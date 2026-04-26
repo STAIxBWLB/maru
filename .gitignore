@@ -1,0 +1,56 @@
+# === OS / Editor ===
+.DS_Store
+Icon?
+~$*
+.vscode/
+.idea/
+
+# === Dependencies ===
+node_modules/
+.pnpm-store/
+
+# === Build outputs ===
+dist/
+dist-ssr/
+build/
+out/
+*.local
+
+# === Vite ===
+.vite/
+
+# === Rust / Cargo / Tauri ===
+target/
+Cargo.lock.bak
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# === Logs ===
+*.log
+npm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# === Environment ===
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# === Test / Coverage ===
+coverage/
+.nyc_output/
+playwright-report/
+playwright/.cache/
+test-results/
+
+# === Anchor runtime ===
+# Per-vault SQLite cache will live at <vault>/.anchor/cache.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# === Claude Code / OMC state ===
+.claude/settings.local.json
+.omc/
+.omx/
