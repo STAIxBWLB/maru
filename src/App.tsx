@@ -1,117 +1,217 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, RefreshCcw } from "lucide-react";
-import { AiPanel } from "./components/AiPanel";
+import { AddVaultDialog } from "./components/AddVaultDialog";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane } from "./components/EditorPane";
+import { LocaleToggle } from "./components/LocaleToggle";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { Sidebar } from "./components/Sidebar";
 import { Button } from "./components/ui/Button";
 import {
-  chooseVault,
+  addVault,
   createDocument,
   createVersion,
-  generateAiDraft,
   getSampleVaultPath,
+  listVaults,
   readDocument,
+  removeVault,
   saveDocument,
   scanVault,
+  setActiveVault,
 } from "./lib/api";
-import type { AiDraft, DocumentMode, DocumentPayload, VaultEntry } from "./lib/types";
+import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
+import type { DocumentPayload, VaultEntry, VaultList } from "./lib/types";
 
-const STORAGE_KEY = "anchor:vaultPath:v1";
+const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
+
+// Fail loudly on locale parity drift. ko/en are equal first-class — every
+// key must exist in both dictionaries. Throws at module load if not.
+assertParityOrThrow();
 
 export default function App() {
-  const [vaultPath, setVaultPath] = useState<string>("");
+  const localeValue = useLocaleState();
+  const { t } = localeValue;
+
+  const [vaultList, setVaultList] = useState<VaultList>({
+    vaults: [],
+    activeVault: null,
+    hiddenDefaults: [],
+  });
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<VaultEntry | null>(null);
   const [document, setDocument] = useState<DocumentPayload | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [query, setQuery] = useState("");
-  const [activeType, setActiveType] = useState("All");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(true);
-  const [aiMode, setAiMode] = useState<DocumentMode>("report");
-  const [instruction, setInstruction] = useState("2분기 운영위원회 보고용으로 개조식 보고서 초안을 작성");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [lastDraft, setLastDraft] = useState<AiDraft | null>(null);
+  const [addVaultOpen, setAddVaultOpen] = useState(false);
 
-  const dirty = useMemo(() => Boolean(document && draftContent !== document.content), [document, draftContent]);
+  const activeVaultPath = vaultList.activeVault;
+  const dirty = useMemo(
+    () => Boolean(document && draftContent !== document.content),
+    [document, draftContent],
+  );
 
-  const loadVault = useCallback(async (path: string, selectFirst = true) => {
-    setLoading(true);
-    setError(null);
+  const lastOpenKeyForVault = useCallback(
+    (path: string) => `${LAST_OPEN_KEY}:${path}`,
+    [],
+  );
+
+  const loadVault = useCallback(
+    async (path: string, preferRelPath: string | null = null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const nextEntries = await scanVault(path);
+        setEntries(nextEntries);
+
+        const target = preferRelPath
+          ? nextEntries.find((entry) => entry.relPath === preferRelPath || entry.path === preferRelPath)
+          : null;
+        const candidate = target ?? nextEntries[0] ?? null;
+        if (candidate) {
+          setSelectedEntry(candidate);
+          const payload = await readDocument(path, candidate.path);
+          setDocument(payload);
+          setDraftContent(payload.content);
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(lastOpenKeyForVault(path), candidate.relPath);
+          }
+        } else {
+          setSelectedEntry(null);
+          setDocument(null);
+          setDraftContent("");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [lastOpenKeyForVault],
+  );
+
+  const switchActiveVault = useCallback(
+    async (path: string) => {
+      try {
+        const list = await setActiveVault(path);
+        setVaultList(list);
+        const lastRel =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(lastOpenKeyForVault(path))
+            : null;
+        await loadVault(path, lastRel);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [loadVault, lastOpenKeyForVault],
+  );
+
+  // Boot: load registry, fall back to sample vault if empty.
+  useEffect(() => {
+    async function boot() {
+      try {
+        const list = await listVaults();
+        if (list.vaults.length === 0) {
+          // Seed registry with the bundled sample vault on first run so the
+          // user has something to open before they pick their own folder.
+          const samplePath = await getSampleVaultPath();
+          const seeded = await addVault("Sample", samplePath, null);
+          setVaultList(seeded);
+          if (seeded.activeVault) {
+            await loadVault(seeded.activeVault);
+          } else {
+            setLoading(false);
+          }
+          return;
+        }
+        setVaultList(list);
+        if (list.activeVault) {
+          const lastRel =
+            typeof window !== "undefined"
+              ? window.localStorage.getItem(lastOpenKeyForVault(list.activeVault))
+              : null;
+          await loadVault(list.activeVault, lastRel);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      }
+    }
+    void boot();
+    // boot only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleAddVault(label: string, path: string, externalWriter: string | null) {
+    const list = await addVault(label, path, externalWriter);
+    setVaultList(list);
+    if (list.activeVault === path) {
+      await loadVault(path);
+    }
+  }
+
+  async function handleRemoveVault(path: string) {
+    const confirmation = window.confirm(`${path}\n\n${t("vault.dialog.confirm")}?`);
+    if (!confirmation) return;
+    const list = await removeVault(path);
+    setVaultList(list);
+    if (list.activeVault) {
+      await loadVault(list.activeVault);
+    } else {
+      setEntries([]);
+      setSelectedEntry(null);
+      setDocument(null);
+      setDraftContent("");
+    }
+  }
+
+  async function useSampleVault() {
     try {
-      const nextEntries = await scanVault(path);
-      setEntries(nextEntries);
-      localStorage.setItem(STORAGE_KEY, path);
-      if (selectFirst && nextEntries.length > 0) {
-        const first = nextEntries[0];
-        setSelectedEntry(first);
-        const payload = await readDocument(path, first.path);
-        setDocument(payload);
-        setDraftContent(payload.content);
-      } else if (nextEntries.length === 0) {
-        setSelectedEntry(null);
-        setDocument(null);
-        setDraftContent("");
+      const samplePath = await getSampleVaultPath();
+      const exists = vaultList.vaults.find((v) => v.path === samplePath);
+      if (!exists) {
+        await handleAddVault("Sample", samplePath, null);
+      } else {
+        await switchActiveVault(samplePath);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    async function boot() {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const path = saved || (await getSampleVaultPath());
-      setVaultPath(path);
-      await loadVault(path);
-    }
-    void boot();
-  }, [loadVault]);
-
-  async function useSampleVault() {
-    const path = await getSampleVaultPath();
-    setVaultPath(path);
-    await loadVault(path);
-  }
-
-  async function pickVault() {
-    const selected = await chooseVault();
-    if (!selected) return;
-    setVaultPath(selected);
-    await loadVault(selected);
   }
 
   async function selectEntry(entry: VaultEntry) {
-    if (dirty && !window.confirm("저장하지 않은 변경이 있습니다. 다른 문서를 열까요?")) return;
+    if (!activeVaultPath) return;
+    if (dirty && !window.confirm(t("app.confirmUnsaved"))) return;
     setSelectedEntry(entry);
     setError(null);
     try {
-      const payload = await readDocument(vaultPath, entry.path);
+      const payload = await readDocument(activeVaultPath, entry.path);
       setDocument(payload);
       setDraftContent(payload.content);
-      setLastDraft(null);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(lastOpenKeyForVault(activeVaultPath), entry.relPath);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function saveCurrent() {
-    if (!document || !dirty) return;
+    if (!document || !dirty || !activeVaultPath) return;
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveDocument(vaultPath, document.path, draftContent);
+      const saved = await saveDocument(activeVaultPath, document.path, draftContent);
       setDocument(saved);
       setDraftContent(saved.content);
-      await loadVault(vaultPath, false);
+      const fresh = await scanVault(activeVaultPath);
+      setEntries(fresh);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -120,129 +220,100 @@ export default function App() {
   }
 
   async function snapshotCurrent() {
-    if (!document) return;
+    if (!document || !activeVaultPath) return;
     setError(null);
     try {
       const snapshot = await createVersion(
-        vaultPath,
+        activeVaultPath,
         document.path,
         document.title,
         draftContent,
-        "사용자 요청으로 생성한 편집 스냅샷",
+        t("snapshot.summary"),
       );
-      await loadVault(vaultPath, false);
-      setError(`버전 생성 완료: ${snapshot.relPath}`);
+      const fresh = await scanVault(activeVaultPath);
+      setEntries(fresh);
+      setError(t("snapshot.success", { path: snapshot.relPath }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function createNew(title: string, docType: string, body: string) {
-    const created = await createDocument(vaultPath, title, docType, body);
-    await loadVault(vaultPath, false);
-    const payload = await readDocument(vaultPath, created.path);
-    setSelectedEntry({
-      path: created.path,
-      relPath: created.relPath,
-      title: created.title,
-      docType,
-      status: "draft",
-      tags: [],
-      people: [],
-      project: null,
-      updatedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      wordCount: payload.body.split(/\s+/).filter(Boolean).length,
-      snippet: payload.body.replace(/\s+/g, " ").slice(0, 220),
-      fileKind: payload.fileKind,
-      versionCount: 0,
-    });
-    setDocument(payload);
-    setDraftContent(payload.content);
+    if (!activeVaultPath) return;
+    const created = await createDocument(activeVaultPath, title, docType, body);
+    await loadVault(activeVaultPath, created.relPath);
   }
 
-  async function runAiDraft() {
-    if (!document) return;
-    setAiLoading(true);
-    setAiError(null);
-    try {
-      const draft = await generateAiDraft(aiMode, instruction, draftContent);
-      setLastDraft(draft);
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  function applyDraft() {
-    if (!lastDraft) return;
-    setDraftContent(lastDraft.content);
+  async function refreshCurrent() {
+    if (!activeVaultPath) return;
+    const lastRel =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem(lastOpenKeyForVault(activeVaultPath))
+        : null;
+    await loadVault(activeVaultPath, lastRel);
   }
 
   return (
-    <div className={aiOpen ? "app-shell" : "app-shell ai-closed"}>
-      <Sidebar
-        vaultPath={vaultPath}
-        entries={entries}
-        activeType={activeType}
-        onTypeChange={setActiveType}
-        onChooseVault={pickVault}
-        onUseSample={useSampleVault}
-        onNewDocument={() => setNewDocumentOpen(true)}
-      />
+    <LocaleContext.Provider value={localeValue}>
+      <div className="app-shell ai-closed">
+        <Sidebar
+          vaultList={vaultList}
+          activeVaultPath={activeVaultPath}
+          onSelectVault={switchActiveVault}
+          onAddVault={() => setAddVaultOpen(true)}
+          onRemoveVault={handleRemoveVault}
+          onUseSample={useSampleVault}
+          onNewDocument={() => setNewDocumentOpen(true)}
+        />
 
-      <DocumentList
-        entries={entries}
-        selectedPath={selectedEntry?.path ?? null}
-        query={query}
-        activeType={activeType}
-        loading={loading}
-        onQueryChange={setQuery}
-        onSelect={selectEntry}
-      />
+        <DocumentList
+          entries={entries}
+          selectedPath={selectedEntry?.path ?? null}
+          query={query}
+          loading={loading}
+          onQueryChange={setQuery}
+          onSelect={selectEntry}
+        />
 
-      <EditorPane
-        document={document}
-        draftContent={draftContent}
-        saving={saving}
-        dirty={dirty}
-        onChange={setDraftContent}
-        onSave={saveCurrent}
-        onSnapshot={snapshotCurrent}
-        onToggleAi={() => setAiOpen((value) => !value)}
-      />
+        <EditorPane
+          document={document}
+          draftContent={draftContent}
+          saving={saving}
+          dirty={dirty}
+          onChange={setDraftContent}
+          onSave={saveCurrent}
+          onSnapshot={snapshotCurrent}
+        />
 
-      <AiPanel
-        open={aiOpen}
-        document={document}
-        instruction={instruction}
-        mode={aiMode}
-        loading={aiLoading}
-        lastDraft={lastDraft}
-        error={aiError}
-        onInstructionChange={setInstruction}
-        onModeChange={setAiMode}
-        onGenerate={runAiDraft}
-        onApplyDraft={applyDraft}
-        onClose={() => setAiOpen(false)}
-      />
-
-      {error ? (
-        <div className={error.startsWith("버전 생성 완료") ? "toast notice" : "toast"}>
-          <AlertTriangle size={15} />
-          <span>{error}</span>
-          <Button size="sm" variant="ghost" onClick={() => setError(null)}>
-            닫기
-          </Button>
+        <div className="locale-floating">
+          <LocaleToggle />
         </div>
-      ) : null}
 
-      <button className="floating-refresh" title="볼트 다시 읽기" onClick={() => loadVault(vaultPath, false)}>
-        <RefreshCcw size={16} />
-      </button>
+        {error ? (
+          <div className={error.startsWith(t("snapshot.success", { path: "" }).slice(0, 4)) ? "toast notice" : "toast"}>
+            <AlertTriangle size={15} />
+            <span>{error}</span>
+            <Button size="sm" variant="ghost" onClick={() => setError(null)}>
+              {t("app.errorClose")}
+            </Button>
+          </div>
+        ) : null}
 
-      <NewDocumentDialog open={newDocumentOpen} onOpenChange={setNewDocumentOpen} onCreate={createNew} />
-    </div>
+        <button
+          className="floating-refresh"
+          title={t("app.refresh")}
+          onClick={() => void refreshCurrent()}
+        >
+          <RefreshCcw size={16} />
+        </button>
+
+        <NewDocumentDialog
+          open={newDocumentOpen}
+          onOpenChange={setNewDocumentOpen}
+          onCreate={createNew}
+        />
+        <AddVaultDialog open={addVaultOpen} onOpenChange={setAddVaultOpen} onAdd={handleAddVault} />
+      </div>
+    </LocaleContext.Provider>
   );
 }

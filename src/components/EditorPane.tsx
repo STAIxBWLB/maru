@@ -1,15 +1,8 @@
 import * as Tabs from "@radix-ui/react-tabs";
-import {
-  Check,
-  Clock3,
-  Eye,
-  FileText,
-  PanelRightOpen,
-  Save,
-  SplitSquareVertical,
-} from "lucide-react";
+import { Check, Clock3, Eye, FileText, Save, SplitSquareVertical } from "lucide-react";
 import { documentStats, markdownPreview } from "../lib/document";
 import type { DocumentPayload } from "../lib/types";
+import { useTranslation } from "../lib/i18n";
 import { Button } from "./ui/Button";
 
 interface EditorPaneProps {
@@ -20,7 +13,6 @@ interface EditorPaneProps {
   onChange: (content: string) => void;
   onSave: () => void;
   onSnapshot: () => void;
-  onToggleAi: () => void;
 }
 
 export function EditorPane({
@@ -31,8 +23,8 @@ export function EditorPane({
   onChange,
   onSave,
   onSnapshot,
-  onToggleAi,
 }: EditorPaneProps) {
+  const { t, locale } = useTranslation();
   const stats = documentStats(document);
 
   if (!document) {
@@ -40,8 +32,8 @@ export function EditorPane({
       <main className="editor-empty">
         <div className="empty-document-plate">
           <FileText size={34} />
-          <h2>문서를 선택하세요</h2>
-          <p>왼쪽 목록에서 문서를 열면 원문 편집, 미리보기, AI 초안 생성이 같은 화면에 배치됩니다.</p>
+          <h2>{t("editor.empty.title")}</h2>
+          <p>{t("editor.empty.description")}</p>
         </div>
       </main>
     );
@@ -59,28 +51,34 @@ export function EditorPane({
         <div className="editor-actions">
           <span className={dirty ? "save-state dirty" : "save-state"}>
             {dirty ? <Clock3 size={13} /> : <Check size={13} />}
-            {dirty ? "저장 필요" : "저장됨"}
+            {dirty ? t("editor.dirty") : t("editor.saved")}
           </span>
-          <Button variant="secondary" onClick={onSnapshot} icon={<SplitSquareVertical size={15} />}>
-            버전
+          <Button
+            variant="secondary"
+            onClick={onSnapshot}
+            icon={<SplitSquareVertical size={15} />}
+          >
+            {t("editor.snapshot")}
           </Button>
-          <Button variant="primary" onClick={onSave} disabled={saving || !dirty} icon={<Save size={15} />}>
-            {saving ? "저장 중" : "저장"}
-          </Button>
-          <Button variant="ghost" onClick={onToggleAi} icon={<PanelRightOpen size={15} />}>
-            AI
+          <Button
+            variant="primary"
+            onClick={onSave}
+            disabled={saving || !dirty}
+            icon={<Save size={15} />}
+          >
+            {saving ? t("editor.saving") : t("editor.save")}
           </Button>
         </div>
       </header>
 
       <Tabs.Root className="editor-tabs" defaultValue="edit">
-        <Tabs.List className="tab-list" aria-label="문서 보기">
+        <Tabs.List className="tab-list" aria-label="document view">
           <Tabs.Trigger className="tab-trigger" value="edit">
-            원문
+            {t("editor.tab.edit")}
           </Tabs.Trigger>
           <Tabs.Trigger className="tab-trigger" value="preview">
             <Eye size={14} />
-            미리보기
+            {t("editor.tab.preview")}
           </Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content className="tab-panel" value="edit">
@@ -97,9 +95,9 @@ export function EditorPane({
       </Tabs.Root>
 
       <footer className="editor-status">
-        <span>{stats.lines.toLocaleString("ko-KR")} 줄</span>
-        <span>{stats.words.toLocaleString("ko-KR")} 단어</span>
-        <span>{stats.chars.toLocaleString("ko-KR")} 자</span>
+        <span>{t("editor.status.lines", { count: stats.lines.toLocaleString(locale) })}</span>
+        <span>{t("editor.status.words", { count: stats.words.toLocaleString(locale) })}</span>
+        <span>{t("editor.status.chars", { count: stats.chars.toLocaleString(locale) })}</span>
         <span>{document.fileKind.toUpperCase()}</span>
       </footer>
     </main>

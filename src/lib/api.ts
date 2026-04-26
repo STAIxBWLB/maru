@@ -2,18 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   MOCK_VAULT_PATH,
-  mockAiDraft,
   mockCreateDocument,
   mockCreateVersion,
   mockEntries,
+  mockVaultList,
   readMockDocument,
 } from "./fixtures";
 import type {
-  AiDraft,
   CreatedDocument,
-  DocumentMode,
   DocumentPayload,
   VaultEntry,
+  VaultList,
   VersionSnapshot,
 } from "./types";
 
@@ -30,12 +29,12 @@ export async function getSampleVaultPath(): Promise<string> {
   return invoke<string>("sample_vault_path");
 }
 
-export async function chooseVault(): Promise<string | null> {
+export async function chooseVaultDirectory(title: string): Promise<string | null> {
   if (!isTauri()) return MOCK_VAULT_PATH;
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Anchor vault 선택",
+    title,
   });
   return typeof selected === "string" ? selected : null;
 }
@@ -45,7 +44,10 @@ export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
   return invoke<VaultEntry[]>("scan_vault", { vaultPath });
 }
 
-export async function readDocument(vaultPath: string, documentPath: string): Promise<DocumentPayload> {
+export async function readDocument(
+  vaultPath: string,
+  documentPath: string,
+): Promise<DocumentPayload> {
   if (!isTauri()) return readMockDocument(documentPath);
   return invoke<DocumentPayload>("read_document", { vaultPath, documentPath });
 }
@@ -91,11 +93,28 @@ export async function createVersion(
   });
 }
 
-export async function generateAiDraft(
-  mode: DocumentMode,
-  instruction: string,
-  content: string,
-): Promise<AiDraft> {
-  if (!isTauri()) return mockAiDraft(mode, instruction, content);
-  return invoke<AiDraft>("generate_ai_draft", { mode, instruction, content });
+// === Multi-vault registry ===
+
+export async function listVaults(): Promise<VaultList> {
+  if (!isTauri()) return mockVaultList();
+  return invoke<VaultList>("list_vaults");
+}
+
+export async function addVault(
+  label: string,
+  path: string,
+  externalWriter?: string | null,
+): Promise<VaultList> {
+  if (!isTauri()) return mockVaultList();
+  return invoke<VaultList>("add_vault", { label, path, externalWriter: externalWriter ?? null });
+}
+
+export async function removeVault(path: string): Promise<VaultList> {
+  if (!isTauri()) return mockVaultList();
+  return invoke<VaultList>("remove_vault", { path });
+}
+
+export async function setActiveVault(path: string): Promise<VaultList> {
+  if (!isTauri()) return mockVaultList();
+  return invoke<VaultList>("set_active_vault", { path });
 }

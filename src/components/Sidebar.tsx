@@ -1,55 +1,29 @@
-import {
-  Archive,
-  BookOpenText,
-  FileClock,
-  FileText,
-  FolderOpen,
-  LibraryBig,
-  Settings,
-  UsersRound,
-} from "lucide-react";
+import { FileText, FolderOpen, Plus, Settings, Trash2 } from "lucide-react";
 import { Button } from "./ui/Button";
-import type { VaultEntry } from "../lib/types";
-import { docTypeLabel } from "../lib/document";
+import { useTranslation } from "../lib/i18n";
+import type { VaultList } from "../lib/types";
 
 interface SidebarProps {
-  vaultPath: string;
-  entries: VaultEntry[];
-  activeType: string;
-  onTypeChange: (type: string) => void;
-  onChooseVault: () => void;
+  vaultList: VaultList;
+  activeVaultPath: string | null;
+  onSelectVault: (path: string) => void;
+  onAddVault: () => void;
+  onRemoveVault: (path: string) => void;
   onUseSample: () => void;
   onNewDocument: () => void;
 }
 
-const typeIcons: Record<string, typeof FileText> = {
-  All: LibraryBig,
-  Document: FileText,
-  Meeting: FileClock,
-  Project: Archive,
-  Person: UsersRound,
-  Template: BookOpenText,
-  Reference: FolderOpen,
-};
-
 export function Sidebar({
-  vaultPath,
-  entries,
-  activeType,
-  onTypeChange,
-  onChooseVault,
+  vaultList,
+  activeVaultPath,
+  onSelectVault,
+  onAddVault,
+  onRemoveVault,
   onUseSample,
   onNewDocument,
 }: SidebarProps) {
-  const types = ["All", ...Array.from(new Set(entries.map((entry) => entry.docType))).sort()];
-  const counts = entries.reduce<Record<string, number>>(
-    (acc, entry) => {
-      acc.All += 1;
-      acc[entry.docType] = (acc[entry.docType] ?? 0) + 1;
-      return acc;
-    },
-    { All: 0 },
-  );
+  const { t } = useTranslation();
+  const activeVault = vaultList.vaults.find((v) => v.path === activeVaultPath);
 
   return (
     <aside className="sidebar">
@@ -58,48 +32,73 @@ export function Sidebar({
           A
         </div>
         <div>
-          <h1>Anchor</h1>
-          <p>RISE 문서 볼트</p>
+          <h1>{t("app.title")}</h1>
+          <p>{t("app.subtitle.work")}</p>
         </div>
       </div>
 
       <div className="vault-box">
-        <span className="eyebrow">현재 볼트</span>
-        <p title={vaultPath}>{vaultPath}</p>
+        <span className="eyebrow">{t("vault.current")}</span>
+        <p title={activeVault?.path ?? ""}>
+          {activeVault ? activeVault.label : t("vault.empty.title")}
+        </p>
+        {activeVault?.externalWriter ? (
+          <span className="status-pill status-info">
+            ✎ {activeVault.externalWriter}
+          </span>
+        ) : null}
         <div className="vault-actions">
-          <Button size="sm" variant="secondary" onClick={onChooseVault} icon={<FolderOpen size={14} />}>
-            선택
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onAddVault}
+            icon={<Plus size={14} />}
+          >
+            {t("vault.add")}
           </Button>
           <Button size="sm" variant="ghost" onClick={onUseSample}>
-            샘플
+            {t("vault.useSample")}
           </Button>
         </div>
       </div>
 
       <Button variant="primary" onClick={onNewDocument} icon={<FileText size={15} />}>
-        새 문서
+        {t("newDoc.button")}
       </Button>
 
-      <nav className="type-nav" aria-label="문서 타입">
-        {types.map((type) => {
-          const Icon = typeIcons[type] ?? FileText;
-          return (
-            <button
-              key={type}
-              className={activeType === type ? "type-row active" : "type-row"}
-              onClick={() => onTypeChange(type)}
+      {vaultList.vaults.length > 0 ? (
+        <nav className="type-nav" aria-label="vaults">
+          {vaultList.vaults.map((vault) => (
+            <div
+              key={vault.path}
+              className={
+                vault.path === activeVaultPath ? "type-row active vault-row" : "type-row vault-row"
+              }
             >
-              <Icon size={16} />
-              <span>{type === "All" ? "전체" : docTypeLabel(type)}</span>
-              <strong>{counts[type] ?? 0}</strong>
-            </button>
-          );
-        })}
-      </nav>
+              <button
+                className="vault-row-pick"
+                onClick={() => onSelectVault(vault.path)}
+                title={vault.path}
+              >
+                <FolderOpen size={16} />
+                <span>{vault.label}</span>
+              </button>
+              <button
+                className="vault-row-remove"
+                onClick={() => onRemoveVault(vault.path)}
+                title={vault.path}
+                aria-label={`remove ${vault.label}`}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </nav>
+      ) : null}
 
       <div className="sidebar-footer">
         <Settings size={15} />
-        <span>로컬 우선 · 파일 원천 · 버전 보존</span>
+        <span>{t("footer.tagline")}</span>
       </div>
     </aside>
   );

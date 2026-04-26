@@ -1,16 +1,12 @@
-export type DocumentMode = "edit" | "summary" | "report" | "minutes" | "kpi" | "budget";
-
 export interface VaultEntry {
   path: string;
   relPath: string;
   title: string;
-  docType: string;
-  status: string;
-  tags: string[];
-  people: string[];
-  project: string | null;
+  /** Raw YAML frontmatter as parsed from disk. Phase 0 surfaces all keys
+   *  unmodified; Phase 1 will derive typed lenses (type, project, etc.)
+   *  from this map without baking them into the Rust struct. */
+  frontmatter: Record<string, unknown>;
   updatedAt: string | null;
-  createdAt: string | null;
   wordCount: number;
   snippet: string;
   fileKind: string;
@@ -40,16 +36,19 @@ export interface CreatedDocument {
   title: string;
 }
 
-export interface AiDraft {
-  provider: string;
-  mode: DocumentMode;
-  summary: string;
-  content: string;
+/** Anchor multi-vault registry. external_writer === "mcp-obsidian"
+ *  signals that anchor reads but defers writes to an Obsidian instance
+ *  (write delegation lands in Phase 2). */
+export interface VaultRegistryEntry {
+  label: string;
+  path: string;
+  externalWriter?: string | null;
 }
 
-export interface KnowledgeReference {
-  title: string;
-  body: string;
+export interface VaultList {
+  vaults: VaultRegistryEntry[];
+  activeVault: string | null;
+  hiddenDefaults: string[];
 }
 
 export interface AppError {

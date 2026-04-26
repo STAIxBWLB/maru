@@ -1,6 +1,5 @@
-use crate::vault::{
-    parse_frontmatter, resolve_inside_vault, serialize_frontmatter, slugify, title_from_content,
-};
+use crate::frontmatter::{build_frontmatter, FrontmatterValue};
+use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -102,17 +101,22 @@ pub fn create_document(
         return Err("A document with that generated file name already exists".to_string());
     }
 
-    let mut meta = BTreeMap::new();
-    meta.insert("type".to_string(), Value::String(doc_type));
-    meta.insert("status".to_string(), Value::String("draft".to_string()));
-    meta.insert("created_at".to_string(), Value::String(now.clone()));
-    meta.insert("updated_at".to_string(), Value::String(now));
-    meta.insert(
-        "id".to_string(),
-        Value::String(format!("doc-{}", Uuid::new_v4())),
-    );
+    // Frontmatter authored in deliberate order: type → status → created_at
+    // → updated_at → id. build_frontmatter preserves this ordering, unlike
+    // BTreeMap serialization which alphabetizes.
+    let fields = vec![
+        ("type", FrontmatterValue::String(doc_type)),
+        ("status", FrontmatterValue::String("draft".to_string())),
+        ("created_at", FrontmatterValue::String(now.clone())),
+        ("updated_at", FrontmatterValue::String(now)),
+        (
+            "id",
+            FrontmatterValue::String(format!("doc-{}", Uuid::new_v4())),
+        ),
+    ];
+    let body_with_heading = format!("# {title}\n\n{body}\n");
+    let content = build_frontmatter(&fields, &body_with_heading);
 
-    let content = serialize_frontmatter(&meta, &format!("# {title}\n\n{body}\n"));
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create parent directory: {err}"))?;
@@ -147,26 +151,29 @@ pub fn create_version(
     let file_name = format!("{stem}-{}.md", timestamp.format("%Y%m%d-%H%M%S"));
     let version_path = version_dir.join(file_name);
 
-    let mut meta = BTreeMap::new();
-    meta.insert("type".to_string(), Value::String("Version".to_string()));
-    meta.insert("status".to_string(), Value::String("snapshot".to_string()));
-    meta.insert(
-        "version_of".to_string(),
-        Value::String(relative(&source_path, &vault)),
-    );
-    meta.insert("summary".to_string(), Value::String(summary));
-    meta.insert(
-        "created_at".to_string(),
-        Value::String(timestamp.to_rfc3339()),
-    );
-
     let body = if content.trim_start().starts_with("---\n") {
         parse_frontmatter(&content).body
     } else {
         content
     };
     let snapshot_title = format!("{title} - {}", timestamp.format("%Y.%m.%d %H:%M"));
-    let snapshot = serialize_frontmatter(&meta, &format!("# {snapshot_title}\n\n{body}"));
+
+    let fields = vec![
+        ("type", FrontmatterValue::String("Version".to_string())),
+        ("status", FrontmatterValue::String("snapshot".to_string())),
+        (
+            "version_of",
+            FrontmatterValue::String(relative(&source_path, &vault)),
+        ),
+        ("summary", FrontmatterValue::String(summary)),
+        (
+            "created_at",
+            FrontmatterValue::String(timestamp.to_rfc3339()),
+        ),
+    ];
+    let body_with_heading = format!("# {snapshot_title}\n\n{body}");
+    let snapshot = build_frontmatter(&fields, &body_with_heading);
+
     fs::write(&version_path, snapshot).map_err(|err| format!("Cannot write version: {err}"))?;
 
     Ok(VersionSnapshot {

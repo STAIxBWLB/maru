@@ -3,6 +3,7 @@ import { FilePlus2, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/Button";
 import { Field, TextArea, TextInput } from "./ui/Field";
+import { useTranslation } from "../lib/i18n";
 
 interface NewDocumentDialogProps {
   open: boolean;
@@ -10,11 +11,10 @@ interface NewDocumentDialogProps {
   onCreate: (title: string, docType: string, body: string) => Promise<void>;
 }
 
-const docTypes = ["Document", "Meeting", "Project", "Task", "Template", "Reference"];
-
 export function NewDocumentDialog({ open, onOpenChange, onCreate }: NewDocumentDialogProps) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState("");
-  const [docType, setDocType] = useState("Document");
+  const [docType, setDocType] = useState("reference");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -22,14 +22,18 @@ export function NewDocumentDialog({ open, onOpenChange, onCreate }: NewDocumentD
   async function submit() {
     setError(null);
     if (!title.trim()) {
-      setError("제목을 입력하세요.");
+      setError(t("newDoc.error.title"));
+      return;
+    }
+    if (!docType.trim()) {
+      setError(t("newDoc.error.type"));
       return;
     }
     setSaving(true);
     try {
-      await onCreate(title.trim(), docType, body.trim());
+      await onCreate(title.trim(), docType.trim(), body.trim());
       setTitle("");
-      setDocType("Document");
+      setDocType("reference");
       setBody("");
       onOpenChange(false);
     } catch (err) {
@@ -46,43 +50,45 @@ export function NewDocumentDialog({ open, onOpenChange, onCreate }: NewDocumentD
         <Dialog.Content className="dialog-content">
           <div className="dialog-header">
             <div>
-              <Dialog.Title>새 Anchor 문서</Dialog.Title>
-              <Dialog.Description>볼트 루트에 표준 frontmatter가 포함된 Markdown 문서를 만듭니다.</Dialog.Description>
+              <Dialog.Title>{t("newDoc.dialog.title")}</Dialog.Title>
+              <Dialog.Description>{t("newDoc.dialog.description")}</Dialog.Description>
             </div>
-            <Dialog.Close className="icon-button" title="닫기">
+            <Dialog.Close className="icon-button" title={t("app.errorClose")}>
               <X size={16} />
             </Dialog.Close>
           </div>
 
-          <Field label="제목" error={error ?? undefined}>
-            <TextInput value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 2분기 운영위원회 보고" />
+          <Field label={t("newDoc.field.title")} error={error ?? undefined}>
+            <TextInput
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder={t("newDoc.field.title.placeholder")}
+            />
           </Field>
 
-          <Field label="타입">
-            <div className="select-row">
-              {docTypes.map((type) => (
-                <button
-                  key={type}
-                  className={docType === type ? "chip active" : "chip"}
-                  onClick={() => setDocType(type)}
-                  type="button"
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
+          <Field label={t("newDoc.field.type")}>
+            <TextInput
+              value={docType}
+              onChange={(event) => setDocType(event.target.value)}
+              placeholder={t("newDoc.field.type.placeholder")}
+            />
           </Field>
 
-          <Field label="초기 본문" helper="비워두면 제목만 포함된 문서가 생성됩니다.">
+          <Field label={t("newDoc.field.body")} helper={t("newDoc.field.body.helper")}>
             <TextArea rows={7} value={body} onChange={(event) => setBody(event.target.value)} />
           </Field>
 
           <div className="dialog-actions">
             <Dialog.Close asChild>
-              <Button variant="ghost">취소</Button>
+              <Button variant="ghost">{t("newDoc.cancel")}</Button>
             </Dialog.Close>
-            <Button variant="primary" onClick={submit} disabled={saving} icon={<FilePlus2 size={15} />}>
-              {saving ? "생성 중" : "생성"}
+            <Button
+              variant="primary"
+              onClick={submit}
+              disabled={saving}
+              icon={<FilePlus2 size={15} />}
+            >
+              {saving ? t("newDoc.creating") : t("newDoc.create")}
             </Button>
           </div>
         </Dialog.Content>

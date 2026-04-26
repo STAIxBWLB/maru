@@ -1,10 +1,12 @@
-mod ai;
 mod document;
+mod filename_rules;
+mod frontmatter;
 mod vault;
+mod vault_list;
 
-use ai::generate_ai_draft;
 use document::{create_document, create_version, read_document, save_document};
 use vault::{default_vault_path, sample_vault_path, scan_vault};
+use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,7 +20,10 @@ pub fn run() {
             save_document,
             create_document,
             create_version,
-            generate_ai_draft,
+            list_vaults,
+            add_vault,
+            remove_vault,
+            set_active_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Anchor");
