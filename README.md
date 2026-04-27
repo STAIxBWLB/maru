@@ -9,7 +9,7 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 0 — Hardening | ✅ shipped | Open existing vaults safely. Frontmatter byte-identical round-trip. Multi-vault registry. ko/en parity. |
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
-| 1B — Rich editor / git | 🚧 in progress | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus) ✅. `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files ✅. Multi-tab editor state plumbing landed (per-vault tab persistence). **BlockNote rich editor / vault cache / Playwright e2e — pending**. |
+| 1B — Rich editor / git | 🚧 in progress | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus) ✅. `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files ✅. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash) ✅. BlockNote rich + source + preview 3-way toggle (frontmatter line preserved across rich↔source) ✅. **Vault cache / Playwright e2e / monorepo extraction — pending**. |
 | 2 — Inbox + AI | 📋 planned | |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
@@ -58,11 +58,11 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Outcome**: anchor is a first-class editor capable of carrying one project's meeting notes through a full week.
 
-- [ ] **BlockNote rich editor + raw-markdown toggle** — lift `tolaria/src/components/{Editor,RawEditorView,BlockNote*}.tsx`. Korean inline + KaTeX + code blocks must round-trip.
-- [~] **Single-window multi-tab editor** — state plumbing landed in `App.tsx` (per-vault `anchor:openTabs:v1` persistence, `EditorTab` discriminator, latest-wins selection). Remaining: tab strip UI, ⌘1/2/3 keybindings, per-tab dirty independence, close-with-confirm.
-- [ ] **Vault cache** — lift `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC). **Trigger threshold raised**: a one-shot 385ms warm scan is bearable; revisit only after BlockNote integration changes the latency budget.
+- [x] **BlockNote rich editor + raw + preview 3-way toggle** — `RichMarkdownEditor` wraps `@blocknote/mantine`; frontmatter line is preserved across rich↔source by splitting on the leading `---…---\n` block before parsing. Source tab is the textarea (with Korean IME-aware `[[` autocomplete). Preview tab is `marked` + DOMPurify. Round-trip on real notes still needs the Phase 1A verification pass.
+- [x] **Single-window multi-tab editor** — per-vault `anchor:openTabs:v1` persistence, `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 to select by index, ⌘W to close active. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast (Tauri webview swallows native `confirm()`, so the toast is the non-blocking equivalent).
+- [ ] **Vault cache** — lift `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC). **Trigger threshold raised**: a one-shot 385ms warm scan is bearable. Revisit only if cold scan is painful or BlockNote integration changes the latency budget.
 - [ ] **Monorepo extraction** — `crates/anchor-vault`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
-- [ ] **Playwright smoke + e2e** — lift `tolaria/playwright.smoke.config.ts`.
+- [ ] **Playwright smoke + e2e** — lift `tolaria/playwright.smoke.config.ts`. Blocked on a node_modules reinstall (pnpm store mismatch); will pick up alongside Phase 2 CI setup.
 
 **Verification gate**: a full week of multi-tab work with project + meeting + people open simultaneously, daily commits, frontmatter preserved.
 
