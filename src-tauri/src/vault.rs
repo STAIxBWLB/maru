@@ -525,4 +525,24 @@ mod tests {
         assert!(!titles.contains(&"Secret"));
         assert!(!titles.contains(&"Dep"));
     }
+
+    /// Bench harness for ad-hoc perf measurement on a real vault. Ignored by
+    /// default — run with `cargo test bench_scan_real_vault -- --ignored
+    /// --nocapture --test-threads=1` (set ANCHOR_BENCH_VAULT to override).
+    /// Use this before reaching for a vault cache: tolaria's cache lift is
+    /// 1,400 LOC, so confirm scan_vault is actually slow first.
+    #[test]
+    #[ignore]
+    fn bench_scan_real_vault() {
+        let path = std::env::var("ANCHOR_BENCH_VAULT")
+            .unwrap_or_else(|_| "/Users/yj.lee/workspace/work".to_string());
+        let t0 = std::time::Instant::now();
+        let entries = scan_vault(path.clone()).expect("scan failed");
+        let dt = t0.elapsed();
+        let total_bytes: usize = entries.iter().map(|e| e.snippet.len()).sum();
+        eprintln!(
+            "scan_vault({path}) → {} entries in {dt:?} (snippet bytes: {total_bytes})",
+            entries.len()
+        );
+    }
 }
