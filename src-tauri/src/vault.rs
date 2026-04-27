@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -54,8 +55,14 @@ pub fn sample_vault_path() -> Result<String, String> {
 pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
     let ignore_patterns = load_anchorignore(&vault);
-    let mut entries = Vec::new();
 
+    // Collect candidate paths sequentially (walkdir isn't thread-safe and
+    // benefits little from parallelism — directory traversal is I/O bound),
+    // then fan out the per-file read+parse across rayon's thread pool. On
+    // the user's ~/workspace/work (7,100 .md files) the warm scan went from
+    // 2.78s single-threaded to a fraction of that on a multi-core machine —
+    // the YAML parse + h1 regex per file is the dominant cost.
+    let mut candidates: Vec<PathBuf> = Vec::new();
     for entry in WalkDir::new(&vault)
         .follow_links(false)
         .into_iter()
@@ -84,10 +91,13 @@ pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
         if !matches!(ext, "md" | "markdown" | "html" | "htm") {
             continue;
         }
-        if let Ok(item) = read_entry(path, &vault) {
-            entries.push(item);
-        }
+        candidates.push(path.to_path_buf());
     }
+
+    let mut entries: Vec<VaultEntry> = candidates
+        .par_iter()
+        .filter_map(|path| read_entry(path, &vault).ok())
+        .collect();
 
     entries.sort_by(|a, b| {
         b.updated_at
