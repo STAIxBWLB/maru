@@ -1,5 +1,7 @@
+use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
+use crate::vault_list::assert_anchor_owns_writes;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -100,6 +102,7 @@ pub fn save_document(
     document_path: String,
     content: String,
 ) -> Result<DocumentPayload, String> {
+    assert_anchor_owns_writes(&vault_path)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -119,14 +122,14 @@ pub fn update_frontmatter_field(
     key: String,
     value: Option<FieldInput>,
 ) -> Result<DocumentPayload, String> {
+    assert_anchor_owns_writes(&vault_path)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
-    let original = fs::read_to_string(&path)
-        .map_err(|err| format!("Cannot read document: {err}"))?;
+    let original =
+        fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
-        fs::write(&path, &updated)
-            .map_err(|err| format!("Cannot save document: {err}"))?;
+        fs::write(&path, &updated).map_err(|err| format!("Cannot save document: {err}"))?;
     }
     read_document(vault_path, path.to_string_lossy().to_string())
 }
@@ -137,10 +140,22 @@ pub fn create_document(
     title: String,
     doc_type: String,
     body: String,
+    target_rel_path: Option<String>,
 ) -> Result<CreatedDocument, String> {
+    assert_anchor_owns_writes(&vault_path)?;
     let now = Utc::now().to_rfc3339();
-    let slug = slugify(&title);
-    let rel_path = format!("{slug}.md");
+    let rel_path = match target_rel_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(target) => validate_target_rel_path(target)?,
+        None => {
+            let slug = slugify(&title);
+            validate_filename_stem(&slug)?;
+            format!("{slug}.md")
+        }
+    };
     let path = resolve_inside_vault(&vault_path, &rel_path)?;
     if path.exists() {
         return Err("A document with that generated file name already exists".to_string());
@@ -175,6 +190,30 @@ pub fn create_document(
     })
 }
 
+fn validate_target_rel_path(target: &str) -> Result<String, String> {
+    let trimmed = target.trim().trim_matches('/');
+    if trimmed.is_empty() || Path::new(trimmed).is_absolute() {
+        return Err("Invalid document path".to_string());
+    }
+
+    let without_ext = trimmed
+        .strip_suffix(".markdown")
+        .or_else(|| trimmed.strip_suffix(".md"))
+        .unwrap_or(trimmed);
+    let parts: Vec<&str> = without_ext.split('/').collect();
+    if parts.is_empty() {
+        return Err("Invalid document path".to_string());
+    }
+
+    for folder in &parts[..parts.len().saturating_sub(1)] {
+        validate_folder_name(folder)?;
+    }
+    let stem = parts[parts.len() - 1];
+    validate_filename_stem(stem)?;
+
+    Ok(format!("{without_ext}.md"))
+}
+
 #[tauri::command]
 pub fn create_version(
     vault_path: String,
@@ -183,6 +222,7 @@ pub fn create_version(
     content: String,
     summary: String,
 ) -> Result<VersionSnapshot, String> {
+    assert_anchor_owns_writes(&vault_path)?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     let stem = source_path
@@ -339,7 +379,10 @@ mod tests {
             root,
             "note.md".to_string(),
             "tags".to_string(),
-            Some(FieldInput::List(vec!["alpha".to_string(), "beta".to_string()])),
+            Some(FieldInput::List(vec![
+                "alpha".to_string(),
+                "beta".to_string(),
+            ])),
         )
         .unwrap();
 
@@ -357,13 +400,9 @@ mod tests {
         let original = "---\ntitle: keep\nephemeral: drop\nstatus: keep\n---\n# X\n";
         fs::write(tmp.path().join("note.md"), original).unwrap();
 
-        let payload = update_frontmatter_field(
-            root,
-            "note.md".to_string(),
-            "ephemeral".to_string(),
-            None,
-        )
-        .unwrap();
+        let payload =
+            update_frontmatter_field(root, "note.md".to_string(), "ephemeral".to_string(), None)
+                .unwrap();
 
         assert!(!payload.content.contains("ephemeral"));
         assert!(payload.content.contains("title: keep"));
@@ -380,6 +419,7 @@ mod tests {
             "테스트 문서".to_string(),
             "meeting".to_string(),
             "본문".to_string(),
+            None,
         )
         .unwrap();
 
@@ -393,7 +433,10 @@ mod tests {
         let id_pos = content.find("\nid:").unwrap_or(0);
         assert!(type_pos < status_pos, "type must precede status");
         assert!(status_pos < created_pos, "status must precede created_at");
-        assert!(created_pos < updated_pos, "created_at must precede updated_at");
+        assert!(
+            created_pos < updated_pos,
+            "created_at must precede updated_at"
+        );
         assert!(updated_pos < id_pos, "updated_at must precede id");
 
         // Korean title must round-trip through slugify + write.
@@ -402,5 +445,46 @@ mod tests {
             "rel_path must end with .md"
         );
     }
-}
 
+    #[test]
+    fn create_document_accepts_valid_nested_target_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let created = create_document(
+            root,
+            "새 회의록".to_string(),
+            "meeting".to_string(),
+            "".to_string(),
+            Some("meetings/새 회의록".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(created.rel_path, "meetings/새 회의록.md");
+        assert!(tmp.path().join("meetings").join("새 회의록.md").exists());
+    }
+
+    #[test]
+    fn create_document_rejects_unsafe_target_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let traversal = create_document(
+            root.clone(),
+            "Bad".to_string(),
+            "reference".to_string(),
+            "".to_string(),
+            Some("../Bad".to_string()),
+        );
+        assert!(traversal.is_err());
+
+        let reserved = create_document(
+            root,
+            "Bad".to_string(),
+            "reference".to_string(),
+            "".to_string(),
+            Some("projects/CON".to_string()),
+        );
+        assert!(reserved.is_err());
+    }
+}

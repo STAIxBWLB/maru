@@ -75,3 +75,13 @@ export interface GitFileChange {
   staged: boolean;
   untracked: boolean;
 }
+
+export interface InboxDropItem {
+  id: string;
+  path: string;
+  relPath: string;
+  title: string;
+  source: string;
+  sizeBytes: number;
+  receivedAt: string | null;
+}

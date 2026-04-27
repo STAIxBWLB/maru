@@ -46,6 +46,8 @@ export function CommandPalette({
       { id: "toggle-outline", label: t("cmdk.action.toggleOutline"), shortcut: "⌘ \\" },
       { id: "toggle-locale", label: t("cmdk.action.toggleLocale"), shortcut: "⌘ ⇧ L" },
       { id: "refresh-vault", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
+      { id: "open-inbox", label: t("cmdk.action.openInbox") },
+      { id: "open-docs", label: t("cmdk.action.openDocs") },
       { id: "add-vault", label: t("cmdk.action.addVault") },
     ],
     [t],

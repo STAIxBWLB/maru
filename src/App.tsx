@@ -142,6 +142,8 @@ export default function App() {
     () => vaultList.vaults.find((v) => v.path === activeVaultPath) ?? null,
     [vaultList, activeVaultPath],
   );
+  const activeVaultExternalWriter = activeVault?.externalWriter ?? null;
+  const activeVaultReadOnly = activeVaultExternalWriter != null;
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
@@ -392,9 +394,19 @@ export default function App() {
   }, [vaultList.vaults, handleAddVault, switchActiveVault]);
 
   const openNewDocumentDialog = useCallback(() => {
+    if (activeVaultReadOnly) {
+      setError(t("vault.writeDelegated", { writer: activeVaultExternalWriter ?? "external writer" }));
+      return;
+    }
     setNewDocumentSeed(null);
     setNewDocumentOpen(true);
-  }, []);
+  }, [activeVaultReadOnly, activeVaultExternalWriter, t]);
+
+  const blockDelegatedWrite = useCallback(() => {
+    if (!activeVaultReadOnly) return false;
+    setError(t("vault.writeDelegated", { writer: activeVaultExternalWriter ?? "external writer" }));
+    return true;
+  }, [activeVaultReadOnly, activeVaultExternalWriter, t]);
 
   const selectEntry = useCallback(
     async (entry: VaultEntry) => {
@@ -523,6 +535,7 @@ export default function App() {
 
   const saveCurrent = useCallback(async () => {
     if (!document || !dirty || !activeVaultPath) return;
+    if (blockDelegatedWrite()) return;
     setSaving(true);
     setError(null);
     try {
@@ -539,10 +552,11 @@ export default function App() {
     } finally {
       setSaving(false);
     }
-  }, [document, dirty, activeVaultPath, draftContent, updateActiveTab]);
+  }, [document, dirty, activeVaultPath, draftContent, updateActiveTab, blockDelegatedWrite]);
 
   const snapshotCurrent = useCallback(async () => {
     if (!document || !activeVaultPath) return;
+    if (blockDelegatedWrite()) return;
     setError(null);
     try {
       const snapshot = await createVersion(
@@ -562,11 +576,12 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [document, activeVaultPath, draftContent, t, updateActiveTab]);
+  }, [document, activeVaultPath, draftContent, t, updateActiveTab, blockDelegatedWrite]);
 
   const createNew = useCallback(
     async (title: string, docType: string, body: string, targetRelPath: string | null) => {
       if (!activeVaultPath) return;
+      if (blockDelegatedWrite()) return;
       const created = await createDocument(activeVaultPath, title, docType, body, targetRelPath);
       const fresh = await scanVault(activeVaultPath);
       setEntries(fresh);
@@ -599,7 +614,7 @@ export default function App() {
       setActiveTabId(newTab.id);
       pushRecent(entry.path);
     },
-    [activeVaultPath, pushRecent],
+    [activeVaultPath, pushRecent, blockDelegatedWrite],
   );
 
   const handleWikilinkClick = useCallback(
@@ -608,6 +623,7 @@ export default function App() {
       if (resolved) {
         void selectEntry(resolved);
       } else {
+        if (blockDelegatedWrite()) return;
         setNewDocumentSeed({
           title: titleFromWikilinkTarget(target),
           relPath: target.trim(),
@@ -616,12 +632,13 @@ export default function App() {
         setError(null);
       }
     },
-    [entries, selectEntry, t],
+    [entries, selectEntry, blockDelegatedWrite],
   );
 
   const updateField = useCallback(
     async (key: string, value: string | string[] | number | boolean | null) => {
       if (!document || !activeVaultPath) return;
+      if (blockDelegatedWrite()) return;
       try {
         const next = await updateFrontmatterField(activeVaultPath, document.path, key, value);
         // Refresh draft only when there are no unsaved body edits — never
@@ -641,7 +658,7 @@ export default function App() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [document, activeVaultPath, draftContent, updateActiveTab],
+    [document, activeVaultPath, draftContent, updateActiveTab, blockDelegatedWrite],
   );
 
   const refreshCurrent = useCallback(async () => {
@@ -696,6 +713,14 @@ export default function App() {
     [tabs, selectTab],
   );
 
+  const handleCommitClick = useCallback(
+    (status: GitStatus) => {
+      if (blockDelegatedWrite()) return;
+      setCommitDialog(status);
+    },
+    [blockDelegatedWrite],
+  );
+
   const jumpToOutlineLine = useCallback((line: number) => {
     const ta = editorTextareaRef.current;
     if (!ta) return;
@@ -738,7 +763,14 @@ export default function App() {
           break;
       }
     },
-    [saveCurrent, snapshotCurrent, refreshCurrent, locale, setLocale, openNewDocumentDialog],
+    [
+      saveCurrent,
+      snapshotCurrent,
+      refreshCurrent,
+      locale,
+      setLocale,
+      openNewDocumentDialog,
+    ],
   );
 
   useKeyboardShortcuts(
@@ -806,7 +838,7 @@ export default function App() {
           <GitStatusBadge
             vaultPath={activeVaultPath}
             refreshTrigger={gitRefreshTick}
-            onCommitClick={(status) => setCommitDialog(status)}
+            onCommitClick={handleCommitClick}
           />
 
           <div className="topbar-spacer" />

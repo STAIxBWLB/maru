@@ -4,8 +4,10 @@
 // surface flat. If we add commit-from-app, swap to git2 then.
 
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::process::Command;
+
+use crate::vault_list::assert_anchor_owns_writes;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -224,7 +226,11 @@ pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String>
 /// run as configured by the user — we never pass --no-verify, so a
 /// failing hook surfaces as an error the user must resolve.
 #[tauri::command]
-pub fn git_commit(vault_path: String, message: String) -> Result<GitStatus, String> {
+pub fn git_commit(
+    vault_path: String,
+    message: String,
+    paths: Option<Vec<String>>,
+) -> Result<GitStatus, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return Err("Commit message is empty.".to_string());
@@ -234,9 +240,30 @@ pub fn git_commit(vault_path: String, message: String) -> Result<GitStatus, Stri
     if !path.is_dir() {
         return Err(format!("Vault path is not a directory: {vault_path}"));
     }
+    assert_anchor_owns_writes(&vault_path)?;
 
-    let stage = Command::new("git")
-        .args(["add", "-A"])
+    let selected_paths = match paths {
+        Some(paths) => {
+            if paths.is_empty() {
+                return Err("No files selected for commit.".to_string());
+            }
+            let mut out = Vec::with_capacity(paths.len());
+            for path in paths {
+                out.push(validate_git_pathspec(&path)?);
+            }
+            Some(out)
+        }
+        None => None,
+    };
+
+    let mut stage_cmd = Command::new("git");
+    stage_cmd.current_dir(path);
+    if let Some(paths) = selected_paths.as_ref() {
+        stage_cmd.args(["add", "--"]).args(paths);
+    } else {
+        stage_cmd.args(["add", "-A"]);
+    }
+    let stage = stage_cmd
         .current_dir(path)
         .output()
         .map_err(|err| format!("git add failed: {err}"))?;
@@ -247,8 +274,12 @@ pub fn git_commit(vault_path: String, message: String) -> Result<GitStatus, Stri
         ));
     }
 
-    let commit = Command::new("git")
-        .args(["commit", "-m", trimmed])
+    let mut commit_cmd = Command::new("git");
+    commit_cmd.args(["commit", "-m", trimmed]);
+    if let Some(paths) = selected_paths.as_ref() {
+        commit_cmd.arg("--").args(paths);
+    }
+    let commit = commit_cmd
         .current_dir(path)
         .output()
         .map_err(|err| format!("git commit failed: {err}"))?;
@@ -256,16 +287,43 @@ pub fn git_commit(vault_path: String, message: String) -> Result<GitStatus, Stri
         let stderr = String::from_utf8_lossy(&commit.stderr);
         let stdout = String::from_utf8_lossy(&commit.stdout);
         // git emits "nothing to commit" on stdout, error elsewhere on stderr.
-        let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
         return Err(format!("git commit failed: {detail}"));
     }
 
     git_status(vault_path)
 }
 
+fn validate_git_pathspec(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("Invalid git path: empty".to_string());
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err("Invalid git path: absolute paths are not allowed".to_string());
+    }
+    for component in path.components() {
+        if matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            return Err("Invalid git path: path traversal is not allowed".to_string());
+        }
+    }
+    Ok(trimmed.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
 
     #[test]
     fn non_directory_path_errors() {
@@ -286,7 +344,68 @@ mod tests {
 
     #[test]
     fn commit_with_empty_message_errors() {
-        let result = git_commit("/tmp".to_string(), "   \n\t".to_string());
+        let result = git_commit("/tmp".to_string(), "   \n\t".to_string(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn selected_commit_leaves_unselected_changes_dirty() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "anchor@example.test"]);
+        run_git(root, &["config", "user.name", "Anchor Test"]);
+
+        fs::write(root.join("a.md"), "a\n").unwrap();
+        fs::write(root.join("b.md"), "b\n").unwrap();
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "initial"]);
+
+        fs::write(root.join("a.md"), "a changed\n").unwrap();
+        fs::write(root.join("b.md"), "b changed\n").unwrap();
+
+        let status = git_commit(
+            root.to_string_lossy().to_string(),
+            "update a".to_string(),
+            Some(vec!["a.md".to_string()]),
+        )
+        .unwrap();
+
+        assert_eq!(status.modified, 1);
+        assert!(!status.clean);
+        let committed = Command::new("git")
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&committed.stdout);
+        assert!(stdout.lines().any(|line| line == "a.md"));
+        assert!(!stdout.lines().any(|line| line == "b.md"));
+    }
+
+    #[test]
+    fn selected_commit_rejects_unsafe_paths() {
+        let result = git_commit(
+            "/tmp".to_string(),
+            "msg".to_string(),
+            Some(vec!["../outside.md".to_string()]),
+        );
+
+        assert!(result.is_err());
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

@@ -1,6 +1,7 @@
 import type {
   CreatedDocument,
   DocumentPayload,
+  InboxDropItem,
   VaultEntry,
   VaultList,
   VersionSnapshot,
@@ -123,4 +124,27 @@ export function mockVaultList(): VaultList {
     activeVault: MOCK_VAULT_PATH,
     hiddenDefaults: [],
   };
+}
+
+export function mockInboxDropItems(): InboxDropItem[] {
+  return [
+    {
+      id: "inbox/downloads/gmail/rise-budget-review.pdf",
+      path: `${MOCK_VAULT_PATH}/inbox/downloads/gmail/rise-budget-review.pdf`,
+      relPath: "inbox/downloads/gmail/rise-budget-review.pdf",
+      title: "rise-budget-review.pdf",
+      source: "gmail",
+      sizeBytes: 184_320,
+      receivedAt: now,
+    },
+    {
+      id: "inbox/downloads/sharepoint/weekly-kpi.xlsx",
+      path: `${MOCK_VAULT_PATH}/inbox/downloads/sharepoint/weekly-kpi.xlsx`,
+      relPath: "inbox/downloads/sharepoint/weekly-kpi.xlsx",
+      title: "weekly-kpi.xlsx",
+      source: "sharepoint",
+      sizeBytes: 92_104,
+      receivedAt: "2026-04-26T14:30:00+09:00",
+    },
+  ];
 }

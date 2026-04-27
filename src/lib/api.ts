@@ -5,6 +5,7 @@ import {
   mockCreateDocument,
   mockCreateVersion,
   mockEntries,
+  mockInboxDropItems,
   mockVaultList,
   readMockDocument,
 } from "./fixtures";
@@ -13,6 +14,7 @@ import type {
   DocumentPayload,
   GitFileChange,
   GitStatus,
+  InboxDropItem,
   VaultEntry,
   VaultList,
   VersionSnapshot,
@@ -44,6 +46,11 @@ export async function chooseVaultDirectory(title: string): Promise<string | null
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
   if (!isTauri()) return mockEntries();
   return invoke<VaultEntry[]>("scan_vault", { vaultPath });
+}
+
+export async function scanInboxDrop(vaultPath: string): Promise<InboxDropItem[]> {
+  if (!isTauri()) return mockInboxDropItems();
+  return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath });
 }
 
 export async function readDocument(
@@ -93,9 +100,16 @@ export async function createDocument(
   title: string,
   docType: string,
   body: string,
+  targetRelPath?: string | null,
 ): Promise<CreatedDocument> {
   if (!isTauri()) return mockCreateDocument(title, docType, body);
-  return invoke<CreatedDocument>("create_document", { vaultPath, title, docType, body });
+  return invoke<CreatedDocument>("create_document", {
+    vaultPath,
+    title,
+    docType,
+    body,
+    targetRelPath: targetRelPath ?? null,
+  });
 }
 
 export async function createVersion(
@@ -150,11 +164,15 @@ export async function gitStatus(vaultPath: string): Promise<GitStatus> {
   return invoke<GitStatus>("git_status", { vaultPath });
 }
 
-export async function gitCommit(vaultPath: string, message: string): Promise<GitStatus> {
+export async function gitCommit(
+  vaultPath: string,
+  message: string,
+  paths?: string[],
+): Promise<GitStatus> {
   if (!isTauri()) {
     return { isRepo: false, modified: 0, staged: 0, untracked: 0, clean: true, branch: null };
   }
-  return invoke<GitStatus>("git_commit", { vaultPath, message });
+  return invoke<GitStatus>("git_commit", { vaultPath, message, paths: paths ?? null });
 }
 
 export async function gitChanges(vaultPath: string): Promise<GitFileChange[]> {

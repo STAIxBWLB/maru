@@ -23,7 +23,7 @@ interface Props {
   onCommitted: (next: GitStatus) => void;
 }
 
-/** Stages all changes and creates a commit via the user's local git binary.
+/** Stages the selected changes and creates a commit via the user's local git binary.
  *  Hooks (pre-commit, commit-msg) run as configured — we don't pass
  *  --no-verify, so a hook failure surfaces here for the user to resolve. */
 export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: Props) {
@@ -32,6 +32,7 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<GitFileChange[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -48,7 +49,10 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
     let cancelled = false;
     gitChanges(vaultPath)
       .then((next) => {
-        if (!cancelled) setFiles(next);
+        if (!cancelled) {
+          setFiles(next);
+          setSelectedPaths(new Set(next.map((file) => file.path)));
+        }
       })
       .catch(() => {
         // Soft-fail: dialog still works without the file list.
@@ -85,10 +89,15 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
       setError(t("commit.error.emptyMessage"));
       return;
     }
+    const paths = Array.from(selectedPaths);
+    if (paths.length === 0) {
+      setError(t("commit.error.emptySelection"));
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const next = await gitCommit(vaultPath, trimmed);
+      const next = await gitCommit(vaultPath, trimmed, paths);
       onCommitted(next);
       onClose();
     } catch (err) {
@@ -112,6 +121,15 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
           {"\n"}
         </span>
       );
+    });
+  }
+
+  function toggleSelected(path: string) {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
     });
   }
 
@@ -149,8 +167,15 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
           ) : null}
 
           {files.length > 0 ? (
-            <ul className="commit-files">
-              {files.map((file) => {
+            <>
+              <div className="commit-selection-summary">
+                {t("commit.selected", {
+                  selected: selectedPaths.size.toString(),
+                  total: files.length.toString(),
+                })}
+              </div>
+              <ul className="commit-files">
+                {files.map((file) => {
                 const isOpen = expanded === file.path;
                 return (
                   <li
@@ -163,21 +188,30 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
                           : "commit-file modified"
                     }
                   >
-                    <button
-                      type="button"
-                      className="commit-file-row"
-                      onClick={() => toggleDiff(file)}
-                      title={`${file.indexStatus}${file.worktreeStatus} ${file.path}`}
-                    >
-                      <span className="commit-file-status">
-                        {file.untracked
-                          ? "?"
-                          : file.staged
-                            ? file.indexStatus.trim() || "•"
-                            : file.worktreeStatus.trim() || "•"}
-                      </span>
-                      <span className="commit-file-path">{file.path}</span>
-                    </button>
+                    <div className="commit-file-row">
+                      <input
+                        type="checkbox"
+                        className="commit-file-check"
+                        checked={selectedPaths.has(file.path)}
+                        onChange={() => toggleSelected(file.path)}
+                        aria-label={t("commit.file.include", { path: file.path })}
+                      />
+                      <button
+                        type="button"
+                        className="commit-file-open"
+                        onClick={() => toggleDiff(file)}
+                        title={`${file.indexStatus}${file.worktreeStatus} ${file.path}`}
+                      >
+                        <span className="commit-file-status">
+                          {file.untracked
+                            ? "?"
+                            : file.staged
+                              ? file.indexStatus.trim() || "•"
+                              : file.worktreeStatus.trim() || "•"}
+                        </span>
+                        <span className="commit-file-path">{file.path}</span>
+                      </button>
+                    </div>
                     {isOpen ? (
                       <pre className="commit-file-diff">
                         {diffLoading ? "…" : renderDiff(diff ?? "")}
@@ -185,8 +219,9 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
                     ) : null}
                   </li>
                 );
-              })}
-            </ul>
+                })}
+              </ul>
+            </>
           ) : null}
 
           <label className="commit-label">
@@ -216,7 +251,7 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
             <Button
               variant="primary"
               onClick={() => void submit()}
-              disabled={submitting || !message.trim()}
+              disabled={submitting || !message.trim() || selectedPaths.size === 0}
               icon={<GitCommit size={14} />}
             >
               {submitting ? t("commit.submitting") : t("commit.submit")}

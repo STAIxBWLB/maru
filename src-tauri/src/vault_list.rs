@@ -70,6 +70,23 @@ pub fn list_vaults() -> Result<VaultList, String> {
     load_at(&vault_list_path()?)
 }
 
+pub fn assert_anchor_owns_writes(vault_path: &str) -> Result<(), String> {
+    let list = load_at(&vault_list_path()?)?;
+    if let Some(writer) = external_writer_for_path(&list, vault_path) {
+        return Err(format!(
+            "Vault writes are delegated to {writer}; anchor will not write directly."
+        ));
+    }
+    Ok(())
+}
+
+fn external_writer_for_path(list: &VaultList, vault_path: &str) -> Option<String> {
+    list.vaults
+        .iter()
+        .find(|vault| vault.path == vault_path)
+        .and_then(|vault| vault.external_writer.clone())
+}
+
 #[tauri::command]
 pub fn add_vault(
     label: String,
@@ -207,5 +224,24 @@ mod tests {
             !json.contains("external_writer"),
             "None external_writer should be omitted"
         );
+    }
+
+    #[test]
+    fn external_writer_policy_blocks_registered_delegated_vault() {
+        let list = VaultList {
+            vaults: vec![VaultRegistryEntry {
+                label: "Obsidian".to_string(),
+                path: "/tmp/obsidian".to_string(),
+                external_writer: Some("mcp-obsidian".to_string()),
+            }],
+            active_vault: None,
+            hidden_defaults: vec![],
+        };
+
+        assert_eq!(
+            external_writer_for_path(&list, "/tmp/obsidian").as_deref(),
+            Some("mcp-obsidian")
+        );
+        assert!(external_writer_for_path(&list, "/tmp/plain").is_none());
     }
 }

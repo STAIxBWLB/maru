@@ -932,7 +932,7 @@ a {
 
 .editor-pane {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   background: var(--panel);
 }
 
@@ -985,6 +985,88 @@ a {
   border-radius: 50%;
   background: var(--accent-tint);
   color: var(--accent);
+}
+
+.document-tabs-row {
+  display: flex;
+  align-items: end;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 7px 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.document-tab {
+  display: inline-flex;
+  align-items: center;
+  min-width: 132px;
+  max-width: 240px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.document-tab.active {
+  border-color: var(--line-soft);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.document-tab-main {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px 0 10px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.document-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-tab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: none;
+}
+
+.document-tab-kbd {
+  flex: none;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.document-tab-close {
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.document-tab-close:hover {
+  background: var(--panel-3);
+  color: var(--ink);
 }
 
 .editor-topbar {
@@ -1126,6 +1208,36 @@ a {
   font-size: 13.5px;
   line-height: 1.78;
   font-feature-settings: "calt" 0;
+}
+
+.rich-editor-surface {
+  height: 100%;
+  overflow: auto;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.rich-editor-surface .bn-container {
+  min-height: 100%;
+  margin: 0;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.rich-editor-surface .bn-editor {
+  min-height: 100%;
+  padding: 28px clamp(20px, 4vw, 64px);
+  background: var(--panel);
+  color: var(--ink);
+  font-family:
+    "Pretendard",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14.5px;
+  line-height: 1.72;
 }
 
 .preview-surface {
@@ -1491,6 +1603,12 @@ button.git-badge:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.commit-selection-summary {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .commit-label {
   display: flex;
   flex-direction: column;
@@ -1551,22 +1669,35 @@ button.git-badge:hover {
 
 .commit-file-row {
   display: grid;
-  grid-template-columns: 14px 1fr;
-  align-items: baseline;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
   gap: 8px;
   padding: 2px 4px;
   border-radius: 3px;
   background: transparent;
-  border: 0;
+}
+
+.commit-file-row:hover {
+  background: var(--accent-tint);
+}
+
+.commit-file-check {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+}
+
+.commit-file-open {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: baseline;
+  gap: 8px;
   width: 100%;
   text-align: left;
   font: inherit;
   color: inherit;
   cursor: pointer;
-}
-
-.commit-file-row:hover {
-  background: var(--accent-tint);
 }
 
 .commit-file-status {
