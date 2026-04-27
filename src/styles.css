@@ -1543,13 +1543,30 @@ button.git-badge:hover {
 }
 
 .commit-file {
+  display: flex;
+  flex-direction: column;
+  border-radius: 3px;
+  color: var(--ink-2);
+}
+
+.commit-file-row {
   display: grid;
   grid-template-columns: 14px 1fr;
   align-items: baseline;
   gap: 8px;
   padding: 2px 4px;
   border-radius: 3px;
-  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.commit-file-row:hover {
+  background: var(--accent-tint);
 }
 
 .commit-file-status {
@@ -1562,6 +1579,26 @@ button.git-badge:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.commit-file-diff {
+  margin: 4px 0 6px 18px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--line-strong);
+  background: var(--panel);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 220px;
+  color: var(--ink-2);
+}
+
+/* Simple +/- coloring through ::first-letter-style — fallback to plain text
+   if the engine ignores per-line styling. The leading "+"/"-" carries the
+   diff sign, which is what the eye scans for first. */
+.commit-file-diff {
+  color: var(--ink);
 }
 
 .commit-file.staged .commit-file-status {

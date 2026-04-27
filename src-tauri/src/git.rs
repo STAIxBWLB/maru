@@ -168,6 +168,58 @@ pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     Ok(rows)
 }
 
+/// Cap on diff bytes returned to the dialog. Anything larger gets
+/// truncated with a tail marker — Phase 1B doesn't render full diffs
+/// of huge files inline.
+const MAX_DIFF_BYTES: usize = 64 * 1024;
+
+#[tauri::command]
+pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String> {
+    let path = Path::new(&vault_path);
+    if !path.is_dir() {
+        return Err(format!("Vault path is not a directory: {vault_path}"));
+    }
+
+    // Combined diff: index changes ∪ worktree changes for this path. -U2
+    // keeps context tight so dialog stays compact.
+    let output = Command::new("git")
+        .args(["diff", "HEAD", "--", &file_path])
+        .arg("-U2")
+        .current_dir(path)
+        .output()
+        .map_err(|err| format!("git diff failed: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // For untracked files git diff HEAD errors. Fall through to a
+        // raw-content fallback below.
+        if !stderr.contains("does not exist in") && !stderr.is_empty() {
+            return Err(format!("git diff failed: {}", stderr.trim()));
+        }
+    }
+
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    if text.is_empty() {
+        // Untracked file: synthesise a "+" diff from raw content so the
+        // dialog has something useful to show.
+        let abs = path.join(&file_path);
+        if let Ok(content) = std::fs::read_to_string(&abs) {
+            let prefixed: String = content
+                .lines()
+                .take(400)
+                .map(|line| format!("+{line}\n"))
+                .collect();
+            text = format!("@@ untracked: {} @@\n{}", file_path, prefixed);
+        }
+    }
+
+    if text.len() > MAX_DIFF_BYTES {
+        text.truncate(MAX_DIFF_BYTES);
+        text.push_str("\n… (truncated, run `git diff` for full output)");
+    }
+
+    Ok(text)
+}
+
 /// Stage all changes and create a commit. Hooks (pre-commit, commit-msg)
 /// run as configured by the user — we never pass --no-verify, so a
 /// failing hook surfaces as an error the user must resolve.

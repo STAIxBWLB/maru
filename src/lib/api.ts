@@ -161,3 +161,8 @@ export async function gitChanges(vaultPath: string): Promise<GitFileChange[]> {
   if (!isTauri()) return [];
   return invoke<GitFileChange[]>("git_changes", { vaultPath });
 }
+
+export async function gitDiff(vaultPath: string, filePath: string): Promise<string> {
+  if (!isTauri()) return "";
+  return invoke<string>("git_diff", { vaultPath, filePath });
+}
