@@ -287,11 +287,17 @@ export default function App() {
       // entry. Falling back blindly to vaults[0] is wrong when the entry
       // came from a different registered vault — readDocument would then
       // reject with "Document path escapes the selected vault".
+      //
+      // Prefer the longest-matching vault root so that a sub-vault registered
+      // alongside its parent (e.g. sample-vault inside ~/workspace/work)
+      // wins for entries that live below it.
       let vaultPath = activeVaultPath;
       if (!vaultPath && vaultList.vaults.length > 0) {
-        const owner = vaultList.vaults.find(
-          (v) => entry.path === v.path || entry.path.startsWith(`${v.path}/`),
-        );
+        const owner = vaultList.vaults
+          .filter(
+            (v) => entry.path === v.path || entry.path.startsWith(`${v.path}/`),
+          )
+          .sort((a, b) => b.path.length - a.path.length)[0];
         vaultPath = owner?.path ?? vaultList.vaults[0].path;
         try {
           const updated = await setActiveVault(vaultPath);
