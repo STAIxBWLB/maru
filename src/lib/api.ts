@@ -148,3 +148,10 @@ export async function gitStatus(vaultPath: string): Promise<GitStatus> {
   }
   return invoke<GitStatus>("git_status", { vaultPath });
 }
+
+export async function gitCommit(vaultPath: string, message: string): Promise<GitStatus> {
+  if (!isTauri()) {
+    return { isRepo: false, modified: 0, staged: 0, untracked: 0, clean: true, branch: null };
+  }
+  return invoke<GitStatus>("git_commit", { vaultPath, message });
+}

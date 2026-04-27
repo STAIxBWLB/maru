@@ -109,6 +109,16 @@ const ko: Record<string, string> = {
   "neighborhood.mentions": "본문 언급",
   "neighborhood.peers": "같은 타입",
 
+  "commit.title": "변경사항 커밋",
+  "commit.summary": "{staged} staged · {modified} 수정 · {untracked} 새 파일 (총 {total})",
+  "commit.message.label": "커밋 메시지",
+  "commit.message.placeholder": "예) feat(meeting): 4월 주간회의 기록 추가",
+  "commit.submit": "커밋",
+  "commit.submitting": "커밋 중...",
+  "commit.error.emptyMessage": "메시지를 입력해주세요.",
+  "dialog.cancel": "취소",
+  "dialog.close": "닫기",
+
   "cmdk.placeholder": "문서 또는 명령 검색...",
   "cmdk.empty": "결과가 없습니다.",
   "cmdk.openHint": "⌘K 로 명령 팔레트를 엽니다",
@@ -239,6 +249,16 @@ const en: Record<string, string> = {
   "neighborhood.upward": "Project / up",
   "neighborhood.mentions": "Mentions",
   "neighborhood.peers": "Same type",
+
+  "commit.title": "Commit changes",
+  "commit.summary": "{staged} staged · {modified} modified · {untracked} new ({total} total)",
+  "commit.message.label": "Commit message",
+  "commit.message.placeholder": "e.g. feat(meeting): add weekly notes for week 4",
+  "commit.submit": "Commit",
+  "commit.submitting": "Committing…",
+  "commit.error.emptyMessage": "Message is required.",
+  "dialog.cancel": "Cancel",
+  "dialog.close": "Close",
 
   "cmdk.placeholder": "Search documents or commands…",
   "cmdk.empty": "No results.",

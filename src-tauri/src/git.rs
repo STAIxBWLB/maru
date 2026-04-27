@@ -98,6 +98,49 @@ pub fn git_status(vault_path: String) -> Result<GitStatus, String> {
     })
 }
 
+/// Stage all changes and create a commit. Hooks (pre-commit, commit-msg)
+/// run as configured by the user — we never pass --no-verify, so a
+/// failing hook surfaces as an error the user must resolve.
+#[tauri::command]
+pub fn git_commit(vault_path: String, message: String) -> Result<GitStatus, String> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err("Commit message is empty.".to_string());
+    }
+
+    let path = Path::new(&vault_path);
+    if !path.is_dir() {
+        return Err(format!("Vault path is not a directory: {vault_path}"));
+    }
+
+    let stage = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(path)
+        .output()
+        .map_err(|err| format!("git add failed: {err}"))?;
+    if !stage.status.success() {
+        return Err(format!(
+            "git add failed: {}",
+            String::from_utf8_lossy(&stage.stderr).trim()
+        ));
+    }
+
+    let commit = Command::new("git")
+        .args(["commit", "-m", trimmed])
+        .current_dir(path)
+        .output()
+        .map_err(|err| format!("git commit failed: {err}"))?;
+    if !commit.status.success() {
+        let stderr = String::from_utf8_lossy(&commit.stderr);
+        let stdout = String::from_utf8_lossy(&commit.stdout);
+        // git emits "nothing to commit" on stdout, error elsewhere on stderr.
+        let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
+        return Err(format!("git commit failed: {detail}"));
+    }
+
+    git_status(vault_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +160,11 @@ mod tests {
         let result = git_status(cwd.to_string_lossy().to_string()).unwrap();
         assert!(result.is_repo);
         assert!(result.branch.is_some());
+    }
+
+    #[test]
+    fn commit_with_empty_message_errors() {
+        let result = git_commit("/tmp".to_string(), "   \n\t".to_string());
+        assert!(result.is_err());
     }
 }

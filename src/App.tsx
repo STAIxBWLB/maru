@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Clock3, RefreshCcw, X } from "lucide-react";
 import { AddVaultDialog } from "./components/AddVaultDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
@@ -24,7 +25,7 @@ import {
 } from "./lib/api";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
-import type { DocumentPayload, VaultEntry, VaultList } from "./lib/types";
+import type { DocumentPayload, GitStatus, VaultEntry, VaultList } from "./lib/types";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
   emptyHistory,
@@ -98,6 +99,9 @@ export default function App() {
   const skipNextHistoryPushRef = useRef(false);
   // Bump on save/snapshot/vault-switch/refresh so the GitStatusBadge re-polls.
   const [gitRefreshTick, setGitRefreshTick] = useState(0);
+  // CommitDialog state — the badge passes the most recent GitStatus so the
+  // dialog can show the file counts at the moment the user clicked.
+  const [commitDialog, setCommitDialog] = useState<GitStatus | null>(null);
 
   const activeVaultPath = vaultList.activeVault;
   const activeVault = useMemo(
@@ -561,6 +565,7 @@ export default function App() {
           <GitStatusBadge
             vaultPath={activeVaultPath}
             refreshTrigger={gitRefreshTick}
+            onCommitClick={(status) => setCommitDialog(status)}
           />
 
           <div className="topbar-spacer" />
@@ -713,6 +718,13 @@ export default function App() {
           onClose={() => setCommandPaletteOpen(false)}
           onSelectEntry={selectEntry}
           onRunCommand={runCommand}
+        />
+        <CommitDialog
+          open={commitDialog !== null}
+          vaultPath={activeVaultPath}
+          status={commitDialog}
+          onClose={() => setCommitDialog(null)}
+          onCommitted={() => setGitRefreshTick((n) => n + 1)}
         />
       </div>
     </LocaleContext.Provider>
