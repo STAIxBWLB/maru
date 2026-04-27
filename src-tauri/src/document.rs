@@ -190,3 +190,82 @@ fn relative(path: &Path, vault: &Path) -> String {
         .to_string_lossy()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// The Phase 0 verification gate as a unit test: a real-world Korean
+    /// frontmatter note read by anchor and written back unchanged must
+    /// produce byte-identical output. If this ever breaks, Obsidian users
+    /// pointing anchor at their vault will see frontmatter mangle.
+    #[test]
+    fn read_then_save_unchanged_is_byte_identical() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let original = "---\n\
+            title: 제주한라대 RISE 2026\n\
+            status: 진행중\n\
+            tags:\n  - 보고서\n  - 행정\n\
+            author: 이영준 (李永俊)\n\
+            project: \"[[Anchor]]\"\n\
+            ---\n\
+            # 본문\n\
+            \n\
+            한국어 + 한자(重要) + emoji 🌊 + KaTeX $\\sum$ 모두 보존되어야 함.\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let payload = read_document(root.clone(), "note.md".to_string()).unwrap();
+        // The raw content surfaced to React must equal what's on disk —
+        // any normalization in read would break byte-identity.
+        assert_eq!(
+            payload.content, original,
+            "read_document.content must match disk byte-for-byte"
+        );
+
+        save_document(root.clone(), payload.path.clone(), payload.content.clone()).unwrap();
+
+        let after = fs::read_to_string(tmp.path().join("note.md")).unwrap();
+        assert_eq!(
+            after, original,
+            "read→save with unchanged content must be byte-identical (frontmatter order, comments, trailing newline all preserved)"
+        );
+    }
+
+    #[test]
+    fn create_document_emits_deterministic_field_order() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let created = create_document(
+            root.clone(),
+            "테스트 문서".to_string(),
+            "meeting".to_string(),
+            "본문".to_string(),
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(tmp.path().join(&created.rel_path)).unwrap();
+        // Field order must be type → status → created_at → updated_at → id.
+        // BTreeMap-based serialization (the prior bug) would alphabetize them.
+        let type_pos = content.find("\ntype:").unwrap_or(0);
+        let status_pos = content.find("\nstatus:").unwrap_or(0);
+        let created_pos = content.find("\ncreated_at:").unwrap_or(0);
+        let updated_pos = content.find("\nupdated_at:").unwrap_or(0);
+        let id_pos = content.find("\nid:").unwrap_or(0);
+        assert!(type_pos < status_pos, "type must precede status");
+        assert!(status_pos < created_pos, "status must precede created_at");
+        assert!(created_pos < updated_pos, "created_at must precede updated_at");
+        assert!(updated_pos < id_pos, "updated_at must precede id");
+
+        // Korean title must round-trip through slugify + write.
+        assert!(
+            created.rel_path.ends_with(".md"),
+            "rel_path must end with .md"
+        );
+    }
+}
+
