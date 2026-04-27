@@ -230,13 +230,14 @@ export default function App() {
 
   const handleAddVault = useCallback(
     async (label: string, path: string, externalWriter: string | null) => {
-      const list = await addVault(label, path, externalWriter);
-      setVaultList(list);
-      if (list.activeVault === path) {
-        await loadVault(path);
-      }
+      await addVault(label, path, externalWriter);
+      // The user just added this vault — they want to work in it. Always
+      // make it active and load its entries, regardless of whether Rust
+      // auto-promoted it (which only happens when there was no prior
+      // active vault).
+      await switchActiveVault(path);
     },
-    [loadVault],
+    [switchActiveVault],
   );
 
   const handleRemoveVault = useCallback(
@@ -273,7 +274,21 @@ export default function App() {
 
   const selectEntry = useCallback(
     async (entry: VaultEntry) => {
-      if (!activeVaultPath) {
+      // Recover from state desync: if entries are loaded but the registry
+      // lost track of the active vault (manual vaults.json edit, prior
+      // failed switch), fall back to the first registered vault and
+      // persist the recovery so subsequent clicks see consistent state.
+      let vaultPath = activeVaultPath;
+      if (!vaultPath && vaultList.vaults.length > 0) {
+        vaultPath = vaultList.vaults[0].path;
+        try {
+          const updated = await setActiveVault(vaultPath);
+          setVaultList(updated);
+        } catch {
+          // Best effort — proceed with the inferred path even if persist fails.
+        }
+      }
+      if (!vaultPath) {
         setError("No active vault. Open or create one first.");
         return false;
       }
@@ -301,7 +316,7 @@ export default function App() {
       }
       setError(null);
       try {
-        const payload = await readDocument(activeVaultPath, entry.path);
+        const payload = await readDocument(vaultPath, entry.path);
         // Drop stale responses — a later click already superseded this one.
         if (reqId !== selectRequestRef.current) return false;
         setSelectedEntry(entry);
@@ -312,7 +327,7 @@ export default function App() {
           setDraftContent(payload.content);
         }
         if (typeof window !== "undefined") {
-          window.localStorage.setItem(lastOpenKeyForVault(activeVaultPath), entry.relPath);
+          window.localStorage.setItem(lastOpenKeyForVault(vaultPath), entry.relPath);
         }
         pushRecent(entry.path);
         return true;
@@ -322,7 +337,7 @@ export default function App() {
         return false;
       }
     },
-    [activeVaultPath, selectedEntry, document, draftContent, lastOpenKeyForVault, pushRecent],
+    [activeVaultPath, vaultList.vaults, selectedEntry, document, draftContent, lastOpenKeyForVault, pushRecent],
   );
 
   const navigateBack = useCallback(() => {
