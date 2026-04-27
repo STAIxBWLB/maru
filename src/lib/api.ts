@@ -11,6 +11,7 @@ import {
 import type {
   CreatedDocument,
   DocumentPayload,
+  GitFileChange,
   GitStatus,
   VaultEntry,
   VaultList,
@@ -154,4 +155,9 @@ export async function gitCommit(vaultPath: string, message: string): Promise<Git
     return { isRepo: false, modified: 0, staged: 0, untracked: 0, clean: true, branch: null };
   }
   return invoke<GitStatus>("git_commit", { vaultPath, message });
+}
+
+export async function gitChanges(vaultPath: string): Promise<GitFileChange[]> {
+  if (!isTauri()) return [];
+  return invoke<GitFileChange[]>("git_changes", { vaultPath });
 }

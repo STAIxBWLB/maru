@@ -65,3 +65,13 @@ export interface GitStatus {
   clean: boolean;
   branch: string | null;
 }
+
+/** Per-file working-tree change. Returned by `git_changes`, capped at
+ *  ~200 rows server-side. Renames surface the new path only. */
+export interface GitFileChange {
+  path: string;
+  indexStatus: string;
+  worktreeStatus: string;
+  staged: boolean;
+  untracked: boolean;
+}

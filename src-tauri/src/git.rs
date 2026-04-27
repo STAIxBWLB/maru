@@ -98,6 +98,76 @@ pub fn git_status(vault_path: String) -> Result<GitStatus, String> {
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileChange {
+    /// Vault-relative path. Renamed entries surface only the new path —
+    /// commit dialog Phase 1B doesn't visualise renames yet.
+    pub path: String,
+    /// Porcelain v1 column 1 (index/staged status). Single char: M, A, D,
+    /// R, C, ?, ! or space.
+    pub index_status: String,
+    /// Porcelain v1 column 2 (worktree status).
+    pub worktree_status: String,
+    /// Convenience flag — true when index_status indicates a staged change.
+    pub staged: bool,
+    /// True for `??` lines.
+    pub untracked: bool,
+}
+
+/// List per-file changes in the working tree, capped so a runaway
+/// vault doesn't bloat the commit-dialog payload. Caller can issue a
+/// terminal `git status` for full detail when truncated.
+const MAX_CHANGE_ROWS: usize = 200;
+
+#[tauri::command]
+pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
+    let path = Path::new(&vault_path);
+    if !path.is_dir() {
+        return Err(format!("Vault path is not a directory: {vault_path}"));
+    }
+    let output = Command::new("git")
+        .args(["status", "--porcelain=v1", "-uall"])
+        .current_dir(path)
+        .output()
+        .map_err(|err| format!("git invocation failed: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("not a git repository") {
+            return Ok(Vec::new());
+        }
+        return Err(format!("git status failed: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut rows = Vec::new();
+    for line in stdout.lines().take(MAX_CHANGE_ROWS) {
+        if line.len() < 4 {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        let index_ch = bytes[0] as char;
+        let worktree_ch = bytes[1] as char;
+        // Path follows the two-status chars and a space.
+        let raw_path = &line[3..];
+        // Rename lines: `R  old -> new` — surface only the new (right) side.
+        let path = if let Some(idx) = raw_path.find(" -> ") {
+            raw_path[idx + 4..].to_string()
+        } else {
+            raw_path.to_string()
+        };
+        let untracked = index_ch == '?' && worktree_ch == '?';
+        let staged = !untracked && index_ch != ' ' && index_ch != '?';
+        rows.push(GitFileChange {
+            path,
+            index_status: index_ch.to_string(),
+            worktree_status: worktree_ch.to_string(),
+            staged,
+            untracked,
+        });
+    }
+    Ok(rows)
+}
+
 /// Stage all changes and create a commit. Hooks (pre-commit, commit-msg)
 /// run as configured by the user — we never pass --no-verify, so a
 /// failing hook surfaces as an error the user must resolve.

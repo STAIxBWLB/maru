@@ -1,9 +1,9 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { GitCommit, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { gitCommit } from "../lib/api";
+import { gitChanges, gitCommit } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
-import type { GitStatus } from "../lib/types";
+import type { GitFileChange, GitStatus } from "../lib/types";
 import { Button } from "./ui/Button";
 
 interface Props {
@@ -22,14 +22,27 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<GitFileChange[]>([]);
 
   useEffect(() => {
-    if (open) {
-      setMessage("");
-      setError(null);
-      setSubmitting(false);
-    }
-  }, [open]);
+    if (!open) return;
+    setMessage("");
+    setError(null);
+    setSubmitting(false);
+    setFiles([]);
+    if (!vaultPath) return;
+    let cancelled = false;
+    gitChanges(vaultPath)
+      .then((next) => {
+        if (!cancelled) setFiles(next);
+      })
+      .catch(() => {
+        // Soft-fail: dialog still works without the file list.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, vaultPath]);
 
   async function submit() {
     if (!vaultPath) return;
@@ -86,6 +99,33 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
                 })}
               </span>
             </div>
+          ) : null}
+
+          {files.length > 0 ? (
+            <ul className="commit-files">
+              {files.map((file) => (
+                <li
+                  key={file.path}
+                  className={
+                    file.untracked
+                      ? "commit-file untracked"
+                      : file.staged
+                        ? "commit-file staged"
+                        : "commit-file modified"
+                  }
+                  title={`${file.indexStatus}${file.worktreeStatus} ${file.path}`}
+                >
+                  <span className="commit-file-status">
+                    {file.untracked
+                      ? "?"
+                      : file.staged
+                        ? file.indexStatus.trim() || "•"
+                        : file.worktreeStatus.trim() || "•"}
+                  </span>
+                  <span className="commit-file-path">{file.path}</span>
+                </li>
+              ))}
+            </ul>
           ) : null}
 
           <label className="commit-label">

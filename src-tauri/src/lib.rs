@@ -8,7 +8,7 @@ mod vault_list;
 use document::{
     create_document, create_version, read_document, save_document, update_frontmatter_field,
 };
-use git::{git_commit, git_status};
+use git::{git_changes, git_commit, git_status};
 use vault::{default_vault_path, sample_vault_path, scan_vault};
 use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 
@@ -31,6 +31,7 @@ pub fn run() {
             set_active_vault,
             git_status,
             git_commit,
+            git_changes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Anchor");
