@@ -4,7 +4,9 @@ mod frontmatter;
 mod vault;
 mod vault_list;
 
-use document::{create_document, create_version, read_document, save_document};
+use document::{
+    create_document, create_version, read_document, save_document, update_frontmatter_field,
+};
 use vault::{default_vault_path, sample_vault_path, scan_vault};
 use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 
@@ -20,6 +22,7 @@ pub fn run() {
             save_document,
             create_document,
             create_version,
+            update_frontmatter_field,
             list_vaults,
             add_vault,
             remove_vault,

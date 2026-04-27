@@ -1097,6 +1097,15 @@ a {
 .tab-panel {
   min-height: 0;
   overflow: hidden;
+  grid-row: 2;
+}
+
+/* Both Tabs.Content panels are forceMount so the textarea ref survives a
+   preview-tab switch (⌘\ outline jump and similar shortcuts depend on it).
+   Hide the inactive one explicitly since forceMount strips Radix's default
+   `hidden` attribute. */
+.tab-panel[data-state="inactive"] {
+  display: none;
 }
 
 .source-editor {
@@ -1229,6 +1238,180 @@ a {
   padding: 0 4px;
   border-radius: 3px;
   font-weight: 500;
+  cursor: pointer;
+}
+
+.preview-surface a.wikilink:hover {
+  background: var(--info);
+  color: var(--panel);
+}
+
+.wikilink-popup {
+  z-index: 1000;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  min-width: 240px;
+  max-width: 380px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wikilink-suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.wikilink-suggestion.active,
+.wikilink-suggestion:hover {
+  background: var(--accent-tint);
+}
+
+.wikilink-suggestion .wikilink-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.wikilink-suggestion .wikilink-path {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  line-height: 1.3;
+  word-break: break-all;
+}
+
+.neighborhood {
+  border-top: 1px solid var(--line-soft);
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.neighborhood-header h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+
+.neighborhood-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.neighborhood-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-bottom: 2px;
+}
+
+.neighborhood-label svg {
+  color: var(--muted);
+}
+
+.neighborhood-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.neighborhood-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.neighborhood-field-name {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding-left: 16px;
+}
+
+.neighborhood-field-targets,
+.neighborhood-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.neighborhood-item {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: baseline;
+  column-gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.neighborhood-item:hover {
+  background: var(--accent-tint);
+}
+
+.neighborhood-icon {
+  color: var(--muted);
+  align-self: center;
+}
+
+.neighborhood-item-title {
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neighborhood-item-path {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neighborhood-item.missing .neighborhood-item-title {
+  color: var(--danger);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
 }
 
 .preview-surface table {
@@ -1388,6 +1571,157 @@ a {
   color: var(--faint);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.inspector {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.inspector-header h3 {
+  margin: 4px 2px 6px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.inspector-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.inspector-row dt {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.inspector-row dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.inspector-row.muted dd {
+  color: var(--muted);
+}
+
+.inspector-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.inspector-input:hover {
+  background: var(--panel-3);
+}
+
+.inspector-input:focus {
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.inspector-readonly {
+  display: inline-block;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  min-height: 26px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.tag-chips:hover {
+  background: var(--panel-3);
+}
+
+.tag-chips:focus-within {
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 4px 0 7px;
+  border-radius: 4px;
+  background: var(--panel-3);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tag-chip-x {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.tag-chip-x:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.tag-chip-input {
+  flex: 1;
+  min-width: 28px;
+  height: 18px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.tag-chip-add {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--faint);
+}
+
+.tag-chip-add:hover {
+  background: var(--panel);
+  color: var(--accent);
 }
 
 /* ─── Buttons ──────────────────────────────────────────────────────── */
@@ -1666,22 +2000,34 @@ a {
 
 /* ─── Toast ────────────────────────────────────────────────────────── */
 
-.toast {
+.toast-stack {
   position: fixed;
   right: 20px;
   bottom: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.toast-stack > * {
+  pointer-events: auto;
+}
+
+.toast {
+  position: relative;
   width: min(420px, calc(100vw - 40px));
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
-  padding: 12px 12px 12px 14px;
+  padding: 10px 10px 10px 14px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--danger);
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
-  z-index: 70;
   animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 

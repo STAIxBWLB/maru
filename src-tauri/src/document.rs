@@ -1,4 +1,4 @@
-use crate::frontmatter::{build_frontmatter, FrontmatterValue};
+use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,29 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use uuid::Uuid;
+
+/// Frontend-supplied value for a single frontmatter field. Untagged so React
+/// can send a bare string / array / number / boolean and we figure it out.
+/// Sending `null` (Option::None) deletes the key.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum FieldInput {
+    Bool(bool),
+    Number(f64),
+    Str(String),
+    List(Vec<String>),
+}
+
+impl From<FieldInput> for FrontmatterValue {
+    fn from(input: FieldInput) -> Self {
+        match input {
+            FieldInput::Bool(value) => FrontmatterValue::Bool(value),
+            FieldInput::Number(value) => FrontmatterValue::Number(value),
+            FieldInput::Str(value) => FrontmatterValue::String(value),
+            FieldInput::List(values) => FrontmatterValue::List(values),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +106,28 @@ pub fn save_document(
             .map_err(|err| format!("Cannot create parent directory: {err}"))?;
     }
     fs::write(&path, content).map_err(|err| format!("Cannot save document: {err}"))?;
+    read_document(vault_path, path.to_string_lossy().to_string())
+}
+
+/// Patch a single frontmatter field on disk while preserving the order and
+/// comments of every other key. Sending `value: null` deletes the field.
+/// This is the load-bearing primitive for the InspectorPane inline editors.
+#[tauri::command]
+pub fn update_frontmatter_field(
+    vault_path: String,
+    document_path: String,
+    key: String,
+    value: Option<FieldInput>,
+) -> Result<DocumentPayload, String> {
+    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let original = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read document: {err}"))?;
+    let mapped = value.map(FrontmatterValue::from);
+    let updated = update_frontmatter_content(&original, &key, mapped)?;
+    if updated != original {
+        fs::write(&path, &updated)
+            .map_err(|err| format!("Cannot save document: {err}"))?;
+    }
     read_document(vault_path, path.to_string_lossy().to_string())
 }
 
@@ -233,6 +278,96 @@ mod tests {
             after, original,
             "read→save with unchanged content must be byte-identical (frontmatter order, comments, trailing newline all preserved)"
         );
+    }
+
+    /// update_frontmatter_field is the InspectorPane backend — a single-field
+    /// patch must touch only that key, leaving order/comments/values of every
+    /// other field byte-identical.
+    #[test]
+    fn update_frontmatter_field_isolates_changes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original = "---\n\
+            title: 제주한라대 RISE 2026\n\
+            status: 진행중\n\
+            # 내부 메모 — 외부 공개 X\n\
+            tags:\n  - 보고서\n  - 행정\n\
+            author: 이영준 (李永俊)\n\
+            ---\n\
+            # 본문\n\nhello\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let payload = update_frontmatter_field(
+            root.clone(),
+            "note.md".to_string(),
+            "status".to_string(),
+            Some(FieldInput::Str("완료".to_string())),
+        )
+        .unwrap();
+
+        // Title, comment, tags, author all preserved verbatim.
+        assert!(payload.content.contains("title: 제주한라대 RISE 2026"));
+        assert!(payload.content.contains("# 내부 메모 — 외부 공개 X"));
+        assert!(payload.content.contains("- 보고서"));
+        assert!(payload.content.contains("- 행정"));
+        assert!(payload.content.contains("author: 이영준 (李永俊)"));
+        // Status updated.
+        assert!(payload.content.contains("status: 완료"));
+        assert!(!payload.content.contains("status: 진행중"));
+        // Order preserved.
+        let title_pos = payload.content.find("title:").unwrap();
+        let status_pos = payload.content.find("status:").unwrap();
+        let tags_pos = payload.content.find("tags:").unwrap();
+        let author_pos = payload.content.find("author:").unwrap();
+        assert!(title_pos < status_pos);
+        assert!(status_pos < tags_pos);
+        assert!(tags_pos < author_pos);
+        // Body intact + trailing newline preserved.
+        assert!(payload.content.contains("# 본문"));
+        assert!(payload.content.ends_with('\n'));
+    }
+
+    /// Updating a list-typed field (tags) must round-trip the array form.
+    #[test]
+    fn update_frontmatter_field_list_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original = "---\nstatus: draft\ntags:\n  - old\n---\n# X\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let payload = update_frontmatter_field(
+            root,
+            "note.md".to_string(),
+            "tags".to_string(),
+            Some(FieldInput::List(vec!["alpha".to_string(), "beta".to_string()])),
+        )
+        .unwrap();
+
+        assert!(payload.content.contains("- \"alpha\""));
+        assert!(payload.content.contains("- \"beta\""));
+        assert!(!payload.content.contains("- old"));
+        assert!(payload.content.contains("status: draft"));
+    }
+
+    /// Sending None must delete the key without disturbing siblings.
+    #[test]
+    fn update_frontmatter_field_null_deletes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original = "---\ntitle: keep\nephemeral: drop\nstatus: keep\n---\n# X\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let payload = update_frontmatter_field(
+            root,
+            "note.md".to_string(),
+            "ephemeral".to_string(),
+            None,
+        )
+        .unwrap();
+
+        assert!(!payload.content.contains("ephemeral"));
+        assert!(payload.content.contains("title: keep"));
+        assert!(payload.content.contains("status: keep"));
     }
 
     #[test]

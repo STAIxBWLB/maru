@@ -8,12 +8,13 @@ import {
   PanelRightOpen,
   Save,
 } from "lucide-react";
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useCallback, useMemo, useRef } from "react";
 import { documentStats } from "../lib/document";
 import { renderMarkdown } from "../lib/markdown";
-import type { DocumentPayload } from "../lib/types";
+import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { Button } from "./ui/Button";
+import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
 
 export type EditorViewMode = "edit" | "preview";
 
@@ -25,11 +26,13 @@ interface EditorPaneProps {
   outlineOpen: boolean;
   activeVaultLabel: string | null;
   viewMode: EditorViewMode;
+  entries: VaultEntry[];
   onChange: (content: string) => void;
   onSave: () => void;
   onSnapshot: () => void;
   onToggleOutline: () => void;
   onViewModeChange: (mode: EditorViewMode) => void;
+  onWikilinkClick: (target: string) => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -42,21 +45,46 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     outlineOpen,
     activeVaultLabel,
     viewMode,
+    entries,
     onChange,
     onSave,
     onSnapshot,
     onToggleOutline,
     onViewModeChange,
+    onWikilinkClick,
     textareaRef,
   },
   ref,
 ) {
   const { t, locale } = useTranslation();
   const stats = documentStats(document, draftContent);
+  const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const taRef = textareaRef ?? localTextareaRef;
+
+  const { handlers: autocompleteHandlers, popup: autocompletePopup } =
+    useWikilinkAutocomplete({
+      textareaRef: taRef,
+      value: draftContent,
+      entries,
+      onChange,
+    });
 
   const previewHtml = useMemo(
     () => (document ? renderMarkdown(draftContent) : ""),
     [draftContent, document],
+  );
+
+  const handlePreviewClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      const node = (event.target as HTMLElement).closest(
+        "[data-wikilink]",
+      ) as HTMLElement | null;
+      if (!node) return;
+      event.preventDefault();
+      const target = node.getAttribute("data-wikilink");
+      if (target) onWikilinkClick(target);
+    },
+    [onWikilinkClick],
   );
 
   if (!document) {
@@ -142,18 +170,25 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             {t("editor.tab.preview")}
           </Tabs.Trigger>
         </Tabs.List>
-        <Tabs.Content className="tab-panel" value="edit">
+        <Tabs.Content className="tab-panel" value="edit" forceMount>
           <textarea
-            ref={textareaRef}
+            ref={taRef}
             className="source-editor"
             value={draftContent}
             onChange={(event) => onChange(event.target.value)}
+            onKeyDown={autocompleteHandlers.onKeyDown}
+            onKeyUp={autocompleteHandlers.onKeyUp}
+            onClick={autocompleteHandlers.onClick}
+            onCompositionStart={autocompleteHandlers.onCompositionStart}
+            onCompositionEnd={autocompleteHandlers.onCompositionEnd}
             spellCheck={false}
           />
+          {autocompletePopup}
         </Tabs.Content>
-        <Tabs.Content className="tab-panel" value="preview">
+        <Tabs.Content className="tab-panel" value="preview" forceMount>
           <article
             className="preview-surface"
+            onClick={handlePreviewClick}
             dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         </Tabs.Content>

@@ -99,6 +99,16 @@ const ko: Record<string, string> = {
   "outline.meta.created": "생성",
   "outline.meta.updated": "수정",
 
+  "inspector.title": "프론트매터",
+  "inspector.empty": "값 없음",
+
+  "wikilink.notFound": "vault에 없음: [[{target}]]",
+
+  "neighborhood.title": "주변",
+  "neighborhood.upward": "프로젝트 / 상위",
+  "neighborhood.mentions": "본문 언급",
+  "neighborhood.peers": "같은 타입",
+
   "cmdk.placeholder": "문서 또는 명령 검색...",
   "cmdk.empty": "결과가 없습니다.",
   "cmdk.openHint": "⌘K 로 명령 팔레트를 엽니다",
@@ -131,6 +141,9 @@ const ko: Record<string, string> = {
 
   "snapshot.summary": "사용자 요청으로 생성한 편집 스냅샷",
   "snapshot.success": "스냅샷 저장됨: {path}",
+
+  "toast.discardedEdit": "{title} 의 저장하지 않은 변경 사항이 임시 보관되었습니다.",
+  "toast.restore": "되돌리기",
 
   "footer.tagline": "로컬 우선 · 파일 원천 · ko/en",
 };
@@ -217,6 +230,16 @@ const en: Record<string, string> = {
   "outline.meta.created": "created",
   "outline.meta.updated": "updated",
 
+  "inspector.title": "Frontmatter",
+  "inspector.empty": "—",
+
+  "wikilink.notFound": "Not in vault: [[{target}]]",
+
+  "neighborhood.title": "Neighborhood",
+  "neighborhood.upward": "Project / up",
+  "neighborhood.mentions": "Mentions",
+  "neighborhood.peers": "Same type",
+
   "cmdk.placeholder": "Search documents or commands…",
   "cmdk.empty": "No results.",
   "cmdk.openHint": "⌘K opens the command palette",
@@ -249,6 +272,9 @@ const en: Record<string, string> = {
 
   "snapshot.summary": "User-requested editing snapshot",
   "snapshot.success": "Snapshot saved: {path}",
+
+  "toast.discardedEdit": "Unsaved edits to {title} have been stashed.",
+  "toast.restore": "Restore",
 
   "footer.tagline": "Local-first · files-as-truth · ko/en",
 };

@@ -66,6 +66,26 @@ export async function saveDocument(
   return invoke<DocumentPayload>("save_document", { vaultPath, documentPath, content });
 }
 
+/** Patch a single frontmatter field while preserving order + comments of
+ *  every other key. Pass `value: null` to delete. */
+export async function updateFrontmatterField(
+  vaultPath: string,
+  documentPath: string,
+  key: string,
+  value: string | string[] | number | boolean | null,
+): Promise<DocumentPayload> {
+  if (!isTauri()) {
+    const doc = readMockDocument(documentPath);
+    return doc;
+  }
+  return invoke<DocumentPayload>("update_frontmatter_field", {
+    vaultPath,
+    documentPath,
+    key,
+    value,
+  });
+}
+
 export async function createDocument(
   vaultPath: string,
   title: string,
