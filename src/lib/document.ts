@@ -62,15 +62,20 @@ export function formatRelativeDate(value: string | null, locale: "ko" | "en"): s
   return formatter.format(0, "second");
 }
 
-export function documentStats(document: DocumentPayload | null): {
+export function documentStats(
+  document: DocumentPayload | null,
+  contentOverride?: string,
+): {
   lines: number;
   words: number;
   chars: number;
 } {
   if (!document) return { lines: 0, words: 0, chars: 0 };
-  const lines = document.content.split("\n").length;
-  const words = document.body.split(/\s+/).filter(Boolean).length;
-  const chars = document.content.length;
+  const content = contentOverride ?? document.content;
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  const lines = content.split("\n").length;
+  const words = body.split(/\s+/).filter(Boolean).length;
+  const chars = content.length;
   return { lines, words, chars };
 }
 

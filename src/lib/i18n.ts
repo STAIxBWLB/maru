@@ -21,8 +21,8 @@ const ko: Record<string, string> = {
   "app.title": "Anchor",
   "app.subtitle.work": "로컬 우선 마크다운 볼트",
   "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 볼트",
-  "app.locale.ko": "한국어",
-  "app.locale.en": "English",
+  "app.locale.ko": "KO",
+  "app.locale.en": "EN",
   "app.locale.label": "언어",
   "app.refresh": "볼트 다시 읽기",
   "app.confirmUnsaved": "저장하지 않은 변경이 있습니다. 다른 문서를 열까요?",
@@ -30,8 +30,13 @@ const ko: Record<string, string> = {
 
   "vault.current": "현재 볼트",
   "vault.add": "볼트 추가",
+  "vault.remove": "볼트 제거",
+  "vault.remove.label": "{label} 볼트 제거",
+  "vault.remove.confirm": "이 볼트를 목록에서 제거할까요?",
   "vault.choose": "선택",
-  "vault.useSample": "샘플 볼트",
+  "vault.useSample": "샘플 볼트 열기",
+  "vault.switcher.empty": "볼트 선택",
+  "vault.switcher.none": "등록된 볼트가 없습니다",
   "vault.empty.title": "등록된 볼트가 없습니다",
   "vault.empty.description":
     "디렉토리를 선택해 첫 번째 볼트를 등록하거나 샘플 볼트로 시작할 수 있습니다.",
@@ -53,13 +58,24 @@ const ko: Record<string, string> = {
   "vault.dialog.error.label": "이름을 입력하세요.",
   "vault.dialog.error.path": "경로를 선택하세요.",
 
-  "list.title": "문서 인덱스",
+  "sidebar.commandPalette": "명령 팔레트",
+  "sidebar.types": "문서 타입",
+  "sidebar.types.all": "전체",
+  "sidebar.types.untyped": "타입 없음",
+  "sidebar.recent": "최근 문서",
+  "sidebar.recent.empty": "아직 열어본 문서가 없습니다.",
+
+  "list.title": "문서",
   "list.searchPlaceholder": "제목, 본문 검색",
   "list.loading": "문서 목록 로딩",
   "list.empty.title": "표시할 문서가 없습니다",
   "list.empty.description": "샘플 볼트를 열거나 새 문서를 만들어 시작하세요.",
   "list.meta.words": "{count} 단어",
   "list.meta.versions": "{count} 버전",
+  "list.meta.count": "{count} 건",
+  "list.group.today": "오늘",
+  "list.group.thisWeek": "이번 주",
+  "list.group.earlier": "이전",
 
   "editor.empty.title": "문서를 선택하세요",
   "editor.empty.description":
@@ -68,12 +84,34 @@ const ko: Record<string, string> = {
   "editor.saved": "저장됨",
   "editor.save": "저장",
   "editor.saving": "저장 중",
-  "editor.snapshot": "버전",
+  "editor.snapshot": "스냅샷",
   "editor.tab.edit": "원문",
   "editor.tab.preview": "미리보기",
   "editor.status.lines": "{count} 줄",
   "editor.status.words": "{count} 단어",
   "editor.status.chars": "{count} 자",
+
+  "outline.title": "문서 개요",
+  "outline.open": "개요 열기",
+  "outline.close": "개요 닫기",
+  "outline.empty": "이 문서에는 제목(#) 헤딩이 없습니다.",
+  "outline.empty.noDocument": "문서를 선택하면 개요가 표시됩니다.",
+  "outline.meta.created": "생성",
+  "outline.meta.updated": "수정",
+
+  "cmdk.placeholder": "문서 또는 명령 검색...",
+  "cmdk.empty": "결과가 없습니다.",
+  "cmdk.openHint": "⌘K 로 명령 팔레트를 엽니다",
+  "cmdk.section.commands": "명령",
+  "cmdk.section.documents": "문서",
+  "cmdk.action.newDocument": "새 문서 만들기",
+  "cmdk.action.save": "현재 문서 저장",
+  "cmdk.action.snapshot": "버전 스냅샷 만들기",
+  "cmdk.action.togglePreview": "미리보기 토글",
+  "cmdk.action.toggleOutline": "개요 패널 토글",
+  "cmdk.action.toggleLocale": "한국어/English 전환",
+  "cmdk.action.refresh": "볼트 다시 읽기",
+  "cmdk.action.addVault": "볼트 추가",
 
   "newDoc.button": "새 문서",
   "newDoc.dialog.title": "새 Anchor 문서",
@@ -92,7 +130,7 @@ const ko: Record<string, string> = {
   "newDoc.error.type": "타입을 입력하세요.",
 
   "snapshot.summary": "사용자 요청으로 생성한 편집 스냅샷",
-  "snapshot.success": "버전 생성 완료: {path}",
+  "snapshot.success": "스냅샷 저장됨: {path}",
 
   "footer.tagline": "로컬 우선 · 파일 원천 · ko/en",
 };
@@ -101,8 +139,8 @@ const en: Record<string, string> = {
   "app.title": "Anchor",
   "app.subtitle.work": "Local-first markdown vault",
   "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-vault",
-  "app.locale.ko": "한국어",
-  "app.locale.en": "English",
+  "app.locale.ko": "KO",
+  "app.locale.en": "EN",
   "app.locale.label": "Language",
   "app.refresh": "Reload vault",
   "app.confirmUnsaved": "You have unsaved changes. Open a different document?",
@@ -110,8 +148,13 @@ const en: Record<string, string> = {
 
   "vault.current": "Current vault",
   "vault.add": "Add vault",
+  "vault.remove": "Remove vault",
+  "vault.remove.label": "Remove {label} vault",
+  "vault.remove.confirm": "Remove this vault from the list?",
   "vault.choose": "Choose",
-  "vault.useSample": "Sample vault",
+  "vault.useSample": "Open sample vault",
+  "vault.switcher.empty": "Choose vault",
+  "vault.switcher.none": "No vaults registered",
   "vault.empty.title": "No vaults registered",
   "vault.empty.description":
     "Pick a folder to register your first vault, or start with the sample vault.",
@@ -133,13 +176,24 @@ const en: Record<string, string> = {
   "vault.dialog.error.label": "Display name is required.",
   "vault.dialog.error.path": "Folder path is required.",
 
+  "sidebar.commandPalette": "Command palette",
+  "sidebar.types": "Document types",
+  "sidebar.types.all": "All documents",
+  "sidebar.types.untyped": "Untyped",
+  "sidebar.recent": "Recent",
+  "sidebar.recent.empty": "No recently opened documents.",
+
   "list.title": "Documents",
-  "list.searchPlaceholder": "Search title or body",
+  "list.searchPlaceholder": "Search titles or contents",
   "list.loading": "Loading documents",
   "list.empty.title": "No documents to show",
   "list.empty.description": "Open the sample vault or create a new document to get started.",
   "list.meta.words": "{count} words",
   "list.meta.versions": "{count} versions",
+  "list.meta.count": "{count} items",
+  "list.group.today": "Today",
+  "list.group.thisWeek": "This week",
+  "list.group.earlier": "Earlier",
 
   "editor.empty.title": "Select a document",
   "editor.empty.description":
@@ -148,12 +202,34 @@ const en: Record<string, string> = {
   "editor.saved": "Saved",
   "editor.save": "Save",
   "editor.saving": "Saving",
-  "editor.snapshot": "Version",
+  "editor.snapshot": "Snapshot",
   "editor.tab.edit": "Source",
   "editor.tab.preview": "Preview",
   "editor.status.lines": "{count} lines",
   "editor.status.words": "{count} words",
   "editor.status.chars": "{count} chars",
+
+  "outline.title": "Outline",
+  "outline.open": "Show outline",
+  "outline.close": "Hide outline",
+  "outline.empty": "This document has no headings yet.",
+  "outline.empty.noDocument": "Open a document to see its outline.",
+  "outline.meta.created": "created",
+  "outline.meta.updated": "updated",
+
+  "cmdk.placeholder": "Search documents or commands…",
+  "cmdk.empty": "No results.",
+  "cmdk.openHint": "⌘K opens the command palette",
+  "cmdk.section.commands": "Commands",
+  "cmdk.section.documents": "Documents",
+  "cmdk.action.newDocument": "Create new document",
+  "cmdk.action.save": "Save current document",
+  "cmdk.action.snapshot": "Create version snapshot",
+  "cmdk.action.togglePreview": "Toggle preview",
+  "cmdk.action.toggleOutline": "Toggle outline panel",
+  "cmdk.action.toggleLocale": "Switch ko / en",
+  "cmdk.action.refresh": "Reload vault",
+  "cmdk.action.addVault": "Add vault",
 
   "newDoc.button": "New document",
   "newDoc.dialog.title": "New Anchor document",
@@ -172,7 +248,7 @@ const en: Record<string, string> = {
   "newDoc.error.type": "Type is required.",
 
   "snapshot.summary": "User-requested editing snapshot",
-  "snapshot.success": "Version saved: {path}",
+  "snapshot.success": "Snapshot saved: {path}",
 
   "footer.tagline": "Local-first · files-as-truth · ko/en",
 };
@@ -227,7 +303,9 @@ function detectInitialLocale(): Locale {
   if (stored === "ko" || stored === "en") return stored;
   const browser = window.navigator.language.toLowerCase();
   if (browser.startsWith("ko")) return "ko";
-  return "en";
+  // Fall back to ko since the primary user is Korean — env detection
+  // will still respect explicit en preference once the user toggles.
+  return "ko";
 }
 
 export function useLocaleState() {

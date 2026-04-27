@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, RefreshCcw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, RefreshCcw, X } from "lucide-react";
 import { AddVaultDialog } from "./components/AddVaultDialog";
+import { CommandPalette } from "./components/CommandPalette";
 import { DocumentList } from "./components/DocumentList";
-import { EditorPane } from "./components/EditorPane";
-import { LocaleToggle } from "./components/LocaleToggle";
+import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
+import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
-import { Button } from "./components/ui/Button";
+import { VaultSwitcher } from "./components/VaultSwitcher";
 import {
   addVault,
   createDocument,
@@ -20,17 +21,18 @@ import {
   setActiveVault,
 } from "./lib/api";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
+import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import type { DocumentPayload, VaultEntry, VaultList } from "./lib/types";
 
 const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
+const RECENT_KEY = "anchor:recent:v1";
+const OUTLINE_OPEN_KEY = "anchor:outlineOpen:v1";
 
-// Fail loudly on locale parity drift. ko/en are equal first-class — every
-// key must exist in both dictionaries. Throws at module load if not.
 assertParityOrThrow();
 
 export default function App() {
   const localeValue = useLocaleState();
-  const { t } = localeValue;
+  const { t, locale, setLocale } = localeValue;
 
   const [vaultList, setVaultList] = useState<VaultList>({
     vaults: [],
@@ -42,22 +44,68 @@ export default function App() {
   const [document, setDocument] = useState<DocumentPayload | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [addVaultOpen, setAddVaultOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("edit");
+  const [outlineOpen, setOutlineOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(OUTLINE_OPEN_KEY) !== "0";
+  });
+  const [recentPaths, setRecentPaths] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(RECENT_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeVaultPath = vaultList.activeVault;
+  const activeVault = useMemo(
+    () => vaultList.vaults.find((v) => v.path === activeVaultPath) ?? null,
+    [vaultList, activeVaultPath],
+  );
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
   );
 
-  const lastOpenKeyForVault = useCallback(
-    (path: string) => `${LAST_OPEN_KEY}:${path}`,
-    [],
-  );
+  const recentEntries = useMemo(() => {
+    const byPath = new Map(entries.map((e) => [e.path, e] as const));
+    const out: VaultEntry[] = [];
+    for (const path of recentPaths) {
+      const entry = byPath.get(path);
+      if (entry) out.push(entry);
+      if (out.length >= 8) break;
+    }
+    return out;
+  }, [entries, recentPaths]);
+
+  const lastOpenKeyForVault = useCallback((path: string) => `${LAST_OPEN_KEY}:${path}`, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(OUTLINE_OPEN_KEY, outlineOpen ? "1" : "0");
+  }, [outlineOpen]);
+
+  const pushRecent = useCallback((path: string) => {
+    setRecentPaths((prev) => {
+      const next = [path, ...prev.filter((p) => p !== path)].slice(0, 16);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
 
   const loadVault = useCallback(
     async (path: string, preferRelPath: string | null = null) => {
@@ -68,7 +116,9 @@ export default function App() {
         setEntries(nextEntries);
 
         const target = preferRelPath
-          ? nextEntries.find((entry) => entry.relPath === preferRelPath || entry.path === preferRelPath)
+          ? nextEntries.find(
+              (entry) => entry.relPath === preferRelPath || entry.path === preferRelPath,
+            )
           : null;
         const candidate = target ?? nextEntries[0] ?? null;
         if (candidate) {
@@ -79,6 +129,7 @@ export default function App() {
           if (typeof window !== "undefined") {
             window.localStorage.setItem(lastOpenKeyForVault(path), candidate.relPath);
           }
+          pushRecent(candidate.path);
         } else {
           setSelectedEntry(null);
           setDocument(null);
@@ -90,7 +141,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [lastOpenKeyForVault],
+    [lastOpenKeyForVault, pushRecent],
   );
 
   const switchActiveVault = useCallback(
@@ -116,8 +167,6 @@ export default function App() {
       try {
         const list = await listVaults();
         if (list.vaults.length === 0) {
-          // Seed registry with the bundled sample vault on first run so the
-          // user has something to open before they pick their own folder.
           const samplePath = await getSampleVaultPath();
           const seeded = await addVault("Sample", samplePath, null);
           setVaultList(seeded);
@@ -135,6 +184,10 @@ export default function App() {
               ? window.localStorage.getItem(lastOpenKeyForVault(list.activeVault))
               : null;
           await loadVault(list.activeVault, lastRel);
+        } else if (list.vaults[0]) {
+          // Vaults exist but none active — auto-pick the first to avoid the
+          // confusing "no vaults registered" empty-state in the topbar.
+          await switchActiveVault(list.vaults[0].path);
         } else {
           setLoading(false);
         }
@@ -148,30 +201,36 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleAddVault(label: string, path: string, externalWriter: string | null) {
-    const list = await addVault(label, path, externalWriter);
-    setVaultList(list);
-    if (list.activeVault === path) {
-      await loadVault(path);
-    }
-  }
+  const handleAddVault = useCallback(
+    async (label: string, path: string, externalWriter: string | null) => {
+      const list = await addVault(label, path, externalWriter);
+      setVaultList(list);
+      if (list.activeVault === path) {
+        await loadVault(path);
+      }
+    },
+    [loadVault],
+  );
 
-  async function handleRemoveVault(path: string) {
-    const confirmation = window.confirm(`${path}\n\n${t("vault.dialog.confirm")}?`);
-    if (!confirmation) return;
-    const list = await removeVault(path);
-    setVaultList(list);
-    if (list.activeVault) {
-      await loadVault(list.activeVault);
-    } else {
-      setEntries([]);
-      setSelectedEntry(null);
-      setDocument(null);
-      setDraftContent("");
-    }
-  }
+  const handleRemoveVault = useCallback(
+    async (path: string) => {
+      const confirmation = window.confirm(`${path}\n\n${t("vault.remove.confirm")}`);
+      if (!confirmation) return;
+      const list = await removeVault(path);
+      setVaultList(list);
+      if (list.activeVault) {
+        await loadVault(list.activeVault);
+      } else {
+        setEntries([]);
+        setSelectedEntry(null);
+        setDocument(null);
+        setDraftContent("");
+      }
+    },
+    [loadVault, t],
+  );
 
-  async function useSampleVault() {
+  const useSampleVault = useCallback(async () => {
     try {
       const samplePath = await getSampleVaultPath();
       const exists = vaultList.vaults.find((v) => v.path === samplePath);
@@ -183,26 +242,32 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }
+  }, [vaultList.vaults, handleAddVault, switchActiveVault]);
 
-  async function selectEntry(entry: VaultEntry) {
-    if (!activeVaultPath) return;
-    if (dirty && !window.confirm(t("app.confirmUnsaved"))) return;
-    setSelectedEntry(entry);
-    setError(null);
-    try {
-      const payload = await readDocument(activeVaultPath, entry.path);
-      setDocument(payload);
-      setDraftContent(payload.content);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(lastOpenKeyForVault(activeVaultPath), entry.relPath);
+  const selectEntry = useCallback(
+    async (entry: VaultEntry) => {
+      if (!activeVaultPath) return false;
+      if (dirty && !window.confirm(t("app.confirmUnsaved"))) return false;
+      setError(null);
+      try {
+        const payload = await readDocument(activeVaultPath, entry.path);
+        setSelectedEntry(entry);
+        setDocument(payload);
+        setDraftContent(payload.content);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(lastOpenKeyForVault(activeVaultPath), entry.relPath);
+        }
+        pushRecent(entry.path);
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return false;
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
+    },
+    [activeVaultPath, dirty, lastOpenKeyForVault, pushRecent, t],
+  );
 
-  async function saveCurrent() {
+  const saveCurrent = useCallback(async () => {
     if (!document || !dirty || !activeVaultPath) return;
     setSaving(true);
     setError(null);
@@ -217,9 +282,9 @@ export default function App() {
     } finally {
       setSaving(false);
     }
-  }
+  }, [document, dirty, activeVaultPath, draftContent]);
 
-  async function snapshotCurrent() {
+  const snapshotCurrent = useCallback(async () => {
     if (!document || !activeVaultPath) return;
     setError(null);
     try {
@@ -236,34 +301,154 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }
+  }, [document, activeVaultPath, draftContent, t]);
 
-  async function createNew(title: string, docType: string, body: string) {
-    if (!activeVaultPath) return;
-    const created = await createDocument(activeVaultPath, title, docType, body);
-    await loadVault(activeVaultPath, created.relPath);
-  }
+  const createNew = useCallback(
+    async (title: string, docType: string, body: string) => {
+      if (!activeVaultPath) return;
+      const created = await createDocument(activeVaultPath, title, docType, body);
+      await loadVault(activeVaultPath, created.relPath);
+    },
+    [activeVaultPath, loadVault],
+  );
 
-  async function refreshCurrent() {
+  const refreshCurrent = useCallback(async () => {
     if (!activeVaultPath) return;
     const lastRel =
       typeof window !== "undefined"
         ? window.localStorage.getItem(lastOpenKeyForVault(activeVaultPath))
         : null;
     await loadVault(activeVaultPath, lastRel);
-  }
+  }, [activeVaultPath, lastOpenKeyForVault, loadVault]);
+
+  const focusSearch = useCallback(() => {
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  }, []);
+
+  const jumpToOutlineLine = useCallback((line: number) => {
+    const ta = editorTextareaRef.current;
+    if (!ta) return;
+    const lines = ta.value.split("\n");
+    let pos = 0;
+    for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
+    ta.focus();
+    ta.setSelectionRange(pos, pos + (lines[line]?.length ?? 0));
+    // Scroll the line into view.
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight || "20");
+    ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 3);
+  }, []);
+
+  const runCommand = useCallback(
+    (id: string) => {
+      switch (id) {
+        case "new-document":
+          setNewDocumentOpen(true);
+          break;
+        case "save":
+          void saveCurrent();
+          break;
+        case "snapshot":
+          void snapshotCurrent();
+          break;
+        case "toggle-preview":
+          setEditorViewMode((mode) => (mode === "edit" ? "preview" : "edit"));
+          break;
+        case "toggle-outline":
+          setOutlineOpen((v) => !v);
+          break;
+        case "toggle-locale":
+          setLocale(locale === "ko" ? "en" : "ko");
+          break;
+        case "refresh-vault":
+          void refreshCurrent();
+          break;
+        case "add-vault":
+          setAddVaultOpen(true);
+          break;
+      }
+    },
+    [saveCurrent, snapshotCurrent, refreshCurrent, locale, setLocale],
+  );
+
+  useKeyboardShortcuts(
+    {
+      "mod+s": () => void saveCurrent(),
+      "mod+shift+s": () => void snapshotCurrent(),
+      "mod+n": () => setNewDocumentOpen(true),
+      "mod+k": () => setCommandPaletteOpen((v) => !v),
+      "mod+p": () => setEditorViewMode((mode) => (mode === "edit" ? "preview" : "edit")),
+      "mod+\\": () => setOutlineOpen((v) => !v),
+      "mod+f": focusSearch,
+      "mod+r": () => void refreshCurrent(),
+      "mod+shift+l": () => setLocale(locale === "ko" ? "en" : "ko"),
+    },
+    [saveCurrent, snapshotCurrent, refreshCurrent, focusSearch, locale, setLocale],
+  );
+
+  const shellClass = `app-shell${outlineOpen ? "" : " outline-closed"}`;
 
   return (
     <LocaleContext.Provider value={localeValue}>
-      <div className="app-shell ai-closed">
+      <div className={shellClass}>
+        <header className="topbar">
+          <div className="brand-mark" aria-hidden="true">
+            A
+          </div>
+          <div className="brand-name">
+            {t("app.title")} <span>{t("app.subtitle.work")}</span>
+          </div>
+          <div style={{ width: 14 }} />
+          <VaultSwitcher
+            vaultList={vaultList}
+            activeVaultPath={activeVaultPath}
+            onSelectVault={switchActiveVault}
+            onAddVault={() => setAddVaultOpen(true)}
+            onRemoveVault={handleRemoveVault}
+            onUseSample={useSampleVault}
+          />
+
+          <div className="topbar-spacer" />
+
+          <button
+            type="button"
+            className="topbar-pill"
+            onClick={() => setCommandPaletteOpen(true)}
+            title={t("cmdk.openHint")}
+          >
+            <span style={{ opacity: 0.55 }}>{t("sidebar.commandPalette")}</span>
+            <span className="kbd">⌘</span>
+            <span className="kbd">K</span>
+          </button>
+          <button
+            type="button"
+            className="topbar-pill"
+            onClick={() => setLocale(locale === "ko" ? "en" : "ko")}
+            title={t("app.locale.label")}
+            aria-label={t("app.locale.label")}
+          >
+            {t(locale === "ko" ? "app.locale.ko" : "app.locale.en")}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => void refreshCurrent()}
+            title={t("app.refresh")}
+            aria-label={t("app.refresh")}
+          >
+            <RefreshCcw size={14} />
+          </button>
+        </header>
+
         <Sidebar
-          vaultList={vaultList}
-          activeVaultPath={activeVaultPath}
-          onSelectVault={switchActiveVault}
-          onAddVault={() => setAddVaultOpen(true)}
-          onRemoveVault={handleRemoveVault}
-          onUseSample={useSampleVault}
+          entries={entries}
+          recentEntries={recentEntries}
+          selectedPath={selectedEntry?.path ?? null}
+          typeFilter={typeFilter}
+          onTypeFilter={setTypeFilter}
           onNewDocument={() => setNewDocumentOpen(true)}
+          onSelectRecent={selectEntry}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
         <DocumentList
@@ -271,8 +456,10 @@ export default function App() {
           selectedPath={selectedEntry?.path ?? null}
           query={query}
           loading={loading}
+          typeFilter={typeFilter}
           onQueryChange={setQuery}
           onSelect={selectEntry}
+          searchInputRef={searchInputRef}
         />
 
         <EditorPane
@@ -280,39 +467,65 @@ export default function App() {
           draftContent={draftContent}
           saving={saving}
           dirty={dirty}
+          outlineOpen={outlineOpen}
+          activeVaultLabel={activeVault?.label ?? null}
+          viewMode={editorViewMode}
           onChange={setDraftContent}
           onSave={saveCurrent}
           onSnapshot={snapshotCurrent}
+          onToggleOutline={() => setOutlineOpen((v) => !v)}
+          onViewModeChange={setEditorViewMode}
+          textareaRef={editorTextareaRef}
         />
 
-        <div className="locale-floating">
-          <LocaleToggle />
-        </div>
-
-        {error ? (
-          <div className={error.startsWith(t("snapshot.success", { path: "" }).slice(0, 4)) ? "toast notice" : "toast"}>
-            <AlertTriangle size={15} />
-            <span>{error}</span>
-            <Button size="sm" variant="ghost" onClick={() => setError(null)}>
-              {t("app.errorClose")}
-            </Button>
-          </div>
+        {outlineOpen ? (
+          <OutlinePane
+            document={document}
+            draftContent={draftContent}
+            onJumpToLine={jumpToOutlineLine}
+            onClose={() => setOutlineOpen(false)}
+          />
         ) : null}
 
-        <button
-          className="floating-refresh"
-          title={t("app.refresh")}
-          onClick={() => void refreshCurrent()}
-        >
-          <RefreshCcw size={16} />
-        </button>
+        {error ? (
+          <div
+            className={
+              error.startsWith(t("snapshot.success", { path: "" }).slice(0, 4))
+                ? "toast notice"
+                : "toast"
+            }
+          >
+            <AlertTriangle size={15} />
+            <span>{error}</span>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setError(null)}
+              aria-label={t("app.errorClose")}
+              title={t("app.errorClose")}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : null}
 
         <NewDocumentDialog
           open={newDocumentOpen}
           onOpenChange={setNewDocumentOpen}
           onCreate={createNew}
         />
-        <AddVaultDialog open={addVaultOpen} onOpenChange={setAddVaultOpen} onAdd={handleAddVault} />
+        <AddVaultDialog
+          open={addVaultOpen}
+          onOpenChange={setAddVaultOpen}
+          onAdd={handleAddVault}
+        />
+        <CommandPalette
+          open={commandPaletteOpen}
+          entries={entries}
+          onClose={() => setCommandPaletteOpen(false)}
+          onSelectEntry={selectEntry}
+          onRunCommand={runCommand}
+        />
       </div>
     </LocaleContext.Provider>
   );

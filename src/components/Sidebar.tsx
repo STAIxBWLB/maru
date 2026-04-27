@@ -1,105 +1,160 @@
-import { FileText, FolderOpen, Plus, Settings, Trash2 } from "lucide-react";
-import { Button } from "./ui/Button";
+import { Clock, FileText, Layers, Plus } from "lucide-react";
+import { useMemo } from "react";
+import { frontmatterScalar } from "../lib/document";
 import { useTranslation } from "../lib/i18n";
-import type { VaultList } from "../lib/types";
+import type { VaultEntry } from "../lib/types";
 
 interface SidebarProps {
-  vaultList: VaultList;
-  activeVaultPath: string | null;
-  onSelectVault: (path: string) => void;
-  onAddVault: () => void;
-  onRemoveVault: (path: string) => void;
-  onUseSample: () => void;
+  entries: VaultEntry[];
+  recentEntries: VaultEntry[];
+  selectedPath: string | null;
+  typeFilter: string | null;
+  onTypeFilter: (type: string | null) => void;
   onNewDocument: () => void;
+  onSelectRecent: (entry: VaultEntry) => void;
+  onOpenCommandPalette: () => void;
 }
 
 export function Sidebar({
-  vaultList,
-  activeVaultPath,
-  onSelectVault,
-  onAddVault,
-  onRemoveVault,
-  onUseSample,
+  entries,
+  recentEntries,
+  selectedPath,
+  typeFilter,
+  onTypeFilter,
   onNewDocument,
+  onSelectRecent,
+  onOpenCommandPalette,
 }: SidebarProps) {
   const { t } = useTranslation();
-  const activeVault = vaultList.vaults.find((v) => v.path === activeVaultPath);
+
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+      const type = frontmatterScalar(entry.frontmatter, "type") ?? "_";
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [entries]);
 
   return (
     <aside className="sidebar">
-      <div className="brand-block">
-        <div className="brand-mark" aria-hidden="true">
-          A
-        </div>
-        <div>
-          <h1>{t("app.title")}</h1>
-          <p>{t("app.subtitle.work")}</p>
-        </div>
+      <div className="sidebar-section">
+        <button type="button" className="sidebar-cta" onClick={onNewDocument}>
+          <Plus size={15} />
+          {t("newDoc.button")}
+        </button>
       </div>
 
-      <div className="vault-box">
-        <span className="eyebrow">{t("vault.current")}</span>
-        <p title={activeVault?.path ?? ""}>
-          {activeVault ? activeVault.label : t("vault.empty.title")}
-        </p>
-        {activeVault?.externalWriter ? (
-          <span className="status-pill status-info">
-            ✎ {activeVault.externalWriter}
+      <div className="sidebar-section">
+        <div className="shortcut-row" onClick={onOpenCommandPalette} title={t("cmdk.openHint")}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <FileText size={13} style={{ opacity: 0.6 }} />
+            {t("sidebar.commandPalette")}
           </span>
-        ) : null}
-        <div className="vault-actions">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={onAddVault}
-            icon={<Plus size={14} />}
-          >
-            {t("vault.add")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onUseSample}>
-            {t("vault.useSample")}
-          </Button>
+          <span className="keys">
+            <span className="kbd">⌘</span>
+            <span className="kbd">K</span>
+          </span>
         </div>
       </div>
 
-      <Button variant="primary" onClick={onNewDocument} icon={<FileText size={15} />}>
-        {t("newDoc.button")}
-      </Button>
+      <div className="sidebar-section">
+        <h3>
+          <Layers size={11} style={{ display: "inline-block", verticalAlign: "-1px", marginRight: 5 }} />
+          {t("sidebar.types")}
+        </h3>
+        <div className="type-filters">
+          <button
+            type="button"
+            className={typeFilter == null ? "type-filter active" : "type-filter"}
+            onClick={() => onTypeFilter(null)}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--faint)" }} />
+            <span>{t("sidebar.types.all")}</span>
+            <span className="count">{entries.length}</span>
+          </button>
+          {typeCounts.map(([type, count]) => {
+            const isUntyped = type === "_";
+            const dotColor = colorForType(type);
+            return (
+              <button
+                key={type}
+                type="button"
+                className={typeFilter === type ? "type-filter active" : "type-filter"}
+                onClick={() => onTypeFilter(type)}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    background: dotColor,
+                  }}
+                />
+                <span>{isUntyped ? t("sidebar.types.untyped") : type}</span>
+                <span className="count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {vaultList.vaults.length > 0 ? (
-        <nav className="type-nav" aria-label="vaults">
-          {vaultList.vaults.map((vault) => (
-            <div
-              key={vault.path}
-              className={
-                vault.path === activeVaultPath ? "type-row active vault-row" : "type-row vault-row"
-              }
-            >
-              <button
-                className="vault-row-pick"
-                onClick={() => onSelectVault(vault.path)}
-                title={vault.path}
-              >
-                <FolderOpen size={16} />
-                <span>{vault.label}</span>
-              </button>
-              <button
-                className="vault-row-remove"
-                onClick={() => onRemoveVault(vault.path)}
-                title={vault.path}
-                aria-label={`remove ${vault.label}`}
-              >
-                <Trash2 size={13} />
-              </button>
+      <div className="sidebar-section flex-fill">
+        <h3>
+          <Clock size={11} style={{ display: "inline-block", verticalAlign: "-1px", marginRight: 5 }} />
+          {t("sidebar.recent")}
+        </h3>
+        <div className="recent-list">
+          {recentEntries.length === 0 ? (
+            <div style={{ padding: "10px 8px", color: "var(--faint)", fontSize: 11.5 }}>
+              {t("sidebar.recent.empty")}
             </div>
-          ))}
-        </nav>
-      ) : null}
+          ) : (
+            recentEntries.map((entry) => (
+              <button
+                key={entry.path}
+                type="button"
+                className="recent-item"
+                onClick={() => onSelectRecent(entry)}
+                style={
+                  entry.path === selectedPath
+                    ? { background: "var(--panel)", color: "var(--ink)" }
+                    : undefined
+                }
+                title={entry.relPath}
+              >
+                <FileText size={12} style={{ opacity: 0.55 }} />
+                <span>{entry.title}</span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
 
       <div className="sidebar-footer">
-        <Settings size={15} />
+        <span className="dot" />
         <span>{t("footer.tagline")}</span>
       </div>
     </aside>
   );
+}
+
+function colorForType(type: string): string {
+  switch (type.toLowerCase()) {
+    case "meeting":
+      return "var(--info)";
+    case "project":
+      return "var(--accent)";
+    case "reference":
+      return "var(--warn)";
+    case "task":
+      return "#7d3f7a";
+    case "person":
+    case "people":
+      return "#8a6f3e";
+    case "version":
+      return "var(--faint)";
+    default:
+      return "var(--line-strong)";
+  }
 }
