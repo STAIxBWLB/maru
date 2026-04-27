@@ -14,6 +14,42 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 3 — Built-in Skills | 📋 계획 | |
 | 4 — Document Edit Mode | 📋 계획 | |
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Tauri Webview (src/)                                        │
+│   React 19 + Radix UI + marked (preview) + DOMPurify         │
+│   Phase 1B: + BlockNote rich editor + MediaPipe (Phase 4)    │
+│                                                               │
+│   [PKM] [Inbox] [Skills] [Doc Edit]  ← 4-mode lens (Phase 1+)│
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Tauri IPC
+┌──────────────────────────────▼──────────────────────────────┐
+│  Rust Core (src-tauri/src/)                                  │
+│   vault.rs       — walkdir + .anchorignore + parallel scan   │
+│   frontmatter/   — line-by-line YAML edit (preserves order)  │
+│   document.rs    — read/save/create/version + field patch    │
+│   git.rs         — status/commit/diff via shell-out          │
+│   vault_list.rs  — multi-vault registry + active vault       │
+│   filename_rules.rs — Korean NFC/NFD safety, Windows reserve │
+│                                                               │
+│   Phase 2+: + ai_router.rs / inbox/ / skill_host.rs          │
+│   Phase 4+: + whisper bridge / mcp lifecycle                 │
+└──────┬─────────────────────────────────────────────────────┘
+       │ Phase 2+: stdio + WS bridges
+┌──────▼────────┐ ┌────────────────────┐ ┌──────────────────┐
+│ MCP server    │ │ User's Claude Code │ │ Whisper sidecar  │
+│ (Node, Phase 2)│ │ CLI (~/.claude/skills/*)│ │ (Python, Phase 4)│
+└───────────────┘ └────────────────────┘ └──────────────────┘
+```
+
+**모듈 경계 결정 원칙**:
+- Rust core가 vault FS / cache / git / frontmatter / 인박스 스케줄러 / MCP 라이프사이클 / Claude CLI subprocess **소유**.
+- React는 BlockNote / 명령 팔레트 / neighborhood / gesture worker / AudioWorklet **만** 담당. 비즈니스 로직 X.
+- Node sidecar는 MCP 서버 + 마켓플레이스 (둘 다 Phase 2+).
+- Python sidecar는 Whisper 만 (Phase 4). HWPX는 사용자의 `hwpx` Claude Code 스킬에 위임 (재작성 X).
+
 ## 향후 개발 계획
 
 각 Phase는 **사용자가 실제로 쓸 수 있는 outcome** 단위. 인프라만 늘리는 phase 없음. Phase 진입 게이트는 직전 phase의 verification 통과.
@@ -91,6 +127,19 @@ likelihood 순:
 - **NotebookLM bridge** — 낮은 우선순위
 - **Auto-updater** — 배포 사용자 >2명일 때
 
+## Open Decisions (사용자 결정 필요)
+
+Phase 1B 이후 작업 진행 전 확정 필요한 항목:
+
+1. **Vault cache 트리거 임계치** — 현재 warm scan 385ms (rayon 병렬화 후). 사용자 체감 latency 보고 후 cache 우선순위 결정. Cold scan 측정도 함께 필요.
+2. **BlockNote ↔ raw 토글의 default** — 일반 노트는 rich, RISE 사업계획서 같은 정밀 편집은 raw. per-vault 설정 vs per-doc 설정 선택.
+3. **Multi-tab UX** — 탭 닫기 confirm dirty 처리 (현재 단일 doc은 dismissable toast). Obsidian 패턴 (자동 저장) vs VS Code 패턴 (확인) 결정.
+4. **Wikilink 미해결 처리** — Phase 1A는 soft notice. Phase 1B에서 (a) 빨간 underline + create-new dialog (b) 자동 stub 생성 후 편집 — 사용자 워크플로 확인 필요.
+5. **anchor MCP 포트** — 9710 (tolaria 동일) 시 환경 충돌 검토. 9712/9713 fallback으로 충분한지.
+6. **anchor-editor archive 시점** — Phase 4 verification gate 통과 후 즉시 archive vs 6개월 reference 보존?
+7. **AI fallback API 키 보관 위치** — Tauri stronghold plugin (macOS Keychain) 권장하나 사용자 운영 환경 확인 필요.
+8. **History 단축키 (확정)** — ⌘[ 뒤로 / ⌘] 앞으로 (브라우저 충돌 없음). Phase 1A에 적용됨. 변경 의사 없으면 lock.
+
 ## Hard "No" List (v1)
 
 명시적으로 v1에서 안 할 것:
@@ -154,6 +203,34 @@ dist
 _sys/env
 target
 ```
+
+## Code Lift Map
+
+각 phase 별 주요 lift 출처. anchor는 처음부터 새로 쓰지 않고 검증된 코드를 빌려 옵니다.
+
+| Phase | 출처 | 대상 | 비고 |
+|-------|------|------|------|
+| 0 | `tolaria/src-tauri/src/frontmatter/{yaml,ops}.rs` | `src-tauri/src/frontmatter/` | line-edit, byte-identical |
+| 0 | `tolaria/src-tauri/src/vault_list.rs` | `src-tauri/src/vault_list.rs` | multi-vault registry |
+| 0 | `tolaria/src-tauri/src/vault/filename_rules.rs` | `src-tauri/src/filename_rules.rs` | NFC/NFD safety |
+| 1A | `tolaria/src/utils/wikilinks.ts` | `src/lib/wikilinks.ts` | 255 LOC, verbatim |
+| 1A | `tolaria/src/utils/wikilinkSuggestions.ts` | `src/lib/wikilinkSuggestions.ts` | adapted, +memo index |
+| 1A | `tolaria/src/utils/neighborhoodHistory.ts` | `src/lib/neighborhoodHistory.ts` | adapted, in-memory only |
+| 1A | `tolaria/src/components/InlineWikilinkSuggest.tsx` | `src/components/WikilinkAutocomplete.tsx` | IME-aware adapted |
+| 1B | `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC) | `crates/anchor-vault/src/cache.rs` (planned) | latency 임계 시 |
+| 1B | `tolaria/src-tauri/src/git/{status,commit}.rs` | `src-tauri/src/git.rs` (shell-out 채택) | git2 대신 가볍게 |
+| 1B | `tolaria/src/components/{Editor,RawEditorView,BlockNote*}.tsx` | `src/components/Editor*.tsx` | 1주 budget, fragile |
+| 1B | `tolaria/src/hooks/useEditorTabSwap.ts` (1,149 LOC) | `src/hooks/useEditorTabSwap.ts` | 단순화 가능 |
+| 1B | `tolaria/playwright.smoke.config.ts` | `e2e/` | smoke + flow tests |
+| 2 | `tidy/app/electron/core/scheduler.js` | `crates/anchor-inbox/src/scheduler.rs` | JS→Rust rewrite |
+| 2 | `tidy/app/electron/core/{parser,imap}.js` | `crates/anchor-inbox/src/{extract,imap}.rs` | Rust crates: lopdf, async-imap |
+| 2 | `tidy/app/electron/ipc-handlers.js:20-109` | `crates/anchor-korean/src/date.rs` + `packages/korean-nl/` | 한국어 NL date split |
+| 2 | `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs` | `src-tauri/src/ai_router.rs` | SSE bridge verbatim+adapt |
+| 4 | `anchor-editor/services/whisper/server.py` | `services/whisper/` | Korean large-v3 |
+| 4 | `anchor-editor/apps/web/lib/intent-fusion.ts` | `src/lib/intent-fusion.ts` | RISE-generic 화 |
+| 4 | `anchor-editor/apps/web/workers/gesture.worker.ts` | `src/workers/gesture.worker.ts` | One-Euro filter |
+
+**원칙**: tolaria 검증된 PKM 코드 + tidy 검증된 인박스/AI 코드 + anchor-editor 검증된 음성·제스처 코드를 한 데스크톱 앱으로 통합. 사용자의 `~/.claude/skills/*` 는 read-only — anchor가 invoke 만, 수정 X.
 
 ## Critical invariants
 
