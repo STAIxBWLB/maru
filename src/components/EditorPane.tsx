@@ -7,6 +7,7 @@ import {
   GitCommit,
   PanelRightOpen,
   Save,
+  X,
 } from "lucide-react";
 import { forwardRef, useCallback, useMemo, useRef } from "react";
 import { documentStats } from "../lib/document";
@@ -14,9 +15,17 @@ import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { Button } from "./ui/Button";
+import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
 
-export type EditorViewMode = "edit" | "preview";
+export type EditorViewMode = "rich" | "source" | "preview";
+
+export interface EditorTabSummary {
+  id: string;
+  title: string;
+  relPath: string;
+  dirty: boolean;
+}
 
 interface EditorPaneProps {
   document: DocumentPayload | null;
@@ -26,8 +35,12 @@ interface EditorPaneProps {
   outlineOpen: boolean;
   activeVaultLabel: string | null;
   viewMode: EditorViewMode;
+  tabs: EditorTabSummary[];
+  activeTabId: string | null;
   entries: VaultEntry[];
   onChange: (content: string) => void;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
   onSave: () => void;
   onSnapshot: () => void;
   onToggleOutline: () => void;
@@ -45,8 +58,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     outlineOpen,
     activeVaultLabel,
     viewMode,
+    tabs,
+    activeTabId,
     entries,
     onChange,
+    onSelectTab,
+    onCloseTab,
     onSave,
     onSnapshot,
     onToggleOutline,
@@ -106,6 +123,35 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   return (
     <main className="editor-pane" ref={ref}>
+      <div className="document-tabs-row" aria-label={t("editor.tabs.label")}>
+        {tabs.map((tab, index) => (
+          <div
+            className={tab.id === activeTabId ? "document-tab active" : "document-tab"}
+            key={tab.id}
+            title={tab.relPath}
+          >
+            <button
+              type="button"
+              className="document-tab-main"
+              onClick={() => onSelectTab(tab.id)}
+              aria-current={tab.id === activeTabId ? "page" : undefined}
+            >
+              <span className="document-tab-title">{tab.title}</span>
+              {tab.dirty ? <span className="document-tab-dirty" aria-hidden="true" /> : null}
+              {index < 8 ? <span className="document-tab-kbd">⌘{index + 1}</span> : null}
+            </button>
+            <button
+              type="button"
+              className="document-tab-close"
+              onClick={() => onCloseTab(tab.id)}
+              aria-label={t("editor.tabs.close", { title: tab.title })}
+              title={t("editor.tabs.close", { title: tab.title })}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
       <header className="editor-topbar">
         <div className="breadcrumb" title={document.relPath}>
           {activeVaultLabel ? (
@@ -163,14 +209,20 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
         onValueChange={(value) => onViewModeChange(value as EditorViewMode)}
       >
         <Tabs.List className="editor-tabs-row" aria-label="document view">
-          <Tabs.Trigger className="tab-trigger" value="edit">
-            {t("editor.tab.edit")}
+          <Tabs.Trigger className="tab-trigger" value="rich">
+            {t("editor.tab.rich")}
+          </Tabs.Trigger>
+          <Tabs.Trigger className="tab-trigger" value="source">
+            {t("editor.tab.source")}
           </Tabs.Trigger>
           <Tabs.Trigger className="tab-trigger" value="preview">
             {t("editor.tab.preview")}
           </Tabs.Trigger>
         </Tabs.List>
-        <Tabs.Content className="tab-panel" value="edit" forceMount>
+        <Tabs.Content className="tab-panel" value="rich" forceMount>
+          <RichMarkdownEditor value={draftContent} onChange={onChange} />
+        </Tabs.Content>
+        <Tabs.Content className="tab-panel" value="source" forceMount>
           <textarea
             ref={taRef}
             className="source-editor"

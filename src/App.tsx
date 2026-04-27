@@ -36,10 +36,33 @@ import {
 } from "./lib/neighborhoodHistory";
 
 const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
+const OPEN_TABS_KEY = "anchor:openTabs:v1";
 const RECENT_KEY = "anchor:recent:v1";
 const OUTLINE_OPEN_KEY = "anchor:outlineOpen:v1";
 
 assertParityOrThrow();
+
+interface EditorTab {
+  id: string;
+  entry: VaultEntry;
+  document: DocumentPayload;
+  draftContent: string;
+}
+
+interface StoredTabs {
+  activeRelPath: string | null;
+  relPaths: string[];
+}
+
+function tabIdForEntry(entry: VaultEntry): string {
+  return entry.path;
+}
+
+function titleFromWikilinkTarget(target: string): string {
+  const cleaned = target.trim().replace(/\.(md|markdown)$/i, "");
+  const leaf = cleaned.split("/").filter(Boolean).pop();
+  return leaf ?? cleaned;
+}
 
 export default function App() {
   const localeValue = useLocaleState();
@@ -51,18 +74,21 @@ export default function App() {
     hiddenDefaults: [],
   });
   const [entries, setEntries] = useState<VaultEntry[]>([]);
-  const [selectedEntry, setSelectedEntry] = useState<VaultEntry | null>(null);
-  const [document, setDocument] = useState<DocumentPayload | null>(null);
-  const [draftContent, setDraftContent] = useState("");
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
+  const [newDocumentSeed, setNewDocumentSeed] = useState<{
+    title: string;
+    relPath: string | null;
+  } | null>(null);
   const [addVaultOpen, setAddVaultOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("edit");
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("rich");
   const [outlineOpen, setOutlineOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem(OUTLINE_OPEN_KEY) !== "0";
@@ -104,6 +130,14 @@ export default function App() {
   const [commitDialog, setCommitDialog] = useState<GitStatus | null>(null);
 
   const activeVaultPath = vaultList.activeVault;
+  const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === resolvedActiveTabId) ?? null,
+    [tabs, resolvedActiveTabId],
+  );
+  const selectedEntry = activeTab?.entry ?? null;
+  const document = activeTab?.document ?? null;
+  const draftContent = activeTab?.draftContent ?? "";
   const activeVault = useMemo(
     () => vaultList.vaults.find((v) => v.path === activeVaultPath) ?? null,
     [vaultList, activeVaultPath],
@@ -125,11 +159,73 @@ export default function App() {
   }, [entries, recentPaths]);
 
   const lastOpenKeyForVault = useCallback((path: string) => `${LAST_OPEN_KEY}:${path}`, []);
+  const openTabsKeyForVault = useCallback((path: string) => `${OPEN_TABS_KEY}:${path}`, []);
+
+  const readStoredTabsForVault = useCallback(
+    (path: string): StoredTabs | null => {
+      if (typeof window === "undefined") return null;
+      try {
+        const raw = window.localStorage.getItem(openTabsKeyForVault(path));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<StoredTabs>;
+        const relPaths = Array.isArray(parsed.relPaths)
+          ? parsed.relPaths.filter((value): value is string => typeof value === "string")
+          : [];
+        return {
+          activeRelPath:
+            typeof parsed.activeRelPath === "string" ? parsed.activeRelPath : null,
+          relPaths,
+        };
+      } catch {
+        return null;
+      }
+    },
+    [openTabsKeyForVault],
+  );
+
+  const updateActiveTab = useCallback(
+    (updater: (tab: EditorTab) => EditorTab) => {
+      if (!resolvedActiveTabId) return;
+      setTabs((prev) =>
+        prev.map((tab) => (tab.id === resolvedActiveTabId ? updater(tab) : tab)),
+      );
+    },
+    [resolvedActiveTabId],
+  );
+
+  const setDraftContent = useCallback(
+    (content: string) => {
+      updateActiveTab((tab) => ({ ...tab, draftContent: content }));
+    },
+    [updateActiveTab],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(OUTLINE_OPEN_KEY, outlineOpen ? "1" : "0");
   }, [outlineOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !activeVaultPath) return;
+    const tabsBelongToActiveVault = tabs.every(
+      (tab) => tab.entry.path === activeVaultPath || tab.entry.path.startsWith(`${activeVaultPath}/`),
+    );
+    if (!tabsBelongToActiveVault) return;
+    if (tabs.length === 0) {
+      window.localStorage.removeItem(openTabsKeyForVault(activeVaultPath));
+      return;
+    }
+    window.localStorage.setItem(
+      openTabsKeyForVault(activeVaultPath),
+      JSON.stringify({
+        activeRelPath: activeTab?.entry.relPath ?? null,
+        relPaths: tabs.map((tab) => tab.entry.relPath),
+      } satisfies StoredTabs),
+    );
+    if (activeTab) {
+      window.localStorage.setItem(lastOpenKeyForVault(activeVaultPath), activeTab.entry.relPath);
+    }
+  }, [activeVaultPath, activeTab, tabs, lastOpenKeyForVault, openTabsKeyForVault]);
 
   const pushRecent = useCallback((path: string) => {
     setRecentPaths((prev) => {
@@ -149,25 +245,42 @@ export default function App() {
         const nextEntries = await scanVault(path);
         setEntries(nextEntries);
 
-        const target = preferRelPath
-          ? nextEntries.find(
-              (entry) => entry.relPath === preferRelPath || entry.path === preferRelPath,
-            )
-          : null;
-        const candidate = target ?? nextEntries[0] ?? null;
+        const storedTabs = readStoredTabsForVault(path);
+        const findEntry = (relOrPath: string | null | undefined) =>
+          relOrPath
+            ? nextEntries.find(
+                (entry) => entry.relPath === relOrPath || entry.path === relOrPath,
+              ) ?? null
+            : null;
+
+        const preferredEntry = findEntry(preferRelPath);
+        const storedActiveEntry = findEntry(storedTabs?.activeRelPath);
+        const storedEntries =
+          storedTabs?.relPaths
+            .map(findEntry)
+            .filter((entry): entry is VaultEntry => entry !== null) ?? [];
+        const candidate = preferredEntry ?? storedActiveEntry ?? storedEntries[0] ?? nextEntries[0] ?? null;
+
         if (candidate) {
-          setSelectedEntry(candidate);
-          const payload = await readDocument(path, candidate.path);
-          setDocument(payload);
-          setDraftContent(payload.content);
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem(lastOpenKeyForVault(path), candidate.relPath);
+          const tabEntries = [candidate, ...storedEntries].filter(
+            (entry, index, arr) => arr.findIndex((other) => other.path === entry.path) === index,
+          );
+          const openedTabs: EditorTab[] = [];
+          for (const entry of tabEntries.slice(0, 8)) {
+            const payload = await readDocument(path, entry.path);
+            openedTabs.push({
+              id: tabIdForEntry(entry),
+              entry,
+              document: payload,
+              draftContent: payload.content,
+            });
           }
+          setTabs(openedTabs);
+          setActiveTabId(tabIdForEntry(candidate));
           pushRecent(candidate.path);
         } else {
-          setSelectedEntry(null);
-          setDocument(null);
-          setDraftContent("");
+          setTabs([]);
+          setActiveTabId(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -175,7 +288,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [lastOpenKeyForVault, pushRecent],
+    [pushRecent, readStoredTabsForVault],
   );
 
   const switchActiveVault = useCallback(
@@ -257,9 +370,8 @@ export default function App() {
         await loadVault(list.activeVault);
       } else {
         setEntries([]);
-        setSelectedEntry(null);
-        setDocument(null);
-        setDraftContent("");
+        setTabs([]);
+        setActiveTabId(null);
       }
     },
     [loadVault, t],
@@ -278,6 +390,11 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [vaultList.vaults, handleAddVault, switchActiveVault]);
+
+  const openNewDocumentDialog = useCallback(() => {
+    setNewDocumentSeed(null);
+    setNewDocumentOpen(true);
+  }, []);
 
   const selectEntry = useCallback(
     async (entry: VaultEntry) => {
@@ -311,20 +428,8 @@ export default function App() {
         return false;
       }
 
-      // Stash unsaved edits before we navigate away, so the user can restore
-      // via the toast action. Replaces the prior window.confirm dialog which
-      // Tauri webview was silently suppressing.
+      const existingTab = tabs.find((tab) => tab.entry.path === entry.path);
       const isSameEntry = selectedEntry?.path === entry.path;
-      if (!isSameEntry && document && draftContent !== document.content) {
-        setDiscardedEdit({
-          entry: selectedEntry ?? entry,
-          draft: draftContent,
-        });
-      } else if (!isSameEntry) {
-        setDiscardedEdit(null);
-      }
-
-      const reqId = ++selectRequestRef.current;
       // Push the *previous* selection onto history before we replace it.
       // Skip when navigateBack/Forward is the caller — they manage manually.
       const skipHistoryPush = skipNextHistoryPushRef.current;
@@ -332,18 +437,29 @@ export default function App() {
       if (!skipHistoryPush && !isSameEntry && selectedEntry) {
         setNavHistory((h) => pushHistory(h, selectedEntry.path));
       }
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(lastOpenKeyForVault(vaultPath), entry.relPath);
+        }
+        pushRecent(entry.path);
+        return true;
+      }
+
+      const reqId = ++selectRequestRef.current;
       setError(null);
       try {
         const payload = await readDocument(vaultPath, entry.path);
         // Drop stale responses — a later click already superseded this one.
         if (reqId !== selectRequestRef.current) return false;
-        setSelectedEntry(entry);
-        setDocument(payload);
-        // Only reset the draft when switching docs — re-clicking the active
-        // doc shouldn't clobber an unsaved edit.
-        if (!isSameEntry) {
-          setDraftContent(payload.content);
-        }
+        const newTab: EditorTab = {
+          id: tabIdForEntry(entry),
+          entry,
+          document: payload,
+          draftContent: payload.content,
+        };
+        setTabs((prev) => [...prev, newTab]);
+        setActiveTabId(newTab.id);
         if (typeof window !== "undefined") {
           window.localStorage.setItem(lastOpenKeyForVault(vaultPath), entry.relPath);
         }
@@ -355,7 +471,7 @@ export default function App() {
         return false;
       }
     },
-    [activeVaultPath, vaultList.vaults, selectedEntry, document, draftContent, lastOpenKeyForVault, pushRecent],
+    [activeVaultPath, vaultList.vaults, tabs, selectedEntry, lastOpenKeyForVault, pushRecent],
   );
 
   const navigateBack = useCallback(() => {
@@ -386,10 +502,19 @@ export default function App() {
     try {
       const payload = await readDocument(activeVaultPath, discardedEdit.entry.path);
       if (reqId !== selectRequestRef.current) return;
-      setSelectedEntry(discardedEdit.entry);
-      setDocument(payload);
-      // Restore the draft text the user had typed, not the on-disk content.
-      setDraftContent(discardedEdit.draft);
+      const restoredTab: EditorTab = {
+        id: tabIdForEntry(discardedEdit.entry),
+        entry: discardedEdit.entry,
+        document: payload,
+        draftContent: discardedEdit.draft,
+      };
+      setTabs((prev) => {
+        const exists = prev.some((tab) => tab.id === restoredTab.id);
+        return exists
+          ? prev.map((tab) => (tab.id === restoredTab.id ? restoredTab : tab))
+          : [...prev, restoredTab];
+      });
+      setActiveTabId(restoredTab.id);
       setDiscardedEdit(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -402,17 +527,19 @@ export default function App() {
     setError(null);
     try {
       const saved = await saveDocument(activeVaultPath, document.path, draftContent);
-      setDocument(saved);
-      setDraftContent(saved.content);
       const fresh = await scanVault(activeVaultPath);
       setEntries(fresh);
+      updateActiveTab((tab) => {
+        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+        return { ...tab, entry: freshEntry, document: saved, draftContent: saved.content };
+      });
       setGitRefreshTick((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
-  }, [document, dirty, activeVaultPath, draftContent]);
+  }, [document, dirty, activeVaultPath, draftContent, updateActiveTab]);
 
   const snapshotCurrent = useCallback(async () => {
     if (!document || !activeVaultPath) return;
@@ -427,19 +554,52 @@ export default function App() {
       );
       const fresh = await scanVault(activeVaultPath);
       setEntries(fresh);
+      updateActiveTab((tab) => {
+        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+        return { ...tab, entry: freshEntry };
+      });
       setError(t("snapshot.success", { path: snapshot.relPath }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [document, activeVaultPath, draftContent, t]);
+  }, [document, activeVaultPath, draftContent, t, updateActiveTab]);
 
   const createNew = useCallback(
-    async (title: string, docType: string, body: string) => {
+    async (title: string, docType: string, body: string, targetRelPath: string | null) => {
       if (!activeVaultPath) return;
-      const created = await createDocument(activeVaultPath, title, docType, body);
-      await loadVault(activeVaultPath, created.relPath);
+      const created = await createDocument(activeVaultPath, title, docType, body, targetRelPath);
+      const fresh = await scanVault(activeVaultPath);
+      setEntries(fresh);
+      const entry =
+        fresh.find((item) => item.relPath === created.relPath || item.path === created.path) ??
+        ({
+          path: created.path,
+          relPath: created.relPath,
+          title: created.title,
+          frontmatter: { type: docType },
+          updatedAt: null,
+          wordCount: 0,
+          snippet: "",
+          fileKind: "md",
+          versionCount: 0,
+        } satisfies VaultEntry);
+      const payload = await readDocument(activeVaultPath, created.path);
+      const newTab: EditorTab = {
+        id: tabIdForEntry(entry),
+        entry,
+        document: payload,
+        draftContent: payload.content,
+      };
+      setTabs((prev) => {
+        const exists = prev.some((tab) => tab.id === newTab.id);
+        return exists
+          ? prev.map((tab) => (tab.id === newTab.id ? newTab : tab))
+          : [...prev, newTab];
+      });
+      setActiveTabId(newTab.id);
+      pushRecent(entry.path);
     },
-    [activeVaultPath, loadVault],
+    [activeVaultPath, pushRecent],
   );
 
   const handleWikilinkClick = useCallback(
@@ -448,9 +608,12 @@ export default function App() {
       if (resolved) {
         void selectEntry(resolved);
       } else {
-        // Phase 1A: unresolved wikilinks just surface a soft notice. "Create
-        // new note" lands in Phase 1B alongside multi-tab + BlockNote.
-        setError(t("wikilink.notFound", { target }));
+        setNewDocumentSeed({
+          title: titleFromWikilinkTarget(target),
+          relPath: target.trim(),
+        });
+        setNewDocumentOpen(true);
+        setError(null);
       }
     },
     [entries, selectEntry, t],
@@ -461,19 +624,24 @@ export default function App() {
       if (!document || !activeVaultPath) return;
       try {
         const next = await updateFrontmatterField(activeVaultPath, document.path, key, value);
-        setDocument(next);
         // Refresh draft only when there are no unsaved body edits — never
         // clobber the textarea with an inspector-driven write.
-        if (draftContent === document.content) {
-          setDraftContent(next.content);
-        }
         const fresh = await scanVault(activeVaultPath);
         setEntries(fresh);
+        updateActiveTab((tab) => {
+          const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+          return {
+            ...tab,
+            entry: freshEntry,
+            document: next,
+            draftContent: draftContent === document.content ? next.content : tab.draftContent,
+          };
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [document, activeVaultPath, draftContent],
+    [document, activeVaultPath, draftContent, updateActiveTab],
   );
 
   const refreshCurrent = useCallback(async () => {
@@ -489,6 +657,44 @@ export default function App() {
     searchInputRef.current?.focus();
     searchInputRef.current?.select();
   }, []);
+
+  const selectTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab) return;
+      setActiveTabId(tabId);
+      pushRecent(tab.entry.path);
+    },
+    [tabs, pushRecent],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      const closing = tabs.find((tab) => tab.id === tabId);
+      if (closing && closing.draftContent !== closing.document.content) {
+        setDiscardedEdit({ entry: closing.entry, draft: closing.draftContent });
+      }
+      setTabs((prev) => {
+        const closingIndex = prev.findIndex((tab) => tab.id === tabId);
+        if (closingIndex === -1) return prev;
+        const next = prev.filter((tab) => tab.id !== tabId);
+        if (resolvedActiveTabId === tabId) {
+          const fallback = next[Math.min(closingIndex, next.length - 1)] ?? null;
+          setActiveTabId(fallback?.id ?? null);
+        }
+        return next;
+      });
+    },
+    [resolvedActiveTabId, tabs],
+  );
+
+  const selectTabByIndex = useCallback(
+    (index: number) => {
+      const tab = tabs[index];
+      if (tab) selectTab(tab.id);
+    },
+    [tabs, selectTab],
+  );
 
   const jumpToOutlineLine = useCallback((line: number) => {
     const ta = editorTextareaRef.current;
@@ -507,7 +713,7 @@ export default function App() {
     (id: string) => {
       switch (id) {
         case "new-document":
-          setNewDocumentOpen(true);
+          openNewDocumentDialog();
           break;
         case "save":
           void saveCurrent();
@@ -516,7 +722,7 @@ export default function App() {
           void snapshotCurrent();
           break;
         case "toggle-preview":
-          setEditorViewMode((mode) => (mode === "edit" ? "preview" : "edit"));
+          setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview"));
           break;
         case "toggle-outline":
           setOutlineOpen((v) => !v);
@@ -532,24 +738,48 @@ export default function App() {
           break;
       }
     },
-    [saveCurrent, snapshotCurrent, refreshCurrent, locale, setLocale],
+    [saveCurrent, snapshotCurrent, refreshCurrent, locale, setLocale, openNewDocumentDialog],
   );
 
   useKeyboardShortcuts(
     {
       "mod+s": () => void saveCurrent(),
       "mod+shift+s": () => void snapshotCurrent(),
-      "mod+n": () => setNewDocumentOpen(true),
+      "mod+n": openNewDocumentDialog,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
-      "mod+p": () => setEditorViewMode((mode) => (mode === "edit" ? "preview" : "edit")),
+      "mod+p": () => setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview")),
       "mod+\\": () => setOutlineOpen((v) => !v),
       "mod+f": focusSearch,
       "mod+r": () => void refreshCurrent(),
       "mod+shift+l": () => setLocale(locale === "ko" ? "en" : "ko"),
       "mod+[": navigateBack,
       "mod+]": navigateForward,
+      "mod+1": () => selectTabByIndex(0),
+      "mod+2": () => selectTabByIndex(1),
+      "mod+3": () => selectTabByIndex(2),
+      "mod+4": () => selectTabByIndex(3),
+      "mod+5": () => selectTabByIndex(4),
+      "mod+6": () => selectTabByIndex(5),
+      "mod+7": () => selectTabByIndex(6),
+      "mod+8": () => selectTabByIndex(7),
+      "mod+w": () => {
+        if (resolvedActiveTabId) closeTab(resolvedActiveTabId);
+      },
     },
-    [saveCurrent, snapshotCurrent, refreshCurrent, focusSearch, locale, setLocale, navigateBack, navigateForward],
+    [
+      saveCurrent,
+      snapshotCurrent,
+      refreshCurrent,
+      focusSearch,
+      locale,
+      setLocale,
+      navigateBack,
+      navigateForward,
+      selectTabByIndex,
+      openNewDocumentDialog,
+      closeTab,
+      resolvedActiveTabId,
+    ],
   );
 
   const shellClass = `app-shell${outlineOpen ? "" : " outline-closed"}`;
@@ -617,7 +847,7 @@ export default function App() {
           selectedPath={selectedEntry?.path ?? null}
           typeFilter={typeFilter}
           onTypeFilter={setTypeFilter}
-          onNewDocument={() => setNewDocumentOpen(true)}
+          onNewDocument={openNewDocumentDialog}
           onSelectRecent={selectEntry}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
@@ -641,8 +871,17 @@ export default function App() {
           outlineOpen={outlineOpen}
           activeVaultLabel={activeVault?.label ?? null}
           viewMode={editorViewMode}
+          tabs={tabs.map((tab) => ({
+            id: tab.id,
+            title: tab.document.title,
+            relPath: tab.document.relPath,
+            dirty: tab.draftContent !== tab.document.content,
+          }))}
+          activeTabId={resolvedActiveTabId}
           entries={entries}
           onChange={setDraftContent}
+          onSelectTab={selectTab}
+          onCloseTab={closeTab}
           onSave={saveCurrent}
           onSnapshot={snapshotCurrent}
           onToggleOutline={() => setOutlineOpen((v) => !v)}
@@ -715,7 +954,12 @@ export default function App() {
 
         <NewDocumentDialog
           open={newDocumentOpen}
-          onOpenChange={setNewDocumentOpen}
+          initialTitle={newDocumentSeed?.title ?? ""}
+          initialRelPath={newDocumentSeed?.relPath ?? null}
+          onOpenChange={(open) => {
+            setNewDocumentOpen(open);
+            if (!open) setNewDocumentSeed(null);
+          }}
           onCreate={createNew}
         />
         <AddVaultDialog
