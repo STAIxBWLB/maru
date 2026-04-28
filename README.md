@@ -10,7 +10,7 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). **Deferred**: vault cache (385ms acceptable), Playwright e2e (Phase 2 CI), monorepo extraction (Phase 1B/2 seam). |
-| 2 — Inbox + AI | 🚧 UI surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane`, mode toggle, classify/accept/reject) all shipped. File-move on accept + Gmail-into-InboxPane integration remain. |
+| 2 — Inbox + AI | 🚧 UI surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, mode toggle, classify/accept/reject) all shipped. File-move on accept + Gmail label-modify on accept remain. |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
 

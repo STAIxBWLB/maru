@@ -15,6 +15,7 @@ import {
   addVault,
   createDocument,
   createVersion,
+  fetchGmailUnread,
   getSampleVaultPath,
   listVaults,
   readDocument,
@@ -28,6 +29,7 @@ import {
   updateFrontmatterField,
 } from "./lib/api";
 import { classifyInboxItem } from "./lib/aiInvoke";
+import { buildGmailMessageStates, type GmailMessageState } from "./lib/gmail";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
 import {
   buildInboxItemStates,
@@ -38,6 +40,7 @@ import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import type {
   DocumentPayload,
   GitStatus,
+  GmailMessage,
   InboxClassification,
   InboxDropItem,
   VaultEntry,
@@ -163,6 +166,17 @@ export default function App() {
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
 
+  // Gmail surface (gws CLI). Sibling section in InboxPane; lives in
+  // memory only — accept/reject decisions are not yet propagated back
+  // to Gmail labels (follow-up). Empty `gmailError` distinguishes "not
+  // yet fetched" from "fetched, no unread".
+  const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [gmailError, setGmailError] = useState<string | null>(null);
+  const [gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
+    () => new Map(),
+  );
+
   const activeVaultPath = vaultList.activeVault;
   const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
   const activeTab = useMemo(
@@ -278,6 +292,32 @@ export default function App() {
     [inboxDrops, inboxCarry],
   );
 
+  const gmailItems = useMemo<GmailMessageState[]>(
+    () => buildGmailMessageStates(gmailMessages, gmailDecisions),
+    [gmailMessages, gmailDecisions],
+  );
+
+  const refreshGmail = useCallback(async () => {
+    setGmailLoading(true);
+    setGmailError(null);
+    try {
+      const messages = await fetchGmailUnread(20);
+      setGmailMessages(messages);
+    } catch (err) {
+      setGmailError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGmailLoading(false);
+    }
+  }, []);
+
+  const decideGmailItem = useCallback((id: string, decision: InboxDecision) => {
+    setGmailDecisions((prev) => {
+      const next = new Map(prev);
+      next.set(id, decision);
+      return next;
+    });
+  }, []);
+
   const refreshInbox = useCallback(async () => {
     if (!activeVaultPath) {
       setInboxDrops([]);
@@ -335,6 +375,16 @@ export default function App() {
     },
     [inboxDrops, updateInboxCarry],
   );
+
+  // First entry into Inbox mode triggers a Gmail fetch. Subsequent
+  // refreshes are user-driven via the refresh button / ⌘R.
+  useEffect(() => {
+    if (appMode !== "inbox") return;
+    if (gmailMessages.length > 0 || gmailLoading) return;
+    void refreshGmail();
+    // Only refire on appMode transitions, not on gmail state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode]);
 
   // Initial scan + watcher subscription, scoped to the active vault.
   // The watcher overlays the polling baseline: any file_event triggers
@@ -907,8 +957,12 @@ export default function App() {
           setLocale(locale === "ko" ? "en" : "ko");
           break;
         case "refresh-vault":
-          if (appMode === "inbox") void refreshInbox();
-          else void refreshCurrent();
+          if (appMode === "inbox") {
+            void refreshInbox();
+            void refreshGmail();
+          } else {
+            void refreshCurrent();
+          }
           break;
         case "open-inbox":
           setAppMode("inbox");
@@ -926,6 +980,7 @@ export default function App() {
       snapshotCurrent,
       refreshCurrent,
       refreshInbox,
+      refreshGmail,
       appMode,
       locale,
       setLocale,
@@ -943,8 +998,12 @@ export default function App() {
       "mod+\\": () => setOutlineOpen((v) => !v),
       "mod+f": focusSearch,
       "mod+r": () => {
-        if (appMode === "inbox") void refreshInbox();
-        else void refreshCurrent();
+        if (appMode === "inbox") {
+          void refreshInbox();
+          void refreshGmail();
+        } else {
+          void refreshCurrent();
+        }
       },
       "mod+shift+l": () => setLocale(locale === "ko" ? "en" : "ko"),
       "mod+[": navigateBack,
@@ -976,6 +1035,7 @@ export default function App() {
       resolvedActiveTabId,
       appMode,
       refreshInbox,
+      refreshGmail,
     ],
   );
 
@@ -1047,8 +1107,12 @@ export default function App() {
             type="button"
             className="icon-button"
             onClick={() => {
-              if (appMode === "inbox") void refreshInbox();
-              else void refreshCurrent();
+              if (appMode === "inbox") {
+                void refreshInbox();
+                void refreshGmail();
+              } else {
+                void refreshCurrent();
+              }
             }}
             title={t("app.refresh")}
             aria-label={t("app.refresh")}
@@ -1072,9 +1136,16 @@ export default function App() {
           <InboxPane
             items={inboxItems}
             loading={inboxLoading}
-            onRefresh={refreshInbox}
+            gmailMessages={gmailItems}
+            gmailLoading={gmailLoading}
+            gmailError={gmailError}
+            onRefresh={() => {
+              void refreshInbox();
+              void refreshGmail();
+            }}
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
+            onDecideGmail={decideGmailItem}
           />
         ) : (
           <>
