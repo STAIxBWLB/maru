@@ -10,7 +10,7 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). **Deferred**: vault cache (385ms acceptable), Playwright e2e (Phase 2 CI), monorepo extraction (Phase 1B/2 seam). |
-| 2 — Inbox + AI | 🚧 UI surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier) + UI (`InboxPane`, mode toggle, classify/accept/reject) all shipped. File-move on accept and Gmail IMAP remain. |
+| 2 — Inbox + AI | 🚧 UI surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane`, mode toggle, classify/accept/reject) all shipped. File-move on accept + Gmail-into-InboxPane integration remain. |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
 
@@ -88,7 +88,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 3. **Korean NL date parser (1–2 days)** — JS→Rust rewrite of `tidy/app/electron/ipc-handlers.js:20-109`. Pure logic, exhaustive unit tests for the user's actual phrases ("내일", "다음 주 금요일", "3월 15일", "오늘 오후 3시"). Surfaces as `parse_korean_date(input, now) -> Option<DateTime<FixedOffset>>`.
 4. **Claude Code CLI subprocess bridge (2–3 days)** — lift `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs`. stdio launch + line-stream events. Used both for Phase 2 inbox classification and Phase 3 user-skill invocation.
 4½. **Inbox classifier (small)** — pure Rust prompt builder + tolerant JSON parser on top of step 4. `build_inbox_classification_prompt(item)` and `parse_inbox_classification(raw)` Tauri commands; closed category set (`task`/`reference`/`meeting`/`admin`/`noise`); parser tolerates ` ```json ` fences and surrounding prose. Frontend orchestrates: build prompt → invoke Claude CLI → accumulate `ai://output` → parse on `ai://done`.
-5. **Gmail IMAP (week 7–8 in parallel)** — `async-imap` Rust client. App-password auth, no OS permissions. Largest backend slice; can run alongside steps 2–4 once they unblock.
+5. **Gmail via `gws` CLI (small)** — replaces the planned `async-imap` Rust client. Anchor shells out to the user's existing [`gws`](https://github.com/googleworkspace/gws) Google Workspace CLI (`gws gmail +triage --format json`) and parses the JSON envelope. Single Tauri command `fetch_gmail_unread(max?, query?) → GmailMessage[]`. No app password, no TLS, no IMAP state machine — `gws` already manages OAuth via the system keyring. Failure classes: `cli_missing` / `auth_required` / `gws_failed` / `gws_parse_failed`.
 6. **Inbox view + accept-loop UI (week 8–9)** — JSX→TSX adapt of `tidy/app/src/components/InboxCard.jsx` + `pages/Inbox.jsx`. Wires polling + watcher + IMAP + Claude bridge into the user's "press `a`" flow. Held until steps 2–4 land so the UI is not dead-on-arrival.
 7. **KakaoTalk macOS notification watcher (week 10, optional)** — deferred while the full-disk-access prompt is avoidable.
 
@@ -239,7 +239,8 @@ Major deliverables come from existing, validated codebases — anchor is integra
 | 1B | `tolaria/src/hooks/useEditorTabSwap.ts` (1,149 LOC) | `src/hooks/useEditorTabSwap.ts` | simplifiable |
 | 1B | `tolaria/playwright.smoke.config.ts` | `e2e/` | smoke + flow tests |
 | 2 | `tidy/app/electron/core/scheduler.js` | `crates/anchor-inbox/src/scheduler.rs` | JS → Rust rewrite |
-| 2 | `tidy/app/electron/core/{parser,imap}.js` | `crates/anchor-inbox/src/{extract,imap}.rs` | Rust crates: lopdf, async-imap |
+| 2 | `tidy/app/electron/core/parser.js` | `crates/anchor-inbox/src/extract.rs` | Rust crate: lopdf |
+| 2 | n/a (replaces tidy/imap.js) | `src-tauri/src/gmail_gws.rs` | shell out to user's `gws` CLI; no IMAP code |
 | 2 | `tidy/app/electron/ipc-handlers.js:20-109` | `crates/anchor-korean/src/date.rs` + `packages/korean-nl/` | Korean NL date split |
 | 2 | `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs` | `src-tauri/src/ai_router.rs` | SSE bridge, verbatim+adapt |
 | 4 | `anchor-editor/services/whisper/server.py` | `services/whisper/` | Korean large-v3 |

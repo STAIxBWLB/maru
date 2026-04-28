@@ -107,3 +107,11 @@ export interface InboxClassification {
   suggestedFolder: string | null;
   extractedDate: string | null;
 }
+
+/** Gmail message envelope from `gws gmail +triage --format json`. */
+export interface GmailMessage {
+  id: string;
+  from: string;
+  subject: string;
+  date: string;
+}

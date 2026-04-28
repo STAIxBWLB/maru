@@ -14,6 +14,7 @@ import type {
   DocumentPayload,
   GitFileChange,
   GitStatus,
+  GmailMessage,
   InboxClassification,
   InboxDropItem,
   VaultEntry,
@@ -232,6 +233,38 @@ export async function startClaudeCliInvocation(
     throw new Error("Claude CLI invocation is only available inside the Tauri shell.");
   }
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
+}
+
+/** Pull unread Gmail messages via the user's existing `gws` Google
+ *  Workspace CLI. Returns id / from / subject / date — anchor never
+ *  fetches the message body, just the envelope, matching the Phase 2
+ *  triage surface. Empty `query` falls back to gws's default
+ *  `is:unread`. */
+export async function fetchGmailUnread(
+  max: number | null = null,
+  query: string | null = null,
+): Promise<GmailMessage[]> {
+  if (!isTauri()) {
+    return mockGmailUnread();
+  }
+  return invoke<GmailMessage[]>("fetch_gmail_unread", { max, query });
+}
+
+function mockGmailUnread(): GmailMessage[] {
+  return [
+    {
+      id: "mock-1",
+      from: "boss <boss@example.com>",
+      subject: "[mock] Q2 운영회의 일정 조율",
+      date: "Tue, 28 Apr 2026 09:00:00 +0900",
+    },
+    {
+      id: "mock-2",
+      from: "no-reply@plaud.ai",
+      subject: "[mock] Plaud-AutoFlow 회의 요약",
+      date: "Tue, 28 Apr 2026 00:29:08 +0000",
+    },
+  ];
 }
 
 function mockClassification(raw: string): InboxClassification {
