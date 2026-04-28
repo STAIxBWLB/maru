@@ -4,6 +4,7 @@ mod filename_rules;
 mod frontmatter;
 mod git;
 mod inbox;
+mod inbox_classifier;
 mod inbox_watcher;
 mod korean_date;
 mod vault;
@@ -15,6 +16,7 @@ use document::{
 };
 use git::{git_changes, git_commit, git_diff, git_status};
 use inbox::scan_inbox_drop;
+use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use vault::{default_vault_path, sample_vault_path, scan_vault};
@@ -47,6 +49,8 @@ pub fn run() {
             stop_inbox_watcher,
             parse_korean_date_cmd,
             start_claude_cli_invocation,
+            build_inbox_classification_prompt,
+            parse_inbox_classification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Anchor");

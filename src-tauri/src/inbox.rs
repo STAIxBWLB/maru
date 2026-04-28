@@ -1,10 +1,10 @@
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use walkdir::WalkDir;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxDropItem {
     pub id: String,
