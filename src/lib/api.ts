@@ -14,6 +14,7 @@ import type {
   DocumentPayload,
   GitFileChange,
   GitStatus,
+  InboxClassification,
   InboxDropItem,
   VaultEntry,
   VaultList,
@@ -183,4 +184,86 @@ export async function gitChanges(vaultPath: string): Promise<GitFileChange[]> {
 export async function gitDiff(vaultPath: string, filePath: string): Promise<string> {
   if (!isTauri()) return "";
   return invoke<string>("git_diff", { vaultPath, filePath });
+}
+
+// === Phase 2 inbox watcher / AI bridge / classifier ===
+
+export async function startInboxWatcher(vaultPath: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("start_inbox_watcher", { vaultPath });
+}
+
+export async function stopInboxWatcher(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("stop_inbox_watcher");
+}
+
+/** Build the prompt anchor sends to Claude for one inbox item. Pure
+ *  Rust side — keeps the prompt template under version control instead
+ *  of in TS. */
+export async function buildInboxClassificationPrompt(item: InboxDropItem): Promise<string> {
+  if (!isTauri()) {
+    return `[mock] classify ${item.relPath} (${item.source})`;
+  }
+  return invoke<string>("build_inbox_classification_prompt", { item });
+}
+
+/** Parse Claude's classifier reply. Tolerant of fences + surrounding
+ *  prose; collapses unknown categories to `noise`. */
+export async function parseInboxClassification(raw: string): Promise<InboxClassification> {
+  if (!isTauri()) {
+    // Browser dev fallback — synthesize a Classification from the
+    // heuristic the old InboxPane used so the UI is exercised without
+    // a real Claude subprocess.
+    return mockClassification(raw);
+  }
+  return invoke<InboxClassification>("parse_inbox_classification", { raw });
+}
+
+/** Spawn the Claude CLI for a one-shot prompt. Returns the invocation
+ *  id; caller subscribes to the `ai://output` and `ai://done` events
+ *  with that id to accumulate output. */
+export async function startClaudeCliInvocation(
+  prompt: string,
+  cwd: string | null = null,
+  extraArgs: string[] | null = null,
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Claude CLI invocation is only available inside the Tauri shell.");
+  }
+  return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
+}
+
+function mockClassification(raw: string): InboxClassification {
+  const lower = raw.toLowerCase();
+  if (lower.includes("meeting") || lower.includes("회의")) {
+    return {
+      category: "meeting",
+      summary: "회의 관련 파일로 추정됩니다.",
+      suggestedFolder: "meetings",
+      extractedDate: null,
+    };
+  }
+  if (lower.includes("task") || lower.includes("todo") || lower.includes("할일")) {
+    return {
+      category: "task",
+      summary: "처리할 작업 항목이 포함됐을 수 있습니다.",
+      suggestedFolder: null,
+      extractedDate: null,
+    };
+  }
+  if (lower.includes("budget") || lower.includes("kpi") || lower.endsWith(".pdf")) {
+    return {
+      category: "reference",
+      summary: "참고자료 또는 행정 첨부로 추정됩니다.",
+      suggestedFolder: "references",
+      extractedDate: null,
+    };
+  }
+  return {
+    category: "noise",
+    summary: "분류기 모의 응답.",
+    suggestedFolder: null,
+    extractedDate: null,
+  };
 }

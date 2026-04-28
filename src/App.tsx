@@ -6,6 +6,7 @@ import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
+import { InboxPane } from "./components/InboxPane";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
@@ -19,13 +20,29 @@ import {
   readDocument,
   removeVault,
   saveDocument,
+  scanInboxDrop,
   scanVault,
   setActiveVault,
+  startInboxWatcher,
+  stopInboxWatcher,
   updateFrontmatterField,
 } from "./lib/api";
+import { classifyInboxItem } from "./lib/aiInvoke";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
+import {
+  buildInboxItemStates,
+  type InboxDecision,
+  type InboxItemState,
+} from "./lib/inbox";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
-import type { DocumentPayload, GitStatus, VaultEntry, VaultList } from "./lib/types";
+import type {
+  DocumentPayload,
+  GitStatus,
+  InboxClassification,
+  InboxDropItem,
+  VaultEntry,
+  VaultList,
+} from "./lib/types";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
   emptyHistory,
@@ -52,6 +69,15 @@ interface EditorTab {
 interface StoredTabs {
   activeRelPath: string | null;
   relPaths: string[];
+}
+
+type AppMode = "pkm" | "inbox";
+
+interface InboxCarry {
+  decision: InboxDecision;
+  classification: InboxClassification | null;
+  classifying: boolean;
+  classifyError: string | null;
 }
 
 function tabIdForEntry(entry: VaultEntry): string {
@@ -128,6 +154,14 @@ export default function App() {
   // CommitDialog state — the badge passes the most recent GitStatus so the
   // dialog can show the file counts at the moment the user clicked.
   const [commitDialog, setCommitDialog] = useState<GitStatus | null>(null);
+
+  // Phase 2 inbox surface. Polling scan + notify watcher feed
+  // `inboxItems`; per-item classifier output is carried alongside the
+  // raw drop item via the InboxItemState shape.
+  const [appMode, setAppMode] = useState<AppMode>("pkm");
+  const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
 
   const activeVaultPath = vaultList.activeVault;
   const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
@@ -238,6 +272,123 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const inboxItems = useMemo<InboxItemState[]>(
+    () => buildInboxItemStates(inboxDrops, inboxCarry),
+    [inboxDrops, inboxCarry],
+  );
+
+  const refreshInbox = useCallback(async () => {
+    if (!activeVaultPath) {
+      setInboxDrops([]);
+      return;
+    }
+    setInboxLoading(true);
+    setError(null);
+    try {
+      setInboxDrops(await scanInboxDrop(activeVaultPath));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInboxLoading(false);
+    }
+  }, [activeVaultPath]);
+
+  const updateInboxCarry = useCallback(
+    (id: string, patch: Partial<InboxCarry>) => {
+      setInboxCarry((prev) => {
+        const next = new Map(prev);
+        const current: InboxCarry = next.get(id) ?? {
+          decision: "pending",
+          classification: null,
+          classifying: false,
+          classifyError: null,
+        };
+        next.set(id, { ...current, ...patch });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const decideInboxItem = useCallback(
+    (id: string, decision: InboxDecision) => {
+      updateInboxCarry(id, { decision });
+    },
+    [updateInboxCarry],
+  );
+
+  const classifyItem = useCallback(
+    async (id: string) => {
+      const target = inboxDrops.find((drop) => drop.id === id);
+      if (!target) return;
+      updateInboxCarry(id, { classifying: true, classifyError: null });
+      try {
+        const classification = await classifyInboxItem(target);
+        updateInboxCarry(id, { classifying: false, classification });
+      } catch (err) {
+        updateInboxCarry(id, {
+          classifying: false,
+          classifyError: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [inboxDrops, updateInboxCarry],
+  );
+
+  // Initial scan + watcher subscription, scoped to the active vault.
+  // The watcher overlays the polling baseline: any file_event triggers
+  // a re-scan rather than a delta apply, which keeps the UI source of
+  // truth a single `scan_inbox_drop` snapshot.
+  useEffect(() => {
+    if (!activeVaultPath) {
+      setInboxDrops([]);
+      return;
+    }
+    let cancelled = false;
+    let unlistenFileEvent: (() => void) | null = null;
+
+    void (async () => {
+      // Cold scan first — watcher only catches subsequent events.
+      void refreshInbox();
+
+      try {
+        await startInboxWatcher(activeVaultPath);
+      } catch (err) {
+        // Most likely cause: <vault>/inbox/downloads doesn't exist yet.
+        // Surface a soft notice but keep polling functional.
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.info("[anchor] inbox watcher not started:", err);
+        }
+        return;
+      }
+
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const off = await listen("inbox://file_event", () => {
+          if (!cancelled) void refreshInbox();
+        });
+        if (cancelled) {
+          off();
+        } else {
+          unlistenFileEvent = off;
+        }
+      } catch (err) {
+        // Browser dev shell — `@tauri-apps/api/event` may not be wired.
+        // eslint-disable-next-line no-console
+        console.info("[anchor] inbox event listener unavailable:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlistenFileEvent) unlistenFileEvent();
+      void stopInboxWatcher().catch(() => {
+        // best-effort
+      });
+    };
+  }, [activeVaultPath, refreshInbox]);
 
   const loadVault = useCallback(
     async (path: string, preferRelPath: string | null = null) => {
@@ -756,7 +907,14 @@ export default function App() {
           setLocale(locale === "ko" ? "en" : "ko");
           break;
         case "refresh-vault":
-          void refreshCurrent();
+          if (appMode === "inbox") void refreshInbox();
+          else void refreshCurrent();
+          break;
+        case "open-inbox":
+          setAppMode("inbox");
+          break;
+        case "open-docs":
+          setAppMode("pkm");
           break;
         case "add-vault":
           setAddVaultOpen(true);
@@ -767,6 +925,8 @@ export default function App() {
       saveCurrent,
       snapshotCurrent,
       refreshCurrent,
+      refreshInbox,
+      appMode,
       locale,
       setLocale,
       openNewDocumentDialog,
@@ -782,7 +942,10 @@ export default function App() {
       "mod+p": () => setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview")),
       "mod+\\": () => setOutlineOpen((v) => !v),
       "mod+f": focusSearch,
-      "mod+r": () => void refreshCurrent(),
+      "mod+r": () => {
+        if (appMode === "inbox") void refreshInbox();
+        else void refreshCurrent();
+      },
       "mod+shift+l": () => setLocale(locale === "ko" ? "en" : "ko"),
       "mod+[": navigateBack,
       "mod+]": navigateForward,
@@ -811,10 +974,12 @@ export default function App() {
       openNewDocumentDialog,
       closeTab,
       resolvedActiveTabId,
+      appMode,
+      refreshInbox,
     ],
   );
 
-  const shellClass = `app-shell${outlineOpen ? "" : " outline-closed"}`;
+  const shellClass = `app-shell${appMode === "inbox" ? " inbox-mode" : ""}${outlineOpen ? "" : " outline-closed"}`;
 
   return (
     <LocaleContext.Provider value={localeValue}>
@@ -845,6 +1010,22 @@ export default function App() {
 
           <button
             type="button"
+            className={appMode === "pkm" ? "topbar-pill active" : "topbar-pill"}
+            onClick={() => setAppMode("pkm")}
+            title={t("mode.pkm")}
+          >
+            {t("mode.pkm")}
+          </button>
+          <button
+            type="button"
+            className={appMode === "inbox" ? "topbar-pill active" : "topbar-pill"}
+            onClick={() => setAppMode("inbox")}
+            title={t("mode.inbox")}
+          >
+            {t("mode.inbox")}
+          </button>
+          <button
+            type="button"
             className="topbar-pill"
             onClick={() => setCommandPaletteOpen(true)}
             title={t("cmdk.openHint")}
@@ -865,7 +1046,10 @@ export default function App() {
           <button
             type="button"
             className="icon-button"
-            onClick={() => void refreshCurrent()}
+            onClick={() => {
+              if (appMode === "inbox") void refreshInbox();
+              else void refreshCurrent();
+            }}
             title={t("app.refresh")}
             aria-label={t("app.refresh")}
           >
@@ -884,56 +1068,68 @@ export default function App() {
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
-        <DocumentList
-          entries={entries}
-          selectedPath={selectedEntry?.path ?? null}
-          query={query}
-          loading={loading}
-          typeFilter={typeFilter}
-          onQueryChange={setQuery}
-          onSelect={selectEntry}
-          searchInputRef={searchInputRef}
-        />
-
-        <EditorPane
-          document={document}
-          draftContent={draftContent}
-          saving={saving}
-          dirty={dirty}
-          outlineOpen={outlineOpen}
-          activeVaultLabel={activeVault?.label ?? null}
-          viewMode={editorViewMode}
-          tabs={tabs.map((tab) => ({
-            id: tab.id,
-            title: tab.document.title,
-            relPath: tab.document.relPath,
-            dirty: tab.draftContent !== tab.document.content,
-          }))}
-          activeTabId={resolvedActiveTabId}
-          entries={entries}
-          onChange={setDraftContent}
-          onSelectTab={selectTab}
-          onCloseTab={closeTab}
-          onSave={saveCurrent}
-          onSnapshot={snapshotCurrent}
-          onToggleOutline={() => setOutlineOpen((v) => !v)}
-          onViewModeChange={setEditorViewMode}
-          onWikilinkClick={handleWikilinkClick}
-          textareaRef={editorTextareaRef}
-        />
-
-        {outlineOpen ? (
-          <OutlinePane
-            document={document}
-            draftContent={draftContent}
-            entries={entries}
-            onJumpToLine={jumpToOutlineLine}
-            onClose={() => setOutlineOpen(false)}
-            onUpdateField={updateField}
-            onSelectEntry={selectEntry}
-            onMissingWikilink={handleWikilinkClick}
+        {appMode === "inbox" ? (
+          <InboxPane
+            items={inboxItems}
+            loading={inboxLoading}
+            onRefresh={refreshInbox}
+            onClassify={(id) => void classifyItem(id)}
+            onDecide={decideInboxItem}
           />
-        ) : null}
+        ) : (
+          <>
+            <DocumentList
+              entries={entries}
+              selectedPath={selectedEntry?.path ?? null}
+              query={query}
+              loading={loading}
+              typeFilter={typeFilter}
+              onQueryChange={setQuery}
+              onSelect={selectEntry}
+              searchInputRef={searchInputRef}
+            />
+
+            <EditorPane
+              document={document}
+              draftContent={draftContent}
+              saving={saving}
+              dirty={dirty}
+              outlineOpen={outlineOpen}
+              activeVaultLabel={activeVault?.label ?? null}
+              viewMode={editorViewMode}
+              tabs={tabs.map((tab) => ({
+                id: tab.id,
+                title: tab.document.title,
+                relPath: tab.document.relPath,
+                dirty: tab.draftContent !== tab.document.content,
+              }))}
+              activeTabId={resolvedActiveTabId}
+              entries={entries}
+              onChange={setDraftContent}
+              onSelectTab={selectTab}
+              onCloseTab={closeTab}
+              onSave={saveCurrent}
+              onSnapshot={snapshotCurrent}
+              onToggleOutline={() => setOutlineOpen((v) => !v)}
+              onViewModeChange={setEditorViewMode}
+              onWikilinkClick={handleWikilinkClick}
+              textareaRef={editorTextareaRef}
+            />
+
+            {outlineOpen ? (
+              <OutlinePane
+                document={document}
+                draftContent={draftContent}
+                entries={entries}
+                onJumpToLine={jumpToOutlineLine}
+                onClose={() => setOutlineOpen(false)}
+                onUpdateField={updateField}
+                onSelectEntry={selectEntry}
+                onMissingWikilink={handleWikilinkClick}
+              />
+            ) : null}
+          </>
+        )}
 
         <div className="toast-stack">
           {error ? (

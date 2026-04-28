@@ -85,3 +85,25 @@ export interface InboxDropItem {
   sizeBytes: number;
   receivedAt: string | null;
 }
+
+/** Live filesystem event from the Rust `notify` watcher. Payload of the
+ *  `inbox://file_event` Tauri event; mirrors `InboxFileEvent` in
+ *  `src-tauri/src/inbox_watcher.rs`. */
+export interface InboxFileEvent {
+  vaultPath: string;
+  absPath: string;
+  relPath: string;
+  source: string;
+  /** "added" | "modified" | "removed". */
+  kind: string;
+}
+
+/** Classifier output. Mirrors `Classification` in
+ *  `src-tauri/src/inbox_classifier.rs`. */
+export interface InboxClassification {
+  /** "task" | "reference" | "meeting" | "admin" | "noise". */
+  category: string;
+  summary: string;
+  suggestedFolder: string | null;
+  extractedDate: string | null;
+}
