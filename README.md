@@ -2,28 +2,27 @@
 
 Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 
-## Status (2026-04-28)
+## Status (2026-05-01)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
 | 0 — Hardening | ✅ shipped | Open existing vaults safely. Frontmatter byte-identical round-trip. Multi-vault registry. ko/en parity. |
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
-| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). **Deferred**: vault cache (385ms acceptable), Playwright e2e (Phase 2 CI), monorepo extraction (Phase 1B/2 seam). |
-| 2 — Inbox + AI | 🚧 UI surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, mode toggle, classify/accept/reject) all shipped. File-move on accept + Gmail label-modify on accept remain. |
+| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: vault cache (385ms acceptable), monorepo extraction. |
+| 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
 
 ## Next up (immediate)
 
-Phase 2 entry sequence, lightest-first. The polling scan already ships; the next three are pure backend so Phase 1A real-vault verification stays unaffected:
+Phase 2 has crossed the read-only boundary. The next work is the smallest safe write/apply loop:
 
-0. **Polling scan (✓ shipped)** — `scan_inbox_drop(vault_path)` walks `<vault>/inbox/downloads/{*}/...`. First Phase 2 surface; the cold-start fallback when the watcher is not yet listening.
-1. **Filesystem watcher** (1 day) — `notify` crate watching `<vault>/inbox/downloads/`, emits `inbox::file_added` events on top of the polling baseline.
-2. **Korean NL date parser** (1–2 days) — JS→Rust rewrite, pure logic with exhaustive unit tests.
-3. **Claude Code CLI subprocess bridge** (2–3 days) — lift `tolaria/{ai_agents,claude_cli}.rs`. Used by both inbox classification and Phase 3 skills.
-
-The inbox UI surface (week 8–9) is held until 1–3 land, so the "press `a` to accept" loop is wired to real watcher events + AI classification rather than a dead shell.
+1. **File accept action** — move accepted drops from `inbox/downloads/<source>/...` into the classifier's `suggestedFolder` when present; otherwise require a user-selected target. Keep all moves inside the vault boundary.
+2. **Gmail accept/reject action** — call `gws` to apply Anchor labels and archive accepted mail. Rejected mail should be labelled or left unread until the policy is chosen.
+3. **Keyboard accept loop** — add focused inbox selection plus `a` / `r` actions so the button-only UI becomes the promised one-keystroke flow.
+4. **Real-vault verification** — verify dropped files, real chu.ac.kr unread mail, Claude classification, and accept/reject in one Tauri session.
+5. **Phase 3 bridge prep** — reuse the Claude CLI event stream for command-palette skill invocation after the inbox apply loop is stable.
 
 ## Architecture
 
@@ -45,20 +44,22 @@ The inbox UI surface (week 8–9) is held until 1–3 land, so the "press `a` to
 │   vault_list.rs  — multi-vault registry + active vault       │
 │   filename_rules.rs — Korean NFC/NFD safety, Windows reserve │
 │                                                               │
-│   Phase 2+: + ai_router.rs / inbox/ / skill_host.rs          │
+│   inbox.rs / inbox_watcher.rs / korean_date.rs               │
+│   inbox_classifier.rs / gmail_gws.rs / ai_router.rs          │
+│   Phase 3+: + skill_host.rs                                  │
 │   Phase 4+: + whisper bridge / mcp lifecycle                 │
 └──────┬─────────────────────────────────────────────────────┘
-       │ Phase 2+: stdio + WS bridges
+       │ stdio bridge + future WS/MCP bridges
 ┌──────▼────────┐ ┌────────────────────┐ ┌──────────────────┐
 │ MCP server    │ │ User's Claude Code │ │ Whisper sidecar  │
-│ (Node, Phase 2)│ │ CLI (~/.claude/skills/*)│ │ (Python, Phase 4)│
+│ (Node, Phase 3)│ │ CLI (~/.claude/skills/*)│ │ (Python, Phase 4)│
 └───────────────┘ └────────────────────┘ └──────────────────┘
 ```
 
 **Module boundary rules**:
-- Rust core **owns** vault FS / cache / git / frontmatter / inbox scheduler / MCP lifecycle / Claude CLI subprocess.
+- Rust core **owns** vault FS / cache / git / frontmatter / inbox scan/watch/classification / Gmail `gws` bridge / Claude CLI subprocess.
 - React handles **only** BlockNote / command palette / neighborhood / gesture worker / AudioWorklet. No business logic.
-- Node sidecar holds the MCP server + marketplace (both Phase 2+).
+- Node sidecar holds the MCP server + marketplace (Phase 3+).
 - Python sidecar holds Whisper only (Phase 4). HWPX is delegated to the user's `hwpx` Claude Code skill — not rewritten.
 
 ## Roadmap
@@ -73,7 +74,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 - [x] **Single-window multi-tab editor** — per-vault `anchor:openTabs:v1` persistence, `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 to select by index, ⌘W to close active. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast (Tauri webview swallows native `confirm()`, so the toast is the non-blocking equivalent).
 - [ ] **Vault cache** — lift `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC). **Trigger threshold raised**: a one-shot 385ms warm scan is bearable. Revisit only if cold scan is painful or BlockNote integration changes the latency budget.
 - [ ] **Monorepo extraction** — `crates/anchor-vault`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
-- [ ] **Playwright smoke + e2e** — lift `tolaria/playwright.smoke.config.ts`. Blocked on a node_modules reinstall (pnpm store mismatch); will pick up alongside Phase 2 CI setup.
+- [x] **Playwright smoke + e2e** — browser smoke covers sample-vault boot, multi-tab open, source tab, and preview tab. Broader inbox/native Tauri e2e still belongs to Phase 2 verification.
 
 **Verification gate**: a full week of multi-tab work with project + meeting + people open simultaneously, daily commits, frontmatter preserved.
 
@@ -81,16 +82,24 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Outcome**: a "Today's inbox" view that ingests Gmail and dropped files (`inbox/downloads/`), Claude classifies and proposes actions, the user accepts with a single `a` keystroke.
 
-**Entry sequence (lightest-first, backend before UI)**. Phase 1B is feature-complete; Phase 2 starts with backend pieces that can ship while Phase 1A verification on the real vault runs in parallel. The polling baseline is already in `src-tauri/src/inbox.rs`:
+**Shipped read-only surface**:
 
-1. **Vault polling scan (✓ shipped)** — `scan_inbox_drop(vault_path)` Rust IPC walks `<vault>/inbox/downloads/{*}/...` and returns `InboxDropItem[]` (id, source, size, mtime). First Phase 2 surface; remains the cold-start fallback once the watcher lands.
-2. **Filesystem watcher (1 day)** — `notify` Rust crate watching `<vault>/inbox/downloads/`. Emits `inbox::file_added` events through Tauri's event channel, layered on top of the polling baseline. No OS permissions needed; piggybacks on the user's existing ingest-chain folder convention. Source: ground-up Rust (lighter than tidy's chokidar).
-3. **Korean NL date parser (1–2 days)** — JS→Rust rewrite of `tidy/app/electron/ipc-handlers.js:20-109`. Pure logic, exhaustive unit tests for the user's actual phrases ("내일", "다음 주 금요일", "3월 15일", "오늘 오후 3시"). Surfaces as `parse_korean_date(input, now) -> Option<DateTime<FixedOffset>>`.
-4. **Claude Code CLI subprocess bridge (2–3 days)** — lift `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs`. stdio launch + line-stream events. Used both for Phase 2 inbox classification and Phase 3 user-skill invocation.
-4½. **Inbox classifier (small)** — pure Rust prompt builder + tolerant JSON parser on top of step 4. `build_inbox_classification_prompt(item)` and `parse_inbox_classification(raw)` Tauri commands; closed category set (`task`/`reference`/`meeting`/`admin`/`noise`); parser tolerates ` ```json ` fences and surrounding prose. Frontend orchestrates: build prompt → invoke Claude CLI → accumulate `ai://output` → parse on `ai://done`.
-5. **Gmail via `gws` CLI (small)** — replaces the planned `async-imap` Rust client. Anchor shells out to the user's existing [`gws`](https://github.com/googleworkspace/gws) Google Workspace CLI (`gws gmail +triage --format json`) and parses the JSON envelope. Single Tauri command `fetch_gmail_unread(max?, query?) → GmailMessage[]`. No app password, no TLS, no IMAP state machine — `gws` already manages OAuth via the system keyring. Failure classes: `cli_missing` / `auth_required` / `gws_failed` / `gws_parse_failed`.
-6. **Inbox view + accept-loop UI (week 8–9)** — JSX→TSX adapt of `tidy/app/src/components/InboxCard.jsx` + `pages/Inbox.jsx`. Wires polling + watcher + IMAP + Claude bridge into the user's "press `a`" flow. Held until steps 2–4 land so the UI is not dead-on-arrival.
-7. **KakaoTalk macOS notification watcher (week 10, optional)** — deferred while the full-disk-access prompt is avoidable.
+1. **Vault polling scan (✓ shipped)** — `scan_inbox_drop(vault_path)` walks `<vault>/inbox/downloads/{*}/...` and returns `InboxDropItem[]` (id, source, size, mtime).
+2. **Filesystem watcher (✓ shipped)** — `notify` watches `<vault>/inbox/downloads/` and emits `inbox://file_event`; the frontend treats events as hints to re-run the cheap polling scan.
+3. **Korean NL date parser (✓ shipped)** — pure Rust parser for phrases such as "내일", "다음 주 금요일", "3월 15일", and "오늘 오후 3시".
+4. **Claude Code CLI subprocess bridge (✓ shipped)** — `start_claude_cli_invocation(prompt, cwd?, extra_args?)` spawns `claude -p` and streams `ai://output`, `ai://done`, and `ai://error`.
+5. **Inbox classifier (✓ shipped)** — `build_inbox_classification_prompt(item)` + `parse_inbox_classification(raw)` with a closed category set (`task`/`reference`/`meeting`/`admin`/`noise`) and tolerant JSON parsing.
+6. **Gmail via `gws` CLI (✓ shipped)** — Anchor shells out to `gws gmail +triage --format json` and exposes `fetch_gmail_unread(max?, query?) -> GmailMessage[]`.
+7. **Inbox UI (✓ shipped)** — `InboxPane` shows parallel Files / Gmail sections and supports classify/accept/reject button actions.
+8. **Browser smoke e2e (✓ shipped)** — Playwright verifies sample-vault boot, multi-tab editor open, source tab, and preview tab.
+
+**Remaining write/apply work**:
+
+1. **File accept** — move or route accepted files after user confirmation; reject must avoid destructive deletes.
+2. **Gmail accept/reject** — apply labels/archive through `gws`; keep raw mail bodies out of logs and fixtures.
+3. **One-keystroke loop** — focused row selection, `a` accept, `r` reject, and visible pending counts.
+4. **Native Tauri e2e** — cover watcher events, Claude CLI success/failure, and Gmail CLI failure taxonomy.
+5. **KakaoTalk macOS notification watcher (optional)** — still deferred while the full-disk-access prompt is avoidable.
 
 **AI dispatch**:
 - Primary: Claude Code CLI subprocess (user's Max plan, marginal cost $0).
@@ -99,7 +108,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Skip in Phase 2**: iMessage DB, Slack, Outlook (Phase 3 wraps Outlook via the `ms-office` skill).
 
-**Verification gate**: a real chu.ac.kr admin email arrives → anchor classifies, extracts a task, and proposes a folder within 30 seconds → user presses `a` → inbox-zero in one session.
+**Verification gate**: a real chu.ac.kr admin email or dropped file arrives → anchor classifies, extracts a task/date, and proposes a folder within 30 seconds → user presses `a` → item is moved/labelled without leaving the inbox session.
 
 ### Phase 3 — Built-in Skills (week 11–14)
 
@@ -238,11 +247,11 @@ Major deliverables come from existing, validated codebases — anchor is integra
 | 1B | `tolaria/src/components/{Editor,RawEditorView,BlockNote*}.tsx` | `src/components/Editor*.tsx` | one-week budget, fragile |
 | 1B | `tolaria/src/hooks/useEditorTabSwap.ts` (1,149 LOC) | `src/hooks/useEditorTabSwap.ts` | simplifiable |
 | 1B | `tolaria/playwright.smoke.config.ts` | `e2e/` | smoke + flow tests |
-| 2 | `tidy/app/electron/core/scheduler.js` | `crates/anchor-inbox/src/scheduler.rs` | JS → Rust rewrite |
-| 2 | `tidy/app/electron/core/parser.js` | `crates/anchor-inbox/src/extract.rs` | Rust crate: lopdf |
+| 2 | n/a | `src-tauri/src/inbox.rs` + `src-tauri/src/inbox_watcher.rs` | polling scan + notify watcher |
 | 2 | n/a (replaces tidy/imap.js) | `src-tauri/src/gmail_gws.rs` | shell out to user's `gws` CLI; no IMAP code |
-| 2 | `tidy/app/electron/ipc-handlers.js:20-109` | `crates/anchor-korean/src/date.rs` + `packages/korean-nl/` | Korean NL date split |
-| 2 | `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs` | `src-tauri/src/ai_router.rs` | SSE bridge, verbatim+adapt |
+| 2 | `tidy/app/electron/ipc-handlers.js:20-109` | `src-tauri/src/korean_date.rs` | Korean NL date parser |
+| 2 | `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs` | `src-tauri/src/ai_router.rs` | Tauri event stream bridge, adapted |
+| 2 | n/a | `src-tauri/src/inbox_classifier.rs` + `src/lib/aiInvoke.ts` | prompt/parser + frontend orchestration |
 | 4 | `anchor-editor/services/whisper/server.py` | `services/whisper/` | Korean large-v3 |
 | 4 | `anchor-editor/apps/web/lib/intent-fusion.ts` | `src/lib/intent-fusion.ts` | RISE-generic generalization |
 | 4 | `anchor-editor/apps/web/workers/gesture.worker.ts` | `src/workers/gesture.worker.ts` | One-Euro filter |
