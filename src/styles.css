@@ -1215,10 +1215,6 @@ a {
   grid-row: 2;
 }
 
-/* Both Tabs.Content panels are forceMount so the textarea ref survives a
-   preview-tab switch (⌘\ outline jump and similar shortcuts depend on it).
-   Hide the inactive one explicitly since forceMount strips Radix's default
-   `hidden` attribute. */
 .tab-panel[data-state="inactive"] {
   display: none;
 }
