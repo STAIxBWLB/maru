@@ -2927,3 +2927,306 @@ button.git-badge:hover {
     flex-wrap: wrap;
   }
 }
+
+/* ============================ Workspace pairing ============================ */
+
+.workspace-detect-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 14px 16px;
+  margin: 8px 0 6px;
+  display: grid;
+  gap: 10px;
+}
+.workspace-detect-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+.workspace-detect-meta {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.workspace-detect-meta > div {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+.workspace-detect-meta .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.workspace-detect-meta .warn {
+  color: var(--warn, #b56b1f);
+  font-style: italic;
+}
+.workspace-detect-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* =============================== System mode =============================== */
+
+.app-shell.system-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar"
+    "sidebar system system system";
+}
+.system-pane {
+  grid-area: system;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: var(--panel);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.system-empty {
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+}
+.system-header {
+  padding: 18px 24px 8px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+}
+.system-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.system-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.system-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  overflow-x: auto;
+}
+.system-tab {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.system-tab:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+.system-tab.active {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.04));
+}
+.system-body {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+}
+
+.system-split {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.system-list {
+  border-right: 1px solid var(--line);
+  background: var(--panel-2);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+.system-list-actions {
+  padding: 10px 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.system-list ul {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+}
+.system-list-empty {
+  padding: 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.system-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.system-list-item:hover {
+  background: var(--panel);
+}
+.system-list-item.active {
+  background: var(--panel);
+  border-color: var(--line);
+}
+.system-list-item-title {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.system-list-item-name {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+}
+
+.system-detail {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 18px;
+  overflow: auto;
+}
+.system-detail-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.system-json-view {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+.system-skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+}
+.system-skill-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+.system-skill-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+}
+.system-skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.system-skill-meta code {
+  background: var(--panel);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.system-import-section {
+  margin-top: 16px;
+}
+.system-import-section h4 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.system-import-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.system-import-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 6px 10px;
+}
+.system-import-item label {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.system-import-label {
+  color: var(--ink);
+}
+.system-import-rel {
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-new {
+  background: rgba(64, 128, 96, 0.18);
+  color: #2f6b4d;
+}
+.chip-update {
+  background: rgba(180, 120, 30, 0.18);
+  color: #8a5a16;
+}
+.chip-unchanged {
+  background: var(--panel);
+  color: var(--muted);
+}
+.chip-warn {
+  background: rgba(180, 120, 30, 0.18);
+  color: #8a5a16;
+}

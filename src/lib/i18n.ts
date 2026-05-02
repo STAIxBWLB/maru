@@ -29,6 +29,7 @@ const ko: Record<string, string> = {
   "app.errorClose": "닫기",
   "mode.pkm": "문서",
   "mode.inbox": "인박스",
+  "mode.system": "시스템",
 
   "vault.current": "현재 볼트",
   "vault.add": "볼트 추가",
@@ -192,6 +193,69 @@ const ko: Record<string, string> = {
   "toast.restore": "되돌리기",
 
   "footer.tagline": "로컬 우선 · 파일 원천 · ko/en",
+
+  // === Workspace pairing ===
+  "workspace.detected": "Workspace 감지됨 (work + vault 페어)",
+  "workspace.owner": "소유자",
+  "workspace.pair.work": "Work",
+  "workspace.pair.vault": "Vault",
+  "workspace.pair.vault.missing": "경로 없음",
+  "workspace.pair.vault.unset": "workspace.config.yaml 에 vault 가 설정되지 않음",
+  "workspace.detect.hint":
+    "workspace.config.yaml 이 감지되었습니다. 한 번에 work 와 vault 를 등록하면 vault 는 자동으로 mcp-obsidian 위임 모드(읽기 전용)로 설정됩니다.",
+  "workspace.detect.register": "Workspace 등록",
+  "workspace.detect.useStandalone": "단일 폴더로 등록",
+  "workspace.pair.badge": "{work} ⇋ {vault}",
+
+  // === System mode ===
+  "system.title": "시스템",
+  "system.subtitle": ".anchor 운영 데이터 (rules, templates, MCP, projects, skills)",
+  "system.empty": "이 vault 는 페어링된 work 가 아닙니다. 시스템 모드는 work 측 vault 에서만 사용할 수 있습니다.",
+  "system.tab.rules": "Rules",
+  "system.tab.templates": "Templates",
+  "system.tab.mcp": "MCP",
+  "system.tab.projects": "Projects",
+  "system.tab.skills": "Skills",
+  "system.tab.import": "Import",
+  "system.rules.empty": "등록된 규칙이 없습니다. Import 탭에서 _sys/rules 를 가져오거나 새로 만들 수 있습니다.",
+  "system.rules.new": "새 규칙",
+  "system.rules.delete": "삭제",
+  "system.rules.delete.confirm": "이 규칙을 .anchor 에서 삭제할까요?",
+  "system.rules.save": "저장",
+  "system.rules.saved": "저장됨",
+  "system.rules.dirty": "저장 필요",
+  "system.templates.empty": "등록된 템플릿이 없습니다.",
+  "system.templates.new": "새 템플릿",
+  "system.mcp.empty": ".anchor/mcp.json 이 비어 있습니다.",
+  "system.mcp.invalidJson": "유효한 JSON 이 아닙니다.",
+  "system.mcp.save": "저장",
+  "system.projects.empty": ".anchor/projects.json 이 비어 있습니다. Import 탭에서 project-registry.yaml 을 가져오세요.",
+  "system.skills.empty": "스킬 카탈로그가 비어 있습니다. Import 탭에서 _sys/skills 를 가져오세요.",
+  "system.skills.runtime": "런타임",
+  "system.skills.source": "원본",
+  "system.skills.category": "카테고리",
+  "system.import.title": "_sys/ 로부터 가져오기",
+  "system.import.subtitle":
+    "사용자의 _sys/ 디렉터리를 anchor 의 .anchor/ 로 복사합니다. 같은 항목을 다시 가져오면 sha256 비교로 변경 여부를 알려줍니다.",
+  "system.import.empty": "이 work 폴더에 _sys/ 가 없습니다. 가져올 항목이 없습니다.",
+  "system.import.section.rules": "Rules",
+  "system.import.section.templates": "Templates",
+  "system.import.section.mcp": "MCP",
+  "system.import.section.projects": "Projects",
+  "system.import.section.skills": "Skills",
+  "system.import.status.new": "신규",
+  "system.import.status.update": "업데이트",
+  "system.import.status.unchanged": "변경 없음",
+  "system.import.selectAll": "전체 선택",
+  "system.import.selectChanges": "변경된 항목만",
+  "system.import.apply": "선택 항목 가져오기",
+  "system.import.applying": "가져오는 중...",
+  "system.import.applied": "가져옴: {count} 건",
+
+  // === Sidebar Projects ===
+  "sidebar.projects": "프로젝트",
+  "sidebar.projects.empty": "프로젝트가 없습니다. Import 탭에서 project-registry.yaml 을 가져오세요.",
+  "sidebar.projects.all": "전체",
 };
 
 const en: Record<string, string> = {
@@ -206,6 +270,7 @@ const en: Record<string, string> = {
   "app.errorClose": "Close",
   "mode.pkm": "Docs",
   "mode.inbox": "Inbox",
+  "mode.system": "System",
 
   "vault.current": "Current vault",
   "vault.add": "Add vault",
@@ -369,6 +434,73 @@ const en: Record<string, string> = {
   "toast.restore": "Restore",
 
   "footer.tagline": "Local-first · files-as-truth · ko/en",
+
+  // === Workspace pairing ===
+  "workspace.detected": "Workspace detected (paired work + vault)",
+  "workspace.owner": "Owner",
+  "workspace.pair.work": "Work",
+  "workspace.pair.vault": "Vault",
+  "workspace.pair.vault.missing": "path not found",
+  "workspace.pair.vault.unset": "vault path not set in workspace.config.yaml",
+  "workspace.detect.hint":
+    "Found workspace.config.yaml. Registering both halves at once stamps the vault side as read-only via the mcp-obsidian writer.",
+  "workspace.detect.register": "Register workspace",
+  "workspace.detect.useStandalone": "Register as single folder",
+  "workspace.pair.badge": "{work} ⇋ {vault}",
+
+  // === System mode ===
+  "system.title": "System",
+  "system.subtitle": ".anchor operational data (rules, templates, MCP, projects, skills)",
+  "system.empty": "This vault is not the work half of a workspace pair. System mode is only available from the work side.",
+  "system.tab.rules": "Rules",
+  "system.tab.templates": "Templates",
+  "system.tab.mcp": "MCP",
+  "system.tab.projects": "Projects",
+  "system.tab.skills": "Skills",
+  "system.tab.import": "Import",
+  "system.rules.empty":
+    "No rules yet. Import _sys/rules from the Import tab or create a new one.",
+  "system.rules.new": "New rule",
+  "system.rules.delete": "Delete",
+  "system.rules.delete.confirm": "Delete this rule from .anchor?",
+  "system.rules.save": "Save",
+  "system.rules.saved": "Saved",
+  "system.rules.dirty": "Unsaved",
+  "system.templates.empty": "No templates yet.",
+  "system.templates.new": "New template",
+  "system.mcp.empty": ".anchor/mcp.json is empty.",
+  "system.mcp.invalidJson": "Invalid JSON.",
+  "system.mcp.save": "Save",
+  "system.projects.empty":
+    ".anchor/projects.json is empty. Import project-registry.yaml from the Import tab.",
+  "system.skills.empty":
+    "Skills catalog is empty. Import _sys/skills from the Import tab.",
+  "system.skills.runtime": "Runtime",
+  "system.skills.source": "Source",
+  "system.skills.category": "Category",
+  "system.import.title": "Import from _sys/",
+  "system.import.subtitle":
+    "Copy from your _sys/ tree into anchor's .anchor/. Re-importing compares sha256 to surface changes.",
+  "system.import.empty": "No _sys/ directory in this work folder. Nothing to import.",
+  "system.import.section.rules": "Rules",
+  "system.import.section.templates": "Templates",
+  "system.import.section.mcp": "MCP",
+  "system.import.section.projects": "Projects",
+  "system.import.section.skills": "Skills",
+  "system.import.status.new": "new",
+  "system.import.status.update": "update",
+  "system.import.status.unchanged": "unchanged",
+  "system.import.selectAll": "Select all",
+  "system.import.selectChanges": "Changed only",
+  "system.import.apply": "Import selected",
+  "system.import.applying": "Importing…",
+  "system.import.applied": "Imported {count} items",
+
+  // === Sidebar Projects ===
+  "sidebar.projects": "Projects",
+  "sidebar.projects.empty":
+    "No projects. Import project-registry.yaml from the Import tab.",
+  "sidebar.projects.all": "All",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { ko, en };

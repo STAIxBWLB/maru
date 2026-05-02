@@ -15,22 +15,42 @@ use std::path::PathBuf;
 
 const APP_CONFIG_DIR: &str = "com.anchor.app";
 
+/// We serialize to/from camelCase JSON because the React layer
+/// consumes the response shape directly via Tauri IPC. Snake_case
+/// aliases are kept on the previously-existing fields so a vaults.json
+/// written by an earlier build still loads.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct VaultRegistryEntry {
     pub label: String,
     pub path: String,
     /// Optional hint for which external system (if any) owns writes to
     /// this vault. Unset = anchor owns writes. "mcp-obsidian" = anchor
     /// reads, Obsidian MCP handles writes (planned Phase 2).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "external_writer"
+    )]
     pub external_writer: Option<String>,
+    /// Workspace pairing — set when this entry was registered as part of
+    /// a (work, vault) workspace pair. Both halves point at the work
+    /// path so the UI can find the partner half. None = standalone vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
+    /// "work" | "vault" — the entry's role within its workspace pair.
+    /// None = standalone (legacy single-folder vault).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct VaultList {
     pub vaults: Vec<VaultRegistryEntry>,
+    #[serde(alias = "active_vault")]
     pub active_vault: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "hidden_defaults")]
     pub hidden_defaults: Vec<String>,
 }
 
@@ -93,17 +113,49 @@ pub fn add_vault(
     path: String,
     external_writer: Option<String>,
 ) -> Result<VaultList, String> {
+    add_vault_internal(VaultRegistryEntry {
+        label,
+        path,
+        external_writer,
+        workspace_root: None,
+        role: None,
+    })
+}
+
+/// Lower-level add that accepts the full entry shape. Used by the
+/// workspace pairing flow to register a `work + vault` pair in one
+/// transaction; `add_vault` is the thin frontend-facing wrapper.
+pub fn add_vault_internal(entry: VaultRegistryEntry) -> Result<VaultList, String> {
     let mut list = load_at(&vault_list_path()?)?;
-    if list.vaults.iter().any(|v| v.path == path) {
+    if list.vaults.iter().any(|v| v.path == entry.path) {
         return Err("Vault is already registered".to_string());
     }
-    list.vaults.push(VaultRegistryEntry {
-        label,
-        path: path.clone(),
-        external_writer,
-    });
+    let path = entry.path.clone();
+    list.vaults.push(entry);
     if list.active_vault.is_none() {
         list.active_vault = Some(path);
+    }
+    save_at(&vault_list_path()?, &list)?;
+    Ok(list)
+}
+
+/// Idempotent upsert. Used by `register_workspace_pair` so re-running on
+/// an already-registered workspace does not error; existing entries are
+/// patched in place (label / external_writer / role / workspace_root)
+/// while the path stays the unique key.
+pub fn upsert_vault(entry: VaultRegistryEntry) -> Result<VaultList, String> {
+    let path_to_check = entry.path.clone();
+    let mut list = load_at(&vault_list_path()?)?;
+    if let Some(existing) = list.vaults.iter_mut().find(|v| v.path == entry.path) {
+        existing.label = entry.label;
+        existing.external_writer = entry.external_writer;
+        existing.workspace_root = entry.workspace_root;
+        existing.role = entry.role;
+    } else {
+        list.vaults.push(entry);
+    }
+    if list.active_vault.is_none() {
+        list.active_vault = Some(path_to_check);
     }
     save_at(&vault_list_path()?, &list)?;
     Ok(list)
@@ -157,11 +209,15 @@ mod tests {
                     label: "Work".to_string(),
                     path: "/Users/yj/workspace/work".to_string(),
                     external_writer: None,
+                    workspace_root: Some("/Users/yj/workspace/work".to_string()),
+                    role: Some("work".to_string()),
                 },
                 VaultRegistryEntry {
                     label: "Knowledge Vault".to_string(),
                     path: "/Users/yj/workspace/vault".to_string(),
                     external_writer: Some("mcp-obsidian".to_string()),
+                    workspace_root: Some("/Users/yj/workspace/work".to_string()),
+                    role: Some("vault".to_string()),
                 },
             ],
             active_vault: Some("/Users/yj/workspace/work".to_string()),
@@ -174,6 +230,16 @@ mod tests {
             loaded.vaults[1].external_writer.as_deref(),
             Some("mcp-obsidian"),
             "external_writer flag must round-trip"
+        );
+        assert_eq!(
+            loaded.vaults[0].role.as_deref(),
+            Some("work"),
+            "workspace pair role must round-trip"
+        );
+        assert_eq!(
+            loaded.vaults[1].workspace_root.as_deref(),
+            Some("/Users/yj/workspace/work"),
+            "vault half should point at its work partner"
         );
         assert_eq!(
             loaded.active_vault.as_deref(),
@@ -215,6 +281,8 @@ mod tests {
                 label: "Plain".to_string(),
                 path: "/tmp/v".to_string(),
                 external_writer: None,
+                workspace_root: None,
+                role: None,
             }],
             active_vault: None,
             hidden_defaults: vec![],
@@ -224,6 +292,11 @@ mod tests {
             !json.contains("external_writer"),
             "None external_writer should be omitted"
         );
+        assert!(
+            !json.contains("workspace_root"),
+            "None workspace_root should be omitted"
+        );
+        assert!(!json.contains("\"role\""), "None role should be omitted");
     }
 
     #[test]
@@ -233,6 +306,8 @@ mod tests {
                 label: "Obsidian".to_string(),
                 path: "/tmp/obsidian".to_string(),
                 external_writer: Some("mcp-obsidian".to_string()),
+                workspace_root: None,
+                role: None,
             }],
             active_vault: None,
             hidden_defaults: vec![],

@@ -27,14 +27,26 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation();
 
+  // Type counts exclude `_sys/` and `.anchor/` entries: they're
+  // operational data, not user notes, and inflate the "untyped" bucket.
+  // Users browsing those areas go through the System mode (work-role
+  // vaults) or open the file directly from search.
+  const contentEntries = useMemo(
+    () =>
+      entries.filter(
+        (entry) =>
+          !entry.relPath.startsWith("_sys/") && !entry.relPath.startsWith(".anchor/"),
+      ),
+    [entries],
+  );
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const entry of entries) {
+    for (const entry of contentEntries) {
       const type = frontmatterScalar(entry.frontmatter, "type") ?? "_";
       counts.set(type, (counts.get(type) ?? 0) + 1);
     }
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  }, [entries]);
+  }, [contentEntries]);
 
   return (
     <aside className="sidebar">
@@ -71,7 +83,7 @@ export function Sidebar({
           >
             <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--faint)" }} />
             <span>{t("sidebar.types.all")}</span>
-            <span className="count">{entries.length}</span>
+            <span className="count">{contentEntries.length}</span>
           </button>
           {typeCounts.map(([type, count]) => {
             const isUntyped = type === "_";

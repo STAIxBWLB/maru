@@ -38,11 +38,18 @@ export interface CreatedDocument {
 
 /** Anchor multi-vault registry. external_writer === "mcp-obsidian"
  *  signals that anchor reads but defers writes to an Obsidian instance
- *  (write delegation lands in Phase 2). */
+ *  (write delegation lands in Phase 2).
+ *
+ *  workspace_root + role identify the entry's place in a (work, vault)
+ *  workspace pair: both halves carry the same workspace_root (the work
+ *  path), with role "work" or "vault". role === undefined means a
+ *  standalone single-folder vault. */
 export interface VaultRegistryEntry {
   label: string;
   path: string;
   externalWriter?: string | null;
+  workspaceRoot?: string | null;
+  role?: "work" | "vault" | null;
 }
 
 export interface VaultList {
@@ -114,4 +121,126 @@ export interface GmailMessage {
   from: string;
   subject: string;
   date: string;
+}
+
+// === Workspace pairing + .anchor/ system mode ===
+
+export interface WorkspaceOwner {
+  name?: string | null;
+  affiliation?: string | null;
+  roles?: string[];
+  emails?: Record<string, string>;
+  github?: string | null;
+}
+
+export interface WorkspacePaths {
+  primary?: string | null;
+  vault?: string | null;
+  mirror?: string | null;
+}
+
+export interface WorkspaceConfig {
+  version: number;
+  owner?: WorkspaceOwner | null;
+  paths: WorkspacePaths;
+  ssot?: Record<string, string>;
+  skills?: Record<string, unknown>;
+  inbox?: Record<string, unknown>;
+  /** Unmodelled keys in workspace.config.yaml are surfaced here. */
+  [extra: string]: unknown;
+}
+
+export interface WorkspaceDetect {
+  workPath: string;
+  configPath: string;
+  config: WorkspaceConfig;
+  resolvedVaultPath: string | null;
+  resolvedVaultExists: boolean;
+}
+
+export interface WorkspaceSummary {
+  root: string;
+  workLabel: string | null;
+  workPath: string | null;
+  vaultLabel: string | null;
+  vaultPath: string | null;
+}
+
+export interface RegisterWorkspaceOutcome {
+  vaultList: VaultList;
+  workPath: string;
+  pairedVaultPath: string | null;
+}
+
+export interface AnchorWorkspaceMeta {
+  version: number;
+  workPath: string;
+  pairedVaultPath: string | null;
+  ownerName: string | null;
+  locale: string | null;
+  /** "pkm" | "inbox" | "system" */
+  lastActiveMode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AnchorWorkspaceMetaPatch {
+  /** v1 semantics: pass a string to set the field. Omitting (or
+   *  passing `null`/`undefined`) leaves the existing value unchanged.
+   *  Clearing a field is not yet supported through this patch. */
+  pairedVaultPath?: string | null;
+  ownerName?: string | null;
+  locale?: string | null;
+  lastActiveMode?: string | null;
+}
+
+export interface RuleEntry {
+  name: string;
+  title: string;
+  enabled: boolean;
+  scope: string | null;
+  origin: string | null;
+  updatedAt: string | null;
+}
+
+export interface RuleDocument {
+  name: string;
+  relPath: string;
+  content: string;
+  title: string;
+  enabled: boolean;
+}
+
+export interface TemplateEntry {
+  name: string;
+  title: string;
+  docType: string | null;
+  origin: string | null;
+  updatedAt: string | null;
+}
+
+export interface ImportItem {
+  category: "rule" | "template" | "mcp" | "projects" | "skills";
+  originAbs: string;
+  originRel: string;
+  targetRel: string;
+  /** "new" | "update" | "unchanged" */
+  status: string;
+  originSha256: string;
+  label: string;
+}
+
+export interface ImportPlan {
+  workPath: string;
+  sysPresent: boolean;
+  rules: ImportItem[];
+  templates: ImportItem[];
+  mcp: ImportItem | null;
+  projects: ImportItem | null;
+  skills: ImportItem | null;
+}
+
+export interface ImportReceipt {
+  applied: ImportItem[];
+  skipped: ImportItem[];
 }

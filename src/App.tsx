@@ -10,6 +10,7 @@ import { InboxPane } from "./components/InboxPane";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
+import { SystemPane } from "./components/SystemPane";
 import { VaultSwitcher } from "./components/VaultSwitcher";
 import {
   addVault,
@@ -28,6 +29,7 @@ import {
   stopInboxWatcher,
   updateFrontmatterField,
 } from "./lib/api";
+import { registerWorkspacePair, updateAnchorWorkspace } from "./lib/anchorDir";
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { buildGmailMessageStates, type GmailMessageState } from "./lib/gmail";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
@@ -74,7 +76,7 @@ interface StoredTabs {
   relPaths: string[];
 }
 
-type AppMode = "pkm" | "inbox";
+type AppMode = "pkm" | "inbox" | "system";
 
 interface InboxCarry {
   decision: InboxDecision;
@@ -192,6 +194,17 @@ export default function App() {
   );
   const activeVaultExternalWriter = activeVault?.externalWriter ?? null;
   const activeVaultReadOnly = activeVaultExternalWriter != null;
+
+  // System mode is gated on "this vault is the work half of a paired
+  // workspace". The work_path is the vault's own path; for vault-half
+  // entries (mcp-obsidian) the System tab is hidden — vault halves
+  // never carry a `.anchor/` of their own.
+  const systemWorkPath = useMemo(() => {
+    if (!activeVault) return null;
+    if (activeVault.role === "work") return activeVault.path;
+    return null;
+  }, [activeVault]);
+  const systemEnabled = systemWorkPath != null;
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
@@ -254,6 +267,22 @@ export default function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(OUTLINE_OPEN_KEY, outlineOpen ? "1" : "0");
   }, [outlineOpen]);
+
+  // If the active vault loses its work-role (e.g. user switches to a
+  // standalone vault while System mode was active), drop back to PKM.
+  // Otherwise the empty "system not available" placeholder lingers.
+  useEffect(() => {
+    if (appMode === "system" && !systemEnabled) {
+      setAppMode("pkm");
+    }
+  }, [appMode, systemEnabled]);
+
+  // Best-effort persistence of the chosen mode into .anchor/workspace.json.
+  // Failures are silent — this is a UX nicety, not a correctness concern.
+  useEffect(() => {
+    if (!systemWorkPath) return;
+    void updateAnchorWorkspace(systemWorkPath, { lastActiveMode: appMode }).catch(() => {});
+  }, [appMode, systemWorkPath]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !activeVaultPath) return;
@@ -559,6 +588,19 @@ export default function App() {
       // auto-promoted it (which only happens when there was no prior
       // active vault).
       await switchActiveVault(path);
+    },
+    [switchActiveVault],
+  );
+
+  const handleRegisterWorkspace = useCallback(
+    async (workPath: string) => {
+      // Bootstraps `<work>/.anchor/`, registers both work + vault halves
+      // in one transaction (vault gets `external_writer="mcp-obsidian"`),
+      // and sets active_vault = work. The frontend then refreshes to
+      // pick up the new pair.
+      const outcome = await registerWorkspacePair(workPath);
+      setVaultList(outcome.vaultList);
+      await switchActiveVault(outcome.workPath);
     },
     [switchActiveVault],
   );
@@ -1039,7 +1081,9 @@ export default function App() {
     ],
   );
 
-  const shellClass = `app-shell${appMode === "inbox" ? " inbox-mode" : ""}${outlineOpen ? "" : " outline-closed"}`;
+  const modeClass =
+    appMode === "inbox" ? " inbox-mode" : appMode === "system" ? " system-mode" : "";
+  const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}`;
 
   return (
     <LocaleContext.Provider value={localeValue}>
@@ -1084,6 +1128,16 @@ export default function App() {
           >
             {t("mode.inbox")}
           </button>
+          {systemEnabled ? (
+            <button
+              type="button"
+              className={appMode === "system" ? "topbar-pill active" : "topbar-pill"}
+              onClick={() => setAppMode("system")}
+              title={t("mode.system")}
+            >
+              {t("mode.system")}
+            </button>
+          ) : null}
           <button
             type="button"
             className="topbar-pill"
@@ -1132,7 +1186,9 @@ export default function App() {
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
-        {appMode === "inbox" ? (
+        {appMode === "system" ? (
+          <SystemPane workPath={systemWorkPath} />
+        ) : appMode === "inbox" ? (
           <InboxPane
             items={inboxItems}
             loading={inboxLoading}
@@ -1265,6 +1321,7 @@ export default function App() {
           open={addVaultOpen}
           onOpenChange={setAddVaultOpen}
           onAdd={handleAddVault}
+          onRegisterWorkspace={handleRegisterWorkspace}
         />
         <CommandPalette
           open={commandPaletteOpen}
