@@ -123,7 +123,8 @@ export default function App() {
   } | null>(null);
   const [addVaultOpen, setAddVaultOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("rich");
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("source");
+  const [pendingSelectedPath, setPendingSelectedPath] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem(OUTLINE_OPEN_KEY) !== "0";
@@ -192,6 +193,11 @@ export default function App() {
   );
   const selectedEntry = activeTab?.entry ?? null;
   const document = activeTab?.document ?? null;
+  const selectedPath = pendingSelectedPath ?? selectedEntry?.path ?? null;
+  const openingEntry =
+    pendingSelectedPath && pendingSelectedPath !== document?.path
+      ? entries.find((entry) => entry.path === pendingSelectedPath) ?? null
+      : null;
   const draftContent = activeTab?.draftContent ?? "";
   const activeVault = useMemo(
     () => vaultList.vaults.find((v) => v.path === activeVaultPath) ?? null,
@@ -500,6 +506,7 @@ export default function App() {
         if (!candidate) {
           setTabs([]);
           setActiveTabId(null);
+          setPendingSelectedPath(null);
           setLoading(false);
           setStartupIoReady(true);
           return true;
@@ -515,6 +522,7 @@ export default function App() {
         };
         setTabs([primaryTab]);
         setActiveTabId(primaryTab.id);
+        setPendingSelectedPath(null);
         setLoading(false);
         setStartupIoReady(true);
         pushRecent(candidate.path);
@@ -694,6 +702,7 @@ export default function App() {
         setEntries([]);
         setTabs([]);
         setActiveTabId(null);
+        setPendingSelectedPath(null);
       }
     },
     [loadVault, t],
@@ -759,6 +768,7 @@ export default function App() {
         setError("No active vault. Open or create one first.");
         return false;
       }
+      setPendingSelectedPath(entry.path);
 
       const existingTab = tabs.find((tab) => tab.entry.path === entry.path);
       const isSameEntry = selectedEntry?.path === entry.path;
@@ -771,6 +781,7 @@ export default function App() {
       }
       if (existingTab) {
         setActiveTabId(existingTab.id);
+        setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
           window.localStorage.setItem(lastOpenKeyForVault(vaultPath), entry.relPath);
         }
@@ -792,6 +803,7 @@ export default function App() {
         };
         setTabs((prev) => [...prev, newTab]);
         setActiveTabId(newTab.id);
+        setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
           window.localStorage.setItem(lastOpenKeyForVault(vaultPath), entry.relPath);
         }
@@ -799,6 +811,7 @@ export default function App() {
         return true;
       } catch (err) {
         if (reqId !== selectRequestRef.current) return false;
+        setPendingSelectedPath(null);
         setError(err instanceof Error ? err.message : String(err));
         return false;
       }
@@ -847,6 +860,7 @@ export default function App() {
           : [...prev, restoredTab];
       });
       setActiveTabId(restoredTab.id);
+      setPendingSelectedPath(null);
       setDiscardedEdit(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -932,6 +946,7 @@ export default function App() {
           : [...prev, newTab];
       });
       setActiveTabId(newTab.id);
+      setPendingSelectedPath(null);
       pushRecent(entry.path);
     },
     [activeVaultPath, pushRecent, blockDelegatedWrite],
@@ -1042,16 +1057,23 @@ export default function App() {
   );
 
   const jumpToOutlineLine = useCallback((line: number) => {
-    const ta = editorTextareaRef.current;
-    if (!ta) return;
-    const lines = ta.value.split("\n");
-    let pos = 0;
-    for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
-    ta.focus();
-    ta.setSelectionRange(pos, pos + (lines[line]?.length ?? 0));
-    // Scroll the line into view.
-    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight || "20");
-    ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 3);
+    const jump = () => {
+      const ta = editorTextareaRef.current;
+      if (!ta) return false;
+      const lines = ta.value.split("\n");
+      let pos = 0;
+      for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
+      ta.focus();
+      ta.setSelectionRange(pos, pos + (lines[line]?.length ?? 0));
+      const lineHeight = parseFloat(getComputedStyle(ta).lineHeight || "20");
+      ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 3);
+      return true;
+    };
+    if (jump()) return;
+    setEditorViewMode("source");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(jump);
+    });
   }, []);
 
   const runCommand = useCallback(
@@ -1256,7 +1278,7 @@ export default function App() {
         <Sidebar
           entries={entries}
           recentEntries={recentEntries}
-          selectedPath={selectedEntry?.path ?? null}
+          selectedPath={selectedPath}
           typeFilter={typeFilter}
           onTypeFilter={setTypeFilter}
           onNewDocument={openNewDocumentDialog}
@@ -1285,7 +1307,7 @@ export default function App() {
           <>
             <DocumentList
               entries={entries}
-              selectedPath={selectedEntry?.path ?? null}
+              selectedPath={selectedPath}
               query={query}
               loading={loading && entries.length === 0}
               typeFilter={typeFilter}
@@ -1296,6 +1318,7 @@ export default function App() {
 
             <EditorPane
               document={document}
+              openingEntry={openingEntry}
               draftContent={draftContent}
               saving={saving}
               dirty={dirty}

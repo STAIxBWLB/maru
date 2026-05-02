@@ -675,6 +675,28 @@ a {
   margin-top: 4px;
 }
 
+.virtual-list-spacer {
+  position: relative;
+  min-height: 100%;
+}
+
+.virtual-list-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.virtual-list-row.entry {
+  padding-bottom: 6px;
+}
+
+.virtual-list-row.group {
+  display: flex;
+  align-items: flex-end;
+}
+
 .list-group-label {
   display: flex;
   align-items: center;
@@ -695,6 +717,7 @@ a {
 
 .doc-row {
   width: 100%;
+  min-height: 126px;
   display: grid;
   gap: 6px;
   margin: 0 0 6px;

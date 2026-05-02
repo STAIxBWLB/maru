@@ -29,6 +29,7 @@ export interface EditorTabSummary {
 
 interface EditorPaneProps {
   document: DocumentPayload | null;
+  openingEntry: VaultEntry | null;
   draftContent: string;
   saving: boolean;
   dirty: boolean;
@@ -52,6 +53,7 @@ interface EditorPaneProps {
 export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
   {
     document,
+    openingEntry,
     draftContent,
     saving,
     dirty,
@@ -87,8 +89,8 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     });
 
   const previewHtml = useMemo(
-    () => (document ? renderMarkdown(draftContent) : ""),
-    [draftContent, document],
+    () => (document && viewMode === "preview" ? renderMarkdown(draftContent) : ""),
+    [draftContent, document, viewMode],
   );
 
   const handlePreviewClick = useCallback(
@@ -103,6 +105,20 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     },
     [onWikilinkClick],
   );
+
+  if (openingEntry && openingEntry.path !== document?.path) {
+    return (
+      <main className="editor-pane editor-empty" ref={ref}>
+        <div className="empty-document-plate">
+          <div className="icon-circle">
+            <FileText size={26} />
+          </div>
+          <h2>{openingEntry.title}</h2>
+          <p>{openingEntry.relPath}</p>
+        </div>
+      </main>
+    );
+  }
 
   if (!document) {
     return (
@@ -219,10 +235,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             {t("editor.tab.preview")}
           </Tabs.Trigger>
         </Tabs.List>
-        <Tabs.Content className="tab-panel" value="rich" forceMount>
+        <Tabs.Content className="tab-panel" value="rich">
           <RichMarkdownEditor value={draftContent} onChange={onChange} />
         </Tabs.Content>
-        <Tabs.Content className="tab-panel" value="source" forceMount>
+        <Tabs.Content className="tab-panel" value="source">
           <textarea
             ref={taRef}
             className="source-editor"
@@ -237,7 +253,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           />
           {autocompletePopup}
         </Tabs.Content>
-        <Tabs.Content className="tab-panel" value="preview" forceMount>
+        <Tabs.Content className="tab-panel" value="preview">
           <article
             className="preview-surface"
             onClick={handlePreviewClick}
