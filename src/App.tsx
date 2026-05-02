@@ -20,6 +20,7 @@ import {
   getSampleVaultPath,
   listVaults,
   readDocument,
+  readVaultCache,
   removeVault,
   saveDocument,
   scanInboxDrop,
@@ -49,6 +50,7 @@ import type {
   VaultList,
 } from "./lib/types";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
+import { mergeFreshEntry, planVaultStartup } from "./lib/vaultStartup";
 import {
   emptyHistory,
   goBack,
@@ -110,6 +112,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [vaultRefreshing, setVaultRefreshing] = useState(false);
+  const [startupIoReady, setStartupIoReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
@@ -141,6 +145,7 @@ export default function App() {
   // overwrite the editor with stale content if the user clicked a later
   // entry in the meantime. Only the latest call wins.
   const selectRequestRef = useRef(0);
+  const loadVaultRequestRef = useRef(0);
   // Holds the discarded draft + entry when the user switches away from a
   // dirty document. Surfaces a "Restore" toast button — non-blocking
   // alternative to window.confirm (which Tauri webview suppresses).
@@ -415,13 +420,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appMode]);
 
-  // Initial scan + watcher subscription, scoped to the active vault.
+  // Inbox scan + watcher subscription, scoped to the active vault and
+  // deferred until Inbox mode so startup document paint owns the I/O lane.
   // The watcher overlays the polling baseline: any file_event triggers
   // a re-scan rather than a delta apply, which keeps the UI source of
   // truth a single `scan_inbox_drop` snapshot.
   useEffect(() => {
     if (!activeVaultPath) {
       setInboxDrops([]);
+      return;
+    }
+    if (appMode !== "inbox") {
       return;
     }
     let cancelled = false;
@@ -467,57 +476,125 @@ export default function App() {
         // best-effort
       });
     };
-  }, [activeVaultPath, refreshInbox]);
+  }, [activeVaultPath, appMode, refreshInbox]);
 
   const loadVault = useCallback(
     async (path: string, preferRelPath: string | null = null) => {
+      const requestId = ++loadVaultRequestRef.current;
       setLoading(true);
+      setVaultRefreshing(false);
+      setStartupIoReady(false);
       setError(null);
-      try {
-        const nextEntries = await scanVault(path);
+      const storedTabs = readStoredTabsForVault(path);
+
+      const restorePrimaryTab = async (nextEntries: VaultEntry[]) => {
+        if (requestId !== loadVaultRequestRef.current) return false;
         setEntries(nextEntries);
 
-        const storedTabs = readStoredTabsForVault(path);
-        const findEntry = (relOrPath: string | null | undefined) =>
-          relOrPath
-            ? nextEntries.find(
-                (entry) => entry.relPath === relOrPath || entry.path === relOrPath,
-              ) ?? null
-            : null;
+        const { candidate, tabEntries } = planVaultStartup(
+          nextEntries,
+          storedTabs,
+          preferRelPath,
+        );
 
-        const preferredEntry = findEntry(preferRelPath);
-        const storedActiveEntry = findEntry(storedTabs?.activeRelPath);
-        const storedEntries =
-          storedTabs?.relPaths
-            .map(findEntry)
-            .filter((entry): entry is VaultEntry => entry !== null) ?? [];
-        const candidate = preferredEntry ?? storedActiveEntry ?? storedEntries[0] ?? nextEntries[0] ?? null;
-
-        if (candidate) {
-          const tabEntries = [candidate, ...storedEntries].filter(
-            (entry, index, arr) => arr.findIndex((other) => other.path === entry.path) === index,
-          );
-          const openedTabs: EditorTab[] = [];
-          for (const entry of tabEntries.slice(0, 8)) {
-            const payload = await readDocument(path, entry.path);
-            openedTabs.push({
-              id: tabIdForEntry(entry),
-              entry,
-              document: payload,
-              draftContent: payload.content,
-            });
-          }
-          setTabs(openedTabs);
-          setActiveTabId(tabIdForEntry(candidate));
-          pushRecent(candidate.path);
-        } else {
+        if (!candidate) {
           setTabs([]);
           setActiveTabId(null);
+          setLoading(false);
+          setStartupIoReady(true);
+          return true;
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
+
+        const payload = await readDocument(path, candidate.path);
+        if (requestId !== loadVaultRequestRef.current) return false;
+        const primaryTab: EditorTab = {
+          id: tabIdForEntry(candidate),
+          entry: candidate,
+          document: payload,
+          draftContent: payload.content,
+        };
+        setTabs([primaryTab]);
+        setActiveTabId(primaryTab.id);
         setLoading(false);
+        setStartupIoReady(true);
+        pushRecent(candidate.path);
+
+        const rest = tabEntries.slice(1);
+        if (rest.length > 0) {
+          void (async () => {
+            const loaded = await Promise.allSettled(
+              rest.map(async (entry) => {
+                const payload = await readDocument(path, entry.path);
+                return {
+                  id: tabIdForEntry(entry),
+                  entry,
+                  document: payload,
+                  draftContent: payload.content,
+                } satisfies EditorTab;
+              }),
+            );
+            if (requestId !== loadVaultRequestRef.current) return;
+            const nextTabs = loaded.flatMap((result) =>
+              result.status === "fulfilled" ? [result.value] : [],
+            );
+            if (nextTabs.length === 0) return;
+            setTabs((prev) => {
+              const seen = new Set(prev.map((tab) => tab.id));
+              return [
+                ...prev,
+                ...nextTabs.filter((tab) => {
+                  if (seen.has(tab.id)) return false;
+                  seen.add(tab.id);
+                  return true;
+                }),
+              ].slice(0, 8);
+            });
+          })();
+        }
+
+        return true;
+      };
+
+      const mergeFreshEntries = (fresh: VaultEntry[]) => {
+        setEntries(fresh);
+        setTabs((prev) => prev.map((tab) => mergeFreshEntry(tab, fresh)));
+      };
+
+      const runAuthoritativeScan = async (paintAfterScan: boolean) => {
+        if (!paintAfterScan) setVaultRefreshing(true);
+        try {
+          const fresh = await scanVault(path);
+          if (requestId !== loadVaultRequestRef.current) return;
+          if (paintAfterScan) {
+            await restorePrimaryTab(fresh);
+          } else {
+            mergeFreshEntries(fresh);
+          }
+        } catch (err) {
+          if (requestId !== loadVaultRequestRef.current) return;
+          setError(err instanceof Error ? err.message : String(err));
+          if (paintAfterScan) {
+            setLoading(false);
+            setStartupIoReady(true);
+          }
+        } finally {
+          if (requestId === loadVaultRequestRef.current) {
+            setVaultRefreshing(false);
+          }
+        }
+      };
+
+      try {
+        const cached = await readVaultCache(path);
+        if (requestId !== loadVaultRequestRef.current) return;
+        const paintedFromCache = cached ? await restorePrimaryTab(cached) : false;
+        if (paintedFromCache) {
+          void runAuthoritativeScan(false);
+        } else {
+          await runAuthoritativeScan(true);
+        }
+      } catch {
+        await runAuthoritativeScan(true);
       }
     },
     [pushRecent, readStoredTabsForVault],
@@ -1106,6 +1183,7 @@ export default function App() {
           />
           <GitStatusBadge
             vaultPath={activeVaultPath}
+            enabled={startupIoReady}
             refreshTrigger={gitRefreshTick}
             onCommitClick={handleCommitClick}
           />
@@ -1159,7 +1237,7 @@ export default function App() {
           </button>
           <button
             type="button"
-            className="icon-button"
+            className={vaultRefreshing ? "icon-button refreshing" : "icon-button"}
             onClick={() => {
               if (appMode === "inbox") {
                 void refreshInbox();
@@ -1209,7 +1287,7 @@ export default function App() {
               entries={entries}
               selectedPath={selectedEntry?.path ?? null}
               query={query}
-              loading={loading}
+              loading={loading && entries.length === 0}
               typeFilter={typeFilter}
               onQueryChange={setQuery}
               onSelect={selectEntry}

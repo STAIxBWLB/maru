@@ -69,6 +69,8 @@ export interface GitStatus {
   modified: number;
   staged: number;
   untracked: number;
+  /** False when badge polling intentionally skipped untracked enumeration. */
+  untrackedKnown: boolean;
   clean: boolean;
   branch: string | null;
 }

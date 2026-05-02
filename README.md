@@ -9,7 +9,7 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 0 — Hardening | ✅ shipped | Open existing vaults safely. Frontmatter byte-identical round-trip. Multi-vault registry. ko/en parity. |
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
-| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism: 2.78s → 385ms on 7.1k files. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: vault cache (385ms acceptable), monorepo extraction. |
+| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
@@ -37,7 +37,7 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
 │  Rust core (src-tauri/src/)                                  │
-│   vault.rs       — walkdir + .anchorignore + parallel scan   │
+│   vault.rs       — walkdir + .anchorignore + cached scan      │
 │   frontmatter/   — line-by-line YAML edit (preserves order)  │
 │   document.rs    — read/save/create/version + field patch    │
 │   git.rs         — status/commit/diff via shell-out          │
@@ -72,7 +72,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 - [x] **BlockNote rich editor + raw + preview 3-way toggle** — `RichMarkdownEditor` wraps `@blocknote/mantine`; frontmatter line is preserved across rich↔source by splitting on the leading `---…---\n` block before parsing. Source tab is the textarea (with Korean IME-aware `[[` autocomplete). Preview tab is `marked` + DOMPurify. Round-trip on real notes still needs the Phase 1A verification pass.
 - [x] **Single-window multi-tab editor** — per-vault `anchor:openTabs:v1` persistence, `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 to select by index, ⌘W to close active. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast (Tauri webview swallows native `confirm()`, so the toast is the non-blocking equivalent).
-- [ ] **Vault cache** — lift `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC). **Trigger threshold raised**: a one-shot 385ms warm scan is bearable. Revisit only if cold scan is painful or BlockNote integration changes the latency budget.
+- [x] **Vault cache** — lightweight JSON cache at `<vault>/.anchor/cache/vault-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs authoritative `scan_vault` in the background. Full scans also precompute version names once and reuse compiled regexes.
 - [ ] **Monorepo extraction** — `crates/anchor-vault`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
 - [x] **Playwright smoke + e2e** — browser smoke covers sample-vault boot, multi-tab open, source tab, and preview tab. Broader inbox/native Tauri e2e still belongs to Phase 2 verification.
 
@@ -157,7 +157,7 @@ In likelihood order:
 
 Items requiring the user's decision before further phases proceed:
 
-1. **Vault cache trigger threshold** — warm scan is now 385ms (after rayon parallelism). Need to confirm perceived latency before scheduling the cache lift. Cold-cache measurement also needed.
+1. **Vault cache threshold** — shipped as a lightweight JSON index because `~/workspace/work` startup latency is dominated by the full initial pipeline, not only the Rust scan. Keep measuring cold scan and warm cache paint before lifting to a heavier database cache.
 2. **BlockNote ↔ raw default** — rich for general notes; raw for precision-sensitive editing such as the RISE proposal. Per-vault setting vs per-doc setting?
 3. **Multi-tab UX** — close-with-dirty confirmation: Obsidian pattern (autosave) vs VS Code pattern (confirm)?
 4. **Unresolved-wikilink behavior** — Phase 1A surfaces a soft notice. Phase 1B should pick: (a) red underline + create-new dialog, or (b) auto-stub note then open it.
@@ -206,6 +206,11 @@ cd src-tauri && cargo test
 cd src-tauri && cargo test --release bench_scan_real_vault \
     -- --ignored --nocapture --test-threads=1
 # → ANCHOR_BENCH_VAULT=/some/path overrides the default ~/workspace/work
+
+# Cold/warm startup expectation:
+# 1. first scan creates <vault>/.anchor/cache/vault-index-v1.json
+# 2. next app load renders cached entries + active document before the
+#    background scan refreshes the index
 ```
 
 ## Vault layout
@@ -215,6 +220,7 @@ A vault is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files. 
 ```
 <vault>/
   .anchor/
+    cache/           # disposable vault index for warm startup
     versions/        # snapshots created via the "Version" button
   .anchorignore      # optional, gitignore-style segment patterns
 ```
@@ -225,8 +231,13 @@ A vault is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files. 
 node_modules
 .venv
 dist
+build
 _sys/env
 target
+.next
+.turbo
+.cache
+.anchor/cache
 ```
 
 ## Code lift map
@@ -260,7 +271,7 @@ Major deliverables come from existing, validated codebases — anchor is integra
 
 ## Critical invariants
 
-1. **Filesystem is authoritative.** The cache (`<vault>/.anchor/cache.db`, Phase 1B+) is disposable. React state is derived.
+1. **Filesystem is authoritative.** The cache (`<vault>/.anchor/cache/vault-index-v1.json`) is disposable. React state is derived.
 2. **Frontmatter key order + comments preserved.** A single-field patch must never disturb the order or comments of any other key (verified by cargo test).
 3. **Crash-safe rename.** `.anchor-rename-txn/` staging dir + recovery on the next vault scan (Phase 1B).
 4. **Dynamic relationship detection.** Any frontmatter field containing `[[wikilink]]` is treated as a relationship. No hard-coded field lists.

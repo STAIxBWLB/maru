@@ -25,14 +25,14 @@ use anchor_dir::{
 use document::{
     create_document, create_version, read_document, save_document, update_frontmatter_field,
 };
-use git::{git_changes, git_commit, git_diff, git_status};
+use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
 use gmail_gws::fetch_gmail_unread;
 use inbox::scan_inbox_drop;
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use sys_import::{apply_sys_import, plan_sys_import};
-use vault::{default_vault_path, sample_vault_path, scan_vault};
+use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
 use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_pair,
@@ -47,6 +47,7 @@ pub fn run() {
             default_vault_path,
             sample_vault_path,
             scan_vault,
+            read_vault_cache,
             read_document,
             save_document,
             create_document,
@@ -57,6 +58,7 @@ pub fn run() {
             remove_vault,
             set_active_vault,
             git_status,
+            git_status_fast,
             git_commit,
             git_changes,
             git_diff,

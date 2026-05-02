@@ -6,7 +6,39 @@ use serde_yaml::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 use walkdir::WalkDir;
+
+const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "vault-index-v1.json"];
+const GENERATED_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+    ".cache",
+];
+
+fn h1_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?m)^#\s+(.+)$").expect("valid h1 regex"))
+}
+
+fn html_h1_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?is)<h1[^>]*>(.*?)</h1>").expect("valid html h1 regex"))
+}
+
+fn html_tags_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?is)<[^>]+>").expect("valid tag regex"))
+}
+
+fn markdown_markup_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?m)^[-*#>\s]+").expect("valid markdown regex"))
+}
 
 /// VaultEntry — minimal representation of a vault note for listing.
 /// Phase 0 keeps only filesystem-derived facts plus the raw frontmatter
@@ -55,6 +87,7 @@ pub fn sample_vault_path() -> Result<String, String> {
 pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
     let ignore_patterns = load_anchorignore(&vault);
+    let version_names = collect_version_names(&vault);
 
     // Collect candidate paths sequentially (walkdir isn't thread-safe and
     // benefits little from parallelism — directory traversal is I/O bound),
@@ -96,7 +129,7 @@ pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
 
     let mut entries: Vec<VaultEntry> = candidates
         .par_iter()
-        .filter_map(|path| read_entry(path, &vault).ok())
+        .filter_map(|path| read_entry(path, &vault, &version_names).ok())
         .collect();
 
     entries.sort_by(|a, b| {
@@ -104,7 +137,27 @@ pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
             .cmp(&a.updated_at)
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
+    let _ = write_vault_cache(&vault, &entries);
     Ok(entries)
+}
+
+#[tauri::command]
+pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
+    let vault = normalize_existing_dir(&vault_path)?;
+    let path = vault_cache_path(&vault);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(None);
+    };
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    match serde_json::from_str::<Vec<VaultEntry>>(&content) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(_) => Ok(None),
+    }
 }
 
 pub fn normalize_existing_dir(input: &str) -> Result<PathBuf, String> {
@@ -202,8 +255,11 @@ pub fn parse_frontmatter(content: &str) -> FrontmatterParts {
 
 pub fn title_from_content(content: &str, fallback: &str) -> String {
     let body = parse_frontmatter(content).body;
-    let h1 = Regex::new(r"(?m)^#\s+(.+)$").expect("valid h1 regex");
-    if let Some(capture) = h1.captures(&body) {
+    title_from_body(&body, fallback)
+}
+
+fn title_from_body(body: &str, fallback: &str) -> String {
+    if let Some(capture) = h1_re().captures(body) {
         return capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
@@ -211,8 +267,7 @@ pub fn title_from_content(content: &str, fallback: &str) -> String {
             .unwrap_or_else(|| fallback.to_string());
     }
 
-    let html_h1 = Regex::new(r"(?is)<h1[^>]*>(.*?)</h1>").expect("valid html h1 regex");
-    if let Some(capture) = html_h1.captures(&body) {
+    if let Some(capture) = html_h1_re().captures(body) {
         return capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
@@ -248,14 +303,14 @@ pub fn slugify(input: &str) -> String {
     }
 }
 
-fn read_entry(path: &Path, vault: &Path) -> Result<VaultEntry, String> {
+fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<VaultEntry, String> {
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
     let parts = parse_frontmatter(&content);
     let fallback = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
-    let title = title_from_content(&content, fallback);
+    let title = title_from_body(&parts.body, fallback);
     let rel_path = path
         .strip_prefix(vault)
         .unwrap_or(path)
@@ -290,7 +345,7 @@ fn read_entry(path: &Path, vault: &Path) -> Result<VaultEntry, String> {
         word_count,
         snippet,
         file_kind,
-        version_count: count_versions(path, vault),
+        version_count: count_versions_from_names(path, version_names),
     })
 }
 
@@ -300,7 +355,7 @@ fn is_hidden_or_system_path(path: &Path, vault: &Path) -> bool {
     };
     rel.components().any(|component| {
         let value = component.as_os_str().to_string_lossy();
-        value.starts_with('.') || value == "node_modules" || value == "target"
+        value.starts_with('.') || GENERATED_DIRS.iter().any(|dir| value == *dir)
     })
 }
 
@@ -336,17 +391,13 @@ fn matches_anchorignore(rel_path: &Path, patterns: &[String]) -> bool {
         }
         rel_str == pat
             || rel_str.starts_with(&format!("{pat}/"))
-            || rel_str
-                .split('/')
-                .any(|seg| seg == pat)
+            || rel_str.split('/').any(|seg| seg == pat)
     })
 }
 
 fn clean_text(input: &str) -> String {
-    let tags = Regex::new(r"(?is)<[^>]+>").expect("valid tag regex");
-    let markup = Regex::new(r"(?m)^[-*#>\s]+").expect("valid markdown regex");
-    let without_tags = tags.replace_all(input, " ");
-    let without_markup = markup.replace_all(&without_tags, "");
+    let without_tags = html_tags_re().replace_all(input, " ");
+    let without_markup = markdown_markup_re().replace_all(&without_tags, "");
     without_markup
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -355,28 +406,51 @@ fn clean_text(input: &str) -> String {
         .to_string()
 }
 
-fn count_versions(path: &Path, vault: &Path) -> usize {
+fn count_versions_from_names(path: &Path, version_names: &[String]) -> usize {
     let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
         return 0;
     };
+    version_names
+        .iter()
+        .filter(|name| name.starts_with(stem))
+        .count()
+}
+
+fn collect_version_names(vault: &Path) -> Vec<String> {
     let dir = vault.join(".anchor").join("versions");
     if !dir.exists() {
-        return 0;
+        return Vec::new();
     }
     WalkDir::new(dir)
         .max_depth(1)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_file()
-                && entry
-                    .path()
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .map(|name| name.starts_with(stem))
-                    .unwrap_or(false)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            entry
+                .path()
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
         })
-        .count()
+        .collect()
+}
+
+fn vault_cache_path(vault: &Path) -> PathBuf {
+    VAULT_CACHE_REL
+        .iter()
+        .fold(vault.to_path_buf(), |acc, part| acc.join(part))
+}
+
+fn write_vault_cache(vault: &Path, entries: &[VaultEntry]) -> Result<(), String> {
+    let path = vault_cache_path(vault);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create vault cache directory: {err}"))?;
+    }
+    let serialized = serde_json::to_string(entries)
+        .map_err(|err| format!("Cannot serialize vault cache: {err}"))?;
+    fs::write(&path, serialized).map_err(|err| format!("Cannot write vault cache: {err}"))
 }
 
 #[cfg(test)]
@@ -451,8 +525,7 @@ mod tests {
     fn resolve_inside_vault_accepts_relative_path() {
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "note.md", "# X\n");
-        let resolved =
-            resolve_inside_vault(tmp.path().to_str().unwrap(), "note.md").unwrap();
+        let resolved = resolve_inside_vault(tmp.path().to_str().unwrap(), "note.md").unwrap();
         assert!(resolved.ends_with("note.md"));
     }
 
@@ -462,11 +535,8 @@ mod tests {
         write_file(tmp.path(), "sub/note.md", "# X\n");
         let canonical_vault = tmp.path().canonicalize().unwrap();
         let abs = canonical_vault.join("sub").join("note.md");
-        let resolved = resolve_inside_vault(
-            canonical_vault.to_str().unwrap(),
-            abs.to_str().unwrap(),
-        )
-        .unwrap();
+        let resolved =
+            resolve_inside_vault(canonical_vault.to_str().unwrap(), abs.to_str().unwrap()).unwrap();
         assert!(resolved.ends_with("sub/note.md"));
     }
 
@@ -506,8 +576,7 @@ mod tests {
         // canonicalize() would resolve through the symlink to outside.tmp/linked.md
         // and reject. The new lexical_normalize must accept.
         let resolved =
-            resolve_inside_vault(tmp.path().to_str().unwrap(), "downloads/linked.md")
-                .unwrap();
+            resolve_inside_vault(tmp.path().to_str().unwrap(), "downloads/linked.md").unwrap();
         assert!(
             resolved.ends_with("downloads/linked.md"),
             "symlink-traversed path inside vault must be allowed (got {resolved:?})"
@@ -534,6 +603,64 @@ mod tests {
         assert!(titles.contains(&"Kept"));
         assert!(!titles.contains(&"Secret"));
         assert!(!titles.contains(&"Dep"));
+    }
+
+    #[test]
+    fn scan_vault_skips_generated_directories() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "dist/generated.md", "# Generated\n");
+        write_file(root, "build/generated.md", "# Build\n");
+        write_file(root, ".next/generated.md", "# Next\n");
+        write_file(root, ".turbo/generated.md", "# Turbo\n");
+        write_file(root, ".cache/generated.md", "# Cache\n");
+        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, vec!["Kept"]);
+    }
+
+    #[test]
+    fn scan_vault_precomputes_version_names() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "report.md", "# Report\n");
+        write_file(root, ".anchor/versions/report-20260503.md", "# Old\n");
+        write_file(root, ".anchor/versions/report-20260504.md", "# Older\n");
+        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let report = entries
+            .iter()
+            .find(|entry| entry.rel_path == "report.md")
+            .unwrap();
+        assert_eq!(report.version_count, 2);
+    }
+
+    #[test]
+    fn scan_vault_writes_cache_and_read_vault_cache_loads_it() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "note.md", "# Note\n");
+        let scanned = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let cached = read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .expect("cache should exist after scan");
+        assert_eq!(cached.len(), scanned.len());
+        assert_eq!(cached[0].rel_path, "note.md");
+    }
+
+    #[test]
+    fn read_vault_cache_returns_none_for_missing_or_malformed_cache() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        assert!(read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .is_none());
+        let cache = vault_cache_path(root);
+        fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        fs::write(cache, "not json").unwrap();
+        assert!(read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .is_none());
     }
 
     /// Bench harness for ad-hoc perf measurement on a real vault. Ignored by

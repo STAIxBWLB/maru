@@ -36,8 +36,13 @@ const ANCHORIGNORE_DEFAULTS: &[&str] = &[
     "node_modules",
     ".venv",
     "dist",
+    "build",
     "target",
+    ".next",
+    ".turbo",
+    ".cache",
     ".secrets",
+    ".anchor/cache",
     "_sys/env",
 ];
 
@@ -164,7 +169,10 @@ pub fn ensure_anchor_dir(work: &Path) -> Result<PathBuf, String> {
     }
 
     if !mcp_json_path(work).exists() {
-        write_json_pretty(&mcp_json_path(work), &json!({ "version": SCHEMA_VERSION, "servers": {} }))?;
+        write_json_pretty(
+            &mcp_json_path(work),
+            &json!({ "version": SCHEMA_VERSION, "servers": {} }),
+        )?;
     }
     if !projects_json_path(work).exists() {
         write_json_pretty(
@@ -713,7 +721,10 @@ pub fn write_rule_with_origin(
     let now = Utc::now().to_rfc3339();
     let mut fields: Vec<(&str, FrontmatterValue)> = vec![
         ("origin", FrontmatterValue::String(origin_rel.to_string())),
-        ("origin_sha256", FrontmatterValue::String(sha256.to_string())),
+        (
+            "origin_sha256",
+            FrontmatterValue::String(sha256.to_string()),
+        ),
         ("imported_at", FrontmatterValue::String(now)),
         ("enabled", FrontmatterValue::Bool(true)),
     ];
@@ -744,7 +755,10 @@ pub fn write_template_with_origin(
     let now = Utc::now().to_rfc3339();
     let mut fields: Vec<(&str, FrontmatterValue)> = vec![
         ("origin", FrontmatterValue::String(origin_rel.to_string())),
-        ("origin_sha256", FrontmatterValue::String(sha256.to_string())),
+        (
+            "origin_sha256",
+            FrontmatterValue::String(sha256.to_string()),
+        ),
         ("imported_at", FrontmatterValue::String(now)),
     ];
     if let Some(t) = parts.meta.get("type").and_then(|v| v.as_str()) {
@@ -809,7 +823,10 @@ mod tests {
         let before = fs::read_to_string(&mcp).unwrap();
         ensure_anchor_dir(tmp.path()).unwrap();
         let after = fs::read_to_string(&mcp).unwrap();
-        assert_eq!(before, after, "second ensure must not overwrite existing JSON");
+        assert_eq!(
+            before, after,
+            "second ensure must not overwrite existing JSON"
+        );
     }
 
     #[test]

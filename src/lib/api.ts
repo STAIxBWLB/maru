@@ -50,6 +50,11 @@ export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
   return invoke<VaultEntry[]>("scan_vault", { vaultPath });
 }
 
+export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
+  if (!isTauri()) return mockEntries();
+  return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
+}
+
 export async function scanInboxDrop(vaultPath: string): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
   return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath });
@@ -161,9 +166,16 @@ export async function setActiveVault(path: string): Promise<VaultList> {
 
 export async function gitStatus(vaultPath: string): Promise<GitStatus> {
   if (!isTauri()) {
-    return { isRepo: false, modified: 0, staged: 0, untracked: 0, clean: true, branch: null };
+    return { isRepo: false, modified: 0, staged: 0, untracked: 0, untrackedKnown: true, clean: true, branch: null };
   }
   return invoke<GitStatus>("git_status", { vaultPath });
+}
+
+export async function gitStatusFast(vaultPath: string): Promise<GitStatus> {
+  if (!isTauri()) {
+    return { isRepo: false, modified: 0, staged: 0, untracked: 0, untrackedKnown: false, clean: true, branch: null };
+  }
+  return invoke<GitStatus>("git_status_fast", { vaultPath });
 }
 
 export async function gitCommit(
@@ -172,7 +184,7 @@ export async function gitCommit(
   paths?: string[],
 ): Promise<GitStatus> {
   if (!isTauri()) {
-    return { isRepo: false, modified: 0, staged: 0, untracked: 0, clean: true, branch: null };
+    return { isRepo: false, modified: 0, staged: 0, untracked: 0, untrackedKnown: true, clean: true, branch: null };
   }
   return invoke<GitStatus>("git_commit", { vaultPath, message, paths: paths ?? null });
 }
