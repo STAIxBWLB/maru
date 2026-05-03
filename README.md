@@ -2,7 +2,7 @@
 
 AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 
-## Status (2026-05-03)
+## Status (2026-05-04)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -191,7 +191,7 @@ Out of scope for v1 by explicit decision:
 - PDF annotation, OCR (file-extracted text is enough).
 - Agent-autonomous edits (every Claude write goes through accept/reject diff).
 - iCloud / Dropbox workspace awareness (user's responsibility).
-- Auto-updater (`pnpm tauri build` local builds only).
+- Auto-updater (GitHub release bundles exist; no in-app update channel yet).
 
 ## Development
 
@@ -210,6 +210,9 @@ pnpm typecheck
 # Production build:
 pnpm build
 
+# Local native bundle build:
+pnpm tauri build
+
 # Rust unit + integration tests:
 cd src-tauri && cargo test --lib
 
@@ -223,6 +226,17 @@ cd src-tauri && cargo test --release bench_scan_real_workspace \
 # 2. next app load renders cached entries + active document before the
 #    background scan refreshes the index
 ```
+
+## Release Bundles
+
+Publishing a GitHub Release triggers `.github/workflows/release-bundles.yml`.
+The workflow builds native Tauri bundles on macOS, Ubuntu, and Windows, then
+uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` / `.AppImage`, `.exe`,
+and `.msi` assets to that same release.
+
+Release asset versions come from the app metadata in `package.json`,
+`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync
+before tagging or publishing a release.
 
 ## Workspace Layout
 
