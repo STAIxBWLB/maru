@@ -10,6 +10,7 @@ interface OutlinePaneProps {
   document: DocumentPayload | null;
   draftContent: string;
   entries: VaultEntry[];
+  readOnly: boolean;
   onJumpToLine: (line: number) => void;
   onClose: () => void;
   onUpdateField: (
@@ -44,6 +45,7 @@ export function OutlinePane({
   document,
   draftContent,
   entries,
+  readOnly,
   onJumpToLine,
   onClose,
   onUpdateField,
@@ -63,7 +65,7 @@ export function OutlinePane({
     ? (fmTags as unknown[]).filter((tag): tag is string => typeof tag === "string")
     : [];
 
-  // Distinct types observed in this vault, used to seed type-input suggestions.
+  // Distinct types observed in this workspace, used to seed type-input suggestions.
   const observedTypes = useMemo(() => {
     const set = new Set<string>(STANDARD_TYPES);
     for (const entry of entries) {
@@ -137,6 +139,7 @@ export function OutlinePane({
               onCommit={(next) => onUpdateField("type", next || null)}
               placeholder={t("inspector.empty")}
               datalistId="anchor-type-list"
+              readOnly={readOnly}
             />
           </InspectorRow>
 
@@ -147,6 +150,7 @@ export function OutlinePane({
               onCommit={(next) => onUpdateField("status", next || null)}
               placeholder={t("inspector.empty")}
               datalistId="anchor-status-list"
+              readOnly={readOnly}
             />
           </InspectorRow>
 
@@ -156,6 +160,7 @@ export function OutlinePane({
               suggestions={[]}
               onCommit={(next) => onUpdateField("project", next || null)}
               placeholder="[[프로젝트]]"
+              readOnly={readOnly}
             />
           </InspectorRow>
 
@@ -163,6 +168,7 @@ export function OutlinePane({
             <TagsInput
               value={tagList}
               onCommit={(next) => onUpdateField("tags", next.length === 0 ? null : next)}
+              readOnly={readOnly}
             />
           </InspectorRow>
 
@@ -206,6 +212,7 @@ interface ComboInputProps {
   onCommit: (next: string) => void | Promise<void>;
   placeholder?: string;
   datalistId?: string;
+  readOnly?: boolean;
 }
 
 /** Free-text input with optional <datalist> suggestions. Commits on blur or
@@ -217,6 +224,7 @@ function ComboInput({
   onCommit,
   placeholder,
   datalistId,
+  readOnly = false,
 }: ComboInputProps) {
   const [draft, setDraft] = useState(value);
   const lastCommitted = useRef(value);
@@ -227,6 +235,7 @@ function ComboInput({
   }, [value]);
 
   function commit() {
+    if (readOnly) return;
     const next = draft.trim();
     if (next === lastCommitted.current) return;
     lastCommitted.current = next;
@@ -241,6 +250,7 @@ function ComboInput({
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
+        disabled={readOnly}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -267,12 +277,13 @@ function ComboInput({
 interface TagsInputProps {
   value: string[];
   onCommit: (next: string[]) => void | Promise<void>;
+  readOnly?: boolean;
 }
 
 /** Multi-chip tags editor. Type and press Enter or comma to add; Backspace
  *  in an empty input removes the last chip. Commits the full array on each
  *  mutation so InspectorPane can write it via update_frontmatter_field. */
-function TagsInput({ value, onCommit }: TagsInputProps) {
+function TagsInput({ value, onCommit, readOnly = false }: TagsInputProps) {
   const [tags, setTags] = useState<string[]>(value);
   const [draft, setDraft] = useState("");
 
@@ -281,6 +292,7 @@ function TagsInput({ value, onCommit }: TagsInputProps) {
   }, [value]);
 
   function applyNext(next: string[]) {
+    if (readOnly) return;
     setTags(next);
     void onCommit(next);
   }
@@ -305,6 +317,7 @@ function TagsInput({ value, onCommit }: TagsInputProps) {
             type="button"
             className="tag-chip-x"
             aria-label={`remove ${tag}`}
+            disabled={readOnly}
             onClick={() => applyNext(tags.filter((t) => t !== tag))}
           >
             <X size={10} />
@@ -315,6 +328,7 @@ function TagsInput({ value, onCommit }: TagsInputProps) {
         className="tag-chip-input"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
+        disabled={readOnly}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === ",") {
             event.preventDefault();
@@ -332,6 +346,7 @@ function TagsInput({ value, onCommit }: TagsInputProps) {
           type="button"
           className="tag-chip-add"
           onClick={pushTag}
+          disabled={readOnly}
           title="add tag"
           aria-label="add tag"
           tabIndex={-1}

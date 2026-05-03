@@ -57,7 +57,7 @@ pub struct Classification {
     pub category: String,
     /// One short Korean sentence describing the item.
     pub summary: String,
-    /// Vault-relative folder anchor should propose. `None` for "ask user".
+    /// Workspace-relative folder anchor should propose. `None` for "ask user".
     pub suggested_folder: Option<String>,
     /// Best-effort due date / event date in RFC3339, or `None`.
     pub extracted_date: Option<String>,

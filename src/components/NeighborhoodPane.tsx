@@ -25,7 +25,7 @@ export function NeighborhoodPane({
 }: NeighborhoodPaneProps) {
   const { t } = useTranslation();
   // Index is stable across draftContent typing — only rebuilds when the
-  // vault scan changes. Avoids the per-keystroke O(n) walk over entries.
+  // workspace scan changes. Avoids the per-keystroke O(n) walk over entries.
   const entryIndex = useMemo(() => buildEntryIndex(entries), [entries]);
   const data = useMemo(
     () => buildNeighborhood(document, draftContent, entries, entryIndex),

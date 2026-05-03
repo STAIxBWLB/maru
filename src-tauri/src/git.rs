@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::path::{Component, Path};
 use std::process::Command;
 
-use crate::vault_list::assert_anchor_owns_writes;
+use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +43,7 @@ pub fn git_status_fast(vault_path: String) -> Result<GitStatus, String> {
 fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<GitStatus, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
-        return Err(format!("Vault path is not a directory: {vault_path}"));
+        return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
 
     let untracked_arg = if include_untracked { "-uall" } else { "-uno" };
@@ -118,7 +118,7 @@ fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<G
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitFileChange {
-    /// Vault-relative path. Renamed entries surface only the new path —
+    /// Workspace-relative path. Renamed entries surface only the new path —
     /// commit dialog Phase 1B doesn't visualise renames yet.
     pub path: String,
     /// Porcelain v1 column 1 (index/staged status). Single char: M, A, D,
@@ -141,7 +141,7 @@ const MAX_CHANGE_ROWS: usize = 200;
 pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
-        return Err(format!("Vault path is not a directory: {vault_path}"));
+        return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
     let output = Command::new("git")
         .args(["status", "--porcelain=v1", "-uall"])
@@ -194,7 +194,7 @@ const MAX_DIFF_BYTES: usize = 64 * 1024;
 pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
-        return Err(format!("Vault path is not a directory: {vault_path}"));
+        return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
 
     // Combined diff: index changes ∪ worktree changes for this path. -U2
@@ -253,9 +253,9 @@ pub fn git_commit(
 
     let path = Path::new(&vault_path);
     if !path.is_dir() {
-        return Err(format!("Vault path is not a directory: {vault_path}"));
+        return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
-    assert_anchor_owns_writes(&vault_path)?;
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
 
     let selected_paths = match paths {
         Some(paths) => {

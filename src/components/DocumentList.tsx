@@ -18,7 +18,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import type { VaultEntry } from "../lib/types";
+import type { VaultEntry, WorkspaceVisibility } from "../lib/types";
 import { formatRelativeDate, frontmatterScalar } from "../lib/document";
 import {
   buildDocumentTreeRows,
@@ -47,6 +47,11 @@ interface DocumentListProps {
   query: string;
   loading: boolean;
   typeFilter: string | null;
+  workspaceVisibility: WorkspaceVisibility;
+  publicWorkspaceAvailable: boolean;
+  activeWorkspaceLabel: string | null;
+  onWorkspaceVisibilityChange: (visibility: WorkspaceVisibility) => void;
+  onAddPublicWorkspace: () => void;
   browserMode: DocumentBrowserMode;
   collapsedTreeFolders: string[];
   onQueryChange: (query: string) => void;
@@ -65,6 +70,11 @@ export const DocumentList = memo(function DocumentList({
   query,
   loading,
   typeFilter,
+  workspaceVisibility,
+  publicWorkspaceAvailable,
+  activeWorkspaceLabel,
+  onWorkspaceVisibilityChange,
+  onAddPublicWorkspace,
   browserMode,
   collapsedTreeFolders,
   onQueryChange,
@@ -229,9 +239,38 @@ export const DocumentList = memo(function DocumentList({
 
   return (
     <section className="document-list">
+      <div className="workspace-tabs" role="tablist" aria-label={t("workspace.tabs.label")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspaceVisibility === "private"}
+          className={workspaceVisibility === "private" ? "active" : ""}
+          onClick={() => onWorkspaceVisibilityChange("private")}
+        >
+          {t("workspace.visibility.private")}
+        </button>
+        {publicWorkspaceAvailable ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceVisibility === "public"}
+            className={workspaceVisibility === "public" ? "active" : ""}
+            onClick={() => onWorkspaceVisibilityChange("public")}
+          >
+            {t("workspace.visibility.public")}
+          </button>
+        ) : (
+          <button type="button" className="add-public" onClick={onAddPublicWorkspace}>
+            {t("workspace.addPublic.short")}
+          </button>
+        )}
+      </div>
       <div className="list-header">
         <div>
           <h2>{headerCaption}</h2>
+          {activeWorkspaceLabel ? (
+            <span className="workspace-caption">{activeWorkspaceLabel}</span>
+          ) : null}
         </div>
         <span className="meta">{t("list.meta.count", { count: filtered.length })}</span>
         {onClose ? (

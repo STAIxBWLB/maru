@@ -1,5 +1,5 @@
 // Thin wrappers around the Rust commands that own `<work>/.anchor/`
-// (workspace pairing + System mode). Mirrors the pattern in `api.ts`:
+// (workspace registration + System mode). Mirrors the pattern in `api.ts`:
 // browser-dev fallbacks return inert no-ops so the React layer can be
 // exercised without the Tauri shell.
 
@@ -13,9 +13,10 @@ import type {
   RuleDocument,
   RuleEntry,
   TemplateEntry,
-  VaultList,
   WorkspaceConfig,
   WorkspaceDetect,
+  WorkspaceRegistry,
+  WorkspaceRootEntry,
   WorkspaceSummary,
 } from "./types";
 import {
@@ -56,13 +57,13 @@ export async function readWorkspaceConfig(workPath: string): Promise<WorkspaceCo
   return invoke<WorkspaceConfig>("read_workspace_config", { workPath });
 }
 
-export async function registerWorkspacePair(
+export async function registerWorkspaceRoots(
   workPath: string,
 ): Promise<RegisterWorkspaceOutcome> {
   if (!isTauri()) {
-    throw new Error("Workspace pairing requires the Tauri shell");
+    throw new Error("Workspace registration requires the Tauri shell");
   }
-  return invoke<RegisterWorkspaceOutcome>("register_workspace_pair", { workPath });
+  return invoke<RegisterWorkspaceOutcome>("register_workspace_roots", { workPath });
 }
 
 export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
@@ -294,16 +295,23 @@ export async function applySysImport(
 // === Helpers (frontend only) ===
 
 /**
- * Identify which registered VaultList entry is the "work" half of an
- * anchored workspace. Used by the frontend to decide whether to show
- * System mode (Rules / Templates / MCP / Projects / Skills tabs).
+ * Identify the private workspace root. Used by the frontend to decide
+ * where System mode should store `.anchor/` settings.
  */
-export function findWorkRoleEntry(list: VaultList) {
-  return list.vaults.find((v) => v.role === "work") ?? null;
+export function findPrivateWorkspaceEntry(registry: WorkspaceRegistry): WorkspaceRootEntry | null {
+  const active = registry.activeByVisibility.private;
+  return (
+    registry.workspaces.find((workspace) => workspace.path === active) ??
+    registry.workspaces.find((workspace) => workspace.visibility === "private") ??
+    null
+  );
 }
 
-export function findVaultRoleEntryForRoot(list: VaultList, workspaceRoot: string) {
+export function findPublicWorkspaceEntry(registry: WorkspaceRegistry): WorkspaceRootEntry | null {
+  const active = registry.activeByVisibility.public;
   return (
-    list.vaults.find((v) => v.role === "vault" && v.workspaceRoot === workspaceRoot) ?? null
+    registry.workspaces.find((workspace) => workspace.path === active) ??
+    registry.workspaces.find((workspace) => workspace.visibility === "public") ??
+    null
   );
 }

@@ -19,12 +19,12 @@ const STORAGE_KEY = "anchor:locale:v1";
 
 const ko: Record<string, string> = {
   "app.title": "Anchor",
-  "app.subtitle.work": "로컬 우선 마크다운 볼트",
-  "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 볼트",
+  "app.subtitle.work": "Anchor Workspace",
+  "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
   "app.locale.label": "언어",
-  "app.refresh": "볼트 다시 읽기",
+  "app.refresh": "Workspace 다시 읽기",
   "app.confirmUnsaved": "저장하지 않은 변경이 있습니다. 다른 문서를 열까요?",
   "app.errorClose": "닫기",
   "mode.pkm": "문서",
@@ -36,37 +36,65 @@ const ko: Record<string, string> = {
   "layout.hideDocuments": "문서 패널 숨기기",
   "layout.showDocuments": "문서 패널 보이기",
 
-  "vault.current": "현재 볼트",
-  "vault.add": "볼트 추가",
-  "vault.remove": "볼트 제거",
-  "vault.remove.label": "{label} 볼트 제거",
-  "vault.remove.confirm": "이 볼트를 목록에서 제거할까요?",
-  "vault.choose": "선택",
-  "vault.useSample": "샘플 볼트 열기",
-  "vault.switcher.empty": "볼트 선택",
-  "vault.switcher.none": "등록된 볼트가 없습니다",
-  "vault.empty.title": "등록된 볼트가 없습니다",
-  "vault.empty.description":
-    "디렉토리를 선택해 첫 번째 볼트를 등록하거나 샘플 볼트로 시작할 수 있습니다.",
-  "vault.empty.cta": "볼트 추가",
-  "vault.empty.sample": "샘플 사용",
-  "vault.dialog.title": "볼트 추가",
-  "vault.dialog.description":
-    "마크다운 파일이 포함된 폴더를 선택해 anchor에서 열 수 있도록 등록합니다.",
-  "vault.dialog.label": "표시 이름",
-  "vault.dialog.path": "폴더 경로",
-  "vault.dialog.pickPath": "폴더 선택...",
-  "vault.dialog.externalWriter": "쓰기 위임 (선택)",
-  "vault.dialog.externalWriter.help":
-    "Obsidian 등 외부 앱이 이 폴더를 관리하는 경우 표시. anchor 는 읽기만 합니다.",
-  "vault.dialog.externalWriter.none": "없음 (anchor 가 직접 쓰기)",
-  "vault.dialog.externalWriter.obsidian": "Obsidian (MCP 위임, Phase 2)",
-  "vault.dialog.cancel": "취소",
-  "vault.dialog.confirm": "추가",
-  "vault.dialog.error.label": "이름을 입력하세요.",
-  "vault.dialog.error.path": "경로를 선택하세요.",
-  "vault.writeDelegated":
-    "이 볼트의 쓰기는 {writer}에 위임되어 있어 anchor가 직접 쓰지 않습니다.",
+  "workspace.current": "현재 Workspace",
+  "workspace.add": "Workspace 추가",
+  "workspace.addPublic": "Public workspace 추가",
+  "workspace.addPublic.short": "Public 추가",
+  "workspace.remove": "Workspace 제거",
+  "workspace.remove.label": "{label} workspace 제거",
+  "workspace.remove.confirm": "이 workspace를 목록에서 제거할까요?",
+  "workspace.choose": "선택",
+  "workspace.useSample": "샘플 workspace 열기",
+  "workspace.switcher.empty": "Workspace 선택",
+  "workspace.switcher.none": "등록된 workspace가 없습니다",
+  "workspace.switcher.publicNone": "등록된 public workspace가 없습니다",
+  "workspace.tabs.label": "Workspace 범위",
+  "workspace.visibility.private": "Private",
+  "workspace.visibility.public": "Public",
+  "workspace.public.optional": "선택 사항",
+  "workspace.path.missing": "경로 없음",
+  "workspace.error.noneActive": "활성 workspace가 없습니다. 먼저 workspace를 열거나 추가하세요.",
+  "workspace.dialog.title": "Workspace 추가",
+  "workspace.dialog.description":
+    "마크다운 파일이 포함된 폴더를 선택해 Anchor Workspace에서 열 수 있도록 등록합니다.",
+  "workspace.dialog.visibility": "범위",
+  "workspace.dialog.label": "표시 이름",
+  "workspace.dialog.path": "폴더 경로",
+  "workspace.dialog.pickPath": "폴더 선택...",
+  "workspace.dialog.externalWriter": "쓰기 위임 (선택)",
+  "workspace.dialog.externalWriter.help":
+    "외부 앱이 이 폴더를 관리하는 경우 표시. Anchor는 읽기만 합니다.",
+  "workspace.dialog.externalWriter.none": "없음 (Anchor가 직접 쓰기)",
+  "workspace.dialog.externalWriter.obsidian": "Obsidian (MCP 위임)",
+  "workspace.dialog.provider": "Provider",
+  "workspace.dialog.provider.help":
+    "Public workspace는 provider가 관리하는 공유 루트로 등록합니다.",
+  "workspace.dialog.writePolicy": "쓰기 정책",
+  "workspace.dialog.writePolicy.help":
+    "Direct는 Anchor 직접 쓰기, Delegated는 외부 writer 위임, Read-only는 읽기 전용입니다.",
+  "workspace.dialog.providerId": "Provider ID",
+  "workspace.dialog.providerId.help": "비밀이 아닌 식별자만 입력합니다.",
+  "workspace.dialog.providerId.placeholder": "shared-drive-id, site-id",
+  "workspace.dialog.role": "Provider role",
+  "workspace.dialog.role.help":
+    "예: contentManager, Can edit, Can view, Nextcloud 권한 bitmask",
+  "workspace.dialog.role.placeholder": "contentManager",
+  "workspace.writePolicy.direct": "Direct",
+  "workspace.writePolicy.delegated": "Delegated",
+  "workspace.writePolicy.readOnly": "Read-only",
+  "workspace.writeStatus.writable": "쓰기 가능",
+  "workspace.writeStatus.limited": "제한적 쓰기",
+  "workspace.writeStatus.readOnly": "읽기 전용",
+  "workspace.refreshCapabilities": "Capability 새로고침",
+  "workspace.refreshCapabilities.label": "{label} capability 새로고침",
+  "workspace.dialog.cancel": "취소",
+  "workspace.dialog.confirm": "추가",
+  "workspace.dialog.error.label": "이름을 입력하세요.",
+  "workspace.dialog.error.path": "경로를 선택하세요.",
+  "workspace.writeDelegated":
+    "이 workspace의 쓰기는 {writer}에 위임되어 있어 Anchor가 직접 쓰지 않습니다.",
+  "workspace.writeBlocked":
+    "이 workspace는 {reason} 때문에 Anchor가 직접 쓰지 않습니다.",
 
   "sidebar.commandPalette": "명령 팔레트",
   "sidebar.types": "문서 타입",
@@ -79,7 +107,7 @@ const ko: Record<string, string> = {
   "list.searchPlaceholder": "제목, 본문 검색",
   "list.loading": "문서 목록 로딩",
   "list.empty.title": "표시할 문서가 없습니다",
-  "list.empty.description": "샘플 볼트를 열거나 새 문서를 만들어 시작하세요.",
+  "list.empty.description": "샘플 workspace를 열거나 새 문서를 만들어 시작하세요.",
   "list.meta.words": "{count} 단어",
   "list.meta.versions": "{count} 버전",
   "list.meta.count": "{count} 건",
@@ -102,6 +130,7 @@ const ko: Record<string, string> = {
   "editor.save": "저장",
   "editor.saving": "저장 중",
   "editor.snapshot": "스냅샷",
+  "editor.readOnly": "읽기 전용",
   "editor.tab.edit": "원문",
   "editor.tab.rich": "리치",
   "editor.tab.source": "원문",
@@ -123,7 +152,7 @@ const ko: Record<string, string> = {
   "inspector.title": "프론트매터",
   "inspector.empty": "값 없음",
 
-  "wikilink.notFound": "vault에 없음: [[{target}]]",
+  "wikilink.notFound": "workspace에 없음: [[{target}]]",
 
   "neighborhood.title": "주변",
   "neighborhood.upward": "프로젝트 / 상위",
@@ -174,16 +203,16 @@ const ko: Record<string, string> = {
   "cmdk.action.togglePreview": "미리보기 토글",
   "cmdk.action.toggleOutline": "개요 패널 토글",
   "cmdk.action.toggleLocale": "한국어/English 전환",
-  "cmdk.action.refresh": "볼트 다시 읽기",
+  "cmdk.action.refresh": "Workspace 다시 읽기",
   "cmdk.action.openInbox": "인박스 열기",
   "cmdk.action.openDocs": "문서 열기",
   "cmdk.action.openSettings": "설정 열기",
-  "cmdk.action.addVault": "볼트 추가",
+  "cmdk.action.addWorkspace": "Workspace 추가",
 
   "newDoc.button": "새 문서",
   "newDoc.dialog.title": "새 Anchor 문서",
   "newDoc.dialog.description":
-    "표준 frontmatter (type, status, created_at, updated_at, id) 가 포함된 마크다운 문서를 볼트 루트에 만듭니다.",
+    "표준 frontmatter (type, status, created_at, updated_at, id) 가 포함된 마크다운 문서를 workspace 루트에 만듭니다.",
   "newDoc.field.title": "제목",
   "newDoc.field.title.placeholder": "예: 2분기 운영위원회 보고",
   "newDoc.field.type": "타입",
@@ -207,23 +236,18 @@ const ko: Record<string, string> = {
 
   "footer.tagline": "로컬 우선 · 파일 원천 · ko/en",
 
-  // === Workspace pairing ===
-  "workspace.detected": "Workspace 감지됨 (work + vault 페어)",
+  // === Workspace registration ===
+  "workspace.detected": "Workspace 설정 감지됨",
   "workspace.owner": "소유자",
-  "workspace.pair.work": "Work",
-  "workspace.pair.vault": "Vault",
-  "workspace.pair.vault.missing": "경로 없음",
-  "workspace.pair.vault.unset": "workspace.config.yaml 에 vault 가 설정되지 않음",
   "workspace.detect.hint":
-    "workspace.config.yaml 이 감지되었습니다. 한 번에 work 와 vault 를 등록하면 vault 는 자동으로 mcp-obsidian 위임 모드(읽기 전용)로 설정됩니다.",
+    "workspace.config.yaml 이 감지되었습니다. private workspace와 선택적 public workspace를 한 번에 등록합니다.",
   "workspace.detect.register": "Workspace 등록",
   "workspace.detect.useStandalone": "단일 폴더로 등록",
-  "workspace.pair.badge": "{work} ⇋ {vault}",
 
   // === System mode ===
   "system.title": "시스템",
   "system.subtitle": ".anchor 운영 데이터 (rules, templates, MCP, projects, skills)",
-  "system.empty": "이 vault 는 페어링된 work 가 아닙니다. 시스템 모드는 work 측 vault 에서만 사용할 수 있습니다.",
+  "system.empty": "설정을 저장할 private workspace가 없습니다.",
   "system.tab.rules": "Rules",
   "system.tab.templates": "Templates",
   "system.tab.preferences": "Preferences",
@@ -304,12 +328,12 @@ const ko: Record<string, string> = {
 
 const en: Record<string, string> = {
   "app.title": "Anchor",
-  "app.subtitle.work": "Local-first markdown vault",
-  "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-vault",
+  "app.subtitle.work": "Anchor Workspace",
+  "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
   "app.locale.label": "Language",
-  "app.refresh": "Reload vault",
+  "app.refresh": "Reload workspace",
   "app.confirmUnsaved": "You have unsaved changes. Open a different document?",
   "app.errorClose": "Close",
   "mode.pkm": "Docs",
@@ -321,37 +345,65 @@ const en: Record<string, string> = {
   "layout.hideDocuments": "Hide documents panel",
   "layout.showDocuments": "Show documents panel",
 
-  "vault.current": "Current vault",
-  "vault.add": "Add vault",
-  "vault.remove": "Remove vault",
-  "vault.remove.label": "Remove {label} vault",
-  "vault.remove.confirm": "Remove this vault from the list?",
-  "vault.choose": "Choose",
-  "vault.useSample": "Open sample vault",
-  "vault.switcher.empty": "Choose vault",
-  "vault.switcher.none": "No vaults registered",
-  "vault.empty.title": "No vaults registered",
-  "vault.empty.description":
-    "Pick a folder to register your first vault, or start with the sample vault.",
-  "vault.empty.cta": "Add vault",
-  "vault.empty.sample": "Use sample",
-  "vault.dialog.title": "Add vault",
-  "vault.dialog.description":
-    "Register a folder containing markdown files so anchor can open it.",
-  "vault.dialog.label": "Display name",
-  "vault.dialog.path": "Folder path",
-  "vault.dialog.pickPath": "Pick folder…",
-  "vault.dialog.externalWriter": "Write delegation (optional)",
-  "vault.dialog.externalWriter.help":
-    "Set if another app (e.g. Obsidian) owns this folder. anchor will read but not write.",
-  "vault.dialog.externalWriter.none": "None (anchor writes directly)",
-  "vault.dialog.externalWriter.obsidian": "Obsidian (MCP delegation, Phase 2)",
-  "vault.dialog.cancel": "Cancel",
-  "vault.dialog.confirm": "Add",
-  "vault.dialog.error.label": "Display name is required.",
-  "vault.dialog.error.path": "Folder path is required.",
-  "vault.writeDelegated":
-    "Writes for this vault are delegated to {writer}; anchor will not write directly.",
+  "workspace.current": "Current workspace",
+  "workspace.add": "Add workspace",
+  "workspace.addPublic": "Add public workspace",
+  "workspace.addPublic.short": "Add public",
+  "workspace.remove": "Remove workspace",
+  "workspace.remove.label": "Remove {label} workspace",
+  "workspace.remove.confirm": "Remove this workspace from the list?",
+  "workspace.choose": "Choose",
+  "workspace.useSample": "Open sample workspace",
+  "workspace.switcher.empty": "Choose workspace",
+  "workspace.switcher.none": "No workspaces registered",
+  "workspace.switcher.publicNone": "No public workspaces registered",
+  "workspace.tabs.label": "Workspace scope",
+  "workspace.visibility.private": "Private",
+  "workspace.visibility.public": "Public",
+  "workspace.public.optional": "optional",
+  "workspace.path.missing": "path not found",
+  "workspace.error.noneActive": "No active workspace. Open or add one first.",
+  "workspace.dialog.title": "Add workspace",
+  "workspace.dialog.description":
+    "Register a folder containing markdown files so Anchor Workspace can open it.",
+  "workspace.dialog.visibility": "Scope",
+  "workspace.dialog.label": "Display name",
+  "workspace.dialog.path": "Folder path",
+  "workspace.dialog.pickPath": "Pick folder...",
+  "workspace.dialog.externalWriter": "Write delegation (optional)",
+  "workspace.dialog.externalWriter.help":
+    "Set if another app owns this folder. Anchor will read but not write.",
+  "workspace.dialog.externalWriter.none": "None (Anchor writes directly)",
+  "workspace.dialog.externalWriter.obsidian": "Obsidian (MCP delegation)",
+  "workspace.dialog.provider": "Provider",
+  "workspace.dialog.provider.help":
+    "A public workspace is a provider-managed shared root.",
+  "workspace.dialog.writePolicy": "Write policy",
+  "workspace.dialog.writePolicy.help":
+    "Direct lets Anchor write, delegated uses an external writer, and read-only blocks writes.",
+  "workspace.dialog.providerId": "Provider ID",
+  "workspace.dialog.providerId.help": "Only store non-secret opaque identifiers.",
+  "workspace.dialog.providerId.placeholder": "shared-drive-id, site-id",
+  "workspace.dialog.role": "Provider role",
+  "workspace.dialog.role.help":
+    "Examples: contentManager, Can edit, Can view, Nextcloud permission bitmask",
+  "workspace.dialog.role.placeholder": "contentManager",
+  "workspace.writePolicy.direct": "Direct",
+  "workspace.writePolicy.delegated": "Delegated",
+  "workspace.writePolicy.readOnly": "Read-only",
+  "workspace.writeStatus.writable": "Writable",
+  "workspace.writeStatus.limited": "Limited write",
+  "workspace.writeStatus.readOnly": "Read-only",
+  "workspace.refreshCapabilities": "Refresh capabilities",
+  "workspace.refreshCapabilities.label": "Refresh {label} capabilities",
+  "workspace.dialog.cancel": "Cancel",
+  "workspace.dialog.confirm": "Add",
+  "workspace.dialog.error.label": "Display name is required.",
+  "workspace.dialog.error.path": "Folder path is required.",
+  "workspace.writeDelegated":
+    "Writes for this workspace are delegated to {writer}; Anchor will not write directly.",
+  "workspace.writeBlocked":
+    "Anchor will not write directly to this workspace because of {reason}.",
 
   "sidebar.commandPalette": "Command palette",
   "sidebar.types": "Document types",
@@ -364,7 +416,7 @@ const en: Record<string, string> = {
   "list.searchPlaceholder": "Search titles or contents",
   "list.loading": "Loading documents",
   "list.empty.title": "No documents to show",
-  "list.empty.description": "Open the sample vault or create a new document to get started.",
+  "list.empty.description": "Open the sample workspace or create a new document to get started.",
   "list.meta.words": "{count} words",
   "list.meta.versions": "{count} versions",
   "list.meta.count": "{count} items",
@@ -387,6 +439,7 @@ const en: Record<string, string> = {
   "editor.save": "Save",
   "editor.saving": "Saving",
   "editor.snapshot": "Snapshot",
+  "editor.readOnly": "Read-only",
   "editor.tab.edit": "Source",
   "editor.tab.rich": "Rich",
   "editor.tab.source": "Source",
@@ -408,7 +461,7 @@ const en: Record<string, string> = {
   "inspector.title": "Frontmatter",
   "inspector.empty": "—",
 
-  "wikilink.notFound": "Not in vault: [[{target}]]",
+  "wikilink.notFound": "Not in workspace: [[{target}]]",
 
   "neighborhood.title": "Neighborhood",
   "neighborhood.upward": "Project / up",
@@ -459,16 +512,16 @@ const en: Record<string, string> = {
   "cmdk.action.togglePreview": "Toggle preview",
   "cmdk.action.toggleOutline": "Toggle outline panel",
   "cmdk.action.toggleLocale": "Switch ko / en",
-  "cmdk.action.refresh": "Reload vault",
+  "cmdk.action.refresh": "Reload workspace",
   "cmdk.action.openInbox": "Open inbox",
   "cmdk.action.openDocs": "Open docs",
   "cmdk.action.openSettings": "Open settings",
-  "cmdk.action.addVault": "Add vault",
+  "cmdk.action.addWorkspace": "Add workspace",
 
   "newDoc.button": "New document",
   "newDoc.dialog.title": "New Anchor document",
   "newDoc.dialog.description":
-    "Creates a markdown file at the vault root with standard frontmatter (type, status, created_at, updated_at, id).",
+    "Creates a markdown file at the workspace root with standard frontmatter (type, status, created_at, updated_at, id).",
   "newDoc.field.title": "Title",
   "newDoc.field.title.placeholder": "e.g. 2026 Q2 ops review",
   "newDoc.field.type": "Type",
@@ -492,23 +545,18 @@ const en: Record<string, string> = {
 
   "footer.tagline": "Local-first · files-as-truth · ko/en",
 
-  // === Workspace pairing ===
-  "workspace.detected": "Workspace detected (paired work + vault)",
+  // === Workspace registration ===
+  "workspace.detected": "Workspace config detected",
   "workspace.owner": "Owner",
-  "workspace.pair.work": "Work",
-  "workspace.pair.vault": "Vault",
-  "workspace.pair.vault.missing": "path not found",
-  "workspace.pair.vault.unset": "vault path not set in workspace.config.yaml",
   "workspace.detect.hint":
-    "Found workspace.config.yaml. Registering both halves at once stamps the vault side as read-only via the mcp-obsidian writer.",
+    "Found workspace.config.yaml. Anchor will register the private workspace and optional public workspace in one step.",
   "workspace.detect.register": "Register workspace",
   "workspace.detect.useStandalone": "Register as single folder",
-  "workspace.pair.badge": "{work} ⇋ {vault}",
 
   // === System mode ===
   "system.title": "System",
   "system.subtitle": ".anchor operational data (rules, templates, MCP, projects, skills)",
-  "system.empty": "This vault is not the work half of a workspace pair. System mode is only available from the work side.",
+  "system.empty": "No private workspace is available for settings storage.",
   "system.tab.rules": "Rules",
   "system.tab.templates": "Templates",
   "system.tab.preferences": "Preferences",
@@ -624,6 +672,20 @@ export function assertParityOrThrow(): void {
     throw new Error(
       `[i18n] locale parity broken — missing in en: ${missingInEn.join(", ")}; missing in ko: ${missingInKo.join(", ")}`,
     );
+  }
+}
+
+export function assertNoLegacyVaultWording(): void {
+  const offenders: string[] = [];
+  for (const [locale, dict] of Object.entries(dictionaries)) {
+    for (const [key, value] of Object.entries(dict)) {
+      if (/\bvault\b/i.test(value) || value.includes("볼트")) {
+        offenders.push(`${locale}.${key}`);
+      }
+    }
+  }
+  if (offenders.length > 0) {
+    throw new Error(`[i18n] legacy vault wording remains in: ${offenders.join(", ")}`);
   }
 }
 

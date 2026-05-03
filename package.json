@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first Anchor/RISE document vault and AI editing desktop app.",
+  "description": "Local-first Anchor Workspace and AI editing desktop app.",
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20.19"

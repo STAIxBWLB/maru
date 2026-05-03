@@ -1,4 +1,4 @@
-# anchor — local-first markdown vault desktop app
+# anchor — local-first Anchor Workspace desktop app
 #
 # Tauri 2 + Rust + React 19 + TypeScript. This Makefile bundles the
 # common dev / build / test / verify workflows so you don't have to
@@ -98,9 +98,9 @@ test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwrigh
 	$(PNPM) test:e2e
 
 .PHONY: bench-scan
-bench-scan: $(ICON_PATH) ## Bench scan_vault on a real vault (default: ~/workspace/work; override BENCH_VAULT=/path)
-	cd $(TAURI_DIR) && ANCHOR_BENCH_VAULT=$(BENCH_VAULT) \
-		$(CARGO) test --release bench_scan_real_vault -- --ignored --nocapture --test-threads=1
+bench-scan: $(ICON_PATH) ## Bench workspace scan (default: ~/workspace/work; override BENCH_WORKSPACE=/path)
+	cd $(TAURI_DIR) && ANCHOR_BENCH_WORKSPACE=$(BENCH_WORKSPACE) \
+		$(CARGO) test --release bench_scan_real_workspace -- --ignored --nocapture --test-threads=1
 
 # ---------------------------------------------------------------------------
 # Verify (the full pre-merge / pre-PR check)

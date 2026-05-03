@@ -34,7 +34,10 @@ interface EditorPaneProps {
   saving: boolean;
   dirty: boolean;
   outlineOpen: boolean;
-  activeVaultLabel: string | null;
+  activeWorkspaceLabel: string | null;
+  readOnly: boolean;
+  canSnapshot: boolean;
+  readOnlyReason: string | null;
   viewMode: EditorViewMode;
   tabs: EditorTabSummary[];
   activeTabId: string | null;
@@ -58,7 +61,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     saving,
     dirty,
     outlineOpen,
-    activeVaultLabel,
+    activeWorkspaceLabel,
+    readOnly,
+    canSnapshot,
+    readOnlyReason,
     viewMode,
     tabs,
     activeTabId,
@@ -170,9 +176,9 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       </div>
       <header className="editor-topbar">
         <div className="breadcrumb" title={document.relPath}>
-          {activeVaultLabel ? (
+          {activeWorkspaceLabel ? (
             <>
-              <span className="crumb">{activeVaultLabel}</span>
+              <span className="crumb">{activeWorkspaceLabel}</span>
               <ChevronRight size={12} className="sep" />
             </>
           ) : null}
@@ -189,12 +195,18 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             {dirty ? <Clock3 size={12} /> : <Check size={12} />}
             {dirty ? t("editor.dirty") : t("editor.saved")}
           </span>
+          {readOnly ? (
+            <span className="save-state readonly" title={readOnlyReason ?? undefined}>
+              {t("editor.readOnly")}
+            </span>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
             onClick={onSnapshot}
+            disabled={!canSnapshot}
             icon={<GitCommit size={14} />}
-            title={t("editor.snapshot")}
+            title={!canSnapshot && readOnlyReason ? readOnlyReason : t("editor.snapshot")}
           >
             {t("editor.snapshot")}
           </Button>
@@ -202,8 +214,9 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             variant="primary"
             size="sm"
             onClick={onSave}
-            disabled={saving || !dirty}
+            disabled={readOnly || saving || !dirty}
             icon={<Save size={14} />}
+            title={readOnly && readOnlyReason ? readOnlyReason : undefined}
           >
             {saving ? t("editor.saving") : t("editor.save")}
           </Button>
@@ -236,7 +249,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content className="tab-panel" value="rich">
-          <RichMarkdownEditor value={draftContent} onChange={onChange} />
+          <RichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
         </Tabs.Content>
         <Tabs.Content className="tab-panel" value="source">
           <textarea
@@ -244,6 +257,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             className="source-editor"
             value={draftContent}
             onChange={(event) => onChange(event.target.value)}
+            readOnly={readOnly}
             onKeyDown={autocompleteHandlers.onKeyDown}
             onKeyUp={autocompleteHandlers.onKeyUp}
             onClick={autocompleteHandlers.onClick}

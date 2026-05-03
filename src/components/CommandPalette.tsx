@@ -47,11 +47,11 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "toggle-preview", label: t("cmdk.action.togglePreview"), shortcut: "⌘ P" },
       { id: "toggle-outline", label: t("cmdk.action.toggleOutline"), shortcut: "⌘ \\" },
       { id: "toggle-locale", label: t("cmdk.action.toggleLocale"), shortcut: "⌘ ⇧ L" },
-      { id: "refresh-vault", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
+      { id: "refresh-workspace", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
       { id: "open-inbox", label: t("cmdk.action.openInbox") },
       { id: "open-docs", label: t("cmdk.action.openDocs") },
       { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
-      { id: "add-vault", label: t("cmdk.action.addVault") },
+      { id: "add-workspace", label: t("cmdk.action.addWorkspace") },
     ],
     [t],
   );

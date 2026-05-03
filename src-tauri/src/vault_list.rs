@@ -1,57 +1,170 @@
-// Multi-vault registry. anchor stores known vault roots in
-// `<config>/com.anchor.app/vaults.json`. The user's existing
-// ~/workspace/work and ~/workspace/vault can be registered as anchor
-// vaults; fresh anchor-only vaults work the same way.
-//
-// Anchor extension: each vault carries an `external_writer` hint —
-// e.g. "mcp-obsidian" for vaults managed by an Obsidian instance, in
-// which case anchor reads but defers writes to the Obsidian MCP. v1
-// Phase 0 stores the field but does not yet enforce write delegation;
-// Phase 2 wires it up.
+// Workspace registry. Anchor stores registered document roots in
+// `<config>/com.anchor.app/workspaces.json`. Older builds wrote the same
+// concept to `vaults.json`; the loader migrates that shape on first use
+// and keeps the old file untouched.
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const APP_CONFIG_DIR: &str = "com.anchor.app";
+const WORKSPACE_REGISTRY_FILE: &str = "workspaces.json";
+const LEGACY_VAULTS_FILE: &str = "vaults.json";
 
-/// We serialize to/from camelCase JSON because the React layer
-/// consumes the response shape directly via Tauri IPC. Snake_case
-/// aliases are kept on the previously-existing fields so a vaults.json
-/// written by an earlier build still loads.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct VaultRegistryEntry {
+pub struct WorkspaceCapabilities {
+    pub can_read: bool,
+    pub can_create: bool,
+    pub can_modify: bool,
+    pub can_delete: bool,
+    pub can_rename_move: bool,
+    pub can_share: bool,
+    pub can_manage_members: bool,
+}
+
+impl WorkspaceCapabilities {
+    fn read_only(can_read: bool) -> Self {
+        Self {
+            can_read,
+            can_create: false,
+            can_modify: false,
+            can_delete: false,
+            can_rename_move: false,
+            can_share: false,
+            can_manage_members: false,
+        }
+    }
+
+    fn full(can_read: bool, writable: bool) -> Self {
+        Self {
+            can_read,
+            can_create: can_read && writable,
+            can_modify: can_read && writable,
+            can_delete: can_read && writable,
+            can_rename_move: can_read && writable,
+            can_share: can_read && writable,
+            can_manage_members: can_read && writable,
+        }
+    }
+
+    fn intersect(&self, other: &Self) -> Self {
+        Self {
+            can_read: self.can_read && other.can_read,
+            can_create: self.can_create && other.can_create,
+            can_modify: self.can_modify && other.can_modify,
+            can_delete: self.can_delete && other.can_delete,
+            can_rename_move: self.can_rename_move && other.can_rename_move,
+            can_share: self.can_share && other.can_share,
+            can_manage_members: self.can_manage_members && other.can_manage_members,
+        }
+    }
+}
+
+impl Default for WorkspaceCapabilities {
+    fn default() -> Self {
+        Self::read_only(false)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPermissionSummary {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub capabilities: WorkspaceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub enum WorkspaceWriteAction {
+    Create,
+    Modify,
+    Delete,
+    RenameMove,
+    Share,
+    ManageMembers,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRootEntry {
     pub label: String,
     pub path: String,
-    /// Optional hint for which external system (if any) owns writes to
-    /// this vault. Unset = anchor owns writes. "mcp-obsidian" = anchor
-    /// reads, Obsidian MCP handles writes (planned Phase 2).
+    /// "private" | "public". Public workspaces are optional and may be
+    /// read-only, but visibility and write policy stay independent.
+    pub visibility: String,
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "provider_id"
+    )]
+    pub provider_id: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         alias = "external_writer"
     )]
     pub external_writer: Option<String>,
-    /// Workspace pairing — set when this entry was registered as part of
-    /// a (work, vault) workspace pair. Both halves point at the work
-    /// path so the UI can find the partner half. None = standalone vault.
+    /// "direct" | "delegated" | "readOnly". Derived from external_writer
+    /// for legacy imports and v1 add/upsert calls.
+    #[serde(default)]
+    pub write_policy: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_root: Option<String>,
-    /// "work" | "vault" — the entry's role within its workspace pair.
-    /// None = standalone (legacy single-folder vault).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
+    pub permission_summary: Option<ProviderPermissionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveByVisibility {
+    #[serde(default)]
+    pub private: Option<String>,
+    #[serde(default)]
+    pub public: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRegistry {
+    pub workspaces: Vec<WorkspaceRootEntry>,
+    #[serde(default)]
+    pub active_by_visibility: ActiveByVisibility,
+    #[serde(default, alias = "hidden_defaults")]
+    pub hidden_defaults: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct VaultList {
-    pub vaults: Vec<VaultRegistryEntry>,
-    #[serde(alias = "active_vault")]
-    pub active_vault: Option<String>,
+struct LegacyVaultList {
+    #[serde(default)]
+    vaults: Vec<LegacyVaultRegistryEntry>,
+    #[serde(default, alias = "active_vault")]
+    active_vault: Option<String>,
     #[serde(default, alias = "hidden_defaults")]
-    pub hidden_defaults: Vec<String>,
+    hidden_defaults: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct LegacyVaultRegistryEntry {
+    label: String,
+    path: String,
+    #[serde(default, alias = "external_writer")]
+    external_writer: Option<String>,
+    #[serde(default)]
+    workspace_root: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
 }
 
 fn app_config_dir() -> Result<PathBuf, String> {
@@ -62,261 +175,763 @@ fn preferred_app_config_path(file_name: &str) -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join(APP_CONFIG_DIR).join(file_name))
 }
 
-fn vault_list_path() -> Result<PathBuf, String> {
-    preferred_app_config_path("vaults.json")
+fn workspace_registry_path() -> Result<PathBuf, String> {
+    preferred_app_config_path(WORKSPACE_REGISTRY_FILE)
 }
 
-fn load_at(path: &PathBuf) -> Result<VaultList, String> {
+fn legacy_vault_list_path() -> Result<PathBuf, String> {
+    preferred_app_config_path(LEGACY_VAULTS_FILE)
+}
+
+fn load_registry_at(path: &Path, legacy_path: &Path) -> Result<WorkspaceRegistry, String> {
+    if path.exists() {
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read workspace list: {e}"))?;
+        let mut registry: WorkspaceRegistry =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse workspace list: {e}"))?;
+        normalize_registry(&mut registry);
+        return Ok(registry);
+    }
+
+    let legacy = load_legacy_at(legacy_path)?;
+    let mut registry = migrate_legacy_vault_list(legacy);
+    normalize_registry(&mut registry);
+    if !registry.workspaces.is_empty() {
+        save_registry_at(path, &registry)?;
+    }
+    Ok(registry)
+}
+
+fn load_legacy_at(path: &Path) -> Result<LegacyVaultList, String> {
     if !path.exists() {
-        return Ok(VaultList::default());
+        return Ok(LegacyVaultList::default());
     }
     let content =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read vault list: {}", e))?;
-    serde_json::from_str(&content).map_err(|e| format!("Failed to parse vault list: {}", e))
+        fs::read_to_string(path).map_err(|e| format!("Failed to read legacy vault list: {e}"))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse legacy vault list: {e}"))
 }
 
-fn save_at(path: &PathBuf, list: &VaultList) -> Result<(), String> {
+fn save_registry_at(path: &Path, registry: &WorkspaceRegistry) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+            .map_err(|e| format!("Failed to create config directory: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(list)
-        .map_err(|e| format!("Failed to serialize vault list: {}", e))?;
-    fs::write(path, json).map_err(|e| format!("Failed to write vault list: {}", e))
+    let json = serde_json::to_string_pretty(registry)
+        .map_err(|e| format!("Failed to serialize workspace list: {e}"))?;
+    fs::write(path, json).map_err(|e| format!("Failed to write workspace list: {e}"))
+}
+
+fn load_registry() -> Result<WorkspaceRegistry, String> {
+    load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
+}
+
+fn save_registry(registry: &WorkspaceRegistry) -> Result<(), String> {
+    save_registry_at(&workspace_registry_path()?, registry)
+}
+
+fn normalize_visibility(value: &str) -> String {
+    if value == "public" {
+        "public".to_string()
+    } else {
+        "private".to_string()
+    }
+}
+
+fn default_provider() -> String {
+    "local".to_string()
+}
+
+fn normalize_provider(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "local".to_string();
+    }
+    match trimmed {
+        "local" => "local".to_string(),
+        "googleDrive" | "gdrive" | "google-drive" => "googleDrive".to_string(),
+        "oneDrive" | "onedrive" | "one-drive" => "oneDrive".to_string(),
+        "sharePoint" | "sharepoint" | "share-point" => "sharePoint".to_string(),
+        "nextcloud" | "nextCloud" => "nextcloud".to_string(),
+        "obsidian" | "mcp-obsidian" => "obsidian".to_string(),
+        "unknown" => "unknown".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn normalize_external_writer(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        match trimmed {
+            "" | "none" => None,
+            "googleDrive" | "google-drive" | "gdrive" => Some("gdrive".to_string()),
+            "oneDrive" | "one-drive" | "onedrive" => Some("onedrive".to_string()),
+            "sharePoint" | "share-point" | "sharepoint" => Some("sharepoint".to_string()),
+            "nextCloud" | "nextcloud" => Some("nextcloud".to_string()),
+            "obsidian" | "mcp-obsidian" => Some("mcp-obsidian".to_string()),
+            other => Some(other.to_string()),
+        }
+    })
+}
+
+fn provider_from_external_writer(writer: &Option<String>) -> Option<String> {
+    match writer.as_deref() {
+        Some("gdrive") => Some("googleDrive".to_string()),
+        Some("onedrive") => Some("oneDrive".to_string()),
+        Some("sharepoint") => Some("sharePoint".to_string()),
+        Some("nextcloud") => Some("nextcloud".to_string()),
+        Some("mcp-obsidian") => Some("obsidian".to_string()),
+        _ => None,
+    }
+}
+
+fn normalize_write_policy(value: &str, external_writer: &Option<String>) -> String {
+    if external_writer.is_some() {
+        return "delegated".to_string();
+    }
+    match value {
+        "readOnly" | "read-only" | "readonly" => "readOnly".to_string(),
+        "delegated" => "delegated".to_string(),
+        _ => "direct".to_string(),
+    }
+}
+
+fn infer_write_policy(external_writer: &Option<String>) -> String {
+    normalize_write_policy("", external_writer)
+}
+
+fn normalize_registry(registry: &mut WorkspaceRegistry) {
+    for entry in &mut registry.workspaces {
+        entry.visibility = normalize_visibility(&entry.visibility);
+        entry.external_writer = normalize_external_writer(entry.external_writer.clone());
+        entry.provider = provider_from_external_writer(&entry.external_writer)
+            .unwrap_or_else(|| normalize_provider(&entry.provider));
+        entry.write_policy = normalize_write_policy(&entry.write_policy, &entry.external_writer);
+        entry.permission_summary = Some(compute_permission_summary(entry, false));
+        if entry.provider == "obsidian" && entry.external_writer.is_none() {
+            entry.external_writer = Some("mcp-obsidian".to_string());
+            entry.write_policy = "delegated".to_string();
+            entry.permission_summary = Some(compute_permission_summary(entry, false));
+        }
+    }
+
+    if !active_path_is_valid(registry, "private", registry.active_by_visibility.private.as_deref())
+    {
+        registry.active_by_visibility.private = first_path_for_visibility(registry, "private");
+    }
+    if !active_path_is_valid(registry, "public", registry.active_by_visibility.public.as_deref()) {
+        registry.active_by_visibility.public = first_path_for_visibility(registry, "public");
+    }
+}
+
+fn active_path_is_valid(
+    registry: &WorkspaceRegistry,
+    visibility: &str,
+    active: Option<&str>,
+) -> bool {
+    let Some(active) = active else {
+        return false;
+    };
+    registry
+        .workspaces
+        .iter()
+        .any(|entry| entry.path == active && entry.visibility == visibility)
+}
+
+fn first_path_for_visibility(registry: &WorkspaceRegistry, visibility: &str) -> Option<String> {
+    registry
+        .workspaces
+        .iter()
+        .find(|entry| entry.visibility == visibility)
+        .map(|entry| entry.path.clone())
+}
+
+fn active_slot<'a>(
+    active: &'a mut ActiveByVisibility,
+    visibility: &str,
+) -> &'a mut Option<String> {
+    if visibility == "public" {
+        &mut active.public
+    } else {
+        &mut active.private
+    }
+}
+
+fn migrate_legacy_vault_list(legacy: LegacyVaultList) -> WorkspaceRegistry {
+    let mut registry = WorkspaceRegistry {
+        hidden_defaults: legacy.hidden_defaults,
+        ..WorkspaceRegistry::default()
+    };
+
+    for entry in legacy.vaults {
+        let visibility = if entry.role.as_deref() == Some("vault") || entry.external_writer.is_some()
+        {
+            "public"
+        } else {
+            "private"
+        };
+        registry.workspaces.push(WorkspaceRootEntry {
+            label: entry.label,
+            path: entry.path,
+            visibility: visibility.to_string(),
+            external_writer: entry.external_writer.clone(),
+            provider: provider_from_external_writer(&entry.external_writer)
+                .unwrap_or_else(|| "local".to_string()),
+            provider_id: None,
+            write_policy: infer_write_policy(&entry.external_writer),
+            permission_summary: None,
+        });
+    }
+
+    if let Some(active) = legacy.active_vault {
+        if let Some(active_entry) = registry.workspaces.iter().find(|entry| entry.path == active) {
+            *active_slot(&mut registry.active_by_visibility, &active_entry.visibility) =
+                Some(active);
+        }
+    }
+    registry
 }
 
 #[tauri::command]
-pub fn list_vaults() -> Result<VaultList, String> {
-    load_at(&vault_list_path()?)
+pub fn list_workspace_roots() -> Result<WorkspaceRegistry, String> {
+    load_registry()
 }
 
-pub fn assert_anchor_owns_writes(vault_path: &str) -> Result<(), String> {
-    let list = load_at(&vault_list_path()?)?;
-    if let Some(writer) = external_writer_for_path(&list, vault_path) {
+#[allow(dead_code)]
+pub fn assert_anchor_owns_writes(workspace_path: &str) -> Result<(), String> {
+    assert_anchor_can_write(workspace_path, WorkspaceWriteAction::Modify)
+}
+
+pub fn assert_anchor_can_write(
+    workspace_path: &str,
+    action: WorkspaceWriteAction,
+) -> Result<(), String> {
+    let registry = load_registry()?;
+    let Some(workspace) = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.path == workspace_path)
+    else {
+        return Ok(());
+    };
+    let summary = compute_permission_summary(workspace, false);
+    if !capability_allows(&summary.capabilities, action) {
+        let writer = workspace
+            .external_writer
+            .as_deref()
+            .unwrap_or(match workspace.write_policy.as_str() {
+                "readOnly" => "read-only workspace",
+                "delegated" => "external writer",
+                _ => "provider capabilities",
+            });
         return Err(format!(
-            "Vault writes are delegated to {writer}; anchor will not write directly."
+            "Workspace writes are blocked by {writer}; Anchor will not write directly."
         ));
     }
     Ok(())
 }
 
-fn external_writer_for_path(list: &VaultList, vault_path: &str) -> Option<String> {
-    list.vaults
-        .iter()
-        .find(|vault| vault.path == vault_path)
-        .and_then(|vault| vault.external_writer.clone())
-}
-
-#[tauri::command]
-pub fn add_vault(
-    label: String,
-    path: String,
-    external_writer: Option<String>,
-) -> Result<VaultList, String> {
-    add_vault_internal(VaultRegistryEntry {
-        label,
-        path,
-        external_writer,
-        workspace_root: None,
-        role: None,
-    })
-}
-
-/// Lower-level add that accepts the full entry shape. Used by the
-/// workspace pairing flow to register a `work + vault` pair in one
-/// transaction; `add_vault` is the thin frontend-facing wrapper.
-pub fn add_vault_internal(entry: VaultRegistryEntry) -> Result<VaultList, String> {
-    let mut list = load_at(&vault_list_path()?)?;
-    if list.vaults.iter().any(|v| v.path == entry.path) {
-        return Err("Vault is already registered".to_string());
+fn capability_allows(capabilities: &WorkspaceCapabilities, action: WorkspaceWriteAction) -> bool {
+    match action {
+        WorkspaceWriteAction::Create => capabilities.can_create,
+        WorkspaceWriteAction::Modify => capabilities.can_modify,
+        WorkspaceWriteAction::Delete => capabilities.can_delete,
+        WorkspaceWriteAction::RenameMove => capabilities.can_rename_move,
+        WorkspaceWriteAction::Share => capabilities.can_share,
+        WorkspaceWriteAction::ManageMembers => capabilities.can_manage_members,
     }
-    let path = entry.path.clone();
-    list.vaults.push(entry);
-    if list.active_vault.is_none() {
-        list.active_vault = Some(path);
-    }
-    save_at(&vault_list_path()?, &list)?;
-    Ok(list)
 }
 
-/// Idempotent upsert. Used by `register_workspace_pair` so re-running on
-/// an already-registered workspace does not error; existing entries are
-/// patched in place (label / external_writer / role / workspace_root)
-/// while the path stays the unique key.
-pub fn upsert_vault(entry: VaultRegistryEntry) -> Result<VaultList, String> {
-    let path_to_check = entry.path.clone();
-    let mut list = load_at(&vault_list_path()?)?;
-    if let Some(existing) = list.vaults.iter_mut().find(|v| v.path == entry.path) {
-        existing.label = entry.label;
-        existing.external_writer = entry.external_writer;
-        existing.workspace_root = entry.workspace_root;
-        existing.role = entry.role;
+fn filesystem_capabilities(path: &str) -> WorkspaceCapabilities {
+    let path = Path::new(path);
+    let can_read = path.exists();
+    let writable = fs::metadata(path)
+        .map(|metadata| !metadata.permissions().readonly())
+        .unwrap_or(false);
+    WorkspaceCapabilities::full(can_read, writable)
+}
+
+fn role_capabilities(provider: &str, role: Option<&str>, can_read: bool) -> (WorkspaceCapabilities, Option<String>) {
+    let Some(role) = role.map(|value| value.trim()).filter(|value| !value.is_empty()) else {
+        if provider == "local" {
+            return (WorkspaceCapabilities::full(can_read, true), None);
+        }
+        return (
+            WorkspaceCapabilities::read_only(can_read),
+            Some("Provider role is not set; public workspace is read-only until capabilities are refreshed.".to_string()),
+        );
+    };
+    let normalized: String = role
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| !matches!(ch, ' ' | '_' | '-'))
+        .collect();
+    match provider {
+        "googleDrive" => match normalized.as_str() {
+            "organizer" | "manager" => (WorkspaceCapabilities::full(can_read, true), None),
+            "fileorganizer" | "contentmanager" => {
+                let mut caps = WorkspaceCapabilities::full(can_read, true);
+                caps.can_manage_members = false;
+                (caps, None)
+            }
+            "writer" | "contributor" => {
+                let mut caps = WorkspaceCapabilities::read_only(can_read);
+                caps.can_create = can_read;
+                caps.can_modify = can_read;
+                (caps, None)
+            }
+            "commenter" | "reader" | "viewer" => (WorkspaceCapabilities::read_only(can_read), None),
+            _ => (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Google Drive role '{role}' treated as read-only.")),
+            ),
+        },
+        "oneDrive" | "sharePoint" => match normalized.as_str() {
+            "owner" => (WorkspaceCapabilities::full(can_read, true), None),
+            "write" | "canedit" | "edit" | "editor" => {
+                let mut caps = WorkspaceCapabilities::full(can_read, true);
+                caps.can_manage_members = false;
+                (caps, None)
+            }
+            "read" | "canview" | "view" | "viewer" => (WorkspaceCapabilities::read_only(can_read), None),
+            _ => (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Microsoft role '{role}' treated as read-only.")),
+            ),
+        },
+        "nextcloud" => {
+            if let Ok(mask) = role.parse::<u32>() {
+                let can_update = mask & 2 != 0;
+                let can_create = mask & 4 != 0;
+                let can_delete = mask & 8 != 0;
+                let can_share = mask & 16 != 0;
+                return (
+                    WorkspaceCapabilities {
+                        can_read: can_read && mask & 1 != 0,
+                        can_create: can_read && can_create,
+                        can_modify: can_read && can_update,
+                        can_delete: can_read && can_delete,
+                        can_rename_move: can_read && can_update && can_create && can_delete,
+                        can_share: can_read && can_share,
+                        can_manage_members: false,
+                    },
+                    None,
+                );
+            }
+            (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Nextcloud permissions '{role}' treated as read-only.")),
+            )
+        }
+        "obsidian" => (WorkspaceCapabilities::read_only(can_read), None),
+        _ => (
+            WorkspaceCapabilities::read_only(can_read),
+            Some("Unknown provider treated as read-only.".to_string()),
+        ),
+    }
+}
+
+fn compute_permission_summary(
+    entry: &WorkspaceRootEntry,
+    update_checked_at: bool,
+) -> ProviderPermissionSummary {
+    let local_caps = filesystem_capabilities(&entry.path);
+    let prior = entry.permission_summary.as_ref();
+    let role = prior.and_then(|summary| summary.role.clone());
+    let source = prior
+        .map(|summary| summary.source.clone())
+        .filter(|value| matches!(value.as_str(), "manual" | "filesystem" | "api"))
+        .unwrap_or_else(|| {
+            if role.is_some() {
+                "manual".to_string()
+            } else if entry.provider == "local" {
+                "filesystem".to_string()
+            } else {
+                "unknown".to_string()
+            }
+        });
+    let (provider_caps, role_warning) =
+        role_capabilities(&entry.provider, role.as_deref(), local_caps.can_read);
+    let mut capabilities = provider_caps.intersect(&local_caps);
+    let mut warning = role_warning.or_else(|| prior.and_then(|summary| summary.warning.clone()));
+    let checked_at = if update_checked_at {
+        Some(Utc::now().to_rfc3339())
     } else {
-        list.vaults.push(entry);
+        prior.and_then(|summary| summary.checked_at.clone())
+    };
+
+    if entry.visibility == "public" && source == "unknown" && entry.provider != "local" {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+        warning = Some("Capabilities are unverified; public workspace is read-only.".to_string());
     }
-    if list.active_vault.is_none() {
-        list.active_vault = Some(path_to_check);
+    if entry.visibility == "public" && entry.provider != "local" && checked_at.is_none() {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+        warning = Some("Capabilities are stale; refresh before direct writes.".to_string());
     }
-    save_at(&vault_list_path()?, &list)?;
-    Ok(list)
+    if entry.write_policy == "readOnly" || entry.write_policy == "delegated" || entry.external_writer.is_some() {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+    }
+
+    ProviderPermissionSummary {
+        role,
+        source,
+        checked_at,
+        capabilities,
+        warning,
+    }
 }
 
 #[tauri::command]
-pub fn remove_vault(path: String) -> Result<VaultList, String> {
-    let mut list = load_at(&vault_list_path()?)?;
-    list.vaults.retain(|v| v.path != path);
-    if list.active_vault.as_deref() == Some(path.as_str()) {
-        list.active_vault = list.vaults.first().map(|v| v.path.clone());
+pub fn add_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
+    upsert_workspace_root(entry)
+}
+
+pub fn upsert_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
+    let mut registry = load_registry()?;
+    let mut normalized = entry;
+    normalized.visibility = normalize_visibility(&normalized.visibility);
+    normalized.external_writer = normalize_external_writer(normalized.external_writer.clone());
+    normalized.provider = provider_from_external_writer(&normalized.external_writer)
+        .unwrap_or_else(|| normalize_provider(&normalized.provider));
+    normalized.write_policy = normalize_write_policy(&normalized.write_policy, &normalized.external_writer);
+    normalized.permission_summary = Some(compute_permission_summary(&normalized, true));
+    let active_path = normalized.path.clone();
+    let active_visibility = normalized.visibility.clone();
+
+    if let Some(existing) = registry
+        .workspaces
+        .iter_mut()
+        .find(|workspace| workspace.path == normalized.path)
+    {
+        *existing = normalized;
+    } else {
+        registry.workspaces.push(normalized);
     }
-    save_at(&vault_list_path()?, &list)?;
-    Ok(list)
+    *active_slot(&mut registry.active_by_visibility, &active_visibility) = Some(active_path);
+    normalize_registry(&mut registry);
+    save_registry(&registry)?;
+    Ok(registry)
 }
 
 #[tauri::command]
-pub fn set_active_vault(path: String) -> Result<VaultList, String> {
-    let mut list = load_at(&vault_list_path()?)?;
-    if !list.vaults.iter().any(|v| v.path == path) {
-        return Err("Vault is not registered".to_string());
+pub fn refresh_workspace_capabilities(path: String) -> Result<WorkspaceRegistry, String> {
+    let mut registry = load_registry()?;
+    let Some(entry) = registry
+        .workspaces
+        .iter_mut()
+        .find(|workspace| workspace.path == path)
+    else {
+        return Err("Workspace is not registered".to_string());
+    };
+    entry.permission_summary = Some(compute_permission_summary(entry, true));
+    normalize_registry(&mut registry);
+    save_registry(&registry)?;
+    Ok(registry)
+}
+
+#[tauri::command]
+pub fn remove_workspace_root(path: String) -> Result<WorkspaceRegistry, String> {
+    let mut registry = load_registry()?;
+    let removed_visibility = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.path == path)
+        .map(|workspace| workspace.visibility.clone());
+    registry.workspaces.retain(|workspace| workspace.path != path);
+    if let Some(visibility) = removed_visibility {
+        let slot = active_slot(&mut registry.active_by_visibility, &visibility);
+        if slot.as_deref() == Some(path.as_str()) {
+            *slot = None;
+        }
     }
-    list.active_vault = Some(path);
-    save_at(&vault_list_path()?, &list)?;
-    Ok(list)
+    normalize_registry(&mut registry);
+    save_registry(&registry)?;
+    Ok(registry)
+}
+
+#[tauri::command]
+pub fn set_active_workspace_root(
+    path: String,
+    visibility: String,
+) -> Result<WorkspaceRegistry, String> {
+    let visibility = normalize_visibility(&visibility);
+    let mut registry = load_registry()?;
+    if !registry
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.path == path && workspace.visibility == visibility)
+    {
+        return Err("Workspace is not registered for this visibility".to_string());
+    }
+    *active_slot(&mut registry.active_by_visibility, &visibility) = Some(path);
+    normalize_registry(&mut registry);
+    save_registry(&registry)?;
+    Ok(registry)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn save_and_reload(list: &VaultList) -> VaultList {
+    fn entry(label: &str, path: &str, visibility: &str) -> WorkspaceRootEntry {
+        WorkspaceRootEntry {
+            label: label.to_string(),
+            path: path.to_string(),
+            visibility: visibility.to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            permission_summary: None,
+        }
+    }
+
+    fn save_and_reload(registry: &WorkspaceRegistry) -> WorkspaceRegistry {
         let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("vaults.json");
-        save_at(&path, list).unwrap();
-        load_at(&path).unwrap()
+        let path = dir.path().join("workspaces.json");
+        let legacy_path = dir.path().join("vaults.json");
+        save_registry_at(&path, registry).unwrap();
+        load_registry_at(&path, &legacy_path).unwrap()
     }
 
     #[test]
-    fn default_vault_list_is_empty() {
-        let vl = VaultList::default();
-        assert!(vl.vaults.is_empty());
-        assert!(vl.active_vault.is_none());
+    fn default_workspace_registry_is_empty() {
+        let registry = WorkspaceRegistry::default();
+        assert!(registry.workspaces.is_empty());
+        assert!(registry.active_by_visibility.private.is_none());
+        assert!(registry.active_by_visibility.public.is_none());
     }
 
     #[test]
-    fn roundtrip_preserves_data() {
-        let list = VaultList {
+    fn roundtrip_preserves_workspace_data() {
+        let registry = WorkspaceRegistry {
+            workspaces: vec![
+                entry("Private", "/Users/yj/workspace/work", "private"),
+                WorkspaceRootEntry {
+                    label: "Public".to_string(),
+                    path: "/Users/yj/workspace/public".to_string(),
+                    visibility: "public".to_string(),
+                    provider: "obsidian".to_string(),
+                    provider_id: None,
+                    external_writer: Some("mcp-obsidian".to_string()),
+                    write_policy: "delegated".to_string(),
+                    permission_summary: None,
+                },
+            ],
+            active_by_visibility: ActiveByVisibility {
+                private: Some("/Users/yj/workspace/work".to_string()),
+                public: Some("/Users/yj/workspace/public".to_string()),
+            },
+            hidden_defaults: vec![],
+        };
+        let loaded = save_and_reload(&registry);
+        assert_eq!(loaded.workspaces.len(), 2);
+        assert_eq!(loaded.workspaces[0].visibility, "private");
+        assert_eq!(loaded.workspaces[1].visibility, "public");
+        assert_eq!(loaded.workspaces[1].write_policy, "delegated");
+        assert_eq!(loaded.workspaces[1].provider, "obsidian");
+    }
+
+    #[test]
+    fn migrates_legacy_vaults_to_workspace_registry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let workspace_path = dir.path().join("workspaces.json");
+        let legacy_path = dir.path().join("vaults.json");
+        let legacy = LegacyVaultList {
             vaults: vec![
-                VaultRegistryEntry {
+                LegacyVaultRegistryEntry {
                     label: "Work".to_string(),
-                    path: "/Users/yj/workspace/work".to_string(),
+                    path: "/work".to_string(),
                     external_writer: None,
-                    workspace_root: Some("/Users/yj/workspace/work".to_string()),
+                    workspace_root: Some("/work".to_string()),
                     role: Some("work".to_string()),
                 },
-                VaultRegistryEntry {
-                    label: "Knowledge Vault".to_string(),
-                    path: "/Users/yj/workspace/vault".to_string(),
+                LegacyVaultRegistryEntry {
+                    label: "Knowledge".to_string(),
+                    path: "/knowledge".to_string(),
                     external_writer: Some("mcp-obsidian".to_string()),
-                    workspace_root: Some("/Users/yj/workspace/work".to_string()),
+                    workspace_root: Some("/work".to_string()),
                     role: Some("vault".to_string()),
                 },
             ],
-            active_vault: Some("/Users/yj/workspace/work".to_string()),
+            active_vault: Some("/work".to_string()),
             hidden_defaults: vec![],
         };
-        let loaded = save_and_reload(&list);
-        assert_eq!(loaded.vaults.len(), 2);
-        assert_eq!(loaded.vaults[0].label, "Work");
+        fs::write(&legacy_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let migrated = load_registry_at(&workspace_path, &legacy_path).unwrap();
+
+        assert!(workspace_path.exists());
+        assert_eq!(migrated.active_by_visibility.private.as_deref(), Some("/work"));
         assert_eq!(
-            loaded.vaults[1].external_writer.as_deref(),
-            Some("mcp-obsidian"),
-            "external_writer flag must round-trip"
+            migrated.active_by_visibility.public.as_deref(),
+            Some("/knowledge")
         );
-        assert_eq!(
-            loaded.vaults[0].role.as_deref(),
-            Some("work"),
-            "workspace pair role must round-trip"
-        );
-        assert_eq!(
-            loaded.vaults[1].workspace_root.as_deref(),
-            Some("/Users/yj/workspace/work"),
-            "vault half should point at its work partner"
-        );
-        assert_eq!(
-            loaded.active_vault.as_deref(),
-            Some("/Users/yj/workspace/work")
-        );
+        assert_eq!(migrated.workspaces[0].visibility, "private");
+        assert_eq!(migrated.workspaces[1].visibility, "public");
+        assert_eq!(migrated.workspaces[0].provider, "local");
+        assert_eq!(migrated.workspaces[1].provider, "obsidian");
     }
 
     #[test]
-    fn load_returns_default_for_missing_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("nonexistent.json");
-        let result = load_at(&path).unwrap();
-        assert!(result.vaults.is_empty());
-    }
-
-    #[test]
-    fn save_creates_parent_directories() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("nested").join("dir").join("vaults.json");
-        let list = VaultList::default();
-        save_at(&path, &list).unwrap();
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn anchor_namespace_used() {
-        let result = preferred_app_config_path("vaults.json").unwrap();
-        let path_str = result.to_str().unwrap();
-        assert!(
-            path_str.contains("com.anchor.app"),
-            "config path must use anchor namespace, got: {path_str}"
-        );
-    }
-
-    #[test]
-    fn missing_external_writer_is_omitted_from_json() {
-        let list = VaultList {
-            vaults: vec![VaultRegistryEntry {
+    fn migrates_legacy_private_only_registry() {
+        let legacy = LegacyVaultList {
+            vaults: vec![LegacyVaultRegistryEntry {
                 label: "Plain".to_string(),
-                path: "/tmp/v".to_string(),
+                path: "/plain".to_string(),
                 external_writer: None,
                 workspace_root: None,
                 role: None,
             }],
-            active_vault: None,
+            active_vault: Some("/plain".to_string()),
             hidden_defaults: vec![],
         };
-        let json = serde_json::to_string(&list).unwrap();
-        assert!(
-            !json.contains("external_writer"),
-            "None external_writer should be omitted"
-        );
-        assert!(
-            !json.contains("workspace_root"),
-            "None workspace_root should be omitted"
-        );
-        assert!(!json.contains("\"role\""), "None role should be omitted");
+
+        let migrated = migrate_legacy_vault_list(legacy);
+
+        assert_eq!(migrated.workspaces[0].visibility, "private");
+        assert_eq!(migrated.active_by_visibility.private.as_deref(), Some("/plain"));
+        assert!(migrated.active_by_visibility.public.is_none());
     }
 
     #[test]
-    fn external_writer_policy_blocks_registered_delegated_vault() {
-        let list = VaultList {
-            vaults: vec![VaultRegistryEntry {
-                label: "Obsidian".to_string(),
-                path: "/tmp/obsidian".to_string(),
-                external_writer: Some("mcp-obsidian".to_string()),
-                workspace_root: None,
-                role: None,
-            }],
-            active_vault: None,
-            hidden_defaults: vec![],
-        };
+    fn delegated_policy_blocks_registered_workspace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.external_writer = Some("mcp-obsidian".to_string());
+        workspace.write_policy = "delegated".to_string();
+        workspace.provider = "obsidian".to_string();
 
-        assert_eq!(
-            external_writer_for_path(&list, "/tmp/obsidian").as_deref(),
-            Some("mcp-obsidian")
-        );
-        assert!(external_writer_for_path(&list, "/tmp/plain").is_none());
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_create);
+    }
+
+    #[test]
+    fn delegated_policy_without_named_writer_still_blocks() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.write_policy = "delegated".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+    }
+
+    #[test]
+    fn read_only_policy_blocks_direct_writes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Reference", &dir.path().to_string_lossy(), "public");
+        workspace.write_policy = "readOnly".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_create);
+        assert!(!summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_delete);
+    }
+
+    #[test]
+    fn direct_policy_still_blocks_when_filesystem_probe_denies_writes() {
+        let missing = tempfile::TempDir::new().unwrap().path().join("missing-root");
+        let workspace = entry("Missing", &missing.to_string_lossy(), "private");
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(!summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_create);
+        assert!(!summary.capabilities.can_modify);
+    }
+
+    #[test]
+    fn provider_roles_map_to_capabilities() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut google = entry("Drive", &dir.path().to_string_lossy(), "public");
+        google.provider = "googleDrive".to_string();
+        google.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("contentManager".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+        let drive = compute_permission_summary(&google, true);
+        assert!(drive.capabilities.can_create);
+        assert!(drive.capabilities.can_delete);
+        assert!(drive.capabilities.can_share);
+        assert!(!drive.capabilities.can_manage_members);
+
+        let mut sharepoint = entry("SharePoint", &dir.path().to_string_lossy(), "public");
+        sharepoint.provider = "sharePoint".to_string();
+        sharepoint.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("Can edit".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+        let microsoft = compute_permission_summary(&sharepoint, true);
+        assert!(microsoft.capabilities.can_modify);
+        assert!(microsoft.capabilities.can_rename_move);
+        assert!(!microsoft.capabilities.can_manage_members);
+    }
+
+    #[test]
+    fn nextcloud_bitmask_maps_exact_permissions() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut nextcloud = entry("Nextcloud", &dir.path().to_string_lossy(), "public");
+        nextcloud.provider = "nextcloud".to_string();
+        nextcloud.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("7".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+
+        let summary = compute_permission_summary(&nextcloud, true);
+
+        assert!(summary.capabilities.can_read);
+        assert!(summary.capabilities.can_create);
+        assert!(summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_delete);
+        assert!(!summary.capabilities.can_rename_move);
+        assert!(!summary.capabilities.can_share);
+    }
+
+    #[test]
+    fn unknown_public_provider_defaults_read_only() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Unknown", &dir.path().to_string_lossy(), "public");
+        workspace.provider = "unknown".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(summary.warning.is_some());
+    }
+
+    #[test]
+    fn stale_public_provider_summary_defaults_read_only() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Drive", &dir.path().to_string_lossy(), "public");
+        workspace.provider = "googleDrive".to_string();
+        workspace.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("contentManager".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(summary.warning.as_deref().unwrap_or("").contains("stale"));
     }
 }

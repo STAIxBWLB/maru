@@ -11,6 +11,7 @@ interface SidebarProps {
   typeFilter: string | null;
   onTypeFilter: (type: string | null) => void;
   onNewDocument: () => void;
+  canCreateDocument: boolean;
   onSelectRecent: (entry: VaultEntry) => void;
   onOpenCommandPalette: () => void;
   onClose?: () => void;
@@ -24,6 +25,7 @@ export const Sidebar = memo(function Sidebar({
   typeFilter,
   onTypeFilter,
   onNewDocument,
+  canCreateDocument,
   onSelectRecent,
   onOpenCommandPalette,
   onClose,
@@ -47,7 +49,12 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
       </div>
       <div className="sidebar-section">
-        <button type="button" className="sidebar-cta" onClick={onNewDocument}>
+        <button
+          type="button"
+          className="sidebar-cta"
+          onClick={onNewDocument}
+          disabled={!canCreateDocument}
+        >
           <Plus size={15} />
           {t("newDoc.button")}
         </button>

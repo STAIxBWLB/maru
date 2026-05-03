@@ -42,7 +42,7 @@ pub fn start_inbox_watcher(
 ) -> Result<(), String> {
     let vault = PathBuf::from(&vault_path);
     if !vault.is_dir() {
-        return Err(format!("Vault path is not a directory: {vault_path}"));
+        return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
     let downloads = vault.join("inbox").join("downloads");
     if !downloads.is_dir() {

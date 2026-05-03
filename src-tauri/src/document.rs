@@ -1,7 +1,7 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
-use crate::vault_list::assert_anchor_owns_writes;
+use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -102,7 +102,7 @@ pub fn save_document(
     document_path: String,
     content: String,
 ) -> Result<DocumentPayload, String> {
-    assert_anchor_owns_writes(&vault_path)?;
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -122,7 +122,7 @@ pub fn update_frontmatter_field(
     key: String,
     value: Option<FieldInput>,
 ) -> Result<DocumentPayload, String> {
-    assert_anchor_owns_writes(&vault_path)?;
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
@@ -142,7 +142,7 @@ pub fn create_document(
     body: String,
     target_rel_path: Option<String>,
 ) -> Result<CreatedDocument, String> {
-    assert_anchor_owns_writes(&vault_path)?;
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let now = Utc::now().to_rfc3339();
     let rel_path = match target_rel_path
         .as_deref()
@@ -222,7 +222,7 @@ pub fn create_version(
     content: String,
     summary: String,
 ) -> Result<VersionSnapshot, String> {
-    assert_anchor_owns_writes(&vault_path)?;
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     let stem = source_path

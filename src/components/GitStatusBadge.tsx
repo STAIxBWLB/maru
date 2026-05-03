@@ -13,8 +13,8 @@ interface Props {
   onCommitClick?: (status: GitStatus) => void;
 }
 
-/** Topbar badge showing the active vault's branch + dirty count. Hides
- *  itself when the vault isn't a git repo so non-versioned vaults don't
+/** Topbar badge showing the active workspace's branch + dirty count. Hides
+ *  itself when the workspace isn't a git repo so non-versioned workspaces don't
  *  show stale "no branch" text. */
 export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitClick }: Props) {
   const [status, setStatus] = useState<GitStatus | null>(null);

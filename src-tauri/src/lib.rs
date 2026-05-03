@@ -37,9 +37,12 @@ use korean_date::parse_korean_date_cmd;
 use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
-use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
+use vault_list::{
+    add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
+    remove_workspace_root, set_active_workspace_root,
+};
 use workspace::{
-    detect_workspace, list_workspaces, read_workspace_config, register_workspace_pair,
+    detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -58,10 +61,11 @@ pub fn run() {
             create_document,
             create_version,
             update_frontmatter_field,
-            list_vaults,
-            add_vault,
-            remove_vault,
-            set_active_vault,
+            list_workspace_roots,
+            add_workspace_root,
+            remove_workspace_root,
+            set_active_workspace_root,
+            refresh_workspace_capabilities,
             git_status,
             git_status_fast,
             git_commit,
@@ -83,7 +87,7 @@ pub fn run() {
             // workspace pairing + .anchor/ system mode
             detect_workspace,
             read_workspace_config,
-            register_workspace_pair,
+            register_workspace_roots,
             list_workspaces,
             bootstrap_anchor_dir,
             read_anchor_workspace,
