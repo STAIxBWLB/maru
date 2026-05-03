@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type React from "react";
 import {
   AlertTriangle,
   Clock3,
   Command,
   FileText,
   Inbox,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCcw,
   Settings2,
   X,
@@ -30,6 +33,7 @@ import {
   getSampleVaultPath,
   listVaults,
   readDocument,
+  revealInFileManager,
   readVaultCache,
   removeVault,
   saveDocument,
@@ -44,6 +48,7 @@ import {
   readAnchorSettings,
   registerWorkspacePair,
   saveAnchorSettings,
+  listenAnchorSettingsUpdated,
   updateAnchorWorkspace,
 } from "./lib/anchorDir";
 import { classifyInboxItem } from "./lib/aiInvoke";
@@ -76,6 +81,13 @@ import {
   type AnchorSettings,
   type DocumentBrowserMode,
 } from "./lib/settings";
+import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
+import {
+  openSettingsWindow,
+  restoreMainWindowLayout,
+  startWindowDrag,
+  subscribeMainWindowLayout,
+} from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import { mergeFreshEntry, planVaultStartup } from "./lib/vaultStartup";
 import {
@@ -89,7 +101,6 @@ import {
 const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
 const OPEN_TABS_KEY = "anchor:openTabs:v1";
 const RECENT_KEY = "anchor:recent:v1";
-const OUTLINE_OPEN_KEY = "anchor:outlineOpen:v1";
 
 assertParityOrThrow();
 
@@ -105,7 +116,7 @@ interface StoredTabs {
   relPaths: string[];
 }
 
-type AppMode = "pkm" | "inbox" | "system";
+type AppMode = "pkm" | "inbox";
 
 interface InboxCarry {
   decision: InboxDecision;
@@ -125,6 +136,101 @@ function titleFromWikilinkTarget(target: string): string {
 }
 
 export default function App() {
+  const params =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  if (params?.get("window") === "settings") {
+    return <SettingsWindowRoot workPath={params.get("workPath")} />;
+  }
+  return <MainApp />;
+}
+
+function SettingsWindowRoot({ workPath }: { workPath: string | null }) {
+  const localeValue = useLocaleState();
+  const { t } = localeValue;
+  const [settings, setSettings] = useState<AnchorSettings>(() =>
+    normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const themeVars = useMemo(() => buildThemeVars(settings), [settings]);
+
+  useEffect(() => {
+    applyThemePreference(settings.ui.themeMode);
+    applyThemeVars(themeVars);
+  }, [settings.ui.themeMode, themeVars]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workPath) {
+      setSettings(normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS));
+      return;
+    }
+    void readAnchorSettings(workPath)
+      .then((next) => {
+        if (!cancelled) setSettings(next);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workPath]);
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void listenAnchorSettingsUpdated((payload) => {
+      if (payload.workPath === workPath) {
+        setSettings(normalizeAnchorSettings(payload.settings));
+      }
+    }).then((off) => {
+      dispose = off;
+    });
+    return () => dispose?.();
+  }, [workPath]);
+
+  const updateSettings = useCallback(
+    (nextSettings: AnchorSettings) => {
+      const normalized = normalizeAnchorSettings(nextSettings);
+      setSettings(normalized);
+      if (!workPath) return;
+      void saveAnchorSettings(workPath, normalized).catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    },
+    [workPath],
+  );
+
+  return (
+    <LocaleContext.Provider value={localeValue}>
+      <div className="settings-window-shell" style={themeVars}>
+        <SystemPane
+          workPath={workPath}
+          settings={settings}
+          onSettingsChange={updateSettings}
+        />
+        {error ? (
+          <div className="toast-stack">
+            <div className="toast">
+              <AlertTriangle size={15} />
+              <span>{error}</span>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setError(null)}
+                aria-label={t("app.errorClose")}
+                title={t("app.errorClose")}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </LocaleContext.Provider>
+  );
+}
+
+function MainApp() {
   const localeValue = useLocaleState();
   const { t, locale, setLocale } = localeValue;
 
@@ -152,10 +258,6 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("source");
   const [pendingSelectedPath, setPendingSelectedPath] = useState<string | null>(null);
-  const [outlineOpen, setOutlineOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem(OUTLINE_OPEN_KEY) !== "0";
-  });
   const [recentPaths, setRecentPaths] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -215,6 +317,7 @@ export default function App() {
   const [anchorSettings, setAnchorSettings] = useState<AnchorSettings>(() =>
     normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS),
   );
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [, startExplorerTransition] = useTransition();
 
   const activeVaultPath = vaultList.activeVault;
@@ -238,6 +341,10 @@ export default function App() {
   );
   const activeVaultExternalWriter = activeVault?.externalWriter ?? null;
   const activeVaultReadOnly = activeVaultExternalWriter != null;
+  const layoutSettings = anchorSettings.ui.layout;
+  const documentTypesPaneOpen = layoutSettings.documentTypesPaneOpen;
+  const documentsPaneOpen = layoutSettings.documentsPaneOpen;
+  const outlineOpen = layoutSettings.outlineOpen;
 
   // System mode is gated on "this vault is the work half of a paired
   // workspace". The work_path is the vault's own path; for vault-half
@@ -248,7 +355,6 @@ export default function App() {
     if (activeVault.role === "work") return activeVault.path;
     return null;
   }, [activeVault]);
-  const systemEnabled = systemWorkPath != null;
   const settingsWorkPath = useMemo(() => {
     if (!activeVault) return null;
     if (activeVault.role === "vault" && activeVault.workspaceRoot) {
@@ -321,27 +427,47 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(OUTLINE_OPEN_KEY, outlineOpen ? "1" : "0");
-  }, [outlineOpen]);
-
-  useEffect(() => {
     let cancelled = false;
+    setSettingsLoaded(false);
     if (!settingsWorkPath) {
       setAnchorSettings(normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS));
+      setSettingsLoaded(true);
       return;
     }
     void readAnchorSettings(settingsWorkPath)
       .then((settings) => {
-        if (!cancelled) setAnchorSettings(settings);
+        if (!cancelled) {
+          setAnchorSettings(settings);
+          setSettingsLoaded(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setAnchorSettings(normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS));
+        if (!cancelled) {
+          setAnchorSettings(normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS));
+          setSettingsLoaded(true);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [settingsWorkPath]);
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void listenAnchorSettingsUpdated((payload) => {
+      if (payload.workPath === settingsWorkPath) {
+        setAnchorSettings(normalizeAnchorSettings(payload.settings));
+      }
+    }).then((off) => {
+      dispose = off;
+    });
+    return () => dispose?.();
+  }, [settingsWorkPath]);
+
+  useEffect(() => {
+    applyThemePreference(anchorSettings.ui.themeMode);
+    applyThemeVars(buildThemeVars(anchorSettings));
+  }, [anchorSettings]);
 
   useEffect(() => {
     if (!settingsWritable || !settingsWorkPath) {
@@ -386,6 +512,56 @@ export default function App() {
     [settingsWorkPath, settingsWritable],
   );
 
+  const updateLayoutSettings = useCallback(
+    (patch: Partial<AnchorSettings["ui"]["layout"]>) => {
+      updateSettings((current) => {
+        const layout = {
+          ...current.ui.layout,
+          ...patch,
+        };
+        return {
+          ...current,
+          ui: {
+            ...current.ui,
+            layout,
+          },
+          terminal: {
+            ...current.terminal,
+            defaultPanelOpen: layout.terminalOpen,
+            lastHeight: layout.terminalHeight,
+          },
+        };
+      });
+    },
+    [updateSettings],
+  );
+
+  const restoredWindowKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!settingsLoaded || !settingsWorkPath) return;
+    const key = settingsWorkPath;
+    if (restoredWindowKeyRef.current === key) return;
+    restoredWindowKeyRef.current = key;
+    void restoreMainWindowLayout(anchorSettings.ui.layout).catch(() => {});
+  }, [anchorSettings.ui.layout, settingsLoaded, settingsWorkPath]);
+
+  useEffect(() => {
+    if (!settingsLoaded || !settingsWritable) return;
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+    void subscribeMainWindowLayout((patch) => {
+      if (!disposed) updateLayoutSettings(patch);
+    }).then((off) => {
+      if (disposed) off();
+      else cleanup = off;
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [settingsLoaded, settingsWritable, updateLayoutSettings]);
+
   const setDocumentBrowserMode = useCallback(
     (mode: DocumentBrowserMode) => {
       updateSettings((current) => ({
@@ -412,16 +588,6 @@ export default function App() {
     [updateSettings],
   );
 
-  const setTerminalSettings = useCallback(
-    (terminal: AnchorSettings["terminal"]) => {
-      updateSettings((current) => ({
-        ...current,
-        terminal,
-      }));
-    },
-    [updateSettings],
-  );
-
   const setExplorerQuery = useCallback(
     (next: string) => {
       startExplorerTransition(() => setQuery(next));
@@ -435,15 +601,6 @@ export default function App() {
     },
     [startExplorerTransition],
   );
-
-  // If the active vault loses its work-role (e.g. user switches to a
-  // standalone vault while System mode was active), drop back to PKM.
-  // Otherwise the empty "system not available" placeholder lingers.
-  useEffect(() => {
-    if (appMode === "system" && !systemEnabled) {
-      setAppMode("pkm");
-    }
-  }, [appMode, systemEnabled]);
 
   // Best-effort persistence of the chosen mode into .anchor/workspace.json.
   // Failures are silent — this is a UX nicety, not a correctness concern.
@@ -1163,9 +1320,17 @@ export default function App() {
   }, [activeVaultPath, lastOpenKeyForVault, loadVault]);
 
   const focusSearch = useCallback(() => {
+    if (!documentsPaneOpen) {
+      updateLayoutSettings({ documentsPaneOpen: true });
+      window.requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+      return;
+    }
     searchInputRef.current?.focus();
     searchInputRef.current?.select();
-  }, []);
+  }, [documentsPaneOpen, updateLayoutSettings]);
 
   const openCommandPalette = useCallback(() => {
     setCommandPaletteOpen(true);
@@ -1179,6 +1344,12 @@ export default function App() {
     setAddVaultOpen(true);
   }, []);
 
+  const openPreferences = useCallback(() => {
+    void openSettingsWindow(settingsWorkPath).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+  }, [settingsWorkPath]);
+
   const toggleLocale = useCallback(() => {
     setLocale(locale === "ko" ? "en" : "ko");
   }, [locale, setLocale]);
@@ -1191,6 +1362,16 @@ export default function App() {
       void refreshCurrent();
     }
   }, [appMode, refreshCurrent, refreshGmail, refreshInbox]);
+
+  const revealTargetInFinder = useCallback(
+    (targetPath: string) => {
+      if (!activeVaultPath) return;
+      void revealInFileManager(activeVaultPath, targetPath).catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    },
+    [activeVaultPath],
+  );
 
   const selectTab = useCallback(
     (tabId: string) => {
@@ -1274,7 +1455,7 @@ export default function App() {
           setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview"));
           break;
         case "toggle-outline":
-          setOutlineOpen((v) => !v);
+          updateLayoutSettings({ outlineOpen: !outlineOpen });
           break;
         case "toggle-locale":
           toggleLocale();
@@ -1300,6 +1481,8 @@ export default function App() {
       toggleLocale,
       openAddVaultDialog,
       openNewDocumentDialog,
+      updateLayoutSettings,
+      outlineOpen,
     ],
   );
 
@@ -1310,7 +1493,7 @@ export default function App() {
       "mod+n": openNewDocumentDialog,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
       "mod+p": () => setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview")),
-      "mod+\\": () => setOutlineOpen((v) => !v),
+      "mod+\\": () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
       "mod+f": focusSearch,
       "mod+r": refreshActiveSurface,
       "mod+shift+l": toggleLocale,
@@ -1340,17 +1523,38 @@ export default function App() {
       openNewDocumentDialog,
       closeTab,
       resolvedActiveTabId,
+      updateLayoutSettings,
+      outlineOpen,
     ],
   );
 
-  const modeClass =
-    appMode === "inbox" ? " inbox-mode" : appMode === "system" ? " system-mode" : "";
-  const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}`;
+  const modeClass = appMode === "inbox" ? " inbox-mode" : "";
+  const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
+    documentTypesPaneOpen ? "" : " types-closed"
+  }${documentsPaneOpen ? "" : " documents-closed"}`;
+  const themeVars = useMemo(() => buildThemeVars(anchorSettings), [anchorSettings]);
+
+  const handleTopbarPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(
+        "button,input,select,textarea,a,[role='button'],[data-no-drag='true']",
+      )
+    ) {
+      return;
+    }
+    void startWindowDrag().catch(() => {});
+  }, []);
 
   return (
     <LocaleContext.Provider value={localeValue}>
-      <div className={shellClass}>
-        <header className="topbar">
+      <div className={shellClass} style={themeVars}>
+        <header
+          className="topbar"
+          data-tauri-drag-region
+          onPointerDown={handleTopbarPointerDown}
+        >
           <div className="brand-mark" aria-hidden="true">
             A
           </div>
@@ -1433,12 +1637,42 @@ export default function App() {
           >
             <Command size={19} />
           </button>
+          <button
+            type="button"
+            className={documentTypesPaneOpen ? "activity-button active" : "activity-button"}
+            onClick={() =>
+              updateLayoutSettings({ documentTypesPaneOpen: !documentTypesPaneOpen })
+            }
+            title={
+              documentTypesPaneOpen
+                ? t("layout.hideDocumentTypes")
+                : t("layout.showDocumentTypes")
+            }
+            aria-label={
+              documentTypesPaneOpen
+                ? t("layout.hideDocumentTypes")
+                : t("layout.showDocumentTypes")
+            }
+          >
+            {documentTypesPaneOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
+          </button>
+          <button
+            type="button"
+            className={documentsPaneOpen ? "activity-button active" : "activity-button"}
+            onClick={() => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen })}
+            title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}
+            aria-label={
+              documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")
+            }
+          >
+            <FileText size={19} />
+          </button>
           <span className="activity-spacer" />
-          {systemEnabled ? (
+          {settingsWorkPath ? (
             <button
               type="button"
-              className={appMode === "system" ? "activity-button active" : "activity-button"}
-              onClick={() => setAppMode("system")}
+              className="activity-button"
+              onClick={openPreferences}
               title={t("mode.system")}
               aria-label={t("mode.system")}
             >
@@ -1447,25 +1681,22 @@ export default function App() {
           ) : null}
         </nav>
 
-        <Sidebar
-          contentCount={documentIndex.contentCount}
-          typeCounts={documentIndex.typeCounts}
-          recentEntries={recentEntries}
-          selectedPath={selectedPath}
-          typeFilter={typeFilter}
-          onTypeFilter={setExplorerTypeFilter}
-          onNewDocument={openNewDocumentDialog}
-          onSelectRecent={selectEntry}
-          onOpenCommandPalette={openCommandPalette}
-        />
-
-        {appMode === "system" ? (
-          <SystemPane
-            workPath={systemWorkPath}
-            settings={anchorSettings}
-            onSettingsChange={updateSettings}
+        {documentTypesPaneOpen ? (
+          <Sidebar
+            contentCount={documentIndex.contentCount}
+            typeCounts={documentIndex.typeCounts}
+            recentEntries={recentEntries}
+            selectedPath={selectedPath}
+            typeFilter={typeFilter}
+            onTypeFilter={setExplorerTypeFilter}
+            onNewDocument={openNewDocumentDialog}
+            onSelectRecent={selectEntry}
+            onOpenCommandPalette={openCommandPalette}
+            onClose={() => updateLayoutSettings({ documentTypesPaneOpen: false })}
           />
-        ) : appMode === "inbox" ? (
+        ) : null}
+
+        {appMode === "inbox" ? (
           <InboxPane
             items={inboxItems}
             loading={inboxLoading}
@@ -1482,20 +1713,25 @@ export default function App() {
           />
         ) : (
           <>
-            <DocumentList
-              documentIndex={documentIndex}
-              selectedPath={selectedPath}
-              query={query}
-              loading={loading && entries.length === 0}
-              typeFilter={typeFilter}
-              browserMode={anchorSettings.ui.documentBrowserMode}
-              collapsedTreeFolders={anchorSettings.ui.collapsedTreeFolders}
-              onQueryChange={setExplorerQuery}
-              onBrowserModeChange={setDocumentBrowserMode}
-              onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
-              onSelect={selectEntry}
-              searchInputRef={searchInputRef}
-            />
+            {documentsPaneOpen ? (
+              <DocumentList
+                documentIndex={documentIndex}
+                selectedPath={selectedPath}
+                query={query}
+                loading={loading && entries.length === 0}
+                typeFilter={typeFilter}
+                browserMode={anchorSettings.ui.documentBrowserMode}
+                collapsedTreeFolders={anchorSettings.ui.collapsedTreeFolders}
+                onQueryChange={setExplorerQuery}
+                onBrowserModeChange={setDocumentBrowserMode}
+                onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
+                onSelect={selectEntry}
+                onRevealInFinder={revealTargetInFinder}
+                onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}
+                searchInputRef={searchInputRef}
+                vaultPath={activeVaultPath}
+              />
+            ) : null}
 
             <EditorPane
               document={document}
@@ -1514,7 +1750,7 @@ export default function App() {
               onCloseTab={closeTab}
               onSave={saveCurrent}
               onSnapshot={snapshotCurrent}
-              onToggleOutline={() => setOutlineOpen((v) => !v)}
+              onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
               onViewModeChange={setEditorViewMode}
               onWikilinkClick={handleWikilinkClick}
               textareaRef={editorTextareaRef}
@@ -1526,7 +1762,7 @@ export default function App() {
                 draftContent={draftContent}
                 entries={entries}
                 onJumpToLine={jumpToOutlineLine}
-                onClose={() => setOutlineOpen(false)}
+                onClose={() => updateLayoutSettings({ outlineOpen: false })}
                 onUpdateField={updateField}
                 onSelectEntry={selectEntry}
                 onMissingWikilink={handleWikilinkClick}
@@ -1537,8 +1773,11 @@ export default function App() {
 
         <TerminalPanel
           cwd={activeVaultPath}
-          settings={anchorSettings.terminal}
-          onSettingsChange={setTerminalSettings}
+          settings={anchorSettings}
+          open={anchorSettings.ui.layout.terminalOpen}
+          height={anchorSettings.ui.layout.terminalHeight}
+          onOpenChange={(terminalOpen) => updateLayoutSettings({ terminalOpen })}
+          onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
         />
 
         <div className="toast-stack">

@@ -23,8 +23,14 @@ import {
   saveAnchorTemplate,
 } from "../lib/anchorDir";
 import { useTranslation } from "../lib/i18n";
-import type { AnchorSettings, DocumentBrowserMode } from "../lib/settings";
+import type {
+  AnchorSettings,
+  DocumentBrowserMode,
+  TerminalLauncherId,
+  ThemeMode,
+} from "../lib/settings";
 import { normalizeAnchorSettings } from "../lib/settings";
+import { normalizeAccentInput } from "../lib/theme";
 import type {
   ImportItem,
   ImportPlan,
@@ -197,13 +203,37 @@ function PreferencesTab({
     );
   };
 
-  const updateTerminalDefaultOpen = (defaultPanelOpen: boolean) => {
+  const updateThemeMode = (themeMode: ThemeMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          themeMode,
+        },
+      }),
+    );
+  };
+
+  const updateAccentColor = (accentColor: string) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          accentColor: normalizeAccentInput(accentColor, settings.ui.accentColor),
+        },
+      }),
+    );
+  };
+
+  const updateAutoLaunch = (autoLaunch: TerminalLauncherId | null) => {
     onSettingsChange(
       normalizeAnchorSettings({
         ...settings,
         terminal: {
           ...settings.terminal,
-          defaultPanelOpen,
+          autoLaunch,
         },
       }),
     );
@@ -223,12 +253,41 @@ function PreferencesTab({
           </select>
         </label>
         <label className="field">
-          <span>{t("system.preferences.terminalDefaultOpen")}</span>
+          <span>{t("system.preferences.themeMode")}</span>
+          <select
+            value={settings.ui.themeMode}
+            onChange={(event) => updateThemeMode(event.target.value as ThemeMode)}
+          >
+            <option value="system">{t("system.preferences.theme.system")}</option>
+            <option value="light">{t("system.preferences.theme.light")}</option>
+            <option value="dark">{t("system.preferences.theme.dark")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.accentColor")}</span>
           <input
-            type="checkbox"
-            checked={settings.terminal.defaultPanelOpen}
-            onChange={(event) => updateTerminalDefaultOpen(event.target.checked)}
+            type="color"
+            value={settings.ui.accentColor}
+            onChange={(event) => updateAccentColor(event.target.value)}
           />
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.terminalAutoLaunch")}</span>
+          <select
+            value={settings.terminal.autoLaunch ?? "none"}
+            onChange={(event) =>
+              updateAutoLaunch(
+                event.target.value === "none"
+                  ? null
+                  : (event.target.value as TerminalLauncherId),
+              )
+            }
+          >
+            <option value="shell">{t("terminal.launcher.shell")}</option>
+            <option value="claude">{t("terminal.launcher.claude")}</option>
+            <option value="codex">{t("terminal.launcher.codex")}</option>
+            <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
+          </select>
         </label>
       </div>
     </div>

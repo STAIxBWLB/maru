@@ -1,4 +1,4 @@
-import type { TerminalLauncherId } from "./settings";
+import type { AnchorSettings, TerminalLauncherId } from "./settings";
 
 export type TerminalKind = TerminalLauncherId;
 
@@ -111,6 +111,17 @@ export function terminalCommandPreview(kind: TerminalKind, cwd: string): string 
     case "shell":
       return "$SHELL";
   }
+}
+
+export function shouldAutoLaunchTerminal(
+  settings: AnchorSettings,
+  open: boolean,
+  tabCount: number,
+): TerminalKind | null {
+  if (!open || tabCount > 0) return null;
+  const launcher = settings.terminal.autoLaunch;
+  if (!launcher) return null;
+  return settings.terminal.launchers[launcher]?.enabled ? launcher : null;
 }
 
 function quoteShellToken(value: string): string {

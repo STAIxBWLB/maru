@@ -272,11 +272,23 @@ fn default_settings_json() -> JsonValue {
         "version": SCHEMA_VERSION,
         "ui": {
             "documentBrowserMode": "tree",
-            "collapsedTreeFolders": []
+            "collapsedTreeFolders": [],
+            "themeMode": "system",
+            "accentColor": "#2f5a3c",
+            "layout": {
+                "documentTypesPaneOpen": true,
+                "documentsPaneOpen": true,
+                "outlineOpen": true,
+                "terminalOpen": false,
+                "terminalHeight": 260,
+                "windowBounds": null,
+                "windowMaximized": null
+            }
         },
         "terminal": {
-            "defaultPanelOpen": true,
+            "defaultPanelOpen": false,
             "lastHeight": 260,
+            "autoLaunch": "shell",
             "launchers": {
                 "claude": {
                     "enabled": true,
@@ -923,7 +935,19 @@ mod tests {
             initial
                 .pointer("/terminal/defaultPanelOpen")
                 .and_then(JsonValue::as_bool),
-            Some(true)
+            Some(false)
+        );
+        assert_eq!(
+            initial
+                .pointer("/terminal/autoLaunch")
+                .and_then(JsonValue::as_str),
+            Some("shell")
+        );
+        assert_eq!(
+            initial
+                .pointer("/ui/layout/terminalOpen")
+                .and_then(JsonValue::as_bool),
+            Some(false)
         );
 
         let next = json!({

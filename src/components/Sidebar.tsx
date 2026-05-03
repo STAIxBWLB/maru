@@ -1,4 +1,4 @@
-import { Clock, FileText, Layers, Plus } from "lucide-react";
+import { Clock, FileText, Layers, PanelLeftClose, Plus } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "../lib/i18n";
 import type { VaultEntry } from "../lib/types";
@@ -13,6 +13,7 @@ interface SidebarProps {
   onNewDocument: () => void;
   onSelectRecent: (entry: VaultEntry) => void;
   onOpenCommandPalette: () => void;
+  onClose?: () => void;
 }
 
 export const Sidebar = memo(function Sidebar({
@@ -25,11 +26,26 @@ export const Sidebar = memo(function Sidebar({
   onNewDocument,
   onSelectRecent,
   onOpenCommandPalette,
+  onClose,
 }: SidebarProps) {
   const { t } = useTranslation();
 
   return (
     <aside className="sidebar">
+      <div className="sidebar-header">
+        <strong>{t("sidebar.types")}</strong>
+        {onClose ? (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            title={t("layout.hideDocumentTypes")}
+            aria-label={t("layout.hideDocumentTypes")}
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        ) : null}
+      </div>
       <div className="sidebar-section">
         <button type="button" className="sidebar-cta" onClick={onNewDocument}>
           <Plus size={15} />

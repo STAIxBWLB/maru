@@ -91,6 +91,21 @@ export function nextCollapsedFolders(
   return Array.from(next).sort((a, b) => a.localeCompare(b));
 }
 
+export function collectDocumentTreeFolderPaths(entries: VaultEntry[]): string[] {
+  const folders = new Set<string>();
+  for (const entry of entries) {
+    const parts = entry.relPath.split("/").filter(Boolean);
+    let current = "";
+    for (const folder of parts.slice(0, -1)) {
+      current = current ? `${current}/${folder}` : folder;
+      folders.add(current);
+    }
+  }
+  return Array.from(folders).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+  );
+}
+
 export function virtualizeDocumentTreeRows(
   rows: DocumentTreeRow[],
   scrollTop: number,

@@ -22,3 +22,70 @@ test("boots the sample vault and opens multiple editor tabs", async ({ page }) =
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await expect(page.locator(".preview-surface")).toContainText("Anchor 용어집");
 });
+
+test("restores a dense shell with collapsible explorer panels and collapsed terminal", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
+  await expect(page.locator(".sidebar")).toBeVisible();
+  await expect(page.locator(".document-list")).toBeVisible();
+
+  const rail = page.locator(".activity-rail");
+  await rail.getByLabel("문서 타입 패널 숨기기").click();
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await rail.getByLabel("문서 타입 패널 보이기").click();
+  await expect(page.locator(".sidebar")).toBeVisible();
+
+  await rail.getByLabel("문서 패널 숨기기").click();
+  await expect(page.locator(".document-list")).toHaveCount(0);
+  await rail.getByLabel("문서 패널 보이기").click();
+  await expect(page.locator(".document-list")).toBeVisible();
+});
+
+test("supports tree bulk controls and Finder context menu", async ({ page }) => {
+  await page.goto("/");
+
+  const documentList = page.locator(".document-list");
+  await expect(documentList.getByRole("button", { name: /references/ })).toBeVisible();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
+
+  await documentList.getByRole("button", { name: "모두 접기" }).click();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toHaveCount(0);
+
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
+
+  await documentList.getByRole("button", { name: /Anchor 용어집/ }).click({
+    button: "right",
+  });
+  await expect(page.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
+});
+
+test("centers the empty editor placeholder", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".document-tab-close").first().click();
+  const editor = page.locator(".editor-empty");
+  const plate = editor.locator(".empty-document-plate");
+  await expect(plate).toBeVisible();
+
+  const editorBox = await editor.boundingBox();
+  const plateBox = await plate.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(plateBox).not.toBeNull();
+  if (!editorBox || !plateBox) return;
+
+  const editorCenter = {
+    x: editorBox.x + editorBox.width / 2,
+    y: editorBox.y + editorBox.height / 2,
+  };
+  const plateCenter = {
+    x: plateBox.x + plateBox.width / 2,
+    y: plateBox.y + plateBox.height / 2,
+  };
+
+  expect(Math.abs(editorCenter.x - plateCenter.x)).toBeLessThan(2);
+  expect(Math.abs(editorCenter.y - plateCenter.y)).toBeLessThan(2);
+});

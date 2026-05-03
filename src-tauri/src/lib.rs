@@ -1,6 +1,7 @@
 mod ai_router;
 mod anchor_dir;
 mod document;
+mod file_manager;
 mod filename_rules;
 mod frontmatter;
 mod git;
@@ -26,6 +27,7 @@ use anchor_dir::{
 use document::{
     create_document, create_version, read_document, save_document, update_frontmatter_field,
 };
+use file_manager::reveal_in_file_manager;
 use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
 use gmail_gws::fetch_gmail_unread;
 use inbox::scan_inbox_drop;
@@ -65,6 +67,7 @@ pub fn run() {
             git_commit,
             git_changes,
             git_diff,
+            reveal_in_file_manager,
             scan_inbox_drop,
             start_inbox_watcher,
             stop_inbox_watcher,

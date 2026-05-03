@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDocumentTreeRows,
+  collectDocumentTreeFolderPaths,
   nextCollapsedFolders,
   virtualizeDocumentTreeRows,
 } from "./documentTree";
@@ -65,6 +66,19 @@ describe("nextCollapsedFolders", () => {
   it("adds and removes folder paths deterministically", () => {
     expect(nextCollapsedFolders(["z"], "a", true)).toEqual(["a", "z"]);
     expect(nextCollapsedFolders(["a", "z"], "a", false)).toEqual(["z"]);
+  });
+});
+
+describe("collectDocumentTreeFolderPaths", () => {
+  it("collects all nested folder paths in sorted order", () => {
+    expect(
+      collectDocumentTreeFolderPaths([
+        entry("projects/rise/plan.md"),
+        entry("admin/a.md"),
+        entry("projects/anchor/readme.md"),
+        entry("root.md"),
+      ]),
+    ).toEqual(["admin", "projects", "projects/anchor", "projects/rise"]);
   });
 });
 

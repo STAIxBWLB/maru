@@ -1,5 +1,23 @@
 export type DocumentBrowserMode = "list" | "tree";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
+export type ThemeMode = "system" | "light" | "dark";
+
+export interface WindowBoundsSettings {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LayoutSettings {
+  documentTypesPaneOpen: boolean;
+  documentsPaneOpen: boolean;
+  outlineOpen: boolean;
+  terminalOpen: boolean;
+  terminalHeight: number;
+  windowBounds?: WindowBoundsSettings | null;
+  windowMaximized?: boolean | null;
+}
 
 export interface TerminalLauncherSettings {
   enabled: boolean;
@@ -13,10 +31,14 @@ export interface AnchorSettings {
   ui: {
     documentBrowserMode: DocumentBrowserMode;
     collapsedTreeFolders: string[];
+    themeMode: ThemeMode;
+    accentColor: string;
+    layout: LayoutSettings;
   };
   terminal: {
     defaultPanelOpen: boolean;
     lastHeight: number;
+    autoLaunch: TerminalLauncherId | null;
     launchers: Record<TerminalLauncherId, TerminalLauncherSettings>;
   };
   ai: Record<string, unknown>;
@@ -29,10 +51,22 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   ui: {
     documentBrowserMode: "tree",
     collapsedTreeFolders: [],
+    themeMode: "system",
+    accentColor: "#2f5a3c",
+    layout: {
+      documentTypesPaneOpen: true,
+      documentsPaneOpen: true,
+      outlineOpen: true,
+      terminalOpen: false,
+      terminalHeight: 260,
+      windowBounds: null,
+      windowMaximized: null,
+    },
   },
   terminal: {
-    defaultPanelOpen: true,
+    defaultPanelOpen: false,
     lastHeight: 260,
+    autoLaunch: "shell",
     launchers: {
       claude: {
         enabled: true,
@@ -63,19 +97,21 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
   const launchers = isRecord(terminal.launchers) ? terminal.launchers : {};
   const legacyAi = isRecord(value.ai) ? value.ai : {};
   const legacyRuntimes = isRecord(legacyAi.runtimes) ? legacyAi.runtimes : {};
+  const layout = normalizeLayout(ui.layout, terminal);
 
   return {
     version: 1,
     ui: {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
+      themeMode: parseThemeMode(ui.themeMode) ?? DEFAULT_ANCHOR_SETTINGS.ui.themeMode,
+      accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
+      layout,
     },
     terminal: {
-      defaultPanelOpen:
-        typeof terminal.defaultPanelOpen === "boolean"
-          ? terminal.defaultPanelOpen
-          : DEFAULT_ANCHOR_SETTINGS.terminal.defaultPanelOpen,
-      lastHeight: normalizeTerminalHeight(terminal.lastHeight),
+      defaultPanelOpen: layout.terminalOpen,
+      lastHeight: layout.terminalHeight,
+      autoLaunch: parseAutoLaunch(terminal.autoLaunch),
       launchers: {
         claude: normalizeLauncher(
           launchers.claude ?? legacyRuntimes["claude-code"],
@@ -107,6 +143,7 @@ function cloneDefaultSettings(): AnchorSettings {
     ui: {
       ...DEFAULT_ANCHOR_SETTINGS.ui,
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
+      layout: { ...DEFAULT_ANCHOR_SETTINGS.ui.layout },
     },
     terminal: {
       ...DEFAULT_ANCHOR_SETTINGS.terminal,
@@ -142,9 +179,78 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
   return value === "list" || value === "tree" ? value : null;
 }
 
+function parseThemeMode(value: unknown): ThemeMode | null {
+  return value === "system" || value === "light" || value === "dark" ? value : null;
+}
+
+function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
+  if (value === null) return null;
+  return value === "claude" || value === "codex" || value === "shell"
+    ? value
+    : DEFAULT_ANCHOR_SETTINGS.terminal.autoLaunch;
+}
+
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>): LayoutSettings {
+  const layout = isRecord(value) ? value : {};
+  const terminalOpen =
+    typeof layout.terminalOpen === "boolean"
+      ? layout.terminalOpen
+      : typeof legacyTerminal.defaultPanelOpen === "boolean"
+        ? legacyTerminal.defaultPanelOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.terminalOpen;
+  const terminalHeight = normalizeTerminalHeight(
+    layout.terminalHeight ?? legacyTerminal.lastHeight,
+  );
+  return {
+    documentTypesPaneOpen:
+      typeof layout.documentTypesPaneOpen === "boolean"
+        ? layout.documentTypesPaneOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.documentTypesPaneOpen,
+    documentsPaneOpen:
+      typeof layout.documentsPaneOpen === "boolean"
+        ? layout.documentsPaneOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.documentsPaneOpen,
+    outlineOpen:
+      typeof layout.outlineOpen === "boolean"
+        ? layout.outlineOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.outlineOpen,
+    terminalOpen,
+    terminalHeight,
+    windowBounds: normalizeWindowBounds(layout.windowBounds),
+    windowMaximized:
+      typeof layout.windowMaximized === "boolean" ? layout.windowMaximized : null,
+  };
+}
+
+function normalizeWindowBounds(value: unknown): WindowBoundsSettings | null {
+  if (!isRecord(value)) return null;
+  const x = finiteNumber(value.x);
+  const y = finiteNumber(value.y);
+  const width = finiteNumber(value.width);
+  const height = finiteNumber(value.height);
+  if (x == null || y == null || width == null || height == null) return null;
+  if (width < 640 || height < 480) return null;
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeHexColor(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed.toLowerCase() : fallback;
 }
 
 function normalizeTerminalHeight(value: unknown): number {

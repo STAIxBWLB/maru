@@ -25,13 +25,17 @@ import {
   TERMINAL_LAUNCHERS,
   terminalCommandPreview,
   terminalTabsReducer,
+  shouldAutoLaunchTerminal,
   type TerminalKind,
 } from "../lib/terminal";
 
 interface TerminalPanelProps {
   cwd: string | null;
-  settings: AnchorSettings["terminal"];
-  onSettingsChange: (settings: AnchorSettings["terminal"]) => void;
+  settings: AnchorSettings;
+  open: boolean;
+  height: number;
+  onOpenChange: (open: boolean) => void;
+  onHeightChange: (height: number) => void;
 }
 
 interface TerminalOutputEvent {
@@ -55,32 +59,27 @@ const MAX_HEIGHT = 520;
 export const TerminalPanel = memo(function TerminalPanel({
   cwd,
   settings,
-  onSettingsChange,
+  open,
+  height,
+  onOpenChange,
+  onHeightChange,
 }: TerminalPanelProps) {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(terminalTabsReducer, EMPTY_TERMINAL_STATE);
-  const [open, setOpen] = useState(settings.defaultPanelOpen);
-  const [height, setHeight] = useState(settings.lastHeight);
+  const [draftHeight, setDraftHeight] = useState(height);
   const [error, setError] = useState<string | null>(null);
   const handlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const hostRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const sessionByTabRef = useRef<Map<string, string>>(new Map());
   const tabBySessionRef = useRef<Map<string, string>>(new Map());
   const seqRef = useRef(1);
+  const autoLaunchRef = useRef(false);
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
   const canRunTerminal = useMemo(() => terminalAvailable(), []);
 
   useEffect(() => {
-    setOpen(settings.defaultPanelOpen);
-    setHeight(settings.lastHeight);
-  }, [settings.defaultPanelOpen, settings.lastHeight]);
-
-  const persistPanel = useCallback(
-    (patch: Partial<AnchorSettings["terminal"]>) => {
-      onSettingsChange({ ...settings, ...patch });
-    },
-    [onSettingsChange, settings],
-  );
+    setDraftHeight(height);
+  }, [height]);
 
   const fitTab = useCallback((tabId: string) => {
     const handle = handlesRef.current.get(tabId);
@@ -159,7 +158,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   useEffect(() => {
     if (!open || !activeTab) return;
     window.requestAnimationFrame(() => fitTab(activeTab.id));
-  }, [activeTab, fitTab, height, open]);
+  }, [activeTab, fitTab, draftHeight, open]);
 
   useEffect(() => {
     if (!open || !activeTab) return;
@@ -195,7 +194,7 @@ export const TerminalPanel = memo(function TerminalPanel({
         setError(t("terminal.tauriRequired"));
         return;
       }
-      const launcher = settings.launchers[kind];
+      const launcher = settings.terminal.launchers[kind];
       if (!launcher?.enabled) return;
       const tabId = `terminal-${Date.now()}-${seqRef.current++}`;
       const sessionId = `term-${
@@ -239,8 +238,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       tabBySessionRef.current.set(sessionId, tabId);
       dispatch({ type: "create", tab: createTerminalTab(tabId, kind, title) });
       dispatch({ type: "attach", tabId, sessionId });
-      setOpen(true);
-      persistPanel({ defaultPanelOpen: true });
+      if (!open) onOpenChange(true);
       setError(null);
 
       try {
@@ -261,8 +259,19 @@ export const TerminalPanel = memo(function TerminalPanel({
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [attachTerminal, canRunTerminal, cwd, fitTab, persistPanel, settings.launchers, t],
+    [attachTerminal, canRunTerminal, cwd, fitTab, onOpenChange, open, settings.terminal.launchers, t],
   );
+
+  useEffect(() => {
+    if (!open) {
+      autoLaunchRef.current = false;
+      return;
+    }
+    const launcher = shouldAutoLaunchTerminal(settings, open, state.tabs.length);
+    if (!launcher || autoLaunchRef.current) return;
+    autoLaunchRef.current = true;
+    void launch(launcher);
+  }, [launch, open, settings, state.tabs.length]);
 
   const closeTab = useCallback((tabId: string) => {
     const sessionId = sessionByTabRef.current.get(tabId);
@@ -278,12 +287,8 @@ export const TerminalPanel = memo(function TerminalPanel({
   }, []);
 
   const toggleOpen = useCallback(() => {
-    setOpen((current) => {
-      const next = !current;
-      persistPanel({ defaultPanelOpen: next });
-      return next;
-    });
-  }, [persistPanel]);
+    onOpenChange(!open);
+  }, [onOpenChange, open]);
 
   const startResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -291,7 +296,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       const handle = event.currentTarget;
       const pointerId = event.pointerId;
       const startY = event.clientY;
-      const startHeight = height;
+      const startHeight = draftHeight;
       let latest = startHeight;
       handle.setPointerCapture(pointerId);
 
@@ -302,7 +307,7 @@ export const TerminalPanel = memo(function TerminalPanel({
           Math.max(MIN_HEIGHT, startHeight + startY - move.clientY),
         );
         latest = next;
-        setHeight(next);
+        setDraftHeight(next);
       };
       const cleanup = () => {
         handle.removeEventListener("pointermove", onMove);
@@ -313,16 +318,16 @@ export const TerminalPanel = memo(function TerminalPanel({
       const onEnd = (end: PointerEvent) => {
         if (end.pointerId !== pointerId) return;
         cleanup();
-        persistPanel({ lastHeight: latest });
+        onHeightChange(latest);
       };
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onEnd);
       handle.addEventListener("pointercancel", onEnd);
     },
-    [height, persistPanel],
+    [draftHeight, onHeightChange],
   );
 
-  const panelStyle = open ? { height } : undefined;
+  const panelStyle = open ? { height: draftHeight } : undefined;
 
   return (
     <section className={open ? "terminal-panel" : "terminal-panel collapsed"} style={panelStyle}>
@@ -340,7 +345,7 @@ export const TerminalPanel = memo(function TerminalPanel({
         </button>
         <div className="terminal-launchers" role="group" aria-label={t("terminal.launchers")}>
           {TERMINAL_LAUNCHERS.map((launcher) => {
-            const enabled = settings.launchers[launcher.id]?.enabled ?? true;
+            const enabled = settings.terminal.launchers[launcher.id]?.enabled ?? true;
             return (
               <button
                 key={launcher.id}

@@ -11,7 +11,7 @@ Local-first markdown vault desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). `scan_vault` rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-vault persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
-| 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | Document browser supports list/tree mode with persisted folder collapse state. The shell now uses a Cursor-style activity rail, Explorer/editor layout, and bottom integrated terminal. `.anchor/settings.json` stores UI/terminal defaults plus future AI, inbox-channel, and connector placeholders. Claude, Codex, and Shell launch as real PTY tabs from the active vault/workspace. |
+| 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | Document browser supports list/tree mode with persisted folder collapse state, collapse/expand-all, and Reveal in Finder. The shell now uses a Cursor-style activity rail, independently collapsible Explorer panels, editor layout, and bottom integrated terminal. `.anchor/settings.json` stores theme/accent/layout/window/terminal defaults plus future AI, inbox-channel, and connector placeholders. Claude, Codex, and Shell launch as real PTY tabs from the active vault/workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. |
 | 3 — Built-in Skills | 📋 planned | |
 | 4 — Document Edit Mode | 📋 planned | |
 
@@ -33,8 +33,8 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
 │   React 19 + Radix UI + marked (preview) + DOMPurify         │
 │   Phase 1B: + BlockNote rich editor + MediaPipe (Phase 4)    │
 │                                                               │
-│   Activity rail: Docs / Inbox / System                         │
-│   Explorer tree + editor + bottom integrated terminal           │
+│   Activity rail: Docs / Inbox / Settings                        │
+│   Collapsible Explorer tree + editor + bottom integrated terminal│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
@@ -98,10 +98,11 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Tree + Cursor shell + integrated terminal add-on (✓ shipped)**:
 
-1. **Document tree** — the document browser has list/tree mode, folder-first sorting, search/type-filter auto-expansion, and persisted collapsed folders.
-2. **Workspace settings** — `.anchor/settings.json` carries UI defaults, terminal panel defaults, launcher preferences, and placeholders for AI providers, inbox channels, and connectors. `.anchor/mcp.json` and `.anchor/skills.json` remain their own SSOT files.
-3. **Cursor-style shell** — the main app uses a left activity rail for Docs / Inbox / System, an Explorer tree, central editor tabs, and a collapsible bottom terminal panel.
-4. **Integrated terminal** — `portable-pty` sessions stream through `terminal://output` and `terminal://exit`. Launcher buttons start `claude`, `codex --cd <cwd>`, or `$SHELL` in independent xterm tabs; closing a tab kills its PTY process.
+1. **Document tree** — the document browser has list/tree mode, folder-first sorting, search/type-filter auto-expansion, persisted collapsed folders, collapse/expand-all, and a Reveal in Finder context menu for files/folders.
+2. **Workspace settings** — `.anchor/settings.json` carries UI defaults, theme/accent, panel/window layout state, terminal defaults, launcher preferences, and placeholders for AI providers, inbox channels, and connectors. `.anchor/mcp.json` and `.anchor/skills.json` remain their own SSOT files.
+3. **Cursor-style shell** — the main app uses a left activity rail for Docs / Inbox / Settings, independently collapsible document type and document Explorer panels, central editor tabs, and a collapsible bottom terminal panel.
+4. **Integrated terminal** — `portable-pty` sessions stream through `terminal://output` and `terminal://exit`. Launcher buttons start `claude`, `codex --cd <cwd>`, or `$SHELL` in independent xterm tabs; closing a tab kills its PTY process. First run keeps the terminal panel collapsed; later launches restore the previous panel height/open state and auto-start Shell only when the panel is open with no tabs.
+5. **Settings window** — Settings opens in a separate Tauri window and edits document browser mode, theme mode, accent color, terminal auto-launch, and raw JSON surfaces for AI, inbox channels, connectors, MCP, projects, and skills.
 
 **Remaining write/apply work**:
 
@@ -114,7 +115,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 **AI / terminal dispatch**:
 - Inbox classification: Claude Code CLI subprocess through `start_claude_cli_invocation`, streamed with the existing `ai://*` events.
 - General Claude/Codex use: integrated terminal PTY tabs, using each CLI's own auth, sandbox, and approval policy.
-- Future API fallback: Anthropic/OpenAI settings can be added under System once there is a write/apply workflow that needs it.
+- Future API fallback: Anthropic/OpenAI settings can be added in the Settings window once there is a write/apply workflow that needs it.
 
 **Skip in Phase 2**: iMessage DB, Slack, Outlook (Phase 3 wraps Outlook via the `ms-office` skill).
 
@@ -231,7 +232,7 @@ A vault is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files. 
 <vault>/
   .anchor/
     cache/           # disposable vault index for warm startup
-    settings.json    # anchor UI/terminal defaults
+    settings.json    # anchor UI/theme/layout/window/terminal defaults
     versions/        # snapshots created via the "Version" button
   .anchorignore      # optional, gitignore-style segment patterns
 ```
@@ -274,6 +275,7 @@ Major deliverables come from existing, validated codebases — anchor is integra
 | 2 | `tidy/app/electron/ipc-handlers.js:20-109` | `src-tauri/src/korean_date.rs` | Korean NL date parser |
 | 2 | `tolaria/src-tauri/src/{ai_agents,claude_cli}.rs` | `src-tauri/src/ai_router.rs` | Claude inbox event stream bridge, adapted |
 | 2.5 | n/a | `src-tauri/src/terminal.rs` | portable-pty integrated terminal manager |
+| 2.5 | n/a | `src-tauri/src/file_manager.rs` | Reveal in Finder/file-manager bridge |
 | 2 | n/a | `src-tauri/src/inbox_classifier.rs` + `src/lib/aiInvoke.ts` | prompt/parser + frontend orchestration |
 | 4 | `anchor-editor/services/whisper/server.py` | `services/whisper/` | Korean large-v3 |
 | 4 | `anchor-editor/apps/web/lib/intent-fusion.ts` | `src/lib/intent-fusion.ts` | RISE-generic generalization |

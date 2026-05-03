@@ -200,6 +200,16 @@ export async function gitDiff(vaultPath: string, filePath: string): Promise<stri
   return invoke<string>("git_diff", { vaultPath, filePath });
 }
 
+export async function revealInFileManager(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Reveal in Finder requires the Tauri app.");
+  }
+  await invoke("reveal_in_file_manager", { vaultPath, targetPath });
+}
+
 // === Phase 2 inbox watcher / AI bridge / classifier ===
 
 export async function startInboxWatcher(vaultPath: string): Promise<void> {
