@@ -9,7 +9,7 @@ import {
 export interface NeighborhoodTarget {
   /** Display title — falls back to the raw target if unresolved. */
   title: string;
-  /** Vault-relative path of the resolved entry, or "" when unresolved. */
+  /** Workspace-relative path of the resolved entry, or "" when unresolved. */
   relPath: string;
   /** Resolved VaultEntry, or null when the target is missing in the vault. */
   entry: VaultEntry | null;

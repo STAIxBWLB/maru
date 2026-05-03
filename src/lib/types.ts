@@ -37,14 +37,50 @@ export interface CreatedDocument {
 }
 
 export type WorkspaceVisibility = "private" | "public";
-export type WorkspaceWritePolicy = "direct" | "delegated";
+export type WorkspaceProvider =
+  | "local"
+  | "googleDrive"
+  | "oneDrive"
+  | "sharePoint"
+  | "nextcloud"
+  | "obsidian"
+  | "unknown";
+export type WorkspaceExternalWriter =
+  | "gdrive"
+  | "onedrive"
+  | "sharepoint"
+  | "nextcloud"
+  | "mcp-obsidian";
+export type WorkspaceWritePolicy = "direct" | "delegated" | "readOnly";
+export type ProviderPermissionSource = "manual" | "filesystem" | "api" | "unknown";
+
+export interface WorkspaceCapabilities {
+  canRead: boolean;
+  canCreate: boolean;
+  canModify: boolean;
+  canDelete: boolean;
+  canRenameMove: boolean;
+  canShare: boolean;
+  canManageMembers: boolean;
+}
+
+export interface ProviderPermissionSummary {
+  role: string | null;
+  source: ProviderPermissionSource;
+  checkedAt: string | null;
+  capabilities: WorkspaceCapabilities;
+  warning?: string | null;
+}
 
 export interface WorkspaceRootEntry {
   label: string;
   path: string;
   visibility: WorkspaceVisibility;
-  externalWriter?: string | null;
+  provider: WorkspaceProvider;
+  providerId?: string | null;
+  externalWriter?: WorkspaceExternalWriter | null;
   writePolicy: WorkspaceWritePolicy;
+  permissionSummary?: ProviderPermissionSummary | null;
 }
 
 export interface WorkspaceRegistry {
@@ -135,7 +171,17 @@ export interface WorkspacePaths {
   vault?: string | null;
   mirror?: string | null;
   "private"?: string | string[] | null;
-  "public"?: string | string[] | null;
+  "public"?: string | string[] | WorkspacePublicPathSpec | WorkspacePublicPathSpec[] | null;
+}
+
+export interface WorkspacePublicPathSpec {
+  label?: string | null;
+  path: string;
+  provider?: WorkspaceProvider | null;
+  providerId?: string | null;
+  externalWriter?: WorkspaceExternalWriter | null;
+  writePolicy?: WorkspaceWritePolicy | null;
+  role?: string | null;
 }
 
 export interface WorkspaceConfig {
@@ -157,6 +203,16 @@ export interface WorkspaceDetect {
   resolvedPrivateExists: boolean;
   resolvedPublicPath: string | null;
   resolvedPublicExists: boolean;
+  publicWorkspaces?: Array<{
+    label: string;
+    path: string;
+    exists: boolean;
+    provider: WorkspaceProvider;
+    providerId?: string | null;
+    externalWriter?: WorkspaceExternalWriter | null;
+    writePolicy: WorkspaceWritePolicy;
+    role?: string | null;
+  }>;
 }
 
 export interface WorkspaceSummary {

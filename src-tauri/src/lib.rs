@@ -38,7 +38,8 @@ use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
 use vault_list::{
-    add_workspace_root, list_workspace_roots, remove_workspace_root, set_active_workspace_root,
+    add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
+    remove_workspace_root, set_active_workspace_root,
 };
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
@@ -64,6 +65,7 @@ pub fn run() {
             add_workspace_root,
             remove_workspace_root,
             set_active_workspace_root,
+            refresh_workspace_capabilities,
             git_status,
             git_status_fast,
             git_commit,

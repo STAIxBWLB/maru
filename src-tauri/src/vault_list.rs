@@ -3,6 +3,7 @@
 // concept to `vaults.json`; the loader migrates that shape on first use
 // and keeps the old file untouched.
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,21 +14,114 @@ const LEGACY_VAULTS_FILE: &str = "vaults.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapabilities {
+    pub can_read: bool,
+    pub can_create: bool,
+    pub can_modify: bool,
+    pub can_delete: bool,
+    pub can_rename_move: bool,
+    pub can_share: bool,
+    pub can_manage_members: bool,
+}
+
+impl WorkspaceCapabilities {
+    fn read_only(can_read: bool) -> Self {
+        Self {
+            can_read,
+            can_create: false,
+            can_modify: false,
+            can_delete: false,
+            can_rename_move: false,
+            can_share: false,
+            can_manage_members: false,
+        }
+    }
+
+    fn full(can_read: bool, writable: bool) -> Self {
+        Self {
+            can_read,
+            can_create: can_read && writable,
+            can_modify: can_read && writable,
+            can_delete: can_read && writable,
+            can_rename_move: can_read && writable,
+            can_share: can_read && writable,
+            can_manage_members: can_read && writable,
+        }
+    }
+
+    fn intersect(&self, other: &Self) -> Self {
+        Self {
+            can_read: self.can_read && other.can_read,
+            can_create: self.can_create && other.can_create,
+            can_modify: self.can_modify && other.can_modify,
+            can_delete: self.can_delete && other.can_delete,
+            can_rename_move: self.can_rename_move && other.can_rename_move,
+            can_share: self.can_share && other.can_share,
+            can_manage_members: self.can_manage_members && other.can_manage_members,
+        }
+    }
+}
+
+impl Default for WorkspaceCapabilities {
+    fn default() -> Self {
+        Self::read_only(false)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPermissionSummary {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub capabilities: WorkspaceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub enum WorkspaceWriteAction {
+    Create,
+    Modify,
+    Delete,
+    RenameMove,
+    Share,
+    ManageMembers,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceRootEntry {
     pub label: String,
     pub path: String,
     /// "private" | "public". Public workspaces are optional and may be
     /// read-only, but visibility and write policy stay independent.
     pub visibility: String,
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "provider_id"
+    )]
+    pub provider_id: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         alias = "external_writer"
     )]
     pub external_writer: Option<String>,
-    /// "direct" | "delegated". Derived from external_writer for legacy
-    /// imports and v1 add/upsert calls.
+    /// "direct" | "delegated" | "readOnly". Derived from external_writer
+    /// for legacy imports and v1 add/upsert calls.
+    #[serde(default)]
     pub write_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_summary: Option<ProviderPermissionSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -143,22 +237,80 @@ fn normalize_visibility(value: &str) -> String {
     }
 }
 
-fn infer_write_policy(external_writer: &Option<String>) -> String {
-    if external_writer.is_some() {
-        "delegated".to_string()
-    } else {
-        "direct".to_string()
+fn default_provider() -> String {
+    "local".to_string()
+}
+
+fn normalize_provider(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "local".to_string();
     }
+    match trimmed {
+        "local" => "local".to_string(),
+        "googleDrive" | "gdrive" | "google-drive" => "googleDrive".to_string(),
+        "oneDrive" | "onedrive" | "one-drive" => "oneDrive".to_string(),
+        "sharePoint" | "sharepoint" | "share-point" => "sharePoint".to_string(),
+        "nextcloud" | "nextCloud" => "nextcloud".to_string(),
+        "obsidian" | "mcp-obsidian" => "obsidian".to_string(),
+        "unknown" => "unknown".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn normalize_external_writer(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        match trimmed {
+            "" | "none" => None,
+            "googleDrive" | "google-drive" | "gdrive" => Some("gdrive".to_string()),
+            "oneDrive" | "one-drive" | "onedrive" => Some("onedrive".to_string()),
+            "sharePoint" | "share-point" | "sharepoint" => Some("sharepoint".to_string()),
+            "nextCloud" | "nextcloud" => Some("nextcloud".to_string()),
+            "obsidian" | "mcp-obsidian" => Some("mcp-obsidian".to_string()),
+            other => Some(other.to_string()),
+        }
+    })
+}
+
+fn provider_from_external_writer(writer: &Option<String>) -> Option<String> {
+    match writer.as_deref() {
+        Some("gdrive") => Some("googleDrive".to_string()),
+        Some("onedrive") => Some("oneDrive".to_string()),
+        Some("sharepoint") => Some("sharePoint".to_string()),
+        Some("nextcloud") => Some("nextcloud".to_string()),
+        Some("mcp-obsidian") => Some("obsidian".to_string()),
+        _ => None,
+    }
+}
+
+fn normalize_write_policy(value: &str, external_writer: &Option<String>) -> String {
+    if external_writer.is_some() {
+        return "delegated".to_string();
+    }
+    match value {
+        "readOnly" | "read-only" | "readonly" => "readOnly".to_string(),
+        "delegated" => "delegated".to_string(),
+        _ => "direct".to_string(),
+    }
+}
+
+fn infer_write_policy(external_writer: &Option<String>) -> String {
+    normalize_write_policy("", external_writer)
 }
 
 fn normalize_registry(registry: &mut WorkspaceRegistry) {
     for entry in &mut registry.workspaces {
         entry.visibility = normalize_visibility(&entry.visibility);
-        if entry.write_policy != "delegated" && entry.write_policy != "direct" {
-            entry.write_policy = infer_write_policy(&entry.external_writer);
-        }
-        if entry.external_writer.is_some() {
+        entry.external_writer = normalize_external_writer(entry.external_writer.clone());
+        entry.provider = provider_from_external_writer(&entry.external_writer)
+            .unwrap_or_else(|| normalize_provider(&entry.provider));
+        entry.write_policy = normalize_write_policy(&entry.write_policy, &entry.external_writer);
+        entry.permission_summary = Some(compute_permission_summary(entry, false));
+        if entry.provider == "obsidian" && entry.external_writer.is_none() {
+            entry.external_writer = Some("mcp-obsidian".to_string());
             entry.write_policy = "delegated".to_string();
+            entry.permission_summary = Some(compute_permission_summary(entry, false));
         }
     }
 
@@ -222,7 +374,11 @@ fn migrate_legacy_vault_list(legacy: LegacyVaultList) -> WorkspaceRegistry {
             path: entry.path,
             visibility: visibility.to_string(),
             external_writer: entry.external_writer.clone(),
+            provider: provider_from_external_writer(&entry.external_writer)
+                .unwrap_or_else(|| "local".to_string()),
+            provider_id: None,
             write_policy: infer_write_policy(&entry.external_writer),
+            permission_summary: None,
         });
     }
 
@@ -240,56 +396,204 @@ pub fn list_workspace_roots() -> Result<WorkspaceRegistry, String> {
     load_registry()
 }
 
+#[allow(dead_code)]
 pub fn assert_anchor_owns_writes(workspace_path: &str) -> Result<(), String> {
+    assert_anchor_can_write(workspace_path, WorkspaceWriteAction::Modify)
+}
+
+pub fn assert_anchor_can_write(
+    workspace_path: &str,
+    action: WorkspaceWriteAction,
+) -> Result<(), String> {
     let registry = load_registry()?;
-    if let Some(writer) = delegated_writer_for_path(&registry, workspace_path) {
+    let Some(workspace) = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.path == workspace_path)
+    else {
+        return Ok(());
+    };
+    let summary = compute_permission_summary(workspace, false);
+    if !capability_allows(&summary.capabilities, action) {
+        let writer = workspace
+            .external_writer
+            .as_deref()
+            .unwrap_or(match workspace.write_policy.as_str() {
+                "readOnly" => "read-only workspace",
+                "delegated" => "external writer",
+                _ => "provider capabilities",
+            });
         return Err(format!(
-            "Workspace writes are delegated to {writer}; Anchor will not write directly."
+            "Workspace writes are blocked by {writer}; Anchor will not write directly."
         ));
     }
     Ok(())
 }
 
-fn delegated_writer_for_path(registry: &WorkspaceRegistry, workspace_path: &str) -> Option<String> {
-    registry
-        .workspaces
-        .iter()
-        .find(|workspace| workspace.path == workspace_path)
-        .and_then(|workspace| {
-            if workspace.write_policy == "delegated" || workspace.external_writer.is_some() {
-                Some(
-                    workspace
-                        .external_writer
-                        .clone()
-                        .unwrap_or_else(|| "external writer".to_string()),
-                )
-            } else {
-                None
+fn capability_allows(capabilities: &WorkspaceCapabilities, action: WorkspaceWriteAction) -> bool {
+    match action {
+        WorkspaceWriteAction::Create => capabilities.can_create,
+        WorkspaceWriteAction::Modify => capabilities.can_modify,
+        WorkspaceWriteAction::Delete => capabilities.can_delete,
+        WorkspaceWriteAction::RenameMove => capabilities.can_rename_move,
+        WorkspaceWriteAction::Share => capabilities.can_share,
+        WorkspaceWriteAction::ManageMembers => capabilities.can_manage_members,
+    }
+}
+
+fn filesystem_capabilities(path: &str) -> WorkspaceCapabilities {
+    let path = Path::new(path);
+    let can_read = path.exists();
+    let writable = fs::metadata(path)
+        .map(|metadata| !metadata.permissions().readonly())
+        .unwrap_or(false);
+    WorkspaceCapabilities::full(can_read, writable)
+}
+
+fn role_capabilities(provider: &str, role: Option<&str>, can_read: bool) -> (WorkspaceCapabilities, Option<String>) {
+    let Some(role) = role.map(|value| value.trim()).filter(|value| !value.is_empty()) else {
+        if provider == "local" {
+            return (WorkspaceCapabilities::full(can_read, true), None);
+        }
+        return (
+            WorkspaceCapabilities::read_only(can_read),
+            Some("Provider role is not set; public workspace is read-only until capabilities are refreshed.".to_string()),
+        );
+    };
+    let normalized: String = role
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| !matches!(ch, ' ' | '_' | '-'))
+        .collect();
+    match provider {
+        "googleDrive" => match normalized.as_str() {
+            "organizer" | "manager" => (WorkspaceCapabilities::full(can_read, true), None),
+            "fileorganizer" | "contentmanager" => {
+                let mut caps = WorkspaceCapabilities::full(can_read, true);
+                caps.can_manage_members = false;
+                (caps, None)
             }
-        })
+            "writer" | "contributor" => {
+                let mut caps = WorkspaceCapabilities::read_only(can_read);
+                caps.can_create = can_read;
+                caps.can_modify = can_read;
+                (caps, None)
+            }
+            "commenter" | "reader" | "viewer" => (WorkspaceCapabilities::read_only(can_read), None),
+            _ => (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Google Drive role '{role}' treated as read-only.")),
+            ),
+        },
+        "oneDrive" | "sharePoint" => match normalized.as_str() {
+            "owner" => (WorkspaceCapabilities::full(can_read, true), None),
+            "write" | "canedit" | "edit" | "editor" => {
+                let mut caps = WorkspaceCapabilities::full(can_read, true);
+                caps.can_manage_members = false;
+                (caps, None)
+            }
+            "read" | "canview" | "view" | "viewer" => (WorkspaceCapabilities::read_only(can_read), None),
+            _ => (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Microsoft role '{role}' treated as read-only.")),
+            ),
+        },
+        "nextcloud" => {
+            if let Ok(mask) = role.parse::<u32>() {
+                let can_update = mask & 2 != 0;
+                let can_create = mask & 4 != 0;
+                let can_delete = mask & 8 != 0;
+                let can_share = mask & 16 != 0;
+                return (
+                    WorkspaceCapabilities {
+                        can_read: can_read && mask & 1 != 0,
+                        can_create: can_read && can_create,
+                        can_modify: can_read && can_update,
+                        can_delete: can_read && can_delete,
+                        can_rename_move: can_read && can_update && can_create && can_delete,
+                        can_share: can_read && can_share,
+                        can_manage_members: false,
+                    },
+                    None,
+                );
+            }
+            (
+                WorkspaceCapabilities::read_only(can_read),
+                Some(format!("Unknown Nextcloud permissions '{role}' treated as read-only.")),
+            )
+        }
+        "obsidian" => (WorkspaceCapabilities::read_only(can_read), None),
+        _ => (
+            WorkspaceCapabilities::read_only(can_read),
+            Some("Unknown provider treated as read-only.".to_string()),
+        ),
+    }
+}
+
+fn compute_permission_summary(
+    entry: &WorkspaceRootEntry,
+    update_checked_at: bool,
+) -> ProviderPermissionSummary {
+    let local_caps = filesystem_capabilities(&entry.path);
+    let prior = entry.permission_summary.as_ref();
+    let role = prior.and_then(|summary| summary.role.clone());
+    let source = prior
+        .map(|summary| summary.source.clone())
+        .filter(|value| matches!(value.as_str(), "manual" | "filesystem" | "api"))
+        .unwrap_or_else(|| {
+            if role.is_some() {
+                "manual".to_string()
+            } else if entry.provider == "local" {
+                "filesystem".to_string()
+            } else {
+                "unknown".to_string()
+            }
+        });
+    let (provider_caps, role_warning) =
+        role_capabilities(&entry.provider, role.as_deref(), local_caps.can_read);
+    let mut capabilities = provider_caps.intersect(&local_caps);
+    let mut warning = role_warning.or_else(|| prior.and_then(|summary| summary.warning.clone()));
+    let checked_at = if update_checked_at {
+        Some(Utc::now().to_rfc3339())
+    } else {
+        prior.and_then(|summary| summary.checked_at.clone())
+    };
+
+    if entry.visibility == "public" && source == "unknown" && entry.provider != "local" {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+        warning = Some("Capabilities are unverified; public workspace is read-only.".to_string());
+    }
+    if entry.visibility == "public" && entry.provider != "local" && checked_at.is_none() {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+        warning = Some("Capabilities are stale; refresh before direct writes.".to_string());
+    }
+    if entry.write_policy == "readOnly" || entry.write_policy == "delegated" || entry.external_writer.is_some() {
+        capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
+    }
+
+    ProviderPermissionSummary {
+        role,
+        source,
+        checked_at,
+        capabilities,
+        warning,
+    }
 }
 
 #[tauri::command]
-pub fn add_workspace_root(
-    label: String,
-    path: String,
-    visibility: String,
-    external_writer: Option<String>,
-) -> Result<WorkspaceRegistry, String> {
-    upsert_workspace_root(WorkspaceRootEntry {
-        label,
-        path,
-        visibility: normalize_visibility(&visibility),
-        write_policy: infer_write_policy(&external_writer),
-        external_writer,
-    })
+pub fn add_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
+    upsert_workspace_root(entry)
 }
 
 pub fn upsert_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
     let mut registry = load_registry()?;
     let mut normalized = entry;
     normalized.visibility = normalize_visibility(&normalized.visibility);
-    normalized.write_policy = infer_write_policy(&normalized.external_writer);
+    normalized.external_writer = normalize_external_writer(normalized.external_writer.clone());
+    normalized.provider = provider_from_external_writer(&normalized.external_writer)
+        .unwrap_or_else(|| normalize_provider(&normalized.provider));
+    normalized.write_policy = normalize_write_policy(&normalized.write_policy, &normalized.external_writer);
+    normalized.permission_summary = Some(compute_permission_summary(&normalized, true));
     let active_path = normalized.path.clone();
     let active_visibility = normalized.visibility.clone();
 
@@ -303,6 +607,22 @@ pub fn upsert_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegis
         registry.workspaces.push(normalized);
     }
     *active_slot(&mut registry.active_by_visibility, &active_visibility) = Some(active_path);
+    normalize_registry(&mut registry);
+    save_registry(&registry)?;
+    Ok(registry)
+}
+
+#[tauri::command]
+pub fn refresh_workspace_capabilities(path: String) -> Result<WorkspaceRegistry, String> {
+    let mut registry = load_registry()?;
+    let Some(entry) = registry
+        .workspaces
+        .iter_mut()
+        .find(|workspace| workspace.path == path)
+    else {
+        return Err("Workspace is not registered".to_string());
+    };
+    entry.permission_summary = Some(compute_permission_summary(entry, true));
     normalize_registry(&mut registry);
     save_registry(&registry)?;
     Ok(registry)
@@ -352,6 +672,19 @@ pub fn set_active_workspace_root(
 mod tests {
     use super::*;
 
+    fn entry(label: &str, path: &str, visibility: &str) -> WorkspaceRootEntry {
+        WorkspaceRootEntry {
+            label: label.to_string(),
+            path: path.to_string(),
+            visibility: visibility.to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            permission_summary: None,
+        }
+    }
+
     fn save_and_reload(registry: &WorkspaceRegistry) -> WorkspaceRegistry {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("workspaces.json");
@@ -372,19 +705,16 @@ mod tests {
     fn roundtrip_preserves_workspace_data() {
         let registry = WorkspaceRegistry {
             workspaces: vec![
-                WorkspaceRootEntry {
-                    label: "Private".to_string(),
-                    path: "/Users/yj/workspace/work".to_string(),
-                    visibility: "private".to_string(),
-                    external_writer: None,
-                    write_policy: "direct".to_string(),
-                },
+                entry("Private", "/Users/yj/workspace/work", "private"),
                 WorkspaceRootEntry {
                     label: "Public".to_string(),
                     path: "/Users/yj/workspace/public".to_string(),
                     visibility: "public".to_string(),
+                    provider: "obsidian".to_string(),
+                    provider_id: None,
                     external_writer: Some("mcp-obsidian".to_string()),
                     write_policy: "delegated".to_string(),
+                    permission_summary: None,
                 },
             ],
             active_by_visibility: ActiveByVisibility {
@@ -398,6 +728,7 @@ mod tests {
         assert_eq!(loaded.workspaces[0].visibility, "private");
         assert_eq!(loaded.workspaces[1].visibility, "public");
         assert_eq!(loaded.workspaces[1].write_policy, "delegated");
+        assert_eq!(loaded.workspaces[1].provider, "obsidian");
     }
 
     #[test]
@@ -437,6 +768,8 @@ mod tests {
         );
         assert_eq!(migrated.workspaces[0].visibility, "private");
         assert_eq!(migrated.workspaces[1].visibility, "public");
+        assert_eq!(migrated.workspaces[0].provider, "local");
+        assert_eq!(migrated.workspaces[1].provider, "obsidian");
     }
 
     #[test]
@@ -462,42 +795,143 @@ mod tests {
 
     #[test]
     fn delegated_policy_blocks_registered_workspace() {
-        let registry = WorkspaceRegistry {
-            workspaces: vec![WorkspaceRootEntry {
-                label: "Public".to_string(),
-                path: "/tmp/public".to_string(),
-                visibility: "public".to_string(),
-                external_writer: Some("mcp-obsidian".to_string()),
-                write_policy: "delegated".to_string(),
-            }],
-            active_by_visibility: ActiveByVisibility::default(),
-            hidden_defaults: vec![],
-        };
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.external_writer = Some("mcp-obsidian".to_string());
+        workspace.write_policy = "delegated".to_string();
+        workspace.provider = "obsidian".to_string();
 
-        assert_eq!(
-            delegated_writer_for_path(&registry, "/tmp/public").as_deref(),
-            Some("mcp-obsidian")
-        );
-        assert!(delegated_writer_for_path(&registry, "/tmp/plain").is_none());
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_create);
     }
 
     #[test]
     fn delegated_policy_without_named_writer_still_blocks() {
-        let registry = WorkspaceRegistry {
-            workspaces: vec![WorkspaceRootEntry {
-                label: "Public".to_string(),
-                path: "/tmp/public".to_string(),
-                visibility: "public".to_string(),
-                external_writer: None,
-                write_policy: "delegated".to_string(),
-            }],
-            active_by_visibility: ActiveByVisibility::default(),
-            hidden_defaults: vec![],
-        };
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.write_policy = "delegated".to_string();
 
-        assert_eq!(
-            delegated_writer_for_path(&registry, "/tmp/public").as_deref(),
-            Some("external writer")
-        );
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+    }
+
+    #[test]
+    fn read_only_policy_blocks_direct_writes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Reference", &dir.path().to_string_lossy(), "public");
+        workspace.write_policy = "readOnly".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_create);
+        assert!(!summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_delete);
+    }
+
+    #[test]
+    fn direct_policy_still_blocks_when_filesystem_probe_denies_writes() {
+        let missing = tempfile::TempDir::new().unwrap().path().join("missing-root");
+        let workspace = entry("Missing", &missing.to_string_lossy(), "private");
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(!summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_create);
+        assert!(!summary.capabilities.can_modify);
+    }
+
+    #[test]
+    fn provider_roles_map_to_capabilities() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut google = entry("Drive", &dir.path().to_string_lossy(), "public");
+        google.provider = "googleDrive".to_string();
+        google.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("contentManager".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+        let drive = compute_permission_summary(&google, true);
+        assert!(drive.capabilities.can_create);
+        assert!(drive.capabilities.can_delete);
+        assert!(drive.capabilities.can_share);
+        assert!(!drive.capabilities.can_manage_members);
+
+        let mut sharepoint = entry("SharePoint", &dir.path().to_string_lossy(), "public");
+        sharepoint.provider = "sharePoint".to_string();
+        sharepoint.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("Can edit".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+        let microsoft = compute_permission_summary(&sharepoint, true);
+        assert!(microsoft.capabilities.can_modify);
+        assert!(microsoft.capabilities.can_rename_move);
+        assert!(!microsoft.capabilities.can_manage_members);
+    }
+
+    #[test]
+    fn nextcloud_bitmask_maps_exact_permissions() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut nextcloud = entry("Nextcloud", &dir.path().to_string_lossy(), "public");
+        nextcloud.provider = "nextcloud".to_string();
+        nextcloud.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("7".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+
+        let summary = compute_permission_summary(&nextcloud, true);
+
+        assert!(summary.capabilities.can_read);
+        assert!(summary.capabilities.can_create);
+        assert!(summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_delete);
+        assert!(!summary.capabilities.can_rename_move);
+        assert!(!summary.capabilities.can_share);
+    }
+
+    #[test]
+    fn unknown_public_provider_defaults_read_only() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Unknown", &dir.path().to_string_lossy(), "public");
+        workspace.provider = "unknown".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(summary.warning.is_some());
+    }
+
+    #[test]
+    fn stale_public_provider_summary_defaults_read_only() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Drive", &dir.path().to_string_lossy(), "public");
+        workspace.provider = "googleDrive".to_string();
+        workspace.permission_summary = Some(ProviderPermissionSummary {
+            role: Some("contentManager".to_string()),
+            source: "manual".to_string(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        });
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(!summary.capabilities.can_modify);
+        assert!(summary.warning.as_deref().unwrap_or("").contains("stale"));
     }
 }

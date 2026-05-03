@@ -1,4 +1,4 @@
-# Anchor
+# Anchor Workspace
 
 Anchor Workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 
@@ -39,7 +39,7 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
 │  Rust core (src-tauri/src/)                                  │
-│   vault.rs       — workspace walkdir + .anchorignore + cached scan │
+│   workspace scan — walkdir + .anchorignore + cached index           │
 │   frontmatter/   — line-by-line YAML edit (preserves order)  │
 │   document.rs    — read/save/create/version + field patch    │
 │   git.rs         — status/commit/diff via shell-out          │
@@ -75,8 +75,8 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 - [x] **BlockNote rich editor + raw + preview 3-way toggle** — `RichMarkdownEditor` wraps `@blocknote/mantine`; frontmatter line is preserved across rich↔source by splitting on the leading `---…---\n` block before parsing. Source tab is the textarea (with Korean IME-aware `[[` autocomplete). Preview tab is `marked` + DOMPurify. Round-trip on real notes still needs the Phase 1A verification pass.
 - [x] **Single-window multi-tab editor** — shared editor tabs persist their workspace path and private/public visibility, with `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 select, ⌘W close. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast.
-- [x] **Workspace cache** — lightweight JSON cache at `<workspace>/.anchor/cache/vault-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs the authoritative workspace scan in the background. Full scans also precompute version names once and reuse compiled regexes.
-- [ ] **Monorepo extraction** — `crates/anchor-vault`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
+- [x] **Workspace cache** — lightweight JSON cache at `<workspace>/.anchor/cache/workspace-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs the authoritative workspace scan in the background. Full scans also precompute version names once and reuse compiled regexes.
+- [ ] **Monorepo extraction** — `crates/anchor-workspace`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
 - [x] **Playwright smoke + e2e** — browser smoke covers sample workspace boot, multi-tab open, source tab, and preview tab. Broader inbox/native Tauri e2e still belongs to Phase 2 verification.
 
 **Verification gate**: a full week of multi-tab work with project + meeting + people open simultaneously, daily commits, frontmatter preserved.
@@ -213,20 +213,43 @@ pnpm build
 # Rust unit + integration tests:
 cd src-tauri && cargo test --lib
 
-# Bench scan_vault on a real workspace:
-cd src-tauri && cargo test --release bench_scan_real_vault \
+# Bench workspace scan on a real workspace:
+cd src-tauri && cargo test --release bench_scan_real_workspace \
     -- --ignored --nocapture --test-threads=1
-# → ANCHOR_BENCH_VAULT=/some/path overrides the default ~/workspace/work
+# → ANCHOR_BENCH_WORKSPACE=/some/path overrides the default ~/workspace/work
 
 # Cold/warm startup expectation:
-# 1. first scan creates <workspace>/.anchor/cache/vault-index-v1.json
+# 1. first scan creates <workspace>/.anchor/cache/workspace-index-v1.json
 # 2. next app load renders cached entries + active document before the
 #    background scan refreshes the index
 ```
 
 ## Workspace Layout
 
-An Anchor Workspace is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files. Anchor stores per-workspace state at:
+An Anchor Workspace is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files.
+
+Private workspace is the required default. Public workspace is optional and means a provider-managed shared root, not internet publishing. V1 capability support is registry-only: Anchor stores non-secret provider metadata in `workspaces.json`, maps a manually entered provider role to coarse capabilities, intersects that with a filesystem writability probe, and gates direct writes in the UI and Rust commands. OAuth, Microsoft Graph, Google Drive, and Nextcloud live API checks are deferred.
+
+Supported public providers are Local, Google Drive, OneDrive, SharePoint, Nextcloud, Obsidian, and Unknown. `workspace.config.yaml` accepts:
+
+```yaml
+paths:
+  private: ~/workspace/work
+  public:
+    - label: Team Drive
+      path: ~/gdrive-workspace/work
+      provider: googleDrive
+      providerId: shared-drive-id
+      writePolicy: direct
+      role: contentManager
+    - label: Reference Site
+      path: ~/shared/reference
+      provider: sharePoint
+      writePolicy: readOnly
+      role: Can view
+```
+
+Anchor stores per-workspace state at:
 
 ```
 <workspace>/
@@ -260,12 +283,12 @@ Major deliverables come from existing, validated codebases — anchor is integra
 |-------|--------|-------------|------|
 | 0 | `tolaria/src-tauri/src/frontmatter/{yaml,ops}.rs` | `src-tauri/src/frontmatter/` | line-edit, byte-identical |
 | 0 | `tolaria/src-tauri/src/vault_list.rs` | `src-tauri/src/vault_list.rs` | workspace registry |
-| 0 | `tolaria/src-tauri/src/vault/filename_rules.rs` | `src-tauri/src/filename_rules.rs` | NFC/NFD safety |
+| 0 | Tolaria filename rules module | `src-tauri/src/filename_rules.rs` | NFC/NFD safety |
 | 1A | `tolaria/src/utils/wikilinks.ts` | `src/lib/wikilinks.ts` | 255 LOC, verbatim |
 | 1A | `tolaria/src/utils/wikilinkSuggestions.ts` | `src/lib/wikilinkSuggestions.ts` | adapted, +memo index |
 | 1A | `tolaria/src/utils/neighborhoodHistory.ts` | `src/lib/neighborhoodHistory.ts` | adapted, in-memory only |
 | 1A | `tolaria/src/components/InlineWikilinkSuggest.tsx` | `src/components/WikilinkAutocomplete.tsx` | IME-aware adapted |
-| 1B | `tolaria/src-tauri/src/vault/cache.rs` (1,422 LOC) | `crates/anchor-vault/src/cache.rs` (planned) | wait until latency demands it |
+| 1B | Tolaria cache module (1,422 LOC) | `crates/anchor-workspace/src/cache.rs` (planned) | wait until latency demands it |
 | 1B | `tolaria/src-tauri/src/git/{status,commit}.rs` | `src-tauri/src/git.rs` (shell-out) | lightweight alternative to git2 |
 | 1B | `tolaria/src/components/{Editor,RawEditorView,BlockNote*}.tsx` | `src/components/Editor*.tsx` | one-week budget, fragile |
 | 1B | `tolaria/src/hooks/useEditorTabSwap.ts` (1,149 LOC) | `src/hooks/useEditorTabSwap.ts` | simplifiable |
@@ -285,7 +308,7 @@ Major deliverables come from existing, validated codebases — anchor is integra
 
 ## Critical invariants
 
-1. **Filesystem is authoritative.** The cache (`<workspace>/.anchor/cache/vault-index-v1.json`) is disposable. React state is derived.
+1. **Filesystem is authoritative.** The cache (`<workspace>/.anchor/cache/workspace-index-v1.json`) is disposable. React state is derived.
 2. **Frontmatter key order + comments preserved.** A single-field patch must never disturb the order or comments of any other key (verified by cargo test).
 3. **Crash-safe rename.** `.anchor-rename-txn/` staging dir + recovery on the next workspace scan (Phase 1B).
 4. **Dynamic relationship detection.** Any frontmatter field containing `[[wikilink]]` is treated as a relationship. No hard-coded field lists.

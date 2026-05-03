@@ -33,14 +33,44 @@ test("switches explorer between private and optional public workspace tabs", asy
   const privateTab = page.getByRole("tab", { name: "Private" });
   const publicTab = page.getByRole("tab", { name: "Public" });
   await expect(privateTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".workspace-caption")).toHaveText("Sample Workspace");
+  await expect(page.locator(".workspace-caption")).toHaveText(
+    "Sample Workspace · Local · 쓰기 가능",
+  );
   await expect(page.getByRole("button", { name: "Public 추가" })).toHaveCount(0);
 
   await publicTab.click();
 
   await expect(publicTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".workspace-caption")).toHaveText("Public Workspace");
+  await expect(page.locator(".workspace-caption")).toHaveText(
+    "Public Workspace · Google Drive · 쓰기 가능",
+  );
   await expect(page.locator(".document-list").getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
+});
+
+test("switches between public provider roots and gates read-only actions", async ({
+  page,
+}) => {
+  await page.goto("/?mockPublic=1");
+
+  await page.getByRole("tab", { name: "Public" }).click();
+  await expect(page.locator(".workspace-caption")).toHaveText(
+    "Public Workspace · Google Drive · 쓰기 가능",
+  );
+  await page.locator(".workspace-switcher").click();
+  await page.locator(".workspace-menu-item", { hasText: "Shared Reference" }).click();
+
+  await expect(page.locator(".workspace-caption")).toHaveText(
+    "Shared Reference · SharePoint · 읽기 전용",
+  );
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+
+  await expect(page.locator("textarea.source-editor")).toHaveAttribute("readonly", "");
+  await expect(page.getByRole("button", { name: "스냅샷" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "새 문서" })).toBeDisabled();
 });
 
 test("restores a dense shell with tabbed explorer and collapsed terminal", async ({

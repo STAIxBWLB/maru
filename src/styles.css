@@ -372,6 +372,28 @@ a {
   white-space: nowrap;
 }
 
+.workspace-switcher .ws-status {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--panel-3);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.workspace-switcher .ws-status.writable {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.workspace-switcher .ws-status.limited {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
 .workspace-switcher .ws-empty {
   color: var(--faint);
   font-weight: 500;
@@ -396,7 +418,7 @@ a {
 
 .workspace-menu-item {
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 18px 1fr auto auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
@@ -431,6 +453,26 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.workspace-menu-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.workspace-menu-badges em {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--panel-3);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .workspace-menu-divider {
   height: 1px;
   background: var(--line);
@@ -453,6 +495,7 @@ a {
   color: var(--ink);
 }
 
+.workspace-menu-refresh,
 .workspace-menu-remove {
   width: 22px;
   height: 22px;
@@ -463,8 +506,14 @@ a {
   opacity: 0;
 }
 
+.workspace-menu-item:hover .workspace-menu-refresh,
 .workspace-menu-item:hover .workspace-menu-remove {
   opacity: 1;
+}
+
+.workspace-menu-refresh:hover {
+  background: var(--panel-3);
+  color: var(--ink);
 }
 
 .workspace-menu-remove:hover {
@@ -641,6 +690,13 @@ a {
 
 .sidebar-cta:hover {
   background: #264a32;
+}
+
+.sidebar-cta:disabled {
+  cursor: not-allowed;
+  color: var(--faint);
+  background: var(--panel-3);
+  box-shadow: none;
 }
 
 .sidebar-cta:active {
@@ -1581,6 +1637,11 @@ a {
   background: var(--warn-soft);
 }
 
+.save-state.readonly {
+  color: var(--faint);
+  background: var(--panel-3);
+}
+
 .editor-tabs-row {
   display: flex;
   align-items: center;
@@ -1643,6 +1704,11 @@ a {
   font-size: 13.5px;
   line-height: 1.78;
   font-feature-settings: "calt" 0;
+}
+
+.source-editor:read-only {
+  color: var(--muted);
+  background: var(--panel-2);
 }
 
 .rich-editor-surface {
@@ -2640,6 +2706,12 @@ button.git-badge:hover {
   box-shadow: 0 0 0 2px var(--accent-tint);
 }
 
+.inspector-input:disabled,
+.tag-chip-input:disabled {
+  cursor: not-allowed;
+  color: var(--faint);
+}
+
 .inspector-readonly {
   display: inline-block;
   padding: 0 8px;
@@ -2672,6 +2744,11 @@ button.git-badge:hover {
   background: var(--panel);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.tag-chips:has(input:disabled) {
+  background: transparent;
+  color: var(--faint);
 }
 
 .tag-chip {
@@ -2896,6 +2973,15 @@ button.git-badge:hover {
   gap: 6px;
 }
 
+.field-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.field-grid.two {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -2914,6 +3000,14 @@ button.git-badge:hover {
 .chip:hover {
   border-color: var(--line-strong);
   color: var(--ink);
+}
+
+.chip:disabled {
+  cursor: not-allowed;
+  color: var(--faint);
+  background: var(--panel-2);
+  border-color: var(--line);
+  opacity: 0.65;
 }
 
 .chip.active {

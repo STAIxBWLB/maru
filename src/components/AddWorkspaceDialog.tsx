@@ -4,7 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { chooseWorkspaceDirectory } from "../lib/api";
 import { detectWorkspace } from "../lib/anchorDir";
 import { useTranslation } from "../lib/i18n";
-import type { WorkspaceDetect, WorkspaceVisibility } from "../lib/types";
+import type {
+  WorkspaceDetect,
+  WorkspaceExternalWriter,
+  WorkspaceProvider,
+  WorkspaceRootEntry,
+  WorkspaceVisibility,
+  WorkspaceWritePolicy,
+} from "../lib/types";
+import { manualPermissionSummary, providerLabel } from "../lib/workspaceCapabilities";
 import { Button } from "./ui/Button";
 import { Field, TextInput } from "./ui/Field";
 
@@ -12,16 +20,38 @@ interface AddWorkspaceDialogProps {
   open: boolean;
   defaultVisibility: WorkspaceVisibility;
   onOpenChange: (open: boolean) => void;
-  onAdd: (
-    label: string,
-    path: string,
-    visibility: WorkspaceVisibility,
-    externalWriter: string | null,
-  ) => Promise<void>;
+  onAdd: (entry: WorkspaceRootEntry) => Promise<void>;
   onRegisterWorkspace: (workPath: string) => Promise<void>;
 }
 
-type WriterChoice = "none" | "obsidian";
+const PROVIDERS: WorkspaceProvider[] = [
+  "local",
+  "googleDrive",
+  "oneDrive",
+  "sharePoint",
+  "nextcloud",
+  "obsidian",
+];
+
+function externalWriterForProvider(
+  provider: WorkspaceProvider,
+  writePolicy: WorkspaceWritePolicy,
+): WorkspaceExternalWriter | null {
+  if (provider === "obsidian") return "mcp-obsidian";
+  if (writePolicy !== "delegated") return null;
+  switch (provider) {
+    case "googleDrive":
+      return "gdrive";
+    case "oneDrive":
+      return "onedrive";
+    case "sharePoint":
+      return "sharepoint";
+    case "nextcloud":
+      return "nextcloud";
+    default:
+      return null;
+  }
+}
 
 export function AddWorkspaceDialog({
   open,
@@ -34,7 +64,10 @@ export function AddWorkspaceDialog({
   const [label, setLabel] = useState("");
   const [path, setPath] = useState("");
   const [visibility, setVisibility] = useState<WorkspaceVisibility>(defaultVisibility);
-  const [writer, setWriter] = useState<WriterChoice>("none");
+  const [provider, setProvider] = useState<WorkspaceProvider>("local");
+  const [providerId, setProviderId] = useState("");
+  const [writePolicy, setWritePolicy] = useState<WorkspaceWritePolicy>("direct");
+  const [role, setRole] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [detected, setDetected] = useState<WorkspaceDetect | null>(null);
@@ -49,12 +82,22 @@ export function AddWorkspaceDialog({
       setLabel("");
       setPath("");
       setVisibility(defaultVisibility);
-      setWriter("none");
+      setProvider("local");
+      setProviderId("");
+      setWritePolicy("direct");
+      setRole("");
       setError(null);
       setSaving(false);
       setDetected(null);
     }
   }, [defaultVisibility, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (provider === "obsidian") {
+      setWritePolicy("delegated");
+    }
+  }, [open, provider]);
 
   useEffect(() => {
     const trimmed = path.trim();
@@ -103,8 +146,17 @@ export function AddWorkspaceDialog({
     }
     setSaving(true);
     try {
-      const ext = writer === "obsidian" ? "mcp-obsidian" : null;
-      await onAdd(label.trim(), path.trim(), visibility, ext);
+      const trimmedRole = role.trim();
+      await onAdd({
+        label: label.trim(),
+        path: path.trim(),
+        visibility,
+        provider,
+        providerId: providerId.trim() || null,
+        externalWriter: externalWriterForProvider(provider, writePolicy),
+        writePolicy: provider === "obsidian" ? "delegated" : writePolicy,
+        permissionSummary: trimmedRole ? manualPermissionSummary(trimmedRole) : null,
+      });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -132,7 +184,7 @@ export function AddWorkspaceDialog({
 
   const ownerName = detected?.config.owner?.name ?? null;
   const privatePath = detected?.resolvedPrivatePath ?? null;
-  const publicPath = detected?.resolvedPublicPath ?? null;
+  const publicWorkspaces = detected?.publicWorkspaces ?? [];
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -184,16 +236,20 @@ export function AddWorkspaceDialog({
                     ) : null}
                   </span>
                 </div>
-                {publicPath ? (
-                  <div>
-                    <span className="muted">{t("workspace.visibility.public")}</span>
-                    <span>
-                      {publicPath}
-                      {!detected.resolvedPublicExists ? (
-                        <em className="warn"> · {t("workspace.path.missing")}</em>
-                      ) : null}
-                    </span>
-                  </div>
+                {publicWorkspaces.length > 0 ? (
+                  publicWorkspaces.map((workspace) => (
+                    <div key={workspace.path}>
+                      <span className="muted">
+                        {t("workspace.visibility.public")} · {providerLabel(workspace.provider)}
+                      </span>
+                      <span>
+                        {workspace.label}: {workspace.path}
+                        {!workspace.exists ? (
+                          <em className="warn"> · {t("workspace.path.missing")}</em>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))
                 ) : (
                   <div>
                     <span className="muted">{t("workspace.visibility.public")}</span>
@@ -246,26 +302,79 @@ export function AddWorkspaceDialog({
               </Field>
 
               <Field
-                label={t("workspace.dialog.externalWriter")}
-                helper={t("workspace.dialog.externalWriter.help")}
+                label={t("workspace.dialog.provider")}
+                helper={t("workspace.dialog.provider.help")}
               >
                 <div className="select-row">
-                  <button
-                    type="button"
-                    className={writer === "none" ? "chip active" : "chip"}
-                    onClick={() => setWriter("none")}
-                  >
-                    {t("workspace.dialog.externalWriter.none")}
-                  </button>
-                  <button
-                    type="button"
-                    className={writer === "obsidian" ? "chip active" : "chip"}
-                    onClick={() => setWriter("obsidian")}
-                  >
-                    {t("workspace.dialog.externalWriter.obsidian")}
-                  </button>
+                  {PROVIDERS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={provider === item ? "chip active" : "chip"}
+                      onClick={() => setProvider(item)}
+                    >
+                      {providerLabel(item)}
+                    </button>
+                  ))}
                 </div>
               </Field>
+
+              <div className="field-grid two">
+                <Field
+                  label={t("workspace.dialog.writePolicy")}
+                  helper={t("workspace.dialog.writePolicy.help")}
+                >
+                  <div className="select-row">
+                    <button
+                      type="button"
+                      className={writePolicy === "direct" ? "chip active" : "chip"}
+                      onClick={() => setWritePolicy("direct")}
+                      disabled={provider === "obsidian"}
+                    >
+                      {t("workspace.writePolicy.direct")}
+                    </button>
+                    <button
+                      type="button"
+                      className={writePolicy === "delegated" ? "chip active" : "chip"}
+                      onClick={() => setWritePolicy("delegated")}
+                    >
+                      {t("workspace.writePolicy.delegated")}
+                    </button>
+                    <button
+                      type="button"
+                      className={writePolicy === "readOnly" ? "chip active" : "chip"}
+                      onClick={() => setWritePolicy("readOnly")}
+                      disabled={provider === "obsidian"}
+                    >
+                      {t("workspace.writePolicy.readOnly")}
+                    </button>
+                  </div>
+                </Field>
+
+                <Field
+                  label={t("workspace.dialog.providerId")}
+                  helper={t("workspace.dialog.providerId.help")}
+                >
+                  <TextInput
+                    value={providerId}
+                    onChange={(event) => setProviderId(event.target.value)}
+                    placeholder={t("workspace.dialog.providerId.placeholder")}
+                  />
+                </Field>
+              </div>
+
+              {visibility === "public" ? (
+                <Field
+                  label={t("workspace.dialog.role")}
+                  helper={t("workspace.dialog.role.help")}
+                >
+                  <TextInput
+                    value={role}
+                    onChange={(event) => setRole(event.target.value)}
+                    placeholder={t("workspace.dialog.role.placeholder")}
+                  />
+                </Field>
+              ) : null}
 
               <div className="dialog-actions">
                 <Dialog.Close asChild>

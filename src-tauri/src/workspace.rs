@@ -6,8 +6,8 @@
 
 use crate::anchor_dir::{ensure_anchor_dir, set_owner_name, set_paired_vault_path};
 use crate::vault_list::{
-    list_workspace_roots, set_active_workspace_root, upsert_workspace_root, WorkspaceRegistry,
-    WorkspaceRootEntry,
+    list_workspace_roots, set_active_workspace_root, upsert_workspace_root,
+    ProviderPermissionSummary, WorkspaceCapabilities, WorkspaceRegistry, WorkspaceRootEntry,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -83,6 +83,21 @@ pub struct WorkspaceDetect {
     /// we surface it anyway so the UI can warn.
     pub resolved_public_path: Option<String>,
     pub resolved_public_exists: bool,
+    #[serde(default)]
+    pub public_workspaces: Vec<DetectedPublicWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedPublicWorkspace {
+    pub label: String,
+    pub path: String,
+    pub exists: bool,
+    pub provider: String,
+    pub provider_id: Option<String>,
+    pub external_writer: Option<String>,
+    pub write_policy: String,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +135,80 @@ fn first_path_value(value: Option<&Value>) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+#[derive(Debug, Clone)]
+struct PublicWorkspaceSpec {
+    label: Option<String>,
+    path: String,
+    provider: String,
+    provider_id: Option<String>,
+    external_writer: Option<String>,
+    write_policy: String,
+    role: Option<String>,
+}
+
+fn mapping_string(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
+    map.get(&Value::String(key.to_string()))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn spec_from_public_value(value: &Value) -> Option<PublicWorkspaceSpec> {
+    match value {
+        Value::String(path) if !path.trim().is_empty() => Some(PublicWorkspaceSpec {
+            label: None,
+            path: path.trim().to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            role: None,
+        }),
+        Value::Mapping(map) => {
+            let path = mapping_string(map, "path")?;
+            Some(PublicWorkspaceSpec {
+                label: mapping_string(map, "label"),
+                path,
+                provider: mapping_string(map, "provider").unwrap_or_else(|| "unknown".to_string()),
+                provider_id: mapping_string(map, "providerId")
+                    .or_else(|| mapping_string(map, "provider_id")),
+                external_writer: mapping_string(map, "externalWriter")
+                    .or_else(|| mapping_string(map, "external_writer")),
+                write_policy: mapping_string(map, "writePolicy")
+                    .or_else(|| mapping_string(map, "write_policy"))
+                    .unwrap_or_else(|| "direct".to_string()),
+                role: mapping_string(map, "role"),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn public_specs_from_config(config: &WorkspaceConfig) -> Vec<PublicWorkspaceSpec> {
+    if let Some(public) = config.paths.public.as_ref() {
+        return match public {
+            Value::Sequence(items) => items.iter().filter_map(spec_from_public_value).collect(),
+            other => spec_from_public_value(other).into_iter().collect(),
+        };
+    }
+    config
+        .paths
+        .vault
+        .as_ref()
+        .map(|path| PublicWorkspaceSpec {
+            label: Some("Public".to_string()),
+            path: path.clone(),
+            provider: "obsidian".to_string(),
+            provider_id: None,
+            external_writer: Some("mcp-obsidian".to_string()),
+            write_policy: "delegated".to_string(),
+            role: None,
+        })
+        .into_iter()
+        .collect()
 }
 
 fn resolve_config_path(raw: Option<&str>) -> (Option<String>, bool) {
@@ -165,9 +254,34 @@ fn detect_at(work_path: &Path) -> Result<Option<WorkspaceDetect>, String> {
     let private_raw = first_path_value(config.paths.private.as_ref())
         .or_else(|| config.paths.primary.clone())
         .unwrap_or_else(|| work_path.to_string_lossy().to_string());
-    let public_raw = first_path_value(config.paths.public.as_ref()).or_else(|| config.paths.vault.clone());
+    let public_specs = public_specs_from_config(&config);
+    let public_raw = public_specs.first().map(|spec| spec.path.clone());
     let (resolved_private_path, resolved_private_exists) = resolve_config_path(Some(&private_raw));
     let (resolved_public_path, resolved_public_exists) = resolve_config_path(public_raw.as_deref());
+    let public_workspaces = public_specs
+        .iter()
+        .map(|spec| {
+            let (path, exists) = resolve_config_path(Some(&spec.path));
+            let path = path.unwrap_or_else(|| spec.path.clone());
+            let label = spec.label.clone().unwrap_or_else(|| {
+                Path::new(&path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Public")
+                    .to_string()
+            });
+            DetectedPublicWorkspace {
+                label,
+                path,
+                exists,
+                provider: spec.provider.clone(),
+                provider_id: spec.provider_id.clone(),
+                external_writer: spec.external_writer.clone(),
+                write_policy: spec.write_policy.clone(),
+                role: spec.role.clone(),
+            }
+        })
+        .collect();
     Ok(Some(WorkspaceDetect {
         work_path: work_path.to_string_lossy().to_string(),
         config_path: config_path.to_string_lossy().to_string(),
@@ -176,6 +290,7 @@ fn detect_at(work_path: &Path) -> Result<Option<WorkspaceDetect>, String> {
         resolved_private_exists,
         resolved_public_path,
         resolved_public_exists,
+        public_workspaces,
     }))
 }
 
@@ -257,41 +372,40 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
         label: private_label,
         path: private.clone(),
         visibility: "private".to_string(),
+        provider: "local".to_string(),
+        provider_id: None,
         external_writer: None,
         write_policy: "direct".to_string(),
+        permission_summary: None,
     })?;
 
-    let public_workspace_path = detected
-        .as_ref()
-        .and_then(|d| {
-            if d.resolved_public_exists {
-                d.resolved_public_path.clone()
-            } else {
-                None
-            }
-        });
-
-    if let Some(public_path) = &public_workspace_path {
-        let legacy_vault_fallback = detected
-            .as_ref()
-            .map(|d| d.config.paths.public.is_none() && d.config.paths.vault.is_some())
-            .unwrap_or(false);
-        upsert_workspace_root(WorkspaceRootEntry {
-            label: "Public".to_string(),
-            path: public_path.clone(),
-            visibility: "public".to_string(),
-            external_writer: if legacy_vault_fallback {
-                Some("mcp-obsidian".to_string())
-            } else {
-                None
-            },
-            write_policy: if legacy_vault_fallback {
-                "delegated".to_string()
-            } else {
-                "direct".to_string()
-            },
-        })?;
+    let mut registered_public_paths: Vec<String> = Vec::new();
+    if let Some(detected) = detected.as_ref() {
+        for public in detected.public_workspaces.iter().filter(|workspace| workspace.exists) {
+            let role = public.role.clone();
+            upsert_workspace_root(WorkspaceRootEntry {
+                label: public.label.clone(),
+                path: public.path.clone(),
+                visibility: "public".to_string(),
+                provider: public.provider.clone(),
+                provider_id: public.provider_id.clone(),
+                external_writer: public.external_writer.clone(),
+                write_policy: public.write_policy.clone(),
+                permission_summary: role.map(|role| ProviderPermissionSummary {
+                    role: Some(role),
+                    source: "manual".to_string(),
+                    checked_at: None,
+                    capabilities: WorkspaceCapabilities::default(),
+                    warning: None,
+                }),
+            })?;
+            registered_public_paths.push(public.path.clone());
+        }
     }
+    if let Some(first_public) = registered_public_paths.first() {
+        set_active_workspace_root(first_public.clone(), "public".to_string())?;
+    }
+    let public_workspace_path = registered_public_paths.first().cloned();
 
     // Stamp anchor's workspace meta with the optional public root + owner.
     set_paired_vault_path(&private_path, public_workspace_path.clone())?;
@@ -415,6 +529,36 @@ mod tests {
         assert!(detected.resolved_private_exists);
         assert!(detected.resolved_public_path.is_none());
         assert!(!detected.resolved_public_exists);
+    }
+
+    #[test]
+    fn detect_parses_multiple_public_workspace_objects() {
+        let work_tmp = TempDir::new().unwrap();
+        let drive_tmp = TempDir::new().unwrap();
+        let sharepoint_tmp = TempDir::new().unwrap();
+        let yaml = format!(
+            "version: 1\npaths:\n  private: {}\n  public:\n    - label: Drive Shared\n      path: {}\n      provider: googleDrive\n      providerId: drive-1\n      writePolicy: direct\n      role: contentManager\n    - label: Team Site\n      path: {}\n      provider: sharePoint\n      writePolicy: readOnly\n      role: Can view\n",
+            work_tmp.path().display(),
+            drive_tmp.path().display(),
+            sharepoint_tmp.path().display(),
+        );
+        fs::write(work_tmp.path().join("workspace.config.yaml"), yaml).unwrap();
+
+        let detected = detect_workspace(work_tmp.path().to_string_lossy().to_string())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(detected.public_workspaces.len(), 2);
+        let canonical_drive = drive_tmp.path().canonicalize().unwrap();
+        assert_eq!(
+            detected.resolved_public_path.as_deref(),
+            Some(canonical_drive.to_str().unwrap())
+        );
+        assert_eq!(detected.public_workspaces[0].provider, "googleDrive");
+        assert_eq!(detected.public_workspaces[0].provider_id.as_deref(), Some("drive-1"));
+        assert_eq!(detected.public_workspaces[0].role.as_deref(), Some("contentManager"));
+        assert_eq!(detected.public_workspaces[1].provider, "sharePoint");
+        assert_eq!(detected.public_workspaces[1].write_policy, "readOnly");
     }
 
     #[test]

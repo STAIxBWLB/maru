@@ -6,6 +6,7 @@ import {
   mockCreateVersion,
   mockEntries,
   mockInboxDropItems,
+  mockSetActiveWorkspaceRoot,
   mockWorkspaceRegistry,
   readMockDocument,
 } from "./fixtures";
@@ -19,6 +20,7 @@ import type {
   InboxDropItem,
   VaultEntry,
   WorkspaceRegistry,
+  WorkspaceRootEntry,
   WorkspaceVisibility,
   VersionSnapshot,
 } from "./types";
@@ -52,12 +54,12 @@ export async function chooseWorkspaceDirectory(title: string): Promise<string | 
 }
 
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
-  if (!isTauri()) return mockEntries();
+  if (!isTauri()) return mockEntries(vaultPath);
   return invoke<VaultEntry[]>("scan_vault", { vaultPath });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
-  if (!isTauri()) return mockEntries();
+  if (!isTauri()) return mockEntries(vaultPath);
   return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
 }
 
@@ -150,18 +152,10 @@ export async function listWorkspaceRoots(): Promise<WorkspaceRegistry> {
 }
 
 export async function addWorkspaceRoot(
-  label: string,
-  path: string,
-  visibility: WorkspaceVisibility,
-  externalWriter?: string | null,
+  entry: WorkspaceRootEntry,
 ): Promise<WorkspaceRegistry> {
   if (!isTauri()) return mockWorkspaceRegistry();
-  return invoke<WorkspaceRegistry>("add_workspace_root", {
-    label,
-    path,
-    visibility,
-    externalWriter: externalWriter ?? null,
-  });
+  return invoke<WorkspaceRegistry>("add_workspace_root", { entry });
 }
 
 export async function removeWorkspaceRoot(path: string): Promise<WorkspaceRegistry> {
@@ -173,8 +167,13 @@ export async function setActiveWorkspaceRoot(
   path: string,
   visibility: WorkspaceVisibility,
 ): Promise<WorkspaceRegistry> {
-  if (!isTauri()) return mockWorkspaceRegistry();
+  if (!isTauri()) return mockSetActiveWorkspaceRoot(path, visibility);
   return invoke<WorkspaceRegistry>("set_active_workspace_root", { path, visibility });
+}
+
+export async function refreshWorkspaceCapabilities(path: string): Promise<WorkspaceRegistry> {
+  if (!isTauri()) return mockWorkspaceRegistry();
+  return invoke<WorkspaceRegistry>("refresh_workspace_capabilities", { path });
 }
 
 // === Git ===

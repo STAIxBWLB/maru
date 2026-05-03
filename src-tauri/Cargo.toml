@@ -1,7 +1,7 @@
 [package]
 name = "anchor"
 version = "0.1.0"
-description = "Local-first Anchor/RISE document vault and AI editing desktop app"
+description = "Local-first Anchor Workspace and AI editing desktop app"
 authors = ["Anchor Contributors"]
 license = "UNLICENSED"
 edition = "2021"

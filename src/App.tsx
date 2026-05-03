@@ -35,6 +35,7 @@ import {
   readDocument,
   revealInFileManager,
   readVaultCache,
+  refreshWorkspaceCapabilities,
   removeWorkspaceRoot,
   saveDocument,
   scanInboxDrop,
@@ -92,6 +93,13 @@ import {
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import { mergeFreshEntry, planVaultStartup } from "./lib/vaultStartup";
+import {
+  providerLabel,
+  workspaceCan,
+  workspaceCapabilities,
+  workspaceWriteReason,
+  workspaceWriteStatus,
+} from "./lib/workspaceCapabilities";
 import {
   emptyHistory,
   goBack,
@@ -426,8 +434,25 @@ function MainApp() {
       ? activeDocumentEntries.find((entry) => entry.path === pendingSelectedPath) ?? null
       : null;
   const draftContent = activeTab?.draftContent ?? "";
-  const activeWorkspaceExternalWriter = activeDocumentWorkspace?.externalWriter ?? null;
-  const activeWorkspaceReadOnly = activeWorkspaceExternalWriter != null;
+  const activeWorkspaceCaps = useMemo(
+    () => workspaceCapabilities(activeDocumentWorkspace),
+    [activeDocumentWorkspace],
+  );
+  const activeWorkspaceCanCreate = activeWorkspaceCaps.canCreate;
+  const activeWorkspaceCanModify = activeWorkspaceCaps.canModify;
+  const activeWorkspaceWriteReason = useMemo(
+    () => workspaceWriteReason(activeDocumentWorkspace),
+    [activeDocumentWorkspace],
+  );
+  const explorerWorkspaceCaption = useMemo(() => {
+    if (!explorerWorkspace) return null;
+    const status = workspaceWriteStatus(explorerWorkspace);
+    return [
+      explorerWorkspace.label,
+      providerLabel(explorerWorkspace.provider),
+      t(`workspace.writeStatus.${status}`),
+    ].join(" · ");
+  }, [explorerWorkspace, t]);
   const layoutSettings = anchorSettings.ui.layout;
   const documentTypesPaneOpen = layoutSettings.documentTypesPaneOpen;
   const documentsPaneOpen = layoutSettings.documentsPaneOpen;
@@ -442,12 +467,25 @@ function MainApp() {
     );
   }, [explorerWorkspace, privateWorkspaces, workspaceRegistry.activeByVisibility.private]);
   const settingsWorkPath = useMemo(() => {
-    if (explorerWorkspace?.visibility === "public" && !explorerWorkspace.externalWriter) {
+    if (
+      explorerWorkspace?.visibility === "public" &&
+      explorerWorkspace.writePolicy === "direct" &&
+      workspaceCan(explorerWorkspace, "modify")
+    ) {
       return explorerWorkspace.path;
     }
     return systemWorkPath;
   }, [explorerWorkspace, systemWorkPath]);
-  const settingsWritable = settingsWorkPath != null;
+  const settingsWorkspace = useMemo(
+    () =>
+      settingsWorkPath
+        ? workspaceRegistry.workspaces.find((workspace) => workspace.path === settingsWorkPath) ?? null
+        : null,
+    [settingsWorkPath, workspaceRegistry.workspaces],
+  );
+  const settingsWritable =
+    settingsWorkPath != null &&
+    (settingsWorkspace?.visibility !== "public" || workspaceCan(settingsWorkspace, "modify"));
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
@@ -1093,12 +1131,16 @@ function MainApp() {
         const registry = await listWorkspaceRoots();
         if (registry.workspaces.length === 0) {
           const samplePath = await getSampleVaultPath();
-          const seeded = await addWorkspaceRoot(
-            "Sample Workspace",
-            samplePath,
-            "private",
-            null,
-          );
+          const seeded = await addWorkspaceRoot({
+            label: "Sample Workspace",
+            path: samplePath,
+            visibility: "private",
+            provider: "local",
+            providerId: null,
+            externalWriter: null,
+            writePolicy: "direct",
+            permissionSummary: null,
+          });
           setWorkspaceRegistry(seeded);
           if (seeded.activeByVisibility.private) {
             setExplorerVisibility("private");
@@ -1140,16 +1182,11 @@ function MainApp() {
   }, []);
 
   const handleAddWorkspace = useCallback(
-    async (
-      label: string,
-      path: string,
-      visibility: WorkspaceVisibility,
-      externalWriter: string | null,
-    ) => {
-      const registry = await addWorkspaceRoot(label, path, visibility, externalWriter);
+    async (entry: WorkspaceRootEntry) => {
+      const registry = await addWorkspaceRoot(entry);
       setWorkspaceRegistry(registry);
-      setExplorerVisibility(visibility);
-      await loadWorkspace(path, visibility);
+      setExplorerVisibility(entry.visibility);
+      await loadWorkspace(entry.path, entry.visibility);
     },
     [loadWorkspace],
   );
@@ -1163,6 +1200,15 @@ function MainApp() {
     },
     [loadWorkspace],
   );
+
+  const handleRefreshWorkspaceCapabilities = useCallback(async (path: string) => {
+    try {
+      const registry = await refreshWorkspaceCapabilities(path);
+      setWorkspaceRegistry(registry);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
   const handleRemoveWorkspace = useCallback(
     async (path: string) => {
@@ -1196,7 +1242,16 @@ function MainApp() {
       const samplePath = await getSampleVaultPath();
       const exists = workspaceRegistry.workspaces.find((workspace) => workspace.path === samplePath);
       if (!exists) {
-        await handleAddWorkspace("Sample Workspace", samplePath, "private", null);
+        await handleAddWorkspace({
+          label: "Sample Workspace",
+          path: samplePath,
+          visibility: "private",
+          provider: "local",
+          providerId: null,
+          externalWriter: null,
+          writePolicy: "direct",
+          permissionSummary: null,
+        });
       } else {
         await switchActiveWorkspace(samplePath, exists.visibility);
       }
@@ -1206,27 +1261,34 @@ function MainApp() {
   }, [workspaceRegistry.workspaces, handleAddWorkspace, switchActiveWorkspace]);
 
   const openNewDocumentDialog = useCallback(() => {
-    if (activeWorkspaceReadOnly) {
+    if (!activeWorkspaceCanCreate) {
       setError(
-        t("workspace.writeDelegated", {
-          writer: activeWorkspaceExternalWriter ?? "external writer",
+        t("workspace.writeBlocked", {
+          reason:
+            workspaceWriteReason(activeDocumentWorkspace, "create") ??
+            "workspace capabilities",
         }),
       );
       return;
     }
     setNewDocumentSeed(null);
     setNewDocumentOpen(true);
-  }, [activeWorkspaceReadOnly, activeWorkspaceExternalWriter, t]);
+  }, [activeDocumentWorkspace, activeWorkspaceCanCreate, t]);
 
-  const blockDelegatedWrite = useCallback(() => {
-    if (!activeWorkspaceReadOnly) return false;
-    setError(
-      t("workspace.writeDelegated", {
-        writer: activeWorkspaceExternalWriter ?? "external writer",
-      }),
-    );
-    return true;
-  }, [activeWorkspaceReadOnly, activeWorkspaceExternalWriter, t]);
+  const blockWorkspaceWrite = useCallback(
+    (action: "create" | "modify" = "modify") => {
+      if (workspaceCan(activeDocumentWorkspace, action)) return false;
+      setError(
+        t("workspace.writeBlocked", {
+          reason:
+            workspaceWriteReason(activeDocumentWorkspace, action) ??
+            "workspace capabilities",
+        }),
+      );
+      return true;
+    },
+    [activeDocumentWorkspace, t],
+  );
 
   const selectEntry = useCallback(
     async (entry: VaultEntry) => {
@@ -1362,7 +1424,7 @@ function MainApp() {
 
   const saveCurrent = useCallback(async () => {
     if (!document || !dirty || !activeDocumentWorkspacePath) return;
-    if (blockDelegatedWrite()) return;
+    if (blockWorkspaceWrite("modify")) return;
     setSaving(true);
     setError(null);
     try {
@@ -1385,13 +1447,13 @@ function MainApp() {
     activeDocumentWorkspacePath,
     draftContent,
     updateActiveTab,
-    blockDelegatedWrite,
+    blockWorkspaceWrite,
     updateWorkspaceState,
   ]);
 
   const snapshotCurrent = useCallback(async () => {
     if (!document || !activeDocumentWorkspacePath) return;
-    if (blockDelegatedWrite()) return;
+    if (blockWorkspaceWrite("create")) return;
     setError(null);
     try {
       const snapshot = await createVersion(
@@ -1417,14 +1479,14 @@ function MainApp() {
     draftContent,
     t,
     updateActiveTab,
-    blockDelegatedWrite,
+    blockWorkspaceWrite,
     updateWorkspaceState,
   ]);
 
   const createNew = useCallback(
     async (title: string, docType: string, body: string, targetRelPath: string | null) => {
       if (!activeDocumentWorkspacePath) return;
-      if (blockDelegatedWrite()) return;
+      if (blockWorkspaceWrite("create")) return;
       const created = await createDocument(
         activeDocumentWorkspacePath,
         title,
@@ -1471,7 +1533,7 @@ function MainApp() {
       activeDocumentWorkspacePath,
       explorerVisibility,
       pushRecent,
-      blockDelegatedWrite,
+      blockWorkspaceWrite,
       updateWorkspaceState,
     ],
   );
@@ -1482,7 +1544,7 @@ function MainApp() {
       if (resolved) {
         void selectEntry(resolved);
       } else {
-        if (blockDelegatedWrite()) return;
+        if (blockWorkspaceWrite("create")) return;
         setNewDocumentSeed({
           title: titleFromWikilinkTarget(target),
           relPath: target.trim(),
@@ -1491,13 +1553,13 @@ function MainApp() {
         setError(null);
       }
     },
-    [activeDocumentEntries, selectEntry, blockDelegatedWrite],
+    [activeDocumentEntries, selectEntry, blockWorkspaceWrite],
   );
 
   const updateField = useCallback(
     async (key: string, value: string | string[] | number | boolean | null) => {
       if (!document || !activeDocumentWorkspacePath) return;
-      if (blockDelegatedWrite()) return;
+      if (blockWorkspaceWrite("modify")) return;
       try {
         const next = await updateFrontmatterField(
           activeDocumentWorkspacePath,
@@ -1527,7 +1589,7 @@ function MainApp() {
       activeDocumentWorkspacePath,
       draftContent,
       updateActiveTab,
-      blockDelegatedWrite,
+      blockWorkspaceWrite,
       updateWorkspaceState,
     ],
   );
@@ -1655,11 +1717,11 @@ function MainApp() {
 
   const handleCommitClick = useCallback(
     (status: GitStatus) => {
-      if (blockDelegatedWrite()) return;
+      if (blockWorkspaceWrite("modify")) return;
       if (!activeDocumentWorkspacePath) return;
       setCommitDialog({ path: activeDocumentWorkspacePath, status });
     },
-    [activeDocumentWorkspacePath, blockDelegatedWrite],
+    [activeDocumentWorkspacePath, blockWorkspaceWrite],
   );
 
   const jumpToOutlineLine = useCallback((line: number) => {
@@ -1818,6 +1880,7 @@ function MainApp() {
             onSelectWorkspace={switchActiveWorkspace}
             onAddWorkspace={openAddWorkspaceDialog}
             onRemoveWorkspace={handleRemoveWorkspace}
+            onRefreshCapabilities={handleRefreshWorkspaceCapabilities}
             onUseSample={useSampleWorkspace}
           />
           <GitStatusBadge
@@ -1827,7 +1890,7 @@ function MainApp() {
               activeDocumentWorkspaceState.startupIoReady
             }
             refreshTrigger={gitRefreshTick}
-            onCommitClick={handleCommitClick}
+            onCommitClick={activeWorkspaceCanModify ? handleCommitClick : undefined}
           />
 
           <div className="topbar-spacer" />
@@ -1943,6 +2006,7 @@ function MainApp() {
             typeFilter={typeFilter}
             onTypeFilter={setExplorerTypeFilter}
             onNewDocument={openNewDocumentDialog}
+            canCreateDocument={activeWorkspaceCanCreate}
             onSelectRecent={selectEntry}
             onOpenCommandPalette={openCommandPalette}
             onClose={() => updateLayoutSettings({ documentTypesPaneOpen: false })}
@@ -1975,7 +2039,7 @@ function MainApp() {
                 typeFilter={typeFilter}
                 workspaceVisibility={explorerVisibility}
                 publicWorkspaceAvailable={publicWorkspaceAvailable}
-                activeWorkspaceLabel={explorerWorkspace?.label ?? null}
+                activeWorkspaceLabel={explorerWorkspaceCaption}
                 onWorkspaceVisibilityChange={(visibility) => {
                   setExplorerVisibility(visibility);
                   const nextPath = workspaceRegistry.activeByVisibility[visibility];
@@ -2005,6 +2069,9 @@ function MainApp() {
               dirty={dirty}
               outlineOpen={outlineOpen}
               activeWorkspaceLabel={activeDocumentWorkspace?.label ?? null}
+              readOnly={!activeWorkspaceCanModify}
+              canSnapshot={activeWorkspaceCanCreate}
+              readOnlyReason={activeWorkspaceWriteReason}
               viewMode={editorViewMode}
               tabs={editorTabSummaries}
               activeTabId={resolvedActiveTabId}
@@ -2025,6 +2092,7 @@ function MainApp() {
                 document={document}
                 draftContent={draftContent}
                 entries={activeDocumentEntries}
+                readOnly={!activeWorkspaceCanModify}
                 onJumpToLine={jumpToOutlineLine}
                 onClose={() => updateLayoutSettings({ outlineOpen: false })}
                 onUpdateField={updateField}

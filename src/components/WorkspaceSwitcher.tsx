@@ -1,7 +1,11 @@
-import { Check, ChevronDown, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, FolderOpen, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../lib/i18n";
 import type { WorkspaceRegistry, WorkspaceVisibility } from "../lib/types";
+import {
+  providerLabel,
+  workspaceWriteStatus,
+} from "../lib/workspaceCapabilities";
 
 interface WorkspaceSwitcherProps {
   registry: WorkspaceRegistry;
@@ -10,6 +14,7 @@ interface WorkspaceSwitcherProps {
   onSelectWorkspace: (path: string, visibility: WorkspaceVisibility) => void;
   onAddWorkspace: (visibility: WorkspaceVisibility) => void;
   onRemoveWorkspace: (path: string) => void;
+  onRefreshCapabilities: (path: string) => void;
   onUseSample: () => void;
 }
 
@@ -20,6 +25,7 @@ export function WorkspaceSwitcher({
   onSelectWorkspace,
   onAddWorkspace,
   onRemoveWorkspace,
+  onRefreshCapabilities,
   onUseSample,
 }: WorkspaceSwitcherProps) {
   const { t } = useTranslation();
@@ -57,7 +63,12 @@ export function WorkspaceSwitcher({
       >
         <span className={`ws-dot ${visibility}`} aria-hidden />
         {active ? (
-          <span className="ws-label">{active.label}</span>
+          <>
+            <span className="ws-label">{active.label}</span>
+            <span className={`ws-status ${workspaceWriteStatus(active)}`}>
+              {providerLabel(active.provider)}
+            </span>
+          </>
         ) : (
           <span className="ws-label ws-empty">{t("workspace.switcher.empty")}</span>
         )}
@@ -97,7 +108,26 @@ export function WorkspaceSwitcher({
                 <div style={{ minWidth: 0 }}>
                   <strong>{workspace.label}</strong>
                   <span title={workspace.path}>{workspace.path}</span>
+                  <div className="workspace-menu-badges">
+                    <em>{providerLabel(workspace.provider)}</em>
+                    <em>{t(`workspace.writePolicy.${workspace.writePolicy}`)}</em>
+                    <em>{t(`workspace.writeStatus.${workspaceWriteStatus(workspace)}`)}</em>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className="workspace-menu-refresh"
+                  title={t("workspace.refreshCapabilities")}
+                  aria-label={t("workspace.refreshCapabilities.label", {
+                    label: workspace.label,
+                  })}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRefreshCapabilities(workspace.path);
+                  }}
+                >
+                  <RefreshCcw size={13} />
+                </button>
                 <button
                   type="button"
                   className="workspace-menu-remove"

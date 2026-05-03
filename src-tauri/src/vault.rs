@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use walkdir::WalkDir;
 
-const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "vault-index-v1.json"];
+const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "workspace-index-v1.json"];
 const GENERATED_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -71,7 +71,7 @@ pub fn default_vault_path() -> Result<String, String> {
     let base = dirs::document_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| "Cannot resolve a user documents directory".to_string())?;
-    Ok(base.join("Anchor Vault").to_string_lossy().to_string())
+    Ok(base.join("Anchor Workspace").to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -163,13 +163,14 @@ pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, S
 pub fn normalize_existing_dir(input: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(input);
     if !path.exists() {
-        fs::create_dir_all(&path).map_err(|err| format!("Cannot create vault directory: {err}"))?;
+        fs::create_dir_all(&path)
+            .map_err(|err| format!("Cannot create workspace directory: {err}"))?;
     }
     let canonical = path
         .canonicalize()
-        .map_err(|err| format!("Cannot open vault directory: {err}"))?;
+        .map_err(|err| format!("Cannot open workspace directory: {err}"))?;
     if !canonical.is_dir() {
-        return Err("Vault path is not a directory".to_string());
+        return Err("Workspace path is not a directory".to_string());
     }
     Ok(canonical)
 }
@@ -194,7 +195,7 @@ pub fn resolve_inside_vault(vault_path: &str, document_path: &str) -> Result<Pat
         return Ok(normalized);
     }
 
-    // Vault root itself might be a symlink (canonicalize earlier resolved it,
+    // Workspace root itself might be a symlink (canonicalize earlier resolved it,
     // but the caller may have passed entries scanned from the un-resolved
     // form). Try canonicalizing the candidate as a fallback — if it lands
     // inside the canonical vault, allow.
@@ -204,7 +205,7 @@ pub fn resolve_inside_vault(vault_path: &str, document_path: &str) -> Result<Pat
         }
     }
 
-    Err("Document path escapes the selected vault".to_string())
+    Err("Document path escapes the selected workspace".to_string())
 }
 
 /// Resolve `..` and `.` lexically, leaving symlinks untouched. Equivalent to
@@ -446,11 +447,11 @@ fn write_vault_cache(vault: &Path, entries: &[VaultEntry]) -> Result<(), String>
     let path = vault_cache_path(vault);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create vault cache directory: {err}"))?;
+            .map_err(|err| format!("Cannot create workspace cache directory: {err}"))?;
     }
     let serialized = serde_json::to_string(entries)
-        .map_err(|err| format!("Cannot serialize vault cache: {err}"))?;
-    fs::write(&path, serialized).map_err(|err| format!("Cannot write vault cache: {err}"))
+        .map_err(|err| format!("Cannot serialize workspace cache: {err}"))?;
+    fs::write(&path, serialized).map_err(|err| format!("Cannot write workspace cache: {err}"))
 }
 
 #[cfg(test)]
@@ -663,15 +664,15 @@ mod tests {
             .is_none());
     }
 
-    /// Bench harness for ad-hoc perf measurement on a real vault. Ignored by
-    /// default — run with `cargo test bench_scan_real_vault -- --ignored
-    /// --nocapture --test-threads=1` (set ANCHOR_BENCH_VAULT to override).
-    /// Use this before reaching for a vault cache: tolaria's cache lift is
+    /// Bench harness for ad-hoc perf measurement on a real workspace. Ignored by
+    /// default — run with `cargo test bench_scan_real_workspace -- --ignored
+    /// --nocapture --test-threads=1` (set ANCHOR_BENCH_WORKSPACE to override).
+    /// Use this before reaching for a workspace cache: tolaria's cache lift is
     /// 1,400 LOC, so confirm scan_vault is actually slow first.
     #[test]
     #[ignore]
-    fn bench_scan_real_vault() {
-        let path = std::env::var("ANCHOR_BENCH_VAULT")
+    fn bench_scan_real_workspace() {
+        let path = std::env::var("ANCHOR_BENCH_WORKSPACE")
             .unwrap_or_else(|_| "/Users/yj.lee/workspace/work".to_string());
         let t0 = std::time::Instant::now();
         let entries = scan_vault(path.clone()).expect("scan failed");
