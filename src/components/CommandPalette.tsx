@@ -50,6 +50,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "refresh-vault", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
       { id: "open-inbox", label: t("cmdk.action.openInbox") },
       { id: "open-docs", label: t("cmdk.action.openDocs") },
+      { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
       { id: "add-vault", label: t("cmdk.action.addVault") },
     ],
     [t],

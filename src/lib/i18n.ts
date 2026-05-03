@@ -177,6 +177,7 @@ const ko: Record<string, string> = {
   "cmdk.action.refresh": "볼트 다시 읽기",
   "cmdk.action.openInbox": "인박스 열기",
   "cmdk.action.openDocs": "문서 열기",
+  "cmdk.action.openSettings": "설정 열기",
   "cmdk.action.addVault": "볼트 추가",
 
   "newDoc.button": "새 문서",
@@ -461,6 +462,7 @@ const en: Record<string, string> = {
   "cmdk.action.refresh": "Reload vault",
   "cmdk.action.openInbox": "Open inbox",
   "cmdk.action.openDocs": "Open docs",
+  "cmdk.action.openSettings": "Open settings",
   "cmdk.action.addVault": "Add vault",
 
   "newDoc.button": "New document",

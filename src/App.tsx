@@ -1472,6 +1472,9 @@ function MainApp() {
         case "add-vault":
           openAddVaultDialog();
           break;
+        case "open-settings":
+          openPreferences();
+          break;
       }
     },
     [
@@ -1481,6 +1484,7 @@ function MainApp() {
       toggleLocale,
       openAddVaultDialog,
       openNewDocumentDialog,
+      openPreferences,
       updateLayoutSettings,
       outlineOpen,
     ],
@@ -1497,6 +1501,7 @@ function MainApp() {
       "mod+f": focusSearch,
       "mod+r": refreshActiveSurface,
       "mod+shift+l": toggleLocale,
+      "mod+,": openPreferences,
       "mod+[": navigateBack,
       "mod+]": navigateForward,
       "mod+1": () => selectTabByIndex(0),
@@ -1521,6 +1526,7 @@ function MainApp() {
       navigateForward,
       selectTabByIndex,
       openNewDocumentDialog,
+      openPreferences,
       closeTab,
       resolvedActiveTabId,
       updateLayoutSettings,

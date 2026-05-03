@@ -5,7 +5,7 @@ export interface ShortcutMap {
 }
 
 /** Listen for Cmd/Ctrl-prefixed shortcuts. Combo grammar: `mod+s`,
- *  `mod+shift+s`, `mod+\`, `mod+/`, `mod+k`. The `mod` token resolves to
+ *  `mod+shift+s`, `mod+\`, `mod+,`, `mod+k`. The `mod` token resolves to
  *  Cmd on macOS and Ctrl elsewhere. Single bare keys (e.g. `escape`) work
  *  too. Returns nothing — registers a single document keydown listener. */
 export function useKeyboardShortcuts(shortcuts: ShortcutMap, deps: unknown[] = []): void {

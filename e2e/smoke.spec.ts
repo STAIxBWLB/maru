@@ -89,3 +89,26 @@ test("centers the empty editor placeholder", async ({ page }) => {
   expect(Math.abs(editorCenter.x - plateCenter.x)).toBeLessThan(2);
   expect(Math.abs(editorCenter.y - plateCenter.y)).toBeLessThan(2);
 });
+
+test("keeps the settings window content anchored at the top", async ({ page }) => {
+  await page.goto("/?window=settings&workPath=mock://anchor-sample-vault");
+
+  const pane = page.locator(".settings-window-shell .system-pane");
+  const header = pane.locator(".system-header");
+  const activeTab = pane.locator(".system-tab.active");
+
+  await expect(header.getByRole("heading", { name: "시스템" })).toBeVisible();
+  await expect(activeTab).toHaveText("Preferences");
+
+  const paneBox = await pane.boundingBox();
+  const headerBox = await header.boundingBox();
+  const tabBox = await activeTab.boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(headerBox).not.toBeNull();
+  expect(tabBox).not.toBeNull();
+  if (!paneBox || !headerBox || !tabBox) return;
+
+  expect(paneBox.y).toBeLessThan(2);
+  expect(headerBox.y).toBeLessThan(24);
+  expect(tabBox.y).toBeLessThan(96);
+});
