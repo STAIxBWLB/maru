@@ -18,6 +18,12 @@ import type {
   WorkspaceDetect,
   WorkspaceSummary,
 } from "./types";
+import {
+  DEFAULT_ANCHOR_SETTINGS,
+  normalizeAnchorSettings,
+  serializeAnchorSettings,
+  type AnchorSettings,
+} from "./settings";
 
 declare global {
   interface Window {
@@ -27,6 +33,14 @@ declare global {
 
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+
+const SETTINGS_FALLBACK_KEY = "anchor:settings:fallback:v1";
+export const ANCHOR_SETTINGS_UPDATED_EVENT = "anchor://settings-updated";
+
+export interface AnchorSettingsUpdatedPayload {
+  workPath: string;
+  settings: AnchorSettings;
+}
 
 // === Workspace detection / pairing ===
 
@@ -180,6 +194,70 @@ export async function saveAnchorProjects(workPath: string, value: unknown): Prom
 export async function readAnchorSkills(workPath: string): Promise<unknown> {
   if (!isTauri()) return null;
   return invoke<unknown>("read_anchor_skills", { workPath });
+}
+
+export async function readAnchorSettings(workPath: string): Promise<AnchorSettings> {
+  if (!isTauri()) {
+    try {
+      const raw = window.localStorage.getItem(`${SETTINGS_FALLBACK_KEY}:${workPath}`);
+      return normalizeAnchorSettings(raw ? JSON.parse(raw) : DEFAULT_ANCHOR_SETTINGS);
+    } catch {
+      return normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS);
+    }
+  }
+  const value = await invoke<unknown>("read_anchor_settings", { workPath });
+  return normalizeAnchorSettings(value);
+}
+
+export async function saveAnchorSettings(
+  workPath: string,
+  value: AnchorSettings,
+): Promise<void> {
+  const normalized = normalizeAnchorSettings(value);
+  if (!isTauri()) {
+    window.localStorage.setItem(
+      `${SETTINGS_FALLBACK_KEY}:${workPath}`,
+      JSON.stringify(normalized),
+    );
+    window.dispatchEvent(
+      new CustomEvent<AnchorSettingsUpdatedPayload>(ANCHOR_SETTINGS_UPDATED_EVENT, {
+        detail: { workPath, settings: normalized },
+      }),
+    );
+    return;
+  }
+  await invoke("save_anchor_settings", {
+    workPath,
+    value: serializeAnchorSettings(normalized),
+  });
+  await emitAnchorSettingsUpdated({ workPath, settings: normalized });
+}
+
+export async function listenAnchorSettingsUpdated(
+  handler: (payload: AnchorSettingsUpdatedPayload) => void,
+): Promise<() => void> {
+  if (!isTauri()) {
+    const onEvent = (event: Event) => {
+      handler((event as CustomEvent<AnchorSettingsUpdatedPayload>).detail);
+    };
+    window.addEventListener(ANCHOR_SETTINGS_UPDATED_EVENT, onEvent);
+    return () => window.removeEventListener(ANCHOR_SETTINGS_UPDATED_EVENT, onEvent);
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<AnchorSettingsUpdatedPayload>(ANCHOR_SETTINGS_UPDATED_EVENT, (event) => {
+    handler(event.payload);
+  });
+}
+
+async function emitAnchorSettingsUpdated(
+  payload: AnchorSettingsUpdatedPayload,
+): Promise<void> {
+  try {
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit(ANCHOR_SETTINGS_UPDATED_EVENT, payload);
+  } catch {
+    // Settings persistence has already succeeded. Event fanout is best-effort.
+  }
 }
 
 export async function readAnchorImports(workPath: string): Promise<unknown> {

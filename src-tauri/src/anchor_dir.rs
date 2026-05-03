@@ -12,6 +12,7 @@
 //     mcp.json             — MCP server config edited from System mode
 //     projects.json        — project-registry equivalent (categories)
 //     skills.json          — skills catalog (read-only v1, written by import)
+//     settings.json        — anchor UI/runtime preferences
 //     imports.json         — append-only receipts of `_sys/ → .anchor/` imports
 //     versions/            — (legacy) snapshots
 //
@@ -94,6 +95,10 @@ fn projects_json_path(work: &Path) -> PathBuf {
 
 fn skills_json_path(work: &Path) -> PathBuf {
     anchor_path(work).join("skills.json")
+}
+
+fn settings_json_path(work: &Path) -> PathBuf {
+    anchor_path(work).join("settings.json")
 }
 
 fn imports_json_path(work: &Path) -> PathBuf {
@@ -186,6 +191,9 @@ pub fn ensure_anchor_dir(work: &Path) -> Result<PathBuf, String> {
             &json!({ "version": SCHEMA_VERSION, "skills": [] }),
         )?;
     }
+    if !settings_json_path(work).exists() {
+        write_json_pretty(&settings_json_path(work), &default_settings_json())?;
+    }
     if !imports_json_path(work).exists() {
         write_json_pretty(
             &imports_json_path(work),
@@ -257,6 +265,52 @@ fn read_json(path: &Path) -> Result<JsonValue, String> {
         return Ok(JsonValue::Null);
     }
     serde_json::from_str(&buf).map_err(|err| format!("Cannot parse {}: {err}", path.display()))
+}
+
+fn default_settings_json() -> JsonValue {
+    json!({
+        "version": SCHEMA_VERSION,
+        "ui": {
+            "documentBrowserMode": "tree",
+            "collapsedTreeFolders": [],
+            "themeMode": "system",
+            "accentColor": "#2f5a3c",
+            "layout": {
+                "documentTypesPaneOpen": true,
+                "documentsPaneOpen": true,
+                "outlineOpen": true,
+                "terminalOpen": false,
+                "terminalHeight": 260,
+                "windowBounds": null,
+                "windowMaximized": null
+            }
+        },
+        "terminal": {
+            "defaultPanelOpen": false,
+            "lastHeight": 260,
+            "autoLaunch": "shell",
+            "launchers": {
+                "claude": {
+                    "enabled": true,
+                    "label": "Claude Code"
+                },
+                "codex": {
+                    "enabled": true,
+                    "label": "Codex"
+                },
+                "shell": {
+                    "enabled": true,
+                    "label": "Shell"
+                }
+            }
+        },
+        "ai": {
+            "providers": {},
+            "defaults": {}
+        },
+        "inboxChannels": {},
+        "connectors": {}
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +730,20 @@ pub fn save_anchor_skills(work_path: String, value: JsonValue) -> Result<(), Str
 }
 
 #[tauri::command]
+pub fn read_anchor_settings(work_path: String) -> Result<JsonValue, String> {
+    let work = normalize_work_path(&work_path)?;
+    ensure_anchor_dir(&work)?;
+    read_json(&settings_json_path(&work))
+}
+
+#[tauri::command]
+pub fn save_anchor_settings(work_path: String, value: JsonValue) -> Result<(), String> {
+    let work = normalize_work_path(&work_path)?;
+    ensure_anchor_dir(&work)?;
+    write_json_pretty(&settings_json_path(&work), &value)
+}
+
+#[tauri::command]
 pub fn read_anchor_imports(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_anchor_dir(&work)?;
@@ -809,6 +877,7 @@ mod tests {
         assert!(tmp.path().join(".anchor/mcp.json").exists());
         assert!(tmp.path().join(".anchor/projects.json").exists());
         assert!(tmp.path().join(".anchor/skills.json").exists());
+        assert!(tmp.path().join(".anchor/settings.json").exists());
         assert!(tmp.path().join(".anchor/imports.json").exists());
         assert!(tmp.path().join(".anchorignore").exists());
     }
@@ -849,6 +918,74 @@ mod tests {
         ensure_anchor_dir(tmp.path()).unwrap();
         let again = fs::read_to_string(tmp.path().join(".anchorignore")).unwrap();
         assert_eq!(content, again, "second ensure_anchorignore must be a no-op");
+    }
+
+    #[test]
+    fn settings_json_round_trips_pretty() {
+        let tmp = fresh_work();
+        let work = tmp.path().to_string_lossy().to_string();
+        let initial = read_anchor_settings(work.clone()).unwrap();
+        assert_eq!(
+            initial
+                .pointer("/ui/documentBrowserMode")
+                .and_then(JsonValue::as_str),
+            Some("tree")
+        );
+        assert_eq!(
+            initial
+                .pointer("/terminal/defaultPanelOpen")
+                .and_then(JsonValue::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            initial
+                .pointer("/terminal/autoLaunch")
+                .and_then(JsonValue::as_str),
+            Some("shell")
+        );
+        assert_eq!(
+            initial
+                .pointer("/ui/layout/terminalOpen")
+                .and_then(JsonValue::as_bool),
+            Some(false)
+        );
+
+        let next = json!({
+            "version": 1,
+            "ui": {
+                "documentBrowserMode": "tree",
+                "collapsedTreeFolders": ["projects/rise"]
+            },
+            "terminal": {
+                "defaultPanelOpen": false,
+                "lastHeight": 320,
+                "launchers": {}
+            },
+            "inboxChannels": {},
+            "connectors": {}
+        });
+        save_anchor_settings(work.clone(), next).unwrap();
+        let reloaded = read_anchor_settings(work.clone()).unwrap();
+        assert_eq!(
+            reloaded
+                .pointer("/ui/documentBrowserMode")
+                .and_then(JsonValue::as_str),
+            Some("tree")
+        );
+        let raw = fs::read_to_string(tmp.path().join(".anchor/settings.json")).unwrap();
+        assert!(
+            raw.contains('\n') && raw.ends_with('\n'),
+            "settings should be pretty JSON with trailing newline"
+        );
+    }
+
+    #[test]
+    fn settings_path_rejects_missing_or_file_work_path() {
+        let tmp = fresh_work();
+        let file = tmp.path().join("not-a-dir");
+        fs::write(&file, "x").unwrap();
+        let result = read_anchor_settings(file.to_string_lossy().to_string());
+        assert!(result.is_err());
     }
 
     #[test]

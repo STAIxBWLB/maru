@@ -24,6 +24,14 @@ import {
 } from "../lib/anchorDir";
 import { useTranslation } from "../lib/i18n";
 import type {
+  AnchorSettings,
+  DocumentBrowserMode,
+  TerminalLauncherId,
+  ThemeMode,
+} from "../lib/settings";
+import { normalizeAnchorSettings } from "../lib/settings";
+import { normalizeAccentInput } from "../lib/theme";
+import type {
   ImportItem,
   ImportPlan,
   RuleEntry,
@@ -31,15 +39,28 @@ import type {
 } from "../lib/types";
 import { Button } from "./ui/Button";
 
-type SystemTab = "rules" | "templates" | "mcp" | "projects" | "skills" | "import";
+type SystemTab =
+  | "preferences"
+  | "ai"
+  | "terminal"
+  | "inbox-channels"
+  | "connectors"
+  | "rules"
+  | "templates"
+  | "mcp"
+  | "projects"
+  | "skills"
+  | "import";
 
 interface SystemPaneProps {
   workPath: string | null;
+  settings: AnchorSettings;
+  onSettingsChange: (settings: AnchorSettings) => void;
 }
 
-export function SystemPane({ workPath }: SystemPaneProps) {
+export function SystemPane({ workPath, settings, onSettingsChange }: SystemPaneProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<SystemTab>("rules");
+  const [tab, setTab] = useState<SystemTab>("preferences");
 
   if (!workPath) {
     return (
@@ -63,6 +84,11 @@ export function SystemPane({ workPath }: SystemPaneProps) {
       <nav className="system-tabs" role="tablist">
         {(
           [
+            ["preferences", "system.tab.preferences"],
+            ["ai", "system.tab.ai"],
+            ["terminal", "system.tab.terminal"],
+            ["inbox-channels", "system.tab.inboxChannels"],
+            ["connectors", "system.tab.connectors"],
             ["rules", "system.tab.rules"],
             ["templates", "system.tab.templates"],
             ["mcp", "system.tab.mcp"],
@@ -84,6 +110,65 @@ export function SystemPane({ workPath }: SystemPaneProps) {
         ))}
       </nav>
       <section className="system-body">
+        {tab === "preferences" ? (
+          <PreferencesTab settings={settings} onSettingsChange={onSettingsChange} />
+        ) : null}
+        {tab === "ai" ? (
+          <SettingsJsonTab
+            title={t("system.ai.title")}
+            value={settings.ai}
+            onSave={(value) =>
+              onSettingsChange(
+                normalizeAnchorSettings({
+                  ...settings,
+                  ai: value,
+                }),
+              )
+            }
+          />
+        ) : null}
+        {tab === "terminal" ? (
+          <SettingsJsonTab
+            title={t("system.terminal.title")}
+            value={settings.terminal}
+            onSave={(value) =>
+              onSettingsChange(
+                normalizeAnchorSettings({
+                  ...settings,
+                  terminal: value,
+                }),
+              )
+            }
+          />
+        ) : null}
+        {tab === "inbox-channels" ? (
+          <SettingsJsonTab
+            title={t("system.inboxChannels.title")}
+            value={settings.inboxChannels}
+            onSave={(value) =>
+              onSettingsChange(
+                normalizeAnchorSettings({
+                  ...settings,
+                  inboxChannels: value,
+                }),
+              )
+            }
+          />
+        ) : null}
+        {tab === "connectors" ? (
+          <SettingsJsonTab
+            title={t("system.connectors.title")}
+            value={settings.connectors}
+            onSave={(value) =>
+              onSettingsChange(
+                normalizeAnchorSettings({
+                  ...settings,
+                  connectors: value,
+                }),
+              )
+            }
+          />
+        ) : null}
         {tab === "rules" ? <RulesTab workPath={workPath} /> : null}
         {tab === "templates" ? <TemplatesTab workPath={workPath} /> : null}
         {tab === "mcp" ? <McpTab workPath={workPath} /> : null}
@@ -92,6 +177,186 @@ export function SystemPane({ workPath }: SystemPaneProps) {
         {tab === "import" ? <ImportTab workPath={workPath} /> : null}
       </section>
     </main>
+  );
+}
+
+// ============================ Preferences ============================
+
+function PreferencesTab({
+  settings,
+  onSettingsChange,
+}: {
+  settings: AnchorSettings;
+  onSettingsChange: (settings: AnchorSettings) => void;
+}) {
+  const { t } = useTranslation();
+
+  const updateBrowserMode = (mode: DocumentBrowserMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          documentBrowserMode: mode,
+        },
+      }),
+    );
+  };
+
+  const updateThemeMode = (themeMode: ThemeMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          themeMode,
+        },
+      }),
+    );
+  };
+
+  const updateAccentColor = (accentColor: string) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          accentColor: normalizeAccentInput(accentColor, settings.ui.accentColor),
+        },
+      }),
+    );
+  };
+
+  const updateAutoLaunch = (autoLaunch: TerminalLauncherId | null) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        terminal: {
+          ...settings.terminal,
+          autoLaunch,
+        },
+      }),
+    );
+  };
+
+  return (
+    <div className="system-detail" style={{ width: "100%" }}>
+      <div className="settings-form">
+        <label className="field">
+          <span>{t("system.preferences.documentBrowser")}</span>
+          <select
+            value={settings.ui.documentBrowserMode}
+            onChange={(event) => updateBrowserMode(event.target.value as DocumentBrowserMode)}
+          >
+            <option value="list">{t("list.view.list")}</option>
+            <option value="tree">{t("list.view.tree")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.themeMode")}</span>
+          <select
+            value={settings.ui.themeMode}
+            onChange={(event) => updateThemeMode(event.target.value as ThemeMode)}
+          >
+            <option value="system">{t("system.preferences.theme.system")}</option>
+            <option value="light">{t("system.preferences.theme.light")}</option>
+            <option value="dark">{t("system.preferences.theme.dark")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.accentColor")}</span>
+          <input
+            type="color"
+            value={settings.ui.accentColor}
+            onChange={(event) => updateAccentColor(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.terminalAutoLaunch")}</span>
+          <select
+            value={settings.terminal.autoLaunch ?? "none"}
+            onChange={(event) =>
+              updateAutoLaunch(
+                event.target.value === "none"
+                  ? null
+                  : (event.target.value as TerminalLauncherId),
+              )
+            }
+          >
+            <option value="shell">{t("terminal.launcher.shell")}</option>
+            <option value="claude">{t("terminal.launcher.claude")}</option>
+            <option value="codex">{t("terminal.launcher.codex")}</option>
+            <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function SettingsJsonTab({
+  title,
+  value,
+  onSave,
+}: {
+  title: string;
+  value: unknown;
+  onSave: (value: unknown) => void;
+}) {
+  const { t } = useTranslation();
+  const [text, setText] = useState(() => JSON.stringify(value ?? {}, null, 2));
+  const [pristine, setPristine] = useState(text);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next = JSON.stringify(value ?? {}, null, 2);
+    setText(next);
+    setPristine(next);
+    setError(null);
+  }, [value]);
+
+  const dirty = text !== pristine;
+
+  return (
+    <div className="system-detail" style={{ width: "100%" }}>
+      <div className="system-detail-actions">
+        <strong>{title}</strong>
+        <span style={{ flex: 1 }} />
+        <span className={dirty ? "save-state dirty" : "save-state saved"}>
+          {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
+        </span>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!dirty}
+          onClick={() => {
+            setError(null);
+            try {
+              const parsed = JSON.parse(text);
+              onSave(parsed);
+              setPristine(text);
+            } catch {
+              setError(t("system.mcp.invalidJson"));
+            }
+          }}
+          icon={<Save size={14} />}
+        >
+          {t("system.rules.save")}
+        </Button>
+      </div>
+      <textarea
+        className="source-editor"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        spellCheck={false}
+      />
+      {error ? (
+        <div className="toast">
+          <AlertTriangle size={13} />
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

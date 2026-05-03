@@ -1,9 +1,10 @@
 // Phase 2 step 4: Claude Code CLI subprocess bridge. Frontend calls
 // `start_claude_cli_invocation(prompt, cwd?, extra_args?)`; Rust spawns
-// `claude -p <prompt>` and streams stdout/stderr lines through Tauri's
-// event channel as `ai://output`, plus a final `ai://done` (or
-// `ai://error` if spawn fails). Both inbox classification (Phase 2) and
-// user-skill invocation (Phase 3) drive this surface.
+// `claude -p --permission-mode plan <prompt>` and streams stdout/stderr
+// lines through Tauri's event channel as `ai://output`, plus a final
+// `ai://done` (or `ai://error` if spawn fails). Inbox classification
+// keeps this one-shot bridge; general Claude/Codex use now runs through
+// the integrated PTY terminal in `terminal.rs`.
 //
 // v1 deliberately omits kill/cancel. Anchor's invocation pattern is
 // "click → wait for the streamed answer", not long-running pipelines;
@@ -13,7 +14,7 @@
 
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -46,6 +47,12 @@ pub struct AiErrorEvent {
     pub message: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AiCommandSpec {
+    program: String,
+    args: Vec<String>,
+}
+
 #[tauri::command]
 pub fn start_claude_cli_invocation(
     app: AppHandle,
@@ -58,12 +65,10 @@ pub fn start_claude_cli_invocation(
     }
 
     let invocation_id = format!("ai-{}", Uuid::new_v4());
+    let spec = build_claude_command_spec(&prompt, extra_args)?;
 
-    let mut cmd = Command::new("claude");
-    cmd.arg("-p").arg(&prompt);
-    if let Some(args) = extra_args {
-        cmd.args(args);
-    }
+    let mut cmd = Command::new(&spec.program);
+    cmd.args(&spec.args);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -71,55 +76,88 @@ pub fn start_claude_cli_invocation(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(err) => {
-            return Err(format_spawn_error(&err));
-        }
-    };
+    let mut child = cmd.spawn().map_err(|err| format_spawn_error(&err))?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        "stdout_capture_failed: claude subprocess produced no stdout handle".to_string()
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        "stderr_capture_failed: claude subprocess produced no stderr handle".to_string()
+    })?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "stdout_capture_failed: claude subprocess produced no stdout handle".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "stderr_capture_failed: claude subprocess produced no stderr handle".to_string())?;
+    let stdout_handle = spawn_line_pump(
+        app.clone(),
+        invocation_id.clone(),
+        "stdout".to_string(),
+        stdout,
+    );
+    let stderr_handle = spawn_line_pump(
+        app.clone(),
+        invocation_id.clone(),
+        "stderr".to_string(),
+        stderr,
+    );
 
-    spawn_line_pump(app.clone(), invocation_id.clone(), "stdout".to_string(), stdout);
-    spawn_line_pump(app.clone(), invocation_id.clone(), "stderr".to_string(), stderr);
-
-    // Reaper thread: wait for exit, then emit `ai://done` or `ai://error`.
     let app_done = app.clone();
     let id_done = invocation_id.clone();
-    thread::spawn(move || match child.wait() {
-        Ok(status) => {
-            let _ = app_done.emit(
-                "ai://done",
-                AiDoneEvent {
-                    invocation_id: id_done,
-                    exit_code: status.code(),
-                    success: status.success(),
-                },
-            );
-        }
-        Err(err) => {
-            let _ = app_done.emit(
-                "ai://error",
-                AiErrorEvent {
-                    invocation_id: id_done,
-                    kind: "wait_failed".to_string(),
-                    message: err.to_string(),
-                },
-            );
+    thread::spawn(move || {
+        let result = child.wait();
+        // Drain both pipes before announcing completion so the UI never
+        // finalizes an invocation while output lines are still mid-flight.
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
+        match result {
+            Ok(status) => {
+                let _ = app_done.emit(
+                    "ai://done",
+                    AiDoneEvent {
+                        invocation_id: id_done,
+                        exit_code: status.code(),
+                        success: status.success(),
+                    },
+                );
+            }
+            Err(err) => {
+                let _ = app_done.emit(
+                    "ai://error",
+                    AiErrorEvent {
+                        invocation_id: id_done,
+                        kind: "wait_failed".to_string(),
+                        message: err.to_string(),
+                    },
+                );
+            }
         }
     });
 
     Ok(invocation_id)
 }
 
-fn spawn_line_pump<R>(app: AppHandle, invocation_id: String, stream_name: String, source: R)
+fn build_claude_command_spec(
+    prompt: &str,
+    extra_args: Option<Vec<String>>,
+) -> Result<AiCommandSpec, String> {
+    if prompt.trim().is_empty() {
+        return Err("Prompt is empty.".to_string());
+    }
+    let mut args = vec![
+        "-p".to_string(),
+        "--permission-mode".to_string(),
+        "plan".to_string(),
+    ];
+    args.extend(extra_args.unwrap_or_default());
+    args.push(prompt.to_string());
+    Ok(AiCommandSpec {
+        program: "claude".to_string(),
+        args,
+    })
+}
+
+fn spawn_line_pump<R>(
+    app: AppHandle,
+    invocation_id: String,
+    stream_name: String,
+    source: R,
+) -> JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
@@ -139,7 +177,7 @@ where
                 },
             );
         }
-    });
+    })
 }
 
 fn format_spawn_error(err: &std::io::Error) -> String {
@@ -163,6 +201,22 @@ mod tests {
         // the input validation by inlining the same check.
         let prompt = "   \n\t   ";
         assert!(prompt.trim().is_empty());
+    }
+
+    #[test]
+    fn claude_bridge_uses_safe_plan_mode() {
+        let spec = build_claude_command_spec("summarize", None).unwrap();
+        assert_eq!(spec.program, "claude");
+        assert_eq!(
+            spec.args,
+            vec!["-p", "--permission-mode", "plan", "summarize"]
+        );
+    }
+
+    #[test]
+    fn command_builder_rejects_empty_prompt() {
+        let err = build_claude_command_spec(" \n ", None).unwrap_err();
+        assert_eq!(err, "Prompt is empty.");
     }
 
     #[test]

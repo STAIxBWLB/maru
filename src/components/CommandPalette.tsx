@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Hash, Search } from "lucide-react";
 import { useTranslation } from "../lib/i18n";
-import { filterEntries, frontmatterScalar } from "../lib/document";
+import { frontmatterScalar } from "../lib/document";
+import { getCommandPaletteDocs, type DocumentIndex } from "../lib/documentIndex";
 import type { VaultEntry } from "../lib/types";
 
 interface CommandPaletteProps {
   open: boolean;
-  entries: VaultEntry[];
+  documentIndex: DocumentIndex;
   onClose: () => void;
   onSelectEntry: (entry: VaultEntry) => boolean | Promise<boolean>;
   onRunCommand: (id: string) => void;
@@ -23,9 +24,9 @@ type PaletteItem =
   | { kind: "doc"; entry: VaultEntry }
   | { kind: "action"; action: CommandAction };
 
-export function CommandPalette({
+export const CommandPalette = memo(function CommandPalette({
   open,
-  entries,
+  documentIndex,
   onClose,
   onSelectEntry,
   onRunCommand,
@@ -36,6 +37,7 @@ export function CommandPalette({
   const [picking, setPicking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
+  const deferredQuery = useDeferredValue(query);
 
   const actions: CommandAction[] = useMemo(
     () => [
@@ -54,8 +56,8 @@ export function CommandPalette({
   );
 
   const filteredDocs = useMemo(
-    () => (query.trim() ? filterEntries(entries, query).slice(0, 24) : entries.slice(0, 12)),
-    [entries, query],
+    () => getCommandPaletteDocs(documentIndex, deferredQuery, deferredQuery.trim() ? 24 : 12),
+    [documentIndex, deferredQuery],
   );
   const filteredActions = useMemo(() => {
     if (!query.trim()) return [];
@@ -249,4 +251,4 @@ export function CommandPalette({
       </div>
     </div>
   );
-}
+});

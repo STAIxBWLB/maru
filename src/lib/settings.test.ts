@@ -1,0 +1,103 @@
+import { describe, expect, it } from "vitest";
+import { DEFAULT_ANCHOR_SETTINGS, normalizeAnchorSettings } from "./settings";
+
+describe("normalizeAnchorSettings", () => {
+  it("returns defaults for invalid or broken input", () => {
+    expect(normalizeAnchorSettings(null)).toEqual(DEFAULT_ANCHOR_SETTINGS);
+    expect(normalizeAnchorSettings("not-json")).toEqual(DEFAULT_ANCHOR_SETTINGS);
+  });
+
+  it("merges partial settings with terminal defaults", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        documentBrowserMode: "tree",
+        collapsedTreeFolders: ["projects/rise"],
+        themeMode: "dark",
+        accentColor: "#445566",
+      },
+      terminal: {
+        defaultPanelOpen: false,
+        lastHeight: 900,
+        autoLaunch: "codex",
+        launchers: {
+          codex: {
+            enabled: false,
+            label: "Local Codex",
+          },
+        },
+      },
+    });
+
+    expect(settings.ui.documentBrowserMode).toBe("tree");
+    expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
+    expect(settings.ui.themeMode).toBe("dark");
+    expect(settings.ui.accentColor).toBe("#445566");
+    expect(settings.ui.layout.terminalOpen).toBe(false);
+    expect(settings.ui.layout.terminalHeight).toBe(520);
+    expect(settings.terminal.defaultPanelOpen).toBe(false);
+    expect(settings.terminal.lastHeight).toBe(520);
+    expect(settings.terminal.autoLaunch).toBe("codex");
+    expect(settings.terminal.launchers.codex.enabled).toBe(false);
+    expect(settings.terminal.launchers.codex.label).toBe("Local Codex");
+    expect(settings.terminal.launchers.claude.enabled).toBe(true);
+    expect(settings.terminal.launchers.shell.enabled).toBe(true);
+    expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+  });
+
+  it("defaults first-run terminal layout to collapsed shell autoload", () => {
+    const settings = normalizeAnchorSettings({});
+
+    expect(settings.ui.layout.terminalOpen).toBe(false);
+    expect(settings.terminal.defaultPanelOpen).toBe(false);
+    expect(settings.terminal.autoLaunch).toBe("shell");
+  });
+
+  it("uses persisted layout over legacy terminal defaults", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        layout: {
+          documentTypesPaneOpen: false,
+          documentsPaneOpen: false,
+          outlineOpen: false,
+          terminalOpen: true,
+          terminalHeight: 300,
+          windowBounds: { x: 10, y: 20, width: 1200, height: 800 },
+          windowMaximized: false,
+        },
+      },
+      terminal: {
+        defaultPanelOpen: false,
+        lastHeight: 200,
+      },
+    });
+
+    expect(settings.ui.layout).toMatchObject({
+      documentTypesPaneOpen: false,
+      documentsPaneOpen: false,
+      outlineOpen: false,
+      terminalOpen: true,
+      terminalHeight: 300,
+      windowBounds: { x: 10, y: 20, width: 1200, height: 800 },
+      windowMaximized: false,
+    });
+    expect(settings.terminal.defaultPanelOpen).toBe(true);
+    expect(settings.terminal.lastHeight).toBe(300);
+  });
+
+  it("migrates legacy AI runtime labels into terminal launcher settings", () => {
+    const settings = normalizeAnchorSettings({
+      ai: {
+        runtimes: {
+          "claude-code": {
+            enabled: false,
+            label: "Claude Local",
+          },
+        },
+      },
+    });
+
+    expect(settings.terminal.launchers.claude.enabled).toBe(false);
+    expect(settings.terminal.launchers.claude.label).toBe("Claude Local");
+    expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+  });
+});

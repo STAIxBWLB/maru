@@ -1,12 +1,40 @@
-import { Search } from "lucide-react";
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  List,
+  PanelLeftClose,
+  Search,
+} from "lucide-react";
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import type { VaultEntry } from "../lib/types";
-import { filterEntries, formatRelativeDate, frontmatterScalar } from "../lib/document";
+import { formatRelativeDate, frontmatterScalar } from "../lib/document";
+import {
+  buildDocumentTreeRows,
+  collectDocumentTreeFolderPaths,
+  nextCollapsedFolders,
+  virtualizeDocumentTreeRows,
+  type DocumentTreeRow,
+  type VirtualTreeRow,
+} from "../lib/documentTree";
+import { filterDocumentIndex, type DocumentIndex } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
+import type { DocumentBrowserMode } from "../lib/settings";
 
 const GROUP_ROW_HEIGHT = 28;
 const ENTRY_ROW_HEIGHT = 132;
+const TREE_ROW_HEIGHT = 30;
 const VIRTUAL_OVERSCAN = 520;
 
 type VirtualRow =
@@ -14,44 +42,70 @@ type VirtualRow =
   | { kind: "entry"; key: string; entry: VaultEntry; height: number };
 
 interface DocumentListProps {
-  entries: VaultEntry[];
+  documentIndex: DocumentIndex;
   selectedPath: string | null;
   query: string;
   loading: boolean;
   typeFilter: string | null;
+  browserMode: DocumentBrowserMode;
+  collapsedTreeFolders: string[];
   onQueryChange: (query: string) => void;
+  onBrowserModeChange: (mode: DocumentBrowserMode) => void;
+  onCollapsedTreeFoldersChange: (paths: string[]) => void;
   onSelect: (entry: VaultEntry) => void;
+  onRevealInFinder: (targetPath: string) => void;
+  onClose?: () => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  vaultPath?: string | null;
 }
 
-export function DocumentList({
-  entries,
+export const DocumentList = memo(function DocumentList({
+  documentIndex,
   selectedPath,
   query,
   loading,
   typeFilter,
+  browserMode,
+  collapsedTreeFolders,
   onQueryChange,
+  onBrowserModeChange,
+  onCollapsedTreeFoldersChange,
   onSelect,
+  onRevealInFinder,
+  onClose,
   searchInputRef,
+  vaultPath,
 }: DocumentListProps) {
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastSentQueryRef = useRef(query);
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 720 });
+  const [inputQuery, setInputQuery] = useState(query);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    targetPath: string;
+    title: string;
+  } | null>(null);
+  const [, startSearchTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
+  const deferredTypeFilter = useDeferredValue(typeFilter);
 
-  const filtered = useMemo(() => {
-    let next = filterEntries(entries, query);
-    if (typeFilter != null) {
-      next = next.filter((entry) => {
-        const type = frontmatterScalar(entry.frontmatter, "type");
-        return typeFilter === "_" ? type == null : type === typeFilter;
-      });
-    }
-    return next;
-  }, [entries, query, typeFilter]);
+  useEffect(() => {
+    if (query === lastSentQueryRef.current) return;
+    lastSentQueryRef.current = query;
+    setInputQuery(query);
+  }, [query]);
+
+  const filtered = useMemo(
+    () => filterDocumentIndex(documentIndex, deferredQuery, deferredTypeFilter),
+    [documentIndex, deferredQuery, deferredTypeFilter],
+  );
 
   // Group by mtime bucket: Today / This week / Earlier
   const grouped = useMemo(() => {
-    if (query.trim() || typeFilter != null) {
+    if (browserMode !== "list") return [];
+    if (deferredQuery.trim() || deferredTypeFilter != null) {
       return [{ label: null, items: filtered }];
     }
     const now = Date.now();
@@ -69,9 +123,10 @@ export function DocumentList({
       else buckets[2].items.push(entry);
     }
     return buckets.filter((b) => b.items.length > 0);
-  }, [filtered, query, typeFilter, t]);
+  }, [browserMode, filtered, deferredQuery, deferredTypeFilter, t]);
 
   const virtualRows = useMemo<VirtualRow[]>(() => {
+    if (browserMode !== "list") return [];
     const rows: VirtualRow[] = [];
     for (const [groupIdx, group] of grouped.entries()) {
       if (group.label) {
@@ -88,7 +143,7 @@ export function DocumentList({
       }
     }
     return rows;
-  }, [grouped]);
+  }, [browserMode, grouped]);
 
   const virtualLayout = useMemo(() => {
     let offset = 0;
@@ -108,6 +163,30 @@ export function DocumentList({
     );
   }, [virtualLayout.rows, viewport]);
 
+  const forceExpandTree = Boolean(deferredQuery.trim() || deferredTypeFilter != null);
+  const folderPaths = useMemo(
+    () => collectDocumentTreeFolderPaths(documentIndex.entries),
+    [documentIndex.entries],
+  );
+  const treeRows = useMemo(
+    () =>
+      browserMode === "tree"
+        ? buildDocumentTreeRows(filtered, collapsedTreeFolders, forceExpandTree)
+        : [],
+    [browserMode, filtered, collapsedTreeFolders, forceExpandTree],
+  );
+  const virtualTreeLayout = useMemo(
+    () =>
+      virtualizeDocumentTreeRows(
+        treeRows,
+        viewport.scrollTop,
+        viewport.height,
+        VIRTUAL_OVERSCAN,
+        TREE_ROW_HEIGHT,
+      ),
+    [treeRows, viewport],
+  );
+
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
@@ -122,11 +201,25 @@ export function DocumentList({
   }, []);
 
   useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTop = 0;
     setViewport({ scrollTop: 0, height: node.clientHeight || 720 });
-  }, [query, typeFilter]);
+  }, [deferredQuery, deferredTypeFilter]);
 
   const headerCaption = typeFilter
     ? typeFilter === "_"
@@ -141,14 +234,72 @@ export function DocumentList({
           <h2>{headerCaption}</h2>
         </div>
         <span className="meta">{t("list.meta.count", { count: filtered.length })}</span>
+        {onClose ? (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            title={t("layout.hideDocuments")}
+            aria-label={t("layout.hideDocuments")}
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        ) : null}
       </div>
+
+      <div className="list-mode-toggle" role="group" aria-label={t("list.viewMode")}>
+        <button
+          type="button"
+          className={browserMode === "list" ? "active" : ""}
+          onClick={() => onBrowserModeChange("list")}
+        >
+          <List size={13} />
+          <span>{t("list.view.list")}</span>
+        </button>
+        <button
+          type="button"
+          className={browserMode === "tree" ? "active" : ""}
+          onClick={() => onBrowserModeChange("tree")}
+        >
+          <Folder size={13} />
+          <span>{t("list.view.tree")}</span>
+        </button>
+      </div>
+
+      {browserMode === "tree" ? (
+        <div className="tree-bulk-actions" role="group" aria-label={t("list.tree.actions")}>
+          <button
+            type="button"
+            onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.collapseAll")}
+          >
+            <ChevronsDownUp size={13} />
+            <span>{t("list.tree.collapseAll")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onCollapsedTreeFoldersChange([])}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.expandAll")}
+          >
+            <ChevronsUpDown size={13} />
+            <span>{t("list.tree.expandAll")}</span>
+          </button>
+        </div>
+      ) : null}
 
       <label className="search-box">
         <Search size={14} />
         <input
           ref={searchInputRef}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
+          value={inputQuery}
+          onChange={(event) => {
+            const next = event.target.value;
+            lastSentQueryRef.current = next;
+            setInputQuery(next);
+            startSearchTransition(() => onQueryChange(next));
+          }}
           placeholder={t("list.searchPlaceholder")}
         />
         <span className="kbd">⌘F</span>
@@ -182,7 +333,32 @@ export function DocumentList({
           </div>
         ) : null}
 
-        {!loading && filtered.length > 0 ? (
+        {!loading && filtered.length > 0 && browserMode === "tree" ? (
+          <DocumentTree
+            rows={virtualTreeLayout.rows}
+            totalHeight={virtualTreeLayout.totalHeight}
+            rowHeight={TREE_ROW_HEIGHT}
+            selectedPath={selectedPath}
+            collapsedTreeFolders={collapsedTreeFolders}
+            forceExpand={forceExpandTree}
+            onCollapsedTreeFoldersChange={onCollapsedTreeFoldersChange}
+            onSelect={onSelect}
+            onContextMenu={(event, targetPath, title) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({
+                x: event.clientX,
+                y: event.clientY,
+                targetPath,
+                title,
+              });
+            }}
+            vaultPath={vaultPath}
+            t={t}
+          />
+        ) : null}
+
+        {!loading && filtered.length > 0 && browserMode === "list" ? (
           <div
             className="virtual-list-spacer"
             style={{ height: virtualLayout.totalHeight }}
@@ -215,6 +391,16 @@ export function DocumentList({
                     type="button"
                     className={selectedPath === entry.path ? "doc-row selected" : "doc-row"}
                     onClick={() => onSelect(entry)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setContextMenu({
+                        x: event.clientX,
+                        y: event.clientY,
+                        targetPath: entry.path,
+                        title: entry.title,
+                      });
+                    }}
                   >
                     <div className="doc-row-top">
                       {fmType ? (
@@ -261,9 +447,204 @@ export function DocumentList({
           </div>
         ) : null}
       </div>
+      {contextMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="context-menu-title" title={contextMenu.title}>
+            {contextMenu.title}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const target = contextMenu.targetPath;
+              setContextMenu(null);
+              onRevealInFinder(target);
+            }}
+          >
+            {t("context.revealInFinder")}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
+});
+
+interface DocumentTreeProps {
+  rows: VirtualTreeRow[];
+  totalHeight: number;
+  rowHeight: number;
+  selectedPath: string | null;
+  collapsedTreeFolders: string[];
+  forceExpand: boolean;
+  onCollapsedTreeFoldersChange: (paths: string[]) => void;
+  onSelect: (entry: VaultEntry) => void;
+  onContextMenu: (
+    event: React.MouseEvent,
+    targetPath: string,
+    title: string,
+  ) => void;
+  vaultPath?: string | null;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
+
+const DocumentTree = memo(function DocumentTree({
+  rows,
+  totalHeight,
+  rowHeight,
+  selectedPath,
+  collapsedTreeFolders,
+  forceExpand,
+  onCollapsedTreeFoldersChange,
+  onSelect,
+  onContextMenu,
+  vaultPath,
+  t,
+}: DocumentTreeProps) {
+  return (
+    <div
+      className="tree-virtual-spacer"
+      role="tree"
+      aria-label={t("list.view.tree")}
+      style={{ height: totalHeight }}
+    >
+      {rows.map(({ row, top }) => {
+        const paddingLeft = 8 + row.depth * 16;
+        if (row.kind === "folder") {
+          return (
+            <div
+              key={row.id}
+              className="virtual-list-row tree"
+              style={{ height: rowHeight, transform: `translateY(${top}px)` }}
+            >
+              <TreeFolderRow
+                row={row}
+                paddingLeft={paddingLeft}
+                collapsedTreeFolders={collapsedTreeFolders}
+                forceExpand={forceExpand}
+                onCollapsedTreeFoldersChange={onCollapsedTreeFoldersChange}
+                onContextMenu={onContextMenu}
+                vaultPath={vaultPath}
+              />
+            </div>
+          );
+        }
+        return (
+          <div
+            key={row.id}
+            className="virtual-list-row tree"
+            style={{ height: rowHeight, transform: `translateY(${top}px)` }}
+          >
+            <TreeEntryRow
+              row={row}
+              paddingLeft={paddingLeft}
+              selected={selectedPath === row.entry.path}
+              onSelect={onSelect}
+              onContextMenu={onContextMenu}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+type FolderRow = Extract<DocumentTreeRow, { kind: "folder" }>;
+type EntryRow = Extract<DocumentTreeRow, { kind: "entry" }>;
+
+const TreeFolderRow = memo(function TreeFolderRow({
+  row,
+  paddingLeft,
+  collapsedTreeFolders,
+  forceExpand,
+  onCollapsedTreeFoldersChange,
+  onContextMenu,
+  vaultPath,
+}: {
+  row: FolderRow;
+  paddingLeft: number;
+  collapsedTreeFolders: string[];
+  forceExpand: boolean;
+  onCollapsedTreeFoldersChange: (paths: string[]) => void;
+  onContextMenu: (
+    event: React.MouseEvent,
+    targetPath: string,
+    title: string,
+  ) => void;
+  vaultPath?: string | null;
+}) {
+  const folderTarget = vaultPath ? joinVaultPath(vaultPath, row.path) : row.path;
+  return (
+    <button
+      type="button"
+      className="tree-row folder"
+      style={{ paddingLeft }}
+      aria-expanded={!row.collapsed}
+      onClick={() =>
+        onCollapsedTreeFoldersChange(
+          nextCollapsedFolders(
+            collapsedTreeFolders,
+            row.path,
+            forceExpand ? true : !row.collapsed,
+          ),
+        )
+      }
+      title={row.path}
+      onContextMenu={(event) => onContextMenu(event, folderTarget, row.path)}
+    >
+      <ChevronRight
+        size={13}
+        className={row.collapsed ? "tree-chevron" : "tree-chevron open"}
+      />
+      <Folder size={14} />
+      <span className="tree-row-title">{row.name}</span>
+      <span className="tree-count">{row.count}</span>
+    </button>
+  );
+});
+
+const TreeEntryRow = memo(function TreeEntryRow({
+  row,
+  paddingLeft,
+  selected,
+  onSelect,
+  onContextMenu,
+}: {
+  row: EntryRow;
+  paddingLeft: number;
+  selected: boolean;
+  onSelect: (entry: VaultEntry) => void;
+  onContextMenu: (
+    event: React.MouseEvent,
+    targetPath: string,
+    title: string,
+  ) => void;
+}) {
+  const fmType = frontmatterScalar(row.entry.frontmatter, "type");
+  return (
+    <button
+      type="button"
+      className={selected ? "tree-row file selected" : "tree-row file"}
+      style={{ paddingLeft }}
+      onClick={() => onSelect(row.entry)}
+      onContextMenu={(event) => onContextMenu(event, row.entry.path, row.entry.title)}
+      title={row.entry.relPath}
+    >
+      <span className="tree-indent-slot" />
+      <FileText size={13} />
+      <span className="tree-row-title">{row.entry.title}</span>
+      {fmType ? (
+        <span className="tree-type" data-type={fmType.toLowerCase()}>
+          {fmType}
+        </span>
+      ) : (
+        <span className="tree-type">{row.entry.fileKind.toUpperCase()}</span>
+      )}
+    </button>
+  );
+});
 
 function FileShape() {
   return (
@@ -277,4 +658,8 @@ function FileShape() {
       <path d="M14 4v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
+}
+
+function joinVaultPath(vaultPath: string, relPath: string): string {
+  return `${vaultPath.replace(/\/+$/, "")}/${relPath.replace(/^\/+/, "")}`;
 }

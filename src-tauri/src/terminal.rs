@@ -1,0 +1,447 @@
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::{env, str};
+use tauri::{AppHandle, Emitter, State};
+
+const DEFAULT_COLS: u16 = 120;
+const DEFAULT_ROWS: u16 = 30;
+const MAX_COLS: u16 = 500;
+const MAX_ROWS: u16 = 200;
+
+#[derive(Clone, Default)]
+pub struct TerminalState {
+    sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
+}
+
+struct TerminalSession {
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TerminalCommandSpec {
+    program: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputEvent {
+    pub session_id: String,
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalExitEvent {
+    pub session_id: String,
+    pub exit_code: Option<i32>,
+}
+
+#[tauri::command]
+pub fn terminal_spawn(
+    app: AppHandle,
+    state: State<'_, TerminalState>,
+    session_id: String,
+    kind: String,
+    cwd: Option<String>,
+    command: Option<String>,
+    extra_args: Option<Vec<String>>,
+) -> Result<String, String> {
+    if session_id.trim().is_empty() {
+        return Err("terminal_session_id_required".to_string());
+    }
+    {
+        let guard = state
+            .sessions
+            .lock()
+            .map_err(|_| "terminal_registry_poisoned".to_string())?;
+        if guard.contains_key(&session_id) {
+            return Err(format!("terminal_session_id_in_use: {session_id}"));
+        }
+    }
+
+    let spec = build_terminal_command_spec(&kind, cwd.as_deref(), command.as_deref(), extra_args)?;
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: DEFAULT_ROWS,
+            cols: DEFAULT_COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|err| format!("terminal_pty_failed: {err}"))?;
+
+    let mut cmd = CommandBuilder::new(&spec.program);
+    cmd.args(&spec.args);
+    cmd.cwd(spec.cwd.as_os_str());
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|err| format!("terminal_reader_failed: {err}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|err| format!("terminal_writer_failed: {err}"))?;
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|err| format!("terminal_spawn_failed: {err}"))?;
+    let killer = child.clone_killer();
+
+    let session = Arc::new(TerminalSession {
+        master: Mutex::new(pair.master),
+        writer: Mutex::new(writer),
+        killer: Mutex::new(killer),
+    });
+    state
+        .sessions
+        .lock()
+        .map_err(|_| "terminal_registry_poisoned".to_string())?
+        .insert(session_id.clone(), session);
+
+    let pump_handle = spawn_output_pump(app.clone(), session_id.clone(), reader);
+
+    let sessions = state.sessions.clone();
+    let exit_app = app.clone();
+    let exit_id = session_id.clone();
+    thread::spawn(move || {
+        let exit_code = child.wait().ok().map(|status| status.exit_code() as i32);
+        // Drop the master so the pump's reader gets EOF and drains its buffer
+        // before we publish the exit event. Without this the exit event can
+        // beat the last terminal://output emission and the UI prints
+        // "[process exited]" above the final lines.
+        if let Ok(mut guard) = sessions.lock() {
+            guard.remove(&exit_id);
+        }
+        let _ = pump_handle.join();
+        let _ = exit_app.emit(
+            "terminal://exit",
+            TerminalExitEvent {
+                session_id: exit_id,
+                exit_code,
+            },
+        );
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
+pub fn terminal_write(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    let session = get_session(&state, &session_id)?;
+    let mut writer = session
+        .writer
+        .lock()
+        .map_err(|_| "terminal_writer_poisoned".to_string())?;
+    writer
+        .write_all(data.as_bytes())
+        .and_then(|_| writer.flush())
+        .map_err(|err| format!("terminal_write_failed: {err}"))
+}
+
+#[tauri::command]
+pub fn terminal_resize(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let session = get_session(&state, &session_id)?;
+    let cols = cols.clamp(2, MAX_COLS);
+    let rows = rows.clamp(1, MAX_ROWS);
+    let master = session
+        .master
+        .lock()
+        .map_err(|_| "terminal_master_poisoned".to_string())?;
+    master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|err| format!("terminal_resize_failed: {err}"))
+}
+
+#[tauri::command]
+pub fn terminal_kill(state: State<'_, TerminalState>, session_id: String) -> Result<(), String> {
+    let session = {
+        let mut guard = state
+            .sessions
+            .lock()
+            .map_err(|_| "terminal_registry_poisoned".to_string())?;
+        guard.remove(&session_id)
+    };
+    let Some(session) = session else {
+        return Ok(());
+    };
+    let mut killer = session
+        .killer
+        .lock()
+        .map_err(|_| "terminal_killer_poisoned".to_string())?;
+    killer
+        .kill()
+        .map_err(|err| format!("terminal_kill_failed: {err}"))
+}
+
+fn get_session(
+    state: &State<'_, TerminalState>,
+    session_id: &str,
+) -> Result<Arc<TerminalSession>, String> {
+    state
+        .sessions
+        .lock()
+        .map_err(|_| "terminal_registry_poisoned".to_string())?
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| format!("Unknown terminal session: {session_id}"))
+}
+
+fn spawn_output_pump(
+    app: AppHandle,
+    session_id: String,
+    mut reader: Box<dyn Read + Send>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut buf = [0_u8; 8192];
+        let mut carry: Vec<u8> = Vec::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    carry.extend_from_slice(&buf[..n]);
+                    let split = valid_utf8_prefix_len(&carry);
+                    if split == 0 {
+                        continue;
+                    }
+                    // Safe: valid_utf8_prefix_len returned a length that
+                    // ends on a complete UTF-8 codepoint.
+                    let chunk = match str::from_utf8(&carry[..split]) {
+                        Ok(s) => s.to_string(),
+                        Err(_) => String::from_utf8_lossy(&carry[..split]).into_owned(),
+                    };
+                    carry.drain(..split);
+                    let _ = app.emit(
+                        "terminal://output",
+                        TerminalOutputEvent {
+                            session_id: session_id.clone(),
+                            data: chunk,
+                        },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+        // Flush any trailing bytes (must be lossy if the child died mid-codepoint).
+        if !carry.is_empty() {
+            let data = String::from_utf8_lossy(&carry).into_owned();
+            let _ = app.emit(
+                "terminal://output",
+                TerminalOutputEvent { session_id, data },
+            );
+        }
+    })
+}
+
+/// Return the length of the longest valid UTF-8 prefix of `bytes`. Trailing
+/// incomplete codepoints (1–3 bytes) are excluded so the caller can carry
+/// them into the next read.
+fn valid_utf8_prefix_len(bytes: &[u8]) -> usize {
+    match str::from_utf8(bytes) {
+        Ok(s) => s.len(),
+        Err(err) => err.valid_up_to(),
+    }
+}
+
+fn build_terminal_command_spec(
+    kind: &str,
+    cwd: Option<&str>,
+    command_override: Option<&str>,
+    extra_args: Option<Vec<String>>,
+) -> Result<TerminalCommandSpec, String> {
+    let cwd = resolve_terminal_cwd(cwd)?;
+    let cwd_str = cwd.to_string_lossy().to_string();
+    let extras = extra_args.unwrap_or_default();
+    let custom = command_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let (program, mut args) = match (kind, custom) {
+        (_, Some(program)) => (program.to_string(), Vec::<String>::new()),
+        ("claude", None) => ("claude".to_string(), Vec::new()),
+        ("codex", None) => ("codex".to_string(), vec!["--cd".to_string(), cwd_str]),
+        ("shell", None) => (user_shell(), Vec::new()),
+        (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
+    };
+    args.extend(extras);
+    Ok(TerminalCommandSpec { program, args, cwd })
+}
+
+fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
+    let raw = match cwd.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => PathBuf::from(value),
+        None => env::current_dir().map_err(|err| format!("terminal_cwd_failed: {err}"))?,
+    };
+    let path = raw
+        .canonicalize()
+        .map_err(|err| format!("terminal_cwd_invalid: {err}"))?;
+    if !path.is_dir() {
+        return Err("terminal_cwd_invalid: cwd is not a directory".to_string());
+    }
+    Ok(path)
+}
+
+fn user_shell() -> String {
+    env::var("SHELL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "/bin/zsh".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn launcher_specs_map_to_real_commands() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+
+        let claude = build_terminal_command_spec("claude", Some(&cwd_str), None, None).unwrap();
+        assert_eq!(claude.program, "claude");
+        assert!(claude.args.is_empty());
+
+        let codex = build_terminal_command_spec("codex", Some(&cwd_str), None, None).unwrap();
+        assert_eq!(codex.program, "codex");
+        assert_eq!(codex.args, vec!["--cd", cwd_str.as_str()]);
+
+        let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None).unwrap();
+        assert!(!shell.program.is_empty());
+        assert!(shell.args.is_empty());
+    }
+
+    #[test]
+    fn unsupported_launcher_is_rejected() {
+        let err = build_terminal_command_spec("python", None, None, None).unwrap_err();
+        assert!(err.contains("Unsupported terminal launcher"));
+    }
+
+    #[test]
+    fn cwd_must_exist_and_be_a_directory() {
+        let missing = env::current_dir()
+            .unwrap()
+            .join("definitely-missing-anchor-cwd");
+        let err =
+            build_terminal_command_spec("shell", Some(&missing.to_string_lossy()), None, None)
+                .unwrap_err();
+        assert!(err.contains("terminal_cwd_invalid"));
+    }
+
+    #[test]
+    fn launcher_command_override_takes_precedence_over_default_args() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let spec = build_terminal_command_spec(
+            "codex",
+            Some(&cwd_str),
+            Some("/usr/local/bin/codex-1.5"),
+            Some(vec!["--profile".to_string(), "dev".to_string()]),
+        )
+        .unwrap();
+        assert_eq!(spec.program, "/usr/local/bin/codex-1.5");
+        assert_eq!(spec.args, vec!["--profile", "dev"]);
+    }
+
+    #[test]
+    fn launcher_extra_args_append_to_default_args() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let spec = build_terminal_command_spec(
+            "codex",
+            Some(&cwd_str),
+            None,
+            Some(vec!["--profile".to_string(), "dev".to_string()]),
+        )
+        .unwrap();
+        assert_eq!(spec.program, "codex");
+        assert_eq!(spec.args, vec!["--cd", cwd_str.as_str(), "--profile", "dev"]);
+    }
+
+    #[test]
+    fn empty_command_override_falls_back_to_default() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let spec = build_terminal_command_spec("claude", Some(&cwd_str), Some("   "), None).unwrap();
+        assert_eq!(spec.program, "claude");
+    }
+
+    #[test]
+    fn terminal_events_serialize_camelcase() {
+        let out = serde_json::to_value(TerminalOutputEvent {
+            session_id: "term-1".to_string(),
+            data: "hi".to_string(),
+        })
+        .unwrap();
+        assert_eq!(out, json!({ "sessionId": "term-1", "data": "hi" }));
+
+        let exit = serde_json::to_value(TerminalExitEvent {
+            session_id: "term-1".to_string(),
+            exit_code: Some(0),
+        })
+        .unwrap();
+        assert_eq!(exit, json!({ "sessionId": "term-1", "exitCode": 0 }));
+    }
+
+    #[test]
+    fn valid_utf8_prefix_excludes_partial_codepoints() {
+        // か = E3 81 8B (3 bytes). First 2 bytes are an incomplete codepoint.
+        let bytes = [0xE3, 0x81];
+        assert_eq!(valid_utf8_prefix_len(&bytes), 0);
+    }
+
+    #[test]
+    fn valid_utf8_prefix_returns_complete_prefix() {
+        // "ok" + first 2 bytes of か.
+        let bytes = [b'o', b'k', 0xE3, 0x81];
+        assert_eq!(valid_utf8_prefix_len(&bytes), 2);
+    }
+
+    #[test]
+    fn valid_utf8_prefix_handles_pure_ascii() {
+        let bytes = b"hello world";
+        assert_eq!(valid_utf8_prefix_len(bytes), bytes.len());
+    }
+
+    #[test]
+    fn carry_buffer_pattern_decodes_split_codepoint_intact() {
+        // Simulate two reads splitting か across the boundary.
+        let mut carry: Vec<u8> = Vec::new();
+        let mut emitted = String::new();
+
+        for chunk in [&[0xE3_u8, 0x81][..], &[0x8B_u8][..]] {
+            carry.extend_from_slice(chunk);
+            let split = valid_utf8_prefix_len(&carry);
+            if split == 0 {
+                continue;
+            }
+            emitted.push_str(str::from_utf8(&carry[..split]).unwrap());
+            carry.drain(..split);
+        }
+        assert_eq!(emitted, "か");
+        assert!(carry.is_empty());
+    }
+}

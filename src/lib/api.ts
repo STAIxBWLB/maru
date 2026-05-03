@@ -21,6 +21,7 @@ import type {
   VaultList,
   VersionSnapshot,
 } from "./types";
+import type { TerminalKind } from "./terminal";
 
 declare global {
   interface Window {
@@ -199,6 +200,16 @@ export async function gitDiff(vaultPath: string, filePath: string): Promise<stri
   return invoke<string>("git_diff", { vaultPath, filePath });
 }
 
+export async function revealInFileManager(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Reveal in Finder requires the Tauri app.");
+  }
+  await invoke("reveal_in_file_manager", { vaultPath, targetPath });
+}
+
 // === Phase 2 inbox watcher / AI bridge / classifier ===
 
 export async function startInboxWatcher(vaultPath: string): Promise<void> {
@@ -245,6 +256,54 @@ export async function startClaudeCliInvocation(
     throw new Error("Claude CLI invocation is only available inside the Tauri shell.");
   }
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
+}
+
+// === Integrated terminal ===
+
+export function terminalAvailable(): boolean {
+  return isTauri();
+}
+
+export interface TerminalSpawnOptions {
+  command?: string | null;
+  extraArgs?: string[] | null;
+}
+
+export async function terminalSpawn(
+  sessionId: string,
+  kind: TerminalKind,
+  cwd: string | null = null,
+  options: TerminalSpawnOptions = {},
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Integrated terminal is only available inside the Tauri shell.");
+  }
+  return invoke<string>("terminal_spawn", {
+    sessionId,
+    kind,
+    cwd,
+    command: options.command ?? null,
+    extraArgs: options.extraArgs ?? null,
+  });
+}
+
+export async function terminalWrite(sessionId: string, data: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_write", { sessionId, data });
+}
+
+export async function terminalResize(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_resize", { sessionId, cols, rows });
+}
+
+export async function terminalKill(sessionId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_kill", { sessionId });
 }
 
 /** Pull unread Gmail messages via the user's existing `gws` Google
