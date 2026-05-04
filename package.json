@@ -13,7 +13,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5308",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "clean:tauri-bundles": "node -e \"const fs=require('fs'); for (const p of ['src-tauri/target/debug/bundle','src-tauri/target/release/bundle']) fs.rmSync(p,{recursive:true,force:true});\"",
+    "tauri:dev": "pnpm clean:tauri-bundles && tauri dev",
+    "tauri:build": "pnpm clean:tauri-bundles && tauri build",
     "test": "vitest run src",
     "test:e2e": "playwright test",
     "typecheck": "tsc -b"

@@ -190,7 +190,7 @@ pnpm install
 # Browser dev (mocked Tauri):
 pnpm dev
 
-# Native Tauri dev:
+# Native Tauri dev (cleans stale local app bundles first):
 pnpm tauri:dev
 
 # Type check:
@@ -202,6 +202,10 @@ pnpm build
 # Signed native release build (requires updater signing env):
 export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/anchor-updater.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/anchor-updater.key.password)"
+pnpm tauri:build
+
+# If you need the raw Tauri CLI, clean stale local bundles first:
+pnpm clean:tauri-bundles
 pnpm tauri build
 
 # Rust unit + integration tests:
