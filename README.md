@@ -12,7 +12,7 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
 | 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | Document browser supports list/tree mode, filename/title display mode, collapsed-by-default tree folders with persisted user state, collapse/expand-all, and Reveal in Finder. The shell now uses a Cursor-style activity rail, Explorer tabs for Private/Public workspaces, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. Private workspace is the default write target; Public workspace is optional and selected explicitly when present. `.anchor/settings.json` stores theme/accent/layout/window size/split/terminal defaults plus future AI, inbox-channel, and connector placeholders. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes `Check for Updates...`. |
-| 3 — Built-in Skills | 📋 planned | |
+| 3 — Built-in Skills + Hub connector | 📋 planned | Command-palette skills plus a read-only connector to the separate `anchor-hub` service. |
 | 4 — Document Edit Mode | 📋 planned | |
 
 ## Next up (immediate)
@@ -22,8 +22,9 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
 1. **File accept action** — move accepted drops from `inbox/downloads/<source>/...` into the classifier's `suggestedFolder` when present; otherwise require a user-selected target. Keep all moves inside the workspace boundary.
 2. **Gmail accept/reject action** — call `gws` to apply Anchor labels and archive accepted mail. Rejected mail should be labelled or left unread until the policy is chosen.
 3. **Keyboard accept loop** — add focused inbox selection plus `a` / `r` actions so the button-only UI becomes the promised one-keystroke flow.
-4. **Real-workspace verification** — verify dropped files, real chu.ac.kr unread mail, Claude classification, and accept/reject in one Tauri session.
+4. **Real-workspace verification** — verify dropped files, a real unread mail item, Claude classification, and accept/reject in one Tauri session.
 5. **Phase 3 bridge prep** — the Claude inbox bridge, integrated terminal, and `.anchor/settings.json` terminal defaults are in place; next is wiring skills to the command palette with accept/reject diffs.
+6. **Hub connector POC** — keep shared workflow, evidence, KPI, and submission-gate features in the separate `anchor-hub` repo; Anchor only stores a connector endpoint and calls hub APIs/MCP tools when the user explicitly asks.
 
 ## Architecture
 
@@ -122,11 +123,11 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Skip in Phase 2**: iMessage DB, Slack, Outlook (Phase 3 wraps Outlook via the `ms-office` skill).
 
-**Verification gate**: a real chu.ac.kr admin email or dropped file arrives → anchor classifies, extracts a task/date, and proposes a folder within 30 seconds → user presses `a` → item is moved/labelled without leaving the inbox session.
+**Verification gate**: a real unread mail item or dropped file arrives -> anchor classifies, extracts a task/date, and proposes a folder within 30 seconds -> user presses `a` -> item is moved/labelled without leaving the inbox session.
 
-### Phase 3 — Built-in Skills (week 11–14)
+### Phase 3 — Built-in Skills + Hub Connector (week 11–14)
 
-**Outcome**: five daily ops moved out of the terminal into the command palette.
+**Outcome**: five daily ops move out of the terminal into the command palette, and Anchor can query a separate hub service for shared context without becoming a multi-user server.
 
 The `runtime: claude-code` lane is the v1 core — the user's `~/.claude/skills/*` are invoked as-is. **Zero lines rewritten**.
 
@@ -139,9 +140,17 @@ Five skills:
 
 **Verification gate**: in one day all five run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
 
+**Anchor Hub connector POC**:
+- `anchor-hub` is a separate public web/API service, not part of the desktop app. It owns shared program data, evidence reuse, KPI status, submission gates, RBAC-shaped access checks, and audit trails.
+- Anchor remains local-first. It stores non-secret connector metadata in `.anchor/settings.json` or `.anchor/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
+- V1 connector calls are read-first: search shared context, find reusable evidence, fetch KPI status, and create a pending submission gate. Direct remote writes wait for an explicit approval flow.
+- Public POC sample data must be synthetic. Do not include real organization names, domains, people, internal project names, or private documents in fixtures, screenshots, logs, or README examples.
+
+**Hub connector verification gate**: a synthetic proposal note in Anchor -> query hub context -> pick reusable evidence -> create a pending submission gate -> hub returns an auditable pending state; Anchor never writes unapproved shared data directly.
+
 ### Phase 4 — Document Edit Mode (week 15–18)
 
-**Outcome**: a dedicated mode inside anchor where voice + gesture edit the RISE proposal. The standalone `dev/anchor-editor` falls out of the loop.
+**Outcome**: a dedicated mode inside anchor where voice + gesture edit a long-form proposal. The standalone `dev/anchor-editor` falls out of the loop.
 
 **Keep** (generalized):
 - Whisper sidecar (Korean large-v3) — lifted from anchor-editor.
@@ -149,7 +158,7 @@ Five skills:
 - One-Euro filter + gesture worker (prev/next, scroll, accept/reject diff).
 - PostToolUse → SSE diff stream (surgical edits, not chat).
 
-**Generalize** (RISE-specific → workspace-level):
+**Generalize** (domain-specific -> workspace-level):
 - Glossary enforcement → `.anchor/glossary.yml` per workspace.
 - Templates → `.anchor/templates/` per workspace.
 
@@ -171,7 +180,7 @@ In likelihood order:
 Items requiring the user's decision before further phases proceed:
 
 1. **Workspace cache threshold** — shipped as a lightweight JSON index because `~/workspace/work` startup latency is dominated by the full initial pipeline, not only the Rust scan. Keep measuring cold scan and warm cache paint before lifting to a heavier database cache.
-2. **BlockNote ↔ raw default** — rich for general notes; raw for precision-sensitive editing such as the RISE proposal. Per-workspace setting vs per-doc setting?
+2. **BlockNote ↔ raw default** — rich for general notes; raw for precision-sensitive editing such as proposals and reports. Per-workspace setting vs per-doc setting?
 3. **Multi-tab UX** — close-with-dirty confirmation: Obsidian pattern (autosave) vs VS Code pattern (confirm)?
 4. **Unresolved-wikilink behavior** — Phase 1A surfaces a soft notice. Phase 1B should pick: (a) red underline + create-new dialog, or (b) auto-stub note then open it.
 5. **anchor MCP port** — 9710 (matches tolaria) or fall back to 9712/9713?
@@ -328,4 +337,4 @@ target
 
 ## License
 
-UNLICENSED — internal RISE/Anchor work.
+No license file is currently published. All rights reserved unless a license is added.
