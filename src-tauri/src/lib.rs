@@ -9,6 +9,7 @@ mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
+mod terminal;
 mod vault;
 mod vault_list;
 
@@ -23,6 +24,7 @@ use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classifica
 use inbox_settings::{read_inbox_settings, save_inbox_settings};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
+use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, sample_vault_path, scan_vault};
 use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 
@@ -31,6 +33,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(InboxWatcherState::default())
+        .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             default_vault_path,
             sample_vault_path,
@@ -55,6 +58,10 @@ pub fn run() {
             save_inbox_settings,
             parse_korean_date_cmd,
             start_claude_cli_invocation,
+            terminal_spawn,
+            terminal_write,
+            terminal_resize,
+            terminal_kill,
             build_inbox_classification_prompt,
             parse_inbox_classification,
             fetch_gmail_unread,

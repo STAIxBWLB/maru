@@ -22,6 +22,7 @@ import type {
   VaultList,
   VersionSnapshot,
 } from "./types";
+import type { TerminalKind } from "./terminal";
 
 export const DEFAULT_INBOX_SETTINGS: InboxSettings = {
   inboxRoot: "inbox/downloads",
@@ -50,6 +51,10 @@ export async function chooseVaultDirectory(title: string): Promise<string | null
     title,
   });
   return typeof selected === "string" ? selected : null;
+}
+
+export async function chooseWorkspaceDirectory(title: string): Promise<string | null> {
+  return chooseVaultDirectory(title);
 }
 
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
@@ -240,6 +245,54 @@ export async function startClaudeCliInvocation(
     throw new Error("Claude CLI invocation is only available inside the Tauri shell.");
   }
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
+}
+
+// === Integrated terminal ===
+
+export function terminalAvailable(): boolean {
+  return isTauri();
+}
+
+export interface TerminalSpawnOptions {
+  command?: string | null;
+  extraArgs?: string[] | null;
+}
+
+export async function terminalSpawn(
+  sessionId: string,
+  kind: TerminalKind,
+  cwd: string | null = null,
+  options: TerminalSpawnOptions = {},
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Integrated terminal is only available inside the Tauri shell.");
+  }
+  return invoke<string>("terminal_spawn", {
+    sessionId,
+    kind,
+    cwd,
+    command: options.command ?? null,
+    extraArgs: options.extraArgs ?? null,
+  });
+}
+
+export async function terminalWrite(sessionId: string, data: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_write", { sessionId, data });
+}
+
+export async function terminalResize(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_resize", { sessionId, cols, rows });
+}
+
+export async function terminalKill(sessionId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_kill", { sessionId });
 }
 
 /** Pull unread Gmail messages via the user's existing `gws` Google
