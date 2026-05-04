@@ -11,9 +11,16 @@ describe("normalizeAnchorSettings", () => {
     const settings = normalizeAnchorSettings({
       ui: {
         documentBrowserMode: "tree",
+        documentLabelMode: "filename",
         collapsedTreeFolders: ["projects/rise"],
         themeMode: "dark",
         accentColor: "#445566",
+        layout: {
+          editorSplitOpen: true,
+          editorSplitRatio: 0.9,
+          terminalSplitOpen: true,
+          terminalSplitRatio: 0.1,
+        },
       },
       terminal: {
         defaultPanelOpen: false,
@@ -29,9 +36,14 @@ describe("normalizeAnchorSettings", () => {
     });
 
     expect(settings.ui.documentBrowserMode).toBe("tree");
+    expect(settings.ui.documentLabelMode).toBe("filename");
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
+    expect(settings.ui.layout.editorSplitOpen).toBe(true);
+    expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
+    expect(settings.ui.layout.terminalSplitOpen).toBe(true);
+    expect(settings.ui.layout.terminalSplitRatio).toBe(0.3);
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.ui.layout.terminalHeight).toBe(520);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
@@ -61,6 +73,10 @@ describe("normalizeAnchorSettings", () => {
           outlineOpen: false,
           terminalOpen: true,
           terminalHeight: 300,
+          editorSplitOpen: true,
+          editorSplitRatio: 0.4,
+          terminalSplitOpen: true,
+          terminalSplitRatio: 0.6,
           windowBounds: { x: 10, y: 20, width: 1200, height: 800 },
           windowMaximized: false,
         },
@@ -77,6 +93,10 @@ describe("normalizeAnchorSettings", () => {
       outlineOpen: false,
       terminalOpen: true,
       terminalHeight: 300,
+      editorSplitOpen: true,
+      editorSplitRatio: 0.4,
+      terminalSplitOpen: true,
+      terminalSplitRatio: 0.6,
       windowBounds: { x: 10, y: 20, width: 1200, height: 800 },
       windowMaximized: false,
     });

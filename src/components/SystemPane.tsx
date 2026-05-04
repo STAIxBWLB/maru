@@ -26,6 +26,7 @@ import { useTranslation } from "../lib/i18n";
 import type {
   AnchorSettings,
   DocumentBrowserMode,
+  DocumentLabelMode,
   TerminalLauncherId,
   ThemeMode,
 } from "../lib/settings";
@@ -203,6 +204,18 @@ function PreferencesTab({
     );
   };
 
+  const updateDocumentLabelMode = (documentLabelMode: DocumentLabelMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          documentLabelMode,
+        },
+      }),
+    );
+  };
+
   const updateThemeMode = (themeMode: ThemeMode) => {
     onSettingsChange(
       normalizeAnchorSettings({
@@ -250,6 +263,18 @@ function PreferencesTab({
           >
             <option value="list">{t("list.view.list")}</option>
             <option value="tree">{t("list.view.tree")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.documentLabel")}</span>
+          <select
+            value={settings.ui.documentLabelMode}
+            onChange={(event) =>
+              updateDocumentLabelMode(event.target.value as DocumentLabelMode)
+            }
+          >
+            <option value="title">{t("system.preferences.documentLabel.title")}</option>
+            <option value="filename">{t("system.preferences.documentLabel.filename")}</option>
           </select>
         </label>
         <label className="field">

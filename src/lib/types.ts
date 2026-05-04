@@ -166,6 +166,30 @@ export interface InboxSettings {
   gwsPath: string | null;
 }
 
+export type FileStoreOperation = "copy" | "move";
+
+export interface StoredFileOutcome {
+  sourcePath: string;
+  targetPath: string;
+  fileName: string;
+  operation: FileStoreOperation;
+}
+
+export type MemoFormat = "plain" | "markdown";
+
+export interface MemoEntry {
+  name: string;
+  path: string;
+  format: MemoFormat;
+  updatedAt: string | null;
+  sizeBytes: number;
+  preview: string;
+}
+
+export interface MemoDocument extends MemoEntry {
+  content: string;
+}
+
 // === Workspace pairing + .anchor/ system mode ===
 
 export interface WorkspaceOwner {

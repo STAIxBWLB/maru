@@ -1,9 +1,36 @@
-import { Hash, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Copy,
+  FilePlus2,
+  Files,
+  Hash,
+  List,
+  MoveRight,
+  Plus,
+  Save,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  chooseFiles,
+  chooseSaveFile,
+  chooseWorkspaceDirectory,
+  listMemos,
+  readMemo,
+  saveMemo,
+  saveMemoAs,
+  storeShelfFiles,
+  storeShelfFilesAs,
+} from "../lib/api";
 import { frontmatterScalar } from "../lib/document";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
-import type { DocumentPayload, VaultEntry } from "../lib/types";
+import type {
+  DocumentPayload,
+  FileStoreOperation,
+  MemoEntry,
+  MemoFormat,
+  VaultEntry,
+} from "../lib/types";
 import { NeighborhoodPane } from "./NeighborhoodPane";
 
 interface OutlinePaneProps {
@@ -11,8 +38,11 @@ interface OutlinePaneProps {
   draftContent: string;
   entries: VaultEntry[];
   readOnly: boolean;
+  workspacePath: string | null;
   onJumpToLine: (line: number) => void;
   onClose: () => void;
+  onError: (message: string | null) => void;
+  onRefreshWorkspace: () => void;
   onUpdateField: (
     key: string,
     value: string | string[] | number | boolean | null,
@@ -46,13 +76,17 @@ export function OutlinePane({
   draftContent,
   entries,
   readOnly,
+  workspacePath,
   onJumpToLine,
   onClose,
+  onError,
+  onRefreshWorkspace,
   onUpdateField,
   onSelectEntry,
   onMissingWikilink,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
+  const [tab, setTab] = useState<"outline" | "files" | "memo" | "info">("outline");
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
   const meta = document?.meta ?? {};
   const fmType = frontmatterScalar(meta, "type");
@@ -78,7 +112,7 @@ export function OutlinePane({
   return (
     <aside className="outline-pane">
       <div className="outline-header">
-        <h3>{t("outline.title")}</h3>
+        <h3>{t("rightPane.title")}</h3>
         <button
           type="button"
           className="icon-button"
@@ -89,44 +123,79 @@ export function OutlinePane({
           <X size={14} />
         </button>
       </div>
+      <div className="right-pane-tabs" role="tablist" aria-label={t("rightPane.tabs")}>
+        {(["outline", "files", "memo", "info"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? "active" : ""}
+            onClick={() => setTab(id)}
+          >
+            {t(`rightPane.tab.${id}`)}
+          </button>
+        ))}
+      </div>
 
-      {document ? (
-        headings.length > 0 ? (
-          <div className="outline-list">
-            {headings.map((heading, i) => (
-              <button
-                key={`${heading.line}-${i}`}
-                type="button"
-                className="outline-item"
-                data-level={heading.level}
-                onClick={() => onJumpToLine(heading.line)}
-                title={heading.text}
-              >
-                {heading.text}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="outline-empty">
-            <Hash size={20} style={{ opacity: 0.5, marginBottom: 6 }} />
-            <div>{t("outline.empty")}</div>
-          </div>
-        )
-      ) : (
-        <div className="outline-empty">{t("outline.empty.noDocument")}</div>
-      )}
+      {tab === "outline" ? (
+        <>
+          {document ? (
+            headings.length > 0 ? (
+              <div className="outline-list">
+                {headings.map((heading, i) => (
+                  <button
+                    key={`${heading.line}-${i}`}
+                    type="button"
+                    className="outline-item"
+                    data-level={heading.level}
+                    onClick={() => onJumpToLine(heading.line)}
+                    title={heading.text}
+                  >
+                    {heading.text}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="outline-empty">
+                <Hash size={20} style={{ opacity: 0.5, marginBottom: 6 }} />
+                <div>{t("outline.empty")}</div>
+              </div>
+            )
+          ) : (
+            <div className="outline-empty">{t("outline.empty.noDocument")}</div>
+          )}
 
-      {document ? (
-        <NeighborhoodPane
-          document={document}
-          draftContent={draftContent}
-          entries={entries}
-          onSelectEntry={onSelectEntry}
-          onMissingTarget={onMissingWikilink}
+          {document ? (
+            <NeighborhoodPane
+              document={document}
+              draftContent={draftContent}
+              entries={entries}
+              onSelectEntry={onSelectEntry}
+              onMissingTarget={onMissingWikilink}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {tab === "files" ? (
+        <FilesShelfPane
+          workspacePath={workspacePath}
+          onError={onError}
+          t={t}
         />
       ) : null}
 
-      {document ? (
+      {tab === "memo" ? (
+        <MemoPane
+          workspacePath={workspacePath}
+          onError={onError}
+          onRefreshWorkspace={onRefreshWorkspace}
+          t={t}
+        />
+      ) : null}
+
+      {tab === "info" && document ? (
         <section className="inspector">
           <div className="inspector-header">
             <h3>{t("inspector.title")}</h3>
@@ -186,8 +255,271 @@ export function OutlinePane({
             <span className="inspector-readonly" title={document.relPath}>{document.relPath}</span>
           </InspectorRow>
         </section>
+      ) : tab === "info" ? (
+        <div className="outline-empty">{t("outline.empty.noDocument")}</div>
       ) : null}
     </aside>
+  );
+}
+
+function FilesShelfPane({
+  workspacePath,
+  onError,
+  t,
+}: {
+  workspacePath: string | null;
+  onError: (message: string | null) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [paths, setPaths] = useState<string[]>([]);
+  const [operation, setOperation] = useState<FileStoreOperation>("copy");
+  const [working, setWorking] = useState(false);
+
+  const addPaths = useCallback((nextPaths: string[]) => {
+    setPaths((current) => Array.from(new Set([...current, ...nextPaths])));
+  }, []);
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type === "drop") addPaths(event.payload.paths);
+        }),
+      )
+      .then((off) => {
+        dispose = off;
+      })
+      .catch(() => {});
+    return () => dispose?.();
+  }, [addPaths]);
+
+  const pickFiles = async () => {
+    addPaths(await chooseFiles(t("rightPane.files.pick")));
+  };
+
+  const runStore = async (saveAs: boolean) => {
+    if (!workspacePath || paths.length === 0) return;
+    setWorking(true);
+    onError(null);
+    try {
+      if (saveAs) {
+        const target = await chooseWorkspaceDirectory(t("rightPane.files.saveAs"));
+        if (!target) return;
+        await storeShelfFilesAs(paths, target, operation);
+      } else {
+        await storeShelfFiles(workspacePath, paths, operation);
+      }
+      setPaths([]);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <section className="right-tool-pane">
+      <div className="right-tool-actions">
+        <button type="button" onClick={pickFiles}>
+          <FilePlus2 size={13} />
+          <span>{t("rightPane.files.pick")}</span>
+        </button>
+        <button
+          type="button"
+          className={operation === "copy" ? "active" : ""}
+          onClick={() => setOperation("copy")}
+        >
+          <Copy size={13} />
+          <span>{t("rightPane.files.copy")}</span>
+        </button>
+        <button
+          type="button"
+          className={operation === "move" ? "active" : ""}
+          onClick={() => setOperation("move")}
+        >
+          <MoveRight size={13} />
+          <span>{t("rightPane.files.move")}</span>
+        </button>
+      </div>
+      <div className={paths.length === 0 ? "file-drop-zone empty" : "file-drop-zone"}>
+        <Files size={18} />
+        <strong>{t("rightPane.files.dropTitle")}</strong>
+        <span>{t("rightPane.files.dropDescription")}</span>
+      </div>
+      <div className="right-list">
+        {paths.map((path) => (
+          <div className="right-list-item" key={path} title={path}>
+            <span>{path.split("/").pop() ?? path}</span>
+            <button type="button" onClick={() => setPaths((items) => items.filter((item) => item !== path))}>
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="right-tool-actions bottom">
+        <button type="button" disabled={!workspacePath || paths.length === 0 || working} onClick={() => void runStore(false)}>
+          <Save size={13} />
+          <span>{t("rightPane.files.store")}</span>
+        </button>
+        <button type="button" disabled={paths.length === 0 || working} onClick={() => void runStore(true)}>
+          <Save size={13} />
+          <span>{t("rightPane.files.saveAs")}</span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MemoPane({
+  workspacePath,
+  onError,
+  onRefreshWorkspace,
+  t,
+}: {
+  workspacePath: string | null;
+  onError: (message: string | null) => void;
+  onRefreshWorkspace: () => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [memos, setMemos] = useState<MemoEntry[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [name, setName] = useState("memo.md");
+  const [format, setFormat] = useState<MemoFormat>("markdown");
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!workspacePath) {
+      setMemos([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      setMemos(await listMemos(workspacePath));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [onError, workspacePath]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const openMemo = async (memo: MemoEntry) => {
+    if (!workspacePath) return;
+    try {
+      const doc = await readMemo(workspacePath, memo.path);
+      setSelectedPath(doc.path);
+      setName(doc.name);
+      setFormat(doc.format);
+      setContent(doc.content);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const newMemo = () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    setSelectedPath(null);
+    setName(`memo-${stamp}.md`);
+    setFormat("markdown");
+    setContent("");
+  };
+
+  const saveDefault = async () => {
+    if (!workspacePath) return;
+    setSaving(true);
+    onError(null);
+    try {
+      const doc = await saveMemo(workspacePath, name, format, content);
+      setSelectedPath(doc.path);
+      setName(doc.name);
+      await refresh();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAs = async () => {
+    setSaving(true);
+    onError(null);
+    try {
+      const target = await chooseSaveFile(t("rightPane.memo.saveAs"), name);
+      if (!target) return;
+      await saveMemoAs(target, content);
+      onRefreshWorkspace();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="right-tool-pane memo-pane">
+      <div className="right-tool-actions">
+        <button type="button" onClick={newMemo}>
+          <Plus size={13} />
+          <span>{t("rightPane.memo.new")}</span>
+        </button>
+        <button type="button" onClick={() => void refresh()}>
+          <List size={13} />
+          <span>{t("rightPane.memo.refresh")}</span>
+        </button>
+      </div>
+      <div className="memo-list" aria-label={t("rightPane.memo.list")}>
+        {loading ? <div className="outline-empty">{t("rightPane.memo.loading")}</div> : null}
+        {!loading && memos.length === 0 ? (
+          <div className="outline-empty">{t("rightPane.memo.empty")}</div>
+        ) : null}
+        {memos.map((memo) => (
+          <button
+            key={memo.path}
+            type="button"
+            className={memo.path === selectedPath ? "memo-list-item active" : "memo-list-item"}
+            onClick={() => void openMemo(memo)}
+            title={memo.path}
+          >
+            <strong>{memo.name}</strong>
+            <span>{memo.preview || t("rightPane.memo.noPreview")}</span>
+          </button>
+        ))}
+      </div>
+      <label className="memo-name">
+        <span>{t("rightPane.memo.name")}</span>
+        <input value={name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      <div className="right-tool-actions">
+        <button type="button" className={format === "markdown" ? "active" : ""} onClick={() => setFormat("markdown")}>
+          Markdown
+        </button>
+        <button type="button" className={format === "plain" ? "active" : ""} onClick={() => setFormat("plain")}>
+          Plain
+        </button>
+      </div>
+      <textarea
+        className="memo-editor"
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        placeholder={t("rightPane.memo.placeholder")}
+      />
+      <div className="right-tool-actions bottom">
+        <button type="button" disabled={!workspacePath || saving} onClick={() => void saveDefault()}>
+          <Save size={13} />
+          <span>{saving ? t("editor.saving") : t("rightPane.memo.save")}</span>
+        </button>
+        <button type="button" disabled={saving} onClick={() => void saveAs()}>
+          <Save size={13} />
+          <span>{t("rightPane.memo.saveAs")}</span>
+        </button>
+      </div>
+    </section>
   );
 }
 

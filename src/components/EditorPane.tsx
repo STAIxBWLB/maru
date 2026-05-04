@@ -3,6 +3,7 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Columns2,
   FileText,
   GitCommit,
   PanelRightOpen,
@@ -35,6 +36,7 @@ interface EditorPaneProps {
   dirty: boolean;
   outlineOpen: boolean;
   activeWorkspaceLabel: string | null;
+  documentLabel: string | null;
   readOnly: boolean;
   canSnapshot: boolean;
   readOnlyReason: string | null;
@@ -45,8 +47,11 @@ interface EditorPaneProps {
   onChange: (content: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onCloseAllTabs: () => void;
   onSave: () => void;
   onSnapshot: () => void;
+  onSplitRight: () => void;
+  onFocusPane?: () => void;
   onToggleOutline: () => void;
   onViewModeChange: (mode: EditorViewMode) => void;
   onWikilinkClick: (target: string) => void;
@@ -62,6 +67,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     dirty,
     outlineOpen,
     activeWorkspaceLabel,
+    documentLabel,
     readOnly,
     canSnapshot,
     readOnlyReason,
@@ -72,8 +78,11 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onChange,
     onSelectTab,
     onCloseTab,
+    onCloseAllTabs,
     onSave,
     onSnapshot,
+    onSplitRight,
+    onFocusPane,
     onToggleOutline,
     onViewModeChange,
     onWikilinkClick,
@@ -114,7 +123,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   if (openingEntry && openingEntry.path !== document?.path) {
     return (
-      <main className="editor-pane editor-empty" ref={ref}>
+      <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
           <div className="icon-circle">
             <FileText size={26} />
@@ -128,7 +137,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   if (!document) {
     return (
-      <main className="editor-pane editor-empty" ref={ref}>
+      <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
           <div className="icon-circle">
             <FileText size={26} />
@@ -144,7 +153,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const folder = pathSegments.length > 1 ? pathSegments.slice(0, -1).join(" / ") : null;
 
   return (
-    <main className="editor-pane" ref={ref}>
+    <main className="editor-pane" ref={ref} onPointerDown={onFocusPane}>
       <div className="document-tabs-row" aria-label={t("editor.tabs.label")}>
         {tabs.map((tab, index) => (
           <div
@@ -173,6 +182,26 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             </button>
           </div>
         ))}
+        <div className="document-tab-tools">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onSplitRight}
+            title={t("editor.splitRight")}
+            aria-label={t("editor.splitRight")}
+          >
+            <Columns2 size={13} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onCloseAllTabs}
+            title={t("editor.tabs.closeAll")}
+            aria-label={t("editor.tabs.closeAll")}
+          >
+            <X size={13} />
+          </button>
+        </div>
       </div>
       <header className="editor-topbar">
         <div className="breadcrumb" title={document.relPath}>
@@ -188,7 +217,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
               <ChevronRight size={12} className="sep" />
             </>
           ) : null}
-          <strong>{document.title}</strong>
+          <strong>{documentLabel ?? document.title}</strong>
         </div>
         <div className="editor-actions">
           <span className={dirty ? "save-state dirty" : "save-state saved"}>

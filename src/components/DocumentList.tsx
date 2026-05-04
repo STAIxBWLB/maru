@@ -20,7 +20,7 @@ import {
   useTransition,
 } from "react";
 import type { VaultEntry, WorkspaceVisibility } from "../lib/types";
-import { formatRelativeDate, frontmatterScalar } from "../lib/document";
+import { documentDisplayName, formatRelativeDate, frontmatterScalar } from "../lib/document";
 import {
   buildDocumentTreeRows,
   collectDocumentTreeFolderPaths,
@@ -31,7 +31,7 @@ import {
 } from "../lib/documentTree";
 import { filterDocumentIndex, type DocumentIndex } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
-import type { DocumentBrowserMode } from "../lib/settings";
+import type { DocumentBrowserMode, DocumentLabelMode } from "../lib/settings";
 
 const GROUP_ROW_HEIGHT = 28;
 const ENTRY_ROW_HEIGHT = 132;
@@ -54,6 +54,7 @@ interface DocumentListProps {
   onWorkspaceVisibilityChange: (visibility: WorkspaceVisibility) => void;
   onAddPublicWorkspace: () => void;
   browserMode: DocumentBrowserMode;
+  documentLabelMode: DocumentLabelMode;
   collapsedTreeFolders: string[];
   onQueryChange: (query: string) => void;
   onBrowserModeChange: (mode: DocumentBrowserMode) => void;
@@ -79,6 +80,7 @@ export const DocumentList = memo(function DocumentList({
   onWorkspaceVisibilityChange,
   onAddPublicWorkspace,
   browserMode,
+  documentLabelMode,
   collapsedTreeFolders,
   onQueryChange,
   onBrowserModeChange,
@@ -409,6 +411,7 @@ export const DocumentList = memo(function DocumentList({
             }}
             vaultPath={vaultPath}
             t={t}
+            documentLabelMode={documentLabelMode}
           />
         ) : null}
 
@@ -473,7 +476,7 @@ export const DocumentList = memo(function DocumentList({
                         {formatRelativeDate(entry.updatedAt, locale)}
                       </time>
                     </div>
-                    <strong>{entry.title}</strong>
+                    <strong>{documentDisplayName(entry, documentLabelMode)}</strong>
                     {entry.snippet ? <p>{entry.snippet}</p> : null}
                     <div className="doc-row-meta">
                       <span>
@@ -542,6 +545,7 @@ interface DocumentTreeProps {
   ) => void;
   vaultPath?: string | null;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  documentLabelMode: DocumentLabelMode;
 }
 
 const DocumentTree = memo(function DocumentTree({
@@ -556,6 +560,7 @@ const DocumentTree = memo(function DocumentTree({
   onContextMenu,
   vaultPath,
   t,
+  documentLabelMode,
 }: DocumentTreeProps) {
   return (
     <div
@@ -597,6 +602,7 @@ const DocumentTree = memo(function DocumentTree({
               selected={selectedPath === row.entry.path}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
+              documentLabelMode={documentLabelMode}
             />
           </div>
         );
@@ -665,6 +671,7 @@ const TreeEntryRow = memo(function TreeEntryRow({
   selected,
   onSelect,
   onContextMenu,
+  documentLabelMode,
 }: {
   row: EntryRow;
   paddingLeft: number;
@@ -675,6 +682,7 @@ const TreeEntryRow = memo(function TreeEntryRow({
     targetPath: string,
     title: string,
   ) => void;
+  documentLabelMode: DocumentLabelMode;
 }) {
   const fmType = frontmatterScalar(row.entry.frontmatter, "type");
   return (
@@ -688,7 +696,7 @@ const TreeEntryRow = memo(function TreeEntryRow({
     >
       <span className="tree-indent-slot" />
       <FileText size={13} />
-      <span className="tree-row-title">{row.entry.title}</span>
+      <span className="tree-row-title">{documentDisplayName(row.entry, documentLabelMode)}</span>
       {fmType ? (
         <span className="tree-type" data-type={fmType.toLowerCase()}>
           {fmType}

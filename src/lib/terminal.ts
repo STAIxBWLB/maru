@@ -17,7 +17,7 @@ export interface TerminalTabsState {
 }
 
 export type TerminalTabsAction =
-  | { type: "create"; tab: TerminalTab }
+  | { type: "create"; tab: TerminalTab; activate?: boolean }
   | { type: "switch"; tabId: string }
   | { type: "attach"; tabId: string; sessionId: string }
   | { type: "exit"; sessionId: string; exitCode: number | null }
@@ -61,7 +61,7 @@ export function terminalTabsReducer(
     case "create":
       return {
         tabs: [...state.tabs, action.tab],
-        activeTabId: action.tab.id,
+        activeTabId: action.activate === false ? state.activeTabId ?? action.tab.id : action.tab.id,
       };
     case "switch":
       return state.tabs.some((tab) => tab.id === action.tabId)

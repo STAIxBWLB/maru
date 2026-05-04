@@ -1,4 +1,5 @@
 export type DocumentBrowserMode = "list" | "tree";
+export type DocumentLabelMode = "title" | "filename";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -15,6 +16,10 @@ export interface LayoutSettings {
   outlineOpen: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
+  editorSplitOpen: boolean;
+  editorSplitRatio: number;
+  terminalSplitOpen: boolean;
+  terminalSplitRatio: number;
   windowBounds?: WindowBoundsSettings | null;
   windowMaximized?: boolean | null;
 }
@@ -30,6 +35,7 @@ export interface AnchorSettings {
   version: 1;
   ui: {
     documentBrowserMode: DocumentBrowserMode;
+    documentLabelMode: DocumentLabelMode;
     collapsedTreeFolders: string[];
     themeMode: ThemeMode;
     accentColor: string;
@@ -50,6 +56,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   version: 1,
   ui: {
     documentBrowserMode: "tree",
+    documentLabelMode: "title",
     collapsedTreeFolders: [],
     themeMode: "system",
     accentColor: "#2f5a3c",
@@ -59,6 +66,10 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       outlineOpen: true,
       terminalOpen: false,
       terminalHeight: 260,
+      editorSplitOpen: false,
+      editorSplitRatio: 0.5,
+      terminalSplitOpen: false,
+      terminalSplitRatio: 0.5,
       windowBounds: null,
       windowMaximized: null,
     },
@@ -103,6 +114,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
     version: 1,
     ui: {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
+      documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       themeMode: parseThemeMode(ui.themeMode) ?? DEFAULT_ANCHOR_SETTINGS.ui.themeMode,
       accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
@@ -179,6 +191,10 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
   return value === "list" || value === "tree" ? value : null;
 }
 
+function parseDocumentLabelMode(value: unknown): DocumentLabelMode | null {
+  return value === "title" || value === "filename" ? value : null;
+}
+
 function parseThemeMode(value: unknown): ThemeMode | null {
   return value === "system" || value === "light" || value === "dark" ? value : null;
 }
@@ -221,10 +237,27 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
         : DEFAULT_ANCHOR_SETTINGS.ui.layout.outlineOpen,
     terminalOpen,
     terminalHeight,
+    editorSplitOpen:
+      typeof layout.editorSplitOpen === "boolean"
+        ? layout.editorSplitOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.editorSplitOpen,
+    editorSplitRatio: normalizeSplitRatio(layout.editorSplitRatio),
+    terminalSplitOpen:
+      typeof layout.terminalSplitOpen === "boolean"
+        ? layout.terminalSplitOpen
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.terminalSplitOpen,
+    terminalSplitRatio: normalizeSplitRatio(layout.terminalSplitRatio),
     windowBounds: normalizeWindowBounds(layout.windowBounds),
     windowMaximized:
       typeof layout.windowMaximized === "boolean" ? layout.windowMaximized : null,
   };
+}
+
+function normalizeSplitRatio(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0.5;
+  }
+  return Math.min(0.7, Math.max(0.3, value));
 }
 
 function normalizeWindowBounds(value: unknown): WindowBoundsSettings | null {

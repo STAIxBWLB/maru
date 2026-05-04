@@ -11,6 +11,7 @@ mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
+mod shelf;
 mod sys_import;
 mod terminal;
 mod vault;
@@ -36,6 +37,9 @@ use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classifica
 use inbox_settings::{read_inbox_settings, save_inbox_settings};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
+use shelf::{
+    list_memos, read_memo, save_memo, save_memo_as, store_shelf_files, store_shelf_files_as,
+};
 use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
@@ -82,6 +86,12 @@ pub fn run() {
             read_inbox_settings,
             save_inbox_settings,
             parse_korean_date_cmd,
+            store_shelf_files,
+            store_shelf_files_as,
+            list_memos,
+            read_memo,
+            save_memo,
+            save_memo_as,
             start_claude_cli_invocation,
             terminal_spawn,
             terminal_write,

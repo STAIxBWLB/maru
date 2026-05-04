@@ -1,4 +1,5 @@
 import type { DocumentPayload, VaultEntry } from "./types";
+import type { DocumentLabelMode } from "./settings";
 
 /** Read a single scalar string from a frontmatter map regardless of whether
  *  the value is stored as string, number, boolean, or undefined. */
@@ -77,6 +78,17 @@ export function documentStats(
   const words = body.split(/\s+/).filter(Boolean).length;
   const chars = content.length;
   return { lines, words, chars };
+}
+
+export function documentDisplayName(
+  item: Pick<DocumentPayload | VaultEntry, "title" | "relPath">,
+  mode: DocumentLabelMode,
+): string {
+  if (mode === "filename") {
+    const fileName = item.relPath.split("/").filter(Boolean).pop();
+    return fileName || item.title;
+  }
+  return item.title;
 }
 
 /** Minimal markdown-to-HTML preview. Phase 1 swaps in BlockNote so we don't

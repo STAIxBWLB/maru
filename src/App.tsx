@@ -58,6 +58,7 @@ import {
 } from "./lib/anchorDir";
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
+import { documentDisplayName } from "./lib/document";
 import {
   buildDocumentIndex,
   getRecentEntries,
@@ -141,6 +142,8 @@ interface StoredTabs {
   activeRelPath: string | null;
   relPaths: string[];
 }
+
+type EditorGroupId = "left" | "right";
 
 interface WorkspaceEntriesState {
   entries: VaultEntry[];
@@ -295,6 +298,9 @@ function MainApp() {
     useState<WorkspaceVisibility>("private");
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
+  const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
+  const [focusedEditorGroup, setFocusedEditorGroup] = useState<EditorGroupId>("left");
   const [queryByVisibility, setQueryByVisibility] = useState<Record<WorkspaceVisibility, string>>({
     private: "",
     public: "",
@@ -337,6 +343,7 @@ function MainApp() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<AnchorSettings> | null>(null);
   const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
   const collapsedTreeHydratedRef = useRef(false);
@@ -426,10 +433,28 @@ function MainApp() {
   const typeFilter = typeFilterByVisibility[explorerVisibility];
   const collapsedTreeFolders = collapsedTreeFoldersByVisibility[explorerVisibility];
   const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
-  const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
+  const layoutSettings = anchorSettings.ui.layout;
+  const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
+  const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? tabs[0]?.id ?? null;
+  const rightResolvedTabId =
+    editorSplitOpen && rightActiveTabId
+      ? rightActiveTabId
+      : null;
+  const resolvedActiveTabId =
+    focusedEditorGroup === "right" && rightResolvedTabId
+      ? rightResolvedTabId
+      : leftResolvedTabId;
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === resolvedActiveTabId) ?? null,
     [tabs, resolvedActiveTabId],
+  );
+  const leftTab = useMemo(
+    () => tabs.find((tab) => tab.id === leftResolvedTabId) ?? null,
+    [tabs, leftResolvedTabId],
+  );
+  const rightTab = useMemo(
+    () => tabs.find((tab) => tab.id === rightResolvedTabId) ?? null,
+    [tabs, rightResolvedTabId],
   );
   const selectedEntry = activeTab?.entry ?? null;
   const document = activeTab?.document ?? null;
@@ -480,7 +505,6 @@ function MainApp() {
       t(`workspace.writeStatus.${status}`),
     ].join(" · ");
   }, [explorerWorkspace, t]);
-  const layoutSettings = anchorSettings.ui.layout;
   const documentTypesPaneOpen = layoutSettings.documentTypesPaneOpen;
   const documentsPaneOpen = layoutSettings.documentsPaneOpen;
   const outlineOpen = layoutSettings.outlineOpen;
@@ -526,11 +550,11 @@ function MainApp() {
     () =>
       tabs.map((tab) => ({
         id: tab.id,
-        title: tab.document.title,
+        title: documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode),
         relPath: tab.document.relPath,
         dirty: tab.draftContent !== tab.document.content,
       })),
-    [tabs],
+    [anchorSettings.ui.documentLabelMode, tabs],
   );
 
   const lastOpenKeyForWorkspace = useCallback((path: string) => `${LAST_OPEN_KEY}:${path}`, []);
@@ -587,6 +611,23 @@ function MainApp() {
     },
     [updateActiveTab],
   );
+
+  const updateTabDraft = useCallback((tabId: string, content: string) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === tabId ? { ...tab, draftContent: content } : tab)),
+    );
+  }, []);
+
+  const activateEditorTab = useCallback((tabId: string, group: EditorGroupId = focusedEditorGroup) => {
+    if (group === "right") {
+      setRightActiveTabId(tabId);
+      setFocusedEditorGroup("right");
+    } else {
+      setLeftActiveTabId(tabId);
+      setFocusedEditorGroup("left");
+    }
+    setActiveTabId(tabId);
+  }, [focusedEditorGroup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1054,6 +1095,13 @@ function MainApp() {
             );
             return stillOpen ? current : null;
           });
+          setLeftActiveTabId((current) =>
+            tabs.some((tab) => tab.id === current && tab.workspacePath !== path)
+              ? current
+              : null,
+          );
+          setRightActiveTabId(null);
+          setFocusedEditorGroup("left");
           setPendingSelectedPath(null);
           updateWorkspaceState(path, { loading: false, startupIoReady: true });
           return true;
@@ -1074,6 +1122,9 @@ function MainApp() {
           return [...otherWorkspaceTabs, primaryTab];
         });
         setActiveTabId(primaryTab.id);
+        setLeftActiveTabId(primaryTab.id);
+        setRightActiveTabId(null);
+        setFocusedEditorGroup("left");
         setPendingSelectedPath(null);
         updateWorkspaceState(path, { loading: false, startupIoReady: true });
         pushRecent(candidate.path);
@@ -1378,7 +1429,7 @@ function MainApp() {
         setNavHistory((h) => pushHistory(h, selectedEntry.path));
       }
       if (existingTab) {
-        setActiveTabId(existingTab.id);
+        activateEditorTab(existingTab.id, editorSplitOpen ? focusedEditorGroup : "left");
         setExplorerVisibility(existingTab.visibility);
         setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
@@ -1403,7 +1454,7 @@ function MainApp() {
           draftContent: payload.content,
         };
         setTabs((prev) => [...prev, newTab]);
-        setActiveTabId(newTab.id);
+        activateEditorTab(newTab.id, editorSplitOpen ? focusedEditorGroup : "left");
         setExplorerVisibility(visibility);
         setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
@@ -1421,6 +1472,9 @@ function MainApp() {
     [
       explorerVisibility,
       explorerWorkspace,
+      activateEditorTab,
+      editorSplitOpen,
+      focusedEditorGroup,
       lastOpenKeyForWorkspace,
       pushRecent,
       selectedEntry,
@@ -1472,7 +1526,7 @@ function MainApp() {
           ? prev.map((tab) => (tab.id === restoredTab.id ? restoredTab : tab))
           : [...prev, restoredTab];
       });
-      setActiveTabId(restoredTab.id);
+      activateEditorTab(restoredTab.id, "left");
       setExplorerVisibility(restoredTab.visibility);
       setPendingSelectedPath(null);
       setDiscardedEdit(null);
@@ -1481,19 +1535,37 @@ function MainApp() {
     }
   }, [discardedEdit]);
 
-  const saveCurrent = useCallback(async () => {
-    if (!document || !dirty || !activeDocumentWorkspacePath) return;
-    if (blockWorkspaceWrite("modify")) return;
+  const saveTab = useCallback(async (tabId: string | null) => {
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target || target.draftContent === target.document.content) return;
+    const workspace = workspaceRegistry.workspaces.find(
+      (item) => item.path === target.workspacePath,
+    );
+    if (!workspaceCan(workspace ?? null, "modify")) {
+      setError(
+        t("workspace.writeBlocked", {
+          reason: workspaceWriteReason(workspace ?? null, "modify") ?? "workspace capabilities",
+        }),
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveDocument(activeDocumentWorkspacePath, document.path, draftContent);
-      const fresh = await scanVault(activeDocumentWorkspacePath);
-      updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
-      updateActiveTab((tab) => {
-        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
-        return { ...tab, entry: freshEntry, document: saved, draftContent: saved.content };
-      });
+      const saved = await saveDocument(
+        target.workspacePath,
+        target.document.path,
+        target.draftContent,
+      );
+      const fresh = await scanVault(target.workspacePath);
+      updateWorkspaceState(target.workspacePath, { entries: fresh });
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== target.id) return tab;
+          const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+          return { ...tab, entry: freshEntry, document: saved, draftContent: saved.content };
+        }),
+      );
       setGitRefreshTick((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1501,46 +1573,62 @@ function MainApp() {
       setSaving(false);
     }
   }, [
-    document,
-    dirty,
-    activeDocumentWorkspacePath,
-    draftContent,
-    updateActiveTab,
-    blockWorkspaceWrite,
+    t,
+    tabs,
     updateWorkspaceState,
+    workspaceRegistry.workspaces,
   ]);
 
-  const snapshotCurrent = useCallback(async () => {
-    if (!document || !activeDocumentWorkspacePath) return;
-    if (blockWorkspaceWrite("create")) return;
+  const saveCurrent = useCallback(async () => {
+    await saveTab(resolvedActiveTabId);
+  }, [resolvedActiveTabId, saveTab]);
+
+  const snapshotTab = useCallback(async (tabId: string | null) => {
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target) return;
+    const workspace = workspaceRegistry.workspaces.find(
+      (item) => item.path === target.workspacePath,
+    );
+    if (!workspaceCan(workspace ?? null, "create")) {
+      setError(
+        t("workspace.writeBlocked", {
+          reason: workspaceWriteReason(workspace ?? null, "create") ?? "workspace capabilities",
+        }),
+      );
+      return;
+    }
     setError(null);
     try {
       const snapshot = await createVersion(
-        activeDocumentWorkspacePath,
-        document.path,
-        document.title,
-        draftContent,
+        target.workspacePath,
+        target.document.path,
+        target.document.title,
+        target.draftContent,
         t("snapshot.summary"),
       );
-      const fresh = await scanVault(activeDocumentWorkspacePath);
-      updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
-      updateActiveTab((tab) => {
-        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
-        return { ...tab, entry: freshEntry };
-      });
+      const fresh = await scanVault(target.workspacePath);
+      updateWorkspaceState(target.workspacePath, { entries: fresh });
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== target.id) return tab;
+          const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+          return { ...tab, entry: freshEntry };
+        }),
+      );
       setError(t("snapshot.success", { path: snapshot.relPath }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [
-    document,
-    activeDocumentWorkspacePath,
-    draftContent,
     t,
-    updateActiveTab,
-    blockWorkspaceWrite,
+    tabs,
     updateWorkspaceState,
+    workspaceRegistry.workspaces,
   ]);
+
+  const snapshotCurrent = useCallback(async () => {
+    await snapshotTab(resolvedActiveTabId);
+  }, [resolvedActiveTabId, snapshotTab]);
 
   const createNew = useCallback(
     async (title: string, docType: string, body: string, targetRelPath: string | null) => {
@@ -1583,7 +1671,7 @@ function MainApp() {
           ? prev.map((tab) => (tab.id === newTab.id ? newTab : tab))
           : [...prev, newTab];
       });
-      setActiveTabId(newTab.id);
+      activateEditorTab(newTab.id, "left");
       setPendingSelectedPath(null);
       pushRecent(entry.path);
     },
@@ -1782,14 +1870,14 @@ function MainApp() {
   );
 
   const selectTab = useCallback(
-    (tabId: string) => {
+    (tabId: string, group: EditorGroupId = focusedEditorGroup) => {
       const tab = tabs.find((item) => item.id === tabId);
       if (!tab) return;
-      setActiveTabId(tabId);
+      activateEditorTab(tabId, group);
       setExplorerVisibility(tab.visibility);
       pushRecent(tab.entry.path);
     },
-    [tabs, pushRecent],
+    [activateEditorTab, focusedEditorGroup, tabs, pushRecent],
   );
 
   const closeTab = useCallback(
@@ -1807,15 +1895,58 @@ function MainApp() {
         const closingIndex = prev.findIndex((tab) => tab.id === tabId);
         if (closingIndex === -1) return prev;
         const next = prev.filter((tab) => tab.id !== tabId);
-        if (resolvedActiveTabId === tabId) {
-          const fallback = next[Math.min(closingIndex, next.length - 1)] ?? null;
-          setActiveTabId(fallback?.id ?? null);
-        }
+        const fallback = next[Math.min(closingIndex, next.length - 1)] ?? null;
+        if (leftResolvedTabId === tabId) setLeftActiveTabId(fallback?.id ?? null);
+        if (rightResolvedTabId === tabId) setRightActiveTabId(null);
+        if (resolvedActiveTabId === tabId) setActiveTabId(fallback?.id ?? null);
         return next;
       });
     },
-    [resolvedActiveTabId, tabs],
+    [leftResolvedTabId, resolvedActiveTabId, rightResolvedTabId, tabs],
   );
+
+  const closeRightEditorPane = useCallback(() => {
+    setRightActiveTabId(null);
+    setFocusedEditorGroup("left");
+    if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
+    updateLayoutSettings({ editorSplitOpen: false });
+  }, [leftResolvedTabId, updateLayoutSettings]);
+
+  const closeAllCleanTabs = useCallback(() => {
+    const dirtyTabs = tabs.filter((tab) => tab.draftContent !== tab.document.content);
+    setTabs(dirtyTabs);
+    const fallback = dirtyTabs[0]?.id ?? null;
+    setLeftActiveTabId(fallback);
+    setRightActiveTabId(null);
+    setActiveTabId(fallback);
+    setFocusedEditorGroup("left");
+    updateLayoutSettings({ editorSplitOpen: false });
+    if (dirtyTabs.length > 0) {
+      setError(t("editor.tabs.closeAll.dirtyKept", { count: dirtyTabs.length }));
+    }
+  }, [tabs, t, updateLayoutSettings]);
+
+  const splitEditorRight = useCallback(() => {
+    const target = activeTab ?? leftTab ?? tabs[0] ?? null;
+    if (!target) return;
+    setRightActiveTabId(target.id);
+    setActiveTabId(target.id);
+    setFocusedEditorGroup("right");
+    updateLayoutSettings({ editorSplitOpen: true });
+  }, [activeTab, leftTab, tabs, updateLayoutSettings]);
+
+  const splitTerminalRight = useCallback(() => {
+    updateLayoutSettings({ terminalOpen: true, terminalSplitOpen: true });
+  }, [updateLayoutSettings]);
+
+  const splitActiveSurfaceRight = useCallback(() => {
+    const active = window.document.activeElement as HTMLElement | null;
+    if (active?.closest(".terminal-panel")) {
+      splitTerminalRight();
+      return;
+    }
+    splitEditorRight();
+  }, [splitEditorRight, splitTerminalRight]);
 
   const selectTabByIndex = useCallback(
     (index: number) => {
@@ -1836,7 +1967,10 @@ function MainApp() {
 
   const jumpToOutlineLine = useCallback((line: number) => {
     const jump = () => {
-      const ta = editorTextareaRef.current;
+      const ta =
+        focusedEditorGroup === "right"
+          ? rightEditorTextareaRef.current
+          : editorTextareaRef.current;
       if (!ta) return false;
       const lines = ta.value.split("\n");
       let pos = 0;
@@ -1852,7 +1986,7 @@ function MainApp() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(jump);
     });
-  }, []);
+  }, [focusedEditorGroup]);
 
   const runCommand = useCallback(
     (id: string) => {
@@ -1865,6 +1999,12 @@ function MainApp() {
           break;
         case "snapshot":
           void snapshotCurrent();
+          break;
+        case "split-right":
+          splitEditorRight();
+          break;
+        case "close-all-tabs":
+          closeAllCleanTabs();
           break;
         case "toggle-preview":
           setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview"));
@@ -1904,6 +2044,8 @@ function MainApp() {
       openNewDocumentDialog,
       openPreferences,
       checkForUpdates,
+      splitEditorRight,
+      closeAllCleanTabs,
       updateLayoutSettings,
       outlineOpen,
     ],
@@ -1914,6 +2056,7 @@ function MainApp() {
       "mod+s": () => void saveCurrent(),
       "mod+shift+s": () => void snapshotCurrent(),
       "mod+n": openNewDocumentDialog,
+      "mod+d": splitActiveSurfaceRight,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
       "mod+p": () => setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview")),
       "mod+\\": () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
@@ -1946,6 +2089,7 @@ function MainApp() {
       selectTabByIndex,
       openNewDocumentDialog,
       openPreferences,
+      splitActiveSurfaceRight,
       closeTab,
       resolvedActiveTabId,
       updateLayoutSettings,
@@ -1958,6 +2102,70 @@ function MainApp() {
     documentTypesPaneOpen ? "" : " types-closed"
   }${documentsPaneOpen ? "" : " documents-closed"}`;
   const themeVars = useMemo(() => buildThemeVars(anchorSettings), [anchorSettings]);
+  const editorSplitStyle =
+    editorSplitOpen && rightTab
+      ? {
+          gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr ${1 - layoutSettings.editorSplitRatio}fr`,
+        }
+      : undefined;
+
+  const renderEditorPane = (
+    group: EditorGroupId,
+    tab: EditorTab | null,
+    tabId: string | null,
+  ) => {
+    const workspace = tab
+      ? workspaceRegistry.workspaces.find((item) => item.path === tab.workspacePath) ?? null
+      : activeDocumentWorkspace;
+    const caps = workspaceCapabilities(workspace);
+    const readOnlyReason = workspaceWriteReason(workspace);
+    const groupTabs =
+      group === "right" && tab
+        ? editorTabSummaries.filter((summary) => summary.id === tab.id)
+        : editorTabSummaries;
+    return (
+      <EditorPane
+        document={tab?.document ?? null}
+        openingEntry={group === "left" ? openingEntry : null}
+        draftContent={tab?.draftContent ?? ""}
+        saving={saving && resolvedActiveTabId === tabId}
+        dirty={Boolean(tab && tab.draftContent !== tab.document.content)}
+        outlineOpen={outlineOpen}
+        activeWorkspaceLabel={workspace?.label ?? null}
+        documentLabel={
+          tab ? documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode) : null
+        }
+        readOnly={!caps.canModify}
+        canSnapshot={caps.canCreate}
+        readOnlyReason={readOnlyReason}
+        viewMode={editorViewMode}
+        tabs={groupTabs}
+        activeTabId={tabId}
+        entries={tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries}
+        onChange={(content) => {
+          if (!tabId) return;
+          activateEditorTab(tabId, group);
+          updateTabDraft(tabId, content);
+        }}
+        onSelectTab={(nextTabId) => selectTab(nextTabId, group)}
+        onCloseTab={(nextTabId) => {
+          if (group === "right") closeRightEditorPane();
+          else closeTab(nextTabId);
+        }}
+        onCloseAllTabs={closeAllCleanTabs}
+        onSave={() => void saveTab(tabId)}
+        onSnapshot={() => void snapshotTab(tabId)}
+        onSplitRight={splitEditorRight}
+        onFocusPane={() => {
+          if (tabId) activateEditorTab(tabId, group);
+        }}
+        onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
+        onViewModeChange={setEditorViewMode}
+        onWikilinkClick={handleWikilinkClick}
+        textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
+      />
+    );
+  };
 
   const handleTopbarPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
@@ -2166,6 +2374,7 @@ function MainApp() {
                 }}
                 onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
                 browserMode={anchorSettings.ui.documentBrowserMode}
+                documentLabelMode={anchorSettings.ui.documentLabelMode}
                 collapsedTreeFolders={collapsedTreeFolders}
                 onQueryChange={setExplorerQuery}
                 onBrowserModeChange={setDocumentBrowserMode}
@@ -2180,31 +2389,15 @@ function MainApp() {
               />
             ) : null}
 
-            <EditorPane
-              document={document}
-              openingEntry={openingEntry}
-              draftContent={draftContent}
-              saving={saving}
-              dirty={dirty}
-              outlineOpen={outlineOpen}
-              activeWorkspaceLabel={activeDocumentWorkspace?.label ?? null}
-              readOnly={!activeWorkspaceCanModify}
-              canSnapshot={activeWorkspaceCanCreate}
-              readOnlyReason={activeWorkspaceWriteReason}
-              viewMode={editorViewMode}
-              tabs={editorTabSummaries}
-              activeTabId={resolvedActiveTabId}
-              entries={activeDocumentEntries}
-              onChange={setDraftContent}
-              onSelectTab={selectTab}
-              onCloseTab={closeTab}
-              onSave={saveCurrent}
-              onSnapshot={snapshotCurrent}
-              onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
-              onViewModeChange={setEditorViewMode}
-              onWikilinkClick={handleWikilinkClick}
-              textareaRef={editorTextareaRef}
-            />
+            <div
+              className={editorSplitOpen && rightTab ? "editor-split-shell split" : "editor-split-shell"}
+              style={editorSplitStyle}
+            >
+              {renderEditorPane("left", leftTab, leftResolvedTabId)}
+              {editorSplitOpen && rightTab
+                ? renderEditorPane("right", rightTab, rightResolvedTabId)
+                : null}
+            </div>
 
             {outlineOpen ? (
               <OutlinePane
@@ -2212,8 +2405,11 @@ function MainApp() {
                 draftContent={draftContent}
                 entries={activeDocumentEntries}
                 readOnly={!activeWorkspaceCanModify}
+                workspacePath={activeDocumentWorkspacePath}
                 onJumpToLine={jumpToOutlineLine}
                 onClose={() => updateLayoutSettings({ outlineOpen: false })}
+                onError={setError}
+                onRefreshWorkspace={() => void refreshCurrent()}
                 onUpdateField={updateField}
                 onSelectEntry={selectEntry}
                 onMissingWikilink={handleWikilinkClick}
@@ -2227,8 +2423,13 @@ function MainApp() {
           settings={anchorSettings}
           open={anchorSettings.ui.layout.terminalOpen}
           height={anchorSettings.ui.layout.terminalHeight}
+          splitOpen={anchorSettings.ui.layout.terminalSplitOpen}
+          splitRatio={anchorSettings.ui.layout.terminalSplitRatio}
           onOpenChange={(terminalOpen) => updateLayoutSettings({ terminalOpen })}
           onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
+          onSplitOpenChange={(terminalSplitOpen) =>
+            updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
+          }
         />
 
         <div className="toast-stack">
@@ -2357,6 +2558,7 @@ function MainApp() {
           onClose={closeCommandPalette}
           onSelectEntry={selectEntry}
           onRunCommand={runCommand}
+          documentLabelMode={anchorSettings.ui.documentLabelMode}
         />
         <CommitDialog
           open={commitDialog !== null}

@@ -1,8 +1,9 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Hash, Search } from "lucide-react";
 import { useTranslation } from "../lib/i18n";
-import { frontmatterScalar } from "../lib/document";
+import { documentDisplayName, frontmatterScalar } from "../lib/document";
 import { getCommandPaletteDocs, type DocumentIndex } from "../lib/documentIndex";
+import type { DocumentLabelMode } from "../lib/settings";
 import type { VaultEntry } from "../lib/types";
 
 interface CommandPaletteProps {
@@ -11,6 +12,7 @@ interface CommandPaletteProps {
   onClose: () => void;
   onSelectEntry: (entry: VaultEntry) => boolean | Promise<boolean>;
   onRunCommand: (id: string) => void;
+  documentLabelMode: DocumentLabelMode;
 }
 
 interface CommandAction {
@@ -30,6 +32,7 @@ export const CommandPalette = memo(function CommandPalette({
   onClose,
   onSelectEntry,
   onRunCommand,
+  documentLabelMode,
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -44,6 +47,8 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "new-document", label: t("cmdk.action.newDocument"), shortcut: "⌘ N" },
       { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },
       { id: "snapshot", label: t("cmdk.action.snapshot"), shortcut: "⌘ ⇧ S" },
+      { id: "split-right", label: t("cmdk.action.splitRight"), shortcut: "⌘ D" },
+      { id: "close-all-tabs", label: t("cmdk.action.closeAllTabs") },
       { id: "toggle-preview", label: t("cmdk.action.togglePreview"), shortcut: "⌘ P" },
       { id: "toggle-outline", label: t("cmdk.action.toggleOutline"), shortcut: "⌘ \\" },
       { id: "toggle-locale", label: t("cmdk.action.toggleLocale"), shortcut: "⌘ ⇧ L" },
@@ -209,7 +214,7 @@ export const CommandPalette = memo(function CommandPalette({
                           <FileText size={14} />
                         </span>
                         <span className="cmdk-copy">
-                          <strong>{item.entry.title}</strong>
+                          <strong>{documentDisplayName(item.entry, documentLabelMode)}</strong>
                           <span>{item.entry.relPath}</span>
                         </span>
                         {fmType ? (

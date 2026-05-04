@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   MOCK_VAULT_PATH,
   mockCreateDocument,
@@ -19,7 +19,12 @@ import type {
   InboxClassification,
   InboxDropItem,
   InboxSettings,
+  FileStoreOperation,
   VaultEntry,
+  MemoDocument,
+  MemoEntry,
+  MemoFormat,
+  StoredFileOutcome,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -58,6 +63,29 @@ export async function chooseVaultDirectory(title: string): Promise<string | null
 
 export async function chooseWorkspaceDirectory(title: string): Promise<string | null> {
   return chooseVaultDirectory(title);
+}
+
+export async function chooseFiles(title: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  const selected = await open({
+    directory: false,
+    multiple: true,
+    title,
+  });
+  if (Array.isArray(selected)) return selected.filter((item): item is string => typeof item === "string");
+  return typeof selected === "string" ? [selected] : [];
+}
+
+export async function chooseSaveFile(
+  title: string,
+  defaultPath?: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  const selected = await save({
+    title,
+    defaultPath,
+  });
+  return typeof selected === "string" ? selected : null;
 }
 
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
@@ -356,6 +384,106 @@ export async function saveInboxSettings(
 ): Promise<InboxSettings> {
   if (!isTauri()) return settings;
   return invoke<InboxSettings>("save_inbox_settings", { vaultPath, settings });
+}
+
+// === Right pane file shelf / memos ===
+
+export async function storeShelfFiles(
+  vaultPath: string,
+  sources: string[],
+  operation: FileStoreOperation,
+): Promise<StoredFileOutcome[]> {
+  if (!isTauri()) {
+    return sources.map((sourcePath) => ({
+      sourcePath,
+      targetPath: `${vaultPath}/.anchor/stash/files/${sourcePath.split("/").pop() ?? "file"}`,
+      fileName: sourcePath.split("/").pop() ?? "file",
+      operation,
+    }));
+  }
+  return invoke<StoredFileOutcome[]>("store_shelf_files", { vaultPath, sources, operation });
+}
+
+export async function storeShelfFilesAs(
+  sources: string[],
+  targetDir: string,
+  operation: FileStoreOperation,
+): Promise<StoredFileOutcome[]> {
+  if (!isTauri()) {
+    return sources.map((sourcePath) => ({
+      sourcePath,
+      targetPath: `${targetDir}/${sourcePath.split("/").pop() ?? "file"}`,
+      fileName: sourcePath.split("/").pop() ?? "file",
+      operation,
+    }));
+  }
+  return invoke<StoredFileOutcome[]>("store_shelf_files_as", {
+    sources,
+    targetDir,
+    operation,
+  });
+}
+
+export async function listMemos(vaultPath: string): Promise<MemoEntry[]> {
+  if (!isTauri()) return [];
+  return invoke<MemoEntry[]>("list_memos", { vaultPath });
+}
+
+export async function readMemo(
+  vaultPath: string,
+  memoPath: string,
+): Promise<MemoDocument> {
+  if (!isTauri()) {
+    return {
+      name: memoPath.split("/").pop() ?? "memo.md",
+      path: memoPath,
+      format: memoPath.endsWith(".txt") ? "plain" : "markdown",
+      updatedAt: null,
+      sizeBytes: 0,
+      preview: "",
+      content: "",
+    };
+  }
+  return invoke<MemoDocument>("read_memo", { vaultPath, memoPath });
+}
+
+export async function saveMemo(
+  vaultPath: string,
+  name: string,
+  format: MemoFormat,
+  content: string,
+): Promise<MemoDocument> {
+  if (!isTauri()) {
+    const fileName = name || `memo.${format === "plain" ? "txt" : "md"}`;
+    return {
+      name: fileName,
+      path: `${vaultPath}/.anchor/memos/${fileName}`,
+      format,
+      updatedAt: null,
+      sizeBytes: content.length,
+      preview: content.trim().slice(0, 160),
+      content,
+    };
+  }
+  return invoke<MemoDocument>("save_memo", { vaultPath, name, format, content });
+}
+
+export async function saveMemoAs(
+  targetPath: string,
+  content: string,
+): Promise<MemoDocument> {
+  if (!isTauri()) {
+    return {
+      name: targetPath.split("/").pop() ?? "memo.md",
+      path: targetPath,
+      format: targetPath.endsWith(".txt") ? "plain" : "markdown",
+      updatedAt: null,
+      sizeBytes: content.length,
+      preview: content.trim().slice(0, 160),
+      content,
+    };
+  }
+  return invoke<MemoDocument>("save_memo_as", { targetPath, content });
 }
 
 function mockGmailUnread(): GmailMessage[] {
