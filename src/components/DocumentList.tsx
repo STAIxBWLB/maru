@@ -1,7 +1,22 @@
-import { Search } from "lucide-react";
-import { useMemo } from "react";
+import {
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FileText,
+  Folder,
+  List,
+  RefreshCcw,
+  Search,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { VaultEntry } from "../lib/types";
 import { filterEntries, formatRelativeDate, frontmatterScalar } from "../lib/document";
+import {
+  buildDocumentTreeRows,
+  collectDocumentTreeFolderPaths,
+  nextCollapsedFolders,
+  type DocumentTreeRow,
+} from "../lib/documentTree";
 import { useTranslation } from "../lib/i18n";
 
 interface DocumentListProps {
@@ -12,8 +27,14 @@ interface DocumentListProps {
   typeFilter: string | null;
   onQueryChange: (query: string) => void;
   onSelect: (entry: VaultEntry) => void;
+  onRefresh: () => void;
+  refreshing?: boolean;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
+
+type BrowserMode = "list" | "tree";
+
+const BROWSER_MODE_KEY = "anchor:documentBrowserMode:v1";
 
 export function DocumentList({
   entries,
@@ -23,9 +44,17 @@ export function DocumentList({
   typeFilter,
   onQueryChange,
   onSelect,
+  onRefresh,
+  refreshing = false,
   searchInputRef,
 }: DocumentListProps) {
   const { t, locale } = useTranslation();
+  const [browserMode, setBrowserMode] = useState<BrowserMode>(() => {
+    if (typeof window === "undefined") return "tree";
+    const stored = window.localStorage.getItem(BROWSER_MODE_KEY);
+    return stored === "list" || stored === "tree" ? stored : "tree";
+  });
+  const [collapsedFolders, setCollapsedFolders] = useState<string[]>([]);
 
   const filtered = useMemo(() => {
     let next = filterEntries(entries, query);
@@ -37,6 +66,11 @@ export function DocumentList({
     }
     return next;
   }, [entries, query, typeFilter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(BROWSER_MODE_KEY, browserMode);
+  }, [browserMode]);
 
   // Group by mtime bucket: Today / This week / Earlier
   const grouped = useMemo(() => {
@@ -60,6 +94,13 @@ export function DocumentList({
     return buckets.filter((b) => b.items.length > 0);
   }, [filtered, query, typeFilter, t]);
 
+  const forceExpandTree = Boolean(query.trim() || typeFilter != null);
+  const folderPaths = useMemo(() => collectDocumentTreeFolderPaths(entries), [entries]);
+  const treeRows = useMemo(
+    () => buildDocumentTreeRows(filtered, collapsedFolders, forceExpandTree),
+    [filtered, collapsedFolders, forceExpandTree],
+  );
+
   const headerCaption = typeFilter
     ? typeFilter === "_"
       ? t("sidebar.types.untyped")
@@ -73,7 +114,59 @@ export function DocumentList({
           <h2>{headerCaption}</h2>
         </div>
         <span className="meta">{t("list.meta.count", { count: filtered.length })}</span>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          title={t("app.refresh")}
+          aria-label={t("app.refresh")}
+        >
+          <RefreshCcw size={14} className={refreshing ? "spin" : undefined} />
+        </button>
       </div>
+
+      <div className="list-mode-toggle" role="group" aria-label={t("list.viewMode")}>
+        <button
+          type="button"
+          className={browserMode === "list" ? "active" : ""}
+          onClick={() => setBrowserMode("list")}
+        >
+          <List size={13} />
+          <span>{t("list.view.list")}</span>
+        </button>
+        <button
+          type="button"
+          className={browserMode === "tree" ? "active" : ""}
+          onClick={() => setBrowserMode("tree")}
+        >
+          <Folder size={13} />
+          <span>{t("list.view.tree")}</span>
+        </button>
+      </div>
+
+      {browserMode === "tree" ? (
+        <div className="tree-bulk-actions" role="group" aria-label={t("list.tree.actions")}>
+          <button
+            type="button"
+            onClick={() => setCollapsedFolders(folderPaths)}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.collapseAll")}
+          >
+            <ChevronsDownUp size={13} />
+            <span>{t("list.tree.collapseAll")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsedFolders([])}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.expandAll")}
+          >
+            <ChevronsUpDown size={13} />
+            <span>{t("list.tree.expandAll")}</span>
+          </button>
+        </div>
+      ) : null}
 
       <label className="search-box">
         <Search size={14} />
@@ -105,7 +198,18 @@ export function DocumentList({
           </div>
         ) : null}
 
-        {grouped.map((group, groupIdx) => (
+        {!loading && filtered.length > 0 && browserMode === "tree" ? (
+          <DocumentTree
+            rows={treeRows}
+            selectedPath={selectedPath}
+            collapsedFolders={collapsedFolders}
+            forceExpand={forceExpandTree}
+            onCollapsedFoldersChange={setCollapsedFolders}
+            onSelect={onSelect}
+          />
+        ) : null}
+
+        {browserMode === "list" ? grouped.map((group, groupIdx) => (
           <div className="list-group" key={group.label ?? `g-${groupIdx}`}>
             {group.label ? (
               <div className="list-group-label">
@@ -164,9 +268,118 @@ export function DocumentList({
               );
             })}
           </div>
-        ))}
+        )) : null}
       </div>
     </section>
+  );
+}
+
+function DocumentTree({
+  rows,
+  selectedPath,
+  collapsedFolders,
+  forceExpand,
+  onCollapsedFoldersChange,
+  onSelect,
+}: {
+  rows: DocumentTreeRow[];
+  selectedPath: string | null;
+  collapsedFolders: string[];
+  forceExpand: boolean;
+  onCollapsedFoldersChange: (paths: string[]) => void;
+  onSelect: (entry: VaultEntry) => void;
+}) {
+  return (
+    <div className="tree-list" role="tree">
+      {rows.map((row) =>
+        row.kind === "folder" ? (
+          <FolderRow
+            key={row.id}
+            row={row}
+            collapsedFolders={collapsedFolders}
+            forceExpand={forceExpand}
+            onCollapsedFoldersChange={onCollapsedFoldersChange}
+          />
+        ) : (
+          <EntryRow
+            key={row.id}
+            row={row}
+            selected={selectedPath === row.entry.path}
+            onSelect={onSelect}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+function FolderRow({
+  row,
+  collapsedFolders,
+  forceExpand,
+  onCollapsedFoldersChange,
+}: {
+  row: Extract<DocumentTreeRow, { kind: "folder" }>;
+  collapsedFolders: string[];
+  forceExpand: boolean;
+  onCollapsedFoldersChange: (paths: string[]) => void;
+}) {
+  const paddingLeft = 8 + row.depth * 14;
+  const collapsed = !forceExpand && row.collapsed;
+  return (
+    <button
+      type="button"
+      className="tree-row folder"
+      style={{ paddingLeft }}
+      aria-expanded={!collapsed}
+      onClick={() =>
+        onCollapsedFoldersChange(
+          nextCollapsedFolders(collapsedFolders, row.path, !collapsed),
+        )
+      }
+      title={row.path}
+    >
+      <ChevronRight
+        size={13}
+        className={collapsed ? "tree-chevron" : "tree-chevron open"}
+      />
+      <Folder size={14} />
+      <span className="tree-row-title">{row.name}</span>
+      <span className="tree-count">{row.count}</span>
+    </button>
+  );
+}
+
+function EntryRow({
+  row,
+  selected,
+  onSelect,
+}: {
+  row: Extract<DocumentTreeRow, { kind: "entry" }>;
+  selected: boolean;
+  onSelect: (entry: VaultEntry) => void;
+}) {
+  const paddingLeft = 8 + row.depth * 14;
+  const fmType = frontmatterScalar(row.entry.frontmatter, "type");
+  return (
+    <button
+      type="button"
+      className={selected ? "tree-row file selected" : "tree-row file"}
+      style={{ paddingLeft }}
+      onClick={() => onSelect(row.entry)}
+      title={row.entry.relPath}
+    >
+      <span className="tree-indent-slot" />
+      <FileText size={13} />
+      <span className="tree-row-title">{row.entry.title}</span>
+      {fmType ? (
+        <span className="tree-type" data-type={fmType.toLowerCase()}>
+          {fmType}
+        </span>
+      ) : (
+        <span className="tree-type">{row.entry.fileKind.toUpperCase()}</span>
+      )}
+    </button>
   );
 }
 

@@ -770,6 +770,136 @@ a {
   background: var(--faint);
 }
 
+.list-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 16px 8px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-3);
+}
+
+.list-mode-toggle button {
+  min-width: 0;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.list-mode-toggle button.active {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.tree-bulk-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 16px 8px;
+}
+
+.tree-bulk-actions button {
+  min-width: 0;
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.tree-bulk-actions button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.tree-bulk-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tree-list {
+  display: grid;
+  gap: 1px;
+  padding: 2px 0 12px;
+}
+
+.tree-row {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 14px 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+
+.tree-row:hover {
+  background: var(--panel-3);
+  color: var(--ink);
+}
+
+.tree-row.file.selected {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.tree-row.folder {
+  color: var(--ink-2);
+  font-weight: 650;
+}
+
+.tree-chevron {
+  color: var(--faint);
+  transition: transform 120ms ease;
+}
+
+.tree-chevron.open {
+  transform: rotate(90deg);
+}
+
+.tree-indent-slot {
+  width: 13px;
+}
+
+.tree-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-count,
+.tree-type {
+  margin-right: 8px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.tree-type {
+  text-transform: uppercase;
+}
+
 /* ─── Status pills ─────────────────────────────────────────────────── */
 
 .type-badge {

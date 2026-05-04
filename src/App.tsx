@@ -41,6 +41,15 @@ import {
   type InboxItemState,
 } from "./lib/inbox";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
+import {
+  checkAppUpdate,
+  installAppUpdate,
+  relaunchApp,
+  updaterAvailable,
+  type AppUpdateCheckResult,
+  type AppUpdateProgress,
+  type AppUpdateInfo,
+} from "./lib/updater";
 import type {
   DocumentPayload,
   GitStatus,
@@ -88,6 +97,14 @@ interface InboxCarry {
   classifyError: string | null;
 }
 
+type UpdateToast =
+  | { kind: "checking" }
+  | { kind: "available"; info: AppUpdateInfo }
+  | { kind: "notAvailable" }
+  | { kind: "downloading"; info: AppUpdateInfo; progress: AppUpdateProgress | null }
+  | { kind: "ready"; info: AppUpdateInfo }
+  | { kind: "error"; message: string };
+
 function tabIdForEntry(entry: VaultEntry): string {
   return entry.path;
 }
@@ -113,6 +130,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshingVault, setRefreshingVault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
@@ -139,6 +157,7 @@ export default function App() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
   // overwrite the editor with stale content if the user clicked a later
@@ -185,6 +204,7 @@ export default function App() {
   const [inboxSettings, setInboxSettings] = useState<InboxSettings>(DEFAULT_INBOX_SETTINGS);
   const [inboxSettingsOpen, setInboxSettingsOpen] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
+  const [updateToast, setUpdateToast] = useState<UpdateToast | null>(null);
 
   const activeVaultPath = vaultList.activeVault;
   const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
@@ -384,6 +404,57 @@ export default function App() {
     },
     [inboxDrops, updateInboxCarry],
   );
+
+  const checkForUpdates = useCallback(async (manual = false) => {
+    if (!updaterAvailable()) {
+      if (manual) setUpdateToast({ kind: "error", message: t("updates.desktopOnly") });
+      return;
+    }
+    if (manual) setUpdateToast({ kind: "checking" });
+    try {
+      const result = await checkAppUpdate();
+      if (!result) {
+        if (manual) setUpdateToast({ kind: "notAvailable" });
+        return;
+      }
+      pendingUpdateRef.current = result.update;
+      setUpdateToast({ kind: "available", info: result.info });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (manual) {
+        setUpdateToast({ kind: "error", message });
+      } else {
+        console.info("[anchor] update check failed:", message);
+      }
+    }
+  }, [t]);
+
+  const installPendingUpdate = useCallback(async () => {
+    const update = pendingUpdateRef.current;
+    if (!update || updateToast?.kind !== "available") return;
+    const info = updateToast.info;
+    setUpdateToast({ kind: "downloading", info, progress: null });
+    try {
+      await installAppUpdate(update, (progress) => {
+        setUpdateToast({ kind: "downloading", info, progress });
+      });
+      setUpdateToast({ kind: "ready", info });
+      await relaunchApp();
+    } catch (err) {
+      setUpdateToast({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [updateToast]);
+
+  useEffect(() => {
+    if (!updaterAvailable()) return;
+    const timer = window.setTimeout(() => {
+      void checkForUpdates(false);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [checkForUpdates]);
 
   // First entry into Inbox mode triggers a Gmail fetch. Subsequent
   // refreshes are user-driven via the refresh button / ⌘R.
@@ -921,12 +992,84 @@ export default function App() {
 
   const refreshCurrent = useCallback(async () => {
     if (!activeVaultPath) return;
-    const lastRel =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem(lastOpenKeyForVault(activeVaultPath))
-        : null;
-    await loadVault(activeVaultPath, lastRel);
-  }, [activeVaultPath, lastOpenKeyForVault, loadVault]);
+    setRefreshingVault(true);
+    setLoading((current) => current || entries.length === 0);
+    setError(null);
+    try {
+      const fresh = await scanVault(activeVaultPath);
+      setEntries(fresh);
+      const byPath = new Map(fresh.map((entry) => [entry.path, entry] as const));
+      const nextTabs: EditorTab[] = [];
+
+      for (const tab of tabs) {
+        const freshEntry = byPath.get(tab.entry.path);
+        if (!freshEntry) continue;
+        const isDirty = tab.draftContent !== tab.document.content;
+        if (isDirty) {
+          nextTabs.push({ ...tab, entry: freshEntry });
+          continue;
+        }
+        const payload = await readDocument(activeVaultPath, freshEntry.path);
+        nextTabs.push({
+          id: tabIdForEntry(freshEntry),
+          entry: freshEntry,
+          document: payload,
+          draftContent: payload.content,
+        });
+      }
+
+      let nextActiveTabId =
+        resolvedActiveTabId && nextTabs.some((tab) => tab.id === resolvedActiveTabId)
+          ? resolvedActiveTabId
+          : null;
+
+      if (!nextActiveTabId) {
+        const lastRel =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(lastOpenKeyForVault(activeVaultPath))
+            : null;
+        const fallback =
+          (lastRel
+            ? fresh.find((entry) => entry.relPath === lastRel || entry.path === lastRel)
+            : null) ??
+          fresh[0] ??
+          null;
+        if (fallback) {
+          const existing = nextTabs.find((tab) => tab.entry.path === fallback.path);
+          if (existing) {
+            nextActiveTabId = existing.id;
+          } else {
+            const payload = await readDocument(activeVaultPath, fallback.path);
+            const tab: EditorTab = {
+              id: tabIdForEntry(fallback),
+              entry: fallback,
+              document: payload,
+              draftContent: payload.content,
+            };
+            nextTabs.push(tab);
+            nextActiveTabId = tab.id;
+          }
+          pushRecent(fallback.path);
+        }
+      }
+
+      setTabs(nextTabs);
+      setActiveTabId(nextActiveTabId);
+      setGitRefreshTick((n) => n + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+      setRefreshingVault(false);
+    }
+  }, [
+    activeVaultPath,
+    entries.length,
+    lastOpenKeyForVault,
+    pushRecent,
+    resolvedActiveTabId,
+    tabs,
+  ]);
 
   const focusSearch = useCallback(() => {
     searchInputRef.current?.focus();
@@ -1021,6 +1164,9 @@ export default function App() {
             void refreshCurrent();
           }
           break;
+        case "check-updates":
+          void checkForUpdates(true);
+          break;
         case "open-inbox":
           setAppMode("inbox");
           break;
@@ -1038,6 +1184,7 @@ export default function App() {
       refreshCurrent,
       refreshInbox,
       refreshGmail,
+      checkForUpdates,
       appMode,
       locale,
       setLocale,
@@ -1217,6 +1364,8 @@ export default function App() {
               typeFilter={typeFilter}
               onQueryChange={setQuery}
               onSelect={selectEntry}
+              onRefresh={() => void refreshCurrent()}
+              refreshing={refreshingVault}
               searchInputRef={searchInputRef}
             />
 
@@ -1307,6 +1456,54 @@ export default function App() {
               >
                 <X size={14} />
               </button>
+            </div>
+          ) : null}
+
+          {updateToast ? (
+            <div className={updateToast.kind === "error" ? "toast" : "toast notice"}>
+              {updateToast.kind === "checking" || updateToast.kind === "downloading" ? (
+                <RefreshCcw size={15} className="spin" />
+              ) : (
+                <AlertTriangle size={15} />
+              )}
+              <span>
+                {updateToast.kind === "checking"
+                  ? t("updates.checking")
+                  : updateToast.kind === "available"
+                    ? t("updates.available", { version: updateToast.info.version })
+                    : updateToast.kind === "notAvailable"
+                      ? t("updates.none")
+                      : updateToast.kind === "downloading"
+                        ? t("updates.downloading", {
+                            progress:
+                              updateToast.progress?.percent != null
+                                ? `${updateToast.progress.percent}%`
+                                : "…",
+                          })
+                        : updateToast.kind === "ready"
+                          ? t("updates.ready")
+                          : t("updates.error", { message: updateToast.message })}
+              </span>
+              {updateToast.kind === "available" ? (
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => void installPendingUpdate()}
+                >
+                  {t("updates.install")}
+                </button>
+              ) : null}
+              {updateToast.kind !== "downloading" ? (
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setUpdateToast(null)}
+                  aria-label={t("app.errorClose")}
+                  title={t("app.errorClose")}
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

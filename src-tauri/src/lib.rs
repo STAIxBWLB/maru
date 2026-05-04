@@ -32,6 +32,8 @@ use vault_list::{add_vault, list_vaults, remove_vault, set_active_vault};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(InboxWatcherState::default())
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![

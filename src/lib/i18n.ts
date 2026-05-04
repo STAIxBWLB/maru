@@ -80,6 +80,12 @@ const ko: Record<string, string> = {
   "list.group.today": "오늘",
   "list.group.thisWeek": "이번 주",
   "list.group.earlier": "이전",
+  "list.viewMode": "문서 보기 방식",
+  "list.view.list": "목록",
+  "list.view.tree": "트리",
+  "list.tree.actions": "트리 작업",
+  "list.tree.collapseAll": "모두 접기",
+  "list.tree.expandAll": "모두 펼치기",
 
   "editor.empty.title": "문서를 선택하세요",
   "editor.empty.description":
@@ -177,6 +183,7 @@ const ko: Record<string, string> = {
   "cmdk.action.toggleOutline": "개요 패널 토글",
   "cmdk.action.toggleLocale": "한국어/English 전환",
   "cmdk.action.refresh": "볼트 다시 읽기",
+  "cmdk.action.checkUpdates": "업데이트 확인",
   "cmdk.action.openInbox": "인박스 열기",
   "cmdk.action.openDocs": "문서 열기",
   "cmdk.action.addVault": "볼트 추가",
@@ -205,6 +212,15 @@ const ko: Record<string, string> = {
 
   "toast.discardedEdit": "{title} 의 저장하지 않은 변경 사항이 임시 보관되었습니다.",
   "toast.restore": "되돌리기",
+
+  "updates.checking": "업데이트 확인 중...",
+  "updates.available": "새 버전 {version}이 있습니다.",
+  "updates.none": "사용 가능한 업데이트가 없습니다.",
+  "updates.downloading": "업데이트 다운로드/설치 중: {progress}",
+  "updates.ready": "업데이트 설치 완료. 앱을 다시 시작합니다.",
+  "updates.install": "설치 후 재시작",
+  "updates.error": "업데이트 실패: {message}",
+  "updates.desktopOnly": "업데이트 확인은 데스크톱 앱에서만 사용할 수 있습니다.",
 
   "footer.tagline": "로컬 우선 · 파일 원천 · ko/en",
 };
@@ -272,6 +288,12 @@ const en: Record<string, string> = {
   "list.group.today": "Today",
   "list.group.thisWeek": "This week",
   "list.group.earlier": "Earlier",
+  "list.viewMode": "Document view mode",
+  "list.view.list": "List",
+  "list.view.tree": "Tree",
+  "list.tree.actions": "Tree actions",
+  "list.tree.collapseAll": "Collapse all",
+  "list.tree.expandAll": "Expand all",
 
   "editor.empty.title": "Select a document",
   "editor.empty.description":
@@ -369,6 +391,7 @@ const en: Record<string, string> = {
   "cmdk.action.toggleOutline": "Toggle outline panel",
   "cmdk.action.toggleLocale": "Switch ko / en",
   "cmdk.action.refresh": "Reload vault",
+  "cmdk.action.checkUpdates": "Check for updates",
   "cmdk.action.openInbox": "Open inbox",
   "cmdk.action.openDocs": "Open docs",
   "cmdk.action.addVault": "Add vault",
@@ -397,6 +420,15 @@ const en: Record<string, string> = {
 
   "toast.discardedEdit": "Unsaved edits to {title} have been stashed.",
   "toast.restore": "Restore",
+
+  "updates.checking": "Checking for updates…",
+  "updates.available": "Version {version} is available.",
+  "updates.none": "No updates available.",
+  "updates.downloading": "Downloading/installing update: {progress}",
+  "updates.ready": "Update installed. Relaunching Anchor.",
+  "updates.install": "Install & restart",
+  "updates.error": "Update failed: {message}",
+  "updates.desktopOnly": "Update checks are only available in the desktop app.",
 
   "footer.tagline": "Local-first · files-as-truth · ko/en",
 };
