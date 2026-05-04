@@ -221,7 +221,10 @@ pnpm typecheck
 # Production build:
 pnpm build
 
-# Signed native release build (requires updater signing env):
+# Signed native release build:
+make tauri-build
+
+# Raw pnpm build still requires explicit updater signing env:
 export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/anchor-updater.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/anchor-updater.key.password)"
 pnpm tauri:build

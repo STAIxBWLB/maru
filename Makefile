@@ -18,6 +18,8 @@ CARGO      ?= cargo
 TAURI_DIR  := src-tauri
 ICON_PATH  := $(TAURI_DIR)/icons/icon.png
 BENCH_VAULT ?= $(HOME)/workspace/work
+TAURI_SIGNING_PRIVATE_KEY_FILE ?= $(HOME)/.tauri/anchor-updater.key
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE ?= $(HOME)/.tauri/anchor-updater.key.password
 
 # ---------------------------------------------------------------------------
 # Help (default target)
@@ -72,7 +74,19 @@ build: node_modules ## Frontend production build (vite)
 
 .PHONY: tauri-build
 tauri-build: install ## Native Tauri production build (cargo + bundle)
-	$(PNPM) tauri build
+	@set -euo pipefail; \
+	if [ -z "$${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then \
+		if [ ! -f "$(TAURI_SIGNING_PRIVATE_KEY_FILE)" ]; then \
+			printf "error: TAURI_SIGNING_PRIVATE_KEY is unset and %s is missing\n" "$(TAURI_SIGNING_PRIVATE_KEY_FILE)" >&2; \
+			printf "restore the updater private key or export TAURI_SIGNING_PRIVATE_KEY before running make tauri-build\n" >&2; \
+			exit 1; \
+		fi; \
+		export TAURI_SIGNING_PRIVATE_KEY="$$(cat "$(TAURI_SIGNING_PRIVATE_KEY_FILE)")"; \
+	fi; \
+	if [ -z "$${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ] && [ -f "$(TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE)" ]; then \
+		export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$$(cat "$(TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE)")"; \
+	fi; \
+	$(PNPM) tauri:build
 
 # ---------------------------------------------------------------------------
 # Test / quality
