@@ -7,6 +7,7 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { InboxPane } from "./components/InboxPane";
+import { InboxSettingsDialog } from "./components/InboxSettingsDialog";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
@@ -15,12 +16,15 @@ import {
   addVault,
   createDocument,
   createVersion,
+  DEFAULT_INBOX_SETTINGS,
   fetchGmailUnread,
   getSampleVaultPath,
   listVaults,
   readDocument,
+  readInboxSettings,
   removeVault,
   saveDocument,
+  saveInboxSettings,
   scanInboxDrop,
   scanVault,
   setActiveVault,
@@ -43,6 +47,7 @@ import type {
   GmailMessage,
   InboxClassification,
   InboxDropItem,
+  InboxSettings,
   VaultEntry,
   VaultList,
 } from "./lib/types";
@@ -177,6 +182,10 @@ export default function App() {
     () => new Map(),
   );
 
+  const [inboxSettings, setInboxSettings] = useState<InboxSettings>(DEFAULT_INBOX_SETTINGS);
+  const [inboxSettingsOpen, setInboxSettingsOpen] = useState(false);
+  const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
+
   const activeVaultPath = vaultList.activeVault;
   const resolvedActiveTabId = activeTabId ?? tabs[0]?.id ?? null;
   const activeTab = useMemo(
@@ -301,14 +310,14 @@ export default function App() {
     setGmailLoading(true);
     setGmailError(null);
     try {
-      const messages = await fetchGmailUnread(20);
+      const messages = await fetchGmailUnread(activeVaultPath, 20);
       setGmailMessages(messages);
     } catch (err) {
       setGmailError(err instanceof Error ? err.message : String(err));
     } finally {
       setGmailLoading(false);
     }
-  }, []);
+  }, [activeVaultPath]);
 
   const decideGmailItem = useCallback((id: string, decision: InboxDecision) => {
     setGmailDecisions((prev) => {
@@ -385,6 +394,54 @@ export default function App() {
     // Only refire on appMode transitions, not on gmail state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appMode]);
+
+  // Load per-vault inbox settings whenever the active vault changes.
+  // Settings drive both `scan_inbox_drop` (via Rust .anchor/inbox.json)
+  // and the Gmail gws-path override.
+  useEffect(() => {
+    if (!activeVaultPath) {
+      setInboxSettings(DEFAULT_INBOX_SETTINGS);
+      setInboxSourceFilter(null);
+      return;
+    }
+    let cancelled = false;
+    void readInboxSettings(activeVaultPath)
+      .then((next) => {
+        if (!cancelled) {
+          setInboxSettings(next);
+          setInboxSourceFilter(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInboxSettings(DEFAULT_INBOX_SETTINGS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVaultPath]);
+
+  const persistInboxSettings = useCallback(
+    async (next: InboxSettings) => {
+      if (!activeVaultPath) return;
+      const saved = await saveInboxSettings(activeVaultPath, next);
+      setInboxSettings(saved);
+      setInboxSourceFilter(null);
+      // Restart watcher + rescan so the new root takes effect immediately.
+      try {
+        await stopInboxWatcher();
+      } catch {
+        // best-effort
+      }
+      void refreshInbox();
+      try {
+        await startInboxWatcher(activeVaultPath);
+      } catch (err) {
+        console.info("[anchor] inbox watcher restart failed:", err);
+      }
+      void refreshGmail();
+    },
+    [activeVaultPath, refreshInbox, refreshGmail],
+  );
 
   // Initial scan + watcher subscription, scoped to the active vault.
   // The watcher overlays the polling baseline: any file_event triggers
@@ -1139,10 +1196,13 @@ export default function App() {
             gmailMessages={gmailItems}
             gmailLoading={gmailLoading}
             gmailError={gmailError}
+            sourceFilter={inboxSourceFilter}
+            onSourceFilter={setInboxSourceFilter}
             onRefresh={() => {
               void refreshInbox();
               void refreshGmail();
             }}
+            onOpenSettings={() => setInboxSettingsOpen(true)}
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
             onDecideGmail={decideGmailItem}
@@ -1279,6 +1339,12 @@ export default function App() {
           status={commitDialog}
           onClose={() => setCommitDialog(null)}
           onCommitted={() => setGitRefreshTick((n) => n + 1)}
+        />
+        <InboxSettingsDialog
+          open={inboxSettingsOpen}
+          settings={inboxSettings}
+          onOpenChange={setInboxSettingsOpen}
+          onSave={persistInboxSettings}
         />
       </div>
     </LocaleContext.Provider>

@@ -304,27 +304,48 @@ fn is_hidden_or_system_path(path: &Path, vault: &Path) -> bool {
     })
 }
 
-/// Load `.anchorignore` patterns from the vault root. Each non-comment,
-/// non-empty line is a pattern. Comparison is plain prefix / segment
-/// match (no glob support yet — gitignore-like patterns can be added in
-/// Phase 1 if real-world vaults need them).
-fn load_anchorignore(vault: &Path) -> Vec<String> {
+/// Built-in patterns that any vault should ignore even without an
+/// explicit `.anchorignore`. macOS / Windows / git noise that has
+/// nothing to do with the user's notes.
+pub const DEFAULT_ANCHOR_IGNORE: &[&str] = &[
+    ".DS_Store",
+    ".gitkeep",
+    ".keep",
+    "Thumbs.db",
+    "Icon\r",
+];
+
+/// Load `.anchorignore` patterns from the vault root, merged with the
+/// built-in defaults. Each non-comment, non-empty line is a pattern.
+/// Comparison is plain prefix / segment match (no glob support yet —
+/// gitignore-like patterns can be added in Phase 1 if real-world vaults
+/// need them).
+pub fn load_anchorignore(vault: &Path) -> Vec<String> {
+    let mut patterns: Vec<String> = DEFAULT_ANCHOR_IGNORE
+        .iter()
+        .map(|p| (*p).to_string())
+        .collect();
     let path = vault.join(".anchorignore");
     if !path.exists() {
-        return Vec::new();
+        return patterns;
     }
     let Ok(content) = fs::read_to_string(&path) else {
-        return Vec::new();
+        return patterns;
     };
-    content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(String::from)
-        .collect()
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let owned = trimmed.to_string();
+        if !patterns.iter().any(|existing| existing == &owned) {
+            patterns.push(owned);
+        }
+    }
+    patterns
 }
 
-fn matches_anchorignore(rel_path: &Path, patterns: &[String]) -> bool {
+pub fn matches_anchorignore(rel_path: &Path, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return false;
     }

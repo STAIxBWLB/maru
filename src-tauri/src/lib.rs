@@ -6,6 +6,7 @@ mod git;
 mod gmail_gws;
 mod inbox;
 mod inbox_classifier;
+mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
 mod vault;
@@ -19,6 +20,7 @@ use git::{git_changes, git_commit, git_diff, git_status};
 use gmail_gws::fetch_gmail_unread;
 use inbox::scan_inbox_drop;
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
+use inbox_settings::{read_inbox_settings, save_inbox_settings};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use vault::{default_vault_path, sample_vault_path, scan_vault};
@@ -49,6 +51,8 @@ pub fn run() {
             scan_inbox_drop,
             start_inbox_watcher,
             stop_inbox_watcher,
+            read_inbox_settings,
+            save_inbox_settings,
             parse_korean_date_cmd,
             start_claude_cli_invocation,
             build_inbox_classification_prompt,

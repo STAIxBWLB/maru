@@ -17,10 +17,17 @@ import type {
   GmailMessage,
   InboxClassification,
   InboxDropItem,
+  InboxSettings,
   VaultEntry,
   VaultList,
   VersionSnapshot,
 } from "./types";
+
+export const DEFAULT_INBOX_SETTINGS: InboxSettings = {
+  inboxRoot: "inbox/downloads",
+  sources: ["outlook", "sharepoint", "gmail", "kakao", "telegram", "downloads"],
+  gwsPath: null,
+};
 
 declare global {
   interface Window {
@@ -239,15 +246,30 @@ export async function startClaudeCliInvocation(
  *  Workspace CLI. Returns id / from / subject / date — anchor never
  *  fetches the message body, just the envelope, matching the Phase 2
  *  triage surface. Empty `query` falls back to gws's default
- *  `is:unread`. */
+ *  `is:unread`. `vaultPath` lets the backend pick up an optional
+ *  `gwsPath` override from `<vault>/.anchor/inbox.json`. */
 export async function fetchGmailUnread(
+  vaultPath: string | null = null,
   max: number | null = null,
   query: string | null = null,
 ): Promise<GmailMessage[]> {
   if (!isTauri()) {
     return mockGmailUnread();
   }
-  return invoke<GmailMessage[]>("fetch_gmail_unread", { max, query });
+  return invoke<GmailMessage[]>("fetch_gmail_unread", { vaultPath, max, query });
+}
+
+export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {
+  if (!isTauri()) return { ...DEFAULT_INBOX_SETTINGS };
+  return invoke<InboxSettings>("read_inbox_settings", { vaultPath });
+}
+
+export async function saveInboxSettings(
+  vaultPath: string,
+  settings: InboxSettings,
+): Promise<InboxSettings> {
+  if (!isTauri()) return settings;
+  return invoke<InboxSettings>("save_inbox_settings", { vaultPath, settings });
 }
 
 function mockGmailUnread(): GmailMessage[] {

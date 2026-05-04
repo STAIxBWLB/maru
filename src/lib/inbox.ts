@@ -26,6 +26,25 @@ export function buildInboxItemStates(
   });
 }
 
+/** Return only items whose `source` matches `source`. `null` means
+ *  "no filter" — pass through. Source comparison is case-sensitive
+ *  to match the Rust scanner. */
+export function filterItemsBySource<T extends { item: { source: string } }>(
+  items: T[],
+  source: string | null,
+): T[] {
+  if (source === null) return items;
+  return items.filter((entry) => entry.item.source === source);
+}
+
+/** Distinct, alphabetically-stable list of sources observed in the
+ *  current inbox snapshot. Used to populate the filter chip row. */
+export function uniqueSources<T extends { item: { source: string } }>(items: T[]): string[] {
+  const seen = new Set<string>();
+  for (const entry of items) seen.add(entry.item.source);
+  return [...seen].sort();
+}
+
 export function categoryLabel(category: string): string {
   switch (category) {
     case "task":

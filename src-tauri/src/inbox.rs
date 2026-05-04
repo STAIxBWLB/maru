@@ -1,7 +1,9 @@
-use crate::vault::{lexical_normalize, resolve_inside_vault};
+use crate::inbox_settings::{self, InboxSettings};
+use crate::vault::{lexical_normalize, load_anchorignore, matches_anchorignore, resolve_inside_vault};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,13 +21,30 @@ pub struct InboxDropItem {
 #[tauri::command]
 pub fn scan_inbox_drop(vault_path: String) -> Result<Vec<InboxDropItem>, String> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
-    let inbox_root = resolve_inside_vault(&vault_path, "inbox/downloads")?;
+    let settings = inbox_settings::load(&vault);
+    scan_inbox_with_settings(&vault, &settings)
+}
+
+fn scan_inbox_with_settings(
+    vault: &Path,
+    settings: &InboxSettings,
+) -> Result<Vec<InboxDropItem>, String> {
+    let inbox_root = resolve_inside_vault(
+        &vault.to_string_lossy(),
+        settings.inbox_root.as_str(),
+    )?;
     if !inbox_root.exists() {
         return Ok(Vec::new());
     }
     if !inbox_root.is_dir() {
-        return Err("inbox/downloads exists but is not a directory".to_string());
+        return Err(format!(
+            "{} exists but is not a directory",
+            settings.inbox_root
+        ));
     }
+
+    let ignore_patterns = load_anchorignore(vault);
+    let allow_all_sources = settings.sources.is_empty();
 
     let mut items = Vec::new();
     for entry in WalkDir::new(&inbox_root).into_iter().filter_map(Result::ok) {
@@ -33,13 +52,13 @@ pub fn scan_inbox_drop(vault_path: String) -> Result<Vec<InboxDropItem>, String>
             continue;
         }
         let path = lexical_normalize(entry.path());
+        let rel_to_vault = path.strip_prefix(vault).unwrap_or(&path).to_path_buf();
+        if matches_anchorignore(&rel_to_vault, &ignore_patterns) {
+            continue;
+        }
         let metadata =
             fs::metadata(&path).map_err(|err| format!("Cannot read inbox item metadata: {err}"))?;
-        let rel_path = path
-            .strip_prefix(&vault)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
+        let rel_path = rel_to_vault.to_string_lossy().to_string();
         let source = path
             .parent()
             .and_then(|parent| parent.strip_prefix(&inbox_root).ok())
@@ -48,6 +67,9 @@ pub fn scan_inbox_drop(vault_path: String) -> Result<Vec<InboxDropItem>, String>
             .filter(|value| !value.is_empty())
             .unwrap_or("downloads")
             .to_string();
+        if !allow_all_sources && !settings.sources.iter().any(|s| s == &source) {
+            continue;
+        }
         let title = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -104,5 +126,62 @@ mod tests {
         assert_eq!(items[0].source, "gmail");
         assert_eq!(items[0].rel_path, "inbox/downloads/gmail/report.pdf");
         assert_eq!(items[0].size_bytes, 3);
+    }
+
+    #[test]
+    fn scan_inbox_drop_skips_default_dotfiles() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("inbox/downloads/outlook")).unwrap();
+        fs::create_dir_all(root.join("inbox/downloads/sharepoint")).unwrap();
+        fs::write(root.join("inbox/downloads/outlook/.DS_Store"), b"junk").unwrap();
+        fs::write(root.join("inbox/downloads/sharepoint/.gitkeep"), b"").unwrap();
+        fs::write(root.join("inbox/downloads/outlook/real.pdf"), b"abc").unwrap();
+
+        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "real.pdf");
+    }
+
+    #[test]
+    fn scan_inbox_drop_uses_custom_root_from_settings() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("incoming/spool/alpha")).unwrap();
+        fs::write(root.join("incoming/spool/alpha/note.md"), b"hi").unwrap();
+        fs::create_dir_all(root.join(".anchor")).unwrap();
+        fs::write(
+            root.join(".anchor/inbox.json"),
+            r#"{"inboxRoot":"incoming/spool","sources":["alpha"]}"#,
+        )
+        .unwrap();
+
+        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, "alpha");
+        assert_eq!(items[0].rel_path, "incoming/spool/alpha/note.md");
+    }
+
+    #[test]
+    fn scan_inbox_drop_filters_unregistered_sources() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("inbox/downloads/outlook")).unwrap();
+        fs::create_dir_all(root.join("inbox/downloads/random")).unwrap();
+        fs::write(root.join("inbox/downloads/outlook/a.pdf"), b"a").unwrap();
+        fs::write(root.join("inbox/downloads/random/b.pdf"), b"b").unwrap();
+        fs::create_dir_all(root.join(".anchor")).unwrap();
+        fs::write(
+            root.join(".anchor/inbox.json"),
+            r#"{"inboxRoot":"inbox/downloads","sources":["outlook"]}"#,
+        )
+        .unwrap();
+
+        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, "outlook");
     }
 }

@@ -115,3 +115,15 @@ export interface GmailMessage {
   subject: string;
   date: string;
 }
+
+/** Per-vault inbox configuration persisted at `<vault>/.anchor/inbox.json`.
+ *  Read on vault activation and applied to scan / watcher / Gmail commands. */
+export interface InboxSettings {
+  /** Vault-relative path to the inbox root directory. */
+  inboxRoot: string;
+  /** Source folder names that should be classified. Empty list means
+   *  "accept everything", but the UI treats it as "no filter active". */
+  sources: string[];
+  /** Optional absolute path to the `gws` CLI binary. */
+  gwsPath: string | null;
+}
