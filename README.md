@@ -257,6 +257,11 @@ configure these GitHub Secrets and publish a new release:
 - `APPLE_PASSWORD` — Apple app-specific password
 - `APPLE_TEAM_ID`
 
+The release workflow imports `APPLE_CERTIFICATE` only inside the macOS signing
+prep step. It intentionally does not pass certificate secrets into
+`tauri-apps/tauri-action`, because unset secrets arrive as empty environment
+variables and make Tauri try to import an empty `.p12`.
+
 Release asset versions come from the app metadata in `package.json`,
 `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync
 before tagging or publishing a release.
