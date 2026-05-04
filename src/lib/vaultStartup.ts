@@ -10,6 +10,14 @@ export interface VaultStartupPlan {
   tabEntries: VaultEntry[];
 }
 
+export interface WorkspaceFilesScanState {
+  paneMode: "documents" | "files";
+  startupIoReady: boolean;
+  hasEntries: boolean;
+  loading: boolean;
+  refreshing: boolean;
+}
+
 export function planVaultStartup(
   entries: VaultEntry[],
   storedTabs: StoredVaultTabs | null,
@@ -47,4 +55,14 @@ export function mergeFreshEntry<T extends { entry: VaultEntry }>(
 ): T {
   const freshEntry = freshEntries.find((entry) => entry.path === tab.entry.path);
   return freshEntry ? { ...tab, entry: freshEntry } : tab;
+}
+
+export function shouldLazyScanWorkspaceFiles({
+  paneMode,
+  startupIoReady,
+  hasEntries,
+  loading,
+  refreshing,
+}: WorkspaceFilesScanState): boolean {
+  return paneMode === "files" && startupIoReady && !hasEntries && !loading && !refreshing;
 }

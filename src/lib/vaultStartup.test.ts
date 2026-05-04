@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { mockEntries } from "./fixtures";
 import type { VaultEntry } from "./types";
-import { mergeFreshEntry, planVaultStartup } from "./vaultStartup";
+import {
+  mergeFreshEntry,
+  planVaultStartup,
+  shouldLazyScanWorkspaceFiles,
+} from "./vaultStartup";
 
 describe("vault startup planning", () => {
   it("prefers the requested cached entry and restores it as the first tab", () => {
@@ -48,5 +52,67 @@ describe("vault startup planning", () => {
       ...tab,
       entry: fresh,
     });
+  });
+
+  it("defers workspace file scanning until the Files pane is visible after startup I/O", () => {
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "documents",
+        startupIoReady: true,
+        hasEntries: false,
+        loading: false,
+        refreshing: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: false,
+        hasEntries: false,
+        loading: false,
+        refreshing: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: true,
+        hasEntries: false,
+        loading: false,
+        refreshing: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: true,
+        hasEntries: true,
+        loading: false,
+        refreshing: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: true,
+        hasEntries: false,
+        loading: true,
+        refreshing: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: true,
+        hasEntries: false,
+        loading: false,
+        refreshing: true,
+      }),
+    ).toBe(false);
   });
 });

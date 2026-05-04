@@ -119,7 +119,11 @@ import {
   subscribeMainWindowLayout,
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
-import { mergeFreshEntry, planVaultStartup } from "./lib/vaultStartup";
+import {
+  mergeFreshEntry,
+  planVaultStartup,
+  shouldLazyScanWorkspaceFiles,
+} from "./lib/vaultStartup";
 import {
   providerLabel,
   workspaceCan,
@@ -560,6 +564,13 @@ function MainApp() {
   const activeDocumentWorkspaceState =
     (activeDocumentWorkspacePath ? workspaceStates[activeDocumentWorkspacePath] : null) ??
     EMPTY_WORKSPACE_STATE;
+  const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
+    paneMode: anchorSettings.ui.explorerPaneMode,
+    startupIoReady: explorerWorkspaceState.startupIoReady,
+    hasEntries: explorerWorkspaceFilesState.entries.length > 0,
+    loading: explorerWorkspaceFilesState.loading,
+    refreshing: explorerWorkspaceFilesState.refreshing,
+  });
   const primaryWorkspacePath =
     workspaceRegistry.activeByVisibility.private ??
     privateWorkspaces[0]?.path ??
@@ -1332,6 +1343,11 @@ function MainApp() {
     [updateWorkspaceFileState],
   );
 
+  useEffect(() => {
+    if (!explorerWorkspacePath || !shouldScanExplorerWorkspaceFiles) return;
+    void refreshWorkspaceFiles(explorerWorkspacePath, true);
+  }, [explorerWorkspacePath, refreshWorkspaceFiles, shouldScanExplorerWorkspaceFiles]);
+
   const loadWorkspace = useCallback(
     async (
       path: string,
@@ -1344,7 +1360,6 @@ function MainApp() {
         refreshing: false,
         startupIoReady: false,
       });
-      void refreshWorkspaceFiles(path, true);
       setError(null);
       const storedTabs = readStoredTabsForWorkspace(path);
 
@@ -1483,7 +1498,7 @@ function MainApp() {
         await runAuthoritativeScan(true);
       }
     },
-    [pushRecent, readStoredTabsForWorkspace, refreshWorkspaceFiles, tabs, updateWorkspaceState],
+    [pushRecent, readStoredTabsForWorkspace, tabs, updateWorkspaceState],
   );
 
   const switchActiveWorkspace = useCallback(
@@ -2388,10 +2403,20 @@ function MainApp() {
     if (appMode === "inbox") {
       void refreshInbox();
       void refreshGmail();
+    } else if (anchorSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
+      void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
       void refreshCurrent();
     }
-  }, [appMode, refreshCurrent, refreshGmail, refreshInbox]);
+  }, [
+    anchorSettings.ui.explorerPaneMode,
+    appMode,
+    explorerWorkspacePath,
+    refreshCurrent,
+    refreshGmail,
+    refreshInbox,
+    refreshWorkspaceFiles,
+  ]);
 
   const revealTargetInFinder = useCallback(
     (targetPath: string) => {
@@ -3235,7 +3260,12 @@ function MainApp() {
                 entries={fileEntries}
                 selectedPaths={selectedFilePaths}
                 query={fileQuery}
-                loading={(booting || explorerWorkspaceFilesState.loading) && fileEntries.length === 0}
+                loading={
+                  (booting ||
+                    explorerWorkspaceFilesState.loading ||
+                    shouldScanExplorerWorkspaceFiles) &&
+                  fileEntries.length === 0
+                }
                 refreshing={explorerWorkspaceFilesState.refreshing}
                 workspaceVisibility={explorerVisibility}
                 publicWorkspaceAvailable={publicWorkspaceAvailable}
@@ -3249,8 +3279,6 @@ function MainApp() {
                   const nextPath = workspaceRegistry.activeByVisibility[visibility];
                   if (nextPath && !workspaceStates[nextPath]?.entries.length) {
                     void loadWorkspace(nextPath, visibility);
-                  } else if (nextPath && !workspaceFileStates[nextPath]?.entries.length) {
-                    void refreshWorkspaceFiles(nextPath, true);
                   }
                 }}
                 onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
