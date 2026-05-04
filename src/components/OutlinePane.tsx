@@ -190,7 +190,7 @@ export function OutlinePane({
                   </div>
                 ) : (
                   <div className="outline-empty">
-                    <Hash size={20} style={{ opacity: 0.5, marginBottom: 6 }} />
+                    <Hash size={20} className="outline-empty-icon" />
                     <div>{t("outline.empty")}</div>
                   </div>
                 )

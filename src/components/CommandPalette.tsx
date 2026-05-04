@@ -176,7 +176,7 @@ export const CommandPalette = memo(function CommandPalette({
         }}
       >
         <label className="cmdk-input">
-          <Search size={16} style={{ color: "var(--faint)" }} />
+          <Search size={16} className="cmdk-search-icon" />
           <input
             ref={inputRef}
             value={query}

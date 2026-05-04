@@ -1,5 +1,5 @@
 import { Clock, FileText, Layers, PanelLeftClose, Plus } from "lucide-react";
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { useTranslation } from "../lib/i18n";
 import type { VaultEntry } from "../lib/types";
 
@@ -62,8 +62,8 @@ export const Sidebar = memo(function Sidebar({
 
       <div className="sidebar-section">
         <div className="shortcut-row" onClick={onOpenCommandPalette} title={t("cmdk.openHint")}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <FileText size={13} style={{ opacity: 0.6 }} />
+          <span className="shortcut-label">
+            <FileText size={13} className="sidebar-inline-icon" />
             {t("sidebar.commandPalette")}
           </span>
           <span className="keys">
@@ -75,7 +75,7 @@ export const Sidebar = memo(function Sidebar({
 
       <div className="sidebar-section">
         <h3>
-          <Layers size={11} style={{ display: "inline-block", verticalAlign: "-1px", marginRight: 5 }} />
+          <Layers size={11} className="sidebar-section-title-icon" />
           {t("sidebar.types")}
         </h3>
         <div className="type-filters">
@@ -84,13 +84,16 @@ export const Sidebar = memo(function Sidebar({
             className={typeFilter == null ? "type-filter active" : "type-filter"}
             onClick={() => onTypeFilter(null)}
           >
-            <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--faint)" }} />
+            <span className="type-dot" />
             <span>{t("sidebar.types.all")}</span>
             <span className="count">{contentCount}</span>
           </button>
           {typeCounts.map(([type, count]) => {
             const isUntyped = type === "_";
             const dotColor = colorForType(type);
+            const dotStyle = {
+              "--dot-color": dotColor,
+            } as CSSProperties & Record<"--dot-color", string>;
             return (
               <button
                 key={type}
@@ -99,12 +102,8 @@ export const Sidebar = memo(function Sidebar({
                 onClick={() => onTypeFilter(type)}
               >
                 <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 3,
-                    background: dotColor,
-                  }}
+                  className="type-dot"
+                  style={dotStyle}
                 />
                 <span>{isUntyped ? t("sidebar.types.untyped") : type}</span>
                 <span className="count">{count}</span>
@@ -116,12 +115,12 @@ export const Sidebar = memo(function Sidebar({
 
       <div className="sidebar-section flex-fill">
         <h3>
-          <Clock size={11} style={{ display: "inline-block", verticalAlign: "-1px", marginRight: 5 }} />
+          <Clock size={11} className="sidebar-section-title-icon" />
           {t("sidebar.recent")}
         </h3>
         <div className="recent-list">
           {recentEntries.length === 0 ? (
-            <div style={{ padding: "10px 8px", color: "var(--faint)", fontSize: 11.5 }}>
+            <div className="recent-empty">
               {t("sidebar.recent.empty")}
             </div>
           ) : (
@@ -129,16 +128,11 @@ export const Sidebar = memo(function Sidebar({
               <button
                 key={entry.path}
                 type="button"
-                className="recent-item"
+                className={entry.path === selectedPath ? "recent-item selected" : "recent-item"}
                 onClick={() => onSelectRecent(entry)}
-                style={
-                  entry.path === selectedPath
-                    ? { background: "var(--panel)", color: "var(--ink)" }
-                    : undefined
-                }
                 title={entry.relPath}
               >
-                <FileText size={12} style={{ opacity: 0.55 }} />
+                <FileText size={12} className="sidebar-inline-icon" />
                 <span>{entry.title}</span>
               </button>
             ))
@@ -163,10 +157,10 @@ function colorForType(type: string): string {
     case "reference":
       return "var(--warn)";
     case "task":
-      return "#7d3f7a";
+      return "var(--purple)";
     case "person":
     case "people":
-      return "#8a6f3e";
+      return "var(--brown)";
     case "version":
       return "var(--faint)";
     default:

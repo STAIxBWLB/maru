@@ -76,7 +76,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 - [x] **BlockNote rich editor + raw + preview 3-way toggle** — `RichMarkdownEditor` wraps `@blocknote/mantine`; frontmatter line is preserved across rich↔source by splitting on the leading `---…---\n` block before parsing. Source tab is the textarea (with Korean IME-aware `[[` autocomplete). Preview tab is `marked` + DOMPurify. Round-trip on real notes still needs the Phase 1A verification pass.
 - [x] **Single-window multi-tab editor** — shared editor tabs persist their workspace path and private/public visibility, with `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 select, ⌘W close. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast.
-- [x] **Workspace cache** — lightweight JSON cache at `<workspace>/.anchor/cache/workspace-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs the authoritative workspace scan in the background. Full scans also precompute version names once and reuse compiled regexes.
+- [x] **Workspace cache** — lightweight JSON cache at `<workspace>/.anchor/cache/workspace-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs the authoritative workspace scan in the background. Files tree scanning is lazy so it does not compete with cached document paint. Full scans also precompute version names once and reuse compiled regexes.
 - [ ] **Monorepo extraction** — `crates/anchor-workspace`, `crates/anchor-git`. Done at the seam between Phase 1B and Phase 2.
 - [x] **Playwright smoke + e2e** — browser smoke covers sample workspace boot, multi-tab open, source tab, and preview tab. Broader inbox/native Tauri e2e still belongs to Phase 2 verification.
 
@@ -246,6 +246,8 @@ cd src-tauri && cargo test --release bench_scan_real_workspace \
 # 1. first scan creates <workspace>/.anchor/cache/workspace-index-v1.json
 # 2. next app load renders cached entries + active document before the
 #    background scan refreshes the index
+# 3. Files tree scanning waits until the Files pane is visible, so it does
+#    not compete with cached document paint on warm startup
 ```
 
 ## Release Bundles
