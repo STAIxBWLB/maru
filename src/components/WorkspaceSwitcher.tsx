@@ -32,8 +32,13 @@ export function WorkspaceSwitcher({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const workspaces = registry.workspaces.filter((workspace) => workspace.visibility === visibility);
   const active = registry.workspaces.find((workspace) => workspace.path === activePath);
+  const privateWorkspaces = registry.workspaces.filter((workspace) => workspace.visibility === "private");
+  const publicWorkspaces = registry.workspaces.filter((workspace) => workspace.visibility === "public");
+  const groups = [
+    { visibility: "private" as const, label: t("workspace.visibility.private"), items: privateWorkspaces },
+    { visibility: "public" as const, label: t("workspace.visibility.public"), items: publicWorkspaces },
+  ];
 
   useEffect(() => {
     if (!open) return;
@@ -77,87 +82,101 @@ export function WorkspaceSwitcher({
 
       {open ? (
         <div className="workspace-menu" role="menu">
-          {workspaces.length === 0 ? (
-            <div style={{ padding: "12px 14px", color: "var(--faint)", fontSize: 12 }}>
-              {t(
-                visibility === "public"
-                  ? "workspace.switcher.publicNone"
-                  : "workspace.switcher.none",
+          {groups.map((group) => (
+            <div key={group.visibility}>
+              <div className="workspace-menu-group">{group.label}</div>
+              {group.items.length === 0 ? (
+                <div style={{ padding: "8px 14px", color: "var(--faint)", fontSize: 12 }}>
+                  {t(
+                    group.visibility === "public"
+                      ? "workspace.switcher.publicNone"
+                      : "workspace.switcher.none",
+                  )}
+                </div>
+              ) : (
+                group.items.map((workspace) => (
+                  <div
+                    key={workspace.path}
+                    className={
+                      workspace.path === activePath
+                        ? "workspace-menu-item active"
+                        : "workspace-menu-item"
+                    }
+                    onClick={() => {
+                      onSelectWorkspace(workspace.path, workspace.visibility);
+                      setOpen(false);
+                    }}
+                    role="menuitem"
+                  >
+                    {workspace.path === activePath ? (
+                      <Check size={14} />
+                    ) : (
+                      <FolderOpen size={14} style={{ opacity: 0.6 }} />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <strong>{workspace.label}</strong>
+                      <span title={workspace.path}>{workspace.path}</span>
+                      <div className="workspace-menu-badges">
+                        <em>{providerLabel(workspace.provider)}</em>
+                        <em>{t(`workspace.writePolicy.${workspace.writePolicy}`)}</em>
+                        <em>{t(`workspace.writeStatus.${workspaceWriteStatus(workspace)}`)}</em>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="workspace-menu-refresh"
+                      title={t("workspace.refreshCapabilities")}
+                      aria-label={t("workspace.refreshCapabilities.label", {
+                        label: workspace.label,
+                      })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRefreshCapabilities(workspace.path);
+                      }}
+                    >
+                      <RefreshCcw size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="workspace-menu-remove"
+                      title={t("workspace.remove")}
+                      aria-label={t("workspace.remove.label", { label: workspace.label })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRemoveWorkspace(workspace.path);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))
               )}
             </div>
-          ) : (
-            workspaces.map((workspace) => (
-              <div
-                key={workspace.path}
-                className={
-                  workspace.path === activePath
-                    ? "workspace-menu-item active"
-                    : "workspace-menu-item"
-                }
-                onClick={() => {
-                  onSelectWorkspace(workspace.path, visibility);
-                  setOpen(false);
-                }}
-                role="menuitem"
-              >
-                {workspace.path === activePath ? (
-                  <Check size={14} />
-                ) : (
-                  <FolderOpen size={14} style={{ opacity: 0.6 }} />
-                )}
-                <div style={{ minWidth: 0 }}>
-                  <strong>{workspace.label}</strong>
-                  <span title={workspace.path}>{workspace.path}</span>
-                  <div className="workspace-menu-badges">
-                    <em>{providerLabel(workspace.provider)}</em>
-                    <em>{t(`workspace.writePolicy.${workspace.writePolicy}`)}</em>
-                    <em>{t(`workspace.writeStatus.${workspaceWriteStatus(workspace)}`)}</em>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="workspace-menu-refresh"
-                  title={t("workspace.refreshCapabilities")}
-                  aria-label={t("workspace.refreshCapabilities.label", {
-                    label: workspace.label,
-                  })}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRefreshCapabilities(workspace.path);
-                  }}
-                >
-                  <RefreshCcw size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="workspace-menu-remove"
-                  title={t("workspace.remove")}
-                  aria-label={t("workspace.remove.label", { label: workspace.label })}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveWorkspace(workspace.path);
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))
-          )}
+          ))}
 
           <div className="workspace-menu-divider" />
 
           <div
             className="workspace-menu-action"
             onClick={() => {
-              onAddWorkspace(visibility);
+              onAddWorkspace("private");
               setOpen(false);
             }}
             role="menuitem"
           >
             <Plus size={14} />
-            <span>
-              {t(visibility === "public" ? "workspace.addPublic" : "workspace.add")}
-            </span>
+            <span>{t("workspace.add")}</span>
+          </div>
+          <div
+            className="workspace-menu-action"
+            onClick={() => {
+              onAddWorkspace("public");
+              setOpen(false);
+            }}
+            role="menuitem"
+          >
+            <Plus size={14} />
+            <span>{t("workspace.addPublic")}</span>
           </div>
           <div
             className="workspace-menu-action"

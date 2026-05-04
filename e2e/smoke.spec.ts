@@ -45,7 +45,11 @@ test("switches explorer between private and optional public workspace tabs", asy
   await expect(page.locator(".workspace-caption")).toHaveText(
     "Public Workspace · Google Drive · 쓰기 가능",
   );
-  await expect(page.locator(".document-list").getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
+  const documentList = page.locator(".document-list");
+  await expect(documentList.getByRole("button", { name: /references/ })).toBeVisible();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toHaveCount(0);
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
 });
 
 test("switches between public provider roots and gates read-only actions", async ({
@@ -65,6 +69,7 @@ test("switches between public provider roots and gates read-only actions", async
   );
 
   const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
   await page.locator(".tab-trigger", { hasText: "원문" }).click();
 
@@ -136,6 +141,51 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "경로 복사", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+});
+
+test("switches between Documents and Files explorer modes", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await expect(explorer.getByRole("button", { name: "Documents" })).toHaveClass(/active/);
+  await expect(explorer.getByRole("button", { name: "목록" })).toBeVisible();
+
+  await explorer.getByRole("button", { name: "Files" }).click();
+
+  await expect(explorer.getByRole("heading", { name: "파일" })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: "목록" })).toHaveCount(0);
+  await expect(explorer.getByRole("button", { name: "Git tracked" })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
+
+  await explorer.getByRole("button", { name: "Binary" }).click();
+  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toBeVisible();
+  await explorer.getByRole("button", { name: "모두 접기" }).click();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
+  await expect(explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ })).toHaveCount(0);
+
+  await explorer.getByRole("button", { name: "전체" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).dblclick();
+  await expect(page.locator(".document-tab-title", { hasText: "Anchor 사업 주간 점검 회의" })).toBeVisible();
+});
+
+test("queues selected files in the right Files pane and applies explicitly", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+  await rightPane.getByRole("button", { name: "Apply" }).click();
+  await expect(rightPane.locator(".right-list-item.queue.done", { hasText: "완료" })).toBeVisible();
 });
 
 test("resizes document and right panes with drag handles", async ({ page }) => {

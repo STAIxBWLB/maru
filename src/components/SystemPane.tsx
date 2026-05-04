@@ -27,10 +27,17 @@ import type {
   AnchorSettings,
   DocumentBrowserMode,
   DocumentLabelMode,
+  ExplorerPaneMode,
+  FileQueueDefaultOperation,
   TerminalLauncherId,
   ThemeMode,
+  WorkspaceFileFilter,
 } from "../lib/settings";
-import { normalizeAnchorSettings } from "../lib/settings";
+import {
+  formatBinaryFileIncludePatterns,
+  normalizeAnchorSettings,
+  parseBinaryFileIncludePatternsText,
+} from "../lib/settings";
 import { normalizeAccentInput } from "../lib/theme";
 import type {
   ImportItem,
@@ -191,6 +198,13 @@ function PreferencesTab({
   onSettingsChange: (settings: AnchorSettings) => void;
 }) {
   const { t } = useTranslation();
+  const [binaryPatternsText, setBinaryPatternsText] = useState(() =>
+    formatBinaryFileIncludePatterns(settings.ui.binaryFileIncludePatterns),
+  );
+
+  useEffect(() => {
+    setBinaryPatternsText(formatBinaryFileIncludePatterns(settings.ui.binaryFileIncludePatterns));
+  }, [settings.ui.binaryFileIncludePatterns]);
 
   const updateBrowserMode = (mode: DocumentBrowserMode) => {
     onSettingsChange(
@@ -199,6 +213,56 @@ function PreferencesTab({
         ui: {
           ...settings.ui,
           documentBrowserMode: mode,
+        },
+      }),
+    );
+  };
+
+  const updateExplorerPaneMode = (explorerPaneMode: ExplorerPaneMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          explorerPaneMode,
+        },
+      }),
+    );
+  };
+
+  const updateWorkspaceFileFilter = (workspaceFileFilter: WorkspaceFileFilter) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          workspaceFileFilter,
+        },
+      }),
+    );
+  };
+
+  const commitBinaryFileIncludePatterns = (text: string) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          binaryFileIncludePatterns: parseBinaryFileIncludePatternsText(text),
+        },
+      }),
+    );
+  };
+
+  const updateFileQueueDefaultOperation = (
+    fileQueueDefaultOperation: FileQueueDefaultOperation,
+  ) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          fileQueueDefaultOperation,
         },
       }),
     );
@@ -256,6 +320,16 @@ function PreferencesTab({
     <div className="system-detail" style={{ width: "100%" }}>
       <div className="settings-form">
         <label className="field">
+          <span>{t("system.preferences.explorerPane")}</span>
+          <select
+            value={settings.ui.explorerPaneMode}
+            onChange={(event) => updateExplorerPaneMode(event.target.value as ExplorerPaneMode)}
+          >
+            <option value="documents">{t("explorer.mode.documents")}</option>
+            <option value="files">{t("explorer.mode.files")}</option>
+          </select>
+        </label>
+        <label className="field">
           <span>{t("system.preferences.documentBrowser")}</span>
           <select
             value={settings.ui.documentBrowserMode}
@@ -263,6 +337,45 @@ function PreferencesTab({
           >
             <option value="list">{t("list.view.list")}</option>
             <option value="tree">{t("list.view.tree")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.filesFilter")}</span>
+          <select
+            value={settings.ui.workspaceFileFilter}
+            onChange={(event) =>
+              updateWorkspaceFileFilter(event.target.value as WorkspaceFileFilter)
+            }
+          >
+            <option value="all">{t("files.filter.all")}</option>
+            <option value="tracked">{t("files.filter.tracked")}</option>
+            <option value="binary">{t("files.filter.binary")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.binaryIncludePatterns")}</span>
+          <textarea
+            className="settings-textarea"
+            value={binaryPatternsText}
+            onChange={(event) => setBinaryPatternsText(event.target.value)}
+            onBlur={() => commitBinaryFileIncludePatterns(binaryPatternsText)}
+            spellCheck={false}
+            rows={8}
+          />
+          <small>{t("system.preferences.binaryIncludePatterns.help")}</small>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.fileQueueOperation")}</span>
+          <select
+            value={settings.ui.fileQueueDefaultOperation}
+            onChange={(event) =>
+              updateFileQueueDefaultOperation(
+                event.target.value as FileQueueDefaultOperation,
+              )
+            }
+          >
+            <option value="copy">{t("rightPane.files.copy")}</option>
+            <option value="move">{t("rightPane.files.move")}</option>
           </select>
         </label>
         <label className="field">

@@ -23,15 +23,13 @@ import {
   readMemo,
   saveMemo,
   saveMemoAs,
-  storeShelfFiles,
-  storeShelfFilesAs,
 } from "../lib/api";
 import { frontmatterScalar } from "../lib/document";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
 import type {
   DocumentPayload,
-  FileStoreOperation,
+  FileQueueItem,
   MemoEntry,
   MemoFormat,
   VaultEntry,
@@ -54,6 +52,15 @@ interface OutlinePaneProps {
   ) => Promise<void>;
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingWikilink?: (target: string) => void;
+  fileQueue: FileQueueItem[];
+  canApplyFileQueue: boolean;
+  onUpdateFileQueueItem: (
+    id: string,
+    patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
+  ) => void;
+  onQueueExternalFiles: (paths: string[]) => void;
+  onApplyFileQueue: () => Promise<void>;
+  onClearFileQueue: () => void;
   paneRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -90,6 +97,12 @@ export function OutlinePane({
   onUpdateField,
   onSelectEntry,
   onMissingWikilink,
+  fileQueue,
+  canApplyFileQueue,
+  onUpdateFileQueueItem,
+  onQueueExternalFiles,
+  onApplyFileQueue,
+  onClearFileQueue,
   paneRef,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
@@ -198,7 +211,16 @@ export function OutlinePane({
           ) : null}
 
           {tab === "files" ? (
-            <FilesShelfPane workspacePath={workspacePath} onError={onError} t={t} />
+            <FilesQueuePane
+              queue={fileQueue}
+              canApplyFileQueue={canApplyFileQueue}
+              onError={onError}
+              onUpdateItem={onUpdateFileQueueItem}
+              onQueueExternalFiles={onQueueExternalFiles}
+              onApply={onApplyFileQueue}
+              onClear={onClearFileQueue}
+              t={t}
+            />
           ) : null}
 
           {tab === "memo" ? (
@@ -285,29 +307,36 @@ export function OutlinePane({
   );
 }
 
-function FilesShelfPane({
-  workspacePath,
+function FilesQueuePane({
+  queue,
+  canApplyFileQueue,
   onError,
+  onUpdateItem,
+  onQueueExternalFiles,
+  onApply,
+  onClear,
   t,
 }: {
-  workspacePath: string | null;
+  queue: FileQueueItem[];
+  canApplyFileQueue: boolean;
   onError: (message: string | null) => void;
+  onUpdateItem: (
+    id: string,
+    patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
+  ) => void;
+  onQueueExternalFiles: (paths: string[]) => void;
+  onApply: () => Promise<void>;
+  onClear: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
-  const [paths, setPaths] = useState<string[]>([]);
-  const [operation, setOperation] = useState<FileStoreOperation>("copy");
   const [working, setWorking] = useState(false);
-
-  const addPaths = useCallback((nextPaths: string[]) => {
-    setPaths((current) => Array.from(new Set([...current, ...nextPaths])));
-  }, []);
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
     void import("@tauri-apps/api/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((event) => {
-          if (event.payload.type === "drop") addPaths(event.payload.paths);
+          if (event.payload.type === "drop") onQueueExternalFiles(event.payload.paths);
         }),
       )
       .then((off) => {
@@ -315,31 +344,34 @@ function FilesShelfPane({
       })
       .catch(() => {});
     return () => dispose?.();
-  }, [addPaths]);
+  }, [onQueueExternalFiles]);
 
   const pickFiles = async () => {
-    addPaths(await chooseFiles(t("rightPane.files.pick")));
+    onQueueExternalFiles(await chooseFiles(t("rightPane.files.pick")));
   };
 
-  const runStore = async (saveAs: boolean) => {
-    if (!workspacePath || paths.length === 0) return;
+  const chooseDestination = async (item: FileQueueItem) => {
+    const target = await chooseWorkspaceDirectory(t("rightPane.files.chooseDestination"));
+    if (target) onUpdateItem(item.id, { targetDir: target });
+  };
+
+  const apply = async () => {
     setWorking(true);
     onError(null);
     try {
-      if (saveAs) {
-        const target = await chooseWorkspaceDirectory(t("rightPane.files.saveAs"));
-        if (!target) return;
-        await storeShelfFilesAs(paths, target, operation);
-      } else {
-        await storeShelfFiles(workspacePath, paths, operation);
-      }
-      setPaths([]);
+      await onApply();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
       setWorking(false);
     }
   };
+
+  const queuedCount = queue.filter((item) => item.status === "queued").length;
+  const cannotApply =
+    queuedCount === 0 ||
+    working ||
+    !canApplyFileQueue;
 
   return (
     <section className="right-tool-pane">
@@ -348,46 +380,63 @@ function FilesShelfPane({
           <FilePlus2 size={13} />
           <span>{t("rightPane.files.pick")}</span>
         </button>
-        <button
-          type="button"
-          className={operation === "copy" ? "active" : ""}
-          onClick={() => setOperation("copy")}
-        >
-          <Copy size={13} />
-          <span>{t("rightPane.files.copy")}</span>
-        </button>
-        <button
-          type="button"
-          className={operation === "move" ? "active" : ""}
-          onClick={() => setOperation("move")}
-        >
-          <MoveRight size={13} />
-          <span>{t("rightPane.files.move")}</span>
-        </button>
       </div>
-      <div className={paths.length === 0 ? "file-drop-zone empty" : "file-drop-zone"}>
+      <div className={queue.length === 0 ? "file-drop-zone empty" : "file-drop-zone"}>
         <Files size={18} />
-        <strong>{t("rightPane.files.dropTitle")}</strong>
-        <span>{t("rightPane.files.dropDescription")}</span>
+        <strong>{t("rightPane.files.queueTitle")}</strong>
+        <span>{t("rightPane.files.queueDescription")}</span>
       </div>
       <div className="right-list">
-        {paths.map((path) => (
-          <div className="right-list-item" key={path} title={path}>
-            <span>{path.split("/").pop() ?? path}</span>
-            <button type="button" onClick={() => setPaths((items) => items.filter((item) => item !== path))}>
-              <X size={12} />
-            </button>
+        {queue.length === 0 ? (
+          <div className="outline-empty">{t("rightPane.files.emptyQueue")}</div>
+        ) : null}
+        {queue.map((item) => (
+          <div className={`right-list-item queue ${item.status}`} key={item.id} title={item.sourcePath}>
+            <div className="queue-copy">
+              <strong>{item.fileName}</strong>
+              <span>{item.sourceRelPath}</span>
+              <span title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
+              {item.message ? <em>{item.message}</em> : null}
+            </div>
+            <div className="queue-controls">
+              <button
+                type="button"
+                className={item.operation === "copy" ? "active" : ""}
+                onClick={() => onUpdateItem(item.id, { operation: "copy" })}
+                disabled={item.status !== "queued"}
+                title={t("rightPane.files.copy")}
+              >
+                <Copy size={12} />
+              </button>
+              <button
+                type="button"
+                className={item.operation === "move" ? "active" : ""}
+                onClick={() => onUpdateItem(item.id, { operation: "move" })}
+                disabled={item.status !== "queued"}
+                title={t("rightPane.files.move")}
+              >
+                <MoveRight size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => void chooseDestination(item)}
+                disabled={item.status !== "queued"}
+                title={t("rightPane.files.chooseDestination")}
+              >
+                <Files size={12} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
       <div className="right-tool-actions bottom">
-        <button type="button" disabled={!workspacePath || paths.length === 0 || working} onClick={() => void runStore(false)}>
+        <button type="button" disabled={cannotApply} onClick={() => void apply()}>
           <Save size={13} />
-          <span>{t("rightPane.files.store")}</span>
+          <span>{t("rightPane.files.applyQueue")}</span>
         </button>
-        <button type="button" disabled={paths.length === 0 || working} onClick={() => void runStore(true)}>
-          <Save size={13} />
-          <span>{t("rightPane.files.saveAs")}</span>
+        <button type="button" disabled={queue.length === 0 || working} onClick={onClear}>
+          <Trash2 size={13} />
+          <span>{t("rightPane.files.clearQueue")}</span>
         </button>
       </div>
     </section>

@@ -7,24 +7,28 @@ import {
   mockEntries,
   mockInboxDropItems,
   mockSetActiveWorkspaceRoot,
+  mockWorkspaceFiles,
   mockWorkspaceRegistry,
   readMockDocument,
 } from "./fixtures";
 import type {
   CreatedDocument,
   DocumentPayload,
+  FileQueueApplyItem,
+  FileQueueApplyOutcome,
+  FileStoreOperation,
   GitFileChange,
   GitStatus,
   GmailMessage,
   InboxClassification,
   InboxDropItem,
   InboxSettings,
-  FileStoreOperation,
-  VaultEntry,
   MemoDocument,
   MemoEntry,
   MemoFormat,
   StoredFileOutcome,
+  VaultEntry,
+  WorkspaceFileEntry,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -91,6 +95,11 @@ export async function chooseSaveFile(
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
   if (!isTauri()) return mockEntries(vaultPath);
   return invoke<VaultEntry[]>("scan_vault", { vaultPath });
+}
+
+export async function scanWorkspaceFiles(vaultPath: string): Promise<WorkspaceFileEntry[]> {
+  if (!isTauri()) return mockWorkspaceFiles(vaultPath);
+  return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
@@ -256,6 +265,25 @@ export async function revealInFileManager(
     throw new Error("Reveal in Finder requires the Tauri app.");
   }
   await invoke("reveal_in_file_manager", { vaultPath, targetPath });
+}
+
+export async function applyFileQueue(
+  vaultPath: string,
+  items: FileQueueApplyItem[],
+): Promise<FileQueueApplyOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => {
+      const fileName = item.sourcePath.split("/").pop() ?? "file";
+      return {
+        id: item.id,
+        sourcePath: item.sourcePath,
+        targetPath: `${item.targetDir.replace(/\/$/, "")}/${fileName}`,
+        fileName,
+        operation: item.operation,
+      };
+    });
+  }
+  return invoke<FileQueueApplyOutcome[]>("apply_file_queue", { vaultPath, items });
 }
 
 // === Phase 2 inbox watcher / AI bridge / classifier ===

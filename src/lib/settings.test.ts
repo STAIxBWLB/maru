@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ANCHOR_SETTINGS, normalizeAnchorSettings } from "./settings";
+import {
+  DEFAULT_ANCHOR_SETTINGS,
+  normalizeAnchorSettings,
+  parseBinaryFileIncludePatternsText,
+} from "./settings";
 
 describe("normalizeAnchorSettings", () => {
   it("returns defaults for invalid or broken input", () => {
@@ -10,10 +14,16 @@ describe("normalizeAnchorSettings", () => {
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {
+        explorerPaneMode: "files",
         documentBrowserMode: "tree",
         documentLabelMode: "filename",
+        workspaceFileFilter: "tracked",
+        binaryFileIncludePatterns: ["*.pdf", "*.HWP*", "*.pdf"],
         collapsedTreeFolders: ["projects/rise"],
+        collapsedFileFolders: ["assets"],
         documentTreeStateInitialized: true,
+        fileTreeStateInitialized: true,
+        fileQueueDefaultOperation: "move",
         themeMode: "dark",
         accentColor: "#445566",
         layout: {
@@ -38,10 +48,16 @@ describe("normalizeAnchorSettings", () => {
       },
     });
 
+    expect(settings.ui.explorerPaneMode).toBe("files");
     expect(settings.ui.documentBrowserMode).toBe("tree");
     expect(settings.ui.documentLabelMode).toBe("filename");
+    expect(settings.ui.workspaceFileFilter).toBe("tracked");
+    expect(settings.ui.binaryFileIncludePatterns).toEqual(["*.pdf", "*.HWP*"]);
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
+    expect(settings.ui.collapsedFileFolders).toEqual(["assets"]);
     expect(settings.ui.documentTreeStateInitialized).toBe(true);
+    expect(settings.ui.fileTreeStateInitialized).toBe(true);
+    expect(settings.ui.fileQueueDefaultOperation).toBe("move");
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
     expect(settings.ui.layout.editorSplitOpen).toBe(true);
@@ -65,6 +81,12 @@ describe("normalizeAnchorSettings", () => {
   it("defaults first-run terminal layout to collapsed shell autoload", () => {
     const settings = normalizeAnchorSettings({});
 
+    expect(settings.ui.explorerPaneMode).toBe("documents");
+    expect(settings.ui.workspaceFileFilter).toBe("all");
+    expect(settings.ui.binaryFileIncludePatterns).toEqual(
+      DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,
+    );
+    expect(settings.ui.fileQueueDefaultOperation).toBe("copy");
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
     expect(settings.terminal.autoLaunch).toBe("shell");
@@ -131,5 +153,24 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.terminal.launchers.claude.enabled).toBe(false);
     expect(settings.terminal.launchers.claude.label).toBe("Claude Local");
     expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+  });
+
+  it("normalizes binary include pattern text with comments and case-insensitive duplicates", () => {
+    expect(
+      parseBinaryFileIncludePatternsText(`
+# archives
+*.tgz
+*.PDF
+*.pdf
+docs/*.html
+`),
+    ).toEqual(["*.tgz", "*.PDF", "docs/*.html"]);
+
+    const settings = normalizeAnchorSettings({
+      ui: {
+        binaryFileIncludePatterns: "# docs\n*.docx\n\n*.pptx",
+      },
+    });
+    expect(settings.ui.binaryFileIncludePatterns).toEqual(["*.docx", "*.pptx"]);
   });
 });

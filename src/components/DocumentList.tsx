@@ -3,6 +3,7 @@ import {
   ChevronsUpDown,
   ChevronRight,
   FileText,
+  Files,
   Folder,
   List,
   PanelLeftClose,
@@ -32,6 +33,7 @@ import {
 import { filterDocumentIndex, type DocumentIndex } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
 import type { DocumentBrowserMode, DocumentLabelMode } from "../lib/settings";
+import type { ExplorerPaneMode } from "../lib/settings";
 
 const GROUP_ROW_HEIGHT = 28;
 const ENTRY_ROW_HEIGHT = 132;
@@ -67,6 +69,8 @@ interface DocumentListProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   paneRef?: React.RefObject<HTMLElement | null>;
   vaultPath?: string | null;
+  paneMode: ExplorerPaneMode;
+  onPaneModeChange: (mode: ExplorerPaneMode) => void;
 }
 
 export const DocumentList = memo(function DocumentList({
@@ -94,6 +98,8 @@ export const DocumentList = memo(function DocumentList({
   searchInputRef,
   paneRef,
   vaultPath,
+  paneMode,
+  onPaneModeChange,
 }: DocumentListProps) {
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -282,6 +288,24 @@ export const DocumentList = memo(function DocumentList({
           </button>
         )}
       </div>
+      <div className="explorer-mode-toggle" role="group" aria-label={t("explorer.mode.label")}>
+        <button
+          type="button"
+          className={paneMode === "documents" ? "active" : ""}
+          onClick={() => onPaneModeChange("documents")}
+        >
+          <FileText size={13} />
+          <span>{t("explorer.mode.documents")}</span>
+        </button>
+        <button
+          type="button"
+          className={paneMode === "files" ? "active" : ""}
+          onClick={() => onPaneModeChange("files")}
+        >
+          <Files size={13} />
+          <span>{t("explorer.mode.files")}</span>
+        </button>
+      </div>
       <div className="list-header">
         <div>
           <h2>{headerCaption}</h2>
@@ -336,7 +360,7 @@ export const DocumentList = memo(function DocumentList({
         <div className="tree-bulk-actions" role="group" aria-label={t("list.tree.actions")}>
           <button
             type="button"
-            onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
+            onClick={() => onCollapsedTreeFoldersChange([])}
             disabled={folderPaths.length === 0}
             title={t("list.tree.collapseAll")}
           >
@@ -345,7 +369,7 @@ export const DocumentList = memo(function DocumentList({
           </button>
           <button
             type="button"
-            onClick={() => onCollapsedTreeFoldersChange([])}
+            onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
             disabled={folderPaths.length === 0}
             title={t("list.tree.expandAll")}
           >

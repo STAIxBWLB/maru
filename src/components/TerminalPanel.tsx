@@ -34,6 +34,7 @@ import {
 interface TerminalPanelProps {
   cwd: string | null;
   settings: AnchorSettings;
+  launchRequest?: { kind: TerminalKind; nonce: number } | null;
   open: boolean;
   height: number;
   splitOpen: boolean;
@@ -67,6 +68,7 @@ const MAX_HEIGHT = 520;
 export const TerminalPanel = memo(function TerminalPanel({
   cwd,
   settings,
+  launchRequest,
   open,
   height,
   splitOpen,
@@ -91,6 +93,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   const tabBySessionRef = useRef<Map<string, string>>(new Map());
   const seqRef = useRef(1);
   const autoLaunchRef = useRef(false);
+  const handledLaunchRequestRef = useRef<number | null>(null);
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
   const rightTab = state.tabs.find((tab) => tab.id === rightTabId) ?? null;
   const canRunTerminal = useMemo(() => terminalAvailable(), []);
@@ -339,6 +342,13 @@ export const TerminalPanel = memo(function TerminalPanel({
     autoLaunchRef.current = true;
     void launch(launcher);
   }, [launch, open, settings, state.tabs.length]);
+
+  useEffect(() => {
+    if (!launchRequest) return;
+    if (handledLaunchRequestRef.current === launchRequest.nonce) return;
+    handledLaunchRequestRef.current = launchRequest.nonce;
+    void launch(launchRequest.kind, focusedGroup);
+  }, [focusedGroup, launch, launchRequest]);
 
   useEffect(() => {
     if (!splitOpen) {

@@ -3,6 +3,7 @@ import type {
   DocumentPayload,
   InboxDropItem,
   VaultEntry,
+  WorkspaceFileEntry,
   WorkspaceRegistry,
   VersionSnapshot,
 } from "./types";
@@ -85,6 +86,45 @@ export function mockEntries(rootPath = MOCK_VAULT_PATH): VaultEntry[] {
     fileKind: doc.fileKind,
     versionCount: 0,
   }));
+}
+
+export function mockWorkspaceFiles(rootPath = MOCK_VAULT_PATH): WorkspaceFileEntry[] {
+  const docs = mockDocuments.map((doc, index) => ({
+    path: `${rootPath}/${doc.relPath}`,
+    relPath: doc.relPath,
+    name: doc.relPath.split("/").pop() ?? doc.relPath,
+    extension: doc.fileKind,
+    fileKind: doc.fileKind,
+    sizeBytes: doc.content.length,
+    updatedAt: index === 0 ? now : "2026-04-22T11:00:00+09:00",
+    gitTracked: true,
+    binary: false,
+  }));
+  return [
+    ...docs,
+    {
+      path: `${rootPath}/attachments/rise-budget-review.pdf`,
+      relPath: "attachments/rise-budget-review.pdf",
+      name: "rise-budget-review.pdf",
+      extension: "pdf",
+      fileKind: "pdf",
+      sizeBytes: 184_320,
+      updatedAt: "2026-04-26T14:30:00+09:00",
+      gitTracked: false,
+      binary: true,
+    },
+    {
+      path: `${rootPath}/templates/minutes-template.md`,
+      relPath: "templates/minutes-template.md",
+      name: "minutes-template.md",
+      extension: "md",
+      fileKind: "md",
+      sizeBytes: 1_024,
+      updatedAt: "2026-04-20T10:00:00+09:00",
+      gitTracked: true,
+      binary: false,
+    },
+  ];
 }
 
 export function readMockDocument(path: string): DocumentPayload {

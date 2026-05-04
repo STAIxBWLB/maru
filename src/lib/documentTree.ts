@@ -40,7 +40,9 @@ export function buildDocumentTreeRows(
   collapsedFolders: string[],
   forceExpand = false,
 ): DocumentTreeRow[] {
-  const collapsed = new Set(collapsedFolders);
+  // Existing settings key is named "collapsed", but the stored value is the
+  // user's expanded folder set so new folders stay collapsed by default.
+  const expanded = new Set(collapsedFolders);
   const root: TreeNode = {
     name: "",
     path: "",
@@ -77,7 +79,7 @@ export function buildDocumentTreeRows(
     node.entries.push(entry);
   }
 
-  return flattenNode(root, collapsed, forceExpand, -1);
+  return flattenNode(root, expanded, forceExpand, -1);
 }
 
 export function nextCollapsedFolders(
@@ -86,8 +88,8 @@ export function nextCollapsedFolders(
   collapsed: boolean,
 ): string[] {
   const next = new Set(current);
-  if (collapsed) next.add(folderPath);
-  else next.delete(folderPath);
+  if (collapsed) next.delete(folderPath);
+  else next.add(folderPath);
   return Array.from(next).sort((a, b) => a.localeCompare(b));
 }
 
@@ -138,7 +140,7 @@ export function virtualizeDocumentTreeRows(
 
 function flattenNode(
   node: TreeNode,
-  collapsed: Set<string>,
+  expanded: Set<string>,
   forceExpand: boolean,
   depth: number,
 ): DocumentTreeRow[] {
@@ -147,7 +149,7 @@ function flattenNode(
   const entries = [...node.entries].sort(compareEntry);
 
   for (const folder of folders) {
-    const isCollapsed = !forceExpand && collapsed.has(folder.path);
+    const isCollapsed = !forceExpand && !expanded.has(folder.path);
     rows.push({
       kind: "folder",
       id: `folder:${folder.path}`,
@@ -158,7 +160,7 @@ function flattenNode(
       collapsed: isCollapsed,
     });
     if (!isCollapsed) {
-      rows.push(...flattenNode(folder, collapsed, forceExpand, depth + 1));
+      rows.push(...flattenNode(folder, expanded, forceExpand, depth + 1));
     }
   }
 

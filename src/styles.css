@@ -448,6 +448,15 @@ a {
   z-index: 60;
 }
 
+.workspace-menu-group {
+  padding: 8px 10px 4px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .workspace-menu-item {
   display: grid;
   grid-template-columns: 18px 1fr auto auto;
@@ -970,6 +979,8 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.explorer-mode-toggle,
+.file-filter-toggle,
 .list-mode-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -981,6 +992,16 @@ a {
   background: var(--panel-3);
 }
 
+.explorer-mode-toggle {
+  margin-top: 8px;
+}
+
+.file-filter-toggle {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.explorer-mode-toggle button,
+.file-filter-toggle button,
 .list-mode-toggle button {
   min-width: 0;
   height: 26px;
@@ -994,6 +1015,8 @@ a {
   font-weight: 650;
 }
 
+.explorer-mode-toggle button.active,
+.file-filter-toggle button.active,
 .list-mode-toggle button.active {
   background: var(--panel);
   color: var(--ink);
@@ -1002,7 +1025,7 @@ a {
 
 .tree-bulk-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
   gap: 6px;
   margin: 0 16px 8px;
 }
@@ -1266,7 +1289,7 @@ a {
   min-width: 0;
   height: 30px;
   display: grid;
-  grid-template-columns: 14px 15px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 15px minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 7px;
   border-radius: 6px;
@@ -1312,7 +1335,8 @@ a {
 }
 
 .tree-count,
-.tree-type {
+.tree-type,
+.tree-size {
   margin-right: 8px;
   color: var(--faint);
   font-size: 10.5px;
@@ -1321,6 +1345,11 @@ a {
 
 .tree-type {
   text-transform: uppercase;
+}
+
+.tree-size {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* ─── Status pills ─────────────────────────────────────────────────── */
@@ -2857,6 +2886,68 @@ button.git-badge:hover {
   background: var(--panel);
   color: var(--muted);
   font-size: 11.5px;
+}
+
+.right-list-item.queue {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.right-list-item.queue.done {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: var(--accent-tint);
+}
+
+.right-list-item.queue.error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.queue-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.queue-copy strong,
+.queue-copy span,
+.queue-copy em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-copy strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.queue-copy em {
+  color: var(--faint);
+  font-style: normal;
+}
+
+.queue-controls {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.queue-controls button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.queue-controls button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-tint);
 }
 
 .right-list-item span {
@@ -4464,7 +4555,14 @@ button.git-badge:hover {
   font-weight: 650;
 }
 
-.settings-form select {
+.settings-form .field small {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.settings-form select,
+.settings-form .settings-textarea {
   height: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4472,6 +4570,16 @@ button.git-badge:hover {
   color: var(--ink);
   padding: 0 10px;
   outline: 0;
+}
+
+.settings-form .settings-textarea {
+  min-height: 180px;
+  height: auto;
+  padding: 10px;
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .system-skill-list {

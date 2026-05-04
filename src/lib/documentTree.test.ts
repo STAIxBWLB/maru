@@ -23,12 +23,15 @@ function entry(relPath: string, title = relPath): VaultEntry {
 
 describe("buildDocumentTreeRows", () => {
   it("sorts folders before files and then by path", () => {
-    const rows = buildDocumentTreeRows([
-      entry("zeta.md"),
-      entry("meetings/b.md"),
-      entry("admin/a.md"),
-      entry("alpha.md"),
-    ], []);
+    const rows = buildDocumentTreeRows(
+      [
+        entry("zeta.md"),
+        entry("meetings/b.md"),
+        entry("admin/a.md"),
+        entry("alpha.md"),
+      ],
+      ["admin", "meetings"],
+    );
 
     expect(rows.map((row) => (row.kind === "folder" ? row.path : row.entry.relPath))).toEqual([
       "admin",
@@ -44,7 +47,7 @@ describe("buildDocumentTreeRows", () => {
     const rows = buildDocumentTreeRows([
       entry("projects/rise/plan.md"),
       entry("projects/rise/report.md"),
-    ], ["projects"]);
+    ], []);
 
     expect(rows.map((row) => (row.kind === "folder" ? row.path : row.entry.relPath))).toEqual([
       "projects",
@@ -52,7 +55,7 @@ describe("buildDocumentTreeRows", () => {
   });
 
   it("force-expands collapsed folders during search or filtering", () => {
-    const rows = buildDocumentTreeRows([entry("projects/rise/plan.md")], ["projects"], true);
+    const rows = buildDocumentTreeRows([entry("projects/rise/plan.md")], [], true);
 
     expect(rows.map((row) => (row.kind === "folder" ? row.path : row.entry.relPath))).toEqual([
       "projects",
@@ -63,9 +66,9 @@ describe("buildDocumentTreeRows", () => {
 });
 
 describe("nextCollapsedFolders", () => {
-  it("adds and removes folder paths deterministically", () => {
-    expect(nextCollapsedFolders(["z"], "a", true)).toEqual(["a", "z"]);
-    expect(nextCollapsedFolders(["a", "z"], "a", false)).toEqual(["z"]);
+  it("tracks expanded folder paths deterministically", () => {
+    expect(nextCollapsedFolders(["z"], "a", false)).toEqual(["a", "z"]);
+    expect(nextCollapsedFolders(["a", "z"], "a", true)).toEqual(["z"]);
   });
 });
 
@@ -86,7 +89,7 @@ describe("virtualizeDocumentTreeRows", () => {
   it("returns only rows in the visible window plus overscan", () => {
     const rows = buildDocumentTreeRows(
       Array.from({ length: 20 }, (_, index) => entry(`folder/doc-${index}.md`)),
-      [],
+      ["folder"],
     );
     const layout = virtualizeDocumentTreeRows(rows, 120, 60, 30, 30);
 

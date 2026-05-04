@@ -18,6 +18,7 @@ mod terminal;
 mod vault;
 mod vault_list;
 mod workspace;
+mod workspace_files;
 
 use ai_router::start_claude_cli_invocation;
 use anchor_dir::{
@@ -52,6 +53,7 @@ use vault_list::{
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
+use workspace_files::{apply_file_queue, scan_workspace_files};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -110,6 +112,8 @@ pub fn run() {
             read_workspace_config,
             register_workspace_roots,
             list_workspaces,
+            scan_workspace_files,
+            apply_file_queue,
             bootstrap_anchor_dir,
             read_anchor_workspace,
             update_anchor_workspace,
