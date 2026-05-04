@@ -26,13 +26,16 @@ import { Sidebar } from "./components/Sidebar";
 import { SystemPane } from "./components/SystemPane";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
+import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
 import {
+  applyFileQueue,
   addWorkspaceRoot,
   createDocument,
   createVersion,
   DEFAULT_INBOX_SETTINGS,
   fetchGmailUnread,
   getSampleVaultPath,
+  gitStatus,
   listWorkspaceRoots,
   readDocument,
   revealInFileManager,
@@ -43,6 +46,7 @@ import {
   saveDocument,
   saveInboxSettings,
   scanInboxDrop,
+  scanWorkspaceFiles,
   scanVault,
   setActiveWorkspaceRoot,
   startInboxWatcher,
@@ -67,12 +71,14 @@ import {
 } from "./lib/documentIndex";
 import { buildGmailMessageStates, type GmailMessageState } from "./lib/gmail";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
+import { listenForMenuCommand } from "./lib/menu";
 import {
   buildInboxItemStates,
   type InboxDecision,
   type InboxItemState,
 } from "./lib/inbox";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
+import type { TerminalKind } from "./lib/terminal";
 import {
   checkAppUpdate,
   installAppUpdate,
@@ -85,12 +91,15 @@ import {
 } from "./lib/updater";
 import type {
   DocumentPayload,
+  FileQueueItem,
+  FileStoreOperation,
   GitStatus,
   GmailMessage,
   InboxClassification,
   InboxDropItem,
   InboxSettings,
   VaultEntry,
+  WorkspaceFileEntry,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -100,6 +109,8 @@ import {
   normalizeAnchorSettings,
   type AnchorSettings,
   type DocumentBrowserMode,
+  type ExplorerPaneMode,
+  type WorkspaceFileFilter,
 } from "./lib/settings";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
@@ -117,6 +128,10 @@ import {
   workspaceWriteReason,
   workspaceWriteStatus,
 } from "./lib/workspaceCapabilities";
+import {
+  collectWorkspaceFileFolderPaths,
+  isOpenableDocumentFile,
+} from "./lib/workspaceFileTree";
 import {
   emptyHistory,
   goBack,
@@ -163,6 +178,18 @@ const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
   loading: false,
   refreshing: false,
   startupIoReady: false,
+};
+
+interface WorkspaceFilesState {
+  entries: WorkspaceFileEntry[];
+  loading: boolean;
+  refreshing: boolean;
+}
+
+const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
+  entries: [],
+  loading: false,
+  refreshing: false,
 };
 
 type AppMode = "pkm" | "inbox";
@@ -305,6 +332,7 @@ function MainApp() {
     hiddenDefaults: [],
   });
   const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
+  const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
   const [explorerVisibility, setExplorerVisibility] =
     useState<WorkspaceVisibility>("private");
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -313,6 +341,12 @@ function MainApp() {
   const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
   const [focusedEditorGroup, setFocusedEditorGroup] = useState<EditorGroupId>("left");
   const [queryByVisibility, setQueryByVisibility] = useState<Record<WorkspaceVisibility, string>>({
+    private: "",
+    public: "",
+  });
+  const [fileQueryByVisibility, setFileQueryByVisibility] = useState<
+    Record<WorkspaceVisibility, string>
+  >({
     private: "",
     public: "",
   });
@@ -328,6 +362,16 @@ function MainApp() {
     private: [],
     public: [],
   });
+  const [collapsedFileFoldersByVisibility, setCollapsedFileFoldersByVisibility] = useState<
+    Record<WorkspaceVisibility, string[]>
+  >({
+    private: [],
+    public: [],
+  });
+  const [selectedFilePathsByWorkspace, setSelectedFilePathsByWorkspace] = useState<
+    Record<string, string[]>
+  >({});
+  const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -363,6 +407,7 @@ function MainApp() {
   const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
   const installingUpdateRef = useRef(false);
   const collapsedTreeHydratedRef = useRef(false);
+  const collapsedFileHydratedRef = useRef(false);
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
   // overwrite the editor with stale content if the user clicked a later
@@ -418,6 +463,10 @@ function MainApp() {
   const [inboxSettingsOpen, setInboxSettingsOpen] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
   const [updateToast, setUpdateToast] = useState<UpdateToast | null>(null);
+  const [terminalLaunchRequest, setTerminalLaunchRequest] = useState<{
+    kind: TerminalKind;
+    nonce: number;
+  } | null>(null);
   const [anchorSettings, setAnchorSettings] = useState<AnchorSettings>(() =>
     normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS),
   );
@@ -444,10 +493,16 @@ function MainApp() {
   const explorerWorkspaceState =
     (explorerWorkspacePath ? workspaceStates[explorerWorkspacePath] : null) ??
     EMPTY_WORKSPACE_STATE;
+  const explorerWorkspaceFilesState =
+    (explorerWorkspacePath ? workspaceFileStates[explorerWorkspacePath] : null) ??
+    EMPTY_WORKSPACE_FILES_STATE;
   const entries = explorerWorkspaceState.entries;
+  const fileEntries = explorerWorkspaceFilesState.entries;
   const query = queryByVisibility[explorerVisibility];
+  const fileQuery = fileQueryByVisibility[explorerVisibility];
   const typeFilter = typeFilterByVisibility[explorerVisibility];
   const savedCollapsedTreeFolders = collapsedTreeFoldersByVisibility[explorerVisibility];
+  const savedCollapsedFileFolders = collapsedFileFoldersByVisibility[explorerVisibility];
   const defaultCollapsedTreeFolders = useMemo(
     () =>
       explorerVisibility === "private" && !anchorSettings.ui.documentTreeStateInitialized
@@ -456,7 +511,18 @@ function MainApp() {
     [anchorSettings.ui.documentTreeStateInitialized, entries, explorerVisibility],
   );
   const collapsedTreeFolders = defaultCollapsedTreeFolders ?? savedCollapsedTreeFolders;
+  const defaultCollapsedFileFolders = useMemo(
+    () =>
+      explorerVisibility === "private" && !anchorSettings.ui.fileTreeStateInitialized
+        ? collectWorkspaceFileFolderPaths(fileEntries)
+        : null,
+    [anchorSettings.ui.fileTreeStateInitialized, explorerVisibility, fileEntries],
+  );
+  const collapsedFileFolders = defaultCollapsedFileFolders ?? savedCollapsedFileFolders;
   const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
+  const selectedFilePaths = explorerWorkspacePath
+    ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
+    : [];
   const layoutSettings = anchorSettings.ui.layout;
   const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? tabs[0]?.id ?? null;
@@ -612,6 +678,19 @@ function MainApp() {
         ...current,
         [path]: {
           ...(current[path] ?? EMPTY_WORKSPACE_STATE),
+          ...patch,
+        },
+      }));
+    },
+    [],
+  );
+
+  const updateWorkspaceFileState = useCallback(
+    (path: string, patch: Partial<WorkspaceFilesState>) => {
+      setWorkspaceFileStates((current) => ({
+        ...current,
+        [path]: {
+          ...(current[path] ?? EMPTY_WORKSPACE_FILES_STATE),
           ...patch,
         },
       }));
@@ -804,6 +883,21 @@ function MainApp() {
     settingsLoaded,
   ]);
 
+  useEffect(() => {
+    if (!settingsLoaded || collapsedFileHydratedRef.current) return;
+    collapsedFileHydratedRef.current = true;
+    setCollapsedFileFoldersByVisibility((current) => ({
+      ...current,
+      private: anchorSettings.ui.fileTreeStateInitialized
+        ? anchorSettings.ui.collapsedFileFolders
+        : current.private,
+    }));
+  }, [
+    anchorSettings.ui.collapsedFileFolders,
+    anchorSettings.ui.fileTreeStateInitialized,
+    settingsLoaded,
+  ]);
+
   const privateWorkspacePath = workspaceRegistry.activeByVisibility.private;
   const privateWorkspaceState =
     (privateWorkspacePath ? workspaceStates[privateWorkspacePath] : null) ??
@@ -834,6 +928,33 @@ function MainApp() {
     updateSettings,
   ]);
 
+  useEffect(() => {
+    if (!settingsLoaded || anchorSettings.ui.fileTreeStateInitialized) return;
+    if (!privateWorkspacePath || explorerVisibility !== "private") return;
+    if (explorerWorkspaceFilesState.loading || explorerWorkspaceFilesState.entries.length === 0) return;
+    const collapsedFolders = collectWorkspaceFileFolderPaths(explorerWorkspaceFilesState.entries);
+    setCollapsedFileFoldersByVisibility((current) => ({
+      ...current,
+      private: collapsedFolders,
+    }));
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        collapsedFileFolders: collapsedFolders,
+        fileTreeStateInitialized: true,
+      },
+    }));
+  }, [
+    anchorSettings.ui.fileTreeStateInitialized,
+    explorerVisibility,
+    explorerWorkspaceFilesState.entries,
+    explorerWorkspaceFilesState.loading,
+    privateWorkspacePath,
+    settingsLoaded,
+    updateSettings,
+  ]);
+
   const setDocumentBrowserMode = useCallback(
     (mode: DocumentBrowserMode) => {
       updateSettings((current) => ({
@@ -841,6 +962,32 @@ function MainApp() {
         ui: {
           ...current.ui,
           documentBrowserMode: mode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setExplorerPaneMode = useCallback(
+    (mode: ExplorerPaneMode) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          explorerPaneMode: mode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setWorkspaceFileFilter = useCallback(
+    (workspaceFileFilter: WorkspaceFileFilter) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          workspaceFileFilter,
         },
       }));
     },
@@ -867,10 +1014,42 @@ function MainApp() {
     [explorerVisibility, updateSettings],
   );
 
+  const setCollapsedFileFolders = useCallback(
+    (paths: string[]) => {
+      setCollapsedFileFoldersByVisibility((current) => ({
+        ...current,
+        [explorerVisibility]: paths,
+      }));
+      if (explorerVisibility === "private") {
+        updateSettings((current) => ({
+          ...current,
+          ui: {
+            ...current.ui,
+            collapsedFileFolders: paths,
+            fileTreeStateInitialized: true,
+          },
+        }));
+      }
+    },
+    [explorerVisibility, updateSettings],
+  );
+
   const setExplorerQuery = useCallback(
     (next: string) => {
       startExplorerTransition(() =>
         setQueryByVisibility((current) => ({
+          ...current,
+          [explorerVisibility]: next,
+        })),
+      );
+    },
+    [explorerVisibility, startExplorerTransition],
+  );
+
+  const setWorkspaceFileQuery = useCallback(
+    (next: string) => {
+      startExplorerTransition(() =>
+        setFileQueryByVisibility((current) => ({
           ...current,
           [explorerVisibility]: next,
         })),
@@ -1123,6 +1302,24 @@ function MainApp() {
     };
   }, [inboxWorkspacePath, appMode, refreshInbox]);
 
+  const refreshWorkspaceFiles = useCallback(
+    async (path: string, initial = false) => {
+      updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
+      try {
+        const files = await scanWorkspaceFiles(path);
+        updateWorkspaceFileState(path, {
+          entries: files,
+          loading: false,
+          refreshing: false,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        updateWorkspaceFileState(path, { loading: false, refreshing: false });
+      }
+    },
+    [updateWorkspaceFileState],
+  );
+
   const loadWorkspace = useCallback(
     async (
       path: string,
@@ -1135,6 +1332,7 @@ function MainApp() {
         refreshing: false,
         startupIoReady: false,
       });
+      void refreshWorkspaceFiles(path, true);
       setError(null);
       const storedTabs = readStoredTabsForWorkspace(path);
 
@@ -1273,7 +1471,7 @@ function MainApp() {
         await runAuthoritativeScan(true);
       }
     },
-    [pushRecent, readStoredTabsForWorkspace, tabs, updateWorkspaceState],
+    [pushRecent, readStoredTabsForWorkspace, refreshWorkspaceFiles, tabs, updateWorkspaceState],
   );
 
   const switchActiveWorkspace = useCallback(
@@ -1545,6 +1743,226 @@ function MainApp() {
     ],
   );
 
+  const selectWorkspaceFile = useCallback(
+    (entry: WorkspaceFileEntry, additive: boolean) => {
+      if (!explorerWorkspacePath) return;
+      setSelectedFilePathsByWorkspace((current) => {
+        const existing = current[explorerWorkspacePath] ?? [];
+        const next = additive
+          ? existing.includes(entry.path)
+            ? existing.filter((path) => path !== entry.path)
+            : [...existing, entry.path]
+          : [entry.path];
+        return {
+          ...current,
+          [explorerWorkspacePath]: next,
+        };
+      });
+    },
+    [explorerWorkspacePath],
+  );
+
+  const openWorkspaceFile = useCallback(
+    (entry: WorkspaceFileEntry) => {
+      if (!isOpenableDocumentFile(entry)) {
+        setError(t("files.openUnsupported"));
+        return;
+      }
+      const docEntry =
+        entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
+        null;
+      if (!docEntry) {
+        setError(t("files.openUnavailable"));
+        return;
+      }
+      void selectEntry(docEntry);
+    },
+    [entries, selectEntry, t],
+  );
+
+  const queueWorkspaceFiles = useCallback(
+    (files: WorkspaceFileEntry[]) => {
+      const workspacePath = explorerWorkspacePath;
+      if (!workspacePath || files.length === 0) return;
+      const defaultOperation = anchorSettings.ui.fileQueueDefaultOperation;
+      const targetDir = workspacePath;
+      setFileQueue((current) => {
+        const existing = new Set(
+          current
+            .filter((item) => item.status === "queued")
+            .map((item) => `${item.sourcePath}\u0000${item.targetDir}`),
+        );
+        const additions: FileQueueItem[] = [];
+        for (const file of files) {
+          const key = `${file.path}\u0000${targetDir}`;
+          if (existing.has(key)) continue;
+          existing.add(key);
+          additions.push({
+            id: `${Date.now()}-${additions.length}-${file.path}`,
+            sourcePath: file.path,
+            sourceRelPath: file.relPath,
+            targetDir,
+            operation: defaultOperation,
+            fileName: file.name,
+            status: "queued",
+            targetPath: null,
+            message: null,
+          });
+        }
+        return additions.length > 0 ? [...current, ...additions] : current;
+      });
+      if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+    },
+    [
+      anchorSettings.ui.fileQueueDefaultOperation,
+      explorerWorkspacePath,
+      outlineOpen,
+      updateLayoutSettings,
+    ],
+  );
+
+  const queueExternalFiles = useCallback(
+    (paths: string[]) => {
+      const targetDir = activeDocumentWorkspacePath ?? explorerWorkspacePath;
+      if (!targetDir || paths.length === 0) return;
+      const defaultOperation = anchorSettings.ui.fileQueueDefaultOperation;
+      setFileQueue((current) => {
+        const existing = new Set(
+          current
+            .filter((item) => item.status === "queued")
+            .map((item) => `${item.sourcePath}\u0000${item.targetDir}`),
+        );
+        const additions: FileQueueItem[] = [];
+        for (const path of paths) {
+          const fileName = path.split("/").pop() ?? path;
+          const key = `${path}\u0000${targetDir}`;
+          if (existing.has(key)) continue;
+          existing.add(key);
+          additions.push({
+            id: `${Date.now()}-external-${additions.length}-${path}`,
+            sourcePath: path,
+            sourceRelPath: fileName,
+            targetDir,
+            operation: defaultOperation,
+            fileName,
+            status: "queued",
+            targetPath: null,
+            message: null,
+          });
+        }
+        return additions.length > 0 ? [...current, ...additions] : current;
+      });
+      if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+    },
+    [
+      activeDocumentWorkspacePath,
+      anchorSettings.ui.fileQueueDefaultOperation,
+      explorerWorkspacePath,
+      outlineOpen,
+      updateLayoutSettings,
+    ],
+  );
+
+  const updateFileQueueItem = useCallback(
+    (id: string, patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>) => {
+      setFileQueue((current) =>
+        current.map((item) =>
+          item.id === id
+            ? { ...item, ...patch, status: "queued", message: null, targetPath: null }
+            : item,
+        ),
+      );
+      if (patch.operation) {
+        updateSettings((current) => ({
+          ...current,
+          ui: {
+            ...current.ui,
+            fileQueueDefaultOperation: patch.operation as FileStoreOperation,
+          },
+        }));
+      }
+    },
+    [updateSettings],
+  );
+
+  const clearFileQueue = useCallback(() => {
+    setFileQueue([]);
+  }, []);
+
+  const applyQueuedFiles = useCallback(async () => {
+    const queued = fileQueue.filter((item) => item.status === "queued");
+    if (queued.length === 0) return;
+    const groups = new Map<string, FileQueueItem[]>();
+    for (const item of queued) {
+      const owner = workspaceRegistry.workspaces
+        .filter(
+          (workspace) =>
+            item.targetDir === workspace.path || item.targetDir.startsWith(`${workspace.path}/`),
+        )
+        .sort((a, b) => b.path.length - a.path.length)[0];
+      if (!owner) {
+        setError(t("workspace.error.noneActive"));
+        return;
+      }
+      const hasMove = item.operation === "move";
+      const action = hasMove ? "renameMove" : "create";
+      if (!workspaceCan(owner, action)) {
+        setError(
+          t("workspace.writeBlocked", {
+            reason: workspaceWriteReason(owner, action) ?? "workspace capabilities",
+          }),
+        );
+        return;
+      }
+      const bucket = groups.get(owner.path) ?? [];
+      bucket.push(item);
+      groups.set(owner.path, bucket);
+    }
+    setError(null);
+    try {
+      const outcomes = (
+        await Promise.all(
+          Array.from(groups.entries()).map(([workspacePath, items]) =>
+            applyFileQueue(workspacePath, items),
+          ),
+        )
+      ).flat();
+      const byId = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
+      setFileQueue((current) =>
+        current.map((item) => {
+          const outcome = byId.get(item.id);
+          if (!outcome) return item;
+          return {
+            ...item,
+            status: "done",
+            targetPath: outcome.targetPath,
+            fileName: outcome.fileName,
+            message: t("rightPane.files.done"),
+          };
+        }),
+      );
+      for (const workspacePath of groups.keys()) {
+        await refreshWorkspaceFiles(workspacePath);
+        const fresh = await scanVault(workspacePath);
+        updateWorkspaceState(workspacePath, { entries: fresh });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFileQueue((current) =>
+        current.map((item) =>
+          item.status === "queued" ? { ...item, status: "error", message } : item,
+        ),
+      );
+      setError(message);
+    }
+  }, [
+    fileQueue,
+    refreshWorkspaceFiles,
+    t,
+    updateWorkspaceState,
+    workspaceRegistry.workspaces,
+  ]);
+
   const navigateBack = useCallback(() => {
     if (!selectedEntry) return;
     const { history, target } = goBack(navHistory, selectedEntry.path);
@@ -1620,6 +2038,7 @@ function MainApp() {
       );
       const fresh = await scanVault(target.workspacePath);
       updateWorkspaceState(target.workspacePath, { entries: fresh });
+      void refreshWorkspaceFiles(target.workspacePath);
       setTabs((prev) =>
         prev.map((tab) => {
           if (tab.id !== target.id) return tab;
@@ -1636,6 +2055,7 @@ function MainApp() {
   }, [
     t,
     tabs,
+    refreshWorkspaceFiles,
     updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
@@ -1669,6 +2089,7 @@ function MainApp() {
       );
       const fresh = await scanVault(target.workspacePath);
       updateWorkspaceState(target.workspacePath, { entries: fresh });
+      void refreshWorkspaceFiles(target.workspacePath);
       setTabs((prev) =>
         prev.map((tab) => {
           if (tab.id !== target.id) return tab;
@@ -1683,6 +2104,7 @@ function MainApp() {
   }, [
     t,
     tabs,
+    refreshWorkspaceFiles,
     updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
@@ -1704,6 +2126,7 @@ function MainApp() {
       );
       const fresh = await scanVault(activeDocumentWorkspacePath);
       updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
+      void refreshWorkspaceFiles(activeDocumentWorkspacePath);
       const entry =
         fresh.find((item) => item.relPath === created.relPath || item.path === created.path) ??
         ({
@@ -1742,6 +2165,7 @@ function MainApp() {
       explorerVisibility,
       pushRecent,
       blockWorkspaceWrite,
+      refreshWorkspaceFiles,
       updateWorkspaceState,
     ],
   );
@@ -1779,6 +2203,7 @@ function MainApp() {
         // clobber the textarea with an inspector-driven write.
         const fresh = await scanVault(activeDocumentWorkspacePath);
         updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
+        void refreshWorkspaceFiles(activeDocumentWorkspacePath);
         updateActiveTab((tab) => {
           const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
           return {
@@ -1798,6 +2223,7 @@ function MainApp() {
       draftContent,
       updateActiveTab,
       blockWorkspaceWrite,
+      refreshWorkspaceFiles,
       updateWorkspaceState,
     ],
   );
@@ -2200,6 +2626,155 @@ function MainApp() {
       outlineOpen,
     ],
   );
+
+  const selectAdjacentTab = useCallback(
+    (delta: number) => {
+      if (tabs.length === 0) return;
+      const currentIndex = Math.max(
+        0,
+        tabs.findIndex((tab) => tab.id === resolvedActiveTabId),
+      );
+      const nextIndex = (currentIndex + delta + tabs.length) % tabs.length;
+      selectTab(tabs[nextIndex].id);
+    },
+    [resolvedActiveTabId, selectTab, tabs],
+  );
+
+  const openCommitDialogFromMenu = useCallback(async () => {
+    if (!activeDocumentWorkspacePath) return;
+    if (blockWorkspaceWrite("modify")) return;
+    try {
+      const status = await gitStatus(activeDocumentWorkspacePath);
+      setCommitDialog({ path: activeDocumentWorkspacePath, status });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [activeDocumentWorkspacePath, blockWorkspaceWrite]);
+
+  const runMenuCommand = useCallback(
+    (id: string) => {
+      switch (id) {
+        case "file.new_document":
+          openNewDocumentDialog();
+          break;
+        case "file.save":
+          void saveCurrent();
+          break;
+        case "file.snapshot":
+          void snapshotCurrent();
+          break;
+        case "file.add_workspace":
+          openAddWorkspaceDialog();
+          break;
+        case "file.preferences":
+          openPreferences();
+          break;
+        case "view.documents":
+          setExplorerPaneMode("documents");
+          break;
+        case "view.files":
+          setExplorerPaneMode("files");
+          break;
+        case "view.toggle_types":
+          updateLayoutSettings({ documentTypesPaneOpen: !documentTypesPaneOpen });
+          break;
+        case "view.toggle_documents":
+          updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen });
+          break;
+        case "view.toggle_right":
+          updateLayoutSettings({ outlineOpen: !outlineOpen });
+          break;
+        case "view.command_palette":
+          setCommandPaletteOpen((value) => !value);
+          break;
+        case "go.back":
+          navigateBack();
+          break;
+        case "go.forward":
+          navigateForward();
+          break;
+        case "go.private_workspace": {
+          const path = workspaceRegistry.activeByVisibility.private;
+          if (path) void switchActiveWorkspace(path, "private");
+          break;
+        }
+        case "go.public_workspace": {
+          const path = workspaceRegistry.activeByVisibility.public;
+          if (path) void switchActiveWorkspace(path, "public");
+          break;
+        }
+        case "go.previous_tab":
+          selectAdjacentTab(-1);
+          break;
+        case "go.next_tab":
+          selectAdjacentTab(1);
+          break;
+        case "terminal.shell":
+        case "terminal.claude":
+        case "terminal.codex":
+          setTerminalLaunchRequest({
+            kind: id.split(".")[1] as TerminalKind,
+            nonce: Date.now(),
+          });
+          updateLayoutSettings({ terminalOpen: true });
+          break;
+        case "terminal.split":
+          splitTerminalRight();
+          break;
+        case "workspace.refresh":
+          refreshActiveSurface();
+          break;
+        case "workspace.reveal":
+          if (explorerWorkspacePath) revealTargetInFinder(explorerWorkspacePath);
+          break;
+        case "workspace.commit":
+          void openCommitDialogFromMenu();
+          break;
+      }
+    },
+    [
+      documentTypesPaneOpen,
+      documentsPaneOpen,
+      explorerWorkspacePath,
+      navigateBack,
+      navigateForward,
+      openAddWorkspaceDialog,
+      openCommitDialogFromMenu,
+      openNewDocumentDialog,
+      openPreferences,
+      outlineOpen,
+      refreshActiveSurface,
+      revealTargetInFinder,
+      saveCurrent,
+      selectAdjacentTab,
+      setExplorerPaneMode,
+      snapshotCurrent,
+      splitTerminalRight,
+      switchActiveWorkspace,
+      updateLayoutSettings,
+      workspaceRegistry.activeByVisibility.private,
+      workspaceRegistry.activeByVisibility.public,
+    ],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listenForMenuCommand((id) => {
+      runMenuCommand(id);
+    })
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((err) => {
+        console.info("[anchor] menu listener unavailable:", err);
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [runMenuCommand]);
 
   const modeClass = appMode === "inbox" ? " inbox-mode" : "";
   const terminalMaximizedClass =
@@ -2607,7 +3182,7 @@ function MainApp() {
           />
         ) : (
           <>
-            {documentsPaneOpen ? (
+            {documentsPaneOpen && anchorSettings.ui.explorerPaneMode === "documents" ? (
               <DocumentList
                 documentIndex={documentIndex}
                 selectedPath={selectedPath}
@@ -2639,6 +3214,46 @@ function MainApp() {
                 searchInputRef={searchInputRef}
                 paneRef={documentsPaneRef}
                 vaultPath={explorerWorkspacePath}
+                paneMode={anchorSettings.ui.explorerPaneMode}
+                onPaneModeChange={setExplorerPaneMode}
+              />
+            ) : null}
+            {documentsPaneOpen && anchorSettings.ui.explorerPaneMode === "files" ? (
+              <WorkspaceFilesPane
+                entries={fileEntries}
+                selectedPaths={selectedFilePaths}
+                query={fileQuery}
+                loading={(booting || explorerWorkspaceFilesState.loading) && fileEntries.length === 0}
+                refreshing={explorerWorkspaceFilesState.refreshing}
+                workspaceVisibility={explorerVisibility}
+                publicWorkspaceAvailable={publicWorkspaceAvailable}
+                activeWorkspaceLabel={explorerWorkspaceCaption}
+                paneMode={anchorSettings.ui.explorerPaneMode}
+                filter={anchorSettings.ui.workspaceFileFilter}
+                collapsedFileFolders={collapsedFileFolders}
+                onWorkspaceVisibilityChange={(visibility) => {
+                  setExplorerVisibility(visibility);
+                  const nextPath = workspaceRegistry.activeByVisibility[visibility];
+                  if (nextPath && !workspaceStates[nextPath]?.entries.length) {
+                    void loadWorkspace(nextPath, visibility);
+                  } else if (nextPath && !workspaceFileStates[nextPath]?.entries.length) {
+                    void refreshWorkspaceFiles(nextPath, true);
+                  }
+                }}
+                onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
+                onPaneModeChange={setExplorerPaneMode}
+                onQueryChange={setWorkspaceFileQuery}
+                onFilterChange={setWorkspaceFileFilter}
+                onCollapsedFileFoldersChange={setCollapsedFileFolders}
+                onSelectFile={selectWorkspaceFile}
+                onOpenFile={openWorkspaceFile}
+                onQueueFiles={queueWorkspaceFiles}
+                onRevealInFinder={revealTargetInFinder}
+                onRefresh={() => {
+                  if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
+                }}
+                onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}
+                paneRef={documentsPaneRef}
               />
             ) : null}
             {documentsPaneOpen ? (
@@ -2707,6 +3322,13 @@ function MainApp() {
                 onUpdateField={updateField}
                 onSelectEntry={selectEntry}
                 onMissingWikilink={handleWikilinkClick}
+                fileQueue={fileQueue}
+                canCreateFiles={workspaceCan(activeDocumentWorkspace, "create")}
+                canMoveFiles={workspaceCan(activeDocumentWorkspace, "renameMove")}
+                onUpdateFileQueueItem={updateFileQueueItem}
+                onQueueExternalFiles={queueExternalFiles}
+                onApplyFileQueue={applyQueuedFiles}
+                onClearFileQueue={clearFileQueue}
                 paneRef={outlinePaneRef}
               />
             ) : null}
@@ -2716,6 +3338,7 @@ function MainApp() {
         <TerminalPanel
           cwd={activeDocumentWorkspacePath}
           settings={anchorSettings}
+          launchRequest={terminalLaunchRequest}
           open={anchorSettings.ui.layout.terminalOpen}
           height={anchorSettings.ui.layout.terminalHeight}
           splitOpen={anchorSettings.ui.layout.terminalSplitOpen}

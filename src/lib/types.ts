@@ -175,6 +175,43 @@ export interface StoredFileOutcome {
   operation: FileStoreOperation;
 }
 
+export interface WorkspaceFileEntry {
+  path: string;
+  relPath: string;
+  name: string;
+  extension: string | null;
+  fileKind: string;
+  sizeBytes: number;
+  updatedAt: string | null;
+  gitTracked: boolean;
+  binary: boolean;
+}
+
+export interface FileQueueApplyItem {
+  id: string;
+  sourcePath: string;
+  targetDir: string;
+  operation: FileStoreOperation;
+}
+
+export interface FileQueueApplyOutcome {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  fileName: string;
+  operation: FileStoreOperation;
+}
+
+export type FileQueueStatus = "queued" | "done" | "error";
+
+export interface FileQueueItem extends FileQueueApplyItem {
+  sourceRelPath: string;
+  fileName: string;
+  status: FileQueueStatus;
+  targetPath?: string | null;
+  message?: string | null;
+}
+
 export type MemoFormat = "plain" | "markdown";
 
 export interface MemoEntry {

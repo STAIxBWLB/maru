@@ -10,10 +10,15 @@ describe("normalizeAnchorSettings", () => {
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {
+        explorerPaneMode: "files",
         documentBrowserMode: "tree",
         documentLabelMode: "filename",
+        workspaceFileFilter: "tracked",
         collapsedTreeFolders: ["projects/rise"],
+        collapsedFileFolders: ["assets"],
         documentTreeStateInitialized: true,
+        fileTreeStateInitialized: true,
+        fileQueueDefaultOperation: "move",
         themeMode: "dark",
         accentColor: "#445566",
         layout: {
@@ -38,10 +43,15 @@ describe("normalizeAnchorSettings", () => {
       },
     });
 
+    expect(settings.ui.explorerPaneMode).toBe("files");
     expect(settings.ui.documentBrowserMode).toBe("tree");
     expect(settings.ui.documentLabelMode).toBe("filename");
+    expect(settings.ui.workspaceFileFilter).toBe("tracked");
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
+    expect(settings.ui.collapsedFileFolders).toEqual(["assets"]);
     expect(settings.ui.documentTreeStateInitialized).toBe(true);
+    expect(settings.ui.fileTreeStateInitialized).toBe(true);
+    expect(settings.ui.fileQueueDefaultOperation).toBe("move");
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
     expect(settings.ui.layout.editorSplitOpen).toBe(true);
@@ -65,6 +75,9 @@ describe("normalizeAnchorSettings", () => {
   it("defaults first-run terminal layout to collapsed shell autoload", () => {
     const settings = normalizeAnchorSettings({});
 
+    expect(settings.ui.explorerPaneMode).toBe("documents");
+    expect(settings.ui.workspaceFileFilter).toBe("all");
+    expect(settings.ui.fileQueueDefaultOperation).toBe("copy");
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
     expect(settings.terminal.autoLaunch).toBe("shell");

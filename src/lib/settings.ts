@@ -1,5 +1,8 @@
 export type DocumentBrowserMode = "list" | "tree";
 export type DocumentLabelMode = "title" | "filename";
+export type ExplorerPaneMode = "documents" | "files";
+export type WorkspaceFileFilter = "all" | "tracked" | "binary";
+export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -37,10 +40,15 @@ export interface TerminalLauncherSettings {
 export interface AnchorSettings {
   version: 1;
   ui: {
+    explorerPaneMode: ExplorerPaneMode;
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
+    workspaceFileFilter: WorkspaceFileFilter;
     collapsedTreeFolders: string[];
+    collapsedFileFolders: string[];
     documentTreeStateInitialized: boolean;
+    fileTreeStateInitialized: boolean;
+    fileQueueDefaultOperation: FileQueueDefaultOperation;
     themeMode: ThemeMode;
     accentColor: string;
     layout: LayoutSettings;
@@ -59,10 +67,15 @@ export interface AnchorSettings {
 export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   version: 1,
   ui: {
+    explorerPaneMode: "documents",
     documentBrowserMode: "tree",
     documentLabelMode: "title",
+    workspaceFileFilter: "all",
     collapsedTreeFolders: [],
+    collapsedFileFolders: [],
     documentTreeStateInitialized: false,
+    fileTreeStateInitialized: false,
+    fileQueueDefaultOperation: "copy",
     themeMode: "system",
     accentColor: "#2f5a3c",
     layout: {
@@ -121,12 +134,20 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
   return {
     version: 1,
     ui: {
+      explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
+      workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
+      collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
       documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
         ? ui.documentTreeStateInitialized
         : false,
+      fileTreeStateInitialized: typeof ui.fileTreeStateInitialized === "boolean"
+        ? ui.fileTreeStateInitialized
+        : false,
+      fileQueueDefaultOperation:
+        parseFileQueueDefaultOperation(ui.fileQueueDefaultOperation) ?? "copy",
       themeMode: parseThemeMode(ui.themeMode) ?? DEFAULT_ANCHOR_SETTINGS.ui.themeMode,
       accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
       layout,
@@ -166,7 +187,9 @@ function cloneDefaultSettings(): AnchorSettings {
     ui: {
       ...DEFAULT_ANCHOR_SETTINGS.ui,
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
+      collapsedFileFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedFileFolders],
       documentTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.documentTreeStateInitialized,
+      fileTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.fileTreeStateInitialized,
       layout: { ...DEFAULT_ANCHOR_SETTINGS.ui.layout },
     },
     terminal: {
@@ -203,8 +226,20 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
   return value === "list" || value === "tree" ? value : null;
 }
 
+function parseExplorerPaneMode(value: unknown): ExplorerPaneMode | null {
+  return value === "documents" || value === "files" ? value : null;
+}
+
 function parseDocumentLabelMode(value: unknown): DocumentLabelMode | null {
   return value === "title" || value === "filename" ? value : null;
+}
+
+function parseWorkspaceFileFilter(value: unknown): WorkspaceFileFilter | null {
+  return value === "all" || value === "tracked" || value === "binary" ? value : null;
+}
+
+function parseFileQueueDefaultOperation(value: unknown): FileQueueDefaultOperation | null {
+  return value === "copy" || value === "move" ? value : null;
 }
 
 function parseThemeMode(value: unknown): ThemeMode | null {

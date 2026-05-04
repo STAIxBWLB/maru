@@ -138,6 +138,44 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   await expect(page.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
 });
 
+test("switches between Documents and Files explorer modes", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await expect(explorer.getByRole("button", { name: "Documents" })).toHaveClass(/active/);
+  await expect(explorer.getByRole("button", { name: "목록" })).toBeVisible();
+
+  await explorer.getByRole("button", { name: "Files" }).click();
+
+  await expect(explorer.getByRole("heading", { name: "파일" })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: "목록" })).toHaveCount(0);
+  await expect(explorer.getByRole("button", { name: "Git tracked" })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
+
+  await explorer.getByRole("button", { name: "Binary" }).click();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ })).toHaveCount(0);
+
+  await explorer.getByRole("button", { name: "전체" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).dblclick();
+  await expect(page.locator(".document-tab-title", { hasText: "Anchor 사업 주간 점검 회의" })).toBeVisible();
+});
+
+test("queues selected files in the right Files pane and applies explicitly", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+  await rightPane.getByRole("button", { name: "Apply" }).click();
+  await expect(rightPane.locator(".right-list-item.queue.done", { hasText: "완료" })).toBeVisible();
+});
+
 test("resizes document and right panes with drag handles", async ({ page }) => {
   await page.goto("/");
 
