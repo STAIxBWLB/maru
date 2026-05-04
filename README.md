@@ -244,6 +244,19 @@ and `.msi` assets to that same release. It also uploads signed updater
 metadata consumed by the startup auto-updater and native `Check for Updates...`
 menu action.
 
+macOS bundles must be code signed before publishing. Until Apple Developer ID
+secrets are configured, Anchor uses explicit ad-hoc bundle signing
+(`bundle.macOS.signingIdentity = "-"`) so Apple Silicon downloads are not
+shipped as unsigned/broken app bundles. For fully trusted Gatekeeper launches,
+configure these GitHub Secrets and publish a new release:
+
+- `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `KEYCHAIN_PASSWORD`
+- `APPLE_ID`
+- `APPLE_PASSWORD` — Apple app-specific password
+- `APPLE_TEAM_ID`
+
 Release asset versions come from the app metadata in `package.json`,
 `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync
 before tagging or publishing a release.
