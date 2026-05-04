@@ -17,10 +17,18 @@ import type {
   GmailMessage,
   InboxClassification,
   InboxDropItem,
+  InboxSettings,
   VaultEntry,
   VaultList,
   VersionSnapshot,
 } from "./types";
+import type { TerminalKind } from "./terminal";
+
+export const DEFAULT_INBOX_SETTINGS: InboxSettings = {
+  inboxRoot: "inbox/downloads",
+  sources: ["outlook", "sharepoint", "gmail", "kakao", "telegram", "downloads"],
+  gwsPath: null,
+};
 
 declare global {
   interface Window {
@@ -43,6 +51,10 @@ export async function chooseVaultDirectory(title: string): Promise<string | null
     title,
   });
   return typeof selected === "string" ? selected : null;
+}
+
+export async function chooseWorkspaceDirectory(title: string): Promise<string | null> {
+  return chooseVaultDirectory(title);
 }
 
 export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
@@ -235,19 +247,82 @@ export async function startClaudeCliInvocation(
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
 }
 
+// === Integrated terminal ===
+
+export function terminalAvailable(): boolean {
+  return isTauri();
+}
+
+export interface TerminalSpawnOptions {
+  command?: string | null;
+  extraArgs?: string[] | null;
+}
+
+export async function terminalSpawn(
+  sessionId: string,
+  kind: TerminalKind,
+  cwd: string | null = null,
+  options: TerminalSpawnOptions = {},
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Integrated terminal is only available inside the Tauri shell.");
+  }
+  return invoke<string>("terminal_spawn", {
+    sessionId,
+    kind,
+    cwd,
+    command: options.command ?? null,
+    extraArgs: options.extraArgs ?? null,
+  });
+}
+
+export async function terminalWrite(sessionId: string, data: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_write", { sessionId, data });
+}
+
+export async function terminalResize(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_resize", { sessionId, cols, rows });
+}
+
+export async function terminalKill(sessionId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_kill", { sessionId });
+}
+
 /** Pull unread Gmail messages via the user's existing `gws` Google
  *  Workspace CLI. Returns id / from / subject / date — anchor never
  *  fetches the message body, just the envelope, matching the Phase 2
  *  triage surface. Empty `query` falls back to gws's default
- *  `is:unread`. */
+ *  `is:unread`. `vaultPath` lets the backend pick up an optional
+ *  `gwsPath` override from `<vault>/.anchor/inbox.json`. */
 export async function fetchGmailUnread(
+  vaultPath: string | null = null,
   max: number | null = null,
   query: string | null = null,
 ): Promise<GmailMessage[]> {
   if (!isTauri()) {
     return mockGmailUnread();
   }
-  return invoke<GmailMessage[]>("fetch_gmail_unread", { max, query });
+  return invoke<GmailMessage[]>("fetch_gmail_unread", { vaultPath, max, query });
+}
+
+export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {
+  if (!isTauri()) return { ...DEFAULT_INBOX_SETTINGS };
+  return invoke<InboxSettings>("read_inbox_settings", { vaultPath });
+}
+
+export async function saveInboxSettings(
+  vaultPath: string,
+  settings: InboxSettings,
+): Promise<InboxSettings> {
+  if (!isTauri()) return settings;
+  return invoke<InboxSettings>("save_inbox_settings", { vaultPath, settings });
 }
 
 function mockGmailUnread(): GmailMessage[] {

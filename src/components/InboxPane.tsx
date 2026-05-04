@@ -1,6 +1,13 @@
-import { Brain, Check, Inbox, Loader2, Mail, RefreshCcw, X } from "lucide-react";
+import { Brain, Check, Inbox, Loader2, Mail, RefreshCcw, Settings, X } from "lucide-react";
+import { useMemo } from "react";
 import { type GmailMessageState, shortFrom } from "../lib/gmail";
-import { categoryLabel, type InboxDecision, type InboxItemState } from "../lib/inbox";
+import {
+  categoryLabel,
+  filterItemsBySource,
+  uniqueSources,
+  type InboxDecision,
+  type InboxItemState,
+} from "../lib/inbox";
 import { useTranslation } from "../lib/i18n";
 
 interface InboxPaneProps {
@@ -9,7 +16,10 @@ interface InboxPaneProps {
   gmailMessages: GmailMessageState[];
   gmailLoading: boolean;
   gmailError: string | null;
+  sourceFilter: string | null;
+  onSourceFilter: (source: string | null) => void;
   onRefresh: () => void;
+  onOpenSettings: () => void;
   onClassify: (id: string) => void;
   onDecide: (id: string, decision: InboxDecision) => void;
   onDecideGmail: (id: string, decision: InboxDecision) => void;
@@ -21,13 +31,21 @@ export function InboxPane({
   gmailMessages,
   gmailLoading,
   gmailError,
+  sourceFilter,
+  onSourceFilter,
   onRefresh,
+  onOpenSettings,
   onClassify,
   onDecide,
   onDecideGmail,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
-  const pending = items.filter((entry) => entry.decision === "pending").length;
+  const sources = useMemo(() => uniqueSources(items), [items]);
+  const visibleItems = useMemo(
+    () => filterItemsBySource(items, sourceFilter),
+    [items, sourceFilter],
+  );
+  const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
   const gmailPending = gmailMessages.filter((entry) => entry.decision === "pending").length;
 
   return (
@@ -42,30 +60,67 @@ export function InboxPane({
             })}
           </p>
         </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={onRefresh}
-          title={t("inbox.refresh")}
-          aria-label={t("inbox.refresh")}
-        >
-          <RefreshCcw size={15} />
-        </button>
+        <div className="inbox-header-actions">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onOpenSettings}
+            title={t("inbox.settings.open")}
+            aria-label={t("inbox.settings.open")}
+          >
+            <Settings size={15} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onRefresh}
+            title={t("inbox.refresh")}
+            aria-label={t("inbox.refresh")}
+          >
+            <RefreshCcw size={15} />
+          </button>
+        </div>
       </header>
+
+      {sources.length > 0 ? (
+        <div className="inbox-filter-row" role="toolbar" aria-label={t("inbox.filter.label")}>
+          <button
+            type="button"
+            className={sourceFilter === null ? "inbox-filter-chip active" : "inbox-filter-chip"}
+            onClick={() => onSourceFilter(null)}
+          >
+            {t("inbox.filter.all")} <span className="count">{items.length}</span>
+          </button>
+          {sources.map((source) => {
+            const count = items.filter((entry) => entry.item.source === source).length;
+            const active = sourceFilter === source;
+            return (
+              <button
+                type="button"
+                key={source}
+                className={active ? "inbox-filter-chip active" : "inbox-filter-chip"}
+                onClick={() => onSourceFilter(active ? null : source)}
+              >
+                {source} <span className="count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="inbox-sections">
         <section className="inbox-section">
           <h3 className="inbox-section-title">{t("inbox.section.files")}</h3>
           <div className="inbox-list">
             {loading ? <div className="inbox-empty">{t("inbox.loading")}</div> : null}
-            {!loading && items.length === 0 ? (
+            {!loading && visibleItems.length === 0 ? (
               <div className="inbox-empty">
                 <Inbox size={24} />
                 <strong>{t("inbox.empty.title")}</strong>
                 <span>{t("inbox.empty.description")}</span>
               </div>
             ) : null}
-            {items.map((entry) => (
+            {visibleItems.map((entry) => (
               <article className={`inbox-item ${entry.decision}`} key={entry.item.id}>
                 <div className="inbox-item-main">
                   <div className="inbox-item-title">

@@ -15,6 +15,8 @@ use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, Recursiv
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::inbox_settings;
+
 #[derive(Default)]
 pub struct InboxWatcherState(pub Mutex<Option<RecommendedWatcher>>);
 
@@ -44,10 +46,11 @@ pub fn start_inbox_watcher(
     if !vault.is_dir() {
         return Err(format!("Vault path is not a directory: {vault_path}"));
     }
-    let downloads = vault.join("inbox").join("downloads");
+    let settings = inbox_settings::load(&vault);
+    let downloads = vault.join(&settings.inbox_root);
     if !downloads.is_dir() {
         return Err(format!(
-            "{} is not a directory; create inbox/downloads first.",
+            "{} is not a directory; create the inbox root first.",
             downloads.display()
         ));
     }

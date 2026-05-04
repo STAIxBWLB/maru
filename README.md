@@ -151,7 +151,7 @@ In likelihood order:
 - **Public marketplace hosting** — when external user count exceeds 10.
 - **Semantic search** — when keyword + relationships + git-grep are demonstrably insufficient.
 - **NotebookLM bridge** — low priority.
-- **Auto-updater** — once the deployed user count exceeds 2.
+- **Auto-updater** — GitHub Release `latest.json` + signed Tauri updater artifacts are wired; release signing key lives in GitHub Secrets.
 
 ## Open decisions (input needed)
 
@@ -180,7 +180,7 @@ Out of scope for v1 by explicit decision:
 - PDF annotation, OCR (file-extracted text is enough).
 - Agent-autonomous edits (every Claude write goes through accept/reject diff).
 - iCloud / Dropbox vault awareness (user's responsibility).
-- Auto-updater (`pnpm tauri build` local builds only).
+- Unsigned / ad-hoc auto-updater feeds (updates are accepted only through signed GitHub Release artifacts).
 
 ## Development
 
@@ -198,6 +198,11 @@ pnpm typecheck
 
 # Production build:
 pnpm build
+
+# Signed native release build (requires updater signing env):
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/anchor-updater.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/anchor-updater.key.password)"
+pnpm tauri build
 
 # Rust unit + integration tests:
 cd src-tauri && cargo test
