@@ -272,7 +272,9 @@ fn default_settings_json() -> JsonValue {
         "version": SCHEMA_VERSION,
         "ui": {
             "documentBrowserMode": "tree",
+            "documentLabelMode": "title",
             "collapsedTreeFolders": [],
+            "documentTreeStateInitialized": false,
             "themeMode": "system",
             "accentColor": "#2f5a3c",
             "layout": {
@@ -281,6 +283,11 @@ fn default_settings_json() -> JsonValue {
                 "outlineOpen": true,
                 "terminalOpen": false,
                 "terminalHeight": 260,
+                "terminalMaximized": false,
+                "editorSplitOpen": false,
+                "editorSplitRatio": 0.5,
+                "terminalSplitOpen": false,
+                "terminalSplitRatio": 0.5,
                 "windowBounds": null,
                 "windowMaximized": null
             }

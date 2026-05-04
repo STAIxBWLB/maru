@@ -315,6 +315,8 @@ export function terminalAvailable(): boolean {
 export interface TerminalSpawnOptions {
   command?: string | null;
   extraArgs?: string[] | null;
+  cols?: number | null;
+  rows?: number | null;
 }
 
 export async function terminalSpawn(
@@ -332,6 +334,8 @@ export async function terminalSpawn(
     cwd,
     command: options.command ?? null,
     extraArgs: options.extraArgs ?? null,
+    cols: options.cols ?? null,
+    rows: options.rows ?? null,
   });
 }
 

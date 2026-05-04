@@ -4,6 +4,8 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  Maximize2,
+  Minimize2,
   PanelBottom,
   SquareTerminal,
   X,
@@ -36,9 +38,11 @@ interface TerminalPanelProps {
   height: number;
   splitOpen: boolean;
   splitRatio: number;
+  maximized: boolean;
   onOpenChange: (open: boolean) => void;
   onHeightChange: (height: number) => void;
   onSplitOpenChange: (open: boolean) => void;
+  onMaximizedChange: (maximized: boolean) => void;
 }
 
 interface TerminalOutputEvent {
@@ -66,9 +70,11 @@ export const TerminalPanel = memo(function TerminalPanel({
   height,
   splitOpen,
   splitRatio,
+  maximized,
   onOpenChange,
   onHeightChange,
   onSplitOpenChange,
+  onMaximizedChange,
 }: TerminalPanelProps) {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(terminalTabsReducer, EMPTY_TERMINAL_STATE);
@@ -85,6 +91,13 @@ export const TerminalPanel = memo(function TerminalPanel({
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
   const rightTab = state.tabs.find((tab) => tab.id === rightTabId) ?? null;
   const canRunTerminal = useMemo(() => terminalAvailable(), []);
+
+  const waitForTerminalHost = useCallback(async (tabId: string) => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (hostRef.current.has(tabId)) return;
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    }
+  }, []);
 
   useEffect(() => {
     setDraftHeight(height);
@@ -168,7 +181,7 @@ export const TerminalPanel = memo(function TerminalPanel({
     if (!open || !activeTab) return;
     window.requestAnimationFrame(() => fitTab(activeTab.id));
     if (rightTab) window.requestAnimationFrame(() => fitTab(rightTab.id));
-  }, [activeTab, fitTab, draftHeight, open, rightTab, splitOpen]);
+  }, [activeTab, draftHeight, fitTab, maximized, open, rightTab, splitOpen]);
 
   useEffect(() => {
     if (!open || !activeTab) return;
@@ -186,7 +199,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", onResize);
     };
-  }, [activeTab, fitTab, open, rightTab]);
+  }, [activeTab, fitTab, maximized, open, rightTab]);
 
   useEffect(() => {
     return () => {
@@ -251,7 +264,6 @@ export const TerminalPanel = memo(function TerminalPanel({
       terminal.onData((data) => {
         void terminalWrite(sessionId, data);
       });
-      terminal.writeln(`$ ${terminalCommandPreview(kind, cwd ?? "")}`);
       handlesRef.current.set(tabId, { terminal, fit });
       // Register the session↔tab mapping BEFORE spawning so we don't drop
       // any terminal://output events that race ahead of the IPC return.
@@ -273,9 +285,18 @@ export const TerminalPanel = memo(function TerminalPanel({
       setError(null);
 
       try {
+        await waitForTerminalHost(tabId);
+        attachTerminal(tabId);
+        try {
+          fit.fit();
+        } catch {
+          // The panel can still be settling after opening or splitting.
+        }
         await terminalSpawn(sessionId, kind, cwd, {
           command: launcher.command ?? null,
           extraArgs: launcher.args ?? null,
+          cols: terminal.cols,
+          rows: terminal.rows,
         });
         window.requestAnimationFrame(() => {
           attachTerminal(tabId);
@@ -301,6 +322,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       open,
       settings.terminal.launchers,
       t,
+      waitForTerminalHost,
     ],
   );
 
@@ -385,14 +407,14 @@ export const TerminalPanel = memo(function TerminalPanel({
     [draftHeight, onHeightChange],
   );
 
-  const panelStyle = open ? { height: draftHeight } : undefined;
+  const panelStyle = open && !maximized ? { height: draftHeight } : undefined;
   const splitBodyStyle =
     splitOpen && rightTab
       ? { gridTemplateColumns: `${splitRatio}fr ${1 - splitRatio}fr` }
       : undefined;
   const focusedTabId = focusedGroup === "right" && rightTab ? rightTab.id : state.activeTabId;
-  const renderTerminalInstances = (activeId: string | null) =>
-    state.tabs.map((tab) => (
+  const renderTerminalInstances = (tabs: typeof state.tabs, activeId: string | null) =>
+    tabs.map((tab) => (
       <div
         key={tab.id}
         className={tab.id === activeId ? "terminal-instance active" : "terminal-instance"}
@@ -408,7 +430,16 @@ export const TerminalPanel = memo(function TerminalPanel({
     ));
 
   return (
-    <section className={open ? "terminal-panel" : "terminal-panel collapsed"} style={panelStyle}>
+    <section
+      className={
+        open
+          ? maximized
+            ? "terminal-panel maximized"
+            : "terminal-panel"
+          : "terminal-panel collapsed"
+      }
+      style={panelStyle}
+    >
       <div className="terminal-resize-handle" onPointerDown={startResize} />
       <header className="terminal-header">
         <button
@@ -445,6 +476,15 @@ export const TerminalPanel = memo(function TerminalPanel({
         <div className="terminal-cwd" title={cwd ?? t("terminal.cwd.none")}>
           {cwd ?? t("terminal.cwd.none")}
         </div>
+        <button
+          type="button"
+          className="terminal-icon-button"
+          onClick={() => onMaximizedChange(!maximized)}
+          aria-label={maximized ? t("terminal.restore") : t("terminal.maximize")}
+          title={maximized ? t("terminal.restore") : t("terminal.maximize")}
+        >
+          {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
       </header>
 
       {/* Tabs and body stay mounted across collapse so xterm DOM keeps its
@@ -462,6 +502,10 @@ export const TerminalPanel = memo(function TerminalPanel({
                   type="button"
                   className="terminal-tab-main"
                   onClick={() => {
+                    if (splitOpen && rightTab?.id === tab.id) {
+                      setFocusedGroup("right");
+                      return;
+                    }
                     dispatch({ type: "switch", tabId: tab.id });
                     setFocusedGroup("left");
                   }}
@@ -496,17 +540,20 @@ export const TerminalPanel = memo(function TerminalPanel({
               className={focusedGroup === "left" ? "terminal-group active" : "terminal-group"}
               onPointerDown={() => setFocusedGroup("left")}
             >
-              {renderTerminalInstances(state.activeTabId)}
+              {renderTerminalInstances(
+                state.tabs.filter((tab) => tab.id !== rightTab.id),
+                state.activeTabId,
+              )}
             </div>
             <div
               className={focusedGroup === "right" ? "terminal-group active" : "terminal-group"}
               onPointerDown={() => setFocusedGroup("right")}
             >
-              {renderTerminalInstances(rightTab.id)}
+              {renderTerminalInstances([rightTab], rightTab.id)}
             </div>
           </>
         ) : (
-          renderTerminalInstances(state.activeTabId)
+          renderTerminalInstances(state.tabs, state.activeTabId)
         )}
       </div>
       {open && error ? <div className="terminal-error">{error}</div> : null}

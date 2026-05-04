@@ -59,6 +59,7 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import { collectDocumentTreeFolderPaths } from "./lib/documentTree";
 import {
   buildDocumentIndex,
   getRecentEntries,
@@ -431,7 +432,15 @@ function MainApp() {
   const entries = explorerWorkspaceState.entries;
   const query = queryByVisibility[explorerVisibility];
   const typeFilter = typeFilterByVisibility[explorerVisibility];
-  const collapsedTreeFolders = collapsedTreeFoldersByVisibility[explorerVisibility];
+  const savedCollapsedTreeFolders = collapsedTreeFoldersByVisibility[explorerVisibility];
+  const defaultCollapsedTreeFolders = useMemo(
+    () =>
+      explorerVisibility === "private" && !anchorSettings.ui.documentTreeStateInitialized
+        ? collectDocumentTreeFolderPaths(entries)
+        : null,
+    [anchorSettings.ui.documentTreeStateInitialized, entries, explorerVisibility],
+  );
+  const collapsedTreeFolders = defaultCollapsedTreeFolders ?? savedCollapsedTreeFolders;
   const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
   const layoutSettings = anchorSettings.ui.layout;
   const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
@@ -770,9 +779,45 @@ function MainApp() {
     collapsedTreeHydratedRef.current = true;
     setCollapsedTreeFoldersByVisibility((current) => ({
       ...current,
-      private: anchorSettings.ui.collapsedTreeFolders,
+      private: anchorSettings.ui.documentTreeStateInitialized
+        ? anchorSettings.ui.collapsedTreeFolders
+        : current.private,
     }));
-  }, [anchorSettings.ui.collapsedTreeFolders, settingsLoaded]);
+  }, [
+    anchorSettings.ui.collapsedTreeFolders,
+    anchorSettings.ui.documentTreeStateInitialized,
+    settingsLoaded,
+  ]);
+
+  const privateWorkspacePath = workspaceRegistry.activeByVisibility.private;
+  const privateWorkspaceState =
+    (privateWorkspacePath ? workspaceStates[privateWorkspacePath] : null) ??
+    EMPTY_WORKSPACE_STATE;
+
+  useEffect(() => {
+    if (!settingsLoaded || anchorSettings.ui.documentTreeStateInitialized) return;
+    if (!privateWorkspacePath || !privateWorkspaceState.startupIoReady) return;
+    const collapsedFolders = collectDocumentTreeFolderPaths(privateWorkspaceState.entries);
+    setCollapsedTreeFoldersByVisibility((current) => ({
+      ...current,
+      private: collapsedFolders,
+    }));
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        collapsedTreeFolders: collapsedFolders,
+        documentTreeStateInitialized: true,
+      },
+    }));
+  }, [
+    anchorSettings.ui.documentTreeStateInitialized,
+    privateWorkspacePath,
+    privateWorkspaceState.entries,
+    privateWorkspaceState.startupIoReady,
+    settingsLoaded,
+    updateSettings,
+  ]);
 
   const setDocumentBrowserMode = useCallback(
     (mode: DocumentBrowserMode) => {
@@ -799,6 +844,7 @@ function MainApp() {
           ui: {
             ...current.ui,
             collapsedTreeFolders: paths,
+            documentTreeStateInitialized: true,
           },
         }));
       }
@@ -2098,9 +2144,13 @@ function MainApp() {
   );
 
   const modeClass = appMode === "inbox" ? " inbox-mode" : "";
+  const terminalMaximizedClass =
+    anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
+      ? " terminal-maximized"
+      : "";
   const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
     documentTypesPaneOpen ? "" : " types-closed"
-  }${documentsPaneOpen ? "" : " documents-closed"}`;
+  }${documentsPaneOpen ? "" : " documents-closed"}${terminalMaximizedClass}`;
   const themeVars = useMemo(() => buildThemeVars(anchorSettings), [anchorSettings]);
   const editorSplitStyle =
     editorSplitOpen && rightTab
@@ -2425,10 +2475,14 @@ function MainApp() {
           height={anchorSettings.ui.layout.terminalHeight}
           splitOpen={anchorSettings.ui.layout.terminalSplitOpen}
           splitRatio={anchorSettings.ui.layout.terminalSplitRatio}
+          maximized={anchorSettings.ui.layout.terminalMaximized}
           onOpenChange={(terminalOpen) => updateLayoutSettings({ terminalOpen })}
           onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
           onSplitOpenChange={(terminalSplitOpen) =>
             updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
+          }
+          onMaximizedChange={(terminalMaximized) =>
+            updateLayoutSettings({ terminalMaximized, terminalOpen: true })
           }
         />
 

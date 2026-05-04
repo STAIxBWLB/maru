@@ -54,6 +54,8 @@ pub fn terminal_spawn(
     cwd: Option<String>,
     command: Option<String>,
     extra_args: Option<Vec<String>>,
+    cols: Option<u16>,
+    rows: Option<u16>,
 ) -> Result<String, String> {
     if session_id.trim().is_empty() {
         return Err("terminal_session_id_required".to_string());
@@ -72,8 +74,8 @@ pub fn terminal_spawn(
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: DEFAULT_ROWS,
-            cols: DEFAULT_COLS,
+            rows: rows.unwrap_or(DEFAULT_ROWS).clamp(1, MAX_ROWS),
+            cols: cols.unwrap_or(DEFAULT_COLS).clamp(2, MAX_COLS),
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -378,14 +380,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.program, "codex");
-        assert_eq!(spec.args, vec!["--cd", cwd_str.as_str(), "--profile", "dev"]);
+        assert_eq!(
+            spec.args,
+            vec!["--cd", cwd_str.as_str(), "--profile", "dev"]
+        );
     }
 
     #[test]
     fn empty_command_override_falls_back_to_default() {
         let cwd = env::current_dir().unwrap();
         let cwd_str = cwd.to_string_lossy().to_string();
-        let spec = build_terminal_command_spec("claude", Some(&cwd_str), Some("   "), None).unwrap();
+        let spec =
+            build_terminal_command_spec("claude", Some(&cwd_str), Some("   "), None).unwrap();
         assert_eq!(spec.program, "claude");
     }
 

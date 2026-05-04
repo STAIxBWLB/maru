@@ -3,10 +3,12 @@ import {
   FilePlus2,
   Files,
   Hash,
+  Info,
   List,
   MoveRight,
   Plus,
   Save,
+  StickyNote,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -123,141 +125,157 @@ export function OutlinePane({
           <X size={14} />
         </button>
       </div>
-      <div className="right-pane-tabs" role="tablist" aria-label={t("rightPane.tabs")}>
-        {(["outline", "files", "memo", "info"] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            className={tab === id ? "active" : ""}
-            onClick={() => setTab(id)}
-          >
-            {t(`rightPane.tab.${id}`)}
-          </button>
-        ))}
-      </div>
+      <div className="right-pane-workspace">
+        <div className="right-pane-tabs" role="tablist" aria-label={t("rightPane.tabs")}>
+          {(["outline", "files", "memo", "info"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              className={tab === id ? "active" : ""}
+              onClick={() => setTab(id)}
+              title={t(`rightPane.tab.${id}`)}
+              aria-label={t(`rightPane.tab.${id}`)}
+            >
+              {id === "outline" ? (
+                <List size={20} />
+              ) : id === "files" ? (
+                <Files size={20} />
+              ) : id === "memo" ? (
+                <StickyNote size={20} />
+              ) : (
+                <Info size={20} />
+              )}
+            </button>
+          ))}
+        </div>
 
-      {tab === "outline" ? (
-        <>
-          {document ? (
-            headings.length > 0 ? (
-              <div className="outline-list">
-                {headings.map((heading, i) => (
-                  <button
-                    key={`${heading.line}-${i}`}
-                    type="button"
-                    className="outline-item"
-                    data-level={heading.level}
-                    onClick={() => onJumpToLine(heading.line)}
-                    title={heading.text}
-                  >
-                    {heading.text}
-                  </button>
-                ))}
+        <div className="right-pane-content">
+          {tab === "outline" ? (
+            <>
+              {document ? (
+                headings.length > 0 ? (
+                  <div className="outline-list">
+                    {headings.map((heading, i) => (
+                      <button
+                        key={`${heading.line}-${i}`}
+                        type="button"
+                        className="outline-item"
+                        data-level={heading.level}
+                        onClick={() => onJumpToLine(heading.line)}
+                        title={heading.text}
+                      >
+                        {heading.text}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="outline-empty">
+                    <Hash size={20} style={{ opacity: 0.5, marginBottom: 6 }} />
+                    <div>{t("outline.empty")}</div>
+                  </div>
+                )
+              ) : (
+                <div className="outline-empty">{t("outline.empty.noDocument")}</div>
+              )}
+
+              {document ? (
+                <NeighborhoodPane
+                  document={document}
+                  draftContent={draftContent}
+                  entries={entries}
+                  onSelectEntry={onSelectEntry}
+                  onMissingTarget={onMissingWikilink}
+                />
+              ) : null}
+            </>
+          ) : null}
+
+          {tab === "files" ? (
+            <FilesShelfPane workspacePath={workspacePath} onError={onError} t={t} />
+          ) : null}
+
+          {tab === "memo" ? (
+            <MemoPane
+              workspacePath={workspacePath}
+              onError={onError}
+              onRefreshWorkspace={onRefreshWorkspace}
+              t={t}
+            />
+          ) : null}
+
+          {tab === "info" && document ? (
+            <section className="inspector">
+              <div className="inspector-header">
+                <h3>{t("inspector.title")}</h3>
               </div>
-            ) : (
-              <div className="outline-empty">
-                <Hash size={20} style={{ opacity: 0.5, marginBottom: 6 }} />
-                <div>{t("outline.empty")}</div>
-              </div>
-            )
-          ) : (
+
+              <InspectorRow label="type">
+                <ComboInput
+                  value={fmType ?? ""}
+                  suggestions={observedTypes}
+                  onCommit={(next) => onUpdateField("type", next || null)}
+                  placeholder={t("inspector.empty")}
+                  datalistId="anchor-type-list"
+                  readOnly={readOnly}
+                />
+              </InspectorRow>
+
+              <InspectorRow label="status">
+                <ComboInput
+                  value={fmStatus ?? ""}
+                  suggestions={STANDARD_STATUSES}
+                  onCommit={(next) => onUpdateField("status", next || null)}
+                  placeholder={t("inspector.empty")}
+                  datalistId="anchor-status-list"
+                  readOnly={readOnly}
+                />
+              </InspectorRow>
+
+              <InspectorRow label="project">
+                <ComboInput
+                  value={fmProject ?? ""}
+                  suggestions={[]}
+                  onCommit={(next) => onUpdateField("project", next || null)}
+                  placeholder="[[프로젝트]]"
+                  readOnly={readOnly}
+                />
+              </InspectorRow>
+
+              <InspectorRow label="tags">
+                <TagsInput
+                  value={tagList}
+                  onCommit={(next) => onUpdateField("tags", next.length === 0 ? null : next)}
+                  readOnly={readOnly}
+                />
+              </InspectorRow>
+
+              {fmCreated ? (
+                <InspectorRow label={t("outline.meta.created")} muted>
+                  <span className="inspector-readonly" title={fmCreated}>
+                    {fmCreated.slice(0, 16).replace("T", " ")}
+                  </span>
+                </InspectorRow>
+              ) : null}
+              {fmUpdated ? (
+                <InspectorRow label={t("outline.meta.updated")} muted>
+                  <span className="inspector-readonly" title={fmUpdated}>
+                    {fmUpdated.slice(0, 16).replace("T", " ")}
+                  </span>
+                </InspectorRow>
+              ) : null}
+              <InspectorRow label="path" muted>
+                <span className="inspector-readonly" title={document.relPath}>
+                  {document.relPath}
+                </span>
+              </InspectorRow>
+            </section>
+          ) : tab === "info" ? (
             <div className="outline-empty">{t("outline.empty.noDocument")}</div>
-          )}
-
-          {document ? (
-            <NeighborhoodPane
-              document={document}
-              draftContent={draftContent}
-              entries={entries}
-              onSelectEntry={onSelectEntry}
-              onMissingTarget={onMissingWikilink}
-            />
           ) : null}
-        </>
-      ) : null}
-
-      {tab === "files" ? (
-        <FilesShelfPane
-          workspacePath={workspacePath}
-          onError={onError}
-          t={t}
-        />
-      ) : null}
-
-      {tab === "memo" ? (
-        <MemoPane
-          workspacePath={workspacePath}
-          onError={onError}
-          onRefreshWorkspace={onRefreshWorkspace}
-          t={t}
-        />
-      ) : null}
-
-      {tab === "info" && document ? (
-        <section className="inspector">
-          <div className="inspector-header">
-            <h3>{t("inspector.title")}</h3>
-          </div>
-
-          <InspectorRow label="type">
-            <ComboInput
-              value={fmType ?? ""}
-              suggestions={observedTypes}
-              onCommit={(next) => onUpdateField("type", next || null)}
-              placeholder={t("inspector.empty")}
-              datalistId="anchor-type-list"
-              readOnly={readOnly}
-            />
-          </InspectorRow>
-
-          <InspectorRow label="status">
-            <ComboInput
-              value={fmStatus ?? ""}
-              suggestions={STANDARD_STATUSES}
-              onCommit={(next) => onUpdateField("status", next || null)}
-              placeholder={t("inspector.empty")}
-              datalistId="anchor-status-list"
-              readOnly={readOnly}
-            />
-          </InspectorRow>
-
-          <InspectorRow label="project">
-            <ComboInput
-              value={fmProject ?? ""}
-              suggestions={[]}
-              onCommit={(next) => onUpdateField("project", next || null)}
-              placeholder="[[프로젝트]]"
-              readOnly={readOnly}
-            />
-          </InspectorRow>
-
-          <InspectorRow label="tags">
-            <TagsInput
-              value={tagList}
-              onCommit={(next) => onUpdateField("tags", next.length === 0 ? null : next)}
-              readOnly={readOnly}
-            />
-          </InspectorRow>
-
-          {fmCreated ? (
-            <InspectorRow label={t("outline.meta.created")} muted>
-              <span className="inspector-readonly" title={fmCreated}>{fmCreated.slice(0, 16).replace("T", " ")}</span>
-            </InspectorRow>
-          ) : null}
-          {fmUpdated ? (
-            <InspectorRow label={t("outline.meta.updated")} muted>
-              <span className="inspector-readonly" title={fmUpdated}>{fmUpdated.slice(0, 16).replace("T", " ")}</span>
-            </InspectorRow>
-          ) : null}
-          <InspectorRow label="path" muted>
-            <span className="inspector-readonly" title={document.relPath}>{document.relPath}</span>
-          </InspectorRow>
-        </section>
-      ) : tab === "info" ? (
-        <div className="outline-empty">{t("outline.empty.noDocument")}</div>
-      ) : null}
+        </div>
+      </div>
     </aside>
   );
 }

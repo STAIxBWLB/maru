@@ -16,6 +16,7 @@ export interface LayoutSettings {
   outlineOpen: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
+  terminalMaximized: boolean;
   editorSplitOpen: boolean;
   editorSplitRatio: number;
   terminalSplitOpen: boolean;
@@ -37,6 +38,7 @@ export interface AnchorSettings {
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
     collapsedTreeFolders: string[];
+    documentTreeStateInitialized: boolean;
     themeMode: ThemeMode;
     accentColor: string;
     layout: LayoutSettings;
@@ -58,6 +60,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     documentBrowserMode: "tree",
     documentLabelMode: "title",
     collapsedTreeFolders: [],
+    documentTreeStateInitialized: false,
     themeMode: "system",
     accentColor: "#2f5a3c",
     layout: {
@@ -66,6 +69,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       outlineOpen: true,
       terminalOpen: false,
       terminalHeight: 260,
+      terminalMaximized: false,
       editorSplitOpen: false,
       editorSplitRatio: 0.5,
       terminalSplitOpen: false,
@@ -116,6 +120,9 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
+      documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
+        ? ui.documentTreeStateInitialized
+        : false,
       themeMode: parseThemeMode(ui.themeMode) ?? DEFAULT_ANCHOR_SETTINGS.ui.themeMode,
       accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
       layout,
@@ -155,6 +162,7 @@ function cloneDefaultSettings(): AnchorSettings {
     ui: {
       ...DEFAULT_ANCHOR_SETTINGS.ui,
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
+      documentTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.documentTreeStateInitialized,
       layout: { ...DEFAULT_ANCHOR_SETTINGS.ui.layout },
     },
     terminal: {
@@ -237,6 +245,10 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
         : DEFAULT_ANCHOR_SETTINGS.ui.layout.outlineOpen,
     terminalOpen,
     terminalHeight,
+    terminalMaximized:
+      typeof layout.terminalMaximized === "boolean"
+        ? layout.terminalMaximized
+        : DEFAULT_ANCHOR_SETTINGS.ui.layout.terminalMaximized,
     editorSplitOpen:
       typeof layout.editorSplitOpen === "boolean"
         ? layout.editorSplitOpen

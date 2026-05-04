@@ -13,6 +13,7 @@ test("boots the sample workspace and opens multiple editor tabs", async ({ page 
   const documentList = page.locator(".document-list");
   await expect(documentList.getByRole("button", { name: /Anchor 사업 주간 점검 회의/ })).toBeVisible();
 
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
 
   await expect(page.locator(".document-tab-title", { hasText: "Anchor 사업 주간 점검 회의" })).toBeVisible();
@@ -117,6 +118,9 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
 
   const documentList = page.locator(".document-list");
   await expect(documentList.getByRole("button", { name: /references/ })).toBeVisible();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toHaveCount(0);
+
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
 
   await documentList.getByRole("button", { name: "모두 접기" }).click();

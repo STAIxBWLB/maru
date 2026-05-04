@@ -49,7 +49,7 @@ describe("terminal tab reducer", () => {
       "codex --cd '/tmp/work tree'",
     );
     expect(terminalCommandPreview("codex", "")).toBe("codex --cd .");
-    expect(terminalCommandPreview("shell", "/tmp/work")).toBe("$SHELL");
+    expect(terminalCommandPreview("shell", "/tmp/work")).toBe("shell");
   });
 
   it("auto-launches only when open, empty, and enabled", () => {

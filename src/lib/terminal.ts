@@ -109,7 +109,7 @@ export function terminalCommandPreview(kind: TerminalKind, cwd: string): string 
     case "codex":
       return `codex --cd ${quoteShellToken(displayCwd)}`;
     case "shell":
-      return "$SHELL";
+      return "shell";
   }
 }
 

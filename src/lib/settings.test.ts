@@ -13,6 +13,7 @@ describe("normalizeAnchorSettings", () => {
         documentBrowserMode: "tree",
         documentLabelMode: "filename",
         collapsedTreeFolders: ["projects/rise"],
+        documentTreeStateInitialized: true,
         themeMode: "dark",
         accentColor: "#445566",
         layout: {
@@ -38,6 +39,7 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.documentBrowserMode).toBe("tree");
     expect(settings.ui.documentLabelMode).toBe("filename");
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
+    expect(settings.ui.documentTreeStateInitialized).toBe(true);
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
     expect(settings.ui.layout.editorSplitOpen).toBe(true);
@@ -73,6 +75,7 @@ describe("normalizeAnchorSettings", () => {
           outlineOpen: false,
           terminalOpen: true,
           terminalHeight: 300,
+          terminalMaximized: true,
           editorSplitOpen: true,
           editorSplitRatio: 0.4,
           terminalSplitOpen: true,
@@ -93,6 +96,7 @@ describe("normalizeAnchorSettings", () => {
       outlineOpen: false,
       terminalOpen: true,
       terminalHeight: 300,
+      terminalMaximized: true,
       editorSplitOpen: true,
       editorSplitRatio: 0.4,
       terminalSplitOpen: true,

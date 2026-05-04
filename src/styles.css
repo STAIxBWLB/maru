@@ -222,6 +222,28 @@ a {
     "activity sidebar terminal terminal terminal";
 }
 
+.app-shell.terminal-maximized {
+  grid-template-rows: 44px minmax(0, 1fr) 0;
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar terminal terminal terminal"
+    "activity sidebar terminal terminal terminal";
+}
+
+.app-shell.terminal-maximized.inbox-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar terminal terminal terminal"
+    "activity sidebar terminal terminal terminal";
+}
+
+.app-shell.terminal-maximized .document-list,
+.app-shell.terminal-maximized .editor-split-shell,
+.app-shell.terminal-maximized .outline-pane,
+.app-shell.terminal-maximized .inbox-pane {
+  display: none;
+}
+
 .topbar {
   grid-area: topbar;
 }
@@ -1509,9 +1531,14 @@ a {
   gap: 2px;
   min-width: 0;
   overflow-x: auto;
+  scrollbar-width: none;
   padding: 7px 12px 0;
   border-bottom: 1px solid var(--line-soft);
   background: var(--panel-2);
+}
+
+.document-tabs-row::-webkit-scrollbar {
+  display: none;
 }
 
 .document-tab-tools {
@@ -1531,6 +1558,7 @@ a {
   align-items: center;
   min-width: 132px;
   max-width: 240px;
+  flex: 0 1 220px;
   height: 32px;
   border: 1px solid transparent;
   border-bottom: 0;
@@ -2566,8 +2594,10 @@ button.git-badge:hover {
 /* ─── Outline pane ─────────────────────────────────────────────────── */
 
 .outline-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
+  padding-right: 48px;
   border-left: 1px solid var(--line);
   background: var(--bg-tint);
 }
@@ -2592,37 +2622,63 @@ button.git-badge:hover {
   color: var(--faint);
 }
 
+.right-pane-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .right-pane-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 3px;
-  margin: 0 10px 10px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-3);
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 6px;
+  border-left: 1px solid var(--line);
+  background: #1f1f1c;
 }
 
 .right-pane-tabs button {
-  min-width: 0;
-  height: 25px;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #d9d5ca;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.right-pane-tabs button:hover {
+  background: #32322d;
+  color: #ffffff;
 }
 
 .right-pane-tabs button.active {
-  background: var(--panel);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  background: #3a3a34;
+  color: #ffffff;
+  box-shadow: inset -3px 0 0 var(--accent);
+}
+
+.right-pane-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .outline-list {
-  flex: 1;
+  flex: 1 1 42%;
   min-height: 0;
   overflow: auto;
-  padding: 0 8px 14px;
+  padding: 0 8px 10px;
   display: grid;
   gap: 1px;
 }
@@ -3630,6 +3686,11 @@ button.git-badge:hover {
   grid-template-rows: 36px;
 }
 
+.terminal-panel.maximized {
+  height: auto;
+  min-height: 0;
+}
+
 /* Tabs and body stay mounted across collapse/expand to preserve xterm DOM,
    so [hidden] must beat the class selectors that set display:flex / block. */
 .terminal-tabs[hidden],
@@ -3712,6 +3773,21 @@ button.git-badge:hover {
   color: #858585;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
+}
+
+.terminal-icon-button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: #c8c8c8;
+  flex: none;
+}
+
+.terminal-icon-button:hover {
+  background: #2a2a2a;
+  color: #ffffff;
 }
 
 .terminal-tabs {

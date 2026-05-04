@@ -74,36 +74,44 @@ export async function subscribeMainWindowLayout(
   if (appWindow.label !== "main") return () => {};
 
   let timer = 0;
+  const captureNow = () =>
+    Promise.all([
+      appWindow.outerPosition(),
+      appWindow.outerSize(),
+      appWindow.isMaximized(),
+    ])
+      .then(([position, size, maximized]) => {
+        onPatch({
+          windowBounds: {
+            x: Math.round(position.x),
+            y: Math.round(position.y),
+            width: Math.round(size.width),
+            height: Math.round(size.height),
+          },
+          windowMaximized: maximized,
+        });
+      })
+      .catch(() => {});
   const capture = () => {
     if (timer) window.clearTimeout(timer);
     timer = window.setTimeout(() => {
       timer = 0;
-      void Promise.all([
-        appWindow.outerPosition(),
-        appWindow.outerSize(),
-        appWindow.isMaximized(),
-      ])
-        .then(([position, size, maximized]) => {
-          onPatch({
-            windowBounds: {
-              x: Math.round(position.x),
-              y: Math.round(position.y),
-              width: Math.round(size.width),
-              height: Math.round(size.height),
-            },
-            windowMaximized: maximized,
-          });
-        })
-        .catch(() => {});
+      void captureNow();
     }, 250);
   };
 
   const offResize = await appWindow.onResized(capture);
   const offMove = await appWindow.onMoved(capture);
+  const offClose = await appWindow.onCloseRequested(() => {
+    if (timer) window.clearTimeout(timer);
+    timer = 0;
+    void captureNow();
+  });
   return () => {
     if (timer) window.clearTimeout(timer);
     offResize();
     offMove();
+    offClose();
   };
 }
 
