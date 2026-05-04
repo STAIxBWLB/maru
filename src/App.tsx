@@ -76,6 +76,7 @@ import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import {
   checkAppUpdate,
   installAppUpdate,
+  listenForCheckUpdatesMenu,
   relaunchApp,
   updaterAvailable,
   type AppUpdateCheckResult,
@@ -360,6 +361,7 @@ function MainApp() {
   const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<AnchorSettings> | null>(null);
   const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
+  const installingUpdateRef = useRef(false);
   const collapsedTreeHydratedRef = useRef(false);
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
@@ -1814,11 +1816,41 @@ function MainApp() {
     loadWorkspace,
   ]);
 
-  const checkForUpdates = useCallback(async (manual = false) => {
+  const installUpdate = useCallback(
+    async (update: AppUpdateCheckResult["update"], info: AppUpdateInfo) => {
+      if (installingUpdateRef.current) return;
+      installingUpdateRef.current = true;
+      setUpdateToast({ kind: "downloading", info, progress: null });
+      try {
+        await installAppUpdate(update, (progress) => {
+          setUpdateToast({ kind: "downloading", info, progress });
+        });
+        setUpdateToast({ kind: "ready", info });
+        await relaunchApp();
+      } catch (err) {
+        setUpdateToast({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        installingUpdateRef.current = false;
+      }
+    },
+    [],
+  );
+
+  const checkForUpdates = useCallback(async (
+    options: boolean | { manual?: boolean; autoInstall?: boolean } = false,
+  ) => {
+    const manual = typeof options === "boolean" ? options : options.manual ?? false;
+    const autoInstall =
+      typeof options === "boolean" ? false : options.autoInstall ?? false;
+
     if (!updaterAvailable()) {
       if (manual) setUpdateToast({ kind: "error", message: t("updates.desktopOnly") });
       return;
     }
+    if (installingUpdateRef.current) return;
     if (manual) setUpdateToast({ kind: "checking" });
     try {
       const result = await checkAppUpdate();
@@ -1827,6 +1859,10 @@ function MainApp() {
         return;
       }
       pendingUpdateRef.current = result.update;
+      if (autoInstall) {
+        await installUpdate(result.update, result.info);
+        return;
+      }
       setUpdateToast({ kind: "available", info: result.info });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1836,33 +1872,42 @@ function MainApp() {
         console.info("[anchor] update check failed:", message);
       }
     }
-  }, [t]);
+  }, [installUpdate, t]);
 
   const installPendingUpdate = useCallback(async () => {
     const update = pendingUpdateRef.current;
     if (!update || updateToast?.kind !== "available") return;
-    const info = updateToast.info;
-    setUpdateToast({ kind: "downloading", info, progress: null });
-    try {
-      await installAppUpdate(update, (progress) => {
-        setUpdateToast({ kind: "downloading", info, progress });
-      });
-      setUpdateToast({ kind: "ready", info });
-      await relaunchApp();
-    } catch (err) {
-      setUpdateToast({
-        kind: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [updateToast]);
+    await installUpdate(update, updateToast.info);
+  }, [installUpdate, updateToast]);
 
   useEffect(() => {
     if (!updaterAvailable()) return;
     const timer = window.setTimeout(() => {
-      void checkForUpdates(false);
+      void checkForUpdates({ autoInstall: true });
     }, 1500);
     return () => window.clearTimeout(timer);
+  }, [checkForUpdates]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listenForCheckUpdatesMenu(() => {
+      void checkForUpdates(true);
+    })
+      .then((off) => {
+        if (disposed) {
+          off();
+        } else {
+          unlisten = off;
+        }
+      })
+      .catch((err) => {
+        console.info("[anchor] update menu listener unavailable:", err);
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [checkForUpdates]);
 
   const focusSearch = useCallback(() => {

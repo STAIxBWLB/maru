@@ -1,6 +1,8 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 
+export const CHECK_FOR_UPDATES_MENU_EVENT = "anchor://check-for-updates";
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
@@ -77,4 +79,12 @@ export async function installAppUpdate(
 
 export async function relaunchApp(): Promise<void> {
   await relaunch();
+}
+
+export async function listenForCheckUpdatesMenu(
+  handler: () => void,
+): Promise<() => void> {
+  if (!updaterAvailable()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen(CHECK_FOR_UPDATES_MENU_EVENT, handler);
 }
