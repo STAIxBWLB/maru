@@ -242,22 +242,32 @@ fn is_binary_file(path: &Path) -> bool {
 }
 
 fn resolve_target_dir(vault: &Path, target_dir: &str) -> Result<PathBuf, String> {
-    let raw = PathBuf::from(target_dir.trim());
+    let trimmed = target_dir.trim();
+    let raw = if trimmed.is_empty() {
+        PathBuf::from(".")
+    } else {
+        PathBuf::from(trimmed)
+    };
     let candidate = if raw.is_absolute() {
         raw
     } else {
         vault.join(raw)
     };
     let normalized = lexical_normalize(&candidate);
-    if normalized.starts_with(vault) {
-        return Ok(normalized);
+    let resolved = if normalized.starts_with(vault) {
+        normalized
+    } else {
+        resolve_through_existing_ancestor(&normalized)
+            .filter(|path| path.starts_with(vault))
+            .ok_or_else(|| "Target directory escapes the selected workspace".to_string())?
+    };
+    let canonical_target = resolve_through_existing_ancestor(&resolved)
+        .ok_or_else(|| "Target directory escapes the selected workspace".to_string())?;
+    if canonical_target.starts_with(vault) {
+        Ok(resolved)
+    } else {
+        Err("Target directory escapes the selected workspace".to_string())
     }
-    if let Ok(canonical) = normalized.canonicalize() {
-        if canonical.starts_with(vault) {
-            return Ok(canonical);
-        }
-    }
-    Err("Target directory escapes the selected workspace".to_string())
 }
 
 fn lexical_normalize(path: &Path) -> PathBuf {
@@ -274,6 +284,20 @@ fn lexical_normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+fn resolve_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let mut ancestor = path.to_path_buf();
+    let mut suffix = PathBuf::new();
+    while !ancestor.exists() {
+        let name = ancestor.file_name()?.to_os_string();
+        suffix = PathBuf::from(name).join(suffix);
+        if !ancestor.pop() {
+            return None;
+        }
+    }
+    let canonical = ancestor.canonicalize().ok()?;
+    Some(lexical_normalize(&canonical.join(suffix)))
 }
 
 fn move_file(source: &Path, target: &Path) -> Result<(), String> {
@@ -378,6 +402,17 @@ mod tests {
     fn queue_rejects_target_traversal() {
         let tmp = TempDir::new().unwrap();
         let err = resolve_target_dir(tmp.path(), "../outside").unwrap_err();
+        assert!(err.contains("escapes"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn queue_rejects_target_symlink_to_outside_workspace() {
+        let workspace = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("external")).unwrap();
+
+        let err = resolve_target_dir(workspace.path(), "external/drop").unwrap_err();
         assert!(err.contains("escapes"));
     }
 

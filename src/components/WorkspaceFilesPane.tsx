@@ -291,7 +291,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
       <div className="tree-bulk-actions" role="group" aria-label={t("files.tree.actions")}>
         <button
           type="button"
-          onClick={() => onCollapsedFileFoldersChange(folderPaths)}
+          onClick={() => onCollapsedFileFoldersChange([])}
           disabled={folderPaths.length === 0}
           title={t("list.tree.collapseAll")}
         >
@@ -300,7 +300,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         </button>
         <button
           type="button"
-          onClick={() => onCollapsedFileFoldersChange([])}
+          onClick={() => onCollapsedFileFoldersChange(folderPaths)}
           disabled={folderPaths.length === 0}
           title={t("list.tree.expandAll")}
         >

@@ -59,7 +59,9 @@ export function buildWorkspaceFileTreeRows(
   collapsedFolders: string[],
   forceExpand = false,
 ): WorkspaceFileTreeRow[] {
-  const collapsed = new Set(collapsedFolders);
+  // Existing settings key is named "collapsed", but the stored value is the
+  // user's expanded folder set so new folders stay collapsed by default.
+  const expanded = new Set(collapsedFolders);
   const root: TreeNode = {
     name: "",
     path: "",
@@ -90,7 +92,7 @@ export function buildWorkspaceFileTreeRows(
     node.files.push(entry);
   }
 
-  return flattenNode(root, collapsed, forceExpand, -1);
+  return flattenNode(root, expanded, forceExpand, -1);
 }
 
 export function collectWorkspaceFileFolderPaths(entries: WorkspaceFileEntry[]): string[] {
@@ -112,8 +114,8 @@ export function nextCollapsedFileFolders(
   collapsed: boolean,
 ): string[] {
   const next = new Set(current);
-  if (collapsed) next.add(folderPath);
-  else next.delete(folderPath);
+  if (collapsed) next.delete(folderPath);
+  else next.add(folderPath);
   return Array.from(next).sort(compareName);
 }
 
@@ -146,7 +148,7 @@ export function isOpenableDocumentFile(entry: WorkspaceFileEntry): boolean {
 
 function flattenNode(
   node: TreeNode,
-  collapsed: Set<string>,
+  expanded: Set<string>,
   forceExpand: boolean,
   depth: number,
 ): WorkspaceFileTreeRow[] {
@@ -155,7 +157,7 @@ function flattenNode(
   const files = [...node.files].sort((a, b) => compareName(a.name, b.name));
 
   for (const folder of folders) {
-    const isCollapsed = !forceExpand && collapsed.has(folder.path);
+    const isCollapsed = !forceExpand && !expanded.has(folder.path);
     rows.push({
       kind: "folder",
       id: `folder:${folder.path}`,
@@ -166,7 +168,7 @@ function flattenNode(
       collapsed: isCollapsed,
     });
     if (!isCollapsed) {
-      rows.push(...flattenNode(folder, collapsed, forceExpand, depth + 1));
+      rows.push(...flattenNode(folder, expanded, forceExpand, depth + 1));
     }
   }
 

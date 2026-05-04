@@ -53,8 +53,7 @@ interface OutlinePaneProps {
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingWikilink?: (target: string) => void;
   fileQueue: FileQueueItem[];
-  canCreateFiles: boolean;
-  canMoveFiles: boolean;
+  canApplyFileQueue: boolean;
   onUpdateFileQueueItem: (
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
@@ -99,8 +98,7 @@ export function OutlinePane({
   onSelectEntry,
   onMissingWikilink,
   fileQueue,
-  canCreateFiles,
-  canMoveFiles,
+  canApplyFileQueue,
   onUpdateFileQueueItem,
   onQueueExternalFiles,
   onApplyFileQueue,
@@ -214,10 +212,8 @@ export function OutlinePane({
 
           {tab === "files" ? (
             <FilesQueuePane
-              workspacePath={workspacePath}
               queue={fileQueue}
-              canCreateFiles={canCreateFiles}
-              canMoveFiles={canMoveFiles}
+              canApplyFileQueue={canApplyFileQueue}
               onError={onError}
               onUpdateItem={onUpdateFileQueueItem}
               onQueueExternalFiles={onQueueExternalFiles}
@@ -312,10 +308,8 @@ export function OutlinePane({
 }
 
 function FilesQueuePane({
-  workspacePath,
   queue,
-  canCreateFiles,
-  canMoveFiles,
+  canApplyFileQueue,
   onError,
   onUpdateItem,
   onQueueExternalFiles,
@@ -323,10 +317,8 @@ function FilesQueuePane({
   onClear,
   t,
 }: {
-  workspacePath: string | null;
   queue: FileQueueItem[];
-  canCreateFiles: boolean;
-  canMoveFiles: boolean;
+  canApplyFileQueue: boolean;
   onError: (message: string | null) => void;
   onUpdateItem: (
     id: string,
@@ -379,12 +371,7 @@ function FilesQueuePane({
   const cannotApply =
     queuedCount === 0 ||
     working ||
-    queue.some(
-      (item) =>
-        item.status === "queued" &&
-        ((item.operation === "copy" && !canCreateFiles) ||
-          (item.operation === "move" && !canMoveFiles)),
-    );
+    !canApplyFileQueue;
 
   return (
     <section className="right-tool-pane">
@@ -443,7 +430,7 @@ function FilesQueuePane({
         ))}
       </div>
       <div className="right-tool-actions bottom">
-        <button type="button" disabled={!workspacePath || cannotApply} onClick={() => void apply()}>
+        <button type="button" disabled={cannotApply} onClick={() => void apply()}>
           <Save size={13} />
           <span>{t("rightPane.files.applyQueue")}</span>
         </button>

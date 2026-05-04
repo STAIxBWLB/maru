@@ -45,7 +45,11 @@ test("switches explorer between private and optional public workspace tabs", asy
   await expect(page.locator(".workspace-caption")).toHaveText(
     "Public Workspace · Google Drive · 쓰기 가능",
   );
-  await expect(page.locator(".document-list").getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
+  const documentList = page.locator(".document-list");
+  await expect(documentList.getByRole("button", { name: /references/ })).toBeVisible();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toHaveCount(0);
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await expect(documentList.getByRole("button", { name: /Anchor 용어집/ })).toBeVisible();
 });
 
 test("switches between public provider roots and gates read-only actions", async ({
@@ -65,6 +69,7 @@ test("switches between public provider roots and gates read-only actions", async
   );
 
   const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
   await page.locator(".tab-trigger", { hasText: "원문" }).click();
 

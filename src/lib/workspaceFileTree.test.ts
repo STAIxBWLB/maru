@@ -47,10 +47,10 @@ describe("workspace file tree", () => {
     ]);
   });
 
-  it("builds folder-first rows and supports collapse", () => {
+  it("collapses folders by default", () => {
     const rows = buildWorkspaceFileTreeRows(
       [file("z.md"), file("docs/b.md"), file("docs/a.md")],
-      ["docs"],
+      [],
     );
 
     expect(rows.map((row) => (row.kind === "folder" ? row.path : row.entry.relPath))).toEqual([
@@ -60,10 +60,25 @@ describe("workspace file tree", () => {
     expect(rows[0]).toMatchObject({ kind: "folder", count: 2, collapsed: true });
   });
 
+  it("keeps only explicitly expanded folders open", () => {
+    const rows = buildWorkspaceFileTreeRows(
+      [file("z.md"), file("docs/b.md"), file("docs/a.md")],
+      ["docs"],
+    );
+
+    expect(rows.map((row) => (row.kind === "folder" ? row.path : row.entry.relPath))).toEqual([
+      "docs",
+      "docs/a.md",
+      "docs/b.md",
+      "z.md",
+    ]);
+    expect(rows[0]).toMatchObject({ kind: "folder", count: 2, collapsed: false });
+  });
+
   it("collects folder paths and virtualizes visible rows", () => {
     const entries = [file("a/b/c.md"), file("a/d/e.md"), file("root.md")];
     expect(collectWorkspaceFileFolderPaths(entries)).toEqual(["a", "a/b", "a/d"]);
-    const rows = buildWorkspaceFileTreeRows(entries, [], false);
+    const rows = buildWorkspaceFileTreeRows(entries, ["a", "a/b", "a/d"], false);
     const layout = virtualizeWorkspaceFileTreeRows(rows, 30, 60, 0, 30);
     expect(layout.totalHeight).toBe(rows.length * 30);
     expect(layout.rows.map(({ top }) => top)).toEqual([30, 60, 90]);

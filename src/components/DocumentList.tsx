@@ -360,7 +360,7 @@ export const DocumentList = memo(function DocumentList({
         <div className="tree-bulk-actions" role="group" aria-label={t("list.tree.actions")}>
           <button
             type="button"
-            onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
+            onClick={() => onCollapsedTreeFoldersChange([])}
             disabled={folderPaths.length === 0}
             title={t("list.tree.collapseAll")}
           >
@@ -369,7 +369,7 @@ export const DocumentList = memo(function DocumentList({
           </button>
           <button
             type="button"
-            onClick={() => onCollapsedTreeFoldersChange([])}
+            onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
             disabled={folderPaths.length === 0}
             title={t("list.tree.expandAll")}
           >

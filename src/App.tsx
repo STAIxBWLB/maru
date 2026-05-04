@@ -63,7 +63,6 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
-import { collectDocumentTreeFolderPaths } from "./lib/documentTree";
 import {
   buildDocumentIndex,
   getRecentEntries,
@@ -129,7 +128,6 @@ import {
   workspaceWriteStatus,
 } from "./lib/workspaceCapabilities";
 import {
-  collectWorkspaceFileFolderPaths,
   isOpenableDocumentFile,
 } from "./lib/workspaceFileTree";
 import {
@@ -506,17 +504,17 @@ function MainApp() {
   const defaultCollapsedTreeFolders = useMemo(
     () =>
       explorerVisibility === "private" && !anchorSettings.ui.documentTreeStateInitialized
-        ? collectDocumentTreeFolderPaths(entries)
+        ? []
         : null,
-    [anchorSettings.ui.documentTreeStateInitialized, entries, explorerVisibility],
+    [anchorSettings.ui.documentTreeStateInitialized, explorerVisibility],
   );
   const collapsedTreeFolders = defaultCollapsedTreeFolders ?? savedCollapsedTreeFolders;
   const defaultCollapsedFileFolders = useMemo(
     () =>
       explorerVisibility === "private" && !anchorSettings.ui.fileTreeStateInitialized
-        ? collectWorkspaceFileFolderPaths(fileEntries)
+        ? []
         : null,
-    [anchorSettings.ui.fileTreeStateInitialized, explorerVisibility, fileEntries],
+    [anchorSettings.ui.fileTreeStateInitialized, explorerVisibility],
   );
   const collapsedFileFolders = defaultCollapsedFileFolders ?? savedCollapsedFileFolders;
   const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
@@ -582,6 +580,21 @@ function MainApp() {
   );
   const activeWorkspaceCanCreate = activeWorkspaceCaps.canCreate;
   const activeWorkspaceCanModify = activeWorkspaceCaps.canModify;
+  const canApplyFileQueue = useMemo(() => {
+    const queued = fileQueue.filter((item) => item.status === "queued");
+    if (queued.length === 0) return true;
+    return queued.every((item) => {
+      const owner = workspaceRegistry.workspaces
+        .filter(
+          (workspace) =>
+            item.targetDir === workspace.path || item.targetDir.startsWith(`${workspace.path}/`),
+        )
+        .sort((a, b) => b.path.length - a.path.length)[0];
+      if (!owner) return false;
+      const action = item.operation === "move" ? "renameMove" : "create";
+      return workspaceCan(owner, action);
+    });
+  }, [fileQueue, workspaceRegistry.workspaces]);
   const activeWorkspaceWriteReason = useMemo(
     () => workspaceWriteReason(activeDocumentWorkspace),
     [activeDocumentWorkspace],
@@ -906,7 +919,7 @@ function MainApp() {
   useEffect(() => {
     if (!settingsLoaded || anchorSettings.ui.documentTreeStateInitialized) return;
     if (!privateWorkspacePath || !privateWorkspaceState.startupIoReady) return;
-    const collapsedFolders = collectDocumentTreeFolderPaths(privateWorkspaceState.entries);
+    const collapsedFolders: string[] = [];
     setCollapsedTreeFoldersByVisibility((current) => ({
       ...current,
       private: collapsedFolders,
@@ -922,7 +935,6 @@ function MainApp() {
   }, [
     anchorSettings.ui.documentTreeStateInitialized,
     privateWorkspacePath,
-    privateWorkspaceState.entries,
     privateWorkspaceState.startupIoReady,
     settingsLoaded,
     updateSettings,
@@ -932,7 +944,7 @@ function MainApp() {
     if (!settingsLoaded || anchorSettings.ui.fileTreeStateInitialized) return;
     if (!privateWorkspacePath || explorerVisibility !== "private") return;
     if (explorerWorkspaceFilesState.loading || explorerWorkspaceFilesState.entries.length === 0) return;
-    const collapsedFolders = collectWorkspaceFileFolderPaths(explorerWorkspaceFilesState.entries);
+    const collapsedFolders: string[] = [];
     setCollapsedFileFoldersByVisibility((current) => ({
       ...current,
       private: collapsedFolders,
@@ -3323,8 +3335,7 @@ function MainApp() {
                 onSelectEntry={selectEntry}
                 onMissingWikilink={handleWikilinkClick}
                 fileQueue={fileQueue}
-                canCreateFiles={workspaceCan(activeDocumentWorkspace, "create")}
-                canMoveFiles={workspaceCan(activeDocumentWorkspace, "renameMove")}
+                canApplyFileQueue={canApplyFileQueue}
                 onUpdateFileQueueItem={updateFileQueueItem}
                 onQueueExternalFiles={queueExternalFiles}
                 onApplyFileQueue={applyQueuedFiles}
