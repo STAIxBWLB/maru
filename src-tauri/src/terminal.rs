@@ -84,6 +84,9 @@ pub fn terminal_spawn(
     let mut cmd = CommandBuilder::new(&spec.program);
     cmd.args(&spec.args);
     cmd.cwd(spec.cwd.as_os_str());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "Anchor");
 
     let reader = pair
         .master

@@ -123,6 +123,16 @@ pub fn save_memo(
 }
 
 #[tauri::command]
+pub fn delete_memo(vault_path: String, memo_path: String) -> Result<(), String> {
+    let path = resolve_memo_path(&vault_path, &memo_path)?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("Cannot delete memo: {err}")),
+    }
+}
+
+#[tauri::command]
 pub fn save_memo_as(target_path: String, content: String) -> Result<MemoDocument, String> {
     let path = PathBuf::from(target_path);
     if path.is_dir() {
@@ -356,6 +366,35 @@ mod tests {
         let err = read_memo(
             tmp.path().to_string_lossy().to_string(),
             "outside.md".to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains(".anchor/memos"));
+    }
+
+    #[test]
+    fn delete_memo_removes_default_memo_only() {
+        let tmp = TempDir::new().unwrap();
+        let doc = save_memo(
+            tmp.path().to_string_lossy().to_string(),
+            "scratch".to_string(),
+            MemoFormat::Plain,
+            "memo".to_string(),
+        )
+        .unwrap();
+        let memo_path = PathBuf::from(&doc.entry.path);
+        assert!(doc.entry.path.contains(".anchor/memos/scratch.txt"));
+        assert!(memo_path.exists());
+
+        delete_memo(
+            tmp.path().to_string_lossy().to_string(),
+            doc.entry.path.clone(),
+        )
+        .unwrap();
+        assert!(!memo_path.exists());
+
+        let err = delete_memo(
+            tmp.path().to_string_lossy().to_string(),
+            "outside.txt".to_string(),
         )
         .unwrap_err();
         assert!(err.contains(".anchor/memos"));

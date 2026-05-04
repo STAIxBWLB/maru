@@ -1461,13 +1461,37 @@ a {
 }
 
 .editor-split-shell.split {
-  gap: 1px;
+  gap: 0;
 }
 
 .editor-split-shell .editor-pane {
   grid-area: auto;
   min-width: 0;
   min-height: 0;
+}
+
+.editor-split-resize-handle {
+  min-width: 6px;
+  width: 6px;
+  cursor: col-resize;
+  background: var(--line-soft);
+  position: relative;
+  z-index: 2;
+}
+
+.editor-split-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--line);
+}
+
+.editor-split-resize-handle:hover,
+.editor-split-resize-handle:active {
+  background: var(--accent-tint);
 }
 
 .editor-tabs {
@@ -2725,6 +2749,15 @@ button.git-badge:hover {
   color: var(--accent);
 }
 
+.right-tool-actions button.danger {
+  color: var(--danger);
+}
+
+.right-tool-actions button.danger:not(:disabled):hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .right-tool-actions button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -2857,6 +2890,26 @@ button.git-badge:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.memo-autosave-status {
+  min-height: 16px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.memo-autosave-status.saving {
+  color: var(--muted);
+}
+
+.memo-autosave-status.saved {
+  color: var(--accent);
+}
+
+.memo-autosave-status.error {
+  color: var(--danger);
 }
 
 .outline-item {
@@ -3890,10 +3943,35 @@ button.git-badge:hover {
   z-index: 1;
 }
 
+.terminal-split-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--terminal-split-ratio) * 100%);
+  width: 9px;
+  transform: translateX(-4px);
+  cursor: col-resize;
+  z-index: 4;
+}
+
+.terminal-split-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+}
+
+.terminal-split-resize-handle:hover::after,
+.terminal-split-resize-handle:active::after {
+  background: #5f7d64;
+}
+
 .terminal-instance {
   position: absolute;
   inset: 0;
-  padding: 6px 8px 8px;
   background: #111111;
   visibility: hidden;
   pointer-events: none;
@@ -3917,8 +3995,59 @@ button.git-badge:hover {
   outline-offset: -1px;
 }
 
+.terminal-instance-host {
+  position: absolute;
+  inset: 0;
+  padding: 6px 8px 8px;
+  overflow: hidden;
+}
+
 .terminal-instance .xterm {
   height: 100%;
+}
+
+.terminal-instance .xterm-viewport,
+.terminal-instance .xterm-screen {
+  background: #111111;
+}
+
+.terminal-instance .xterm-helper-textarea {
+  position: absolute !important;
+  left: -9999px !important;
+  top: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  opacity: 0 !important;
+  resize: none !important;
+  background: transparent !important;
+  color: transparent !important;
+  pointer-events: none !important;
+}
+
+.terminal-pane-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: rgba(36, 36, 36, 0.9);
+  color: #bdbdbd;
+  opacity: 0.86;
+}
+
+.terminal-pane-close:hover {
+  background: #333333;
+  color: #ffffff;
+  opacity: 1;
 }
 
 .terminal-empty {

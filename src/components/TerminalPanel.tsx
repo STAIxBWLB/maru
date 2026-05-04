@@ -42,6 +42,7 @@ interface TerminalPanelProps {
   onOpenChange: (open: boolean) => void;
   onHeightChange: (height: number) => void;
   onSplitOpenChange: (open: boolean) => void;
+  onSplitRatioChange: (ratio: number) => void;
   onMaximizedChange: (maximized: boolean) => void;
 }
 
@@ -74,6 +75,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   onOpenChange,
   onHeightChange,
   onSplitOpenChange,
+  onSplitRatioChange,
   onMaximizedChange,
 }: TerminalPanelProps) {
   const { t } = useTranslation();
@@ -84,6 +86,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   const [error, setError] = useState<string | null>(null);
   const handlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const hostRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const terminalBodyRef = useRef<HTMLDivElement | null>(null);
   const sessionByTabRef = useRef<Map<string, string>>(new Map());
   const tabBySessionRef = useRef<Map<string, string>>(new Map());
   const seqRef = useRef(1);
@@ -407,6 +410,45 @@ export const TerminalPanel = memo(function TerminalPanel({
     [draftHeight, onHeightChange],
   );
 
+  const startSplitResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const body = terminalBodyRef.current;
+      if (!body) return;
+      const handle = event.currentTarget;
+      const pointerId = event.pointerId;
+      handle.setPointerCapture(pointerId);
+
+      const update = (clientX: number) => {
+        const rect = body.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const next = Math.min(0.7, Math.max(0.3, (clientX - rect.left) / rect.width));
+        onSplitRatioChange(next);
+      };
+      update(event.clientX);
+
+      const cleanup = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      };
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId !== pointerId) return;
+        update(move.clientX);
+      };
+      const onEnd = (end: PointerEvent) => {
+        if (end.pointerId !== pointerId) return;
+        cleanup();
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    },
+    [onSplitRatioChange],
+  );
+
   const panelStyle = open && !maximized ? { height: draftHeight } : undefined;
   const splitMode = splitOpen && Boolean(rightTab);
   // Use a CSS variable instead of grid columns so terminal-instance divs stay
@@ -519,6 +561,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       <div
         className={splitMode ? "terminal-body split" : "terminal-body"}
         style={splitBodyStyle}
+        ref={terminalBodyRef}
         hidden={!open}
       >
         {!canRunTerminal ? (
@@ -526,9 +569,10 @@ export const TerminalPanel = memo(function TerminalPanel({
         ) : state.tabs.length === 0 ? (
           <div className="terminal-empty">{t("terminal.empty.detail")}</div>
         ) : (
-          // Flat sibling list under terminal-body. Each instance keeps the
-          // same parent across split toggles so xterm DOM is never reparented.
-          state.tabs.map((tab) => {
+          <>
+            {/* Flat sibling list under terminal-body. Each instance keeps the
+                same parent across split toggles so xterm DOM is never reparented. */}
+            {state.tabs.map((tab) => {
             const isRight = splitMode && rightTabId === tab.id;
             const isLeftActive = !isRight && state.activeTabId === tab.id;
             const isVisible = isRight || isLeftActive;
@@ -549,17 +593,45 @@ export const TerminalPanel = memo(function TerminalPanel({
                 key={tab.id}
                 className={className}
                 onPointerDown={() => setFocusedGroup(isRight ? "right" : "left")}
-                ref={(node) => {
-                  if (node) {
-                    hostRef.current.set(tab.id, node);
-                    attachTerminal(tab.id);
-                  } else {
-                    hostRef.current.delete(tab.id);
-                  }
-                }}
-              />
+              >
+                {isVisible ? (
+                  <button
+                    type="button"
+                    className="terminal-pane-close"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => closeTab(tab.id)}
+                    title={t("terminal.tab.close", { title: tab.title })}
+                    aria-label={t("terminal.tab.close", { title: tab.title })}
+                  >
+                    <X size={13} />
+                  </button>
+                ) : null}
+                <div
+                  className="terminal-instance-host"
+                  ref={(node) => {
+                    if (node) {
+                      hostRef.current.set(tab.id, node);
+                      attachTerminal(tab.id);
+                    } else {
+                      hostRef.current.delete(tab.id);
+                    }
+                  }}
+                />
+              </div>
             );
-          })
+            })}
+            {splitMode ? (
+              <div
+                className="terminal-split-resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-valuemin={30}
+                aria-valuemax={70}
+                aria-valuenow={Math.round(splitRatio * 100)}
+                onPointerDown={startSplitResize}
+              />
+            ) : null}
+          </>
         )}
       </div>
       {open && error ? <div className="terminal-error">{error}</div> : null}

@@ -9,6 +9,7 @@ import {
   Plus,
   Save,
   StickyNote,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import {
   chooseFiles,
   chooseSaveFile,
   chooseWorkspaceDirectory,
+  deleteMemo,
   listMemos,
   readMemo,
   saveMemo,
@@ -402,11 +404,28 @@ function MemoPane({
 }) {
   const [memos, setMemos] = useState<MemoEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [name, setName] = useState("memo.md");
-  const [format, setFormat] = useState<MemoFormat>("markdown");
+  const [name, setName] = useState("memo.txt");
+  const [format, setFormat] = useState<MemoFormat>("plain");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const autoSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const autoSaveSerialRef = useRef(0);
+  const selectedPathRef = useRef<string | null>(null);
+  const userEditedRef = useRef(false);
+  const lastSavedSignatureRef = useRef("");
+
+  const clearAutoSaveTimer = useCallback(() => {
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
 
   const refresh = useCallback(async () => {
     if (!workspacePath) {
@@ -427,14 +446,71 @@ function MemoPane({
     void refresh();
   }, [refresh]);
 
+  useEffect(() => () => clearAutoSaveTimer(), [clearAutoSaveTimer]);
+
+  useEffect(() => {
+    const signature = `${name}\u0000${format}\u0000${content}`;
+    if (!workspacePath || !userEditedRef.current) return;
+    if (!selectedPath && !content.trim()) {
+      setSaveState("idle");
+      return;
+    }
+    if (lastSavedSignatureRef.current === signature) return;
+
+    clearAutoSaveTimer();
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      const saveName = name;
+      const saveFormat = format;
+      const saveContent = content;
+      const previousPath = selectedPathRef.current;
+      const serial = ++autoSaveSerialRef.current;
+      setSaving(true);
+      setSaveState("saving");
+      onError(null);
+      void saveMemo(workspacePath, saveName, saveFormat, saveContent)
+        .then(async (doc) => {
+          if (serial !== autoSaveSerialRef.current) return;
+          if (previousPath && previousPath !== doc.path) {
+            await deleteMemo(workspacePath, previousPath);
+          }
+          setSelectedPath(doc.path);
+          setName((current) => (current === saveName ? doc.name : current));
+          setFormat((current) => (current === saveFormat ? doc.format : current));
+          lastSavedSignatureRef.current = `${doc.name}\u0000${doc.format}\u0000${saveContent}`;
+          userEditedRef.current = false;
+          setSaveState("saved");
+          await refresh();
+        })
+        .catch((err) => {
+          if (serial !== autoSaveSerialRef.current) return;
+          setSaveState("error");
+          onError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          if (serial === autoSaveSerialRef.current) {
+            setSaving(false);
+          }
+        });
+    }, 700);
+
+    return clearAutoSaveTimer;
+  }, [clearAutoSaveTimer, content, format, name, onError, refresh, selectedPath, workspacePath]);
+
   const openMemo = async (memo: MemoEntry) => {
     if (!workspacePath) return;
+    clearAutoSaveTimer();
+    autoSaveSerialRef.current += 1;
+    userEditedRef.current = false;
+    setSaving(false);
     try {
       const doc = await readMemo(workspacePath, memo.path);
       setSelectedPath(doc.path);
       setName(doc.name);
       setFormat(doc.format);
       setContent(doc.content);
+      lastSavedSignatureRef.current = `${doc.name}\u0000${doc.format}\u0000${doc.content}`;
+      setSaveState("saved");
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     }
@@ -442,21 +518,47 @@ function MemoPane({
 
   const newMemo = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    clearAutoSaveTimer();
+    autoSaveSerialRef.current += 1;
+    userEditedRef.current = false;
     setSelectedPath(null);
-    setName(`memo-${stamp}.md`);
-    setFormat("markdown");
+    setName(`memo-${stamp}.txt`);
+    setFormat("plain");
     setContent("");
+    setSaving(false);
+    setSaveState("idle");
+    lastSavedSignatureRef.current = "";
   };
 
-  const saveDefault = async () => {
-    if (!workspacePath) return;
+  const handleNameChange = (next: string) => {
+    userEditedRef.current = true;
+    setSaveState("idle");
+    setName(next);
+  };
+
+  const handleFormatChange = (next: MemoFormat) => {
+    userEditedRef.current = true;
+    setSaveState("idle");
+    setFormat(next);
+  };
+
+  const handleContentChange = (next: string) => {
+    userEditedRef.current = true;
+    setSaveState("idle");
+    setContent(next);
+  };
+
+  const deleteCurrent = async () => {
+    if (!workspacePath || !selectedPath) return;
+    if (!window.confirm(t("rightPane.memo.deleteConfirm"))) return;
+    clearAutoSaveTimer();
+    autoSaveSerialRef.current += 1;
     setSaving(true);
     onError(null);
     try {
-      const doc = await saveMemo(workspacePath, name, format, content);
-      setSelectedPath(doc.path);
-      setName(doc.name);
+      await deleteMemo(workspacePath, selectedPath);
       await refresh();
+      newMemo();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -478,6 +580,15 @@ function MemoPane({
       setSaving(false);
     }
   };
+
+  const autoSaveLabel =
+    saveState === "saving"
+      ? t("rightPane.memo.autoSaving")
+      : saveState === "saved"
+        ? t("rightPane.memo.autoSaved")
+        : saveState === "error"
+          ? t("rightPane.memo.autoSaveError")
+          : t("rightPane.memo.autoSaveIdle");
 
   return (
     <section className="right-tool-pane memo-pane">
@@ -511,26 +622,27 @@ function MemoPane({
       </div>
       <label className="memo-name">
         <span>{t("rightPane.memo.name")}</span>
-        <input value={name} onChange={(event) => setName(event.target.value)} />
+        <input value={name} onChange={(event) => handleNameChange(event.target.value)} />
       </label>
       <div className="right-tool-actions">
-        <button type="button" className={format === "markdown" ? "active" : ""} onClick={() => setFormat("markdown")}>
-          Markdown
-        </button>
-        <button type="button" className={format === "plain" ? "active" : ""} onClick={() => setFormat("plain")}>
+        <button type="button" className={format === "plain" ? "active" : ""} onClick={() => handleFormatChange("plain")}>
           Plain
+        </button>
+        <button type="button" className={format === "markdown" ? "active" : ""} onClick={() => handleFormatChange("markdown")}>
+          Markdown
         </button>
       </div>
       <textarea
         className="memo-editor"
         value={content}
-        onChange={(event) => setContent(event.target.value)}
+        onChange={(event) => handleContentChange(event.target.value)}
         placeholder={t("rightPane.memo.placeholder")}
       />
+      <div className={`memo-autosave-status ${saveState}`}>{autoSaveLabel}</div>
       <div className="right-tool-actions bottom">
-        <button type="button" disabled={!workspacePath || saving} onClick={() => void saveDefault()}>
-          <Save size={13} />
-          <span>{saving ? t("editor.saving") : t("rightPane.memo.save")}</span>
+        <button type="button" className="danger" disabled={!workspacePath || !selectedPath || saving} onClick={() => void deleteCurrent()}>
+          <Trash2 size={13} />
+          <span>{t("rightPane.memo.delete")}</span>
         </button>
         <button type="button" disabled={saving} onClick={() => void saveAs()}>
           <Save size={13} />

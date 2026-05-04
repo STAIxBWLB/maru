@@ -38,7 +38,8 @@ use inbox_settings::{read_inbox_settings, save_inbox_settings};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use shelf::{
-    list_memos, read_memo, save_memo, save_memo_as, store_shelf_files, store_shelf_files_as,
+    delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
+    store_shelf_files_as,
 };
 use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
@@ -91,6 +92,7 @@ pub fn run() {
             list_memos,
             read_memo,
             save_memo,
+            delete_memo,
             save_memo_as,
             start_claude_cli_invocation,
             terminal_spawn,

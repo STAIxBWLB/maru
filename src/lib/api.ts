@@ -458,7 +458,9 @@ export async function saveMemo(
   content: string,
 ): Promise<MemoDocument> {
   if (!isTauri()) {
-    const fileName = name || `memo.${format === "plain" ? "txt" : "md"}`;
+    const ext = format === "plain" ? "txt" : "md";
+    const leaf = (name.trim() || `memo.${ext}`).split("/").pop() ?? `memo.${ext}`;
+    const fileName = `${leaf.replace(/\.(md|markdown|txt)$/i, "")}.${ext}`;
     return {
       name: fileName,
       path: `${vaultPath}/.anchor/memos/${fileName}`,
@@ -470,6 +472,14 @@ export async function saveMemo(
     };
   }
   return invoke<MemoDocument>("save_memo", { vaultPath, name, format, content });
+}
+
+export async function deleteMemo(
+  vaultPath: string,
+  memoPath: string,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("delete_memo", { vaultPath, memoPath });
 }
 
 export async function saveMemoAs(

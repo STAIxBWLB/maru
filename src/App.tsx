@@ -343,6 +343,7 @@ function MainApp() {
   });
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const editorSplitShellRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<AnchorSettings> | null>(null);
@@ -2155,9 +2156,51 @@ function MainApp() {
   const editorSplitStyle =
     editorSplitOpen && rightTab
       ? {
-          gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr ${1 - layoutSettings.editorSplitRatio}fr`,
+          gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr 6px ${1 - layoutSettings.editorSplitRatio}fr`,
         }
       : undefined;
+
+  const startEditorSplitResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const shell = editorSplitShellRef.current;
+      if (!shell) return;
+      const handle = event.currentTarget;
+      const pointerId = event.pointerId;
+      handle.setPointerCapture(pointerId);
+
+      const update = (clientX: number) => {
+        const rect = shell.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const editorSplitRatio = Math.min(
+          0.7,
+          Math.max(0.3, (clientX - rect.left) / rect.width),
+        );
+        updateLayoutSettings({ editorSplitRatio });
+      };
+      update(event.clientX);
+
+      const cleanup = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      };
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId !== pointerId) return;
+        update(move.clientX);
+      };
+      const onEnd = (end: PointerEvent) => {
+        if (end.pointerId !== pointerId) return;
+        cleanup();
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    },
+    [updateLayoutSettings],
+  );
 
   const renderEditorPane = (
     group: EditorGroupId,
@@ -2442,8 +2485,20 @@ function MainApp() {
             <div
               className={editorSplitOpen && rightTab ? "editor-split-shell split" : "editor-split-shell"}
               style={editorSplitStyle}
+              ref={editorSplitShellRef}
             >
               {renderEditorPane("left", leftTab, leftResolvedTabId)}
+              {editorSplitOpen && rightTab ? (
+                <div
+                  className="editor-split-resize-handle"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-valuemin={30}
+                  aria-valuemax={70}
+                  aria-valuenow={Math.round(layoutSettings.editorSplitRatio * 100)}
+                  onPointerDown={startEditorSplitResize}
+                />
+              ) : null}
               {editorSplitOpen && rightTab
                 ? renderEditorPane("right", rightTab, rightResolvedTabId)
                 : null}
@@ -2480,6 +2535,9 @@ function MainApp() {
           onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
           onSplitOpenChange={(terminalSplitOpen) =>
             updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
+          }
+          onSplitRatioChange={(terminalSplitRatio) =>
+            updateLayoutSettings({ terminalSplitRatio })
           }
           onMaximizedChange={(terminalMaximized) =>
             updateLayoutSettings({ terminalMaximized, terminalOpen: true })
