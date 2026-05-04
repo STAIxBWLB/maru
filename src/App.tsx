@@ -3058,7 +3058,7 @@ function MainApp() {
           <div className="brand-name">
             {t("app.title")} <span>{t("app.subtitle.work")}</span>
           </div>
-          <div style={{ width: 14 }} />
+          <div className="topbar-system-spacer" />
           <WorkspaceSwitcher
             registry={workspaceRegistry}
             activePath={explorerWorkspacePath}
@@ -3087,7 +3087,7 @@ function MainApp() {
             onClick={openCommandPalette}
             title={t("cmdk.openHint")}
           >
-            <span style={{ opacity: 0.55 }}>{t("sidebar.commandPalette")}</span>
+            <span className="topbar-muted-label">{t("sidebar.commandPalette")}</span>
             <span className="kbd">⌘</span>
             <span className="kbd">K</span>
           </button>

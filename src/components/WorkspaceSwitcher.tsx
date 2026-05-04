@@ -57,7 +57,7 @@ export function WorkspaceSwitcher({
   }, [open]);
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} className="workspace-switcher-wrap">
       <button
         type="button"
         className="workspace-switcher"
@@ -77,7 +77,7 @@ export function WorkspaceSwitcher({
         ) : (
           <span className="ws-label ws-empty">{t("workspace.switcher.empty")}</span>
         )}
-        <ChevronDown size={13} style={{ opacity: 0.55 }} />
+        <ChevronDown size={13} className="ws-chevron" />
       </button>
 
       {open ? (
@@ -86,7 +86,7 @@ export function WorkspaceSwitcher({
             <div key={group.visibility}>
               <div className="workspace-menu-group">{group.label}</div>
               {group.items.length === 0 ? (
-                <div style={{ padding: "8px 14px", color: "var(--faint)", fontSize: 12 }}>
+                <div className="workspace-menu-empty">
                   {t(
                     group.visibility === "public"
                       ? "workspace.switcher.publicNone"
@@ -111,9 +111,9 @@ export function WorkspaceSwitcher({
                     {workspace.path === activePath ? (
                       <Check size={14} />
                     ) : (
-                      <FolderOpen size={14} style={{ opacity: 0.6 }} />
+                      <FolderOpen size={14} className="workspace-menu-icon-muted" />
                     )}
-                    <div style={{ minWidth: 0 }}>
+                    <div className="workspace-menu-copy">
                       <strong>{workspace.label}</strong>
                       <span title={workspace.path}>{workspace.path}</span>
                       <div className="workspace-menu-badges">
