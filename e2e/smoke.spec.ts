@@ -156,12 +156,19 @@ test("switches between Documents and Files explorer modes", async ({ page }) => 
   await expect(explorer.getByRole("button", { name: "목록" })).toHaveCount(0);
   await expect(explorer.getByRole("button", { name: "Git tracked" })).toBeVisible();
   await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
 
   await explorer.getByRole("button", { name: "Binary" }).click();
+  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
   await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toBeVisible();
+  await explorer.getByRole("button", { name: "모두 접기" }).click();
+  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
   await expect(explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ })).toHaveCount(0);
 
   await explorer.getByRole("button", { name: "전체" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
   await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).dblclick();
   await expect(page.locator(".document-tab-title", { hasText: "Anchor 사업 주간 점검 회의" })).toBeVisible();
 });

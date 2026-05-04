@@ -123,7 +123,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     () => filterWorkspaceFiles(entries, deferredQuery, filter, binaryIncludePatterns),
     [entries, deferredQuery, filter, binaryIncludePatterns],
   );
-  const forceExpandTree = Boolean(deferredQuery.trim()) || filter !== "all";
+  const forceExpandTree = Boolean(deferredQuery.trim());
   const folderPaths = useMemo(() => collectWorkspaceFileFolderPaths(filtered), [filtered]);
   const rows = useMemo(
     () => buildWorkspaceFileTreeRows(filtered, collapsedFileFolders, forceExpandTree),
