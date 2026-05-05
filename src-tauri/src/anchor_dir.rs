@@ -1,8 +1,7 @@
 // `.anchor/` is anchor's per-workspace home inside a vault root. It
-// already housed `versions/` (snapshots created by `create_version`);
-// this module turns it into the single owner of every piece of system
-// state anchor manages — rules, templates, MCP config, projects
-// catalog, skills catalog, import receipts.
+// already housed `versions` (snapshots created by `create_version`);
+// this module owns workspace-local state and catalogs. User/global
+// preferences live outside workspaces at `~/.anchor/settings.json`.
 //
 // Layout:
 //   <work>/.anchor/
@@ -12,7 +11,8 @@
 //     mcp.json             — MCP server config edited from System mode
 //     projects.json        — project-registry equivalent (categories)
 //     skills.json          — skills catalog (read-only v1, written by import)
-//     settings.json        — anchor UI/runtime preferences
+//     workspace-state.json — workspace-scoped UI state and overrides
+//     settings.json        — legacy read-once migration source
 //     imports.json         — append-only receipts of `_sys/ → .anchor/` imports
 //     versions/            — (legacy) snapshots
 //
@@ -97,8 +97,12 @@ fn skills_json_path(work: &Path) -> PathBuf {
     anchor_path(work).join("skills.json")
 }
 
-fn settings_json_path(work: &Path) -> PathBuf {
+fn legacy_settings_json_path(work: &Path) -> PathBuf {
     anchor_path(work).join("settings.json")
+}
+
+fn workspace_state_json_path(work: &Path) -> PathBuf {
+    anchor_path(work).join("workspace-state.json")
 }
 
 fn imports_json_path(work: &Path) -> PathBuf {
@@ -107,6 +111,20 @@ fn imports_json_path(work: &Path) -> PathBuf {
 
 fn anchorignore_path(work: &Path) -> PathBuf {
     work.join(".anchorignore")
+}
+
+fn anchor_home_dir() -> Result<PathBuf, String> {
+    dirs::home_dir()
+        .map(|home| home.join(".anchor"))
+        .ok_or_else(|| "Could not determine home directory for ~/.anchor".to_string())
+}
+
+fn global_settings_json_path_for_home(home: &Path) -> PathBuf {
+    home.join(".anchor").join("settings.json")
+}
+
+fn global_settings_json_path() -> Result<PathBuf, String> {
+    Ok(anchor_home_dir()?.join("settings.json"))
 }
 
 /// Reject `name` values that try to escape `.anchor/<sub>/`. We accept
@@ -191,9 +209,6 @@ pub fn ensure_anchor_dir(work: &Path) -> Result<PathBuf, String> {
             &json!({ "version": SCHEMA_VERSION, "skills": [] }),
         )?;
     }
-    if !settings_json_path(work).exists() {
-        write_json_pretty(&settings_json_path(work), &default_settings_json())?;
-    }
     if !imports_json_path(work).exists() {
         write_json_pretty(
             &imports_json_path(work),
@@ -248,6 +263,10 @@ fn ensure_anchorignore(work: &Path) -> Result<(), String> {
 }
 
 fn write_json_pretty(path: &Path, value: &JsonValue) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create {}: {err}", parent.display()))?;
+    }
     let serialized =
         serde_json::to_string_pretty(value).map_err(|err| format!("Cannot serialize: {err}"))?;
     let mut content = serialized;
@@ -358,6 +377,140 @@ fn default_settings_json() -> JsonValue {
         "inboxChannels": {},
         "connectors": {}
     })
+}
+
+fn read_json_if_exists(path: &Path) -> Result<Option<JsonValue>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    read_json(path).map(Some)
+}
+
+fn merge_json(base: &mut JsonValue, overlay: &JsonValue) {
+    match (base, overlay) {
+        (JsonValue::Object(base_map), JsonValue::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                match base_map.get_mut(key) {
+                    Some(existing) => merge_json(existing, value),
+                    None => {
+                        base_map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (base_slot, overlay_value) => {
+            *base_slot = overlay_value.clone();
+        }
+    }
+}
+
+fn copy_path(source: &JsonValue, target: &mut JsonValue, path: &[&str]) {
+    let pointer = format!("/{}", path.join("/"));
+    if let Some(value) = source.pointer(&pointer) {
+        insert_path(target, path, value.clone());
+    }
+}
+
+fn insert_path(target: &mut JsonValue, path: &[&str], value: JsonValue) {
+    if path.is_empty() {
+        *target = value;
+        return;
+    }
+    if !target.is_object() {
+        *target = json!({});
+    }
+    if path.len() == 1 {
+        if let Some(map) = target.as_object_mut() {
+            map.insert(path[0].to_string(), value);
+        }
+        return;
+    }
+    let child = target
+        .as_object_mut()
+        .expect("target is object")
+        .entry(path[0].to_string())
+        .or_insert_with(|| json!({}));
+    insert_path(child, &path[1..], value);
+}
+
+fn split_settings_json(value: &JsonValue) -> (JsonValue, JsonValue) {
+    let mut global = json!({ "version": SCHEMA_VERSION });
+    for path in [
+        &["ui", "explorerPaneMode"][..],
+        &["ui", "documentBrowserMode"][..],
+        &["ui", "documentLabelMode"][..],
+        &["ui", "workspaceFileFilter"][..],
+        &["ui", "fileQueueDefaultOperation"][..],
+        &["ui", "themeMode"][..],
+        &["ui", "accentColor"][..],
+        &["ui", "layout"][..],
+        &["terminal"][..],
+        &["ai"][..],
+    ] {
+        copy_path(value, &mut global, path);
+    }
+
+    let mut workspace_state = json!({ "version": SCHEMA_VERSION });
+    for path in [
+        &["ui", "binaryFileIncludePatterns"][..],
+        &["ui", "collapsedTreeFolders"][..],
+        &["ui", "collapsedFileFolders"][..],
+        &["ui", "documentTreeStateInitialized"][..],
+        &["ui", "fileTreeStateInitialized"][..],
+        &["inboxChannels"][..],
+        &["connectors"][..],
+    ] {
+        copy_path(value, &mut workspace_state, path);
+    }
+
+    (global, workspace_state)
+}
+
+fn migrate_legacy_settings_if_needed(work: &Path, global_path: &Path) -> Result<(), String> {
+    let legacy_path = legacy_settings_json_path(work);
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    let state_path = workspace_state_json_path(work);
+    if global_path.exists() && state_path.exists() {
+        return Ok(());
+    }
+
+    let legacy = read_json(&legacy_path)?;
+    let (legacy_global, legacy_workspace_state) = split_settings_json(&legacy);
+    if !global_path.exists() {
+        write_json_pretty(global_path, &legacy_global)?;
+    }
+    if !state_path.exists() {
+        write_json_pretty(&state_path, &legacy_workspace_state)?;
+    }
+    Ok(())
+}
+
+fn read_anchor_settings_internal(work: &Path, global_path: &Path) -> Result<JsonValue, String> {
+    ensure_anchor_dir(work)?;
+    migrate_legacy_settings_if_needed(work, global_path)?;
+
+    let mut settings = default_settings_json();
+    if let Some(global) = read_json_if_exists(global_path)? {
+        merge_json(&mut settings, &global);
+    }
+    if let Some(workspace_state) = read_json_if_exists(&workspace_state_json_path(work))? {
+        merge_json(&mut settings, &workspace_state);
+    }
+    Ok(settings)
+}
+
+fn save_anchor_settings_internal(
+    work: &Path,
+    global_path: &Path,
+    value: JsonValue,
+) -> Result<(), String> {
+    ensure_anchor_dir(work)?;
+    let (global, workspace_state) = split_settings_json(&value);
+    write_json_pretty(global_path, &global)?;
+    write_json_pretty(&workspace_state_json_path(work), &workspace_state)
 }
 
 // ---------------------------------------------------------------------------
@@ -779,15 +932,15 @@ pub fn save_anchor_skills(work_path: String, value: JsonValue) -> Result<(), Str
 #[tauri::command]
 pub fn read_anchor_settings(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_anchor_dir(&work)?;
-    read_json(&settings_json_path(&work))
+    let global_path = global_settings_json_path()?;
+    read_anchor_settings_internal(&work, &global_path)
 }
 
 #[tauri::command]
 pub fn save_anchor_settings(work_path: String, value: JsonValue) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_anchor_dir(&work)?;
-    write_json_pretty(&settings_json_path(&work), &value)
+    let global_path = global_settings_json_path()?;
+    save_anchor_settings_internal(&work, &global_path, value)
 }
 
 #[tauri::command]
@@ -924,7 +1077,7 @@ mod tests {
         assert!(tmp.path().join(".anchor/mcp.json").exists());
         assert!(tmp.path().join(".anchor/projects.json").exists());
         assert!(tmp.path().join(".anchor/skills.json").exists());
-        assert!(tmp.path().join(".anchor/settings.json").exists());
+        assert!(!tmp.path().join(".anchor/settings.json").exists());
         assert!(tmp.path().join(".anchor/imports.json").exists());
         assert!(tmp.path().join(".anchorignore").exists());
     }
@@ -942,6 +1095,24 @@ mod tests {
         assert_eq!(
             before, after,
             "second ensure must not overwrite existing JSON"
+        );
+    }
+
+    #[test]
+    fn settings_paths_are_split_between_home_and_workspace() {
+        let home = fresh_work();
+        let work = fresh_work();
+        assert_eq!(
+            global_settings_json_path_for_home(home.path()),
+            home.path().join(".anchor/settings.json")
+        );
+        assert_eq!(
+            workspace_state_json_path(work.path()),
+            work.path().join(".anchor/workspace-state.json")
+        );
+        assert_eq!(
+            legacy_settings_json_path(work.path()),
+            work.path().join(".anchor/settings.json")
         );
     }
 
@@ -968,10 +1139,11 @@ mod tests {
     }
 
     #[test]
-    fn settings_json_round_trips_pretty() {
+    fn settings_split_round_trips_pretty() {
         let tmp = fresh_work();
-        let work = tmp.path().to_string_lossy().to_string();
-        let initial = read_anchor_settings(work.clone()).unwrap();
+        let home = fresh_work();
+        let global = home.path().join(".anchor/settings.json");
+        let initial = read_anchor_settings_internal(tmp.path(), &global).unwrap();
         assert_eq!(
             initial
                 .pointer("/ui/documentBrowserMode")
@@ -1011,19 +1183,109 @@ mod tests {
             "inboxChannels": {},
             "connectors": {}
         });
-        save_anchor_settings(work.clone(), next).unwrap();
-        let reloaded = read_anchor_settings(work.clone()).unwrap();
+        save_anchor_settings_internal(tmp.path(), &global, next).unwrap();
+        let reloaded = read_anchor_settings_internal(tmp.path(), &global).unwrap();
         assert_eq!(
             reloaded
                 .pointer("/ui/documentBrowserMode")
                 .and_then(JsonValue::as_str),
             Some("tree")
         );
-        let raw = fs::read_to_string(tmp.path().join(".anchor/settings.json")).unwrap();
+        assert_eq!(
+            reloaded
+                .pointer("/ui/collapsedTreeFolders/0")
+                .and_then(JsonValue::as_str),
+            Some("projects/rise")
+        );
+        let raw = fs::read_to_string(&global).unwrap();
         assert!(
             raw.contains('\n') && raw.ends_with('\n'),
-            "settings should be pretty JSON with trailing newline"
+            "global settings should be pretty JSON with trailing newline"
         );
+        let state_raw =
+            fs::read_to_string(tmp.path().join(".anchor/workspace-state.json")).unwrap();
+        assert!(
+            state_raw.contains('\n') && state_raw.ends_with('\n'),
+            "workspace state should be pretty JSON with trailing newline"
+        );
+        assert!(!tmp.path().join(".anchor/settings.json").exists());
+        let global_value = read_json(&global).unwrap();
+        assert_eq!(
+            global_value
+                .pointer("/ui/documentBrowserMode")
+                .and_then(JsonValue::as_str),
+            Some("tree")
+        );
+        assert!(global_value.pointer("/ui/collapsedTreeFolders").is_none());
+        let state_value = read_json(&tmp.path().join(".anchor/workspace-state.json")).unwrap();
+        assert_eq!(
+            state_value
+                .pointer("/ui/collapsedTreeFolders/0")
+                .and_then(JsonValue::as_str),
+            Some("projects/rise")
+        );
+        assert!(state_value.pointer("/terminal").is_none());
+    }
+
+    #[test]
+    fn legacy_workspace_settings_migrate_without_deleting_source() {
+        let tmp = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".anchor/settings.json");
+        ensure_anchor_dir(tmp.path()).unwrap();
+        fs::write(
+            tmp.path().join(".anchor/settings.json"),
+            r##"{
+  "version": 1,
+  "ui": {
+    "documentBrowserMode": "list",
+    "themeMode": "dark",
+    "collapsedTreeFolders": ["projects/rise"],
+    "binaryFileIncludePatterns": ["*.pdf"]
+  },
+  "terminal": {
+    "defaultPanelOpen": true,
+    "lastHeight": 420,
+    "autoLaunch": "codex",
+    "launchers": {}
+  },
+  "connectors": {
+    "hub": {
+      "endpoint": "http://localhost:9710"
+    }
+  }
+}"##,
+        )
+        .unwrap();
+
+        let effective = read_anchor_settings_internal(tmp.path(), &global).unwrap();
+        assert_eq!(
+            effective
+                .pointer("/ui/documentBrowserMode")
+                .and_then(JsonValue::as_str),
+            Some("list")
+        );
+        assert_eq!(
+            effective
+                .pointer("/ui/themeMode")
+                .and_then(JsonValue::as_str),
+            Some("dark")
+        );
+        assert_eq!(
+            effective
+                .pointer("/ui/collapsedTreeFolders/0")
+                .and_then(JsonValue::as_str),
+            Some("projects/rise")
+        );
+        assert_eq!(
+            effective
+                .pointer("/connectors/hub/endpoint")
+                .and_then(JsonValue::as_str),
+            Some("http://localhost:9710")
+        );
+        assert!(tmp.path().join(".anchor/settings.json").exists());
+        assert!(tmp.path().join(".anchor/workspace-state.json").exists());
+        assert!(global.exists());
     }
 
     #[test]

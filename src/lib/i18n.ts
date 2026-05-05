@@ -336,7 +336,7 @@ const ko: Record<string, string> = {
   // === System mode ===
   "system.title": "시스템",
   "system.subtitle": ".anchor 운영 데이터 (rules, templates, MCP, projects, skills)",
-  "system.empty": "설정을 저장할 private workspace가 없습니다.",
+  "system.empty": "workspace-local 설정을 저장할 private workspace가 없습니다.",
   "system.tab.rules": "Rules",
   "system.tab.templates": "Templates",
   "system.tab.preferences": "Preferences",
@@ -745,7 +745,7 @@ const en: Record<string, string> = {
   // === System mode ===
   "system.title": "System",
   "system.subtitle": ".anchor operational data (rules, templates, MCP, projects, skills)",
-  "system.empty": "No private workspace is available for settings storage.",
+  "system.empty": "No private workspace is available for workspace-local settings.",
   "system.tab.rules": "Rules",
   "system.tab.templates": "Templates",
   "system.tab.preferences": "Preferences",

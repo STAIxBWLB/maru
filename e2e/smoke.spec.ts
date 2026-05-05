@@ -241,6 +241,68 @@ test("resizes document and right panes with drag handles", async ({ page }) => {
   expect(resizedOutlineBox.width).toBeGreaterThan(initialOutlineBox.width + 35);
 });
 
+test("keeps split source editors constrained to their pane widths", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await page.getByLabel("오른쪽으로 분할").first().click();
+
+  const panes = page.locator(".editor-split-shell.split .editor-pane");
+  await expect(panes).toHaveCount(2);
+  await expect(page.locator(".editor-split-shell.split textarea.source-editor")).toHaveCount(2);
+
+  for (let i = 0; i < 2; i += 1) {
+    const paneBox = await panes.nth(i).boundingBox();
+    const editorBox = await panes.nth(i).locator("textarea.source-editor").boundingBox();
+    expect(paneBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    if (!paneBox || !editorBox) return;
+    expect(editorBox.x).toBeGreaterThanOrEqual(paneBox.x - 1);
+    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(paneBox.x + paneBox.width + 1);
+  }
+});
+
+test("keeps document list rows from overlapping in list mode", async ({ page }) => {
+  await page.goto("/");
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "목록" }).click();
+  const rows = documentList.locator(".virtual-list-row.entry");
+  await expect(rows.first()).toBeVisible();
+  await expect(rows.nth(1)).toBeVisible();
+
+  const first = await rows.nth(0).boundingBox();
+  const second = await rows.nth(1).boundingBox();
+  const firstCard = await rows.nth(0).locator(".doc-row").boundingBox();
+  const secondCard = await rows.nth(1).locator(".doc-row").boundingBox();
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(firstCard).not.toBeNull();
+  expect(secondCard).not.toBeNull();
+  if (!first || !second || !firstCard || !secondCard) return;
+
+  expect(first.y + first.height).toBeLessThanOrEqual(second.y + 1);
+  expect(firstCard.y + firstCard.height).toBeLessThanOrEqual(secondCard.y + 1);
+});
+
+test("places the right pane active marker on the rail edge", async ({ page }) => {
+  await page.goto("/");
+
+  const activeTab = page.locator(".right-pane-tabs button.active").first();
+  await expect(activeTab).toBeVisible();
+  const marker = await activeTab.evaluate((node) => {
+    const style = window.getComputedStyle(node, "::before");
+    return {
+      left: style.left,
+      right: style.right,
+      width: style.width,
+    };
+  });
+
+  expect(marker.right).not.toBe("auto");
+  expect(marker.width).toBe("2px");
+});
+
 test("centers the empty editor placeholder", async ({ page }) => {
   await page.goto("/");
 

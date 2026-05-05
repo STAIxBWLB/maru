@@ -1,5 +1,6 @@
-// Thin wrappers around the Rust commands that own `<work>/.anchor/`
-// (workspace registration + System mode). Mirrors the pattern in `api.ts`:
+// Thin wrappers around the Rust commands that own layered settings plus
+// `<work>/.anchor/` workspace resources (workspace registration + System mode).
+// Mirrors the pattern in `api.ts`:
 // browser-dev fallbacks return inert no-ops so the React layer can be
 // exercised without the Tauri shell.
 
@@ -295,8 +296,8 @@ export async function applySysImport(
 // === Helpers (frontend only) ===
 
 /**
- * Identify the private workspace root. Used by the frontend to decide
- * where System mode should store `.anchor/` settings.
+ * Identify the private workspace root. Used by the frontend to decide where
+ * System mode should store workspace-local `.anchor/` resources and state.
  */
 export function findPrivateWorkspaceEntry(registry: WorkspaceRegistry): WorkspaceRootEntry | null {
   const active = registry.activeByVisibility.private;
