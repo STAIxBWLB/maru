@@ -33,6 +33,29 @@ use std::path::{Path, PathBuf};
 const ANCHOR_DIR: &str = ".anchor";
 const SCHEMA_VERSION: u32 = 1;
 
+const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
+    &["ui", "explorerPaneMode"],
+    &["ui", "documentBrowserMode"],
+    &["ui", "documentLabelMode"],
+    &["ui", "workspaceFileFilter"],
+    &["ui", "fileQueueDefaultOperation"],
+    &["ui", "themeMode"],
+    &["ui", "accentColor"],
+    &["ui", "layout"],
+    &["terminal"],
+    &["ai"],
+    &["connectors"],
+];
+
+const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
+    &["ui", "binaryFileIncludePatterns"],
+    &["ui", "collapsedTreeFolders"],
+    &["ui", "collapsedFileFolders"],
+    &["ui", "documentTreeStateInitialized"],
+    &["ui", "fileTreeStateInitialized"],
+    &["inboxChannels"],
+];
+
 const ANCHORIGNORE_DEFAULTS: &[&str] = &[
     "node_modules",
     ".venv",
@@ -435,35 +458,37 @@ fn insert_path(target: &mut JsonValue, path: &[&str], value: JsonValue) {
 
 fn split_settings_json(value: &JsonValue) -> (JsonValue, JsonValue) {
     let mut global = json!({ "version": SCHEMA_VERSION });
-    for path in [
-        &["ui", "explorerPaneMode"][..],
-        &["ui", "documentBrowserMode"][..],
-        &["ui", "documentLabelMode"][..],
-        &["ui", "workspaceFileFilter"][..],
-        &["ui", "fileQueueDefaultOperation"][..],
-        &["ui", "themeMode"][..],
-        &["ui", "accentColor"][..],
-        &["ui", "layout"][..],
-        &["terminal"][..],
-        &["ai"][..],
-    ] {
+    for path in GLOBAL_SETTINGS_PATHS {
         copy_path(value, &mut global, path);
     }
 
     let mut workspace_state = json!({ "version": SCHEMA_VERSION });
-    for path in [
-        &["ui", "binaryFileIncludePatterns"][..],
-        &["ui", "collapsedTreeFolders"][..],
-        &["ui", "collapsedFileFolders"][..],
-        &["ui", "documentTreeStateInitialized"][..],
-        &["ui", "fileTreeStateInitialized"][..],
-        &["inboxChannels"][..],
-        &["connectors"][..],
-    ] {
+    for path in WORKSPACE_STATE_PATHS {
         copy_path(value, &mut workspace_state, path);
     }
 
     (global, workspace_state)
+}
+
+fn apply_changed_paths(
+    target: &mut JsonValue,
+    incoming: &JsonValue,
+    base: &JsonValue,
+    paths: &[&[&str]],
+) -> bool {
+    let mut changed = false;
+    for path in paths {
+        let pointer = format!("/{}", path.join("/"));
+        let incoming_value = incoming.pointer(&pointer);
+        if incoming_value == base.pointer(&pointer) {
+            continue;
+        }
+        if let Some(value) = incoming_value {
+            insert_path(target, path, value.clone());
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn migrate_legacy_settings_if_needed(work: &Path, global_path: &Path) -> Result<(), String> {
@@ -506,11 +531,58 @@ fn save_anchor_settings_internal(
     work: &Path,
     global_path: &Path,
     value: JsonValue,
-) -> Result<(), String> {
+) -> Result<AnchorSettingsSaveOutcome, String> {
+    save_anchor_settings_internal_with_base(work, global_path, value, None)
+}
+
+fn save_anchor_settings_internal_with_base(
+    work: &Path,
+    global_path: &Path,
+    value: JsonValue,
+    base_value: Option<JsonValue>,
+) -> Result<AnchorSettingsSaveOutcome, String> {
     ensure_anchor_dir(work)?;
+    migrate_legacy_settings_if_needed(work, global_path)?;
     let (global, workspace_state) = split_settings_json(&value);
-    write_json_pretty(global_path, &global)?;
-    write_json_pretty(&workspace_state_json_path(work), &workspace_state)
+    let state_path = workspace_state_json_path(work);
+    let Some(base) = base_value else {
+        write_json_pretty(global_path, &global)?;
+        write_json_pretty(&state_path, &workspace_state)?;
+        return Ok(AnchorSettingsSaveOutcome {
+            global_changed: true,
+            workspace_changed: true,
+        });
+    };
+
+    let mut current_global =
+        read_json_if_exists(global_path)?.unwrap_or_else(|| json!({ "version": SCHEMA_VERSION }));
+    let mut current_workspace_state =
+        read_json_if_exists(&state_path)?.unwrap_or_else(|| json!({ "version": SCHEMA_VERSION }));
+    let global_changed =
+        apply_changed_paths(&mut current_global, &global, &base, GLOBAL_SETTINGS_PATHS);
+    let workspace_changed = apply_changed_paths(
+        &mut current_workspace_state,
+        &workspace_state,
+        &base,
+        WORKSPACE_STATE_PATHS,
+    );
+    if global_changed {
+        write_json_pretty(global_path, &current_global)?;
+    }
+    if workspace_changed {
+        write_json_pretty(&state_path, &current_workspace_state)?;
+    }
+    Ok(AnchorSettingsSaveOutcome {
+        global_changed,
+        workspace_changed,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnchorSettingsSaveOutcome {
+    pub global_changed: bool,
+    pub workspace_changed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -937,10 +1009,14 @@ pub fn read_anchor_settings(work_path: String) -> Result<JsonValue, String> {
 }
 
 #[tauri::command]
-pub fn save_anchor_settings(work_path: String, value: JsonValue) -> Result<(), String> {
+pub fn save_anchor_settings(
+    work_path: String,
+    value: JsonValue,
+    base_value: Option<JsonValue>,
+) -> Result<AnchorSettingsSaveOutcome, String> {
     let work = normalize_work_path(&work_path)?;
     let global_path = global_settings_json_path()?;
-    save_anchor_settings_internal(&work, &global_path, value)
+    save_anchor_settings_internal_with_base(&work, &global_path, value, base_value)
 }
 
 #[tauri::command]
@@ -1225,6 +1301,91 @@ mod tests {
             Some("projects/rise")
         );
         assert!(state_value.pointer("/terminal").is_none());
+        assert!(state_value.pointer("/connectors").is_none());
+    }
+
+    #[test]
+    fn settings_save_with_base_preserves_newer_global_values() {
+        let work_a = fresh_work();
+        let work_b = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".anchor/settings.json");
+
+        let base_a = read_anchor_settings_internal(work_a.path(), &global).unwrap();
+        let stale_base_b = read_anchor_settings_internal(work_b.path(), &global).unwrap();
+        let mut next_a = base_a.clone();
+        insert_path(
+            &mut next_a,
+            &["ui", "themeMode"],
+            JsonValue::String("dark".to_string()),
+        );
+        save_anchor_settings_internal_with_base(work_a.path(), &global, next_a, Some(base_a))
+            .unwrap();
+
+        let mut next_b = stale_base_b.clone();
+        insert_path(
+            &mut next_b,
+            &["ui", "collapsedTreeFolders"],
+            json!(["workspace-b-only"]),
+        );
+        save_anchor_settings_internal_with_base(work_b.path(), &global, next_b, Some(stale_base_b))
+            .unwrap();
+
+        let effective_a = read_anchor_settings_internal(work_a.path(), &global).unwrap();
+        let effective_b = read_anchor_settings_internal(work_b.path(), &global).unwrap();
+        assert_eq!(
+            effective_a
+                .pointer("/ui/themeMode")
+                .and_then(JsonValue::as_str),
+            Some("dark")
+        );
+        assert_eq!(
+            effective_b
+                .pointer("/ui/themeMode")
+                .and_then(JsonValue::as_str),
+            Some("dark")
+        );
+        assert_eq!(
+            effective_b
+                .pointer("/ui/collapsedTreeFolders/0")
+                .and_then(JsonValue::as_str),
+            Some("workspace-b-only")
+        );
+    }
+
+    #[test]
+    fn connectors_save_to_global_defaults_not_workspace_state() {
+        let tmp = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".anchor/settings.json");
+        let base = read_anchor_settings_internal(tmp.path(), &global).unwrap();
+        let mut next = base.clone();
+        insert_path(
+            &mut next,
+            &["connectors"],
+            json!({
+                "hub": {
+                    "endpoint": "http://localhost:9710"
+                }
+            }),
+        );
+
+        let outcome =
+            save_anchor_settings_internal_with_base(tmp.path(), &global, next, Some(base)).unwrap();
+
+        assert!(outcome.global_changed);
+        assert!(!outcome.workspace_changed);
+        let global_value = read_json(&global).unwrap();
+        assert_eq!(
+            global_value
+                .pointer("/connectors/hub/endpoint")
+                .and_then(JsonValue::as_str),
+            Some("http://localhost:9710")
+        );
+        let state_value = read_json_if_exists(&tmp.path().join(".anchor/workspace-state.json"))
+            .unwrap()
+            .unwrap_or_else(|| json!({}));
+        assert!(state_value.pointer("/connectors").is_none());
     }
 
     #[test]
@@ -1283,6 +1444,17 @@ mod tests {
                 .and_then(JsonValue::as_str),
             Some("http://localhost:9710")
         );
+        assert_eq!(
+            read_json(&global)
+                .unwrap()
+                .pointer("/connectors/hub/endpoint")
+                .and_then(JsonValue::as_str),
+            Some("http://localhost:9710")
+        );
+        assert!(read_json(&tmp.path().join(".anchor/workspace-state.json"))
+            .unwrap()
+            .pointer("/connectors")
+            .is_none());
         assert!(tmp.path().join(".anchor/settings.json").exists());
         assert!(tmp.path().join(".anchor/workspace-state.json").exists());
         assert!(global.exists());

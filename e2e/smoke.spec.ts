@@ -77,6 +77,13 @@ test("switches between public provider roots and gates read-only actions", async
   await expect(page.getByRole("button", { name: "스냅샷" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "새 문서" })).toBeDisabled();
+
+  await page.locator(".document-tab.active").click({ button: "right" });
+  const menu = page.locator(".document-tab-context-menu");
+  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "이동..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "복제..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "삭제" })).toBeDisabled();
 });
 
 test("restores direct write policy when leaving Obsidian provider", async ({ page }) => {
@@ -141,6 +148,105 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "경로 복사", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+});
+
+test("shows supported document tab menu items and performs file operations", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
+
+  const glossaryTab = page.locator(".document-tab[title='references/anchor-glossary.md']");
+  await expect(glossaryTab).toBeVisible();
+  await glossaryTab.click({ button: "right" });
+
+  const menu = page.locator(".document-tab-context-menu");
+  await expect(menu.getByRole("button", { name: "닫기", exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "다른 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "오른쪽 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "저장된 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "이름 복사" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "이동..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "복제..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "삭제" })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "미리보기 열기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Explorer View에서 보기" })).toBeVisible();
+  await expect(menu).not.toContainText("Remote URL");
+  await expect(menu).not.toContainText("Share");
+  await expect(menu).not.toContainText("Open Changes");
+  await expect(menu).not.toContainText("File History");
+  await expect(menu).not.toContainText("Reopen Editor With");
+
+  await menu.getByRole("button", { name: "복제..." }).click();
+  const copyTab = page.locator(".document-tab[title='references/anchor-glossary-copy.md']");
+  await expect(copyTab).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("prompt");
+    await dialog.accept("anchor-glossary-renamed");
+  });
+  await copyTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "이름 변경..." })
+    .click();
+  const renamedTab = page.locator(".document-tab[title='references/anchor-glossary-renamed.md']");
+  await expect(renamedTab).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("prompt");
+    await dialog.accept("moved/anchor-glossary-renamed.md");
+  });
+  await renamedTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "이동..." })
+    .click();
+  const movedTab = page.locator(".document-tab[title='moved/anchor-glossary-renamed.md']");
+  await expect(movedTab).toBeVisible();
+  await expect(page.locator("textarea.source-editor")).toHaveValue(/# Anchor 용어집/);
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    await dialog.accept();
+  });
+  await movedTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "삭제" })
+    .click();
+  await expect(movedTab).toHaveCount(0);
+  await expect(page.locator(".toast", { hasText: ".anchor/trash/documents/moved/" })).toBeVisible();
+});
+
+test("suppresses native context menus outside document surfaces", async ({ page }) => {
+  await page.goto("/");
+
+  const topbarPrevented = await page.locator(".topbar").evaluate((node) => {
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+    return !node.dispatchEvent(event);
+  });
+  expect(topbarPrevented).toBe(true);
+
+  const editorPrevented = await page.locator("textarea.source-editor").evaluate((node) => {
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+    return !node.dispatchEvent(event);
+  });
+  expect(editorPrevented).toBe(false);
 });
 
 test("switches between Documents and Files explorer modes", async ({ page }) => {

@@ -1357,6 +1357,8 @@ a {
   width: 100%;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   height: 30px;
   padding: 0 8px;
   border-radius: 6px;
@@ -1366,12 +1368,51 @@ a {
   transition:
     background 120ms ease,
     color 120ms ease,
-    transform 100ms ease;
+  transform 100ms ease;
+}
+
+.context-menu button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .context-menu button:hover {
   background: var(--accent-tint);
   color: var(--accent);
+}
+
+.context-menu button:disabled {
+  cursor: default;
+  color: var(--faint);
+  opacity: 0.52;
+}
+
+.context-menu button:disabled:hover {
+  background: transparent;
+  color: var(--faint);
+}
+
+.context-menu button.danger {
+  color: var(--danger);
+}
+
+.context-menu button.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.context-menu-shortcut {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-tab-context-menu {
+  z-index: 48;
+  width: min(330px, calc(100vw - 18px));
 }
 
 .context-menu-separator {

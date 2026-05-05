@@ -29,7 +29,8 @@ use anchor_dir::{
     save_anchor_settings, save_anchor_skills, save_anchor_template, update_anchor_workspace,
 };
 use document::{
-    create_document, create_version, read_document, save_document, update_frontmatter_field,
+    create_document, create_version, duplicate_document, move_document, read_document,
+    save_document, trash_document, update_frontmatter_field,
 };
 use file_manager::reveal_in_file_manager;
 use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
@@ -73,6 +74,9 @@ pub fn run() {
             read_document,
             save_document,
             create_document,
+            move_document,
+            duplicate_document,
+            trash_document,
             create_version,
             update_frontmatter_field,
             list_workspace_roots,
