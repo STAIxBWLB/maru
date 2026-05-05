@@ -319,6 +319,34 @@ test("queues selected files in the right Files pane and applies explicitly", asy
   await expect(rightPane.locator(".right-list-item.queue.done", { hasText: "완료" })).toBeVisible();
 });
 
+test("copies selected Files shelf items into a tree context target", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  const weeklyItem = rightPane.locator(".right-list-item.queue", {
+    hasText: "anchor-weekly-meeting.md",
+  });
+  const templateItem = rightPane.locator(".right-list-item.queue", {
+    hasText: "minutes-template.md",
+  });
+  await expect(weeklyItem).toBeVisible();
+  await expect(templateItem).toBeVisible();
+  await weeklyItem.click({ modifiers: ["Shift"] });
+
+  await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
+  await page.getByRole("button", { name: "선택 항목 2개 여기에 복사" }).click();
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+});
+
 test("resizes document and right panes with drag handles", async ({ page }) => {
   await page.goto("/");
 

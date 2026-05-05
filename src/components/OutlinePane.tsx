@@ -489,7 +489,7 @@ function FilesQueuePane({
               <span title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
               {item.message ? <em>{item.message}</em> : null}
             </div>
-            <div className="queue-controls">
+            <div className="queue-controls" onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
                 className={item.operation === "copy" ? "active" : ""}
