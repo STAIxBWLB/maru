@@ -40,12 +40,20 @@ import {
   saveMemoAs,
 } from "../lib/api";
 import { frontmatterScalar } from "../lib/document";
+import {
+  clearExplorerDragPayload,
+  dropOperationFromEvent,
+  hasExplorerDragPayload,
+  readExplorerDragPayload,
+  type ExplorerDragPayload,
+} from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
 import type { RightPaneTab } from "../lib/settings";
 import type {
   DocumentPayload,
   FileQueueItem,
+  FileQueueSourceInfo,
   MemoEntry,
   MemoFormat,
   VaultEntry,
@@ -77,7 +85,8 @@ interface OutlinePaneProps {
   selectedFileQueueItemIds: string[];
   onSelectFileQueueItem: (id: string, additive: boolean) => void;
   onQueueExternalFiles: (paths: string[]) => Promise<void>;
-  onApplyFileQueue: () => Promise<void>;
+  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
+  onApplyFileQueue: () => Promise<unknown>;
   onClearFileQueue: () => void;
   onClearSelectedFileQueueItems: () => void;
   activeTab: RightPaneTab;
@@ -161,6 +170,7 @@ export function OutlinePane({
   selectedFileQueueItemIds,
   onSelectFileQueueItem,
   onQueueExternalFiles,
+  onQueueFileSources,
   onApplyFileQueue,
   onClearFileQueue,
   onClearSelectedFileQueueItems,
@@ -191,6 +201,20 @@ export function OutlinePane({
     }
     return Array.from(set).sort();
   }, [entries]);
+  const queueExplorerPayload = useCallback(
+    (payload: ExplorerDragPayload) => {
+      onQueueFileSources(
+        payload.items.map((item) => ({
+          path: item.path,
+          sourceRelPath: item.relPath,
+          fileName: item.fileName,
+          sourceKind: item.sourceKind,
+        })),
+        payload.workspacePath,
+      );
+    },
+    [onQueueFileSources],
+  );
 
   return (
     <aside className="outline-pane" ref={paneRef}>
@@ -216,6 +240,27 @@ export function OutlinePane({
               aria-selected={tab === id}
               className={tab === id ? "active" : ""}
               onClick={() => onTabChange(id)}
+              onDragOver={
+                id === "files"
+                  ? (event) => {
+                      if (!hasExplorerDragPayload(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+                    }
+                  : undefined
+              }
+              onDrop={
+                id === "files"
+                  ? (event) => {
+                      const payload = readExplorerDragPayload(event.dataTransfer);
+                      if (!payload) return;
+                      event.preventDefault();
+                      clearExplorerDragPayload();
+                      onTabChange("files");
+                      queueExplorerPayload(payload);
+                    }
+                  : undefined
+              }
               title={t(`rightPane.tab.${id}`)}
               aria-label={t(`rightPane.tab.${id}`)}
             >
@@ -282,6 +327,7 @@ export function OutlinePane({
               onUpdateItem={onUpdateFileQueueItem}
               onSelectItem={onSelectFileQueueItem}
               onQueueExternalFiles={onQueueExternalFiles}
+              onQueueFileSources={onQueueFileSources}
               onApply={onApplyFileQueue}
               onClear={onClearFileQueue}
               onClearSelected={onClearSelectedFileQueueItems}
@@ -381,6 +427,7 @@ function FilesQueuePane({
   onUpdateItem,
   onSelectItem,
   onQueueExternalFiles,
+  onQueueFileSources,
   onApply,
   onClear,
   onClearSelected,
@@ -396,7 +443,8 @@ function FilesQueuePane({
   ) => void;
   onSelectItem: (id: string, additive: boolean) => void;
   onQueueExternalFiles: (paths: string[]) => Promise<void>;
-  onApply: () => Promise<void>;
+  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
+  onApply: () => Promise<unknown>;
   onClear: () => void;
   onClearSelected: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -404,6 +452,7 @@ function FilesQueuePane({
   const [working, setWorking] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverShelf, setDragOverShelf] = useState(false);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   useEffect(() => {
@@ -441,6 +490,31 @@ function FilesQueuePane({
 
   const pickFolders = async () => {
     await onQueueExternalFiles(await chooseDirectories(t("rightPane.files.pickFolder")));
+  };
+  const queueExplorerPayload = (payload: ExplorerDragPayload) => {
+    onQueueFileSources(
+      payload.items.map((item) => ({
+        path: item.path,
+        sourceRelPath: item.relPath,
+        fileName: item.fileName,
+        sourceKind: item.sourceKind,
+      })),
+      payload.workspacePath,
+    );
+  };
+  const handleShelfDragOver = (event: React.DragEvent) => {
+    if (!hasExplorerDragPayload(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+    setDragOverShelf(true);
+  };
+  const handleShelfDrop = (event: React.DragEvent) => {
+    const payload = readExplorerDragPayload(event.dataTransfer);
+    setDragOverShelf(false);
+    if (!payload) return;
+    event.preventDefault();
+    clearExplorerDragPayload();
+    queueExplorerPayload(payload);
   };
 
   const chooseDestination = async (item: FileQueueItem) => {
@@ -511,8 +585,17 @@ function FilesQueuePane({
         </div>
       </div>
       <div
-        className={queue.length === 0 ? "file-drop-zone empty" : "file-drop-zone"}
+        className={[
+          "file-drop-zone",
+          queue.length === 0 ? "empty" : "",
+          dragOverShelf ? "drag-over" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         title={t("rightPane.files.dropTitle")}
+        onDragOver={handleShelfDragOver}
+        onDragLeave={() => setDragOverShelf(false)}
+        onDrop={handleShelfDrop}
         onContextMenu={(event) => {
           event.preventDefault();
           setContextMenu({ x: event.clientX, y: event.clientY });
@@ -522,7 +605,18 @@ function FilesQueuePane({
         <strong>{t("rightPane.files.dropTitle")}</strong>
         <span>{t("rightPane.files.dropDescription")}</span>
       </div>
-      <div className={viewMode === "icons" ? "right-list file-shelf-icons" : "right-list"}>
+      <div
+        className={[
+          "right-list",
+          viewMode === "icons" ? "file-shelf-icons" : "",
+          dragOverShelf ? "drag-over" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onDragOver={handleShelfDragOver}
+        onDragLeave={() => setDragOverShelf(false)}
+        onDrop={handleShelfDrop}
+      >
         {queue.length === 0 ? (
           <div className="outline-empty">{t("rightPane.files.emptyQueue")}</div>
         ) : null}

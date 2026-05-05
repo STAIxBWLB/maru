@@ -25,6 +25,14 @@ import {
   useTransition,
 } from "react";
 import { useTranslation } from "../lib/i18n";
+import {
+  clearExplorerDragPayload,
+  dropOperationFromEvent,
+  hasExplorerDragPayload,
+  readExplorerDragPayload,
+  writeExplorerDragPayload,
+  type ExplorerDragPayload,
+} from "../lib/fileDrag";
 import type { ExplorerPaneMode, WorkspaceFileFilter } from "../lib/settings";
 import type {
   FileStoreOperation,
@@ -80,6 +88,12 @@ interface WorkspaceFilesPaneProps {
     targetKind: "file" | "directory",
     operation: FileStoreOperation,
   ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
 }
 
 export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
@@ -113,6 +127,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   onRevealHandled,
   selectedFileQueueCount = 0,
   onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
 }: WorkspaceFilesPaneProps) {
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -128,6 +143,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     entry: WorkspaceFileEntry | null;
     targetKind: "file" | "directory";
   } | null>(null);
+  const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
@@ -421,6 +437,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             totalHeight={virtualTreeLayout.totalHeight}
             rowHeight={FILE_TREE_ROW_HEIGHT}
             selectedSet={selectedSet}
+            selectedEntries={selectedEntries}
             collapsedFileFolders={collapsedFileFolders}
             forceExpand={forceExpandTree}
             onCollapsedFileFoldersChange={onCollapsedFileFoldersChange}
@@ -456,6 +473,9 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             }}
             selectedFileQueueCount={selectedFileQueueCount}
             onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+            onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+            dragOverTargetPath={dragOverTargetPath}
+            onDragOverTargetChange={setDragOverTargetPath}
             workspacePath={workspacePath}
             t={t}
             locale={locale}
@@ -551,6 +571,7 @@ interface WorkspaceFileTreeProps {
   totalHeight: number;
   rowHeight: number;
   selectedSet: Set<string>;
+  selectedEntries: WorkspaceFileEntry[];
   collapsedFileFolders: string[];
   forceExpand: boolean;
   onCollapsedFileFoldersChange: (paths: string[]) => void;
@@ -564,6 +585,14 @@ interface WorkspaceFileTreeProps {
     targetKind: "file" | "directory",
     operation: FileStoreOperation,
   ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
   workspacePath?: string | null;
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale: string;
@@ -574,6 +603,7 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
   totalHeight,
   rowHeight,
   selectedSet,
+  selectedEntries,
   collapsedFileFolders,
   forceExpand,
   onCollapsedFileFoldersChange,
@@ -583,6 +613,9 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
   onFolderContextMenu,
   selectedFileQueueCount,
   onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
   workspacePath,
   t,
   locale,
@@ -612,6 +645,9 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
                 onContextMenu={onFolderContextMenu}
                 selectedFileQueueCount={selectedFileQueueCount}
                 onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+                onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+                dragOverTargetPath={dragOverTargetPath}
+                onDragOverTargetChange={onDragOverTargetChange}
                 workspacePath={workspacePath}
               />
             ) : (
@@ -622,8 +658,13 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
                 onSelectFile={onSelectFile}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
+                selectedEntries={selectedEntries}
                 selectedFileQueueCount={selectedFileQueueCount}
                 onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+                onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+                dragOverTargetPath={dragOverTargetPath}
+                onDragOverTargetChange={onDragOverTargetChange}
+                workspacePath={workspacePath}
                 locale={locale}
               />
             )}
@@ -646,6 +687,9 @@ const FileFolderRow = memo(function FileFolderRow({
   onContextMenu,
   selectedFileQueueCount,
   onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
   workspacePath,
 }: {
   row: FolderRow;
@@ -660,14 +704,31 @@ const FileFolderRow = memo(function FileFolderRow({
     targetKind: "file" | "directory",
     operation: FileStoreOperation,
   ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
   workspacePath?: string | null;
 }) {
+  const folderTarget = workspacePath ? joinWorkspacePath(workspacePath, row.path) : row.path;
+  const canDrop = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+    );
   return (
     <button
       type="button"
-      className="tree-row folder"
+      className={
+        dragOverTargetPath === folderTarget ? "tree-row folder drag-over" : "tree-row folder"
+      }
       style={{ paddingLeft }}
       aria-expanded={!row.collapsed}
+      draggable={Boolean(workspacePath)}
       onClick={() =>
         onCollapsedFileFoldersChange(
           nextCollapsedFileFolders(
@@ -679,17 +740,49 @@ const FileFolderRow = memo(function FileFolderRow({
       }
       title={row.path}
       onContextMenu={(event) => onContextMenu(event, row)}
-      onDragOver={(event) => {
-        if (!selectedFileQueueCount) return;
-        event.preventDefault();
+      onDragStart={(event) => {
+        if (!workspacePath) return;
+        writeExplorerDragPayload(event, {
+          origin: "files",
+          workspacePath,
+          items: [
+            {
+              path: folderTarget,
+              relPath: row.path,
+              fileName: row.name,
+              sourceKind: "directory",
+            },
+          ],
+        });
       }}
+      onDragEnd={clearExplorerDragPayload}
+      onDragOver={(event) => {
+        if (!canDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+        onDragOverTargetChange(folderTarget);
+      }}
+      onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
+        const payload = readExplorerDragPayload(event.dataTransfer);
+        onDragOverTargetChange(null);
+        if (payload && onApplyExplorerDragToDestination) {
+          event.preventDefault();
+          clearExplorerDragPayload();
+          onApplyExplorerDragToDestination(
+            payload,
+            folderTarget,
+            "directory",
+            dropOperationFromEvent(event),
+          );
+          return;
+        }
         if (!selectedFileQueueCount || !onApplyFileQueueToDestination || !workspacePath) return;
         event.preventDefault();
         void onApplyFileQueueToDestination(
-          joinWorkspacePath(workspacePath, row.path),
+          folderTarget,
           "directory",
-          event.altKey ? "move" : "copy",
+          dropOperationFromEvent(event),
         );
       }}
     >
@@ -711,8 +804,13 @@ const FileRow = memo(function FileRow({
   onSelectFile,
   onOpenFile,
   onContextMenu,
+  selectedEntries,
   selectedFileQueueCount,
   onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
+  workspacePath,
   locale,
 }: {
   row: FileTreeFileRow;
@@ -721,33 +819,86 @@ const FileRow = memo(function FileRow({
   onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
   onOpenFile: (entry: WorkspaceFileEntry) => void;
   onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
+  selectedEntries: WorkspaceFileEntry[];
   selectedFileQueueCount?: number;
   onApplyFileQueueToDestination?: (
     targetPath: string,
     targetKind: "file" | "directory",
     operation: FileStoreOperation,
   ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
+  workspacePath?: string | null;
   locale: string;
 }) {
+  const canDrop = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+    );
+  const dragEntries = selected && selectedEntries.length > 0 ? selectedEntries : [row.entry];
   return (
     <button
       type="button"
-      className={selected ? "tree-row file selected" : "tree-row file"}
+      className={[
+        "tree-row file",
+        selected ? "selected" : "",
+        dragOverTargetPath === row.entry.path ? "drag-over" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       style={{ paddingLeft }}
+      draggable={Boolean(workspacePath)}
       onClick={(event) => onSelectFile(row.entry, event.metaKey || event.ctrlKey)}
       onDoubleClick={() => onOpenFile(row.entry)}
       onContextMenu={(event) => onContextMenu(event, row.entry)}
-      onDragOver={(event) => {
-        if (!selectedFileQueueCount) return;
-        event.preventDefault();
+      onDragStart={(event) => {
+        if (!workspacePath) return;
+        writeExplorerDragPayload(event, {
+          origin: "files",
+          workspacePath,
+          items: dragEntries.map((entry) => ({
+            path: entry.path,
+            relPath: entry.relPath,
+            fileName: entry.name,
+            sourceKind: "file",
+          })),
+        });
       }}
+      onDragEnd={clearExplorerDragPayload}
+      onDragOver={(event) => {
+        if (!canDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+        onDragOverTargetChange(row.entry.path);
+      }}
+      onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
+        const payload = readExplorerDragPayload(event.dataTransfer);
+        onDragOverTargetChange(null);
+        if (payload && onApplyExplorerDragToDestination) {
+          event.preventDefault();
+          clearExplorerDragPayload();
+          onApplyExplorerDragToDestination(
+            payload,
+            row.entry.path,
+            "file",
+            dropOperationFromEvent(event),
+          );
+          return;
+        }
         if (!selectedFileQueueCount || !onApplyFileQueueToDestination) return;
         event.preventDefault();
         void onApplyFileQueueToDestination(
           row.entry.path,
           "file",
-          event.altKey ? "move" : "copy",
+          dropOperationFromEvent(event),
         );
       }}
       title={row.entry.relPath}

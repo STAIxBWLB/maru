@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -7,6 +7,74 @@ test.beforeEach(async ({ page }) => {
     window.sessionStorage.setItem("anchor:e2e:storage-cleared", "true");
   });
 });
+
+async function dispatchDrag(
+  page: Page,
+  sourceSelector: string,
+  sourceLabel: string,
+  targetSelector: string,
+  targetLabel: string,
+  altKey = false,
+) {
+  await page.evaluate(
+    ({ sourceSelector, sourceLabel, targetSelector, targetLabel, altKey }) => {
+      const findByLabel = (selector: string, label: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>(selector)).find((element) => {
+          const text = element.textContent ?? "";
+          const aria = element.getAttribute("aria-label") ?? "";
+          const title = element.getAttribute("title") ?? "";
+          return text.includes(label) || aria.includes(label) || title.includes(label);
+        });
+      const source = findByLabel(sourceSelector, sourceLabel);
+      const target = findByLabel(targetSelector, targetLabel);
+      if (!source || !target) {
+        throw new Error(`Cannot dispatch drag from ${sourceLabel} to ${targetLabel}`);
+      }
+      const dataTransfer = new DataTransfer();
+      source.dispatchEvent(
+        new DragEvent("dragstart", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("dragenter", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("dragover", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      source.dispatchEvent(
+        new DragEvent("dragend", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+    },
+    { sourceSelector, sourceLabel, targetSelector, targetLabel, altKey },
+  );
+}
 
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
@@ -449,6 +517,91 @@ test("copies selected Files shelf items into a tree context target", async ({ pa
   await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
   await page.getByRole("button", { name: "선택 항목 2개 여기에 복사" }).click();
   await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+});
+
+test("drags a Documents list item into the right Files shelf", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "목록" }).click();
+  await page
+    .locator(".document-list .doc-row", { hasText: "Anchor 사업 주간 점검 회의" })
+    .dragTo(page.getByRole("tab", { name: "파일" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(
+    rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" }),
+  ).toBeVisible();
+});
+
+test("drags explorer items directly onto left tree targets", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await page
+    .locator(".document-list .tree-row.file", { hasText: "Anchor 사업 주간 점검 회의" })
+    .dragTo(page.locator(".document-list .tree-row.folder", { hasText: "references" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(1);
+});
+
+test("drags multi-selected Files rows and folder rows", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click({
+    modifiers: ["Meta"],
+  });
+
+  await page
+    .locator(".document-list .tree-row.file", { hasText: "anchor-weekly-meeting.md" })
+    .dragTo(page.locator(".document-list .tree-row.folder", { hasText: "attachments" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+  await rightPane.getByRole("button", { name: "전체 비우기" }).click();
+
+  await page
+    .locator(".document-list .tree-row.folder", { hasText: "attachments" })
+    .dragTo(page.getByRole("tab", { name: "파일" }));
+  await expect(
+    rightPane.locator(".right-list-item.queue", { hasText: "attachments" }),
+  ).toBeVisible();
+  await expect(rightPane.locator('.queue-file-icon[data-kind="directory"]')).toBeVisible();
+});
+
+test("blocks moving dirty open documents by drag and drop", async ({ page }) => {
+  await page.goto("/");
+
+  const textarea = page.locator("textarea.source-editor");
+  await textarea.fill(`${await textarea.inputValue()}\n\nUnsaved local edit`);
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await dispatchDrag(
+    page,
+    ".document-list .tree-row.file",
+    "Anchor 사업 주간 점검 회의",
+    ".document-list .tree-row.folder",
+    "references",
+    true,
+  );
+
+  await expect(page.locator(".toast")).toContainText("저장되지 않은 문서는 이동할 수 없습니다");
+  await expect(page.locator(".outline-pane .right-list-item.queue.done")).toHaveCount(0);
 });
 
 test("resizes document and right panes with drag handles", async ({ page }) => {

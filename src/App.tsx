@@ -100,6 +100,7 @@ import {
 } from "./lib/updater";
 import type {
   DocumentPayload,
+  FileQueueApplyOutcome,
   FileQueueItem,
   FileQueueSourceInfo,
   FileStoreOperation,
@@ -114,6 +115,12 @@ import type {
   WorkspaceRootEntry,
   WorkspaceVisibility,
 } from "./lib/types";
+import {
+  isSameParentMove,
+  targetDirForDropTarget,
+  type ExplorerDragItem,
+  type ExplorerDragPayload,
+} from "./lib/fileDrag";
 import {
   DEFAULT_ANCHOR_SETTINGS,
   normalizeAnchorSettings,
@@ -282,6 +289,60 @@ function initialStartupVisibility(
   const preferred = settings?.ui.activeWorkspaceVisibility;
   if (preferred && visibilityAvailable(registry, preferred)) return preferred;
   return defaultStartupVisibility(registry);
+}
+
+function fileQueueItemFromSource(
+  source: FileQueueSourceInfo,
+  targetDir: string,
+  operation: FileStoreOperation,
+  seed: number,
+  index: number,
+): FileQueueItem {
+  return {
+    id: `${seed}-${index}-${source.sourceKind}-${source.path}`,
+    sourcePath: source.path,
+    sourceKind: source.sourceKind,
+    sourceRelPath: source.sourceRelPath,
+    targetDir,
+    operation,
+    fileName: source.fileName,
+    status: "queued",
+    targetPath: null,
+    message: null,
+  };
+}
+
+function sourcesFromExplorerPayload(payload: ExplorerDragPayload): FileQueueSourceInfo[] {
+  return payload.items.map((item) => ({
+    path: item.path,
+    sourceRelPath: item.relPath,
+    fileName: item.fileName,
+    sourceKind: item.sourceKind,
+  }));
+}
+
+function dragItemContainsPath(item: ExplorerDragItem, path: string): boolean {
+  return item.sourceKind === "directory" ? path.startsWith(`${item.path}/`) : item.path === path;
+}
+
+function workspaceForTargetPath(
+  workspaces: WorkspaceRootEntry[],
+  targetPath: string,
+): WorkspaceRootEntry | null {
+  return (
+    workspaces
+      .filter(
+        (workspace) =>
+          targetPath === workspace.path || targetPath.startsWith(`${workspace.path}/`),
+      )
+      .sort((a, b) => b.path.length - a.path.length)[0] ?? null
+  );
+}
+
+function relativePathForWorkspace(workspacePath: string, targetPath: string): string {
+  return targetPath.startsWith(`${workspacePath}/`)
+    ? targetPath.slice(workspacePath.length + 1)
+    : targetPath;
 }
 
 export default function App() {
@@ -2078,6 +2139,7 @@ function MainApp() {
     ) => {
       if (sources.length === 0) return;
       const addedIds: string[] = [];
+      const seed = Date.now();
       setFileQueue((current) => {
         const existing = new Set(
           current
@@ -2089,20 +2151,9 @@ function MainApp() {
           const key = `${source.path}\u0000${targetDir}\u0000${source.sourceKind}`;
           if (existing.has(key)) continue;
           existing.add(key);
-          const id = `${Date.now()}-${additions.length}-${source.sourceKind}-${source.path}`;
-          addedIds.push(id);
-          additions.push({
-            id,
-            sourcePath: source.path,
-            sourceKind: source.sourceKind,
-            sourceRelPath: source.sourceRelPath,
-            targetDir,
-            operation,
-            fileName: source.fileName,
-            status: "queued",
-            targetPath: null,
-            message: null,
-          });
+          const item = fileQueueItemFromSource(source, targetDir, operation, seed, additions.length);
+          addedIds.push(item.id);
+          additions.push(item);
         }
         return additions.length > 0 ? [...current, ...additions] : current;
       });
@@ -2197,7 +2248,7 @@ function MainApp() {
 
   const applyQueuedFiles = useCallback(async (itemsOverride?: FileQueueItem[]) => {
     const queued = itemsOverride ?? fileQueue.filter((item) => item.status === "queued");
-    if (queued.length === 0) return;
+    if (queued.length === 0) return [];
     const groups = new Map<string, FileQueueItem[]>();
     for (const item of queued) {
       const owner = workspaceRegistry.workspaces
@@ -2208,7 +2259,7 @@ function MainApp() {
         .sort((a, b) => b.path.length - a.path.length)[0];
       if (!owner) {
         setError(t("workspace.error.noneActive"));
-        return;
+        return [];
       }
       const hasMove = item.operation === "move";
       const action = hasMove ? "renameMove" : "create";
@@ -2218,7 +2269,7 @@ function MainApp() {
             reason: workspaceWriteReason(owner, action) ?? "workspace capabilities",
           }),
         );
-        return;
+        return [];
       }
       const bucket = groups.get(owner.path) ?? [];
       bucket.push(item);
@@ -2226,7 +2277,7 @@ function MainApp() {
     }
     setError(null);
     try {
-      const outcomes = (
+      const outcomes: FileQueueApplyOutcome[] = (
         await Promise.all(
           Array.from(groups.entries()).map(([workspacePath, items]) =>
             applyFileQueue(workspacePath, items),
@@ -2256,6 +2307,7 @@ function MainApp() {
         const fresh = await scanVault(workspacePath);
         updateWorkspaceState(workspacePath, { entries: fresh });
       }
+      return outcomes;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const failedIds = itemsOverride ? new Set(itemsOverride.map((item) => item.id)) : null;
@@ -2267,6 +2319,7 @@ function MainApp() {
         ),
       );
       setError(message);
+      return [];
     }
   }, [
     fileQueue,
@@ -2845,6 +2898,138 @@ function MainApp() {
       return true;
     },
     [t, workspaceRegistry.workspaces],
+  );
+
+  const applyExplorerDragSourcesToDestination = useCallback(
+    async (
+      payload: ExplorerDragPayload,
+      targetPath: string,
+      targetKind: "file" | "directory",
+      operation: FileStoreOperation,
+    ) => {
+      const targetDir = targetDirForDropTarget(targetPath, targetKind);
+      const items =
+        operation === "move"
+          ? payload.items.filter((item) => !isSameParentMove(item, targetDir))
+          : payload.items;
+      if (items.length === 0) return;
+      if (operation === "move") {
+        const dirtyTab = tabs.find(
+          (tab) =>
+            tab.draftContent !== tab.document.content &&
+            items.some((item) => dragItemContainsPath(item, tab.document.path)),
+        );
+        if (dirtyTab) {
+          setError(
+            t("rightPane.files.moveDirtyBlocked", {
+              path: dirtyTab.document.relPath,
+            }),
+          );
+          return;
+        }
+      }
+      const seed = Date.now();
+      const queueItems = sourcesFromExplorerPayload({ ...payload, items }).map((source, index) =>
+        fileQueueItemFromSource(source, targetDir, operation, seed, index),
+      );
+      setFileQueue((current) => [...current, ...queueItems]);
+      setSelectedFileQueueItemIds(queueItems.map((item) => item.id));
+      setPersistedAppMode("pkm");
+      if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+      setPersistedRightPaneTab("files");
+      setError(null);
+      const outcomes = await applyQueuedFiles(queueItems);
+      if (operation !== "move" || outcomes.length === 0) return;
+
+      const outcomeBySource = new Map(outcomes.map((outcome) => [outcome.sourcePath, outcome]));
+      const movedByTabId = new Map<
+        string,
+        {
+          nextId: string;
+          workspace: WorkspaceRootEntry;
+          nextPath: string;
+          relPath: string;
+        }
+      >();
+      for (const tab of tabs) {
+        const moved = items
+          .map((item) => {
+            const outcome = outcomeBySource.get(item.path);
+            if (!outcome || !dragItemContainsPath(item, tab.document.path)) return null;
+            const nextPath =
+              item.sourceKind === "directory"
+                ? `${outcome.targetPath}/${tab.document.path.slice(item.path.length + 1)}`
+                : outcome.targetPath;
+            const workspace =
+              workspaceForTargetPath(workspaceRegistry.workspaces, nextPath) ??
+              workspaceRegistry.workspaces.find(
+                (candidate) => candidate.path === tab.workspacePath,
+              ) ??
+              null;
+            if (!workspace) return null;
+            return {
+              workspace,
+              nextPath,
+              relPath: relativePathForWorkspace(workspace.path, nextPath),
+            };
+          })
+          .find(Boolean);
+        if (!moved) continue;
+        movedByTabId.set(tab.id, {
+          ...moved,
+          nextId: tabIdForEntry({ ...tab.entry, path: moved.nextPath, relPath: moved.relPath }),
+        });
+      }
+      if (movedByTabId.size === 0) return;
+      setTabs((currentTabs) =>
+        currentTabs.map((tab) => {
+          const moved = movedByTabId.get(tab.id);
+          if (!moved) return tab;
+          const entry = {
+            ...tab.entry,
+            path: moved.nextPath,
+            relPath: moved.relPath,
+          };
+          return {
+            ...tab,
+            id: moved.nextId,
+            workspacePath: moved.workspace.path,
+            visibility: moved.workspace.visibility,
+            entry,
+            document: {
+              ...tab.document,
+              path: moved.nextPath,
+              relPath: moved.relPath,
+            },
+          };
+        }),
+      );
+      const replacements = new Map(
+        Array.from(movedByTabId.entries()).map(([tabId, moved]) => [tabId, moved.nextId]),
+      );
+      const replaceId = (id: string | null) => (id ? replacements.get(id) ?? id : id);
+      setActiveTabId((id) => replaceId(id));
+      setLeftActiveTabId((id) => replaceId(id));
+      setRightActiveTabId((id) => replaceId(id));
+      for (const item of movedByTabId.values()) {
+        pushRecent(item.nextPath);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(lastOpenKeyForWorkspace(item.workspace.path), item.relPath);
+        }
+      }
+    },
+    [
+      applyQueuedFiles,
+      lastOpenKeyForWorkspace,
+      outlineOpen,
+      pushRecent,
+      setPersistedAppMode,
+      setPersistedRightPaneTab,
+      t,
+      tabs,
+      updateLayoutSettings,
+      workspaceRegistry.workspaces,
+    ],
   );
 
   const closeTab = useCallback(
@@ -3965,6 +4150,14 @@ function MainApp() {
                 onApplyFileQueueToDestination={(targetPath, targetKind, operation) => {
                   void applySelectedFileQueueToDestination(targetPath, targetKind, operation);
                 }}
+                onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
+                  void applyExplorerDragSourcesToDestination(
+                    payload,
+                    targetPath,
+                    targetKind,
+                    operation,
+                  );
+                }}
               />
             ) : null}
             {documentsPaneOpen && anchorSettings.ui.explorerPaneMode === "files" ? (
@@ -4017,6 +4210,14 @@ function MainApp() {
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
                 onApplyFileQueueToDestination={(targetPath, targetKind, operation) => {
                   void applySelectedFileQueueToDestination(targetPath, targetKind, operation);
+                }}
+                onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
+                  void applyExplorerDragSourcesToDestination(
+                    payload,
+                    targetPath,
+                    targetKind,
+                    operation,
+                  );
                 }}
               />
             ) : null}
@@ -4092,6 +4293,7 @@ function MainApp() {
                 selectedFileQueueItemIds={selectedFileQueueItemIds}
                 onSelectFileQueueItem={selectFileQueueItem}
                 onQueueExternalFiles={queueExternalFiles}
+                onQueueFileSources={addFileQueueSources}
                 onApplyFileQueue={applyQueuedFiles}
                 onClearFileQueue={clearFileQueue}
                 onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
