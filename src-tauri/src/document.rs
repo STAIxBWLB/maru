@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Frontend-supplied value for a single frontmatter field. Untagged so React
@@ -60,6 +60,15 @@ pub struct VersionSnapshot {
     pub rel_path: String,
     pub title: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedDocument {
+    pub original_path: String,
+    pub original_rel_path: String,
+    pub trash_path: String,
+    pub trash_rel_path: String,
 }
 
 #[tauri::command]
@@ -212,6 +221,159 @@ fn validate_target_rel_path(target: &str) -> Result<String, String> {
     validate_filename_stem(stem)?;
 
     Ok(format!("{without_ext}.md"))
+}
+
+#[tauri::command]
+pub fn move_document(
+    vault_path: String,
+    document_path: String,
+    target_rel_path: String,
+) -> Result<DocumentPayload, String> {
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::RenameMove)?;
+    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    ensure_existing_document(&source_path)?;
+
+    let rel_path = validate_target_rel_path(&target_rel_path)?;
+    let target_path = resolve_inside_vault(&vault_path, &rel_path)?;
+    if paths_match(&source_path, &target_path) {
+        return read_document(vault_path, source_path.to_string_lossy().to_string());
+    }
+    if target_path.exists() {
+        return Err("A document already exists at that path".to_string());
+    }
+
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create target directory: {err}"))?;
+    }
+    move_file(&source_path, &target_path)?;
+
+    let payload = read_document(vault_path, target_path.to_string_lossy().to_string())?;
+    if payload.rel_path != relative(&target_path, &vault) {
+        return Err("Moved document resolved outside the selected workspace".to_string());
+    }
+    Ok(payload)
+}
+
+#[tauri::command]
+pub fn duplicate_document(
+    vault_path: String,
+    document_path: String,
+) -> Result<DocumentPayload, String> {
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Create)?;
+    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    ensure_existing_document(&source_path)?;
+    let target_path = unique_duplicate_path(&source_path);
+    fs::copy(&source_path, &target_path)
+        .map_err(|err| format!("Cannot duplicate document: {err}"))?;
+    read_document(vault_path, target_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn trash_document(
+    vault_path: String,
+    document_path: String,
+) -> Result<DeletedDocument, String> {
+    assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Delete)?;
+    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    ensure_existing_document(&source_path)?;
+    let original_rel_path = relative(&source_path, &vault);
+    let trash_path = unique_trash_path(&source_path, &vault)?;
+    if let Some(parent) = trash_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create trash directory: {err}"))?;
+    }
+    move_file(&source_path, &trash_path)?;
+    let trash_rel_path = relative(&trash_path, &vault);
+
+    Ok(DeletedDocument {
+        original_path: source_path.to_string_lossy().to_string(),
+        original_rel_path,
+        trash_path: trash_path.to_string_lossy().to_string(),
+        trash_rel_path,
+    })
+}
+
+fn ensure_existing_document(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err("Document file does not exist".to_string());
+    }
+    if !path.is_file() {
+        return Err("Document path is not a file".to_string());
+    }
+    Ok(())
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    left == right || left.canonicalize().ok() == right.canonicalize().ok()
+}
+
+fn move_file(source_path: &Path, target_path: &Path) -> Result<(), String> {
+    match fs::rename(source_path, target_path) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            fs::copy(source_path, target_path).map_err(|copy_err| {
+                format!("Cannot move document: {rename_err}; copy fallback failed: {copy_err}")
+            })?;
+            fs::remove_file(source_path)
+                .map_err(|remove_err| format!("Cannot remove original after move: {remove_err}"))
+        }
+    }
+}
+
+fn unique_duplicate_path(source_path: &Path) -> PathBuf {
+    let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document");
+    let mut counter = 1;
+    loop {
+        let suffix = if counter == 1 {
+            "-copy".to_string()
+        } else {
+            format!("-copy-{counter}")
+        };
+        let candidate = parent.join(format!("{stem}{suffix}.md"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
+fn unique_trash_path(source_path: &Path, vault: &Path) -> Result<PathBuf, String> {
+    let original_rel_parent = source_path
+        .strip_prefix(vault)
+        .unwrap_or(source_path)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document");
+    let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
+    let trash_dir = vault
+        .join(".anchor")
+        .join("trash")
+        .join("documents")
+        .join(original_rel_parent);
+    let base = format!("{stem}-{timestamp}");
+    for counter in 1.. {
+        let file_name = if counter == 1 {
+            format!("{base}.md")
+        } else {
+            format!("{base}-{counter}.md")
+        };
+        let candidate = trash_dir.join(file_name);
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err("Cannot allocate trash path".to_string())
 }
 
 #[tauri::command]
@@ -486,5 +648,96 @@ mod tests {
             Some("projects/CON".to_string()),
         );
         assert!(reserved.is_err());
+    }
+
+    #[test]
+    fn move_document_moves_nested_document_and_returns_payload() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let source = tmp.path().join("notes").join("weekly.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Weekly\n\nbody\n").unwrap();
+
+        let payload = move_document(
+            root,
+            "notes/weekly.md".to_string(),
+            "archive/weekly-renamed".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(payload.rel_path, "archive/weekly-renamed.md");
+        assert_eq!(payload.content, "# Weekly\n\nbody\n");
+        assert!(!source.exists());
+        assert!(tmp
+            .path()
+            .join("archive")
+            .join("weekly-renamed.md")
+            .exists());
+    }
+
+    #[test]
+    fn move_document_rejects_unsafe_and_existing_targets() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("source.md"), "# Source\n").unwrap();
+        fs::write(tmp.path().join("existing.md"), "# Existing\n").unwrap();
+
+        let traversal = move_document(
+            root.clone(),
+            "source.md".to_string(),
+            "../outside.md".to_string(),
+        );
+        assert!(traversal.is_err());
+
+        let invalid = move_document(
+            root.clone(),
+            "source.md".to_string(),
+            "notes/bad:name.md".to_string(),
+        );
+        assert!(invalid.is_err());
+
+        let overwrite = move_document(root, "source.md".to_string(), "existing.md".to_string());
+        assert!(overwrite.is_err());
+        assert!(tmp.path().join("source.md").exists());
+        assert!(tmp.path().join("existing.md").exists());
+    }
+
+    #[test]
+    fn duplicate_document_creates_unique_copy_and_preserves_bytes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original = b"---\ntype: reference\n---\n# Binary-ish bytes\n\x00\x01\n";
+        fs::write(tmp.path().join("source.md"), original).unwrap();
+        fs::write(tmp.path().join("source-copy.md"), b"existing").unwrap();
+
+        let payload = duplicate_document(root, "source.md".to_string()).unwrap();
+
+        assert_eq!(payload.rel_path, "source-copy-2.md");
+        assert_eq!(
+            fs::read(tmp.path().join("source-copy-2.md")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn trash_document_moves_to_anchor_trash_and_removes_source() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let source = tmp.path().join("meetings").join("weekly.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Weekly\n").unwrap();
+
+        let deleted = trash_document(root, "meetings/weekly.md".to_string()).unwrap();
+
+        assert_eq!(deleted.original_rel_path, "meetings/weekly.md");
+        assert!(!source.exists());
+        assert!(deleted
+            .trash_rel_path
+            .starts_with(".anchor/trash/documents/meetings/weekly-"));
+        assert!(Path::new(&deleted.trash_path).exists());
+        assert_eq!(
+            fs::read_to_string(deleted.trash_path).unwrap(),
+            "# Weekly\n"
+        );
     }
 }

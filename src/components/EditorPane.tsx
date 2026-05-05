@@ -10,7 +10,7 @@ import {
   Save,
   X,
 } from "lucide-react";
-import { forwardRef, useCallback, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { documentStats } from "../lib/document";
 import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
@@ -24,8 +24,13 @@ export type EditorViewMode = "rich" | "source" | "preview";
 export interface EditorTabSummary {
   id: string;
   title: string;
+  path: string;
   relPath: string;
   dirty: boolean;
+  canRenameMove: boolean;
+  canCreate: boolean;
+  canDelete: boolean;
+  writeBlockedReason: string | null;
 }
 
 interface EditorPaneProps {
@@ -47,7 +52,20 @@ interface EditorPaneProps {
   onChange: (content: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onCloseOtherTabs: (tabId: string) => void;
+  onCloseTabsToRight: (tabId: string) => void;
+  onCloseSavedTabs: () => void;
   onCloseAllTabs: () => void;
+  onCopyTabName: (tabId: string) => void;
+  onCopyTabPath: (tabId: string) => void;
+  onCopyTabRelativePath: (tabId: string) => void;
+  onRenameTab: (tabId: string) => void;
+  onMoveTab: (tabId: string) => void;
+  onDuplicateTab: (tabId: string) => void;
+  onDeleteTab: (tabId: string) => void;
+  onOpenTabPreview: (tabId: string) => void;
+  onRevealTabInFinder: (tabId: string) => void;
+  onRevealTabInExplorer: (tabId: string) => void;
   onSave: () => void;
   onSnapshot: () => void;
   onSplitRight: () => void;
@@ -78,7 +96,20 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onChange,
     onSelectTab,
     onCloseTab,
+    onCloseOtherTabs,
+    onCloseTabsToRight,
+    onCloseSavedTabs,
     onCloseAllTabs,
+    onCopyTabName,
+    onCopyTabPath,
+    onCopyTabRelativePath,
+    onRenameTab,
+    onMoveTab,
+    onDuplicateTab,
+    onDeleteTab,
+    onOpenTabPreview,
+    onRevealTabInFinder,
+    onRevealTabInExplorer,
     onSave,
     onSnapshot,
     onSplitRight,
@@ -94,6 +125,11 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const stats = documentStats(document, draftContent);
   const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const taRef = textareaRef ?? localTextareaRef;
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    tab: EditorTabSummary;
+  } | null>(null);
 
   const { handlers: autocompleteHandlers, popup: autocompletePopup } =
     useWikilinkAutocomplete({
@@ -120,6 +156,31 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     },
     [onWikilinkClick],
   );
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
+  const runTabAction = useCallback(
+    (handler: (tabId: string) => void) => {
+      const tabId = contextMenu?.tab.id;
+      setContextMenu(null);
+      if (tabId) handler(tabId);
+    },
+    [contextMenu],
+  );
+
+  const mutationDisabledTitle = contextMenu?.tab.writeBlockedReason ?? undefined;
 
   if (openingEntry && openingEntry.path !== document?.path) {
     return (
@@ -160,6 +221,11 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             className={tab.id === activeTabId ? "document-tab active" : "document-tab"}
             key={tab.id}
             title={tab.relPath}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({ x: event.clientX, y: event.clientY, tab });
+            }}
           >
             <button
               type="button"
@@ -203,6 +269,89 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
         </div>
       </div>
+      {contextMenu ? (
+        <div
+          className="context-menu document-tab-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="context-menu-title" title={contextMenu.tab.relPath}>
+            {contextMenu.tab.title}
+          </div>
+          <button type="button" onClick={() => runTabAction(onCloseTab)}>
+            <span>{t("editor.tabs.menu.close")}</span>
+            <span className="context-menu-shortcut" aria-hidden="true">
+              ⌘W
+            </span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCloseOtherTabs)}>
+            <span>{t("editor.tabs.menu.closeOthers")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCloseTabsToRight)}>
+            <span>{t("editor.tabs.menu.closeRight")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCloseSavedTabs)}>
+            <span>{t("editor.tabs.menu.closeSaved")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCloseAllTabs)}>
+            <span>{t("editor.tabs.menu.closeAllSaved")}</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button type="button" onClick={() => runTabAction(onCopyTabName)}>
+            <span>{t("editor.tabs.menu.copyName")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCopyTabPath)}>
+            <span>{t("editor.tabs.menu.copyPath")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onCopyTabRelativePath)}>
+            <span>{t("editor.tabs.menu.copyRelativePath")}</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            type="button"
+            disabled={!contextMenu.tab.canRenameMove}
+            title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
+            onClick={() => runTabAction(onRenameTab)}
+          >
+            <span>{t("editor.tabs.menu.rename")}</span>
+          </button>
+          <button
+            type="button"
+            disabled={!contextMenu.tab.canRenameMove}
+            title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
+            onClick={() => runTabAction(onMoveTab)}
+          >
+            <span>{t("editor.tabs.menu.move")}</span>
+          </button>
+          <button
+            type="button"
+            disabled={!contextMenu.tab.canCreate}
+            title={!contextMenu.tab.canCreate ? mutationDisabledTitle : undefined}
+            onClick={() => runTabAction(onDuplicateTab)}
+          >
+            <span>{t("editor.tabs.menu.duplicate")}</span>
+          </button>
+          <button
+            type="button"
+            className="danger"
+            disabled={!contextMenu.tab.canDelete}
+            title={!contextMenu.tab.canDelete ? mutationDisabledTitle : undefined}
+            onClick={() => runTabAction(onDeleteTab)}
+          >
+            <span>{t("editor.tabs.menu.delete")}</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button type="button" onClick={() => runTabAction(onOpenTabPreview)}>
+            <span>{t("editor.tabs.menu.openPreview")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onRevealTabInFinder)}>
+            <span>{t("editor.tabs.menu.revealFinder")}</span>
+          </button>
+          <button type="button" onClick={() => runTabAction(onRevealTabInExplorer)}>
+            <span>{t("editor.tabs.menu.revealExplorer")}</span>
+          </button>
+        </div>
+      ) : null}
       <header className="editor-topbar">
         <div className="breadcrumb" title={document.relPath}>
           {activeWorkspaceLabel ? (

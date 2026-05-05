@@ -36,6 +36,13 @@ export interface CreatedDocument {
   title: string;
 }
 
+export interface DeletedDocument {
+  originalPath: string;
+  originalRelPath: string;
+  trashPath: string;
+  trashRelPath: string;
+}
+
 export type WorkspaceVisibility = "private" | "public";
 export type WorkspaceProvider =
   | "local"

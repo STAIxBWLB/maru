@@ -3,8 +3,8 @@
 // retarget the inbox root (`inbox/downloads` by default) and restrict
 // which subdirectories are recognized as classification sources.
 //
-// Schema is intentionally tiny — anything richer belongs in a future
-// settings.json. Missing or unreadable file → defaults.
+// Schema is intentionally tiny — anything richer belongs in the broader
+// layered settings model. Missing or unreadable file → defaults.
 
 use std::fs;
 use std::path::{Path, PathBuf};

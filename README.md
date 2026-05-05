@@ -11,7 +11,7 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
-| 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `.anchor/settings.json` stores theme/accent/layout/window size/split/terminal defaults, Explorer mode/filter state, Binary include patterns, expanded folder state, and queue defaults plus future AI, inbox-channel, and connector placeholders. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
+| 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.anchor/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.anchor/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
 | 3 — Built-in Skills + Hub connector | 📋 planned | Command-palette skills plus a read-only connector to the separate `anchor-hub` service. |
 | 4 — Document Edit Mode | 📋 planned | |
 
@@ -23,7 +23,7 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
 2. **Gmail accept/reject action** — call `gws` to apply Anchor labels and archive accepted mail. Rejected mail should be labelled or left unread until the policy is chosen.
 3. **Keyboard accept loop** — add focused inbox selection plus `a` / `r` actions so the button-only UI becomes the promised one-keystroke flow.
 4. **Real-workspace verification** — verify dropped files, a real unread mail item, Claude classification, and accept/reject in one Tauri session.
-5. **Phase 3 bridge prep** — the Claude inbox bridge, integrated terminal, and `.anchor/settings.json` terminal defaults are in place; next is wiring skills to the command palette with accept/reject diffs.
+5. **Phase 3 bridge prep** — the Claude inbox bridge, integrated terminal, and `~/.anchor/settings.json` terminal defaults are in place; next is wiring skills to the command palette with accept/reject diffs.
 6. **Hub connector POC** — keep shared workflow, evidence, KPI, and submission-gate features in the separate `anchor-hub` repo; Anchor only stores a connector endpoint and calls hub APIs/MCP tools when the user explicitly asks.
 
 ## Architecture
@@ -49,7 +49,7 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
 │                                                               │
 │   inbox.rs / inbox_watcher.rs / korean_date.rs               │
 │   inbox_classifier.rs / gmail_gws.rs / ai_router.rs / terminal.rs │
-│   anchor_dir.rs  — .anchor settings/rules/templates/catalogs  │
+│   anchor_dir.rs  — layered settings + .anchor rules/templates/catalogs │
 │   Phase 3+: + skill_host.rs                                  │
 │   Phase 4+: + whisper bridge / mcp lifecycle                 │
 └──────┬─────────────────────────────────────────────────────┘
@@ -61,7 +61,7 @@ Phase 2 has crossed the read-only boundary. The next work is the smallest safe w
 ```
 
 **Module boundary rules**:
-- Rust core **owns** workspace FS / cache / git / frontmatter / inbox scan/watch/classification / Gmail `gws` bridge / `.anchor/settings.json` / Claude inbox subprocess / integrated terminal PTY sessions.
+- Rust core **owns** workspace FS / cache / git / frontmatter / inbox scan/watch/classification / Gmail `gws` bridge / layered Anchor settings (`~/.anchor/settings.json` + `.anchor/workspace-state.json`) / Claude inbox subprocess / integrated terminal PTY sessions.
 - React handles **only** BlockNote / command palette / neighborhood / gesture worker / AudioWorklet. No business logic.
 - Node sidecar holds the MCP server + marketplace (Phase 3+).
 - Python sidecar holds Whisper only (Phase 4). HWPX is delegated to the user's `hwpx` Claude Code skill — not rewritten.
@@ -100,7 +100,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 **Tree + Cursor shell + integrated terminal add-on (✓ shipped)**:
 
 1. **Documents / Files Explorer** — the Explorer pane has a top Documents/Files switch. Documents keeps list/tree mode, folder-first sorting, default-collapsed folders, search/type-filter auto-expansion, per-visibility user-expanded folders, collapse/expand-all, and a Reveal in Finder context menu for files/folders. Files always uses a VS Code-style tree with workspace-safe scanning, `.anchorignore`, All/Git tracked/Binary filters, search, collapse/expand, multi-select, path copy, reveal, and add-to-queue actions. Binary mode shows only files matching the workspace setting's include patterns by default.
-2. **Workspace settings** — `.anchor/settings.json` carries UI defaults, theme/accent, panel/window layout state, terminal defaults, launcher preferences, Explorer mode/filter state, Binary include patterns, expanded folder state, file-queue defaults, and placeholders for AI providers, inbox channels, and connectors. `.anchor/mcp.json` and `.anchor/skills.json` remain their own SSOT files.
+2. **Layered settings** — `~/.anchor/settings.json` carries user/global UI defaults, theme/accent, panel/window/split layout state, terminal defaults, launcher preferences, Explorer display defaults, file-queue defaults, and AI defaults. `<workspace>/.anchor/workspace-state.json` carries workspace-only state and overrides such as collapsed document/file folders, initialization flags, Binary include patterns, inbox channel overrides, and connector overrides. Existing `<workspace>/.anchor/settings.json` is read as a legacy migration source only and is not created for new workspaces. `.anchor/mcp.json` and `.anchor/skills.json` remain their own SSOT files.
 3. **Cursor-style shell** — the main app uses a left activity rail for Docs / Inbox / Settings, a single tabbed Explorer pane, central editor tabs, and a collapsible bottom terminal panel.
 4. **Split panes and tab controls** — `⌘D` splits the active document pane to the right by reusing the same draft buffer, and splits the terminal by starting a fresh PTY with the same launcher profile. The document tab row can close all clean tabs while preserving dirty drafts.
 5. **Right utility pane** — the right pane now has a right-edge icon rail for Outline / Files / Memo / Info. Files is an operation queue: selections from the Files Explorer or external files are staged with copy/move, destination folder, conflict name/status, and an explicit Apply/Clear loop. Memos default to `.anchor/memos/`, support plain text or markdown, expose a memo list, and can be saved elsewhere via Save As.
@@ -143,7 +143,7 @@ Five skills:
 
 **Anchor Hub connector POC**:
 - `anchor-hub` is a separate public web/API service, not part of the desktop app. It owns shared program data, evidence reuse, KPI status, submission gates, RBAC-shaped access checks, and audit trails.
-- Anchor remains local-first. It stores non-secret connector metadata in `.anchor/settings.json` or `.anchor/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
+- Anchor remains local-first. It stores global connector defaults in `~/.anchor/settings.json` and workspace connector overrides in `.anchor/workspace-state.json` or `.anchor/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
 - V1 connector calls are read-first: search shared context, find reusable evidence, fetch KPI status, and create a pending submission gate. Direct remote writes wait for an explicit approval flow.
 - Public POC sample data must be synthetic. Do not include real organization names, domains, people, internal project names, or private documents in fixtures, screenshots, logs, or README examples.
 
@@ -307,16 +307,25 @@ paths:
       role: Can view
 ```
 
-Anchor stores per-workspace state at:
+Anchor stores user/global preferences at:
+
+```
+~/.anchor/
+  settings.json    # UI/theme/layout/window/split/terminal/explorer/file-queue/AI defaults
+```
+
+Anchor stores workspace-local state and resources at:
 
 ```
 <workspace>/
   .anchor/
     cache/           # disposable workspace index for warm startup
-    settings.json    # anchor UI/theme/layout/window/terminal defaults
+    workspace-state.json # collapsed folders, initialization flags, binary patterns, overrides
     versions/        # snapshots created via the "Version" button
   .anchorignore      # optional, gitignore-style segment patterns
 ```
+
+`<workspace>/.anchor/settings.json` is a legacy migration input only. Anchor reads it when present to build effective settings, but new workspaces do not get that file.
 
 `.anchorignore` example for the user's `~/workspace/work`:
 

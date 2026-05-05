@@ -1,5 +1,6 @@
 import type {
   CreatedDocument,
+  DeletedDocument,
   DocumentPayload,
   InboxDropItem,
   VaultEntry,
@@ -128,9 +129,91 @@ export function mockWorkspaceFiles(rootPath = MOCK_VAULT_PATH): WorkspaceFileEnt
 }
 
 export function readMockDocument(path: string): DocumentPayload {
-  const found = mockDocuments.find((doc) => doc.path === path || doc.relPath === path);
+  const found = findMockDocument(path);
   if (!found) return mockDocuments[0];
   return found;
+}
+
+export function mockMoveDocument(
+  documentPath: string,
+  targetRelPath: string,
+): DocumentPayload {
+  const found = findMockDocument(documentPath);
+  if (!found) throw new Error("Document file does not exist");
+  const relPath = normalizeMockTargetRelPath(targetRelPath);
+  if (mockDocuments.some((doc) => doc.relPath === relPath && doc !== found)) {
+    throw new Error("A document already exists at that path");
+  }
+  const rootPath = mockRootForPath(documentPath, found.relPath, found.path);
+  found.relPath = relPath;
+  found.path = `${rootPath}/${relPath}`;
+  found.fileKind = "md";
+  return found;
+}
+
+export function mockDuplicateDocument(documentPath: string): DocumentPayload {
+  const found = findMockDocument(documentPath);
+  if (!found) throw new Error("Document file does not exist");
+  const rootPath = mockRootForPath(documentPath, found.relPath, found.path);
+  const folder = found.relPath.includes("/")
+    ? `${found.relPath.split("/").slice(0, -1).join("/")}/`
+    : "";
+  const stem = (found.relPath.split("/").pop() ?? "document").replace(/\.(md|markdown)$/i, "");
+  let counter = 1;
+  let relPath = "";
+  do {
+    relPath = `${folder}${stem}${counter === 1 ? "-copy" : `-copy-${counter}`}.md`;
+    counter += 1;
+  } while (mockDocuments.some((doc) => doc.relPath === relPath));
+  const next: DocumentPayload = {
+    ...found,
+    path: `${rootPath}/${relPath}`,
+    relPath,
+    fileKind: "md",
+  };
+  mockDocuments.push(next);
+  return next;
+}
+
+export function mockTrashDocument(documentPath: string): DeletedDocument {
+  const found = findMockDocument(documentPath);
+  if (!found) throw new Error("Document file does not exist");
+  const rootPath = mockRootForPath(documentPath, found.relPath, found.path);
+  const index = mockDocuments.indexOf(found);
+  if (index >= 0) mockDocuments.splice(index, 1);
+  const parts = found.relPath.split("/");
+  const fileName = parts.pop() ?? "document.md";
+  const folder = parts.length > 0 ? `${parts.join("/")}/` : "";
+  const stem = fileName.replace(/\.(md|markdown)$/i, "");
+  const trashRelPath = `.anchor/trash/documents/${folder}${stem}-${Date.now()}.md`;
+  return {
+    originalPath: found.path,
+    originalRelPath: found.relPath,
+    trashPath: `${rootPath}/${trashRelPath}`,
+    trashRelPath,
+  };
+}
+
+function findMockDocument(path: string): DocumentPayload | undefined {
+  return mockDocuments.find(
+    (doc) => doc.path === path || doc.relPath === path || path.endsWith(`/${doc.relPath}`),
+  );
+}
+
+function mockRootForPath(path: string, relPath: string, fallbackPath: string): string {
+  if (path.endsWith(`/${relPath}`)) {
+    return path.slice(0, -relPath.length - 1);
+  }
+  if (fallbackPath.endsWith(`/${relPath}`)) {
+    return fallbackPath.slice(0, -relPath.length - 1);
+  }
+  return MOCK_VAULT_PATH;
+}
+
+function normalizeMockTargetRelPath(targetRelPath: string): string {
+  const trimmed = targetRelPath.trim().replace(/^\/+|\/+$/g, "");
+  if (!trimmed || trimmed.includes("..")) throw new Error("Invalid document path");
+  return trimmed.replace(/\.(md|markdown)$/i, "") + ".md";
 }
 
 export function mockCreateDocument(

@@ -1,5 +1,6 @@
-// Thin wrappers around the Rust commands that own `<work>/.anchor/`
-// (workspace registration + System mode). Mirrors the pattern in `api.ts`:
+// Thin wrappers around the Rust commands that own layered settings plus
+// `<work>/.anchor/` workspace resources (workspace registration + System mode).
+// Mirrors the pattern in `api.ts`:
 // browser-dev fallbacks return inert no-ops so the React layer can be
 // exercised without the Tauri shell.
 
@@ -41,6 +42,13 @@ export const ANCHOR_SETTINGS_UPDATED_EVENT = "anchor://settings-updated";
 export interface AnchorSettingsUpdatedPayload {
   workPath: string;
   settings: AnchorSettings;
+  globalChanged?: boolean;
+  workspaceChanged?: boolean;
+}
+
+interface AnchorSettingsSaveOutcome {
+  globalChanged: boolean;
+  workspaceChanged: boolean;
 }
 
 // === Workspace detection / pairing ===
@@ -213,8 +221,10 @@ export async function readAnchorSettings(workPath: string): Promise<AnchorSettin
 export async function saveAnchorSettings(
   workPath: string,
   value: AnchorSettings,
+  baseValue?: AnchorSettings,
 ): Promise<void> {
   const normalized = normalizeAnchorSettings(value);
+  const normalizedBase = baseValue ? normalizeAnchorSettings(baseValue) : undefined;
   if (!isTauri()) {
     window.localStorage.setItem(
       `${SETTINGS_FALLBACK_KEY}:${workPath}`,
@@ -222,16 +232,27 @@ export async function saveAnchorSettings(
     );
     window.dispatchEvent(
       new CustomEvent<AnchorSettingsUpdatedPayload>(ANCHOR_SETTINGS_UPDATED_EVENT, {
-        detail: { workPath, settings: normalized },
+        detail: {
+          workPath,
+          settings: normalized,
+          globalChanged: true,
+          workspaceChanged: true,
+        },
       }),
     );
     return;
   }
-  await invoke("save_anchor_settings", {
+  const outcome = await invoke<AnchorSettingsSaveOutcome>("save_anchor_settings", {
     workPath,
     value: serializeAnchorSettings(normalized),
+    baseValue: normalizedBase ? serializeAnchorSettings(normalizedBase) : null,
   });
-  await emitAnchorSettingsUpdated({ workPath, settings: normalized });
+  await emitAnchorSettingsUpdated({
+    workPath,
+    settings: normalized,
+    globalChanged: outcome.globalChanged,
+    workspaceChanged: outcome.workspaceChanged,
+  });
 }
 
 export async function listenAnchorSettingsUpdated(
@@ -295,8 +316,8 @@ export async function applySysImport(
 // === Helpers (frontend only) ===
 
 /**
- * Identify the private workspace root. Used by the frontend to decide
- * where System mode should store `.anchor/` settings.
+ * Identify the private workspace root. Used by the frontend to decide where
+ * System mode should store workspace-local `.anchor/` resources and state.
  */
 export function findPrivateWorkspaceEntry(registry: WorkspaceRegistry): WorkspaceRootEntry | null {
   const active = registry.activeByVisibility.private;

@@ -4,15 +4,19 @@ import {
   MOCK_VAULT_PATH,
   mockCreateDocument,
   mockCreateVersion,
+  mockDuplicateDocument,
   mockEntries,
   mockInboxDropItems,
+  mockMoveDocument,
   mockSetActiveWorkspaceRoot,
+  mockTrashDocument,
   mockWorkspaceFiles,
   mockWorkspaceRegistry,
   readMockDocument,
 } from "./fixtures";
 import type {
   CreatedDocument,
+  DeletedDocument,
   DocumentPayload,
   FileQueueApplyItem,
   FileQueueApplyOutcome,
@@ -186,6 +190,35 @@ export async function createVersion(
     content,
     summary,
   });
+}
+
+export async function moveDocument(
+  vaultPath: string,
+  documentPath: string,
+  targetRelPath: string,
+): Promise<DocumentPayload> {
+  if (!isTauri()) return mockMoveDocument(documentPath, targetRelPath);
+  return invoke<DocumentPayload>("move_document", {
+    vaultPath,
+    documentPath,
+    targetRelPath,
+  });
+}
+
+export async function duplicateDocument(
+  vaultPath: string,
+  documentPath: string,
+): Promise<DocumentPayload> {
+  if (!isTauri()) return mockDuplicateDocument(documentPath);
+  return invoke<DocumentPayload>("duplicate_document", { vaultPath, documentPath });
+}
+
+export async function trashDocument(
+  vaultPath: string,
+  documentPath: string,
+): Promise<DeletedDocument> {
+  if (!isTauri()) return mockTrashDocument(documentPath);
+  return invoke<DeletedDocument>("trash_document", { vaultPath, documentPath });
 }
 
 // === Workspace registry ===

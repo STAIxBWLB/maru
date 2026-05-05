@@ -77,6 +77,13 @@ test("switches between public provider roots and gates read-only actions", async
   await expect(page.getByRole("button", { name: "스냅샷" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "새 문서" })).toBeDisabled();
+
+  await page.locator(".document-tab.active").click({ button: "right" });
+  const menu = page.locator(".document-tab-context-menu");
+  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "이동..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "복제..." })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "삭제" })).toBeDisabled();
 });
 
 test("restores direct write policy when leaving Obsidian provider", async ({ page }) => {
@@ -141,6 +148,105 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "경로 복사", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+});
+
+test("shows supported document tab menu items and performs file operations", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
+
+  const glossaryTab = page.locator(".document-tab[title='references/anchor-glossary.md']");
+  await expect(glossaryTab).toBeVisible();
+  await glossaryTab.click({ button: "right" });
+
+  const menu = page.locator(".document-tab-context-menu");
+  await expect(menu.getByRole("button", { name: "닫기", exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "다른 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "오른쪽 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "저장된 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "이름 복사" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "이동..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "복제..." })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "삭제" })).toBeEnabled();
+  await expect(menu.getByRole("button", { name: "미리보기 열기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Explorer View에서 보기" })).toBeVisible();
+  await expect(menu).not.toContainText("Remote URL");
+  await expect(menu).not.toContainText("Share");
+  await expect(menu).not.toContainText("Open Changes");
+  await expect(menu).not.toContainText("File History");
+  await expect(menu).not.toContainText("Reopen Editor With");
+
+  await menu.getByRole("button", { name: "복제..." }).click();
+  const copyTab = page.locator(".document-tab[title='references/anchor-glossary-copy.md']");
+  await expect(copyTab).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("prompt");
+    await dialog.accept("anchor-glossary-renamed");
+  });
+  await copyTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "이름 변경..." })
+    .click();
+  const renamedTab = page.locator(".document-tab[title='references/anchor-glossary-renamed.md']");
+  await expect(renamedTab).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("prompt");
+    await dialog.accept("moved/anchor-glossary-renamed.md");
+  });
+  await renamedTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "이동..." })
+    .click();
+  const movedTab = page.locator(".document-tab[title='moved/anchor-glossary-renamed.md']");
+  await expect(movedTab).toBeVisible();
+  await expect(page.locator("textarea.source-editor")).toHaveValue(/# Anchor 용어집/);
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    await dialog.accept();
+  });
+  await movedTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "삭제" })
+    .click();
+  await expect(movedTab).toHaveCount(0);
+  await expect(page.locator(".toast", { hasText: ".anchor/trash/documents/moved/" })).toBeVisible();
+});
+
+test("suppresses native context menus outside document surfaces", async ({ page }) => {
+  await page.goto("/");
+
+  const topbarPrevented = await page.locator(".topbar").evaluate((node) => {
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+    return !node.dispatchEvent(event);
+  });
+  expect(topbarPrevented).toBe(true);
+
+  const editorPrevented = await page.locator("textarea.source-editor").evaluate((node) => {
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+    return !node.dispatchEvent(event);
+  });
+  expect(editorPrevented).toBe(false);
 });
 
 test("switches between Documents and Files explorer modes", async ({ page }) => {
@@ -239,6 +345,68 @@ test("resizes document and right panes with drag handles", async ({ page }) => {
   expect(resizedOutlineBox).not.toBeNull();
   if (!resizedOutlineBox) return;
   expect(resizedOutlineBox.width).toBeGreaterThan(initialOutlineBox.width + 35);
+});
+
+test("keeps split source editors constrained to their pane widths", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await page.getByLabel("오른쪽으로 분할").first().click();
+
+  const panes = page.locator(".editor-split-shell.split .editor-pane");
+  await expect(panes).toHaveCount(2);
+  await expect(page.locator(".editor-split-shell.split textarea.source-editor")).toHaveCount(2);
+
+  for (let i = 0; i < 2; i += 1) {
+    const paneBox = await panes.nth(i).boundingBox();
+    const editorBox = await panes.nth(i).locator("textarea.source-editor").boundingBox();
+    expect(paneBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    if (!paneBox || !editorBox) return;
+    expect(editorBox.x).toBeGreaterThanOrEqual(paneBox.x - 1);
+    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(paneBox.x + paneBox.width + 1);
+  }
+});
+
+test("keeps document list rows from overlapping in list mode", async ({ page }) => {
+  await page.goto("/");
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "목록" }).click();
+  const rows = documentList.locator(".virtual-list-row.entry");
+  await expect(rows.first()).toBeVisible();
+  await expect(rows.nth(1)).toBeVisible();
+
+  const first = await rows.nth(0).boundingBox();
+  const second = await rows.nth(1).boundingBox();
+  const firstCard = await rows.nth(0).locator(".doc-row").boundingBox();
+  const secondCard = await rows.nth(1).locator(".doc-row").boundingBox();
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(firstCard).not.toBeNull();
+  expect(secondCard).not.toBeNull();
+  if (!first || !second || !firstCard || !secondCard) return;
+
+  expect(first.y + first.height).toBeLessThanOrEqual(second.y + 1);
+  expect(firstCard.y + firstCard.height).toBeLessThanOrEqual(secondCard.y + 1);
+});
+
+test("places the right pane active marker on the rail edge", async ({ page }) => {
+  await page.goto("/");
+
+  const activeTab = page.locator(".right-pane-tabs button.active").first();
+  await expect(activeTab).toBeVisible();
+  const marker = await activeTab.evaluate((node) => {
+    const style = window.getComputedStyle(node, "::before");
+    return {
+      left: style.left,
+      right: style.right,
+      width: style.width,
+    };
+  });
+
+  expect(marker.right).not.toBe("auto");
+  expect(marker.width).toBe("2px");
 });
 
 test("centers the empty editor placeholder", async ({ page }) => {

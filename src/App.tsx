@@ -33,10 +33,12 @@ import {
   createDocument,
   createVersion,
   DEFAULT_INBOX_SETTINGS,
+  duplicateDocument,
   fetchGmailUnread,
   getSampleVaultPath,
   gitStatus,
   listWorkspaceRoots,
+  moveDocument,
   readDocument,
   revealInFileManager,
   readInboxSettings,
@@ -51,6 +53,7 @@ import {
   setActiveWorkspaceRoot,
   startInboxWatcher,
   stopInboxWatcher,
+  trashDocument,
   updateFrontmatterField,
 } from "./lib/api";
 import {
@@ -63,6 +66,12 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import {
+  replaceEditorTabIds,
+  tabIdsToCloseOthers,
+  tabIdsToCloseRight,
+  tabIdsToCloseSaved,
+} from "./lib/editorTabActions";
 import {
   buildDocumentIndex,
   getRecentEntries,
@@ -222,12 +231,28 @@ function titleFromWikilinkTarget(target: string): string {
 }
 
 export default function App() {
+  useSuppressNativeContextMenu();
   const params =
     typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   if (params?.get("window") === "settings") {
     return <SettingsWindowRoot workPath={params.get("workPath")} />;
   }
   return <MainApp />;
+}
+
+function useSuppressNativeContextMenu() {
+  useEffect(() => {
+    const suppressUnhandledContextMenu = (event: MouseEvent) => {
+      if (event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(".editor-pane")) return;
+      event.preventDefault();
+    };
+    window.document.addEventListener("contextmenu", suppressUnhandledContextMenu);
+    return () => {
+      window.document.removeEventListener("contextmenu", suppressUnhandledContextMenu);
+    };
+  }, []);
 }
 
 function SettingsWindowRoot({ workPath }: { workPath: string | null }) {
@@ -267,6 +292,10 @@ function SettingsWindowRoot({ workPath }: { workPath: string | null }) {
     void listenAnchorSettingsUpdated((payload) => {
       if (payload.workPath === workPath) {
         setSettings(normalizeAnchorSettings(payload.settings));
+      } else if (payload.globalChanged && workPath) {
+        void readAnchorSettings(workPath)
+          .then((next) => setSettings(next))
+          .catch((err) => setError(err instanceof Error ? err.message : String(err)));
       }
     }).then((off) => {
       dispose = off;
@@ -277,10 +306,13 @@ function SettingsWindowRoot({ workPath }: { workPath: string | null }) {
   const updateSettings = useCallback(
     (nextSettings: AnchorSettings) => {
       const normalized = normalizeAnchorSettings(nextSettings);
-      setSettings(normalized);
-      if (!workPath) return;
-      void saveAnchorSettings(workPath, normalized).catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+      setSettings((current) => {
+        if (workPath) {
+          void saveAnchorSettings(workPath, normalized, current).catch((err) => {
+            setError(err instanceof Error ? err.message : String(err));
+          });
+        }
+        return normalized;
       });
     },
     [workPath],
@@ -406,6 +438,7 @@ function MainApp() {
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<AnchorSettings> | null>(null);
+  const settingsSaveBaseRef = useRef<AnchorSettings | null>(null);
   const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
   const installingUpdateRef = useRef(false);
   const collapsedTreeHydratedRef = useRef(false);
@@ -662,13 +695,23 @@ function MainApp() {
   );
   const editorTabSummaries = useMemo(
     () =>
-      tabs.map((tab) => ({
-        id: tab.id,
-        title: documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode),
-        relPath: tab.document.relPath,
-        dirty: tab.draftContent !== tab.document.content,
-      })),
-    [anchorSettings.ui.documentLabelMode, tabs],
+      tabs.map((tab) => {
+        const workspace =
+          workspaceRegistry.workspaces.find((item) => item.path === tab.workspacePath) ??
+          null;
+        return {
+          id: tab.id,
+          title: documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode),
+          path: tab.document.path,
+          relPath: tab.document.relPath,
+          dirty: tab.draftContent !== tab.document.content,
+          canRenameMove: workspaceCan(workspace, "renameMove"),
+          canCreate: workspaceCan(workspace, "create"),
+          canDelete: workspaceCan(workspace, "delete"),
+          writeBlockedReason: workspaceWriteReason(workspace, "renameMove"),
+        };
+      }),
+    [anchorSettings.ui.documentLabelMode, tabs, workspaceRegistry.workspaces],
   );
 
   const lastOpenKeyForWorkspace = useCallback((path: string) => `${LAST_OPEN_KEY}:${path}`, []);
@@ -787,6 +830,10 @@ function MainApp() {
     void listenAnchorSettingsUpdated((payload) => {
       if (payload.workPath === settingsWorkPath) {
         setAnchorSettings(normalizeAnchorSettings(payload.settings));
+      } else if (payload.globalChanged && settingsWorkPath) {
+        void readAnchorSettings(settingsWorkPath)
+          .then((next) => setAnchorSettings(next))
+          .catch((err) => setError(err instanceof Error ? err.message : String(err)));
       }
     }).then((off) => {
       dispose = off;
@@ -802,10 +849,15 @@ function MainApp() {
   useEffect(() => {
     if (!settingsWritable || !settingsWorkPath) {
       settingsSaverRef.current = null;
+      settingsSaveBaseRef.current = null;
       return;
     }
     const saver = createDebouncedSaver<AnchorSettings>(
-      (settings) => saveAnchorSettings(settingsWorkPath, settings),
+      async (settings) => {
+        const base = settingsSaveBaseRef.current ?? undefined;
+        settingsSaveBaseRef.current = null;
+        await saveAnchorSettings(settingsWorkPath, settings, base);
+      },
       250,
       (err) => {
         setError(err instanceof Error ? err.message : String(err));
@@ -829,9 +881,12 @@ function MainApp() {
         if (settingsWritable && settingsWorkPath) {
           const saver = settingsSaverRef.current;
           if (saver) {
+            if (!settingsSaveBaseRef.current) {
+              settingsSaveBaseRef.current = current;
+            }
             saver.schedule(next);
           } else {
-            void saveAnchorSettings(settingsWorkPath, next).catch((err) => {
+            void saveAnchorSettings(settingsWorkPath, next, current).catch((err) => {
               setError(err instanceof Error ? err.message : String(err));
             });
           }
@@ -2447,6 +2502,96 @@ function MainApp() {
     [activateEditorTab, focusedEditorGroup, tabs, pushRecent],
   );
 
+  const copyTextToClipboard = useCallback((value: string) => {
+    void navigator.clipboard.writeText(value).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+  }, []);
+
+  const refreshAfterDocumentMutation = useCallback(
+    async (workspacePath: string) => {
+      const fresh = await scanVault(workspacePath);
+      updateWorkspaceState(workspacePath, { entries: fresh });
+      await refreshWorkspaceFiles(workspacePath);
+      setGitRefreshTick((n) => n + 1);
+      return fresh;
+    },
+    [refreshWorkspaceFiles, updateWorkspaceState],
+  );
+
+  const entryFromPayload = useCallback(
+    (
+      payload: DocumentPayload,
+      freshEntries: VaultEntry[],
+      fallback: VaultEntry,
+    ): VaultEntry =>
+      freshEntries.find((entry) => entry.path === payload.path || entry.relPath === payload.relPath) ??
+      {
+        ...fallback,
+        path: payload.path,
+        relPath: payload.relPath,
+        title: payload.title,
+        wordCount: payload.body.split(/\s+/).filter(Boolean).length,
+        snippet: payload.body.replace(/\s+/g, " ").slice(0, 220),
+        fileKind: payload.fileKind,
+        frontmatter: payload.meta,
+      },
+    [],
+  );
+
+  const replaceMovedTab = useCallback(
+    (oldTab: EditorTab, payload: DocumentPayload, entry: VaultEntry) => {
+      const nextId = tabIdForEntry(entry);
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === oldTab.id
+            ? {
+                ...tab,
+                id: nextId,
+                entry,
+                document: payload,
+                draftContent:
+                  oldTab.draftContent === oldTab.document.content
+                    ? payload.content
+                    : oldTab.draftContent,
+              }
+            : tab,
+        ),
+      );
+      const replaced = replaceEditorTabIds(
+        { activeTabId, leftActiveTabId, rightActiveTabId },
+        oldTab.id,
+        nextId,
+      );
+      setActiveTabId(replaced.activeTabId);
+      setLeftActiveTabId(replaced.leftActiveTabId);
+      setRightActiveTabId(replaced.rightActiveTabId);
+      pushRecent(entry.path);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(lastOpenKeyForWorkspace(oldTab.workspacePath), entry.relPath);
+      }
+    },
+    [activeTabId, leftActiveTabId, rightActiveTabId, pushRecent, lastOpenKeyForWorkspace],
+  );
+
+  const blockTabWrite = useCallback(
+    (
+      tab: EditorTab,
+      action: "create" | "modify" | "delete" | "renameMove",
+    ) => {
+      const workspace =
+        workspaceRegistry.workspaces.find((item) => item.path === tab.workspacePath) ?? null;
+      if (workspaceCan(workspace, action)) return false;
+      setError(
+        t("workspace.writeBlocked", {
+          reason: workspaceWriteReason(workspace, action) ?? "workspace capabilities",
+        }),
+      );
+      return true;
+    },
+    [t, workspaceRegistry.workspaces],
+  );
+
   const closeTab = useCallback(
     (tabId: string) => {
       const closing = tabs.find((tab) => tab.id === tabId);
@@ -2470,6 +2615,245 @@ function MainApp() {
       });
     },
     [leftResolvedTabId, resolvedActiveTabId, rightResolvedTabId, tabs],
+  );
+
+  const closeTabsByIds = useCallback(
+    (tabIds: string[]) => {
+      const closeSet = new Set(tabIds);
+      if (closeSet.size === 0) return;
+      const dirtyClosing = tabs.find(
+        (tab) => closeSet.has(tab.id) && tab.draftContent !== tab.document.content,
+      );
+      if (dirtyClosing) {
+        setDiscardedEdit({
+          workspacePath: dirtyClosing.workspacePath,
+          visibility: dirtyClosing.visibility,
+          entry: dirtyClosing.entry,
+          draft: dirtyClosing.draftContent,
+        });
+      }
+      setTabs((prev) => {
+        const closingIndex = prev.findIndex((tab) => closeSet.has(tab.id));
+        const next = prev.filter((tab) => !closeSet.has(tab.id));
+        const fallback = next[Math.min(Math.max(closingIndex, 0), next.length - 1)] ?? null;
+        if (leftResolvedTabId && closeSet.has(leftResolvedTabId)) {
+          setLeftActiveTabId(fallback?.id ?? null);
+        }
+        if (rightResolvedTabId && closeSet.has(rightResolvedTabId)) {
+          setRightActiveTabId(null);
+          updateLayoutSettings({ editorSplitOpen: false });
+        }
+        if (resolvedActiveTabId && closeSet.has(resolvedActiveTabId)) {
+          setActiveTabId(fallback?.id ?? null);
+        }
+        return next;
+      });
+    },
+    [
+      leftResolvedTabId,
+      resolvedActiveTabId,
+      rightResolvedTabId,
+      tabs,
+      updateLayoutSettings,
+    ],
+  );
+
+  const closeOtherTabs = useCallback(
+    (tabId: string) => {
+      if (!tabs.some((tab) => tab.id === tabId)) return;
+      closeTabsByIds(tabIdsToCloseOthers(tabs, tabId));
+      setLeftActiveTabId(tabId);
+      setRightActiveTabId(null);
+      setActiveTabId(tabId);
+      setFocusedEditorGroup("left");
+      updateLayoutSettings({ editorSplitOpen: false });
+    },
+    [closeTabsByIds, tabs, updateLayoutSettings],
+  );
+
+  const closeTabsToRight = useCallback(
+    (tabId: string) => {
+      closeTabsByIds(tabIdsToCloseRight(tabs, tabId));
+    },
+    [closeTabsByIds, tabs],
+  );
+
+  const closeSavedTabs = useCallback(() => {
+    const summaries = tabs.map((tab) => ({
+      id: tab.id,
+      dirty: tab.draftContent !== tab.document.content,
+    }));
+    closeTabsByIds(tabIdsToCloseSaved(summaries));
+  }, [closeTabsByIds, tabs]);
+
+  const copyTabName = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (tab) copyTextToClipboard(documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode));
+    },
+    [anchorSettings.ui.documentLabelMode, copyTextToClipboard, tabs],
+  );
+
+  const copyTabPath = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (tab) copyTextToClipboard(tab.document.path);
+    },
+    [copyTextToClipboard, tabs],
+  );
+
+  const copyTabRelativePath = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (tab) copyTextToClipboard(tab.document.relPath);
+    },
+    [copyTextToClipboard, tabs],
+  );
+
+  const renameTabDocument = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab || blockTabWrite(tab, "renameMove")) return;
+      const parts = tab.document.relPath.split("/");
+      const fileName = parts.pop() ?? tab.document.relPath;
+      const currentStem = fileName.replace(/\.(md|markdown)$/i, "");
+      const input = window.prompt(t("editor.tabs.rename.prompt"), currentStem);
+      if (input == null) return;
+      const nextStem = input.trim().replace(/\.(md|markdown)$/i, "");
+      if (!nextStem) return;
+      if (/[\\/]/.test(nextStem)) {
+        setError(t("editor.tabs.rename.invalid"));
+        return;
+      }
+      const targetRelPath = `${parts.length > 0 ? `${parts.join("/")}/` : ""}${nextStem}.md`;
+      try {
+        const moved = await moveDocument(tab.workspacePath, tab.document.path, targetRelPath);
+        const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
+        const entry = entryFromPayload(moved, fresh, tab.entry);
+        replaceMovedTab(tab, moved, entry);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [
+      blockTabWrite,
+      entryFromPayload,
+      refreshAfterDocumentMutation,
+      replaceMovedTab,
+      t,
+      tabs,
+    ],
+  );
+
+  const moveTabDocument = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab || blockTabWrite(tab, "renameMove")) return;
+      const input = window.prompt(t("editor.tabs.move.prompt"), tab.document.relPath);
+      if (input == null || !input.trim()) return;
+      try {
+        const moved = await moveDocument(tab.workspacePath, tab.document.path, input);
+        const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
+        const entry = entryFromPayload(moved, fresh, tab.entry);
+        replaceMovedTab(tab, moved, entry);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [
+      blockTabWrite,
+      entryFromPayload,
+      refreshAfterDocumentMutation,
+      replaceMovedTab,
+      t,
+      tabs,
+    ],
+  );
+
+  const duplicateTabDocument = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab || blockTabWrite(tab, "create")) return;
+      try {
+        const duplicated = await duplicateDocument(tab.workspacePath, tab.document.path);
+        const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
+        const entry = entryFromPayload(duplicated, fresh, tab.entry);
+        const newTab: EditorTab = {
+          id: tabIdForEntry(entry),
+          workspacePath: tab.workspacePath,
+          visibility: tab.visibility,
+          entry,
+          document: duplicated,
+          draftContent: duplicated.content,
+        };
+        setTabs((prev) => {
+          const exists = prev.some((item) => item.id === newTab.id);
+          return exists
+            ? prev.map((item) => (item.id === newTab.id ? newTab : item))
+            : [...prev, newTab];
+        });
+        activateEditorTab(newTab.id, "left");
+        setExplorerVisibility(tab.visibility);
+        setPendingSelectedPath(null);
+        pushRecent(entry.path);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [
+      activateEditorTab,
+      blockTabWrite,
+      entryFromPayload,
+      pushRecent,
+      refreshAfterDocumentMutation,
+      tabs,
+    ],
+  );
+
+  const trashTabDocument = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab || blockTabWrite(tab, "delete")) return;
+      if (
+        !window.confirm(
+          t("editor.tabs.delete.confirm", {
+            path: tab.document.relPath,
+          }),
+        )
+      ) {
+        return;
+      }
+      try {
+        const deleted = await trashDocument(tab.workspacePath, tab.document.path);
+        await refreshAfterDocumentMutation(tab.workspacePath);
+        closeTab(tab.id);
+        setError(t("editor.tabs.delete.success", { path: deleted.trashRelPath }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [blockTabWrite, closeTab, refreshAfterDocumentMutation, t, tabs],
+  );
+
+  const revealTabInFinder = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (tab) revealTargetInFinder(tab.document.path);
+    },
+    [revealTargetInFinder, tabs],
+  );
+
+  const revealTabInExplorer = useCallback(
+    (tabId: string, group: EditorGroupId) => {
+      const tab = tabs.find((item) => item.id === tabId);
+      if (!tab) return;
+      setAppMode("pkm");
+      setExplorerPaneMode("documents");
+      if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
+      setExplorerVisibility(tab.visibility);
+      selectTab(tab.id, group);
+    },
+    [documentsPaneOpen, selectTab, setExplorerPaneMode, tabs, updateLayoutSettings],
   );
 
   const closeRightEditorPane = useCallback(() => {
@@ -3016,7 +3400,23 @@ function MainApp() {
           if (group === "right") closeRightEditorPane();
           else closeTab(nextTabId);
         }}
+        onCloseOtherTabs={closeOtherTabs}
+        onCloseTabsToRight={closeTabsToRight}
+        onCloseSavedTabs={closeSavedTabs}
         onCloseAllTabs={closeAllCleanTabs}
+        onCopyTabName={copyTabName}
+        onCopyTabPath={copyTabPath}
+        onCopyTabRelativePath={copyTabRelativePath}
+        onRenameTab={(nextTabId) => void renameTabDocument(nextTabId)}
+        onMoveTab={(nextTabId) => void moveTabDocument(nextTabId)}
+        onDuplicateTab={(nextTabId) => void duplicateTabDocument(nextTabId)}
+        onDeleteTab={(nextTabId) => void trashTabDocument(nextTabId)}
+        onOpenTabPreview={(nextTabId) => {
+          selectTab(nextTabId, group);
+          setEditorViewMode("preview");
+        }}
+        onRevealTabInFinder={revealTabInFinder}
+        onRevealTabInExplorer={(nextTabId) => revealTabInExplorer(nextTabId, group)}
         onSave={() => void saveTab(tabId)}
         onSnapshot={() => void snapshotTab(tabId)}
         onSplitRight={splitEditorRight}
