@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem("anchor:e2e:storage-cleared") === "true") return;
+    window.localStorage.clear();
+    window.sessionStorage.setItem("anchor:e2e:storage-cleared", "true");
+  });
 });
 
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
@@ -123,6 +127,76 @@ test("restores a dense shell with tabbed explorer and collapsed terminal", async
   await expect(page.locator(".document-list")).toHaveCount(0);
   await rail.getByLabel("문서 패널 보이기").click();
   await expect(page.locator(".document-list")).toBeVisible();
+});
+
+test("restores the previous app state on startup", async ({ page }) => {
+  await page.goto("/");
+
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "인박스", exact: true }).click();
+  await expect(page.locator(".inbox-pane")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some((value) => value?.includes('"activeAppMode":"inbox"')),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+  await expect(page.locator(".inbox-pane")).toBeVisible();
+  await rail.getByRole("button", { name: "문서", exact: true }).click();
+
+  await rail.getByLabel("문서 타입 패널 숨기기").click();
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await page.getByLabel("오른쪽으로 분할").first().click();
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("tab", { name: "파일" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some(
+          (value) =>
+            value != null &&
+            value.includes('"activeAppMode":"pkm"') &&
+            value.includes('"editorViewMode":"preview"') &&
+            value.includes('"rightPaneTab":"files"'),
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some(
+          (value) =>
+            value != null &&
+            value.includes('"rightRelPath":"anchor-weekly-meeting.md"') &&
+            value.includes('"focusedGroup":"right"'),
+        ),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Files" })).toHaveClass(/active/);
+  await expect(page.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".tab-trigger", { hasText: "미리보기" }).first()).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".editor-split-shell.split .editor-pane")).toHaveCount(2);
 });
 
 test("supports tree bulk controls and Finder context menu", async ({ page }) => {
@@ -313,7 +387,7 @@ test("queues selected files in the right Files pane and applies explicitly", asy
   await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
 
   const rightPane = page.locator(".outline-pane");
-  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute("aria-selected", "true");
   await expect(rightPane.getByRole("button", { name: "아이콘 보기" })).toHaveClass(/active/);
   await expect(rightPane.locator(".right-list.file-shelf-icons")).toBeVisible();
   await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();

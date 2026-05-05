@@ -34,6 +34,10 @@ const ANCHOR_DIR: &str = ".anchor";
 const SCHEMA_VERSION: u32 = 1;
 
 const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
+    &["ui", "activeAppMode"],
+    &["ui", "activeWorkspaceVisibility"],
+    &["ui", "editorViewMode"],
+    &["ui", "rightPaneTab"],
     &["ui", "explorerPaneMode"],
     &["ui", "documentBrowserMode"],
     &["ui", "documentLabelMode"],
@@ -313,6 +317,10 @@ fn default_settings_json() -> JsonValue {
     json!({
         "version": SCHEMA_VERSION,
         "ui": {
+            "activeAppMode": "pkm",
+            "activeWorkspaceVisibility": "private",
+            "editorViewMode": "source",
+            "rightPaneTab": "outline",
             "explorerPaneMode": "documents",
             "documentBrowserMode": "tree",
             "documentLabelMode": "title",

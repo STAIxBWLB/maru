@@ -118,9 +118,13 @@ import {
   DEFAULT_ANCHOR_SETTINGS,
   normalizeAnchorSettings,
   type AnchorSettings,
+  type AnchorAppMode,
   type DocumentBrowserMode,
+  type EditorViewModeSetting,
   type ExplorerPaneMode,
+  type RightPaneTab,
   type WorkspaceFileFilter,
+  type WorkspaceVisibilitySetting,
 } from "./lib/settings";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
@@ -183,6 +187,9 @@ interface EditorTab {
 
 interface StoredTabs {
   activeRelPath: string | null;
+  leftRelPath: string | null;
+  rightRelPath: string | null;
+  focusedGroup: EditorGroupId;
   relPaths: string[];
 }
 
@@ -214,7 +221,7 @@ const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
   refreshing: false,
 };
 
-type AppMode = "pkm" | "inbox";
+type AppMode = AnchorAppMode;
 
 interface InboxCarry {
   decision: InboxDecision;
@@ -239,6 +246,42 @@ function titleFromWikilinkTarget(target: string): string {
   const cleaned = target.trim().replace(/\.(md|markdown)$/i, "");
   const leaf = cleaned.split("/").filter(Boolean).pop();
   return leaf ?? cleaned;
+}
+
+function visibilityAvailable(
+  registry: WorkspaceRegistry,
+  visibility: WorkspaceVisibilitySetting,
+): boolean {
+  return Boolean(
+    registry.activeByVisibility[visibility] ??
+      registry.workspaces.find((workspace) => workspace.visibility === visibility),
+  );
+}
+
+function defaultStartupVisibility(registry: WorkspaceRegistry): WorkspaceVisibility {
+  return registry.activeByVisibility.private ||
+    registry.workspaces.some((workspace) => workspace.visibility === "private")
+    ? "private"
+    : "public";
+}
+
+function startupSettingsPath(registry: WorkspaceRegistry): string | null {
+  return (
+    registry.activeByVisibility.private ??
+    registry.workspaces.find((workspace) => workspace.visibility === "private")?.path ??
+    registry.activeByVisibility.public ??
+    registry.workspaces.find((workspace) => workspace.visibility === "public")?.path ??
+    null
+  );
+}
+
+function initialStartupVisibility(
+  registry: WorkspaceRegistry,
+  settings: AnchorSettings | null,
+): WorkspaceVisibility {
+  const preferred = settings?.ui.activeWorkspaceVisibility;
+  if (preferred && visibilityAvailable(registry, preferred)) return preferred;
+  return defaultStartupVisibility(registry);
 }
 
 export default function App() {
@@ -433,7 +476,12 @@ function MainApp() {
   const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
     useState<WorkspaceVisibility>("private");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("source");
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>(
+    DEFAULT_ANCHOR_SETTINGS.ui.editorViewMode,
+  );
+  const [rightPaneTab, setRightPaneTab] = useState<RightPaneTab>(
+    DEFAULT_ANCHOR_SETTINGS.ui.rightPaneTab,
+  );
   const [pendingSelectedPath, setPendingSelectedPath] = useState<string | null>(null);
   const [recentPaths, setRecentPaths] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -494,7 +542,7 @@ function MainApp() {
   // Phase 2 inbox surface. Polling scan + notify watcher feed
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
-  const [appMode, setAppMode] = useState<AppMode>("pkm");
+  const [appMode, setAppMode] = useState<AppMode>(DEFAULT_ANCHOR_SETTINGS.ui.activeAppMode);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
@@ -749,6 +797,11 @@ function MainApp() {
         return {
           activeRelPath:
             typeof parsed.activeRelPath === "string" ? parsed.activeRelPath : null,
+          leftRelPath:
+            typeof parsed.leftRelPath === "string" ? parsed.leftRelPath : null,
+          rightRelPath:
+            typeof parsed.rightRelPath === "string" ? parsed.rightRelPath : null,
+          focusedGroup: parsed.focusedGroup === "right" ? "right" : "left",
           relPaths,
         };
       } catch {
@@ -822,6 +875,11 @@ function MainApp() {
     let cancelled = false;
     setSettingsLoaded(false);
     if (!settingsWorkPath) {
+      if (booting && workspaceRegistry.workspaces.length === 0) {
+        return () => {
+          cancelled = true;
+        };
+      }
       setAnchorSettings(normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS));
       setSettingsLoaded(true);
       return;
@@ -830,6 +888,9 @@ function MainApp() {
       .then((settings) => {
         if (!cancelled) {
           setAnchorSettings(settings);
+          setAppMode(settings.ui.activeAppMode);
+          setEditorViewMode(settings.ui.editorViewMode);
+          setRightPaneTab(settings.ui.rightPaneTab);
           setSettingsLoaded(true);
         }
       })
@@ -842,16 +903,25 @@ function MainApp() {
     return () => {
       cancelled = true;
     };
-  }, [settingsWorkPath]);
+  }, [booting, settingsWorkPath, workspaceRegistry.workspaces.length]);
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
     void listenAnchorSettingsUpdated((payload) => {
       if (payload.workPath === settingsWorkPath) {
-        setAnchorSettings(normalizeAnchorSettings(payload.settings));
+        const next = normalizeAnchorSettings(payload.settings);
+        setAnchorSettings(next);
+        setAppMode(next.ui.activeAppMode);
+        setEditorViewMode(next.ui.editorViewMode);
+        setRightPaneTab(next.ui.rightPaneTab);
       } else if (payload.globalChanged && settingsWorkPath) {
         void readAnchorSettings(settingsWorkPath)
-          .then((next) => setAnchorSettings(next))
+          .then((next) => {
+            setAnchorSettings(next);
+            setAppMode(next.ui.activeAppMode);
+            setEditorViewMode(next.ui.editorViewMode);
+            setRightPaneTab(next.ui.rightPaneTab);
+          })
           .catch((err) => setError(err instanceof Error ? err.message : String(err)));
       }
     }).then((off) => {
@@ -890,6 +960,18 @@ function MainApp() {
       void saver.flush();
     };
   }, [settingsWorkPath, settingsWritable]);
+
+  useEffect(() => {
+    const flushPendingSettings = () => {
+      void settingsSaverRef.current?.flush();
+    };
+    window.addEventListener("beforeunload", flushPendingSettings);
+    window.addEventListener("pagehide", flushPendingSettings);
+    return () => {
+      window.removeEventListener("beforeunload", flushPendingSettings);
+      window.removeEventListener("pagehide", flushPendingSettings);
+    };
+  }, []);
 
   const updateSettings = useCallback(
     (updater: AnchorSettings | ((current: AnchorSettings) => AnchorSettings)) => {
@@ -940,6 +1022,48 @@ function MainApp() {
     [updateSettings],
   );
 
+  const setPersistedAppMode = useCallback(
+    (activeAppMode: AppMode) => {
+      setAppMode(activeAppMode);
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          activeAppMode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setPersistedEditorViewMode = useCallback(
+    (editorViewMode: EditorViewModeSetting) => {
+      setEditorViewMode(editorViewMode);
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          editorViewMode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setPersistedRightPaneTab = useCallback(
+    (rightPaneTab: RightPaneTab) => {
+      setRightPaneTab(rightPaneTab);
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          rightPaneTab,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
   const restoredWindowKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -979,6 +1103,24 @@ function MainApp() {
     anchorSettings.ui.collapsedTreeFolders,
     anchorSettings.ui.documentTreeStateInitialized,
     settingsLoaded,
+  ]);
+
+  useEffect(() => {
+    if (!settingsLoaded || anchorSettings.ui.activeWorkspaceVisibility === explorerVisibility) {
+      return;
+    }
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        activeWorkspaceVisibility: explorerVisibility,
+      },
+    }));
+  }, [
+    anchorSettings.ui.activeWorkspaceVisibility,
+    explorerVisibility,
+    settingsLoaded,
+    updateSettings,
   ]);
 
   useEffect(() => {
@@ -1188,11 +1330,18 @@ function MainApp() {
       byWorkspace.set(tab.workspacePath, bucket);
     }
     for (const [workspacePath, workspaceTabs] of byWorkspace) {
+      const relPathForTabId = (tabId: string | null) =>
+        tabId
+          ? workspaceTabs.find((tab) => tab.id === tabId)?.entry.relPath ?? null
+          : null;
       window.localStorage.setItem(
         openTabsKeyForWorkspace(workspacePath),
         JSON.stringify({
           activeRelPath:
             activeTab?.workspacePath === workspacePath ? activeTab.entry.relPath : null,
+          leftRelPath: relPathForTabId(leftActiveTabId),
+          rightRelPath: relPathForTabId(rightActiveTabId),
+          focusedGroup: focusedEditorGroup,
           relPaths: workspaceTabs.map((tab) => tab.entry.relPath),
         } satisfies StoredTabs),
       );
@@ -1203,7 +1352,15 @@ function MainApp() {
         activeTab.entry.relPath,
       );
     }
-  }, [activeTab, tabs, lastOpenKeyForWorkspace, openTabsKeyForWorkspace]);
+  }, [
+    activeTab,
+    focusedEditorGroup,
+    lastOpenKeyForWorkspace,
+    leftActiveTabId,
+    openTabsKeyForWorkspace,
+    rightActiveTabId,
+    tabs,
+  ]);
 
   const pushRecent = useCallback((path: string) => {
     setRecentPaths((prev) => {
@@ -1482,14 +1639,30 @@ function MainApp() {
           document: payload,
           draftContent: payload.content,
         };
+        const applyStoredTabState = (loadedTabs: EditorTab[]) => {
+          const idForRelPath = (relPath: string | null | undefined) =>
+            relPath
+              ? loadedTabs.find(
+                  (tab) => tab.entry.relPath === relPath || tab.entry.path === relPath,
+                )?.id ?? null
+              : null;
+          const leftId =
+            idForRelPath(storedTabs?.leftRelPath) ??
+            idForRelPath(storedTabs?.activeRelPath) ??
+            primaryTab.id;
+          const rightId = idForRelPath(storedTabs?.rightRelPath);
+          const focusedGroup: EditorGroupId =
+            rightId && storedTabs?.focusedGroup === "right" ? "right" : "left";
+          setLeftActiveTabId(leftId);
+          setRightActiveTabId(rightId);
+          setFocusedEditorGroup(focusedGroup);
+          setActiveTabId(focusedGroup === "right" && rightId ? rightId : leftId);
+        };
         setTabs((prev) => {
           const otherWorkspaceTabs = prev.filter((tab) => tab.workspacePath !== path);
           return [...otherWorkspaceTabs, primaryTab];
         });
-        setActiveTabId(primaryTab.id);
-        setLeftActiveTabId(primaryTab.id);
-        setRightActiveTabId(null);
-        setFocusedEditorGroup("left");
+        applyStoredTabState([primaryTab]);
         setPendingSelectedPath(null);
         updateWorkspaceState(path, { loading: false, startupIoReady: true });
         pushRecent(candidate.path);
@@ -1526,6 +1699,7 @@ function MainApp() {
                 }),
               ].slice(0, 8);
             });
+            applyStoredTabState([primaryTab, ...nextTabs]);
           })();
         }
 
@@ -1627,10 +1801,20 @@ function MainApp() {
           return;
         }
         setWorkspaceRegistry(registry);
-        const initialVisibility: WorkspaceVisibility =
-          registry.activeByVisibility.private || registry.workspaces.some((w) => w.visibility === "private")
-            ? "private"
-            : "public";
+        let bootSettings: AnchorSettings | null = null;
+        const bootSettingsPath = startupSettingsPath(registry);
+        if (bootSettingsPath) {
+          try {
+            bootSettings = await readAnchorSettings(bootSettingsPath);
+            setAnchorSettings(bootSettings);
+            setAppMode(bootSettings.ui.activeAppMode);
+            setEditorViewMode(bootSettings.ui.editorViewMode);
+            setRightPaneTab(bootSettings.ui.rightPaneTab);
+          } catch {
+            bootSettings = null;
+          }
+        }
+        const initialVisibility = initialStartupVisibility(registry, bootSettings);
         setExplorerVisibility(initialVisibility);
         const initialPath =
           registry.activeByVisibility[initialVisibility] ??
@@ -1923,9 +2107,17 @@ function MainApp() {
         return additions.length > 0 ? [...current, ...additions] : current;
       });
       if (addedIds.length > 0) setSelectedFileQueueItemIds(addedIds);
+      setPersistedAppMode("pkm");
       if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+      setPersistedRightPaneTab("files");
     },
-    [anchorSettings.ui.fileQueueDefaultOperation, outlineOpen, updateLayoutSettings],
+    [
+      anchorSettings.ui.fileQueueDefaultOperation,
+      outlineOpen,
+      setPersistedAppMode,
+      setPersistedRightPaneTab,
+      updateLayoutSettings,
+    ],
   );
 
   const queueWorkspaceFiles = useCallback(
@@ -2911,7 +3103,7 @@ function MainApp() {
       const tab = tabs.find((item) => item.id === tabId);
       if (!tab) return;
       const activePane = anchorSettings.ui.explorerPaneMode;
-      setAppMode("pkm");
+      setPersistedAppMode("pkm");
       if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
       setExplorerVisibility(tab.visibility);
       if (activePane === "documents") {
@@ -2954,6 +3146,7 @@ function MainApp() {
       setExplorerTypeFilter,
       setWorkspaceFileFilter,
       setWorkspaceFileQuery,
+      setPersistedAppMode,
       tabs,
       updateLayoutSettings,
     ],
@@ -3036,11 +3229,11 @@ function MainApp() {
       return true;
     };
     if (jump()) return;
-    setEditorViewMode("source");
+    setPersistedEditorViewMode("source");
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(jump);
     });
-  }, [focusedEditorGroup]);
+  }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
   const runCommand = useCallback(
     (id: string) => {
@@ -3061,7 +3254,7 @@ function MainApp() {
           closeAllCleanTabs();
           break;
         case "toggle-preview":
-          setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview"));
+          setPersistedEditorViewMode(editorViewMode === "preview" ? "rich" : "preview");
           break;
         case "toggle-outline":
           updateLayoutSettings({ outlineOpen: !outlineOpen });
@@ -3073,10 +3266,10 @@ function MainApp() {
           refreshActiveSurface();
           break;
         case "open-inbox":
-          setAppMode("inbox");
+          setPersistedAppMode("inbox");
           break;
         case "open-docs":
-          setAppMode("pkm");
+          setPersistedAppMode("pkm");
           break;
         case "add-workspace":
           openAddWorkspaceDialog();
@@ -3100,6 +3293,9 @@ function MainApp() {
       checkForUpdates,
       splitEditorRight,
       closeAllCleanTabs,
+      editorViewMode,
+      setPersistedAppMode,
+      setPersistedEditorViewMode,
       updateLayoutSettings,
       outlineOpen,
     ],
@@ -3112,7 +3308,8 @@ function MainApp() {
       "mod+n": openNewDocumentDialog,
       "mod+d": splitActiveSurfaceRight,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
-      "mod+p": () => setEditorViewMode((mode) => (mode === "preview" ? "rich" : "preview")),
+      "mod+p": () =>
+        setPersistedEditorViewMode(editorViewMode === "preview" ? "rich" : "preview"),
       "mod+\\": () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
       "mod+f": focusSearch,
       "mod+r": refreshActiveSurface,
@@ -3145,7 +3342,9 @@ function MainApp() {
       openPreferences,
       splitActiveSurfaceRight,
       closeTab,
+      editorViewMode,
       resolvedActiveTabId,
+      setPersistedEditorViewMode,
       updateLayoutSettings,
       outlineOpen,
     ],
@@ -3516,7 +3715,7 @@ function MainApp() {
         onDeleteTab={(nextTabId) => void trashTabDocument(nextTabId)}
         onOpenTabPreview={(nextTabId) => {
           selectTab(nextTabId, group);
-          setEditorViewMode("preview");
+          setPersistedEditorViewMode("preview");
         }}
         onRevealTabInFinder={revealTabInFinder}
         onRevealTabInExplorer={(nextTabId) => revealTabInExplorer(nextTabId, group)}
@@ -3527,7 +3726,7 @@ function MainApp() {
           if (tabId) activateEditorTab(tabId, group);
         }}
         onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
-        onViewModeChange={setEditorViewMode}
+        onViewModeChange={setPersistedEditorViewMode}
         onWikilinkClick={handleWikilinkClick}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
       />
@@ -3618,7 +3817,7 @@ function MainApp() {
           <button
             type="button"
             className={appMode === "pkm" ? "activity-button active" : "activity-button"}
-            onClick={() => setAppMode("pkm")}
+            onClick={() => setPersistedAppMode("pkm")}
             title={t("mode.pkm")}
             aria-label={t("mode.pkm")}
           >
@@ -3627,7 +3826,7 @@ function MainApp() {
           <button
             type="button"
             className={appMode === "inbox" ? "activity-button active" : "activity-button"}
-            onClick={() => setAppMode("inbox")}
+            onClick={() => setPersistedAppMode("inbox")}
             title={t("mode.inbox")}
             aria-label={t("mode.inbox")}
           >
@@ -3896,6 +4095,8 @@ function MainApp() {
                 onApplyFileQueue={applyQueuedFiles}
                 onClearFileQueue={clearFileQueue}
                 onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
+                activeTab={rightPaneTab}
+                onTabChange={setPersistedRightPaneTab}
                 paneRef={outlinePaneRef}
               />
             ) : null}

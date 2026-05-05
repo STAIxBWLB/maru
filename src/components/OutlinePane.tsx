@@ -42,6 +42,7 @@ import {
 import { frontmatterScalar } from "../lib/document";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
+import type { RightPaneTab } from "../lib/settings";
 import type {
   DocumentPayload,
   FileQueueItem,
@@ -79,6 +80,8 @@ interface OutlinePaneProps {
   onApplyFileQueue: () => Promise<void>;
   onClearFileQueue: () => void;
   onClearSelectedFileQueueItems: () => void;
+  activeTab: RightPaneTab;
+  onTabChange: (tab: RightPaneTab) => void;
   paneRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -161,10 +164,12 @@ export function OutlinePane({
   onApplyFileQueue,
   onClearFileQueue,
   onClearSelectedFileQueueItems,
+  activeTab,
+  onTabChange,
   paneRef,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"outline" | "files" | "memo" | "info">("outline");
+  const tab = activeTab;
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
   const meta = document?.meta ?? {};
   const fmType = frontmatterScalar(meta, "type");
@@ -210,7 +215,7 @@ export function OutlinePane({
               role="tab"
               aria-selected={tab === id}
               className={tab === id ? "active" : ""}
-              onClick={() => setTab(id)}
+              onClick={() => onTabChange(id)}
               title={t(`rightPane.tab.${id}`)}
               aria-label={t(`rightPane.tab.${id}`)}
             >
