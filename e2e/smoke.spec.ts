@@ -314,9 +314,39 @@ test("queues selected files in the right Files pane and applies explicitly", asy
 
   const rightPane = page.locator(".outline-pane");
   await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.getByRole("button", { name: "아이콘 보기" })).toHaveClass(/active/);
+  await expect(rightPane.locator(".right-list.file-shelf-icons")).toBeVisible();
   await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+  await expect(rightPane.locator('.queue-file-icon[data-kind="markdown"]')).toBeVisible();
+  await rightPane.getByRole("button", { name: "리스트 보기" }).click();
+  await expect(rightPane.locator(".right-list.file-shelf-icons")).toHaveCount(0);
   await rightPane.getByRole("button", { name: "Apply" }).click();
   await expect(rightPane.locator(".right-list-item.queue.done", { hasText: "완료" })).toBeVisible();
+});
+
+test("clears selected and all file shelf items explicitly", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.locator(".right-list-item.queue")).toHaveCount(2);
+
+  await rightPane.locator(".right-list-item.queue", { hasText: "minutes-template.md" }).click();
+  await rightPane.getByRole("button", { name: "선택 항목 1개 비우기" }).click();
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "minutes-template.md" })).toHaveCount(0);
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+
+  await rightPane.getByRole("button", { name: "전체 비우기" }).click();
+  await expect(rightPane.locator(".right-list-item.queue")).toHaveCount(0);
+  await expect(rightPane.locator(".outline-empty", { hasText: "대기 중인 파일 작업이 없습니다." })).toBeVisible();
 });
 
 test("copies selected Files shelf items into a tree context target", async ({ page }) => {

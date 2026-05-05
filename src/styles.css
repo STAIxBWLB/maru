@@ -3325,11 +3325,13 @@ button.git-badge:hover {
   min-height: 0;
   overflow: auto;
   display: grid;
+  align-content: start;
   gap: 4px;
 }
 
 .right-list {
   flex: 1;
+  grid-auto-rows: max-content;
 }
 
 .right-list-item {
@@ -3347,10 +3349,11 @@ button.git-badge:hover {
 }
 
 .right-list-item.queue {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   text-align: left;
   cursor: default;
+  padding: 5px 6px;
 }
 
 .right-list-item.queue.done {
@@ -3372,7 +3375,10 @@ button.git-badge:hover {
 .queue-copy {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 1px;
 }
 
 .queue-copy strong,
@@ -3384,15 +3390,59 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+.queue-file-icon {
+  grid-row: 1 / span 3;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  overflow: visible;
+}
+
+.queue-file-icon[data-kind="directory"] {
+  color: var(--warn);
+}
+
+.queue-file-icon[data-kind="markdown"],
+.queue-file-icon[data-kind="text"],
+.queue-file-icon[data-kind="pdf"] {
+  color: var(--accent);
+}
+
+.queue-file-icon[data-kind="code"] {
+  color: var(--purple);
+}
+
+.queue-file-icon[data-kind="image"],
+.queue-file-icon[data-kind="video"],
+.queue-file-icon[data-kind="audio"] {
+  color: var(--info);
+}
+
+.queue-file-icon[data-kind="archive"],
+.queue-file-icon[data-kind="spreadsheet"],
+.queue-file-icon[data-kind="presentation"] {
+  color: var(--brown);
+}
+
 .queue-copy strong {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  grid-column: 2;
   color: var(--ink);
   font-size: 12px;
 }
 
+.queue-copy .queue-source-path,
+.queue-copy .queue-target-path,
 .queue-copy em {
+  grid-column: 2;
+  font-size: 10.5px;
   color: var(--faint);
   font-style: normal;
 }
@@ -3400,7 +3450,7 @@ button.git-badge:hover {
 .queue-controls {
   display: flex;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .queue-controls button {
@@ -3441,34 +3491,64 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+.right-list-item .queue-file-icon {
+  min-width: 30px;
+  overflow: visible;
+}
+
 .file-shelf-icons {
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   align-content: start;
 }
 
 .file-shelf-icons .right-list-item.queue {
-  min-height: 108px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 116px;
   justify-items: stretch;
+  align-items: stretch;
+  padding: 8px;
 }
 
 .file-shelf-icons .queue-copy {
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
+  gap: 4px;
   text-align: center;
 }
 
+.file-shelf-icons .queue-file-icon {
+  grid-row: auto;
+  min-width: 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+}
+
+.file-shelf-icons .queue-file-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
 .file-shelf-icons .queue-copy strong {
+  grid-column: 1;
   max-width: 100%;
-  flex-direction: column;
-  gap: 8px;
+  display: block;
+  text-align: center;
 }
 
-.file-shelf-icons .queue-copy strong svg {
-  width: 24px;
-  height: 24px;
+.file-shelf-icons .queue-source-path {
+  grid-column: 1;
+  max-width: 100%;
+  font-size: 10px;
 }
 
-.file-shelf-icons .queue-copy span:not(:first-child) {
+.file-shelf-icons .queue-target-path,
+.file-shelf-icons .queue-copy em {
   display: none;
+}
+
+.file-shelf-icons .queue-controls {
+  justify-content: center;
 }
 
 @container (max-width: 300px) {

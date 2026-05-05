@@ -1,14 +1,26 @@
 import {
+  CircleX,
   Copy,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileImage,
   FolderPlus,
   Grid2X2,
   FilePlus2,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  FileVideo,
   Files,
+  Folder,
   Hash,
   Info,
   List,
   MoveRight,
   Plus,
+  Presentation,
   Save,
   StickyNote,
   Trash2,
@@ -89,6 +101,43 @@ const STANDARD_STATUSES = [
   "검토",
   "완료",
 ];
+
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
+const TEXT_EXTENSIONS = new Set(["txt", "text", "rtf", "csv", "tsv", "log"]);
+const CODE_EXTENSIONS = new Set([
+  "c",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "html",
+  "java",
+  "js",
+  "json",
+  "jsx",
+  "kt",
+  "lua",
+  "php",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sh",
+  "swift",
+  "toml",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
+const IMAGE_EXTENSIONS = new Set(["avif", "gif", "heic", "jpeg", "jpg", "png", "svg", "webp"]);
+const ARCHIVE_EXTENSIONS = new Set(["7z", "bz2", "dmg", "gz", "pkg", "rar", "tar", "tgz", "xz", "zip"]);
+const SPREADSHEET_EXTENSIONS = new Set(["numbers", "ods", "tsv", "xls", "xlsm", "xlsx"]);
+const PRESENTATION_EXTENSIONS = new Set(["key", "odp", "ppt", "pptx"]);
+const AUDIO_EXTENSIONS = new Set(["aac", "aiff", "flac", "m4a", "mp3", "ogg", "wav"]);
+const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm", "wmv"]);
 
 export function OutlinePane({
   document,
@@ -348,7 +397,7 @@ function FilesQueuePane({
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   const [working, setWorking] = useState(false);
-  const [viewMode, setViewMode] = useState<"list" | "icons">("list");
+  const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -411,6 +460,8 @@ function FilesQueuePane({
     queuedCount === 0 ||
     working ||
     !canApplyFileQueue;
+  const clearSelectedLabel = t("rightPane.files.clearSelected", { count: selectedIds.length });
+  const clearAllLabel = t("rightPane.files.clearAll");
 
   return (
     <section className="right-tool-pane">
@@ -476,7 +527,7 @@ function FilesQueuePane({
             tabIndex={0}
             className={`right-list-item queue ${item.status}${selectedSet.has(item.id) ? " selected" : ""}`}
             key={item.id}
-            title={item.sourcePath}
+            title={fileQueueTitleFor(item, t)}
             aria-selected={selectedSet.has(item.id)}
             draggable={selectedSet.has(item.id)}
             onClick={(event) => onSelectItem(item.id, event.metaKey || event.ctrlKey || event.shiftKey)}
@@ -492,12 +543,19 @@ function FilesQueuePane({
             }}
           >
             <div className="queue-copy">
+              <span
+                className="queue-file-icon"
+                data-kind={fileQueueKindFor(item)}
+                title={fileQueueTitleFor(item, t)}
+                aria-hidden="true"
+              >
+                {fileQueueIconFor(item)}
+              </span>
               <strong>
-                {item.sourceKind === "directory" ? <Files size={12} /> : <FilePlus2 size={12} />}
                 <span>{item.fileName}</span>
               </strong>
-              <span>{item.sourceRelPath}</span>
-              <span title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
+              <span className="queue-source-path">{item.sourceRelPath}</span>
+              <span className="queue-target-path" title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
               {item.message ? <em>{item.message}</em> : null}
             </div>
             <div className="queue-controls" onClick={(event) => event.stopPropagation()}>
@@ -547,13 +605,23 @@ function FilesQueuePane({
         </button>
         <button
           type="button"
+          disabled={selectedIds.length === 0 || working}
+          onClick={onClearSelected}
+          title={clearSelectedLabel}
+          aria-label={clearSelectedLabel}
+        >
+          <X size={13} />
+          <span>{clearSelectedLabel}</span>
+        </button>
+        <button
+          type="button"
           disabled={queue.length === 0 || working}
           onClick={onClear}
-          title={t("rightPane.files.clearQueue")}
-          aria-label={t("rightPane.files.clearQueue")}
+          title={clearAllLabel}
+          aria-label={clearAllLabel}
         >
-          <Trash2 size={13} />
-          <span>{t("rightPane.files.clearQueue")}</span>
+          <CircleX size={13} />
+          <span>{clearAllLabel}</span>
         </button>
       </div>
       {contextMenu ? (
@@ -577,7 +645,7 @@ function FilesQueuePane({
               onClearSelected();
             }}
           >
-            {t("rightPane.files.clearSelected", { count: selectedIds.length })}
+            {clearSelectedLabel}
           </button>
           <button
             type="button"
@@ -587,12 +655,82 @@ function FilesQueuePane({
               onClear();
             }}
           >
-            {t("rightPane.files.clearQueue")}
+            {clearAllLabel}
           </button>
         </div>
       ) : null}
     </section>
   );
+}
+
+function fileQueueIconFor(item: FileQueueItem): React.ReactNode {
+  const kind = fileQueueKindFor(item);
+  const size = 18;
+  switch (kind) {
+    case "directory":
+      return <Folder size={size} />;
+    case "markdown":
+    case "text":
+      return <FileText size={size} />;
+    case "code":
+      return <FileCode2 size={size} />;
+    case "image":
+      return <FileImage size={size} />;
+    case "pdf":
+      return <FileType size={size} />;
+    case "archive":
+      return <FileArchive size={size} />;
+    case "spreadsheet":
+      return <FileSpreadsheet size={size} />;
+    case "presentation":
+      return <Presentation size={size} />;
+    case "audio":
+      return <FileAudio size={size} />;
+    case "video":
+      return <FileVideo size={size} />;
+    default:
+      return <File size={size} />;
+  }
+}
+
+function fileQueueKindFor(item: FileQueueItem): string {
+  if (item.sourceKind === "directory") return "directory";
+  const extension = fileQueueExtension(item);
+  if (MARKDOWN_EXTENSIONS.has(extension)) return "markdown";
+  if (TEXT_EXTENSIONS.has(extension)) return "text";
+  if (CODE_EXTENSIONS.has(extension)) return "code";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (extension === "pdf") return "pdf";
+  if (ARCHIVE_EXTENSIONS.has(extension)) return "archive";
+  if (SPREADSHEET_EXTENSIONS.has(extension)) return "spreadsheet";
+  if (PRESENTATION_EXTENSIONS.has(extension)) return "presentation";
+  if (AUDIO_EXTENSIONS.has(extension)) return "audio";
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
+  return "file";
+}
+
+function fileQueueExtension(item: FileQueueItem): string {
+  const name = (item.fileName || item.sourceRelPath || item.sourcePath).toLowerCase();
+  const index = name.lastIndexOf(".");
+  if (index <= 0 || index === name.length - 1) return "";
+  return name.slice(index + 1);
+}
+
+function fileQueueTitleFor(
+  item: FileQueueItem,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  const operation = item.operation === "move" ? t("rightPane.files.move") : t("rightPane.files.copy");
+  return [
+    item.fileName,
+    item.sourcePath,
+    `${t("rightPane.files.destination")}: ${item.targetDir}`,
+    operation,
+    item.status,
+    item.message,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function MemoPane({
