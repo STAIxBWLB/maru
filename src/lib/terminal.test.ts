@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createTerminalTab,
   EMPTY_TERMINAL_STATE,
+  selectTerminalSplitLeftTabId,
   shouldAutoLaunchTerminal,
   terminalCommandPreview,
   terminalTabsReducer,
@@ -50,6 +51,29 @@ describe("terminal tab reducer", () => {
     );
     expect(terminalCommandPreview("codex", "")).toBe("codex --cd .");
     expect(terminalCommandPreview("shell", "/tmp/work")).toBe("shell");
+  });
+
+  it("keeps the split-left tab separate from the right tab", () => {
+    const shell = createTerminalTab("tab-1", "shell", "Shell");
+    const codex = createTerminalTab("tab-2", "codex", "Codex");
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: shell,
+    });
+    state = terminalTabsReducer(state, {
+      type: "create",
+      tab: codex,
+      activate: false,
+    });
+
+    expect(selectTerminalSplitLeftTabId(state, "tab-2")).toBe("tab-1");
+
+    const rightOnly = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: shell,
+      activate: false,
+    });
+    expect(selectTerminalSplitLeftTabId(rightOnly, "tab-1")).toBeNull();
   });
 
   it("auto-launches only when open, empty, and enabled", () => {

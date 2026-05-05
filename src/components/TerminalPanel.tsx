@@ -27,6 +27,7 @@ import {
   TERMINAL_LAUNCHERS,
   terminalCommandPreview,
   terminalTabsReducer,
+  selectTerminalSplitLeftTabId,
   shouldAutoLaunchTerminal,
   type TerminalKind,
 } from "../lib/terminal";
@@ -96,6 +97,8 @@ export const TerminalPanel = memo(function TerminalPanel({
   const handledLaunchRequestRef = useRef<number | null>(null);
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
   const rightTab = state.tabs.find((tab) => tab.id === rightTabId) ?? null;
+  const splitLeftTabId = selectTerminalSplitLeftTabId(state, rightTabId);
+  const splitLeftTab = state.tabs.find((tab) => tab.id === splitLeftTabId) ?? null;
   const canRunTerminal = useMemo(() => terminalAvailable(), []);
 
   const waitForTerminalHost = useCallback(async (tabId: string) => {
@@ -184,28 +187,40 @@ export const TerminalPanel = memo(function TerminalPanel({
   }, [canRunTerminal]);
 
   useEffect(() => {
-    if (!open || !activeTab) return;
-    window.requestAnimationFrame(() => fitTab(activeTab.id));
+    const leftFitTab = splitOpen ? splitLeftTab : activeTab;
+    if (!open || !leftFitTab) return;
+    window.requestAnimationFrame(() => fitTab(leftFitTab.id));
     if (rightTab) window.requestAnimationFrame(() => fitTab(rightTab.id));
-  }, [activeTab, draftHeight, fitTab, maximized, open, rightTab, splitOpen, splitRatio]);
+  }, [
+    activeTab,
+    draftHeight,
+    fitTab,
+    maximized,
+    open,
+    rightTab,
+    splitLeftTab,
+    splitOpen,
+    splitRatio,
+  ]);
 
   useEffect(() => {
-    if (!open || !activeTab) return;
+    const leftFitTab = splitOpen ? splitLeftTab : activeTab;
+    if (!open || !leftFitTab) return;
     let frame = 0;
     const onResize = () => {
       if (frame) cancelAnimationFrame(frame);
-        frame = window.requestAnimationFrame(() => {
-          frame = 0;
-          fitTab(activeTab.id);
-          if (rightTab) fitTab(rightTab.id);
-        });
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        fitTab(leftFitTab.id);
+        if (rightTab) fitTab(rightTab.id);
+      });
     };
     window.addEventListener("resize", onResize);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", onResize);
     };
-  }, [activeTab, fitTab, maximized, open, rightTab]);
+  }, [activeTab, fitTab, maximized, open, rightTab, splitLeftTab, splitOpen]);
 
   useEffect(() => {
     return () => {
@@ -337,11 +352,12 @@ export const TerminalPanel = memo(function TerminalPanel({
       autoLaunchRef.current = false;
       return;
     }
+    if (splitOpen) return;
     const launcher = shouldAutoLaunchTerminal(settings, open, state.tabs.length);
     if (!launcher || autoLaunchRef.current) return;
     autoLaunchRef.current = true;
     void launch(launcher);
-  }, [launch, open, settings, state.tabs.length]);
+  }, [launch, open, settings, splitOpen, state.tabs.length]);
 
   useEffect(() => {
     if (!launchRequest) return;
@@ -356,10 +372,40 @@ export const TerminalPanel = memo(function TerminalPanel({
       setFocusedGroup("left");
       return;
     }
-    if (rightTabId && state.tabs.some((tab) => tab.id === rightTabId)) return;
-    const kind = activeTab?.kind ?? settings.terminal.autoLaunch ?? "shell";
+
+    if (rightTabId && !state.tabs.some((tab) => tab.id === rightTabId)) {
+      setRightTabId(null);
+      setFocusedGroup("left");
+      return;
+    }
+
+    if (!splitLeftTab) {
+      if (rightTabId) {
+        setRightTabId(null);
+        setFocusedGroup("left");
+        return;
+      }
+      const kind = settings.terminal.autoLaunch ?? "shell";
+      void launch(kind, "left");
+      return;
+    }
+
+    if (state.activeTabId !== splitLeftTab.id) {
+      dispatch({ type: "switch", tabId: splitLeftTab.id });
+    }
+
+    if (rightTabId) return;
+    const kind = splitLeftTab.kind;
     void launch(kind, "right");
-  }, [activeTab?.kind, launch, rightTabId, settings.terminal.autoLaunch, splitOpen, state.tabs]);
+  }, [
+    launch,
+    rightTabId,
+    settings.terminal.autoLaunch,
+    splitLeftTab,
+    splitOpen,
+    state.activeTabId,
+    state.tabs,
+  ]);
 
   const closeTab = useCallback((tabId: string) => {
     const sessionId = sessionByTabRef.current.get(tabId);
@@ -470,7 +516,12 @@ export const TerminalPanel = memo(function TerminalPanel({
   const splitBodyStyle = splitMode
     ? ({ "--terminal-split-ratio": String(splitRatio) } as React.CSSProperties)
     : undefined;
-  const focusedTabId = focusedGroup === "right" && rightTab ? rightTab.id : state.activeTabId;
+  const focusedTabId =
+    focusedGroup === "right" && rightTab
+      ? rightTab.id
+      : splitMode
+        ? splitLeftTabId
+        : state.activeTabId;
 
   return (
     <section
@@ -533,41 +584,41 @@ export const TerminalPanel = memo(function TerminalPanel({
       {/* Tabs and body stay mounted across collapse so xterm DOM keeps its
           parent. Visibility is controlled via CSS on .terminal-panel.collapsed. */}
       <div className="terminal-tabs" role="tablist" aria-label={t("terminal.tabs")} hidden={!open}>
-            {state.tabs.length === 0 ? (
-              <span className="terminal-tab-placeholder">{t("terminal.empty")}</span>
-            ) : null}
-            {state.tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={tab.id === focusedTabId ? "terminal-tab active" : "terminal-tab"}
-              >
-                <button
-                  type="button"
-                  className="terminal-tab-main"
-                  onClick={() => {
-                    if (splitOpen && rightTab?.id === tab.id) {
-                      setFocusedGroup("right");
-                      return;
-                    }
-                    dispatch({ type: "switch", tabId: tab.id });
-                    setFocusedGroup("left");
-                  }}
-                  title={tab.title}
-                >
-                  <span className={tab.running ? "terminal-dot running" : "terminal-dot"} />
-                  <span>{tab.title}</span>
-                </button>
-                <button
-                  type="button"
-                  className="terminal-tab-close"
-                  onClick={() => closeTab(tab.id)}
-                  aria-label={t("terminal.tab.close", { title: tab.title })}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
+        {state.tabs.length === 0 ? (
+          <span className="terminal-tab-placeholder">{t("terminal.empty")}</span>
+        ) : null}
+        {state.tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={tab.id === focusedTabId ? "terminal-tab active" : "terminal-tab"}
+          >
+            <button
+              type="button"
+              className="terminal-tab-main"
+              onClick={() => {
+                if (splitOpen && rightTab?.id === tab.id) {
+                  setFocusedGroup("right");
+                  return;
+                }
+                dispatch({ type: "switch", tabId: tab.id });
+                setFocusedGroup("left");
+              }}
+              title={tab.title}
+            >
+              <span className={tab.running ? "terminal-dot running" : "terminal-dot"} />
+              <span>{tab.title}</span>
+            </button>
+            <button
+              type="button"
+              className="terminal-tab-close"
+              onClick={() => closeTab(tab.id)}
+              aria-label={t("terminal.tab.close", { title: tab.title })}
+            >
+              <X size={13} />
+            </button>
           </div>
+        ))}
+      </div>
       <div
         className={splitMode ? "terminal-body split" : "terminal-body"}
         style={splitBodyStyle}
@@ -583,52 +634,54 @@ export const TerminalPanel = memo(function TerminalPanel({
             {/* Flat sibling list under terminal-body. Each instance keeps the
                 same parent across split toggles so xterm DOM is never reparented. */}
             {state.tabs.map((tab) => {
-            const isRight = splitMode && rightTabId === tab.id;
-            const isLeftActive = !isRight && state.activeTabId === tab.id;
-            const isVisible = isRight || isLeftActive;
-            const isFocused =
-              isVisible &&
-              splitMode &&
-              (isRight ? focusedGroup === "right" : focusedGroup === "left");
-            const className = [
-              "terminal-instance",
-              isVisible ? "active" : null,
-              splitMode ? (isRight ? "pane-right" : "pane-left") : null,
-              isFocused ? "focused" : null,
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <div
-                key={tab.id}
-                className={className}
-                onPointerDown={() => setFocusedGroup(isRight ? "right" : "left")}
-              >
-                {isVisible ? (
-                  <button
-                    type="button"
-                    className="terminal-pane-close"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => closeTab(tab.id)}
-                    title={t("terminal.tab.close", { title: tab.title })}
-                    aria-label={t("terminal.tab.close", { title: tab.title })}
-                  >
-                    <X size={13} />
-                  </button>
-                ) : null}
+              const isRight = splitMode && rightTabId === tab.id;
+              const isLeftActive =
+                !isRight &&
+                (splitMode ? splitLeftTabId === tab.id : state.activeTabId === tab.id);
+              const isVisible = isRight || isLeftActive;
+              const isFocused =
+                isVisible &&
+                splitMode &&
+                (isRight ? focusedGroup === "right" : focusedGroup === "left");
+              const className = [
+                "terminal-instance",
+                isVisible ? "active" : null,
+                splitMode ? (isRight ? "pane-right" : "pane-left") : null,
+                isFocused ? "focused" : null,
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
                 <div
-                  className="terminal-instance-host"
-                  ref={(node) => {
-                    if (node) {
-                      hostRef.current.set(tab.id, node);
-                      attachTerminal(tab.id);
-                    } else {
-                      hostRef.current.delete(tab.id);
-                    }
-                  }}
-                />
-              </div>
-            );
+                  key={tab.id}
+                  className={className}
+                  onPointerDown={() => setFocusedGroup(isRight ? "right" : "left")}
+                >
+                  {isVisible ? (
+                    <button
+                      type="button"
+                      className="terminal-pane-close"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => closeTab(tab.id)}
+                      title={t("terminal.tab.close", { title: tab.title })}
+                      aria-label={t("terminal.tab.close", { title: tab.title })}
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : null}
+                  <div
+                    className="terminal-instance-host"
+                    ref={(node) => {
+                      if (node) {
+                        hostRef.current.set(tab.id, node);
+                        attachTerminal(tab.id);
+                      } else {
+                        hostRef.current.delete(tab.id);
+                      }
+                    }}
+                  />
+                </div>
+              );
             })}
             {splitMode ? (
               <div

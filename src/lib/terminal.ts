@@ -101,6 +101,17 @@ export function terminalTabsReducer(
   }
 }
 
+export function selectTerminalSplitLeftTabId(
+  state: TerminalTabsState,
+  rightTabId: string | null,
+): string | null {
+  if (state.activeTabId && state.activeTabId !== rightTabId) {
+    const active = state.tabs.find((tab) => tab.id === state.activeTabId);
+    if (active) return active.id;
+  }
+  return state.tabs.find((tab) => tab.id !== rightTabId)?.id ?? null;
+}
+
 export function terminalCommandPreview(kind: TerminalKind, cwd: string): string {
   const displayCwd = cwd.trim() || ".";
   switch (kind) {
