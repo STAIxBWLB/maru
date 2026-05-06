@@ -541,6 +541,8 @@ export const TerminalPanel = memo(function TerminalPanel({
           className="terminal-title"
           onClick={toggleOpen}
           aria-expanded={open}
+          title={open ? t("terminal.collapse") : t("terminal.expand")}
+          aria-label={open ? t("terminal.collapse") : t("terminal.expand")}
         >
           <PanelBottom size={14} />
           <span>{t("terminal.title")}</span>
@@ -560,6 +562,7 @@ export const TerminalPanel = memo(function TerminalPanel({
                     ? terminalCommandPreview(launcher.id, cwd ?? "")
                     : t("terminal.tauriRequired")
                 }
+                aria-label={t(launcher.titleKey)}
               >
                 {launcher.id === "codex" ? <Code2 size={13} /> : <SquareTerminal size={13} />}
                 <span>{t(launcher.titleKey)}</span>
@@ -613,6 +616,7 @@ export const TerminalPanel = memo(function TerminalPanel({
               className="terminal-tab-close"
               onClick={() => closeTab(tab.id)}
               aria-label={t("terminal.tab.close", { title: tab.title })}
+              title={t("terminal.tab.close", { title: tab.title })}
             >
               <X size={13} />
             </button>

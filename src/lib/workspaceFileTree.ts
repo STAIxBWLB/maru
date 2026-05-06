@@ -149,6 +149,23 @@ export function collectWorkspaceFileFolderPaths(entries: WorkspaceFileEntry[]): 
   return Array.from(folders).sort(compareName);
 }
 
+export function collectWorkspaceFileAncestorFolders(relPath: string): string[] {
+  const folders: string[] = [];
+  const parts = relPath.split("/").filter(Boolean).slice(0, -1);
+  let current = "";
+  for (const folder of parts) {
+    current = current ? `${current}/${folder}` : folder;
+    folders.push(current);
+  }
+  return folders;
+}
+
+export function expandWorkspaceFileAncestors(current: string[], relPath: string): string[] {
+  return Array.from(new Set([...current, ...collectWorkspaceFileAncestorFolders(relPath)])).sort(
+    compareName,
+  );
+}
+
 export function nextCollapsedFileFolders(
   current: string[],
   folderPath: string,

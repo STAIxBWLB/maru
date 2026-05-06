@@ -489,7 +489,7 @@ function SettingsJsonTab({
         spellCheck={false}
       />
       {error ? (
-        <div className="toast">
+        <div className="toast" title={error}>
           <AlertTriangle size={13} />
           <span>{error}</span>
         </div>
@@ -653,7 +653,7 @@ function RulesTab({ workPath }: { workPath: string }) {
           <p className="muted">{t("system.rules.empty")}</p>
         )}
         {error ? (
-          <div className="toast">
+          <div className="toast" title={error}>
             <AlertTriangle size={13} />
             <span>{error}</span>
           </div>
@@ -806,7 +806,7 @@ function TemplatesTab({ workPath }: { workPath: string }) {
           <p className="muted">{t("system.templates.empty")}</p>
         )}
         {error ? (
-          <div className="toast">
+          <div className="toast" title={error}>
             <AlertTriangle size={13} />
             <span>{error}</span>
           </div>
@@ -881,7 +881,7 @@ function McpTab({ workPath }: { workPath: string }) {
         spellCheck={false}
       />
       {error ? (
-        <div className="toast">
+        <div className="toast" title={error}>
           <AlertTriangle size={13} />
           <span>{error}</span>
         </div>
@@ -925,7 +925,7 @@ function ProjectsTab({ workPath }: { workPath: string }) {
         <pre className="system-json-view">{json}</pre>
       )}
       {error ? (
-        <div className="toast">
+        <div className="toast" title={error}>
           <AlertTriangle size={13} />
           <span>{error}</span>
         </div>
@@ -994,7 +994,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
         </ul>
       )}
       {error ? (
-        <div className="toast">
+        <div className="toast" title={error}>
           <AlertTriangle size={13} />
           <span>{error}</span>
         </div>
@@ -1108,13 +1108,13 @@ function ImportTab({ workPath }: { workPath: string }) {
       </div>
 
       {appliedCount !== null ? (
-        <div className="toast notice">
+        <div className="toast notice" title={t("system.import.applied", { count: appliedCount })}>
           <Check size={13} />
           <span>{t("system.import.applied", { count: appliedCount })}</span>
         </div>
       ) : null}
       {error ? (
-        <div className="toast">
+        <div className="toast" title={error}>
           <AlertTriangle size={13} />
           <span>{error}</span>
         </div>

@@ -46,11 +46,19 @@ pub enum FileQueueOperation {
     Move,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileQueueSourceKind {
+    File,
+    Directory,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileQueueApplyItem {
     pub id: String,
     pub source_path: String,
+    pub source_kind: FileQueueSourceKind,
     pub target_dir: String,
     pub operation: FileQueueOperation,
 }
@@ -65,10 +73,51 @@ pub struct FileQueueApplyOutcome {
     pub operation: FileQueueOperation,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileQueueSourceInfo {
+    pub path: String,
+    pub source_rel_path: String,
+    pub file_name: String,
+    pub source_kind: FileQueueSourceKind,
+}
+
 #[tauri::command]
 pub fn scan_workspace_files(vault_path: String) -> Result<Vec<WorkspaceFileEntry>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
     scan_workspace_files_at(&vault)
+}
+
+#[tauri::command]
+pub fn describe_file_queue_sources(paths: Vec<String>) -> Result<Vec<FileQueueSourceInfo>, String> {
+    let mut sources = Vec::new();
+    for path in paths {
+        let source_path = PathBuf::from(&path);
+        let metadata = fs::symlink_metadata(&source_path)
+            .map_err(|err| format!("Cannot inspect source: {err}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("Source symlinks are not supported: {}", source_path.display()));
+        }
+        let source_kind = if metadata.is_dir() {
+            FileQueueSourceKind::Directory
+        } else if metadata.is_file() {
+            FileQueueSourceKind::File
+        } else {
+            return Err(format!("Source is not a file or directory: {}", source_path.display()));
+        };
+        let file_name = source_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "Source file name is not valid UTF-8".to_string())?
+            .to_string();
+        sources.push(FileQueueSourceInfo {
+            path: source_path.to_string_lossy().to_string(),
+            source_rel_path: file_name.clone(),
+            file_name,
+            source_kind,
+        });
+    }
+    Ok(sources)
 }
 
 #[tauri::command]
@@ -88,27 +137,23 @@ pub fn apply_file_queue(
         };
         assert_anchor_can_write(&vault.to_string_lossy(), action)?;
         let source_path = PathBuf::from(&item.source_path);
-        if !source_path.is_file() {
-            return Err(format!("Source is not a file: {}", source_path.display()));
-        }
+        validate_queue_source(&source_path, item.source_kind)?;
         let target_dir = resolve_target_dir(&vault, &item.target_dir)?;
-        fs::create_dir_all(&target_dir)
-            .map_err(|err| format!("Cannot create target directory: {err}"))?;
-        if !target_dir.is_dir() {
-            return Err("Target path is not a directory".to_string());
-        }
         let file_name = source_path
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| "Source file name is not valid UTF-8".to_string())?
             .to_string();
         let target_path = unique_path(target_dir.join(&file_name));
+        reject_target_inside_source(&source_path, &target_path, item.source_kind)?;
+        fs::create_dir_all(&target_dir)
+            .map_err(|err| format!("Cannot create target directory: {err}"))?;
+        if !target_dir.is_dir() {
+            return Err("Target path is not a directory".to_string());
+        }
         match item.operation {
-            FileQueueOperation::Copy => {
-                fs::copy(&source_path, &target_path)
-                    .map_err(|err| format!("Cannot copy file: {err}"))?;
-            }
-            FileQueueOperation::Move => move_file(&source_path, &target_path)?,
+            FileQueueOperation::Copy => copy_source(&source_path, &target_path, item.source_kind)?,
+            FileQueueOperation::Move => move_source(&source_path, &target_path, item.source_kind)?,
         }
         outcomes.push(FileQueueApplyOutcome {
             id: item.id,
@@ -123,6 +168,97 @@ pub fn apply_file_queue(
         });
     }
     Ok(outcomes)
+}
+
+fn validate_queue_source(path: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("Cannot inspect source: {err}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("Source symlinks are not supported: {}", path.display()));
+    }
+    match kind {
+        FileQueueSourceKind::File if metadata.is_file() => Ok(()),
+        FileQueueSourceKind::Directory if metadata.is_dir() => Ok(()),
+        FileQueueSourceKind::File => Err(format!("Source is not a file: {}", path.display())),
+        FileQueueSourceKind::Directory => {
+            Err(format!("Source is not a directory: {}", path.display()))
+        }
+    }
+}
+
+fn copy_source(source: &Path, target: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
+    match kind {
+        FileQueueSourceKind::File => {
+            fs::copy(source, target).map_err(|err| format!("Cannot copy file: {err}"))?;
+            Ok(())
+        }
+        FileQueueSourceKind::Directory => copy_dir_recursive(source, target),
+    }
+}
+
+fn move_source(source: &Path, target: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_source(source, target, kind)?;
+            match kind {
+                FileQueueSourceKind::File => fs::remove_file(source)
+                    .map_err(|err| format!("Cannot remove moved source: {err}")),
+                FileQueueSourceKind::Directory => fs::remove_dir_all(source)
+                    .map_err(|err| format!("Cannot remove moved directory: {err}")),
+            }
+        }
+    }
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir_all(target).map_err(|err| format!("Cannot create target directory: {err}"))?;
+    for entry in WalkDir::new(source).follow_links(false).into_iter() {
+        let entry = entry.map_err(|err| format!("Cannot read source directory: {err}"))?;
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(source)
+            .map_err(|err| format!("Cannot resolve directory entry: {err}"))?;
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let destination = target.join(rel);
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            return Err(format!("Source symlinks are not supported: {}", path.display()));
+        }
+        if file_type.is_dir() {
+            fs::create_dir_all(&destination)
+                .map_err(|err| format!("Cannot create target directory: {err}"))?;
+        } else if file_type.is_file() {
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|err| format!("Cannot create target directory: {err}"))?;
+            }
+            fs::copy(path, &destination).map_err(|err| format!("Cannot copy file: {err}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_target_inside_source(
+    source: &Path,
+    target: &Path,
+    kind: FileQueueSourceKind,
+) -> Result<(), String> {
+    if kind != FileQueueSourceKind::Directory {
+        return Ok(());
+    }
+    let source = source
+        .canonicalize()
+        .map_err(|err| format!("Cannot inspect source: {err}"))?;
+    let target = resolve_through_existing_ancestor(target)
+        .ok_or_else(|| "Cannot inspect target path".to_string())?;
+    if target.starts_with(&source) {
+        Err("Target directory cannot be inside the source directory".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn scan_workspace_files_at(vault: &Path) -> Result<Vec<WorkspaceFileEntry>, String> {
@@ -300,16 +436,6 @@ fn resolve_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
     Some(lexical_normalize(&canonical.join(suffix)))
 }
 
-fn move_file(source: &Path, target: &Path) -> Result<(), String> {
-    match fs::rename(source, target) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            fs::copy(source, target).map_err(|err| format!("Cannot copy file for move: {err}"))?;
-            fs::remove_file(source).map_err(|err| format!("Cannot remove moved source: {err}"))
-        }
-    }
-}
-
 fn unique_path(candidate: PathBuf) -> PathBuf {
     if !candidate.exists() {
         return candidate;
@@ -432,10 +558,87 @@ mod tests {
                 .to_string(),
             target_dir: target_dir.path().to_string_lossy().to_string(),
             operation: FileQueueOperation::Copy,
+            source_kind: FileQueueSourceKind::File,
         };
         let outcomes =
             apply_file_queue(target_dir.path().to_string_lossy().to_string(), vec![item]).unwrap();
 
         assert_eq!(outcomes[0].file_name, "drop-copy.pdf");
+    }
+
+    #[test]
+    fn queue_copies_directory_recursively_with_unique_name() {
+        let source_dir = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        write_file(source_dir.path(), "bundle/a.txt", b"a");
+        write_file(source_dir.path(), "bundle/nested/b.txt", b"b");
+        fs::create_dir_all(target_dir.path().join("bundle")).unwrap();
+
+        let item = FileQueueApplyItem {
+            id: "dir".to_string(),
+            source_path: source_dir
+                .path()
+                .join("bundle")
+                .to_string_lossy()
+                .to_string(),
+            target_dir: target_dir.path().to_string_lossy().to_string(),
+            operation: FileQueueOperation::Copy,
+            source_kind: FileQueueSourceKind::Directory,
+        };
+        let outcomes =
+            apply_file_queue(target_dir.path().to_string_lossy().to_string(), vec![item]).unwrap();
+
+        assert_eq!(outcomes[0].file_name, "bundle-copy");
+        assert_eq!(
+            fs::read(target_dir.path().join("bundle-copy/nested/b.txt")).unwrap(),
+            b"b"
+        );
+    }
+
+    #[test]
+    fn queue_rejects_directory_target_inside_source() {
+        let workspace = TempDir::new().unwrap();
+        write_file(workspace.path(), "source/a.txt", b"a");
+
+        let item = FileQueueApplyItem {
+            id: "dir".to_string(),
+            source_path: workspace
+                .path()
+                .join("source")
+                .to_string_lossy()
+                .to_string(),
+            target_dir: workspace
+                .path()
+                .join("source/nested")
+                .to_string_lossy()
+                .to_string(),
+            operation: FileQueueOperation::Copy,
+            source_kind: FileQueueSourceKind::Directory,
+        };
+        let err =
+            apply_file_queue(workspace.path().to_string_lossy().to_string(), vec![item]).unwrap_err();
+        assert!(err.contains("inside the source"));
+    }
+
+    #[test]
+    fn queue_moves_directory() {
+        let source_dir = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        write_file(source_dir.path(), "bundle/a.txt", b"a");
+        let source = source_dir.path().join("bundle");
+
+        let item = FileQueueApplyItem {
+            id: "dir".to_string(),
+            source_path: source.to_string_lossy().to_string(),
+            target_dir: target_dir.path().to_string_lossy().to_string(),
+            operation: FileQueueOperation::Move,
+            source_kind: FileQueueSourceKind::Directory,
+        };
+        let outcomes =
+            apply_file_queue(target_dir.path().to_string_lossy().to_string(), vec![item]).unwrap();
+
+        assert_eq!(outcomes[0].file_name, "bundle");
+        assert!(!source.exists());
+        assert_eq!(fs::read(target_dir.path().join("bundle/a.txt")).unwrap(), b"a");
     }
 }

@@ -1,8 +1,80 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem("anchor:e2e:storage-cleared") === "true") return;
+    window.localStorage.clear();
+    window.sessionStorage.setItem("anchor:e2e:storage-cleared", "true");
+  });
 });
+
+async function dispatchDrag(
+  page: Page,
+  sourceSelector: string,
+  sourceLabel: string,
+  targetSelector: string,
+  targetLabel: string,
+  altKey = false,
+) {
+  await page.evaluate(
+    ({ sourceSelector, sourceLabel, targetSelector, targetLabel, altKey }) => {
+      const findByLabel = (selector: string, label: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>(selector)).find((element) => {
+          const text = element.textContent ?? "";
+          const aria = element.getAttribute("aria-label") ?? "";
+          const title = element.getAttribute("title") ?? "";
+          return text.includes(label) || aria.includes(label) || title.includes(label);
+        });
+      const source = findByLabel(sourceSelector, sourceLabel);
+      const target = findByLabel(targetSelector, targetLabel);
+      if (!source || !target) {
+        throw new Error(`Cannot dispatch drag from ${sourceLabel} to ${targetLabel}`);
+      }
+      const dataTransfer = new DataTransfer();
+      source.dispatchEvent(
+        new DragEvent("dragstart", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("dragenter", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("dragover", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      target.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+      source.dispatchEvent(
+        new DragEvent("dragend", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          altKey,
+        }),
+      );
+    },
+    { sourceSelector, sourceLabel, targetSelector, targetLabel, altKey },
+  );
+}
 
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
@@ -125,6 +197,76 @@ test("restores a dense shell with tabbed explorer and collapsed terminal", async
   await expect(page.locator(".document-list")).toBeVisible();
 });
 
+test("restores the previous app state on startup", async ({ page }) => {
+  await page.goto("/");
+
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "인박스", exact: true }).click();
+  await expect(page.locator(".inbox-pane")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some((value) => value?.includes('"activeAppMode":"inbox"')),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+  await expect(page.locator(".inbox-pane")).toBeVisible();
+  await rail.getByRole("button", { name: "문서", exact: true }).click();
+
+  await rail.getByLabel("문서 타입 패널 숨기기").click();
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await page.getByLabel("오른쪽으로 분할").first().click();
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("tab", { name: "파일" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some(
+          (value) =>
+            value != null &&
+            value.includes('"activeAppMode":"pkm"') &&
+            value.includes('"editorViewMode":"preview"') &&
+            value.includes('"rightPaneTab":"files"'),
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some(
+          (value) =>
+            value != null &&
+            value.includes('"rightRelPath":"anchor-weekly-meeting.md"') &&
+            value.includes('"focusedGroup":"right"'),
+        ),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Files" })).toHaveClass(/active/);
+  await expect(page.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".tab-trigger", { hasText: "미리보기" }).first()).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".editor-split-shell.split .editor-pane")).toHaveCount(2);
+});
+
 test("supports tree bulk controls and Finder context menu", async ({ page }) => {
   await page.goto("/");
 
@@ -158,6 +300,7 @@ test("shows supported document tab menu items and performs file operations", asy
   const documentList = page.locator(".document-list");
   await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await documentList.getByRole("button", { name: /Anchor 용어집/ }).click();
+  await documentList.getByRole("button", { name: "목록" }).click();
 
   const glossaryTab = page.locator(".document-tab[title='references/anchor-glossary.md']");
   await expect(glossaryTab).toBeVisible();
@@ -183,7 +326,17 @@ test("shows supported document tab menu items and performs file operations", asy
   await expect(menu).not.toContainText("File History");
   await expect(menu).not.toContainText("Reopen Editor With");
 
-  await menu.getByRole("button", { name: "복제..." }).click();
+  await menu.getByRole("button", { name: "Explorer View에서 보기" }).click();
+  const revealedGlossary = documentList.getByRole("button", { name: /Anchor 용어집/ });
+  await expect(documentList.getByRole("button", { name: "트리" })).toHaveClass(/active/);
+  await expect(revealedGlossary).toBeVisible();
+  await expect(revealedGlossary).toBeFocused();
+
+  await glossaryTab.click({ button: "right" });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "복제..." })
+    .click();
   const copyTab = page.locator(".document-tab[title='references/anchor-glossary-copy.md']");
   await expect(copyTab).toBeVisible();
 
@@ -275,8 +428,22 @@ test("switches between Documents and Files explorer modes", async ({ page }) => 
 
   await explorer.getByRole("button", { name: "전체" }).click();
   await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).dblclick();
-  await expect(page.locator(".document-tab-title", { hasText: "Anchor 사업 주간 점검 회의" })).toBeVisible();
+  await explorer.getByRole("button", { name: /anchor-glossary\.md/ }).dblclick();
+  await expect(page.locator(".document-tab-title", { hasText: "Anchor 용어집" })).toBeVisible();
+  await explorer.getByRole("button", { name: "모두 접기" }).click();
+  await expect(explorer.getByRole("button", { name: /anchor-glossary\.md/ })).toHaveCount(0);
+
+  await page.locator(".document-tab[title='references/anchor-glossary.md']").click({
+    button: "right",
+  });
+  await page
+    .locator(".document-tab-context-menu")
+    .getByRole("button", { name: "Explorer View에서 보기" })
+    .click();
+  const revealedFile = explorer.getByRole("button", { name: /anchor-glossary\.md/ });
+  await expect(explorer.getByRole("button", { name: "Files" })).toHaveClass(/active/);
+  await expect(revealedFile).toBeVisible();
+  await expect(revealedFile).toBeFocused();
 });
 
 test("queues selected files in the right Files pane and applies explicitly", async ({ page }) => {
@@ -288,10 +455,153 @@ test("queues selected files in the right Files pane and applies explicitly", asy
   await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
 
   const rightPane = page.locator(".outline-pane");
-  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute("aria-selected", "true");
+  await expect(rightPane.getByRole("button", { name: "아이콘 보기" })).toHaveClass(/active/);
+  await expect(rightPane.locator(".right-list.file-shelf-icons")).toBeVisible();
   await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+  await expect(rightPane.locator('.queue-file-icon[data-kind="markdown"]')).toBeVisible();
+  await rightPane.getByRole("button", { name: "리스트 보기" }).click();
+  await expect(rightPane.locator(".right-list.file-shelf-icons")).toHaveCount(0);
   await rightPane.getByRole("button", { name: "Apply" }).click();
   await expect(rightPane.locator(".right-list-item.queue.done", { hasText: "완료" })).toBeVisible();
+});
+
+test("clears selected and all file shelf items explicitly", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  await expect(rightPane.locator(".right-list-item.queue")).toHaveCount(2);
+
+  await rightPane.locator(".right-list-item.queue", { hasText: "minutes-template.md" }).click();
+  await rightPane.getByRole("button", { name: "선택 항목 1개 비우기" }).click();
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "minutes-template.md" })).toHaveCount(0);
+  await expect(rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" })).toBeVisible();
+
+  await rightPane.getByRole("button", { name: "전체 비우기" }).click();
+  await expect(rightPane.locator(".right-list-item.queue")).toHaveCount(0);
+  await expect(rightPane.locator(".outline-empty", { hasText: "대기 중인 파일 작업이 없습니다." })).toBeVisible();
+});
+
+test("copies selected Files shelf items into a tree context target", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
+  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "파일" }).click();
+  const weeklyItem = rightPane.locator(".right-list-item.queue", {
+    hasText: "anchor-weekly-meeting.md",
+  });
+  const templateItem = rightPane.locator(".right-list-item.queue", {
+    hasText: "minutes-template.md",
+  });
+  await expect(weeklyItem).toBeVisible();
+  await expect(templateItem).toBeVisible();
+  await weeklyItem.click({ modifiers: ["Shift"] });
+
+  await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
+  await page.getByRole("button", { name: "선택 항목 2개 여기에 복사" }).click();
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+});
+
+test("drags a Documents list item into the right Files shelf", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "목록" }).click();
+  await page
+    .locator(".document-list .doc-row", { hasText: "Anchor 사업 주간 점검 회의" })
+    .dragTo(page.getByRole("tab", { name: "파일" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(
+    rightPane.locator(".right-list-item.queue", { hasText: "anchor-weekly-meeting.md" }),
+  ).toBeVisible();
+});
+
+test("drags explorer items directly onto left tree targets", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await page
+    .locator(".document-list .tree-row.file", { hasText: "Anchor 사업 주간 점검 회의" })
+    .dragTo(page.locator(".document-list .tree-row.folder", { hasText: "references" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(1);
+});
+
+test("drags multi-selected Files rows and folder rows", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await explorer.getByRole("button", { name: /anchor-weekly-meeting\.md/ }).click();
+  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click({
+    modifiers: ["Meta"],
+  });
+
+  await page
+    .locator(".document-list .tree-row.file", { hasText: "anchor-weekly-meeting.md" })
+    .dragTo(page.locator(".document-list .tree-row.folder", { hasText: "attachments" }));
+
+  const rightPane = page.locator(".outline-pane");
+  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+  await rightPane.getByRole("button", { name: "전체 비우기" }).click();
+
+  await page
+    .locator(".document-list .tree-row.folder", { hasText: "attachments" })
+    .dragTo(page.getByRole("tab", { name: "파일" }));
+  await expect(
+    rightPane.locator(".right-list-item.queue", { hasText: "attachments" }),
+  ).toBeVisible();
+  await expect(rightPane.locator('.queue-file-icon[data-kind="directory"]')).toBeVisible();
+});
+
+test("blocks moving dirty open documents by drag and drop", async ({ page }) => {
+  await page.goto("/");
+
+  const textarea = page.locator("textarea.source-editor");
+  await textarea.fill(`${await textarea.inputValue()}\n\nUnsaved local edit`);
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await dispatchDrag(
+    page,
+    ".document-list .tree-row.file",
+    "Anchor 사업 주간 점검 회의",
+    ".document-list .tree-row.folder",
+    "references",
+    true,
+  );
+
+  await expect(page.locator(".toast")).toContainText("저장되지 않은 문서는 이동할 수 없습니다");
+  await expect(page.locator(".outline-pane .right-list-item.queue.done")).toHaveCount(0);
 });
 
 test("resizes document and right panes with drag handles", async ({ page }) => {

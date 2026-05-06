@@ -54,6 +54,8 @@ export const Sidebar = memo(function Sidebar({
           className="sidebar-cta"
           onClick={onNewDocument}
           disabled={!canCreateDocument}
+          title={t("newDoc.button")}
+          aria-label={t("newDoc.button")}
         >
           <Plus size={15} />
           {t("newDoc.button")}
@@ -74,7 +76,7 @@ export const Sidebar = memo(function Sidebar({
       </div>
 
       <div className="sidebar-section">
-        <h3>
+        <h3 title={t("sidebar.types")}>
           <Layers size={11} className="sidebar-section-title-icon" />
           {t("sidebar.types")}
         </h3>
@@ -114,7 +116,7 @@ export const Sidebar = memo(function Sidebar({
       </div>
 
       <div className="sidebar-section flex-fill">
-        <h3>
+        <h3 title={t("sidebar.recent")}>
           <Clock size={11} className="sidebar-section-title-icon" />
           {t("sidebar.recent")}
         </h3>

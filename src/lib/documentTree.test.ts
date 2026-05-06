@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDocumentTreeRows,
   collectDocumentTreeFolderPaths,
+  expandDocumentAncestors,
   nextCollapsedFolders,
   virtualizeDocumentTreeRows,
 } from "./documentTree";
@@ -82,6 +83,17 @@ describe("collectDocumentTreeFolderPaths", () => {
         entry("root.md"),
       ]),
     ).toEqual(["admin", "projects", "projects/anchor", "projects/rise"]);
+  });
+});
+
+describe("expandDocumentAncestors", () => {
+  it("adds every ancestor folder while preserving existing expanded folders", () => {
+    expect(expandDocumentAncestors(["z"], "projects/rise/reports/final.md")).toEqual([
+      "projects",
+      "projects/rise",
+      "projects/rise/reports",
+      "z",
+    ]);
   });
 });
 

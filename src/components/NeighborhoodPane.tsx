@@ -47,7 +47,7 @@ export function NeighborhoodPane({
 
       {data.upward.length > 0 ? (
         <div className="neighborhood-section">
-          <div className="neighborhood-label">
+          <div className="neighborhood-label" title={t("neighborhood.upward")}>
             <ArrowUpRight size={11} />
             <span>{t("neighborhood.upward")}</span>
           </div>
@@ -71,7 +71,7 @@ export function NeighborhoodPane({
 
       {data.mentions.length > 0 ? (
         <div className="neighborhood-section">
-          <div className="neighborhood-label">
+          <div className="neighborhood-label" title={t("neighborhood.mentions")}>
             <Link2 size={11} />
             <span>{t("neighborhood.mentions")}</span>
             <span className="neighborhood-count">{data.mentions.length}</span>
@@ -91,7 +91,7 @@ export function NeighborhoodPane({
 
       {data.peers.length > 0 ? (
         <div className="neighborhood-section">
-          <div className="neighborhood-label">
+          <div className="neighborhood-label" title={t("neighborhood.peers")}>
             <Users size={11} />
             <span>{t("neighborhood.peers")}</span>
             <span className="neighborhood-count">{data.peers.length}</span>

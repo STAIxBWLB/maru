@@ -5,6 +5,10 @@ export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
+export type AnchorAppMode = "pkm" | "inbox";
+export type WorkspaceVisibilitySetting = "private" | "public";
+export type EditorViewModeSetting = "rich" | "source" | "preview";
+export type RightPaneTab = "outline" | "files" | "memo" | "info";
 
 export const DEFAULT_BINARY_FILE_INCLUDE_PATTERNS = [
   "*.tgz",
@@ -74,6 +78,10 @@ export interface TerminalLauncherSettings {
 export interface AnchorSettings {
   version: 1;
   ui: {
+    activeAppMode: AnchorAppMode;
+    activeWorkspaceVisibility: WorkspaceVisibilitySetting;
+    editorViewMode: EditorViewModeSetting;
+    rightPaneTab: RightPaneTab;
     explorerPaneMode: ExplorerPaneMode;
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
@@ -102,6 +110,10 @@ export interface AnchorSettings {
 export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   version: 1,
   ui: {
+    activeAppMode: "pkm",
+    activeWorkspaceVisibility: "private",
+    editorViewMode: "source",
+    rightPaneTab: "outline",
     explorerPaneMode: "documents",
     documentBrowserMode: "tree",
     documentLabelMode: "title",
@@ -170,6 +182,11 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
   return {
     version: 1,
     ui: {
+      activeAppMode: parseAnchorAppMode(ui.activeAppMode) ?? "pkm",
+      activeWorkspaceVisibility:
+        parseWorkspaceVisibilitySetting(ui.activeWorkspaceVisibility) ?? "private",
+      editorViewMode: parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
+      rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "outline",
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
@@ -266,6 +283,24 @@ function normalizeLauncher(
 
 function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
   return value === "list" || value === "tree" ? value : null;
+}
+
+function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
+  return value === "pkm" || value === "inbox" ? value : null;
+}
+
+function parseWorkspaceVisibilitySetting(value: unknown): WorkspaceVisibilitySetting | null {
+  return value === "private" || value === "public" ? value : null;
+}
+
+function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | null {
+  return value === "rich" || value === "source" || value === "preview" ? value : null;
+}
+
+function parseRightPaneTab(value: unknown): RightPaneTab | null {
+  return value === "outline" || value === "files" || value === "memo" || value === "info"
+    ? value
+    : null;
 }
 
 function parseExplorerPaneMode(value: unknown): ExplorerPaneMode | null {

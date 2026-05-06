@@ -62,7 +62,8 @@ export function WorkspaceSwitcher({
         type="button"
         className="workspace-switcher"
         onClick={() => setOpen((value) => !value)}
-        title={active?.path ?? ""}
+        title={active?.path ?? t("workspace.switcher.empty")}
+        aria-label={active?.label ?? t("workspace.switcher.empty")}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -107,6 +108,7 @@ export function WorkspaceSwitcher({
                       setOpen(false);
                     }}
                     role="menuitem"
+                    title={workspace.path}
                   >
                     {workspace.path === activePath ? (
                       <Check size={14} />
@@ -163,6 +165,8 @@ export function WorkspaceSwitcher({
               setOpen(false);
             }}
             role="menuitem"
+            title={t("workspace.add")}
+            aria-label={t("workspace.add")}
           >
             <Plus size={14} />
             <span>{t("workspace.add")}</span>
@@ -174,6 +178,8 @@ export function WorkspaceSwitcher({
               setOpen(false);
             }}
             role="menuitem"
+            title={t("workspace.addPublic")}
+            aria-label={t("workspace.addPublic")}
           >
             <Plus size={14} />
             <span>{t("workspace.addPublic")}</span>
@@ -185,6 +191,8 @@ export function WorkspaceSwitcher({
               setOpen(false);
             }}
             role="menuitem"
+            title={t("workspace.useSample")}
+            aria-label={t("workspace.useSample")}
           >
             <FolderOpen size={14} />
             <span>{t("workspace.useSample")}</span>

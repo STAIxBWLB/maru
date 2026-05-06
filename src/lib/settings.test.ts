@@ -14,6 +14,10 @@ describe("normalizeAnchorSettings", () => {
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {
+        activeAppMode: "inbox",
+        activeWorkspaceVisibility: "public",
+        editorViewMode: "preview",
+        rightPaneTab: "files",
         explorerPaneMode: "files",
         documentBrowserMode: "tree",
         documentLabelMode: "filename",
@@ -48,6 +52,10 @@ describe("normalizeAnchorSettings", () => {
       },
     });
 
+    expect(settings.ui.activeAppMode).toBe("inbox");
+    expect(settings.ui.activeWorkspaceVisibility).toBe("public");
+    expect(settings.ui.editorViewMode).toBe("preview");
+    expect(settings.ui.rightPaneTab).toBe("files");
     expect(settings.ui.explorerPaneMode).toBe("files");
     expect(settings.ui.documentBrowserMode).toBe("tree");
     expect(settings.ui.documentLabelMode).toBe("filename");
@@ -82,6 +90,10 @@ describe("normalizeAnchorSettings", () => {
     const settings = normalizeAnchorSettings({});
 
     expect(settings.ui.explorerPaneMode).toBe("documents");
+    expect(settings.ui.activeAppMode).toBe("pkm");
+    expect(settings.ui.activeWorkspaceVisibility).toBe("private");
+    expect(settings.ui.editorViewMode).toBe("source");
+    expect(settings.ui.rightPaneTab).toBe("outline");
     expect(settings.ui.workspaceFileFilter).toBe("all");
     expect(settings.ui.binaryFileIncludePatterns).toEqual(
       DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,

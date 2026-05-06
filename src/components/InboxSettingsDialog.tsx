@@ -67,7 +67,11 @@ export function InboxSettingsDialog({
               <Dialog.Title>{t("inbox.settings.title")}</Dialog.Title>
               <Dialog.Description>{t("inbox.settings.description")}</Dialog.Description>
             </div>
-            <Dialog.Close className="icon-button" title={t("app.errorClose")}>
+            <Dialog.Close
+              className="icon-button"
+              title={t("app.errorClose")}
+              aria-label={t("app.errorClose")}
+            >
               <X size={16} />
             </Dialog.Close>
           </div>

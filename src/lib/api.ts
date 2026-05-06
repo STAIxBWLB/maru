@@ -20,6 +20,7 @@ import type {
   DocumentPayload,
   FileQueueApplyItem,
   FileQueueApplyOutcome,
+  FileQueueSourceInfo,
   FileStoreOperation,
   GitFileChange,
   GitStatus,
@@ -77,6 +78,17 @@ export async function chooseFiles(title: string): Promise<string[]> {
   if (!isTauri()) return [];
   const selected = await open({
     directory: false,
+    multiple: true,
+    title,
+  });
+  if (Array.isArray(selected)) return selected.filter((item): item is string => typeof item === "string");
+  return typeof selected === "string" ? [selected] : [];
+}
+
+export async function chooseDirectories(title: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  const selected = await open({
+    directory: true,
     multiple: true,
     title,
   });
@@ -317,6 +329,21 @@ export async function applyFileQueue(
     });
   }
   return invoke<FileQueueApplyOutcome[]>("apply_file_queue", { vaultPath, items });
+}
+
+export async function describeFileQueueSources(paths: string[]): Promise<FileQueueSourceInfo[]> {
+  if (!isTauri()) {
+    return paths.map((path) => {
+      const fileName = path.split("/").pop() ?? path;
+      return {
+        path,
+        sourceRelPath: fileName,
+        fileName,
+        sourceKind: "file",
+      };
+    });
+  }
+  return invoke<FileQueueSourceInfo[]>("describe_file_queue_sources", { paths });
 }
 
 // === Phase 2 inbox watcher / AI bridge / classifier ===

@@ -186,7 +186,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     return (
       <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
-          <div className="icon-circle">
+          <div className="icon-circle" title={openingEntry.title}>
             <FileText size={26} />
           </div>
           <h2>{openingEntry.title}</h2>
@@ -200,7 +200,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     return (
       <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
-          <div className="icon-circle">
+          <div className="icon-circle" title={t("editor.empty.title")}>
             <FileText size={26} />
           </div>
           <h2>{t("editor.empty.title")}</h2>
@@ -369,7 +369,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           <strong>{documentLabel ?? document.title}</strong>
         </div>
         <div className="editor-actions">
-          <span className={dirty ? "save-state dirty" : "save-state saved"}>
+          <span
+            className={dirty ? "save-state dirty" : "save-state saved"}
+            title={dirty ? t("editor.dirty") : t("editor.saved")}
+          >
             {dirty ? <Clock3 size={12} /> : <Check size={12} />}
             {dirty ? t("editor.dirty") : t("editor.saved")}
           </span>

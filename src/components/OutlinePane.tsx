@@ -1,12 +1,26 @@
 import {
+  CircleX,
   Copy,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileImage,
+  FolderPlus,
+  Grid2X2,
   FilePlus2,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  FileVideo,
   Files,
+  Folder,
   Hash,
   Info,
   List,
   MoveRight,
   Plus,
+  Presentation,
   Save,
   StickyNote,
   Trash2,
@@ -15,6 +29,7 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  chooseDirectories,
   chooseFiles,
   chooseSaveFile,
   chooseWorkspaceDirectory,
@@ -25,11 +40,20 @@ import {
   saveMemoAs,
 } from "../lib/api";
 import { frontmatterScalar } from "../lib/document";
+import {
+  clearExplorerDragPayload,
+  dropOperationFromEvent,
+  hasExplorerDragPayload,
+  readExplorerDragPayload,
+  type ExplorerDragPayload,
+} from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
+import type { RightPaneTab } from "../lib/settings";
 import type {
   DocumentPayload,
   FileQueueItem,
+  FileQueueSourceInfo,
   MemoEntry,
   MemoFormat,
   VaultEntry,
@@ -58,9 +82,15 @@ interface OutlinePaneProps {
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
   ) => void;
-  onQueueExternalFiles: (paths: string[]) => void;
-  onApplyFileQueue: () => Promise<void>;
+  selectedFileQueueItemIds: string[];
+  onSelectFileQueueItem: (id: string, additive: boolean) => void;
+  onQueueExternalFiles: (paths: string[]) => Promise<void>;
+  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
+  onApplyFileQueue: () => Promise<unknown>;
   onClearFileQueue: () => void;
+  onClearSelectedFileQueueItems: () => void;
+  activeTab: RightPaneTab;
+  onTabChange: (tab: RightPaneTab) => void;
   paneRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -84,6 +114,43 @@ const STANDARD_STATUSES = [
   "완료",
 ];
 
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
+const TEXT_EXTENSIONS = new Set(["txt", "text", "rtf", "csv", "tsv", "log"]);
+const CODE_EXTENSIONS = new Set([
+  "c",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "html",
+  "java",
+  "js",
+  "json",
+  "jsx",
+  "kt",
+  "lua",
+  "php",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sh",
+  "swift",
+  "toml",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
+const IMAGE_EXTENSIONS = new Set(["avif", "gif", "heic", "jpeg", "jpg", "png", "svg", "webp"]);
+const ARCHIVE_EXTENSIONS = new Set(["7z", "bz2", "dmg", "gz", "pkg", "rar", "tar", "tgz", "xz", "zip"]);
+const SPREADSHEET_EXTENSIONS = new Set(["numbers", "ods", "tsv", "xls", "xlsm", "xlsx"]);
+const PRESENTATION_EXTENSIONS = new Set(["key", "odp", "ppt", "pptx"]);
+const AUDIO_EXTENSIONS = new Set(["aac", "aiff", "flac", "m4a", "mp3", "ogg", "wav"]);
+const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm", "wmv"]);
+
 export function OutlinePane({
   document,
   draftContent,
@@ -100,13 +167,19 @@ export function OutlinePane({
   fileQueue,
   canApplyFileQueue,
   onUpdateFileQueueItem,
+  selectedFileQueueItemIds,
+  onSelectFileQueueItem,
   onQueueExternalFiles,
+  onQueueFileSources,
   onApplyFileQueue,
   onClearFileQueue,
+  onClearSelectedFileQueueItems,
+  activeTab,
+  onTabChange,
   paneRef,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"outline" | "files" | "memo" | "info">("outline");
+  const tab = activeTab;
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
   const meta = document?.meta ?? {};
   const fmType = frontmatterScalar(meta, "type");
@@ -128,6 +201,20 @@ export function OutlinePane({
     }
     return Array.from(set).sort();
   }, [entries]);
+  const queueExplorerPayload = useCallback(
+    (payload: ExplorerDragPayload) => {
+      onQueueFileSources(
+        payload.items.map((item) => ({
+          path: item.path,
+          sourceRelPath: item.relPath,
+          fileName: item.fileName,
+          sourceKind: item.sourceKind,
+        })),
+        payload.workspacePath,
+      );
+    },
+    [onQueueFileSources],
+  );
 
   return (
     <aside className="outline-pane" ref={paneRef}>
@@ -152,7 +239,28 @@ export function OutlinePane({
               role="tab"
               aria-selected={tab === id}
               className={tab === id ? "active" : ""}
-              onClick={() => setTab(id)}
+              onClick={() => onTabChange(id)}
+              onDragOver={
+                id === "files"
+                  ? (event) => {
+                      if (!hasExplorerDragPayload(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+                    }
+                  : undefined
+              }
+              onDrop={
+                id === "files"
+                  ? (event) => {
+                      const payload = readExplorerDragPayload(event.dataTransfer);
+                      if (!payload) return;
+                      event.preventDefault();
+                      clearExplorerDragPayload();
+                      onTabChange("files");
+                      queueExplorerPayload(payload);
+                    }
+                  : undefined
+              }
               title={t(`rightPane.tab.${id}`)}
               aria-label={t(`rightPane.tab.${id}`)}
             >
@@ -189,7 +297,7 @@ export function OutlinePane({
                     ))}
                   </div>
                 ) : (
-                  <div className="outline-empty">
+                  <div className="outline-empty" title={t("outline.empty")}>
                     <Hash size={20} className="outline-empty-icon" />
                     <div>{t("outline.empty")}</div>
                   </div>
@@ -214,11 +322,15 @@ export function OutlinePane({
             <FilesQueuePane
               queue={fileQueue}
               canApplyFileQueue={canApplyFileQueue}
+              selectedIds={selectedFileQueueItemIds}
               onError={onError}
               onUpdateItem={onUpdateFileQueueItem}
+              onSelectItem={onSelectFileQueueItem}
               onQueueExternalFiles={onQueueExternalFiles}
+              onQueueFileSources={onQueueFileSources}
               onApply={onApplyFileQueue}
               onClear={onClearFileQueue}
+              onClearSelected={onClearSelectedFileQueueItems}
               t={t}
             />
           ) : null}
@@ -310,33 +422,45 @@ export function OutlinePane({
 function FilesQueuePane({
   queue,
   canApplyFileQueue,
+  selectedIds,
   onError,
   onUpdateItem,
+  onSelectItem,
   onQueueExternalFiles,
+  onQueueFileSources,
   onApply,
   onClear,
+  onClearSelected,
   t,
 }: {
   queue: FileQueueItem[];
   canApplyFileQueue: boolean;
+  selectedIds: string[];
   onError: (message: string | null) => void;
   onUpdateItem: (
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
   ) => void;
-  onQueueExternalFiles: (paths: string[]) => void;
-  onApply: () => Promise<void>;
+  onSelectItem: (id: string, additive: boolean) => void;
+  onQueueExternalFiles: (paths: string[]) => Promise<void>;
+  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
+  onApply: () => Promise<unknown>;
   onClear: () => void;
+  onClearSelected: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   const [working, setWorking] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverShelf, setDragOverShelf] = useState(false);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
     void import("@tauri-apps/api/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((event) => {
-          if (event.payload.type === "drop") onQueueExternalFiles(event.payload.paths);
+          if (event.payload.type === "drop") void onQueueExternalFiles(event.payload.paths);
         }),
       )
       .then((off) => {
@@ -346,8 +470,51 @@ function FilesQueuePane({
     return () => dispose?.();
   }, [onQueueExternalFiles]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
   const pickFiles = async () => {
-    onQueueExternalFiles(await chooseFiles(t("rightPane.files.pick")));
+    await onQueueExternalFiles(await chooseFiles(t("rightPane.files.pick")));
+  };
+
+  const pickFolders = async () => {
+    await onQueueExternalFiles(await chooseDirectories(t("rightPane.files.pickFolder")));
+  };
+  const queueExplorerPayload = (payload: ExplorerDragPayload) => {
+    onQueueFileSources(
+      payload.items.map((item) => ({
+        path: item.path,
+        sourceRelPath: item.relPath,
+        fileName: item.fileName,
+        sourceKind: item.sourceKind,
+      })),
+      payload.workspacePath,
+    );
+  };
+  const handleShelfDragOver = (event: React.DragEvent) => {
+    if (!hasExplorerDragPayload(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+    setDragOverShelf(true);
+  };
+  const handleShelfDrop = (event: React.DragEvent) => {
+    const payload = readExplorerDragPayload(event.dataTransfer);
+    setDragOverShelf(false);
+    if (!payload) return;
+    event.preventDefault();
+    clearExplorerDragPayload();
+    queueExplorerPayload(payload);
   };
 
   const chooseDestination = async (item: FileQueueItem) => {
@@ -372,39 +539,132 @@ function FilesQueuePane({
     queuedCount === 0 ||
     working ||
     !canApplyFileQueue;
+  const clearSelectedLabel = t("rightPane.files.clearSelected", { count: selectedIds.length });
+  const clearAllLabel = t("rightPane.files.clearAll");
 
   return (
     <section className="right-tool-pane">
-      <div className="right-tool-actions">
-        <button type="button" onClick={pickFiles}>
+      <div className="right-tool-actions file-shelf-toolbar">
+        <button
+          type="button"
+          onClick={pickFiles}
+          title={t("rightPane.files.pick")}
+          aria-label={t("rightPane.files.pick")}
+        >
           <FilePlus2 size={13} />
           <span>{t("rightPane.files.pick")}</span>
         </button>
+        <button
+          type="button"
+          onClick={pickFolders}
+          title={t("rightPane.files.pickFolder")}
+          aria-label={t("rightPane.files.pickFolder")}
+        >
+          <FolderPlus size={13} />
+          <span>{t("rightPane.files.pickFolder")}</span>
+        </button>
+        <div className="queue-view-toggle" role="group" aria-label={t("rightPane.files.viewMode")}>
+          <button
+            type="button"
+            className={viewMode === "list" ? "active" : ""}
+            onClick={() => setViewMode("list")}
+            title={t("rightPane.files.viewList")}
+            aria-label={t("rightPane.files.viewList")}
+          >
+            <List size={13} />
+          </button>
+          <button
+            type="button"
+            className={viewMode === "icons" ? "active" : ""}
+            onClick={() => setViewMode("icons")}
+            title={t("rightPane.files.viewIcons")}
+            aria-label={t("rightPane.files.viewIcons")}
+          >
+            <Grid2X2 size={13} />
+          </button>
+        </div>
       </div>
-      <div className={queue.length === 0 ? "file-drop-zone empty" : "file-drop-zone"}>
+      <div
+        className={[
+          "file-drop-zone",
+          queue.length === 0 ? "empty" : "",
+          dragOverShelf ? "drag-over" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        title={t("rightPane.files.dropTitle")}
+        onDragOver={handleShelfDragOver}
+        onDragLeave={() => setDragOverShelf(false)}
+        onDrop={handleShelfDrop}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
         <Files size={18} />
-        <strong>{t("rightPane.files.queueTitle")}</strong>
-        <span>{t("rightPane.files.queueDescription")}</span>
+        <strong>{t("rightPane.files.dropTitle")}</strong>
+        <span>{t("rightPane.files.dropDescription")}</span>
       </div>
-      <div className="right-list">
+      <div
+        className={[
+          "right-list",
+          viewMode === "icons" ? "file-shelf-icons" : "",
+          dragOverShelf ? "drag-over" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onDragOver={handleShelfDragOver}
+        onDragLeave={() => setDragOverShelf(false)}
+        onDrop={handleShelfDrop}
+      >
         {queue.length === 0 ? (
           <div className="outline-empty">{t("rightPane.files.emptyQueue")}</div>
         ) : null}
         {queue.map((item) => (
-          <div className={`right-list-item queue ${item.status}`} key={item.id} title={item.sourcePath}>
+          <div
+            role="button"
+            tabIndex={0}
+            className={`right-list-item queue ${item.status}${selectedSet.has(item.id) ? " selected" : ""}`}
+            key={item.id}
+            title={fileQueueTitleFor(item, t)}
+            aria-selected={selectedSet.has(item.id)}
+            draggable={selectedSet.has(item.id)}
+            onClick={(event) => onSelectItem(item.id, event.metaKey || event.ctrlKey || event.shiftKey)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onSelectItem(item.id, event.metaKey || event.ctrlKey || event.shiftKey);
+            }}
+            onDragStart={(event) => {
+              if (!selectedSet.has(item.id)) onSelectItem(item.id, false);
+              event.dataTransfer.effectAllowed = "copyMove";
+              event.dataTransfer.setData("application/x-anchor-file-queue", item.id);
+            }}
+          >
             <div className="queue-copy">
-              <strong>{item.fileName}</strong>
-              <span>{item.sourceRelPath}</span>
-              <span title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
+              <span
+                className="queue-file-icon"
+                data-kind={fileQueueKindFor(item)}
+                title={fileQueueTitleFor(item, t)}
+                aria-hidden="true"
+              >
+                {fileQueueIconFor(item)}
+              </span>
+              <strong>
+                <span>{item.fileName}</span>
+              </strong>
+              <span className="queue-source-path">{item.sourceRelPath}</span>
+              <span className="queue-target-path" title={item.targetDir}>{t("rightPane.files.destination")}: {item.targetDir}</span>
               {item.message ? <em>{item.message}</em> : null}
             </div>
-            <div className="queue-controls">
+            <div className="queue-controls" onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
                 className={item.operation === "copy" ? "active" : ""}
                 onClick={() => onUpdateItem(item.id, { operation: "copy" })}
                 disabled={item.status !== "queued"}
                 title={t("rightPane.files.copy")}
+                aria-label={t("rightPane.files.copy")}
               >
                 <Copy size={12} />
               </button>
@@ -414,6 +674,7 @@ function FilesQueuePane({
                 onClick={() => onUpdateItem(item.id, { operation: "move" })}
                 disabled={item.status !== "queued"}
                 title={t("rightPane.files.move")}
+                aria-label={t("rightPane.files.move")}
               >
                 <MoveRight size={12} />
               </button>
@@ -422,6 +683,7 @@ function FilesQueuePane({
                 onClick={() => void chooseDestination(item)}
                 disabled={item.status !== "queued"}
                 title={t("rightPane.files.chooseDestination")}
+                aria-label={t("rightPane.files.chooseDestination")}
               >
                 <Files size={12} />
               </button>
@@ -430,17 +692,144 @@ function FilesQueuePane({
         ))}
       </div>
       <div className="right-tool-actions bottom">
-        <button type="button" disabled={cannotApply} onClick={() => void apply()}>
+        <button
+          type="button"
+          disabled={cannotApply}
+          onClick={() => void apply()}
+          title={t("rightPane.files.applyQueue")}
+          aria-label={t("rightPane.files.applyQueue")}
+        >
           <Save size={13} />
           <span>{t("rightPane.files.applyQueue")}</span>
         </button>
-        <button type="button" disabled={queue.length === 0 || working} onClick={onClear}>
-          <Trash2 size={13} />
-          <span>{t("rightPane.files.clearQueue")}</span>
+        <button
+          type="button"
+          disabled={selectedIds.length === 0 || working}
+          onClick={onClearSelected}
+          title={clearSelectedLabel}
+          aria-label={clearSelectedLabel}
+        >
+          <X size={13} />
+          <span>{clearSelectedLabel}</span>
+        </button>
+        <button
+          type="button"
+          disabled={queue.length === 0 || working}
+          onClick={onClear}
+          title={clearAllLabel}
+          aria-label={clearAllLabel}
+        >
+          <CircleX size={13} />
+          <span>{clearAllLabel}</span>
         </button>
       </div>
+      {contextMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" onClick={() => { setContextMenu(null); void pickFiles(); }}>
+            {t("rightPane.files.pick")}
+          </button>
+          <button type="button" onClick={() => { setContextMenu(null); void pickFolders(); }}>
+            {t("rightPane.files.pickFolder")}
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            type="button"
+            disabled={selectedIds.length === 0}
+            onClick={() => {
+              setContextMenu(null);
+              onClearSelected();
+            }}
+          >
+            {clearSelectedLabel}
+          </button>
+          <button
+            type="button"
+            disabled={queue.length === 0}
+            onClick={() => {
+              setContextMenu(null);
+              onClear();
+            }}
+          >
+            {clearAllLabel}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function fileQueueIconFor(item: FileQueueItem): React.ReactNode {
+  const kind = fileQueueKindFor(item);
+  const size = 18;
+  switch (kind) {
+    case "directory":
+      return <Folder size={size} />;
+    case "markdown":
+    case "text":
+      return <FileText size={size} />;
+    case "code":
+      return <FileCode2 size={size} />;
+    case "image":
+      return <FileImage size={size} />;
+    case "pdf":
+      return <FileType size={size} />;
+    case "archive":
+      return <FileArchive size={size} />;
+    case "spreadsheet":
+      return <FileSpreadsheet size={size} />;
+    case "presentation":
+      return <Presentation size={size} />;
+    case "audio":
+      return <FileAudio size={size} />;
+    case "video":
+      return <FileVideo size={size} />;
+    default:
+      return <File size={size} />;
+  }
+}
+
+function fileQueueKindFor(item: FileQueueItem): string {
+  if (item.sourceKind === "directory") return "directory";
+  const extension = fileQueueExtension(item);
+  if (MARKDOWN_EXTENSIONS.has(extension)) return "markdown";
+  if (TEXT_EXTENSIONS.has(extension)) return "text";
+  if (CODE_EXTENSIONS.has(extension)) return "code";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (extension === "pdf") return "pdf";
+  if (ARCHIVE_EXTENSIONS.has(extension)) return "archive";
+  if (SPREADSHEET_EXTENSIONS.has(extension)) return "spreadsheet";
+  if (PRESENTATION_EXTENSIONS.has(extension)) return "presentation";
+  if (AUDIO_EXTENSIONS.has(extension)) return "audio";
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
+  return "file";
+}
+
+function fileQueueExtension(item: FileQueueItem): string {
+  const name = (item.fileName || item.sourceRelPath || item.sourcePath).toLowerCase();
+  const index = name.lastIndexOf(".");
+  if (index <= 0 || index === name.length - 1) return "";
+  return name.slice(index + 1);
+}
+
+function fileQueueTitleFor(
+  item: FileQueueItem,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  const operation = item.operation === "move" ? t("rightPane.files.move") : t("rightPane.files.copy");
+  return [
+    item.fileName,
+    item.sourcePath,
+    `${t("rightPane.files.destination")}: ${item.targetDir}`,
+    operation,
+    item.status,
+    item.message,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function MemoPane({
@@ -645,11 +1034,21 @@ function MemoPane({
   return (
     <section className="right-tool-pane memo-pane">
       <div className="right-tool-actions">
-        <button type="button" onClick={newMemo}>
+        <button
+          type="button"
+          onClick={newMemo}
+          title={t("rightPane.memo.new")}
+          aria-label={t("rightPane.memo.new")}
+        >
           <Plus size={13} />
           <span>{t("rightPane.memo.new")}</span>
         </button>
-        <button type="button" onClick={() => void refresh()}>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          title={t("rightPane.memo.refresh")}
+          aria-label={t("rightPane.memo.refresh")}
+        >
           <List size={13} />
           <span>{t("rightPane.memo.refresh")}</span>
         </button>
@@ -692,11 +1091,24 @@ function MemoPane({
       />
       <div className={`memo-autosave-status ${saveState}`}>{autoSaveLabel}</div>
       <div className="right-tool-actions bottom">
-        <button type="button" className="danger" disabled={!workspacePath || !selectedPath || saving} onClick={() => void deleteCurrent()}>
+        <button
+          type="button"
+          className="danger"
+          disabled={!workspacePath || !selectedPath || saving}
+          onClick={() => void deleteCurrent()}
+          title={t("rightPane.memo.delete")}
+          aria-label={t("rightPane.memo.delete")}
+        >
           <Trash2 size={13} />
           <span>{t("rightPane.memo.delete")}</span>
         </button>
-        <button type="button" disabled={saving} onClick={() => void saveAs()}>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void saveAs()}
+          title={t("rightPane.memo.saveAs")}
+          aria-label={t("rightPane.memo.saveAs")}
+        >
           <Save size={13} />
           <span>{t("rightPane.memo.saveAs")}</span>
         </button>
@@ -831,6 +1243,7 @@ function TagsInput({ value, onCommit, readOnly = false }: TagsInputProps) {
             type="button"
             className="tag-chip-x"
             aria-label={`remove ${tag}`}
+            title={`remove ${tag}`}
             disabled={readOnly}
             onClick={() => applyNext(tags.filter((t) => t !== tag))}
           >

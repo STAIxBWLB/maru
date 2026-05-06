@@ -108,6 +108,23 @@ export function collectDocumentTreeFolderPaths(entries: VaultEntry[]): string[] 
   );
 }
 
+export function collectDocumentAncestorFolders(relPath: string): string[] {
+  const folders: string[] = [];
+  const parts = relPath.split("/").filter(Boolean).slice(0, -1);
+  let current = "";
+  for (const folder of parts) {
+    current = current ? `${current}/${folder}` : folder;
+    folders.push(current);
+  }
+  return folders;
+}
+
+export function expandDocumentAncestors(current: string[], relPath: string): string[] {
+  return Array.from(new Set([...current, ...collectDocumentAncestorFolders(relPath)])).sort(
+    (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+  );
+}
+
 export function virtualizeDocumentTreeRows(
   rows: DocumentTreeRow[],
   scrollTop: number,

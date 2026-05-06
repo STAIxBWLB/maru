@@ -20,8 +20,16 @@ import {
   useState,
   useTransition,
 } from "react";
-import type { VaultEntry, WorkspaceVisibility } from "../lib/types";
+import type { FileStoreOperation, VaultEntry, WorkspaceVisibility } from "../lib/types";
 import { documentDisplayName, formatRelativeDate, frontmatterScalar } from "../lib/document";
+import {
+  clearExplorerDragPayload,
+  dropOperationFromEvent,
+  hasExplorerDragPayload,
+  readExplorerDragPayload,
+  writeExplorerDragPayload,
+  type ExplorerDragPayload,
+} from "../lib/fileDrag";
 import {
   buildDocumentTreeRows,
   collectDocumentTreeFolderPaths,
@@ -71,6 +79,20 @@ interface DocumentListProps {
   vaultPath?: string | null;
   paneMode: ExplorerPaneMode;
   onPaneModeChange: (mode: ExplorerPaneMode) => void;
+  pendingRevealTargetPath?: string | null;
+  onRevealHandled?: () => void;
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: (
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
 }
 
 export const DocumentList = memo(function DocumentList({
@@ -100,6 +122,11 @@ export const DocumentList = memo(function DocumentList({
   vaultPath,
   paneMode,
   onPaneModeChange,
+  pendingRevealTargetPath = null,
+  onRevealHandled,
+  selectedFileQueueCount = 0,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
 }: DocumentListProps) {
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -113,7 +140,9 @@ export const DocumentList = memo(function DocumentList({
     relPath: string;
     title: string;
     entry: VaultEntry | null;
+    targetKind: "file" | "directory";
   } | null>(null);
+  const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
   const deferredTypeFilter = useDeferredValue(typeFilter);
@@ -248,6 +277,27 @@ export const DocumentList = memo(function DocumentList({
     setViewport({ scrollTop: 0, height: node.clientHeight || 720 });
   }, [deferredQuery, deferredTypeFilter]);
 
+  useEffect(() => {
+    if (!pendingRevealTargetPath || browserMode !== "tree") return;
+    const index = treeRows.findIndex(
+      (row) => row.kind === "entry" && row.entry.path === pendingRevealTargetPath,
+    );
+    if (index < 0) return;
+    const node = scrollRef.current;
+    if (!node) return;
+    const top = index * TREE_ROW_HEIGHT;
+    node.scrollTop = Math.max(0, top - TREE_ROW_HEIGHT);
+    setViewport({ scrollTop: node.scrollTop, height: node.clientHeight || 720 });
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const selector = `[data-tree-target-path="${CSS.escape(pendingRevealTargetPath)}"]`;
+        const target = scrollRef.current?.querySelector<HTMLButtonElement>(selector);
+        target?.focus({ preventScroll: true });
+        onRevealHandled?.();
+      });
+    });
+  }, [browserMode, onRevealHandled, pendingRevealTargetPath, treeRows]);
+
   const headerCaption = typeFilter
     ? typeFilter === "_"
       ? t("sidebar.types.untyped")
@@ -258,6 +308,57 @@ export const DocumentList = memo(function DocumentList({
     const write = navigator.clipboard?.writeText(value);
     void write?.catch(() => {});
     setContextMenu(null);
+  };
+  const canDropOnTarget = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+    );
+  const handleTargetDragOver = (
+    event: React.DragEvent,
+    targetPath: string,
+  ) => {
+    if (!canDropOnTarget(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+    setDragOverTargetPath(targetPath);
+  };
+  const handleTargetDrop = (
+    event: React.DragEvent,
+    targetPath: string,
+    targetKind: "file" | "directory",
+  ) => {
+    const payload = readExplorerDragPayload(event.dataTransfer);
+    setDragOverTargetPath(null);
+    if (payload && onApplyExplorerDragToDestination) {
+      event.preventDefault();
+      clearExplorerDragPayload();
+      onApplyExplorerDragToDestination(
+        payload,
+        targetPath,
+        targetKind,
+        dropOperationFromEvent(event),
+      );
+      return;
+    }
+    if (!selectedFileQueueCount || !onApplyFileQueueToDestination) return;
+    event.preventDefault();
+    onApplyFileQueueToDestination(targetPath, targetKind, dropOperationFromEvent(event));
+  };
+  const writeDocumentDragPayload = (event: React.DragEvent, entry: VaultEntry) => {
+    if (!vaultPath) return;
+    writeExplorerDragPayload(event, {
+      origin: "documents",
+      workspacePath: vaultPath,
+      items: [
+        {
+          path: entry.path,
+          relPath: entry.relPath,
+          fileName: entry.relPath.split("/").pop() ?? entry.relPath,
+          sourceKind: "file",
+        },
+      ],
+    });
   };
 
   return (
@@ -293,6 +394,8 @@ export const DocumentList = memo(function DocumentList({
           type="button"
           className={paneMode === "documents" ? "active" : ""}
           onClick={() => onPaneModeChange("documents")}
+          title={t("explorer.mode.documents")}
+          aria-label={t("explorer.mode.documents")}
         >
           <FileText size={13} />
           <span>{t("explorer.mode.documents")}</span>
@@ -301,6 +404,8 @@ export const DocumentList = memo(function DocumentList({
           type="button"
           className={paneMode === "files" ? "active" : ""}
           onClick={() => onPaneModeChange("files")}
+          title={t("explorer.mode.files")}
+          aria-label={t("explorer.mode.files")}
         >
           <Files size={13} />
           <span>{t("explorer.mode.files")}</span>
@@ -342,6 +447,8 @@ export const DocumentList = memo(function DocumentList({
           type="button"
           className={browserMode === "list" ? "active" : ""}
           onClick={() => onBrowserModeChange("list")}
+          title={t("list.view.list")}
+          aria-label={t("list.view.list")}
         >
           <List size={13} />
           <span>{t("list.view.list")}</span>
@@ -350,6 +457,8 @@ export const DocumentList = memo(function DocumentList({
           type="button"
           className={browserMode === "tree" ? "active" : ""}
           onClick={() => onBrowserModeChange("tree")}
+          title={t("list.view.tree")}
+          aria-label={t("list.view.tree")}
         >
           <Folder size={13} />
           <span>{t("list.view.tree")}</span>
@@ -363,6 +472,7 @@ export const DocumentList = memo(function DocumentList({
             onClick={() => onCollapsedTreeFoldersChange([])}
             disabled={folderPaths.length === 0}
             title={t("list.tree.collapseAll")}
+            aria-label={t("list.tree.collapseAll")}
           >
             <ChevronsDownUp size={13} />
             <span>{t("list.tree.collapseAll")}</span>
@@ -372,6 +482,7 @@ export const DocumentList = memo(function DocumentList({
             onClick={() => onCollapsedTreeFoldersChange(folderPaths)}
             disabled={folderPaths.length === 0}
             title={t("list.tree.expandAll")}
+            aria-label={t("list.tree.expandAll")}
           >
             <ChevronsUpDown size={13} />
             <span>{t("list.tree.expandAll")}</span>
@@ -379,7 +490,7 @@ export const DocumentList = memo(function DocumentList({
         </div>
       ) : null}
 
-      <label className="search-box">
+      <label className="search-box" title={t("list.searchPlaceholder")}>
         <Search size={14} />
         <input
           ref={searchInputRef}
@@ -415,7 +526,7 @@ export const DocumentList = memo(function DocumentList({
 
         {!loading && filtered.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-illus">
+            <div className="empty-illus" title={t("list.empty.title")}>
               <FileShape />
             </div>
             <strong>{t("list.empty.title")}</strong>
@@ -445,6 +556,11 @@ export const DocumentList = memo(function DocumentList({
             vaultPath={vaultPath}
             t={t}
             documentLabelMode={documentLabelMode}
+            selectedFileQueueCount={selectedFileQueueCount}
+            onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+            onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+            dragOverTargetPath={dragOverTargetPath}
+            onDragOverTargetChange={setDragOverTargetPath}
           />
         ) : null}
 
@@ -479,8 +595,20 @@ export const DocumentList = memo(function DocumentList({
                 >
                   <button
                     type="button"
-                    className={selectedPath === entry.path ? "doc-row selected" : "doc-row"}
+                    className={[
+                      "doc-row",
+                      selectedPath === entry.path ? "selected" : "",
+                      dragOverTargetPath === entry.path ? "drag-over" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    draggable={Boolean(vaultPath)}
                     onClick={() => onSelect(entry)}
+                    onDragStart={(event) => writeDocumentDragPayload(event, entry)}
+                    onDragEnd={clearExplorerDragPayload}
+                    onDragOver={(event) => handleTargetDragOver(event, entry.path)}
+                    onDragLeave={() => setDragOverTargetPath(null)}
+                    onDrop={(event) => handleTargetDrop(event, entry.path, "file")}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -491,6 +619,7 @@ export const DocumentList = memo(function DocumentList({
                         relPath: entry.relPath,
                         title: entry.title,
                         entry,
+                        targetKind: "file",
                       });
                     }}
                   >
@@ -570,6 +699,33 @@ export const DocumentList = memo(function DocumentList({
           >
             {t("context.revealInFinder")}
           </button>
+          {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                onClick={() => {
+                  const target = contextMenu.targetPath;
+                  const kind = contextMenu.targetKind;
+                  setContextMenu(null);
+                  onApplyFileQueueToDestination(target, kind, "copy");
+                }}
+              >
+                {t("rightPane.files.copySelectedHere", { count: selectedFileQueueCount })}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = contextMenu.targetPath;
+                  const kind = contextMenu.targetKind;
+                  setContextMenu(null);
+                  onApplyFileQueueToDestination(target, kind, "move");
+                }}
+              >
+                {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+              </button>
+            </>
+          ) : null}
           <div className="context-menu-separator" />
           <button type="button" onClick={() => copyContextText(contextMenu.targetPath)}>
             {t("context.copyPath")}
@@ -596,6 +752,20 @@ interface DocumentTreeProps {
     event: React.MouseEvent,
     target: DocumentContextTarget,
   ) => void;
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: (
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
   vaultPath?: string | null;
   t: (key: string, vars?: Record<string, string | number>) => string;
   documentLabelMode: DocumentLabelMode;
@@ -611,6 +781,11 @@ const DocumentTree = memo(function DocumentTree({
   onCollapsedTreeFoldersChange,
   onSelect,
   onContextMenu,
+  selectedFileQueueCount,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
   vaultPath,
   t,
   documentLabelMode,
@@ -638,6 +813,11 @@ const DocumentTree = memo(function DocumentTree({
                 forceExpand={forceExpand}
                 onCollapsedTreeFoldersChange={onCollapsedTreeFoldersChange}
                 onContextMenu={onContextMenu}
+                selectedFileQueueCount={selectedFileQueueCount}
+                onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+                onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+                dragOverTargetPath={dragOverTargetPath}
+                onDragOverTargetChange={onDragOverTargetChange}
                 vaultPath={vaultPath}
               />
             </div>
@@ -655,6 +835,12 @@ const DocumentTree = memo(function DocumentTree({
               selected={selectedPath === row.entry.path}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
+              selectedFileQueueCount={selectedFileQueueCount}
+              onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+              onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+              dragOverTargetPath={dragOverTargetPath}
+              onDragOverTargetChange={onDragOverTargetChange}
+              vaultPath={vaultPath}
               documentLabelMode={documentLabelMode}
             />
           </div>
@@ -671,6 +857,7 @@ type DocumentContextTarget = {
   relPath: string;
   title: string;
   entry: VaultEntry | null;
+  targetKind: "file" | "directory";
 };
 
 const TreeFolderRow = memo(function TreeFolderRow({
@@ -680,6 +867,11 @@ const TreeFolderRow = memo(function TreeFolderRow({
   forceExpand,
   onCollapsedTreeFoldersChange,
   onContextMenu,
+  selectedFileQueueCount,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
   vaultPath,
 }: {
   row: FolderRow;
@@ -691,15 +883,37 @@ const TreeFolderRow = memo(function TreeFolderRow({
     event: React.MouseEvent,
     target: DocumentContextTarget,
   ) => void;
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: (
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
   vaultPath?: string | null;
 }) {
   const folderTarget = vaultPath ? joinVaultPath(vaultPath, row.path) : row.path;
+  const canDrop = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+    );
   return (
     <button
       type="button"
-      className="tree-row folder"
+      className={
+        dragOverTargetPath === folderTarget ? "tree-row folder drag-over" : "tree-row folder"
+      }
       style={{ paddingLeft }}
       aria-expanded={!row.collapsed}
+      draggable={Boolean(vaultPath)}
       onClick={() =>
         onCollapsedTreeFoldersChange(
           nextCollapsedFolders(
@@ -709,6 +923,22 @@ const TreeFolderRow = memo(function TreeFolderRow({
           ),
         )
       }
+      onDragStart={(event) => {
+        if (!vaultPath) return;
+        writeExplorerDragPayload(event, {
+          origin: "documents",
+          workspacePath: vaultPath,
+          items: [
+            {
+              path: folderTarget,
+              relPath: row.path,
+              fileName: row.name,
+              sourceKind: "directory",
+            },
+          ],
+        });
+      }}
+      onDragEnd={clearExplorerDragPayload}
       title={row.path}
       onContextMenu={(event) =>
         onContextMenu(event, {
@@ -716,8 +946,38 @@ const TreeFolderRow = memo(function TreeFolderRow({
           relPath: row.path,
           title: row.path,
           entry: null,
+          targetKind: "directory",
         })
       }
+      onDragOver={(event) => {
+        if (!canDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+        onDragOverTargetChange(folderTarget);
+      }}
+      onDragLeave={() => onDragOverTargetChange(null)}
+      onDrop={(event) => {
+        const payload = readExplorerDragPayload(event.dataTransfer);
+        onDragOverTargetChange(null);
+        if (payload && onApplyExplorerDragToDestination) {
+          event.preventDefault();
+          clearExplorerDragPayload();
+          onApplyExplorerDragToDestination(
+            payload,
+            folderTarget,
+            "directory",
+            dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (!selectedFileQueueCount || !onApplyFileQueueToDestination) return;
+        event.preventDefault();
+        void onApplyFileQueueToDestination(
+          folderTarget,
+          "directory",
+          dropOperationFromEvent(event),
+        );
+      }}
     >
       <ChevronRight
         size={13}
@@ -736,6 +996,12 @@ const TreeEntryRow = memo(function TreeEntryRow({
   selected,
   onSelect,
   onContextMenu,
+  selectedFileQueueCount,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
+  vaultPath,
   documentLabelMode,
 }: {
   row: EntryRow;
@@ -746,24 +1012,98 @@ const TreeEntryRow = memo(function TreeEntryRow({
     event: React.MouseEvent,
     target: DocumentContextTarget,
   ) => void;
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: (
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
+  vaultPath?: string | null;
   documentLabelMode: DocumentLabelMode;
 }) {
   const fmType = frontmatterScalar(row.entry.frontmatter, "type");
+  const canDrop = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+    );
   return (
     <button
       type="button"
-      className={selected ? "tree-row file selected" : "tree-row file"}
+      className={[
+        "tree-row file",
+        selected ? "selected" : "",
+        dragOverTargetPath === row.entry.path ? "drag-over" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       style={{ paddingLeft }}
+      draggable={Boolean(vaultPath)}
       onClick={() => onSelect(row.entry)}
+      onDragStart={(event) => {
+        if (!vaultPath) return;
+        writeExplorerDragPayload(event, {
+          origin: "documents",
+          workspacePath: vaultPath,
+          items: [
+            {
+              path: row.entry.path,
+              relPath: row.entry.relPath,
+              fileName: row.entry.relPath.split("/").pop() ?? row.entry.relPath,
+              sourceKind: "file",
+            },
+          ],
+        });
+      }}
+      onDragEnd={clearExplorerDragPayload}
       onContextMenu={(event) =>
         onContextMenu(event, {
           targetPath: row.entry.path,
           relPath: row.entry.relPath,
           title: row.entry.title,
           entry: row.entry,
+          targetKind: "file",
         })
       }
+      onDragOver={(event) => {
+        if (!canDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+        onDragOverTargetChange(row.entry.path);
+      }}
+      onDragLeave={() => onDragOverTargetChange(null)}
+      onDrop={(event) => {
+        const payload = readExplorerDragPayload(event.dataTransfer);
+        onDragOverTargetChange(null);
+        if (payload && onApplyExplorerDragToDestination) {
+          event.preventDefault();
+          clearExplorerDragPayload();
+          onApplyExplorerDragToDestination(
+            payload,
+            row.entry.path,
+            "file",
+            dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (!selectedFileQueueCount || !onApplyFileQueueToDestination) return;
+        event.preventDefault();
+        void onApplyFileQueueToDestination(
+          row.entry.path,
+          "file",
+          dropOperationFromEvent(event),
+        );
+      }}
       title={row.entry.relPath}
+      data-tree-target-path={row.entry.path}
     >
       <span className="tree-indent-slot" />
       <FileText size={13} />

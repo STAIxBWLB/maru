@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWorkspaceFileTreeRows,
   collectWorkspaceFileFolderPaths,
+  expandWorkspaceFileAncestors,
   filterWorkspaceFiles,
   virtualizeWorkspaceFileTreeRows,
 } from "./workspaceFileTree";
@@ -87,5 +88,13 @@ describe("workspace file tree", () => {
     const layout = virtualizeWorkspaceFileTreeRows(rows, 30, 60, 0, 30);
     expect(layout.totalHeight).toBe(rows.length * 30);
     expect(layout.rows.map(({ top }) => top)).toEqual([30, 60, 90]);
+  });
+
+  it("expands every ancestor for a revealed workspace file", () => {
+    expect(expandWorkspaceFileAncestors(["z"], "assets/reports/final.pdf")).toEqual([
+      "assets",
+      "assets/reports",
+      "z",
+    ]);
   });
 });

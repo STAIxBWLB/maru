@@ -174,6 +174,14 @@ export interface InboxSettings {
 }
 
 export type FileStoreOperation = "copy" | "move";
+export type FileQueueSourceKind = "file" | "directory";
+
+export interface FileQueueSourceInfo {
+  path: string;
+  sourceRelPath: string;
+  fileName: string;
+  sourceKind: FileQueueSourceKind;
+}
 
 export interface StoredFileOutcome {
   sourcePath: string;
@@ -197,6 +205,7 @@ export interface WorkspaceFileEntry {
 export interface FileQueueApplyItem {
   id: string;
   sourcePath: string;
+  sourceKind: FileQueueSourceKind;
   targetDir: string;
   operation: FileStoreOperation;
 }

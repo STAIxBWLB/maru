@@ -175,7 +175,7 @@ export const CommandPalette = memo(function CommandPalette({
           }
         }}
       >
-        <label className="cmdk-input">
+        <label className="cmdk-input" title={t("cmdk.placeholder")}>
           <Search size={16} className="cmdk-search-icon" />
           <input
             ref={inputRef}
@@ -209,6 +209,7 @@ export const CommandPalette = memo(function CommandPalette({
                         className={active ? "cmdk-item active" : "cmdk-item"}
                         onMouseEnter={() => setCursor(index)}
                         onClick={() => void pick(index)}
+                        title={item.entry.relPath}
                       >
                         <span className="cmdk-icon">
                           <FileText size={14} />
@@ -236,6 +237,7 @@ export const CommandPalette = memo(function CommandPalette({
                       className={active ? "cmdk-item active" : "cmdk-item"}
                       onMouseEnter={() => setCursor(index)}
                       onClick={() => void pick(index)}
+                      title={item.action.label}
                     >
                       <span className="cmdk-icon">
                         <Hash size={14} />

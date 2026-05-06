@@ -80,7 +80,11 @@ export function NewDocumentDialog({
               <Dialog.Title>{t("newDoc.dialog.title")}</Dialog.Title>
               <Dialog.Description>{t("newDoc.dialog.description")}</Dialog.Description>
             </div>
-            <Dialog.Close className="icon-button" title={t("app.errorClose")}>
+            <Dialog.Close
+              className="icon-button"
+              title={t("app.errorClose")}
+              aria-label={t("app.errorClose")}
+            >
               <X size={16} />
             </Dialog.Close>
           </div>

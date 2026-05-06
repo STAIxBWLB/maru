@@ -209,7 +209,11 @@ export function AddWorkspaceDialog({
               <Dialog.Title>{t("workspace.dialog.title")}</Dialog.Title>
               <Dialog.Description>{t("workspace.dialog.description")}</Dialog.Description>
             </div>
-            <Dialog.Close className="icon-button" title={t("app.errorClose")}>
+            <Dialog.Close
+              className="icon-button"
+              title={t("app.errorClose")}
+              aria-label={t("app.errorClose")}
+            >
               <X size={16} />
             </Dialog.Close>
           </div>
@@ -229,7 +233,7 @@ export function AddWorkspaceDialog({
 
           {detected ? (
             <div className="workspace-detect-card">
-              <div className="workspace-detect-title">
+              <div className="workspace-detect-title" title={t("workspace.detected")}>
                 <Link2 size={14} />
                 <strong>{t("workspace.detected")}</strong>
               </div>

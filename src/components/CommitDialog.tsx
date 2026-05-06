@@ -155,7 +155,12 @@ export function CommitDialog({ open, vaultPath, status, onClose, onCommitted }: 
           <div className="dialog-header">
             <Dialog.Title>{t("commit.title")}</Dialog.Title>
             <Dialog.Close asChild>
-              <button type="button" className="icon-button" aria-label={t("dialog.close")}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("dialog.close")}
+                title={t("dialog.close")}
+              >
                 <X size={14} />
               </button>
             </Dialog.Close>

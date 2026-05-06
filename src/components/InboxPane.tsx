@@ -114,7 +114,7 @@ export function InboxPane({
           <div className="inbox-list">
             {loading ? <div className="inbox-empty">{t("inbox.loading")}</div> : null}
             {!loading && visibleItems.length === 0 ? (
-              <div className="inbox-empty">
+              <div className="inbox-empty" title={t("inbox.empty.title")}>
                 <Inbox size={24} />
                 <strong>{t("inbox.empty.title")}</strong>
                 <span>{t("inbox.empty.description")}</span>
@@ -202,7 +202,7 @@ export function InboxPane({
             {gmailLoading ? <div className="inbox-empty">{t("inbox.gmail.loading")}</div> : null}
             {gmailError ? <div className="inbox-error gmail-error">{gmailError}</div> : null}
             {!gmailLoading && !gmailError && gmailMessages.length === 0 ? (
-              <div className="inbox-empty">
+              <div className="inbox-empty" title={t("inbox.gmail.empty.title")}>
                 <Mail size={24} />
                 <strong>{t("inbox.gmail.empty.title")}</strong>
                 <span>{t("inbox.gmail.empty.description")}</span>
