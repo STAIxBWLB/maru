@@ -24,8 +24,11 @@ import type { FileStoreOperation, VaultEntry, WorkspaceVisibility } from "../lib
 import { documentDisplayName, formatRelativeDate, frontmatterScalar } from "../lib/document";
 import {
   clearExplorerDragPayload,
+  clearFileQueueDragPayload,
   dropOperationFromEvent,
   hasExplorerDragPayload,
+  hasFileQueueDragPayload,
+  readFileQueueDragPayload,
   readExplorerDragPayload,
   writeExplorerDragPayload,
   type ExplorerDragPayload,
@@ -51,6 +54,13 @@ const VIRTUAL_OVERSCAN = 520;
 type VirtualRow =
   | { kind: "group"; key: string; label: string; count: number; height: number }
   | { kind: "entry"; key: string; entry: VaultEntry; height: number };
+
+type ApplyFileQueueToDestination = (
+  targetPath: string,
+  targetKind: "file" | "directory",
+  operation: FileStoreOperation,
+  itemIds?: string[],
+) => void;
 
 interface DocumentListProps {
   documentIndex: DocumentIndex;
@@ -82,11 +92,7 @@ interface DocumentListProps {
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -282,7 +288,10 @@ export const DocumentList = memo(function DocumentList({
     const index = treeRows.findIndex(
       (row) => row.kind === "entry" && row.entry.path === pendingRevealTargetPath,
     );
-    if (index < 0) return;
+    if (index < 0) {
+      if (!loading) onRevealHandled?.();
+      return;
+    }
     const node = scrollRef.current;
     if (!node) return;
     const top = index * TREE_ROW_HEIGHT;
@@ -296,7 +305,7 @@ export const DocumentList = memo(function DocumentList({
         onRevealHandled?.();
       });
     });
-  }, [browserMode, onRevealHandled, pendingRevealTargetPath, treeRows]);
+  }, [browserMode, loading, onRevealHandled, pendingRevealTargetPath, treeRows]);
 
   const headerCaption = typeFilter
     ? typeFilter === "_"
@@ -312,7 +321,8 @@ export const DocumentList = memo(function DocumentList({
   const canDropOnTarget = (event: React.DragEvent): boolean =>
     Boolean(
       (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
-        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
   const handleTargetDragOver = (
     event: React.DragEvent,
@@ -329,6 +339,7 @@ export const DocumentList = memo(function DocumentList({
     targetKind: "file" | "directory",
   ) => {
     const payload = readExplorerDragPayload(event.dataTransfer);
+    const queuePayload = readFileQueueDragPayload(event.dataTransfer);
     setDragOverTargetPath(null);
     if (payload && onApplyExplorerDragToDestination) {
       event.preventDefault();
@@ -338,6 +349,17 @@ export const DocumentList = memo(function DocumentList({
         targetPath,
         targetKind,
         dropOperationFromEvent(event),
+      );
+      return;
+    }
+    if (queuePayload && onApplyFileQueueToDestination) {
+      event.preventDefault();
+      clearFileQueueDragPayload();
+      onApplyFileQueueToDestination(
+        targetPath,
+        targetKind,
+        dropOperationFromEvent(event),
+        queuePayload.itemIds,
       );
       return;
     }
@@ -753,11 +775,7 @@ interface DocumentTreeProps {
     target: DocumentContextTarget,
   ) => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -884,11 +902,7 @@ const TreeFolderRow = memo(function TreeFolderRow({
     target: DocumentContextTarget,
   ) => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -903,7 +917,8 @@ const TreeFolderRow = memo(function TreeFolderRow({
   const canDrop = (event: React.DragEvent): boolean =>
     Boolean(
       (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
-        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
   return (
     <button
@@ -958,6 +973,7 @@ const TreeFolderRow = memo(function TreeFolderRow({
       onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
         const payload = readExplorerDragPayload(event.dataTransfer);
+        const queuePayload = readFileQueueDragPayload(event.dataTransfer);
         onDragOverTargetChange(null);
         if (payload && onApplyExplorerDragToDestination) {
           event.preventDefault();
@@ -967,6 +983,17 @@ const TreeFolderRow = memo(function TreeFolderRow({
             folderTarget,
             "directory",
             dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (queuePayload && onApplyFileQueueToDestination) {
+          event.preventDefault();
+          clearFileQueueDragPayload();
+          void onApplyFileQueueToDestination(
+            folderTarget,
+            "directory",
+            dropOperationFromEvent(event),
+            queuePayload.itemIds,
           );
           return;
         }
@@ -1013,11 +1040,7 @@ const TreeEntryRow = memo(function TreeEntryRow({
     target: DocumentContextTarget,
   ) => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -1033,7 +1056,8 @@ const TreeEntryRow = memo(function TreeEntryRow({
   const canDrop = (event: React.DragEvent): boolean =>
     Boolean(
       (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
-        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
   return (
     <button
@@ -1082,6 +1106,7 @@ const TreeEntryRow = memo(function TreeEntryRow({
       onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
         const payload = readExplorerDragPayload(event.dataTransfer);
+        const queuePayload = readFileQueueDragPayload(event.dataTransfer);
         onDragOverTargetChange(null);
         if (payload && onApplyExplorerDragToDestination) {
           event.preventDefault();
@@ -1091,6 +1116,17 @@ const TreeEntryRow = memo(function TreeEntryRow({
             row.entry.path,
             "file",
             dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (queuePayload && onApplyFileQueueToDestination) {
+          event.preventDefault();
+          clearFileQueueDragPayload();
+          void onApplyFileQueueToDestination(
+            row.entry.path,
+            "file",
+            dropOperationFromEvent(event),
+            queuePayload.itemIds,
           );
           return;
         }

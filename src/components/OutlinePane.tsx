@@ -42,10 +42,12 @@ import {
 import { frontmatterScalar } from "../lib/document";
 import {
   clearExplorerDragPayload,
+  clearFileQueueDragPayload,
   dropOperationFromEvent,
   hasExplorerDragPayload,
   readExplorerDragPayload,
   type ExplorerDragPayload,
+  writeFileQueueDragPayload,
 } from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
@@ -539,6 +541,14 @@ function FilesQueuePane({
     queuedCount === 0 ||
     working ||
     !canApplyFileQueue;
+  const dragIdsForQueueItem = (item: FileQueueItem): string[] => {
+    if (item.status !== "queued") return [];
+    if (!selectedSet.has(item.id)) return [item.id];
+    const selectedQueuedIds = queue
+      .filter((candidate) => candidate.status === "queued" && selectedSet.has(candidate.id))
+      .map((candidate) => candidate.id);
+    return selectedQueuedIds.length > 0 ? selectedQueuedIds : [item.id];
+  };
   const clearSelectedLabel = t("rightPane.files.clearSelected", { count: selectedIds.length });
   const clearAllLabel = t("rightPane.files.clearAll");
 
@@ -628,7 +638,7 @@ function FilesQueuePane({
             key={item.id}
             title={fileQueueTitleFor(item, t)}
             aria-selected={selectedSet.has(item.id)}
-            draggable={selectedSet.has(item.id)}
+            draggable={item.status === "queued"}
             onClick={(event) => onSelectItem(item.id, event.metaKey || event.ctrlKey || event.shiftKey)}
             onKeyDown={(event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
@@ -636,10 +646,15 @@ function FilesQueuePane({
               onSelectItem(item.id, event.metaKey || event.ctrlKey || event.shiftKey);
             }}
             onDragStart={(event) => {
+              const dragIds = dragIdsForQueueItem(item);
+              if (dragIds.length === 0) {
+                event.preventDefault();
+                return;
+              }
               if (!selectedSet.has(item.id)) onSelectItem(item.id, false);
-              event.dataTransfer.effectAllowed = "copyMove";
-              event.dataTransfer.setData("application/x-anchor-file-queue", item.id);
+              writeFileQueueDragPayload(event, dragIds);
             }}
+            onDragEnd={clearFileQueueDragPayload}
           >
             <div className="queue-copy">
               <span

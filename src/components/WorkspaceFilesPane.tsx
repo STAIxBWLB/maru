@@ -27,8 +27,11 @@ import {
 import { useTranslation } from "../lib/i18n";
 import {
   clearExplorerDragPayload,
+  clearFileQueueDragPayload,
   dropOperationFromEvent,
   hasExplorerDragPayload,
+  hasFileQueueDragPayload,
+  readFileQueueDragPayload,
   readExplorerDragPayload,
   writeExplorerDragPayload,
   type ExplorerDragPayload,
@@ -52,6 +55,13 @@ import {
 
 const FILE_TREE_ROW_HEIGHT = 30;
 const VIRTUAL_OVERSCAN = 520;
+
+type ApplyFileQueueToDestination = (
+  targetPath: string,
+  targetKind: "file" | "directory",
+  operation: FileStoreOperation,
+  itemIds?: string[],
+) => void;
 
 interface WorkspaceFilesPaneProps {
   entries: WorkspaceFileEntry[];
@@ -83,11 +93,7 @@ interface WorkspaceFilesPaneProps {
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -219,7 +225,10 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     const index = rows.findIndex(
       (row) => row.kind === "file" && row.entry.path === pendingRevealTargetPath,
     );
-    if (index < 0) return;
+    if (index < 0) {
+      if (!loading) onRevealHandled?.();
+      return;
+    }
     const node = scrollRef.current;
     if (!node) return;
     const top = index * FILE_TREE_ROW_HEIGHT;
@@ -233,7 +242,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         onRevealHandled?.();
       });
     });
-  }, [onRevealHandled, pendingRevealTargetPath, rows]);
+  }, [loading, onRevealHandled, pendingRevealTargetPath, rows]);
 
   const copyText = (value: string) => {
     if (!value) return;
@@ -580,11 +589,7 @@ interface WorkspaceFileTreeProps {
   onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
   onFolderContextMenu: (event: React.MouseEvent, row: FolderRow) => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -699,11 +704,7 @@ const FileFolderRow = memo(function FileFolderRow({
   onCollapsedFileFoldersChange: (paths: string[]) => void;
   onContextMenu: (event: React.MouseEvent, row: FolderRow) => void;
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -718,7 +719,8 @@ const FileFolderRow = memo(function FileFolderRow({
   const canDrop = (event: React.DragEvent): boolean =>
     Boolean(
       (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
-        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
   return (
     <button
@@ -765,6 +767,7 @@ const FileFolderRow = memo(function FileFolderRow({
       onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
         const payload = readExplorerDragPayload(event.dataTransfer);
+        const queuePayload = readFileQueueDragPayload(event.dataTransfer);
         onDragOverTargetChange(null);
         if (payload && onApplyExplorerDragToDestination) {
           event.preventDefault();
@@ -774,6 +777,17 @@ const FileFolderRow = memo(function FileFolderRow({
             folderTarget,
             "directory",
             dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (queuePayload && onApplyFileQueueToDestination) {
+          event.preventDefault();
+          clearFileQueueDragPayload();
+          void onApplyFileQueueToDestination(
+            folderTarget,
+            "directory",
+            dropOperationFromEvent(event),
+            queuePayload.itemIds,
           );
           return;
         }
@@ -821,11 +835,7 @@ const FileRow = memo(function FileRow({
   onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
   selectedEntries: WorkspaceFileEntry[];
   selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: (
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
     payload: ExplorerDragPayload,
     targetPath: string,
@@ -840,7 +850,8 @@ const FileRow = memo(function FileRow({
   const canDrop = (event: React.DragEvent): boolean =>
     Boolean(
       (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
-        ((selectedFileQueueCount ?? 0) > 0 && onApplyFileQueueToDestination),
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
   const dragEntries = selected && selectedEntries.length > 0 ? selectedEntries : [row.entry];
   return (
@@ -881,6 +892,7 @@ const FileRow = memo(function FileRow({
       onDragLeave={() => onDragOverTargetChange(null)}
       onDrop={(event) => {
         const payload = readExplorerDragPayload(event.dataTransfer);
+        const queuePayload = readFileQueueDragPayload(event.dataTransfer);
         onDragOverTargetChange(null);
         if (payload && onApplyExplorerDragToDestination) {
           event.preventDefault();
@@ -890,6 +902,17 @@ const FileRow = memo(function FileRow({
             row.entry.path,
             "file",
             dropOperationFromEvent(event),
+          );
+          return;
+        }
+        if (queuePayload && onApplyFileQueueToDestination) {
+          event.preventDefault();
+          clearFileQueueDragPayload();
+          void onApplyFileQueueToDestination(
+            row.entry.path,
+            "file",
+            dropOperationFromEvent(event),
+            queuePayload.itemIds,
           );
           return;
         }

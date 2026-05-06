@@ -1,6 +1,7 @@
 import type { FileQueueSourceKind, FileStoreOperation } from "./types";
 
 export const EXPLORER_DRAG_MIME = "application/x-anchor-explorer-items";
+export const FILE_QUEUE_DRAG_MIME = "application/x-anchor-file-queue";
 
 export type ExplorerDragOrigin = "documents" | "files";
 
@@ -17,10 +18,20 @@ export interface ExplorerDragPayload {
   items: ExplorerDragItem[];
 }
 
+export interface FileQueueDragPayload {
+  itemIds: string[];
+}
+
 const ACTIVE_EXPLORER_DRAG_TTL_MS = 30_000;
 let activeExplorerDrag:
   | {
       payload: ExplorerDragPayload;
+      startedAt: number;
+    }
+  | null = null;
+let activeFileQueueDrag:
+  | {
+      payload: FileQueueDragPayload;
       startedAt: number;
     }
   | null = null;
@@ -77,6 +88,43 @@ export function clearExplorerDragPayload(): void {
   activeExplorerDrag = null;
 }
 
+export function writeFileQueueDragPayload(
+  event: DragEventLike,
+  itemIds: string[],
+): void {
+  const payload = normalizeFileQueueDragPayload({ itemIds });
+  if (!payload) return;
+  activeFileQueueDrag = { payload, startedAt: Date.now() };
+  event.dataTransfer.setData?.(FILE_QUEUE_DRAG_MIME, JSON.stringify(payload));
+  event.dataTransfer.effectAllowed = "copyMove";
+}
+
+export function readFileQueueDragPayload(
+  dataTransfer: DragDataTransferLike,
+): FileQueueDragPayload | null {
+  const raw = dataTransfer.getData?.(FILE_QUEUE_DRAG_MIME);
+  if (raw) {
+    try {
+      return normalizeFileQueueDragPayload(JSON.parse(raw));
+    } catch {
+      return normalizeFileQueueDragPayload(raw) ?? readActiveFileQueueDragPayload();
+    }
+  }
+  return readActiveFileQueueDragPayload();
+}
+
+export function hasFileQueueDragPayload(dataTransfer: DragDataTransferLike): boolean {
+  return Boolean(
+    dataTransfer.types?.includes(FILE_QUEUE_DRAG_MIME) ||
+      dataTransfer.getData?.(FILE_QUEUE_DRAG_MIME) ||
+      readActiveFileQueueDragPayload(),
+  );
+}
+
+export function clearFileQueueDragPayload(): void {
+  activeFileQueueDrag = null;
+}
+
 export function dropOperationFromEvent(event: Pick<DragEventLike, "altKey">): FileStoreOperation {
   return event.altKey ? "move" : "copy";
 }
@@ -127,6 +175,25 @@ function normalizeExplorerDragPayload(value: unknown): ExplorerDragPayload | nul
   return { origin, workspacePath, items };
 }
 
+function normalizeFileQueueDragPayload(value: unknown): FileQueueDragPayload | null {
+  if (typeof value === "string") return value ? { itemIds: [value] } : null;
+  const rawIds =
+    Array.isArray(value)
+      ? value
+      : value && typeof value === "object"
+        ? (value as Record<string, unknown>).itemIds
+        : null;
+  if (!Array.isArray(rawIds)) return null;
+  const itemIds = Array.from(
+    new Set(
+      rawIds.filter(
+        (itemId): itemId is string => typeof itemId === "string" && itemId.length > 0,
+      ),
+    ),
+  );
+  return itemIds.length > 0 ? { itemIds } : null;
+}
+
 function readActiveExplorerDragPayload(): ExplorerDragPayload | null {
   if (!activeExplorerDrag) return null;
   if (Date.now() - activeExplorerDrag.startedAt > ACTIVE_EXPLORER_DRAG_TTL_MS) {
@@ -134,6 +201,15 @@ function readActiveExplorerDragPayload(): ExplorerDragPayload | null {
     return null;
   }
   return activeExplorerDrag.payload;
+}
+
+function readActiveFileQueueDragPayload(): FileQueueDragPayload | null {
+  if (!activeFileQueueDrag) return null;
+  if (Date.now() - activeFileQueueDrag.startedAt > ACTIVE_EXPLORER_DRAG_TTL_MS) {
+    activeFileQueueDrag = null;
+    return null;
+  }
+  return activeFileQueueDrag.payload;
 }
 
 function trimTrailingSlash(value: string): string {

@@ -2330,14 +2330,27 @@ function MainApp() {
   ]);
 
   const applySelectedFileQueueToDestination = useCallback(
-    async (targetPath: string, targetKind: "file" | "directory", operation: FileStoreOperation) => {
-      if (selectedQueuedFileQueueItems.length === 0) return;
+    async (
+      targetPath: string,
+      targetKind: "file" | "directory",
+      operation: FileStoreOperation,
+      itemIds?: string[],
+    ) => {
+      const queuedItems = itemIds
+        ? Array.from(new Set(itemIds))
+            .map((id) => fileQueue.find((item) => item.id === id))
+            .filter(
+              (item): item is FileQueueItem =>
+                item != null && item.status === "queued",
+            )
+        : selectedQueuedFileQueueItems;
+      if (queuedItems.length === 0) return;
       const targetDir =
         targetKind === "directory"
           ? targetPath
           : targetPath.split("/").slice(0, -1).join("/");
       if (!targetDir) return;
-      const nextItems = selectedQueuedFileQueueItems.map((item) => ({
+      const nextItems = queuedItems.map((item) => ({
         ...item,
         targetDir,
         operation,
@@ -2350,7 +2363,7 @@ function MainApp() {
       );
       await applyQueuedFiles(nextItems);
     },
-    [applyQueuedFiles, selectedQueuedFileQueueItems],
+    [applyQueuedFiles, fileQueue, selectedQueuedFileQueueItems],
   );
 
   const navigateBack = useCallback(() => {
@@ -4147,8 +4160,13 @@ function MainApp() {
                 }
                 onRevealHandled={() => setPendingExplorerReveal(null)}
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
-                onApplyFileQueueToDestination={(targetPath, targetKind, operation) => {
-                  void applySelectedFileQueueToDestination(targetPath, targetKind, operation);
+                onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
+                  void applySelectedFileQueueToDestination(
+                    targetPath,
+                    targetKind,
+                    operation,
+                    itemIds,
+                  );
                 }}
                 onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
                   void applyExplorerDragSourcesToDestination(
@@ -4208,8 +4226,13 @@ function MainApp() {
                 }
                 onRevealHandled={() => setPendingExplorerReveal(null)}
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
-                onApplyFileQueueToDestination={(targetPath, targetKind, operation) => {
-                  void applySelectedFileQueueToDestination(targetPath, targetKind, operation);
+                onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
+                  void applySelectedFileQueueToDestination(
+                    targetPath,
+                    targetKind,
+                    operation,
+                    itemIds,
+                  );
                 }}
                 onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
                   void applyExplorerDragSourcesToDestination(

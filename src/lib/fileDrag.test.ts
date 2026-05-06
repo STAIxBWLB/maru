@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   EXPLORER_DRAG_MIME,
+  FILE_QUEUE_DRAG_MIME,
   clearExplorerDragPayload,
+  clearFileQueueDragPayload,
   dropOperationFromEvent,
   hasExplorerDragPayload,
+  hasFileQueueDragPayload,
   isSameParentMove,
   readExplorerDragPayload,
+  readFileQueueDragPayload,
   targetDirForDropTarget,
   writeExplorerDragPayload,
+  writeFileQueueDragPayload,
   type ExplorerDragPayload,
 } from "./fileDrag";
 
@@ -105,5 +110,36 @@ describe("explorer drag payload", () => {
   it("uses copy by default and move with Alt", () => {
     expect(dropOperationFromEvent({ altKey: false })).toBe("copy");
     expect(dropOperationFromEvent({ altKey: true })).toBe("move");
+  });
+});
+
+describe("file queue drag payload", () => {
+  it("encodes and decodes selected queue item IDs", () => {
+    const dataTransfer = new FakeDataTransfer();
+
+    writeFileQueueDragPayload({ dataTransfer }, ["a", "b", "a"]);
+
+    expect(dataTransfer.effectAllowed).toBe("copyMove");
+    expect(hasFileQueueDragPayload(dataTransfer)).toBe(true);
+    expect(readFileQueueDragPayload(dataTransfer)).toEqual({ itemIds: ["a", "b"] });
+  });
+
+  it("supports legacy single-ID queue drag data", () => {
+    const dataTransfer = new FakeDataTransfer();
+    dataTransfer.setData(FILE_QUEUE_DRAG_MIME, "legacy-id");
+
+    expect(readFileQueueDragPayload(dataTransfer)).toEqual({ itemIds: ["legacy-id"] });
+  });
+
+  it("falls back to the active in-memory queue drag payload", () => {
+    const dataTransfer = new FakeDataTransfer();
+
+    writeFileQueueDragPayload({ dataTransfer }, ["queued-id"]);
+    const restricted = new FakeDataTransfer();
+
+    expect(hasFileQueueDragPayload(restricted)).toBe(true);
+    expect(readFileQueueDragPayload(restricted)).toEqual({ itemIds: ["queued-id"] });
+    clearFileQueueDragPayload();
+    expect(hasFileQueueDragPayload(restricted)).toBe(false);
   });
 });
