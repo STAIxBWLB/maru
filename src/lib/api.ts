@@ -387,11 +387,12 @@ export async function startClaudeCliInvocation(
   prompt: string,
   cwd: string | null = null,
   extraArgs: string[] | null = null,
+  extraEnv: Record<string, string> | null = null,
 ): Promise<string> {
   if (!isTauri()) {
     throw new Error("Claude CLI invocation is only available inside the Tauri shell.");
   }
-  return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs });
+  return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs, extraEnv });
 }
 
 // === Integrated terminal ===
@@ -403,6 +404,7 @@ export function terminalAvailable(): boolean {
 export interface TerminalSpawnOptions {
   command?: string | null;
   extraArgs?: string[] | null;
+  extraEnv?: Record<string, string> | null;
   cols?: number | null;
   rows?: number | null;
 }
@@ -422,6 +424,7 @@ export async function terminalSpawn(
     cwd,
     command: options.command ?? null,
     extraArgs: options.extraArgs ?? null,
+    extraEnv: options.extraEnv ?? null,
     cols: options.cols ?? null,
     rows: options.rows ?? null,
   });

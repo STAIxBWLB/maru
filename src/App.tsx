@@ -24,9 +24,14 @@ import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
 import { SystemPane } from "./components/SystemPane";
-import { TerminalPanel } from "./components/TerminalPanel";
+import { TerminalPanel, type TerminalLaunchRequest } from "./components/TerminalPanel";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
+import {
+  ComposeDialog,
+  type ComposeDialogSeed,
+} from "./components/skills/ComposeDialog";
+import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
 import {
   applyFileQueue,
   addWorkspaceRoot,
@@ -88,6 +93,12 @@ import {
 } from "./lib/inbox";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import type { TerminalKind } from "./lib/terminal";
+import {
+  skillsListSkills,
+  type SkillContextItem,
+  type SkillRecord,
+  type TerminalDispatchSpec,
+} from "./lib/skills";
 import {
   checkAppUpdate,
   installAppUpdate,
@@ -622,10 +633,11 @@ function MainApp() {
   const [inboxSettingsOpen, setInboxSettingsOpen] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
   const [updateToast, setUpdateToast] = useState<UpdateToast | null>(null);
-  const [terminalLaunchRequest, setTerminalLaunchRequest] = useState<{
-    kind: TerminalKind;
-    nonce: number;
-  } | null>(null);
+  const [terminalLaunchRequest, setTerminalLaunchRequest] =
+    useState<TerminalLaunchRequest | null>(null);
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
   const [anchorSettings, setAnchorSettings] = useState<AnchorSettings>(() =>
     normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS),
   );
@@ -840,6 +852,15 @@ function MainApp() {
         };
       }),
     [anchorSettings.ui.documentLabelMode, tabs, workspaceRegistry.workspaces],
+  );
+  const commandPaletteSkillActions = useMemo(
+    () =>
+      skills.slice(0, 30).map((skill) => ({
+        id: `skill:${skill.id}`,
+        label: `/skill ${skill.name}`,
+        hint: skill.description ?? skill.sourceId,
+      })),
+    [skills],
   );
 
   const lastOpenKeyForWorkspace = useCallback((path: string) => `${LAST_OPEN_KEY}:${path}`, []);
@@ -1082,6 +1103,21 @@ function MainApp() {
     },
     [updateSettings],
   );
+
+  const refreshSkills = useCallback(async () => {
+    setSkillsLoading(true);
+    try {
+      setSkills(await skillsListSkills(settingsWorkPath));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [settingsWorkPath]);
+
+  useEffect(() => {
+    void refreshSkills();
+  }, [refreshSkills]);
 
   const setPersistedAppMode = useCallback(
     (activeAppMode: AppMode) => {
@@ -2130,6 +2166,58 @@ function MainApp() {
     },
     [entries, selectEntry, t],
   );
+
+  const openSkillCompose = useCallback(
+    (skill: SkillRecord | null = null, contextOverride?: SkillContextItem[]) => {
+      const context =
+        contextOverride ??
+        (selectedEntry
+          ? [
+              {
+                path: selectedEntry.path,
+                kind: "document",
+              },
+            ]
+          : selectedFilePaths.map((path) => ({
+              path,
+              kind: "file",
+            })));
+      setComposeSeed({
+        skill,
+        context,
+        cwd: activeDocumentWorkspacePath ?? explorerWorkspacePath ?? settingsWorkPath,
+      });
+    },
+    [
+      activeDocumentWorkspacePath,
+      explorerWorkspacePath,
+      selectedEntry,
+      selectedFilePaths,
+      settingsWorkPath,
+    ],
+  );
+
+  const applySkillToFileTarget = useCallback(
+    (targetPath: string, targetKind: "file" | "directory") => {
+      openSkillCompose(null, [{ path: targetPath, kind: targetKind }]);
+      if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+      setPersistedRightPaneTab("skills");
+    },
+    [openSkillCompose, outlineOpen, setPersistedRightPaneTab, updateLayoutSettings],
+  );
+
+  const launchSkillTerminal = useCallback((spec: TerminalDispatchSpec) => {
+    setTerminalLaunchRequest({
+      kind: spec.kind,
+      nonce: Date.now(),
+      title: spec.title,
+      cwd: spec.cwd,
+      command: spec.command ?? null,
+      extraArgs: spec.extraArgs,
+      extraEnv: spec.extraEnv,
+    });
+    updateLayoutSettings({ terminalOpen: true });
+  }, [updateLayoutSettings]);
 
   const addFileQueueSources = useCallback(
     (
@@ -3435,6 +3523,11 @@ function MainApp() {
 
   const runCommand = useCallback(
     (id: string) => {
+      if (id.startsWith("skill:")) {
+        const skillId = id.slice("skill:".length);
+        openSkillCompose(skills.find((skill) => skill.id === skillId) ?? null);
+        return;
+      }
       switch (id) {
         case "new-document":
           openNewDocumentDialog();
@@ -3478,6 +3571,9 @@ function MainApp() {
         case "check-updates":
           void checkForUpdates(true);
           break;
+        case "open-skill-compose":
+          openSkillCompose(null);
+          break;
       }
     },
     [
@@ -3496,6 +3592,8 @@ function MainApp() {
       setPersistedEditorViewMode,
       updateLayoutSettings,
       outlineOpen,
+      openSkillCompose,
+      skills,
     ],
   );
 
@@ -3506,6 +3604,7 @@ function MainApp() {
       "mod+n": openNewDocumentDialog,
       "mod+d": splitActiveSurfaceRight,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
+      "mod+shift+k": () => openSkillCompose(null),
       "mod+p": () =>
         setPersistedEditorViewMode(editorViewMode === "preview" ? "rich" : "preview"),
       "mod+\\": () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
@@ -3538,6 +3637,7 @@ function MainApp() {
       selectTabByIndex,
       openNewDocumentDialog,
       openPreferences,
+      openSkillCompose,
       splitActiveSurfaceRight,
       closeTab,
       editorViewMode,
@@ -4250,6 +4350,7 @@ function MainApp() {
                     operation,
                   );
                 }}
+                onApplySkillToTarget={applySkillToFileTarget}
               />
             ) : null}
             {documentsPaneOpen ? (
@@ -4331,10 +4432,30 @@ function MainApp() {
                 activeTab={rightPaneTab}
                 onTabChange={setPersistedRightPaneTab}
                 paneRef={outlinePaneRef}
+                skillsNode={
+                  <SkillsQuickPane
+                    skills={skills}
+                    loading={skillsLoading}
+                    onRefresh={refreshSkills}
+                    onRunSkill={(skill) => openSkillCompose(skill)}
+                  />
+                }
               />
             ) : null}
           </>
         )}
+
+        <button
+          type="button"
+          className="skill-compose-strip"
+          onClick={() => openSkillCompose(null)}
+          title="Apply skill"
+          aria-label="Apply skill"
+        >
+          <Command size={14} />
+          <span>Apply skill</span>
+          <kbd>⌘⇧K</kbd>
+        </button>
 
         <TerminalPanel
           cwd={activeDocumentWorkspacePath}
@@ -4502,6 +4623,17 @@ function MainApp() {
           onOpenChange={setInboxSettingsOpen}
           onSave={persistInboxSettings}
         />
+        <ComposeDialog
+          open={composeSeed !== null}
+          skills={skills}
+          seed={composeSeed}
+          onClose={() => setComposeSeed(null)}
+          onTerminalDispatch={launchSkillTerminal}
+          onBackgroundDispatch={(invocationId) => {
+            setError(`Background skill run started: ${invocationId}`);
+          }}
+          onError={setError}
+        />
         <CommandPalette
           open={commandPaletteOpen}
           documentIndex={documentIndex}
@@ -4509,6 +4641,7 @@ function MainApp() {
           onSelectEntry={selectEntry}
           onRunCommand={runCommand}
           documentLabelMode={anchorSettings.ui.documentLabelMode}
+          skillActions={commandPaletteSkillActions}
         />
         <CommitDialog
           open={commitDialog !== null}

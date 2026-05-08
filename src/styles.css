@@ -4930,6 +4930,280 @@ button.git-badge:hover {
   font-size: 11.5px;
 }
 
+/* ─── Skills manager / compose ─────────────────────────────────────── */
+
+.skills-manager-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(360px, 1.3fr);
+  gap: 14px;
+  width: 100%;
+}
+
+.skills-manager-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skills-manager-section.editor {
+  grid-column: 1 / -1;
+}
+
+.system-skill-list.compact {
+  gap: 8px;
+}
+
+.system-detail-actions.inline {
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.system-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel-2);
+}
+
+.source-add-card {
+  display: grid;
+  gap: 10px;
+}
+
+.skills-create-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.dirty-pill {
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.skills-quick-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.list-header.compact {
+  align-items: center;
+}
+
+.skills-quick-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+}
+
+.skills-quick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.skills-quick-row:hover {
+  border-color: var(--accent);
+  background: var(--active-surface);
+}
+
+.skills-quick-row span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skills-quick-row strong,
+.skills-quick-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-quick-row small {
+  color: var(--muted);
+}
+
+.skill-compose-strip {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 35;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  padding: 8px 10px;
+}
+
+.terminal-panel:not(.collapsed) ~ .skill-compose-strip,
+.skill-compose-strip {
+  bottom: 18px;
+}
+
+.skill-compose-strip kbd {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.compose-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: var(--overlay);
+}
+
+.compose-dialog {
+  width: min(760px, calc(100vw - 36px));
+  max-height: min(760px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+}
+
+.compose-header,
+.compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compose-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.compose-header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.compose-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+
+.segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+}
+
+.segmented-control button:last-child {
+  border-right: 0;
+}
+
+.segmented-control button.active {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.compose-skill-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 10px;
+}
+
+.compose-skill-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.compose-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compose-context span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compose-dialog .field textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.compose-preview {
+  min-height: 0;
+}
+
+.compose-preview pre {
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 /* ─── Responsive ───────────────────────────────────────────────────── */
 
 @media (max-width: 1320px) {

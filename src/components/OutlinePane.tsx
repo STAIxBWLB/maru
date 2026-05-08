@@ -94,6 +94,7 @@ interface OutlinePaneProps {
   activeTab: RightPaneTab;
   onTabChange: (tab: RightPaneTab) => void;
   paneRef?: React.RefObject<HTMLElement | null>;
+  skillsNode?: React.ReactNode;
 }
 
 const STANDARD_TYPES = [
@@ -179,6 +180,7 @@ export function OutlinePane({
   activeTab,
   onTabChange,
   paneRef,
+  skillsNode,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
   const tab = activeTab;
@@ -234,7 +236,7 @@ export function OutlinePane({
       </div>
       <div className="right-pane-workspace">
         <div className="right-pane-tabs" role="tablist" aria-label={t("rightPane.tabs")}>
-          {(["outline", "files", "memo", "info"] as const).map((id) => (
+          {(["outline", "files", "memo", "skills", "info"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -272,6 +274,8 @@ export function OutlinePane({
                 <Files size={20} />
               ) : id === "memo" ? (
                 <StickyNote size={20} />
+              ) : id === "skills" ? (
+                <FileCode2 size={20} />
               ) : (
                 <Info size={20} />
               )}
@@ -345,6 +349,8 @@ export function OutlinePane({
               t={t}
             />
           ) : null}
+
+          {tab === "skills" ? skillsNode ?? null : null}
 
           {tab === "info" && document ? (
             <section className="inspector">

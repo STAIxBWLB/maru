@@ -199,6 +199,7 @@ const ko: Record<string, string> = {
   "rightPane.tab.outline": "개요",
   "rightPane.tab.files": "파일",
   "rightPane.tab.memo": "메모",
+  "rightPane.tab.skills": "스킬",
   "rightPane.tab.info": "정보",
   "rightPane.files.pick": "파일 추가",
   "rightPane.files.pickFolder": "폴더 추가",
@@ -318,6 +319,7 @@ const ko: Record<string, string> = {
   "cmdk.action.openSettings": "설정 열기",
   "cmdk.action.checkUpdates": "업데이트 확인",
   "cmdk.action.addWorkspace": "Workspace 추가",
+  "cmdk.action.skillCompose": "스킬 적용",
 
   "newDoc.button": "새 문서",
   "newDoc.dialog.title": "새 Anchor 문서",
@@ -643,6 +645,7 @@ const en: Record<string, string> = {
   "rightPane.tab.outline": "Outline",
   "rightPane.tab.files": "Files",
   "rightPane.tab.memo": "Memo",
+  "rightPane.tab.skills": "Skills",
   "rightPane.tab.info": "Info",
   "rightPane.files.pick": "Add files",
   "rightPane.files.pickFolder": "Add folder",
@@ -762,6 +765,7 @@ const en: Record<string, string> = {
   "cmdk.action.openSettings": "Open settings",
   "cmdk.action.checkUpdates": "Check for updates",
   "cmdk.action.addWorkspace": "Add workspace",
+  "cmdk.action.skillCompose": "Apply skill",
 
   "newDoc.button": "New document",
   "newDoc.dialog.title": "New Anchor document",

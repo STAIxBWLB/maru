@@ -1,8 +1,8 @@
 // SystemPane — anchor's `.anchor/` operations surface.
 //
-// One pane, six tabs (Rules / Templates / MCP / Projects / Skills /
-// Import). Reads exclusively from `<work>/.anchor/`; the external
-// `_sys/` tree is only touched through the Import tab.
+// One pane for workspace settings and `.anchor/` operations. Workspace-local
+// JSON stays under `<work>/.anchor/`; skill management also talks to the
+// global `~/.anchor/skills` registry.
 
 import { AlertTriangle, Check, Plus, RefreshCcw, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,7 +16,6 @@ import {
   readAnchorMcp,
   readAnchorProjects,
   readAnchorRule,
-  readAnchorSkills,
   readAnchorTemplate,
   saveAnchorMcp,
   saveAnchorRule,
@@ -45,6 +44,26 @@ import type {
   RuleEntry,
   TemplateEntry,
 } from "../lib/types";
+import {
+  skillsAddSource,
+  skillsAdoptExternalLinks,
+  skillsCreateSkill,
+  skillsEnvBootstrap,
+  skillsEnvStatus,
+  skillsInstallSkill,
+  skillsListInstalls,
+  skillsListSkills,
+  skillsListSources,
+  skillsReadSkill,
+  skillsRescanSource,
+  skillsSaveSkillFile,
+  skillsSyncSource,
+  skillsUninstallSkill,
+  type SkillInstall,
+  type SkillRecord,
+  type SkillSource,
+  type SkillsEnvStatus,
+} from "../lib/skills";
 import { Button } from "./ui/Button";
 
 type SystemTab =
@@ -938,61 +957,349 @@ function ProjectsTab({ workPath }: { workPath: string }) {
 
 function SkillsTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
-  const [value, setValue] = useState<unknown>(null);
+  const [sources, setSources] = useState<SkillSource[]>([]);
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [installs, setInstalls] = useState<SkillInstall[]>([]);
+  const [envStatus, setEnvStatus] = useState<SkillsEnvStatus | null>(null);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [editorText, setEditorText] = useState("");
+  const [editorBase, setEditorBase] = useState("");
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSourceId, setNewSourceId] = useState("");
+  const [newSourcePath, setNewSourcePath] = useState("");
+  const [newSourceKind, setNewSourceKind] = useState<"linked" | "cloned">("linked");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setValue(await readAnchorSkills(workPath));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const nextSources = await skillsListSources(workPath);
+      const nextSkills = await skillsListSkills(workPath);
+      const nextInstalls = await skillsListInstalls(workPath);
+      const nextEnv = await skillsEnvStatus(workPath);
+      setSources(nextSources);
+      setSkills(nextSkills);
+      setInstalls(nextInstalls);
+      setEnvStatus(nextEnv);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }, [workPath]);
 
-  const skills = useMemo(() => {
-    if (!value || typeof value !== "object") return [];
-    const arr = (value as { skills?: unknown[] }).skills;
-    if (!Array.isArray(arr)) return [];
-    return arr as Array<{
-      name?: string;
-      description?: string;
-      runtime?: string;
-      category?: string;
-      source?: string;
-    }>;
-  }, [value]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const selectedSkill = useMemo(
+    () => skills.find((skill) => skill.id === selectedSkillId) ?? null,
+    [selectedSkillId, skills],
+  );
+  const installKey = useMemo(() => {
+    const set = new Set<string>();
+    installs.forEach((install) => set.add(`${install.skillId}:${install.target}`));
+    return set;
+  }, [installs]);
+
+  const loadEditor = useCallback(async (skill: SkillRecord) => {
+    setError(null);
+    try {
+      const doc = await skillsReadSkill(skill.id);
+      setSelectedSkillId(doc.skill.id);
+      setEditorText(doc.content);
+      setEditorBase(doc.content);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const saveEditor = useCallback(async () => {
+    if (!selectedSkill) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await skillsSaveSkillFile(selectedSkill.id, "SKILL.md", editorText);
+      setEditorBase(editorText);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [editorText, refresh, selectedSkill]);
+
+  const install = useCallback(
+    async (skill: SkillRecord, target: "claude" | "codex") => {
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsInstallSkill(skill.id, target, skill.name);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
+  const uninstall = useCallback(
+    async (skill: SkillRecord, target: "claude" | "codex") => {
+      const existing = installs.find(
+        (item) => item.skillId === skill.id && item.target === target,
+      );
+      if (!existing) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsUninstallSkill(target, existing.installedAs);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [installs, refresh],
+  );
 
   return (
     <div className="system-detail" style={{ width: "100%" }}>
-      {skills.length === 0 ? (
-        <p className="muted">{t("system.skills.empty")}</p>
-      ) : (
-        <ul className="system-skill-list">
-          {skills.map((skill, i) => (
-            <li className="system-skill-card" key={`${skill.name ?? "skill"}-${i}`}>
-              <div className="system-skill-name">{skill.name ?? "(unnamed)"}</div>
-              {skill.description ? <div className="muted">{skill.description}</div> : null}
+      <div className="system-detail-actions">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void refresh()}
+          icon={<RefreshCcw size={14} />}
+        >
+          Refresh
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void skillsAdoptExternalLinks().then(refresh).catch((err) => setError(err instanceof Error ? err.message : String(err)))}
+        >
+          Adopt links
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void skillsEnvBootstrap(workPath).then(() => refresh()).catch((err) => setError(err instanceof Error ? err.message : String(err)))}
+        >
+          Bootstrap env
+        </Button>
+      </div>
+
+      <div className="skills-manager-grid">
+        <section className="skills-manager-section">
+          <h3>Sources</h3>
+          <div className="system-card source-add-card">
+            <label className="field">
+              <span>Source id</span>
+              <input
+                value={newSourceId}
+                onChange={(event) => setNewSourceId(event.target.value)}
+                placeholder="team-skills"
+              />
+            </label>
+            <label className="field">
+              <span>{newSourceKind === "linked" ? "Path" : "Repo URL"}</span>
+              <input
+                value={newSourcePath}
+                onChange={(event) => setNewSourcePath(event.target.value)}
+                placeholder={newSourceKind === "linked" ? "~/path/to/skills-repo" : "https://github.com/org/skills"}
+              />
+            </label>
+            <div className="system-detail-actions inline">
+              <select
+                value={newSourceKind}
+                onChange={(event) => setNewSourceKind(event.target.value as "linked" | "cloned")}
+              >
+                <option value="linked">linked</option>
+                <option value="cloned">cloned</option>
+              </select>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!newSourceId.trim() || !newSourcePath.trim() || busy}
+                onClick={() => {
+                  setBusy(true);
+                  void skillsAddSource({
+                    id: newSourceId.trim(),
+                    kind: newSourceKind,
+                    path: newSourceKind === "linked" ? newSourcePath.trim() : null,
+                    repoUrl: newSourceKind === "cloned" ? newSourcePath.trim() : null,
+                    skillsSubdir: "skills",
+                  })
+                    .then(() => {
+                      setNewSourceId("");
+                      setNewSourcePath("");
+                      return refresh();
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Add source
+              </Button>
+            </div>
+          </div>
+          <ul className="system-skill-list compact">
+            {sources.map((source) => (
+              <li className="system-skill-card" key={source.id}>
+                <div className="system-skill-name">{source.id}</div>
+                <div className="system-skill-meta">
+                  <span>{source.kind}</span>
+                  <span><code>{source.skillsSubdir}</code></span>
+                </div>
+                <div className="muted" title={source.path ?? ""}>{source.path}</div>
+                <div className="system-detail-actions inline">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void skillsRescanSource(source.id).then(refresh).catch((err) => setError(err instanceof Error ? err.message : String(err)))}
+                  >
+                    Rescan
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void skillsSyncSource(source.id).then(refresh).catch((err) => setError(err instanceof Error ? err.message : String(err)))}
+                  >
+                    Sync
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="system-card">
+            <h3>Env</h3>
+            {envStatus ? (
               <div className="system-skill-meta">
-                <span>
-                  {t("system.skills.runtime")}: <code>{skill.runtime ?? "—"}</code>
-                </span>
-                {skill.category ? (
-                  <span>
-                    {t("system.skills.category")}: <code>{skill.category}</code>
-                  </span>
-                ) : null}
-                {skill.source ? (
-                  <span>
-                    {t("system.skills.source")}: <code>{skill.source}</code>
-                  </span>
+                <span>{envStatus.healthy ? "healthy" : "needs setup"}</span>
+                <span><code>{envStatus.root}</code></span>
+              </div>
+            ) : (
+              <p className="muted">Env status unavailable.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="skills-manager-section wide">
+          <div className="skills-create-row">
+            <label className="field">
+              <span>New managed skill</span>
+              <input
+                value={newSkillName}
+                onChange={(event) => setNewSkillName(event.target.value)}
+                placeholder="skill-name"
+              />
+            </label>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Plus size={14} />}
+              disabled={!newSkillName.trim() || busy}
+              onClick={() =>
+                void skillsCreateSkill(newSkillName.trim(), null)
+                  .then((skill) => {
+                    setNewSkillName("");
+                    void refresh().then(() => loadEditor(skill));
+                  })
+                  .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+              }
+            >
+              Create
+            </Button>
+          </div>
+
+          {skills.length === 0 ? (
+            <p className="muted">{t("system.skills.empty")}</p>
+          ) : (
+            <ul className="system-skill-list">
+              {skills.map((skill) => {
+                const claudeInstalled = installKey.has(`${skill.id}:claude`);
+                const codexInstalled = installKey.has(`${skill.id}:codex`);
+                return (
+                  <li className="system-skill-card" key={skill.id}>
+                    <div className="system-skill-name">
+                      {skill.name}
+                      {skill.dirty ? <span className="dirty-pill">dirty</span> : null}
+                    </div>
+                    {skill.description ? <div className="muted">{skill.description}</div> : null}
+                    <div className="system-skill-meta">
+                      <span>
+                        {t("system.skills.runtime")}: <code>{skill.runtime ?? "—"}</code>
+                      </span>
+                      <span>
+                        {t("system.skills.source")}: <code>{skill.sourceId}</code>
+                      </span>
+                      <span title={skill.absPath}><code>{skill.relPath}</code></span>
+                    </div>
+                    <div className="system-detail-actions inline">
+                      <Button variant="secondary" size="sm" onClick={() => void loadEditor(skill)}>
+                        Edit
+                      </Button>
+                      <Button
+                        variant={claudeInstalled ? "secondary" : "primary"}
+                        size="sm"
+                        onClick={() =>
+                          claudeInstalled ? void uninstall(skill, "claude") : void install(skill, "claude")
+                        }
+                        disabled={busy}
+                      >
+                        {claudeInstalled ? "Uninstall Claude" : "Install Claude"}
+                      </Button>
+                      <Button
+                        variant={codexInstalled ? "secondary" : "primary"}
+                        size="sm"
+                        onClick={() =>
+                          codexInstalled ? void uninstall(skill, "codex") : void install(skill, "codex")
+                        }
+                        disabled={busy}
+                      >
+                        {codexInstalled ? "Uninstall Codex" : "Install Codex"}
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {selectedSkill ? (
+          <section className="skills-manager-section editor">
+            <div className="system-detail-actions">
+              <div>
+                <h3>{selectedSkill.name}</h3>
+                {selectedSkill.dirty ? (
+                  <p className="muted">Linked source has git changes.</p>
                 ) : null}
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
+              <span className={editorText !== editorBase ? "save-state dirty" : "save-state saved"}>
+                {editorText !== editorBase ? t("system.rules.dirty") : t("system.rules.saved")}
+              </span>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void saveEditor()}
+                disabled={editorText === editorBase || busy}
+                icon={<Save size={14} />}
+              >
+                {t("system.mcp.save")}
+              </Button>
+            </div>
+            <textarea
+              className="source-editor"
+              value={editorText}
+              onChange={(event) => setEditorText(event.target.value)}
+              spellCheck={false}
+            />
+          </section>
+        ) : null}
+      </div>
       {error ? (
         <div className="toast" title={error}>
           <AlertTriangle size={13} />

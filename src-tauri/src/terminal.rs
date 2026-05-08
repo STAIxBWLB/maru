@@ -31,6 +31,7 @@ struct TerminalCommandSpec {
     program: String,
     args: Vec<String>,
     cwd: PathBuf,
+    extra_env: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -56,6 +57,7 @@ pub fn terminal_spawn(
     cwd: Option<String>,
     command: Option<String>,
     extra_args: Option<Vec<String>>,
+    extra_env: Option<HashMap<String, String>>,
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<String, String> {
@@ -72,7 +74,13 @@ pub fn terminal_spawn(
         }
     }
 
-    let spec = build_terminal_command_spec(&kind, cwd.as_deref(), command.as_deref(), extra_args)?;
+    let spec = build_terminal_command_spec(
+        &kind,
+        cwd.as_deref(),
+        command.as_deref(),
+        extra_args,
+        extra_env,
+    )?;
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -91,6 +99,9 @@ pub fn terminal_spawn(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "Anchor");
+    for (key, value) in &spec.extra_env {
+        cmd.env(key, value);
+    }
 
     let reader = pair
         .master
@@ -280,6 +291,7 @@ fn build_terminal_command_spec(
     cwd: Option<&str>,
     command_override: Option<&str>,
     extra_args: Option<Vec<String>>,
+    extra_env: Option<HashMap<String, String>>,
 ) -> Result<TerminalCommandSpec, String> {
     let cwd = resolve_terminal_cwd(cwd)?;
     let cwd_str = cwd.to_string_lossy().to_string();
@@ -296,7 +308,12 @@ fn build_terminal_command_spec(
         (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
     };
     args.extend(extras);
-    Ok(TerminalCommandSpec { program, args, cwd })
+    Ok(TerminalCommandSpec {
+        program,
+        args,
+        cwd,
+        extra_env: extra_env.unwrap_or_default(),
+    })
 }
 
 fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -336,22 +353,23 @@ mod tests {
         let cwd = env::current_dir().unwrap();
         let cwd_str = cwd.to_string_lossy().to_string();
 
-        let claude = build_terminal_command_spec("claude", Some(&cwd_str), None, None).unwrap();
+        let claude =
+            build_terminal_command_spec("claude", Some(&cwd_str), None, None, None).unwrap();
         assert_eq!(claude.program, "claude");
         assert!(claude.args.is_empty());
 
-        let codex = build_terminal_command_spec("codex", Some(&cwd_str), None, None).unwrap();
+        let codex = build_terminal_command_spec("codex", Some(&cwd_str), None, None, None).unwrap();
         assert_eq!(codex.program, "codex");
         assert_eq!(codex.args, vec!["--cd", cwd_str.as_str()]);
 
-        let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None).unwrap();
+        let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None, None).unwrap();
         assert!(!shell.program.is_empty());
         assert!(shell.args.is_empty());
     }
 
     #[test]
     fn unsupported_launcher_is_rejected() {
-        let err = build_terminal_command_spec("python", None, None, None).unwrap_err();
+        let err = build_terminal_command_spec("python", None, None, None, None).unwrap_err();
         assert!(err.contains("Unsupported terminal launcher"));
     }
 
@@ -360,9 +378,14 @@ mod tests {
         let missing = env::current_dir()
             .unwrap()
             .join("definitely-missing-anchor-cwd");
-        let err =
-            build_terminal_command_spec("shell", Some(&missing.to_string_lossy()), None, None)
-                .unwrap_err();
+        let err = build_terminal_command_spec(
+            "shell",
+            Some(&missing.to_string_lossy()),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("terminal_cwd_invalid"));
     }
 
@@ -375,6 +398,7 @@ mod tests {
             Some(&cwd_str),
             Some("/usr/local/bin/codex-1.5"),
             Some(vec!["--profile".to_string(), "dev".to_string()]),
+            None,
         )
         .unwrap();
         assert_eq!(spec.program, "/usr/local/bin/codex-1.5");
@@ -390,6 +414,7 @@ mod tests {
             Some(&cwd_str),
             None,
             Some(vec!["--profile".to_string(), "dev".to_string()]),
+            None,
         )
         .unwrap();
         assert_eq!(spec.program, "codex");
@@ -404,7 +429,7 @@ mod tests {
         let cwd = env::current_dir().unwrap();
         let cwd_str = cwd.to_string_lossy().to_string();
         let spec =
-            build_terminal_command_spec("claude", Some(&cwd_str), Some("   "), None).unwrap();
+            build_terminal_command_spec("claude", Some(&cwd_str), Some("   "), None, None).unwrap();
         assert_eq!(spec.program, "claude");
     }
 

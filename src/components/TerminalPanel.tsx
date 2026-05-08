@@ -36,7 +36,7 @@ import {
 interface TerminalPanelProps {
   cwd: string | null;
   settings: AnchorSettings;
-  launchRequest?: { kind: TerminalKind; nonce: number } | null;
+  launchRequest?: TerminalLaunchRequest | null;
   open: boolean;
   height: number;
   splitOpen: boolean;
@@ -47,6 +47,16 @@ interface TerminalPanelProps {
   onSplitOpenChange: (open: boolean) => void;
   onSplitRatioChange: (ratio: number) => void;
   onMaximizedChange: (maximized: boolean) => void;
+}
+
+export interface TerminalLaunchRequest {
+  kind: TerminalKind;
+  nonce: number;
+  title?: string | null;
+  cwd?: string | null;
+  command?: string | null;
+  extraArgs?: string[] | null;
+  extraEnv?: Record<string, string> | null;
 }
 
 interface TerminalOutputEvent {
@@ -235,7 +245,11 @@ export const TerminalPanel = memo(function TerminalPanel({
   }, []);
 
   const launch = useCallback(
-    async (kind: TerminalKind, group: "left" | "right" = "left") => {
+    async (
+      kind: TerminalKind,
+      group: "left" | "right" = "left",
+      request?: Omit<TerminalLaunchRequest, "kind" | "nonce">,
+    ) => {
       if (!canRunTerminal) {
         setError(t("terminal.tauriRequired"));
         return;
@@ -248,7 +262,7 @@ export const TerminalPanel = memo(function TerminalPanel({
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2)}`
       }`;
-      const title = launcher.label || t(`terminal.launcher.${kind}`);
+      const title = request?.title || launcher.label || t(`terminal.launcher.${kind}`);
       const terminal = new XtermTerminal({
         cursorBlink: true,
         convertEol: false,
@@ -314,9 +328,10 @@ export const TerminalPanel = memo(function TerminalPanel({
         } catch {
           // The panel can still be settling after opening or splitting.
         }
-        await terminalSpawn(sessionId, kind, cwd, {
-          command: launcher.command ?? null,
-          extraArgs: launcher.args ?? null,
+        await terminalSpawn(sessionId, kind, request?.cwd ?? cwd, {
+          command: request?.command ?? launcher.command ?? null,
+          extraArgs: request?.extraArgs ?? launcher.args ?? null,
+          extraEnv: request?.extraEnv ?? null,
           cols: terminal.cols,
           rows: terminal.rows,
         });
@@ -364,7 +379,7 @@ export const TerminalPanel = memo(function TerminalPanel({
     if (!launchRequest) return;
     if (handledLaunchRequestRef.current === launchRequest.nonce) return;
     handledLaunchRequestRef.current = launchRequest.nonce;
-    void launch(launchRequest.kind, focusedGroup);
+    void launch(launchRequest.kind, focusedGroup, launchRequest);
   }, [focusedGroup, launch, launchRequest]);
 
   useEffect(() => {

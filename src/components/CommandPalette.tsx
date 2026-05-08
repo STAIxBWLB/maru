@@ -13,6 +13,7 @@ interface CommandPaletteProps {
   onSelectEntry: (entry: VaultEntry) => boolean | Promise<boolean>;
   onRunCommand: (id: string) => void;
   documentLabelMode: DocumentLabelMode;
+  skillActions?: CommandAction[];
 }
 
 interface CommandAction {
@@ -33,6 +34,7 @@ export const CommandPalette = memo(function CommandPalette({
   onSelectEntry,
   onRunCommand,
   documentLabelMode,
+  skillActions = [],
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -58,8 +60,10 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
       { id: "check-updates", label: t("cmdk.action.checkUpdates") },
       { id: "add-workspace", label: t("cmdk.action.addWorkspace") },
+      { id: "open-skill-compose", label: t("cmdk.action.skillCompose"), shortcut: "⌘ ⇧ K" },
+      ...skillActions,
     ],
-    [t],
+    [skillActions, t],
   );
 
   const filteredDocs = useMemo(

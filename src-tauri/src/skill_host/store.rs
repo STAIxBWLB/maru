@@ -1,0 +1,1047 @@
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_yaml::Value as YamlValue;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use walkdir::WalkDir;
+
+use crate::skill_host::fs as host_fs;
+use crate::vault::{parse_frontmatter, title_from_content};
+
+const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_FILE: &str = "registry.json";
+const MANAGED_SOURCE_ID: &str = "anchor-managed";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSource {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_url: Option<String>,
+    #[serde(default = "default_skills_subdir")]
+    pub skills_subdir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRecord {
+    pub id: String,
+    pub source_id: String,
+    pub name: String,
+    pub rel_path: String,
+    pub abs_path: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub editable: bool,
+    #[serde(default)]
+    pub dirty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInstall {
+    pub skill_id: String,
+    pub target: String,
+    pub installed_as: String,
+    pub managed_by: String,
+    pub entrypoint_path: String,
+    pub target_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsRegistry {
+    pub version: u32,
+    #[serde(default)]
+    pub sources: Vec<SkillSource>,
+    #[serde(default)]
+    pub skills: Vec<SkillRecord>,
+    #[serde(default)]
+    pub installs: Vec<SkillInstall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDocument {
+    pub skill: SkillRecord,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOutcome {
+    pub install: SkillInstall,
+    pub anchor_entrypoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptOutcome {
+    pub adopted: usize,
+    pub skipped: usize,
+    pub installs: Vec<SkillInstall>,
+}
+
+fn default_skills_subdir() -> String {
+    "skills".to_string()
+}
+
+impl Default for SkillsRegistry {
+    fn default() -> Self {
+        Self {
+            version: REGISTRY_VERSION,
+            sources: Vec::new(),
+            skills: Vec::new(),
+            installs: Vec::new(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn skills_list_sources(work_path: Option<String>) -> Result<Vec<SkillSource>, String> {
+    let mut registry = load_registry()?;
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    save_registry(&registry)?;
+    Ok(registry.sources)
+}
+
+#[tauri::command]
+pub fn skills_add_source(
+    id: String,
+    kind: String,
+    path: Option<String>,
+    repo_url: Option<String>,
+    skills_subdir: Option<String>,
+) -> Result<SkillSource, String> {
+    let id = normalize_source_id(&id)?;
+    let kind = normalize_source_kind(&kind)?;
+    let mut registry = load_registry()?;
+    if registry.sources.iter().any(|source| source.id == id) {
+        return Err(format!("source_exists: {id}"));
+    }
+
+    let source_path = match kind.as_str() {
+        "linked" => {
+            let raw = path.ok_or_else(|| "source_path_required".to_string())?;
+            let p = host_fs::expand_tilde(&raw);
+            if !p.is_dir() {
+                return Err(format!(
+                    "source_path_invalid: {}",
+                    host_fs::display_path(&p)
+                ));
+            }
+            Some(host_fs::display_path(&canonicalize_or_self(&p)))
+        }
+        "cloned" => {
+            let url = repo_url
+                .clone()
+                .ok_or_else(|| "source_repo_url_required".to_string())?;
+            let checkout = host_fs::skills_root()?.join("_sources").join(&id);
+            if checkout.exists() {
+                return Err(format!(
+                    "source_checkout_exists: {}",
+                    host_fs::display_path(&checkout)
+                ));
+            }
+            host_fs::ensure_dir(checkout.parent().unwrap())?;
+            run_command(Command::new("git").arg("clone").arg(&url).arg(&checkout))?;
+            Some(host_fs::display_path(&checkout))
+        }
+        "imported" | "managed" | "adopted" => {
+            path.map(|raw| host_fs::display_path(&host_fs::expand_tilde(&raw)))
+        }
+        other => return Err(format!("unsupported_source_kind: {other}")),
+    };
+
+    let source = SkillSource {
+        id,
+        kind,
+        path: source_path,
+        repo_url,
+        skills_subdir: skills_subdir
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(default_skills_subdir),
+        branch: None,
+        last_synced_at: None,
+    };
+    registry.sources.push(source.clone());
+    rescan_source_in_registry(&mut registry, &source.id)?;
+    save_registry(&registry)?;
+    Ok(source)
+}
+
+#[tauri::command]
+pub fn skills_remove_source(source_id: String) -> Result<(), String> {
+    let mut registry = load_registry()?;
+    let skill_ids: BTreeSet<String> = registry
+        .skills
+        .iter()
+        .filter(|skill| skill.source_id == source_id)
+        .map(|skill| skill.id.clone())
+        .collect();
+    if registry
+        .installs
+        .iter()
+        .any(|install| skill_ids.contains(&install.skill_id))
+    {
+        return Err("source_has_installed_skills".to_string());
+    }
+    registry.sources.retain(|source| source.id != source_id);
+    registry.skills.retain(|skill| skill.source_id != source_id);
+    save_registry(&registry)
+}
+
+#[tauri::command]
+pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
+    let mut registry = load_registry()?;
+    let source = registry
+        .sources
+        .iter()
+        .find(|source| source.id == source_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_source: {source_id}"))?;
+    if source.kind == "cloned" {
+        let path = source_path(&source)?;
+        run_command(
+            Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .arg("pull")
+                .arg("--ff-only"),
+        )?;
+    }
+    let skills = rescan_source_in_registry(&mut registry, &source_id)?;
+    save_registry(&registry)?;
+    Ok(skills)
+}
+
+#[tauri::command]
+pub fn skills_rescan_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
+    let mut registry = load_registry()?;
+    let skills = rescan_source_in_registry(&mut registry, &source_id)?;
+    save_registry(&registry)?;
+    Ok(skills)
+}
+
+#[tauri::command]
+pub fn skills_list_skills(work_path: Option<String>) -> Result<Vec<SkillRecord>, String> {
+    let mut registry = load_registry()?;
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    let source_ids: Vec<String> = registry
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect();
+    for source_id in source_ids {
+        let _ = rescan_source_in_registry(&mut registry, &source_id);
+    }
+    save_registry(&registry)?;
+    Ok(registry.skills)
+}
+
+#[tauri::command]
+pub fn skills_read_skill(skill_id: String) -> Result<SkillDocument, String> {
+    let registry = load_registry()?;
+    let skill = registry
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    let content = fs::read_to_string(Path::new(&skill.abs_path).join("SKILL.md"))
+        .map_err(|err| format!("Cannot read SKILL.md for {}: {err}", skill.name))?;
+    Ok(SkillDocument { skill, content })
+}
+
+#[tauri::command]
+pub fn skills_read_skill_file(skill_id: String, file_path: String) -> Result<String, String> {
+    let path = resolve_skill_file(&skill_id, &file_path)?;
+    fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))
+}
+
+#[tauri::command]
+pub fn skills_save_skill_file(
+    skill_id: String,
+    file_path: String,
+    content: String,
+) -> Result<SkillRecord, String> {
+    let mut registry = load_registry()?;
+    let skill = registry
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    let source = registry
+        .sources
+        .iter()
+        .find(|source| source.id == skill.source_id)
+        .ok_or_else(|| format!("unknown_source: {}", skill.source_id))?;
+    if source.kind == "imported" || source.kind == "adopted" {
+        return Err("skill_source_not_editable".to_string());
+    }
+    let path = resolve_skill_file_from_record(&skill, &file_path)?;
+    fs::write(&path, content)
+        .map_err(|err| format!("Cannot write {}: {err}", host_fs::display_path(&path)))?;
+    let refreshed = rescan_source_in_registry(&mut registry, &skill.source_id)?
+        .into_iter()
+        .find(|next| next.id == skill_id)
+        .ok_or_else(|| format!("skill_missing_after_save: {skill_id}"))?;
+    save_registry(&registry)?;
+    Ok(refreshed)
+}
+
+#[tauri::command]
+pub fn skills_create_skill(name: String, title: Option<String>) -> Result<SkillRecord, String> {
+    let name = host_fs::safe_entry_name(&name)?;
+    let mut registry = load_registry()?;
+    ensure_managed_source(&mut registry)?;
+    let root = host_fs::skills_root()?.join("_managed").join(&name);
+    if root.exists() {
+        return Err(format!("managed_skill_exists: {name}"));
+    }
+    host_fs::ensure_dir(&root)?;
+    let title = title
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| name.clone());
+    let body = format!(
+        "---\nname: {name}\ndescription: {title}\nruntime: generic\n---\n\n# {title}\n\nUse this skill when the selected context should be processed with the `{name}` workflow.\n"
+    );
+    fs::write(root.join("SKILL.md"), body)
+        .map_err(|err| format!("Cannot create managed skill {name}: {err}"))?;
+    let skills = rescan_source_in_registry(&mut registry, MANAGED_SOURCE_ID)?;
+    let created = skills
+        .into_iter()
+        .find(|skill| skill.name == name)
+        .ok_or_else(|| "managed_skill_scan_failed".to_string())?;
+    save_registry(&registry)?;
+    Ok(created)
+}
+
+#[tauri::command]
+pub fn skills_delete_skill(skill_id: String) -> Result<(), String> {
+    let mut registry = load_registry()?;
+    let skill = registry
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    if skill.source_id != MANAGED_SOURCE_ID {
+        return Err("delete_only_managed_skills".to_string());
+    }
+    if registry
+        .installs
+        .iter()
+        .any(|install| install.skill_id == skill_id)
+    {
+        return Err("skill_is_installed".to_string());
+    }
+    fs::remove_dir_all(&skill.abs_path)
+        .map_err(|err| format!("Cannot delete {}: {err}", skill.abs_path))?;
+    let _ = rescan_source_in_registry(&mut registry, MANAGED_SOURCE_ID)?;
+    save_registry(&registry)
+}
+
+#[tauri::command]
+pub fn skills_list_installs(work_path: Option<String>) -> Result<Vec<SkillInstall>, String> {
+    let mut registry = load_registry()?;
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    save_registry(&registry)?;
+    Ok(registry.installs)
+}
+
+#[tauri::command]
+pub fn skills_install_skill(
+    skill_id: String,
+    target: String,
+    installed_as: Option<String>,
+) -> Result<InstallOutcome, String> {
+    let mut registry = load_registry()?;
+    let skill = registry
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    let target = normalize_install_target(&target)?;
+    let installed_as = host_fs::safe_entry_name(installed_as.as_deref().unwrap_or(&skill.name))?;
+    let anchor_entry = host_fs::skills_root()?.join(&installed_as);
+    let skill_path = PathBuf::from(&skill.abs_path);
+    host_fs::create_symlink_no_clobber(&anchor_entry, &skill_path)?;
+
+    let tool_target = install_target_path(&target, &installed_as)?;
+    host_fs::create_symlink_no_clobber(&tool_target, &anchor_entry)?;
+
+    let install = SkillInstall {
+        skill_id,
+        target: target.clone(),
+        installed_as,
+        managed_by: "anchor".to_string(),
+        entrypoint_path: host_fs::display_path(&anchor_entry),
+        target_path: host_fs::display_path(&tool_target),
+        created_at: Some(Utc::now().to_rfc3339()),
+    };
+    registry.installs.retain(|existing| {
+        !(existing.target == install.target && existing.installed_as == install.installed_as)
+    });
+    registry.installs.push(install.clone());
+    save_registry(&registry)?;
+    Ok(InstallOutcome {
+        install,
+        anchor_entrypoint: host_fs::display_path(&anchor_entry),
+    })
+}
+
+#[tauri::command]
+pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<(), String> {
+    let target = normalize_install_target(&target)?;
+    let installed_as = host_fs::safe_entry_name(&installed_as)?;
+    let mut registry = load_registry()?;
+    let install = registry
+        .installs
+        .iter()
+        .find(|install| install.target == target && install.installed_as == installed_as)
+        .cloned()
+        .ok_or_else(|| "install_not_registered".to_string())?;
+    if install.managed_by != "anchor" {
+        return Err("external_install_not_removed".to_string());
+    }
+    let tool_target = PathBuf::from(&install.target_path);
+    let anchor_entry = PathBuf::from(&install.entrypoint_path);
+    let removed_target = host_fs::remove_if_matching_symlink(&tool_target, &anchor_entry)?;
+    if !removed_target {
+        return Err(format!(
+            "install_target_changed: {} no longer points to {}",
+            install.target_path, install.entrypoint_path
+        ));
+    }
+    let still_used = registry.installs.iter().any(|other| {
+        !(other.target == target && other.installed_as == installed_as)
+            && other.entrypoint_path == install.entrypoint_path
+    });
+    if !still_used {
+        let skill_target = registry
+            .skills
+            .iter()
+            .find(|skill| skill.id == install.skill_id)
+            .map(|skill| PathBuf::from(&skill.abs_path));
+        if let Some(skill_target) = skill_target {
+            let _ = host_fs::remove_if_matching_symlink(&anchor_entry, &skill_target);
+        }
+    }
+    registry
+        .installs
+        .retain(|other| !(other.target == target && other.installed_as == installed_as));
+    save_registry(&registry)
+}
+
+#[tauri::command]
+pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
+    let mut registry = load_registry()?;
+    let mut adopted = 0;
+    let mut skipped = 0;
+    let mut installs = Vec::new();
+    for target in ["claude", "codex"] {
+        let dir = install_root(target)?;
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(&dir)
+            .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&dir)))?
+        {
+            let entry = entry.map_err(|err| err.to_string())?;
+            let link_path = entry.path();
+            let installed_as = entry.file_name().to_string_lossy().to_string();
+            let Some(raw_target) = host_fs::read_link_target(&link_path) else {
+                skipped += 1;
+                continue;
+            };
+            let abs_target = if raw_target.is_absolute() {
+                raw_target
+            } else {
+                dir.join(raw_target)
+            };
+            if !abs_target.join("SKILL.md").is_file() {
+                skipped += 1;
+                continue;
+            }
+            let source_id = adopted_source_id(&abs_target);
+            if !registry.sources.iter().any(|source| source.id == source_id) {
+                registry.sources.push(SkillSource {
+                    id: source_id.clone(),
+                    kind: "adopted".to_string(),
+                    path: Some(host_fs::display_path(&abs_target)),
+                    repo_url: None,
+                    skills_subdir: ".".to_string(),
+                    branch: None,
+                    last_synced_at: None,
+                });
+            }
+            let scanned = rescan_source_in_registry(&mut registry, &source_id)?;
+            let Some(skill) = scanned.first() else {
+                skipped += 1;
+                continue;
+            };
+            if registry
+                .installs
+                .iter()
+                .any(|install| install.target == target && install.installed_as == installed_as)
+            {
+                skipped += 1;
+                continue;
+            }
+            let install = SkillInstall {
+                skill_id: skill.id.clone(),
+                target: target.to_string(),
+                installed_as,
+                managed_by: "external".to_string(),
+                entrypoint_path: host_fs::display_path(&abs_target),
+                target_path: host_fs::display_path(&link_path),
+                created_at: Some(Utc::now().to_rfc3339()),
+            };
+            registry.installs.push(install.clone());
+            installs.push(install);
+            adopted += 1;
+        }
+    }
+    save_registry(&registry)?;
+    Ok(AdoptOutcome {
+        adopted,
+        skipped,
+        installs,
+    })
+}
+
+pub fn load_registry() -> Result<SkillsRegistry, String> {
+    let root = host_fs::skills_root()?;
+    host_fs::ensure_dir(&root)?;
+    for name in ["_sources", "_managed", "_imported", "_cache"] {
+        host_fs::ensure_dir(&root.join(name))?;
+    }
+    let path = registry_path()?;
+    if !path.is_file() {
+        return Ok(SkillsRegistry::default());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))?;
+    if content.trim().is_empty() {
+        return Ok(SkillsRegistry::default());
+    }
+    let mut registry: SkillsRegistry = serde_json::from_str(&content)
+        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
+    registry.version = REGISTRY_VERSION;
+    Ok(registry)
+}
+
+pub fn save_registry(registry: &SkillsRegistry) -> Result<(), String> {
+    host_fs::write_json_pretty(&registry_path()?, registry)
+}
+
+pub fn get_skill(skill_id: &str) -> Result<SkillRecord, String> {
+    let registry = load_registry()?;
+    registry
+        .skills
+        .into_iter()
+        .find(|skill| skill.id == skill_id)
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))
+}
+
+pub fn env_vars_for_runs() -> Result<BTreeMap<String, String>, String> {
+    let env_root = host_fs::env_root()?;
+    let bin = env_root.join(".venv").join("bin");
+    let mut vars = BTreeMap::new();
+    vars.insert(
+        "ANCHOR_SKILLS_ENV".to_string(),
+        host_fs::display_path(&env_root),
+    );
+    vars.insert(
+        "VIRTUAL_ENV".to_string(),
+        host_fs::display_path(&env_root.join(".venv")),
+    );
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    vars.insert(
+        "PATH".to_string(),
+        format!("{}:{}", host_fs::display_path(&bin), existing_path),
+    );
+    Ok(vars)
+}
+
+pub fn default_public_env_setup(work_path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let mut registry = load_registry()?;
+    ensure_default_sources(&mut registry, work_path)?;
+    for source in &registry.sources {
+        if source.id == "stai-public" || source.id.contains("public") {
+            if let Some(path) = source.path.as_ref() {
+                let setup = Path::new(path).join("env").join("setup.sh");
+                if setup.is_file() {
+                    return Ok(Some(setup));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn registry_path() -> Result<PathBuf, String> {
+    Ok(host_fs::skills_root()?.join(REGISTRY_FILE))
+}
+
+fn ensure_default_sources(
+    registry: &mut SkillsRegistry,
+    work_path: Option<&str>,
+) -> Result<(), String> {
+    ensure_managed_source(registry)?;
+    let Some(work_path) = work_path else {
+        return Ok(());
+    };
+    let config_path = Path::new(work_path).join("workspace.config.yaml");
+    if !config_path.is_file() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&config_path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&config_path)))?;
+    let yaml: YamlValue = serde_yaml::from_str(&content).map_err(|err| {
+        format!(
+            "Cannot parse {}: {err}",
+            host_fs::display_path(&config_path)
+        )
+    })?;
+    let Some(skills) = yaml.get("skills") else {
+        return Ok(());
+    };
+    let public_root = yaml_string(skills, "public_root");
+    let public_skills = yaml_string(skills, "public_skills");
+    let private_root = yaml_string(skills, "private_root");
+    let private_skills = yaml_string(skills, "private_skills");
+    if let Some(root) = public_root {
+        upsert_linked_source(
+            registry,
+            "stai-public",
+            &root,
+            skills_subdir_for(&root, public_skills.as_deref()),
+        );
+    }
+    if let Some(root) = private_root {
+        upsert_linked_source(
+            registry,
+            "stai-private",
+            &root,
+            skills_subdir_for(&root, private_skills.as_deref()),
+        );
+    }
+    Ok(())
+}
+
+fn ensure_managed_source(registry: &mut SkillsRegistry) -> Result<(), String> {
+    let managed = host_fs::skills_root()?.join("_managed");
+    host_fs::ensure_dir(&managed)?;
+    if !registry
+        .sources
+        .iter()
+        .any(|source| source.id == MANAGED_SOURCE_ID)
+    {
+        registry.sources.push(SkillSource {
+            id: MANAGED_SOURCE_ID.to_string(),
+            kind: "managed".to_string(),
+            path: Some(host_fs::display_path(&managed)),
+            repo_url: None,
+            skills_subdir: ".".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+    }
+    Ok(())
+}
+
+fn upsert_linked_source(
+    registry: &mut SkillsRegistry,
+    id: &str,
+    raw_root: &str,
+    skills_subdir: String,
+) {
+    let root = host_fs::expand_tilde(raw_root);
+    if !root.is_dir() {
+        return;
+    }
+    let source = SkillSource {
+        id: id.to_string(),
+        kind: "linked".to_string(),
+        path: Some(host_fs::display_path(&canonicalize_or_self(&root))),
+        repo_url: None,
+        skills_subdir,
+        branch: None,
+        last_synced_at: None,
+    };
+    if let Some(existing) = registry.sources.iter_mut().find(|source| source.id == id) {
+        *existing = source;
+    } else {
+        registry.sources.push(source);
+    }
+}
+
+fn yaml_string(root: &YamlValue, key: &str) -> Option<String> {
+    root.get(key)
+        .and_then(YamlValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn skills_subdir_for(root: &str, skills_path: Option<&str>) -> String {
+    let Some(skills_path) = skills_path else {
+        return default_skills_subdir();
+    };
+    let root_path = host_fs::expand_tilde(root);
+    let skills_path = host_fs::expand_tilde(skills_path);
+    skills_path
+        .strip_prefix(&root_path)
+        .ok()
+        .and_then(|rel| rel.to_str())
+        .map(|rel| if rel.is_empty() { "." } else { rel })
+        .unwrap_or("skills")
+        .to_string()
+}
+
+fn rescan_source_in_registry(
+    registry: &mut SkillsRegistry,
+    source_id: &str,
+) -> Result<Vec<SkillRecord>, String> {
+    let source = registry
+        .sources
+        .iter()
+        .find(|source| source.id == source_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_source: {source_id}"))?;
+    let scanned = scan_source(&source)?;
+    registry.skills.retain(|skill| skill.source_id != source_id);
+    registry.skills.extend(scanned.clone());
+    if let Some(existing) = registry
+        .sources
+        .iter_mut()
+        .find(|item| item.id == source_id)
+    {
+        existing.last_synced_at = Some(Utc::now().to_rfc3339());
+    }
+    Ok(scanned)
+}
+
+fn scan_source(source: &SkillSource) -> Result<Vec<SkillRecord>, String> {
+    let base = source_path(source)?;
+    let skill_roots =
+        manifest_skill_roots(&base, source)?.unwrap_or_else(|| discover_skill_roots(&base, source));
+    let mut skills = Vec::new();
+    for skill_root in skill_roots {
+        let skill_md = skill_root.join("SKILL.md");
+        if !skill_md.is_file() {
+            continue;
+        }
+        let name = skill_root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("skill")
+            .to_string();
+        let content = fs::read_to_string(&skill_md).unwrap_or_default();
+        let parts = parse_frontmatter(&content);
+        let rel_path = skill_root
+            .strip_prefix(&base)
+            .unwrap_or(&skill_root)
+            .to_string_lossy()
+            .to_string();
+        let id = format!("{}::{}", source.id, name);
+        let title = yaml_meta_string(&parts.meta, "name")
+            .or_else(|| yaml_meta_string(&parts.meta, "title"))
+            .unwrap_or_else(|| title_from_content(&content, &name));
+        let dirty = git_dirty(&skill_root).unwrap_or(false);
+        skills.push(SkillRecord {
+            id,
+            source_id: source.id.clone(),
+            name,
+            rel_path,
+            abs_path: host_fs::display_path(&canonicalize_or_self(&skill_root)),
+            title,
+            description: yaml_meta_string(&parts.meta, "description"),
+            runtime: yaml_meta_string(&parts.meta, "runtime"),
+            category: yaml_meta_string(&parts.meta, "category"),
+            editable: matches!(source.kind.as_str(), "linked" | "cloned" | "managed"),
+            dirty,
+        });
+    }
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(skills)
+}
+
+fn manifest_skill_roots(base: &Path, source: &SkillSource) -> Result<Option<Vec<PathBuf>>, String> {
+    let path = base.join("manifest.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))?;
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
+    let Some(items) = value.get("skills").and_then(serde_json::Value::as_array) else {
+        return Ok(None);
+    };
+    let mut roots = Vec::new();
+    for item in items {
+        let rel = match item {
+            serde_json::Value::String(name) => source_skill_base(base, source).join(name),
+            serde_json::Value::Object(map) => {
+                if let Some(path) = map.get("path").and_then(serde_json::Value::as_str) {
+                    base.join(path)
+                } else if let Some(name) = map.get("name").and_then(serde_json::Value::as_str) {
+                    source_skill_base(base, source).join(name)
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        roots.push(rel);
+    }
+    Ok(Some(roots))
+}
+
+fn discover_skill_roots(base: &Path, source: &SkillSource) -> Vec<PathBuf> {
+    let skills_base = source_skill_base(base, source);
+    if source.skills_subdir == "." && skills_base.join("SKILL.md").is_file() {
+        return vec![skills_base];
+    }
+    if !skills_base.is_dir() {
+        return Vec::new();
+    }
+    WalkDir::new(&skills_base)
+        .follow_links(false)
+        .min_depth(1)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
+        .filter_map(|entry| entry.path().parent().map(Path::to_path_buf))
+        .collect()
+}
+
+fn source_skill_base(base: &Path, source: &SkillSource) -> PathBuf {
+    if source.skills_subdir == "." {
+        base.to_path_buf()
+    } else {
+        base.join(&source.skills_subdir)
+    }
+}
+
+fn source_path(source: &SkillSource) -> Result<PathBuf, String> {
+    let path = source
+        .path
+        .as_ref()
+        .ok_or_else(|| format!("source_path_missing: {}", source.id))?;
+    let p = host_fs::expand_tilde(path);
+    if !p.is_dir() {
+        return Err(format!(
+            "source_path_invalid: {}",
+            host_fs::display_path(&p)
+        ));
+    }
+    Ok(canonicalize_or_self(&p))
+}
+
+fn resolve_skill_file(skill_id: &str, file_path: &str) -> Result<PathBuf, String> {
+    let skill = get_skill(skill_id)?;
+    resolve_skill_file_from_record(&skill, file_path)
+}
+
+fn resolve_skill_file_from_record(skill: &SkillRecord, file_path: &str) -> Result<PathBuf, String> {
+    let base = PathBuf::from(&skill.abs_path);
+    let rel = safe_relative_path(file_path)?;
+    let candidate = base.join(rel);
+    let normalized = lexical_normalize(&candidate);
+    if !normalized.starts_with(&base) {
+        return Err("skill_file_escapes_skill_root".to_string());
+    }
+    Ok(normalized)
+}
+
+fn safe_relative_path(file_path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(file_path.trim());
+    if path.is_absolute() {
+        return Err("skill_file_path_must_be_relative".to_string());
+    }
+    for component in path.components() {
+        if matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            return Err("skill_file_path_invalid".to_string());
+        }
+    }
+    Ok(path.to_path_buf())
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+fn yaml_meta_string(map: &BTreeMap<String, YamlValue>, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(YamlValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn git_dirty(path: &Path) -> Result<bool, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("status")
+        .arg("--porcelain")
+        .output();
+    let Ok(output) = output else {
+        return Ok(false);
+    };
+    if !output.status.success() {
+        return Ok(false);
+    }
+    Ok(!output.stdout.is_empty())
+}
+
+fn install_root(target: &str) -> Result<PathBuf, String> {
+    match target {
+        "claude" => Ok(host_fs::home_dir()?.join(".claude").join("skills")),
+        "codex" => Ok(host_fs::home_dir()?.join(".codex").join("skills")),
+        other => Err(format!("unsupported_install_target: {other}")),
+    }
+}
+
+fn install_target_path(target: &str, installed_as: &str) -> Result<PathBuf, String> {
+    Ok(install_root(target)?.join(installed_as))
+}
+
+fn normalize_install_target(target: &str) -> Result<String, String> {
+    let target = target.trim().to_lowercase();
+    match target.as_str() {
+        "claude" | "codex" => Ok(target),
+        _ => Err(format!("unsupported_install_target: {target}")),
+    }
+}
+
+fn normalize_source_id(id: &str) -> Result<String, String> {
+    let value = id.trim();
+    if value.is_empty() {
+        return Err("source_id_required".to_string());
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(format!("invalid_source_id: {value}"));
+    }
+    Ok(value.to_string())
+}
+
+fn normalize_source_kind(kind: &str) -> Result<String, String> {
+    let value = kind.trim().to_lowercase();
+    match value.as_str() {
+        "linked" | "cloned" | "imported" | "managed" | "adopted" => Ok(value),
+        _ => Err(format!("unsupported_source_kind: {value}")),
+    }
+}
+
+fn adopted_source_id(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(host_fs::display_path(path).as_bytes());
+    let digest = hasher.finalize();
+    format!("adopted-{:x}", digest)[..24].to_string()
+}
+
+fn canonicalize_or_self(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn run_command(cmd: &mut Command) -> Result<(), String> {
+    let output = cmd
+        .output()
+        .map_err(|err| format!("command_failed_to_start: {err}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!(
+        "command_failed: {}",
+        stderr.trim().if_empty("unknown error")
+    ))
+}
+
+trait IfEmpty {
+    fn if_empty(&self, fallback: &str) -> String;
+}
+
+impl IfEmpty for str {
+    fn if_empty(&self, fallback: &str) -> String {
+        if self.is_empty() {
+            fallback.to_string()
+        } else {
+            self.to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_id_validation_rejects_path_like_values() {
+        assert!(normalize_source_id("stai-public").is_ok());
+        assert!(normalize_source_id("../x").is_err());
+        assert!(normalize_source_id("x/y").is_err());
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_escape() {
+        assert!(safe_relative_path("SKILL.md").is_ok());
+        assert!(safe_relative_path("../SKILL.md").is_err());
+        assert!(safe_relative_path("/tmp/SKILL.md").is_err());
+    }
+
+    #[test]
+    fn skills_subdir_derives_relative_path() {
+        let root = "/tmp/work/_sys/skills";
+        let skills = "/tmp/work/_sys/skills/skills";
+        assert_eq!(skills_subdir_for(root, Some(skills)), "skills");
+    }
+}

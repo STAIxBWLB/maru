@@ -11,6 +11,7 @@
 // before there's a UI button. When a kill button lands, the registry
 // goes here.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -54,6 +55,7 @@ pub fn start_claude_cli_invocation(
     prompt: String,
     cwd: Option<String>,
     extra_args: Option<Vec<String>>,
+    extra_env: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
     if prompt.trim().is_empty() {
         return Err("Prompt is empty.".to_string());
@@ -77,6 +79,11 @@ pub fn start_claude_cli_invocation(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(extra_env) = extra_env {
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+    }
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
