@@ -14,6 +14,7 @@ mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
 mod shelf;
+mod skill_host;
 mod sys_import;
 mod terminal;
 mod vault;
@@ -44,6 +45,14 @@ use korean_date::parse_korean_date_cmd;
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
+};
+use skill_host::{
+    skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
+    skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal,
+    skills_env_bootstrap, skills_env_repair, skills_env_status, skills_install_skill,
+    skills_list_installs, skills_list_skills, skills_list_sources, skills_read_skill,
+    skills_read_skill_file, skills_remove_source, skills_rescan_source, skills_save_skill_file,
+    skills_sync_source, skills_uninstall_skill,
 };
 use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
@@ -147,6 +156,27 @@ pub fn run() {
             read_anchor_imports,
             plan_sys_import,
             apply_sys_import,
+            skills_list_sources,
+            skills_add_source,
+            skills_remove_source,
+            skills_sync_source,
+            skills_rescan_source,
+            skills_list_skills,
+            skills_read_skill,
+            skills_read_skill_file,
+            skills_save_skill_file,
+            skills_create_skill,
+            skills_delete_skill,
+            skills_list_installs,
+            skills_install_skill,
+            skills_uninstall_skill,
+            skills_adopt_external_links,
+            skills_env_status,
+            skills_env_bootstrap,
+            skills_env_repair,
+            skills_dispatch_compose,
+            skills_dispatch_terminal,
+            skills_dispatch_background,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Anchor");

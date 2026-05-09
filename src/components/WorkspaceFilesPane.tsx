@@ -100,6 +100,7 @@ interface WorkspaceFilesPaneProps {
     targetKind: "file" | "directory",
     operation: FileStoreOperation,
   ) => void;
+  onApplySkillToTarget?: (targetPath: string, targetKind: "file" | "directory") => void;
 }
 
 export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
@@ -134,6 +135,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   selectedFileQueueCount = 0,
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
+  onApplySkillToTarget,
 }: WorkspaceFilesPaneProps) {
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -525,6 +527,19 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           >
             {t("files.queue")}
           </button>
+          {onApplySkillToTarget ? (
+            <button
+              type="button"
+              onClick={() => {
+                const target = contextMenu.targetPath;
+                const kind = contextMenu.targetKind;
+                setContextMenu(null);
+                onApplySkillToTarget(target, kind);
+              }}
+            >
+              {t("context.applySkill")}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => {

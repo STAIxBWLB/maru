@@ -8,7 +8,7 @@ export type ThemeMode = "system" | "light" | "dark";
 export type AnchorAppMode = "pkm" | "inbox";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
-export type RightPaneTab = "outline" | "files" | "memo" | "info";
+export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
 
 export const DEFAULT_BINARY_FILE_INCLUDE_PATTERNS = [
   "*.tgz",
@@ -299,6 +299,7 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
   return value === "outline" || value === "files" || value === "memo" || value === "info"
+    || value === "skills"
     ? value
     : null;
 }

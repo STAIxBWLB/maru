@@ -375,59 +375,62 @@ fn apply_skills(work: &Path, item: &ImportItem) -> Result<(), String> {
     let mut skills_arr: Vec<JsonValue> = Vec::new();
     let skills_root = work.join("_sys/skills/skills");
     if skills_root.is_dir() {
-        for sub in &["public", "private", "vault"] {
-            let bucket = skills_root.join(sub);
-            if !bucket.is_dir() {
+        for entry in WalkDir::new(&skills_root)
+            .min_depth(2)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if entry.file_name() != "SKILL.md" {
                 continue;
             }
-            for entry in WalkDir::new(&bucket)
-                .min_depth(2)
-                .max_depth(2)
-                .into_iter()
-                .filter_map(Result::ok)
+            let skill_path = entry.path();
+            let Ok(content) = fs::read_to_string(skill_path) else {
+                continue;
+            };
+            let parts = parse_frontmatter(&content);
+            let skill_dir = skill_path.parent().unwrap_or(skill_path);
+            let rel_to_skills = skill_dir.strip_prefix(&skills_root).unwrap_or(skill_dir);
+            let rel_components: Vec<String> = rel_to_skills
+                .components()
+                .filter_map(|component| component.as_os_str().to_str().map(str::to_string))
+                .collect();
+            let Some(folder_name) = rel_components.last().cloned() else {
+                continue;
+            };
+            let category = if rel_components.len() >= 2
+                && matches!(rel_components[0].as_str(), "public" | "private" | "vault")
             {
-                if entry.file_name() != "SKILL.md" {
-                    continue;
-                }
-                let skill_path = entry.path();
-                let Ok(content) = fs::read_to_string(skill_path) else {
-                    continue;
-                };
-                let parts = parse_frontmatter(&content);
-                let name = parts
-                    .meta
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        skill_path
-                            .parent()
-                            .and_then(Path::file_name)
-                            .and_then(|n| n.to_str())
-                            .map(str::to_string)
-                    })
-                    .unwrap_or_else(|| "untitled".to_string());
-                let description = parts
-                    .meta
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let runtime = parts
-                    .meta
-                    .get("runtime")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("claude-code")
-                    .to_string();
-                let source = rel_within(work, skill_path);
-                skills_arr.push(json!({
-                    "name": name,
-                    "description": description,
-                    "runtime": runtime,
-                    "category": sub,
-                    "source": source,
-                }));
-            }
+                rel_components[0].clone()
+            } else {
+                "public".to_string()
+            };
+            let name = parts
+                .meta
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or(folder_name);
+            let description = parts
+                .meta
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let runtime = parts
+                .meta
+                .get("runtime")
+                .and_then(|v| v.as_str())
+                .unwrap_or("claude-code")
+                .to_string();
+            let source = rel_within(work, skill_path);
+            skills_arr.push(json!({
+                "name": name,
+                "description": description,
+                "runtime": runtime,
+                "category": category,
+                "source": source,
+            }));
         }
     }
     let value = json!({

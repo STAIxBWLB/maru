@@ -1,10 +1,23 @@
 // SystemPane — anchor's `.anchor/` operations surface.
 //
-// One pane, six tabs (Rules / Templates / MCP / Projects / Skills /
-// Import). Reads exclusively from `<work>/.anchor/`; the external
-// `_sys/` tree is only touched through the Import tab.
+// One pane for workspace settings and `.anchor/` operations. Workspace-local
+// JSON stays under `<work>/.anchor/`; skill management also talks to the
+// global `~/.anchor/skills` registry.
 
-import { AlertTriangle, Check, Plus, RefreshCcw, Save, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Code2,
+  PackageCheck,
+  Plus,
+  RefreshCcw,
+  Save,
+  Search,
+  ShieldCheck,
+  SquareTerminal,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applySysImport,
@@ -16,7 +29,6 @@ import {
   readAnchorMcp,
   readAnchorProjects,
   readAnchorRule,
-  readAnchorSkills,
   readAnchorTemplate,
   saveAnchorMcp,
   saveAnchorRule,
@@ -45,6 +57,27 @@ import type {
   RuleEntry,
   TemplateEntry,
 } from "../lib/types";
+import {
+  skillsAddSource,
+  skillsAdoptExternalLinks,
+  skillsCreateSkill,
+  skillsEnvBootstrap,
+  skillsEnvStatus,
+  skillsInstallSkill,
+  skillsListInstalls,
+  skillsListSkills,
+  skillsListSources,
+  skillsReadSkill,
+  skillsRescanSource,
+  skillsSaveSkillFile,
+  skillsSyncSource,
+  skillsUninstallSkill,
+  type SkillInstall,
+  type SkillInstallTarget,
+  type SkillRecord,
+  type SkillSource,
+  type SkillsEnvStatus,
+} from "../lib/skills";
 import { Button } from "./ui/Button";
 
 type SystemTab =
@@ -938,61 +971,574 @@ function ProjectsTab({ workPath }: { workPath: string }) {
 
 function SkillsTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
-  const [value, setValue] = useState<unknown>(null);
+  const [sources, setSources] = useState<SkillSource[]>([]);
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [installs, setInstalls] = useState<SkillInstall[]>([]);
+  const [envStatus, setEnvStatus] = useState<SkillsEnvStatus | null>(null);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [editorText, setEditorText] = useState("");
+  const [editorBase, setEditorBase] = useState("");
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSourceId, setNewSourceId] = useState("");
+  const [newSourcePath, setNewSourcePath] = useState("");
+  const [newSourceKind, setNewSourceKind] = useState<"linked" | "cloned">("linked");
+  const [skillQuery, setSkillQuery] = useState("");
+  const [installFilter, setInstallFilter] = useState<"all" | "installed" | "uninstalled" | "dirty">("all");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setValue(await readAnchorSkills(workPath));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const nextSources = await skillsListSources(workPath);
+      const nextSkills = await skillsListSkills(workPath);
+      const nextInstalls = await skillsListInstalls(workPath);
+      const nextEnv = await skillsEnvStatus(workPath);
+      setSources(nextSources);
+      setSkills(nextSkills);
+      setInstalls(nextInstalls);
+      setEnvStatus(nextEnv);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }, [workPath]);
 
-  const skills = useMemo(() => {
-    if (!value || typeof value !== "object") return [];
-    const arr = (value as { skills?: unknown[] }).skills;
-    if (!Array.isArray(arr)) return [];
-    return arr as Array<{
-      name?: string;
-      description?: string;
-      runtime?: string;
-      category?: string;
-      source?: string;
-    }>;
-  }, [value]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const selectedSkill = useMemo(
+    () => skills.find((skill) => skill.id === selectedSkillId) ?? null,
+    [selectedSkillId, skills],
+  );
+  const installKey = useMemo(() => {
+    const set = new Set<string>();
+    installs.forEach((install) => set.add(`${install.skillId}:${install.target}`));
+    return set;
+  }, [installs]);
+  const installTargetsBySkill = useMemo(() => {
+    const map = new Map<string, Set<SkillInstallTarget>>();
+    installs.forEach((install) => {
+      const targets = map.get(install.skillId) ?? new Set<SkillInstallTarget>();
+      targets.add(install.target);
+      map.set(install.skillId, targets);
+    });
+    return map;
+  }, [installs]);
+  const installedSkillCount = useMemo(
+    () => skills.filter((skill) => installTargetsBySkill.has(skill.id)).length,
+    [installTargetsBySkill, skills],
+  );
+  const claudeInstallCount = useMemo(
+    () => installs.filter((install) => install.target === "claude").length,
+    [installs],
+  );
+  const codexInstallCount = useMemo(
+    () => installs.filter((install) => install.target === "codex").length,
+    [installs],
+  );
+  const filteredSkills = useMemo(() => {
+    const q = skillQuery.trim().toLowerCase();
+    return skills.filter((skill) => {
+      const targets = installTargetsBySkill.get(skill.id);
+      const installed = Boolean(targets?.size);
+      if (installFilter === "installed" && !installed) return false;
+      if (installFilter === "uninstalled" && installed) return false;
+      if (installFilter === "dirty" && !skill.dirty) return false;
+      if (!q) return true;
+      return [skill.name, skill.title, skill.description ?? "", skill.sourceId, skill.relPath]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [installFilter, installTargetsBySkill, skillQuery, skills]);
+  const skillFilterOptions: Array<[
+    typeof installFilter,
+    string,
+    number,
+  ]> = [
+    ["all", t("system.skills.filter.all"), skills.length],
+    ["installed", t("system.skills.filter.installed"), installedSkillCount],
+    ["uninstalled", t("system.skills.filter.open"), Math.max(skills.length - installedSkillCount, 0)],
+    ["dirty", t("system.skills.filter.dirty"), skills.filter((skill) => skill.dirty).length],
+  ];
+
+  const loadEditor = useCallback(async (skill: SkillRecord) => {
+    setError(null);
+    try {
+      const doc = await skillsReadSkill(skill.id);
+      setSelectedSkillId(doc.skill.id);
+      setEditorText(doc.content);
+      setEditorBase(doc.content);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const saveEditor = useCallback(async () => {
+    if (!selectedSkill) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await skillsSaveSkillFile(selectedSkill.id, "SKILL.md", editorText);
+      setEditorBase(editorText);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [editorText, refresh, selectedSkill]);
+
+  const install = useCallback(
+    async (skill: SkillRecord, target: "claude" | "codex") => {
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsInstallSkill(skill.id, target, skill.name);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
+  const uninstall = useCallback(
+    async (skill: SkillRecord, target: "claude" | "codex") => {
+      const existing = installs.find(
+        (item) => item.skillId === skill.id && item.target === target,
+      );
+      if (!existing) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsUninstallSkill(target, existing.installedAs);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [installs, refresh],
+  );
 
   return (
-    <div className="system-detail" style={{ width: "100%" }}>
-      {skills.length === 0 ? (
-        <p className="muted">{t("system.skills.empty")}</p>
-      ) : (
-        <ul className="system-skill-list">
-          {skills.map((skill, i) => (
-            <li className="system-skill-card" key={`${skill.name ?? "skill"}-${i}`}>
-              <div className="system-skill-name">{skill.name ?? "(unnamed)"}</div>
-              {skill.description ? <div className="muted">{skill.description}</div> : null}
-              <div className="system-skill-meta">
-                <span>
-                  {t("system.skills.runtime")}: <code>{skill.runtime ?? "—"}</code>
-                </span>
-                {skill.category ? (
+    <div className="system-detail skills-system-detail" style={{ width: "100%" }}>
+      <div className="skills-overview">
+        <div className="skills-overview-title">
+          <PackageCheck size={18} />
+          <div>
+            <h3>{t("system.skills.catalogTitle")}</h3>
+            <p>{t("system.skills.globalStore")}</p>
+          </div>
+        </div>
+        <div className="skills-metrics" aria-label={t("system.skills.summary")}>
+          <span className="skills-metric">
+            <strong>{sources.length}</strong>
+            <span>{t("system.skills.sources")}</span>
+          </span>
+          <span className="skills-metric">
+            <strong>{skills.length}</strong>
+            <span>{t("system.skills.skills")}</span>
+          </span>
+          <span className="skills-metric">
+            <strong>{claudeInstallCount}</strong>
+            <span>Claude</span>
+          </span>
+          <span className="skills-metric">
+            <strong>{codexInstallCount}</strong>
+            <span>Codex</span>
+          </span>
+        </div>
+        <div className="skills-overview-actions">
+          <span className={envStatus?.healthy ? "skill-status-pill installed" : "skill-status-pill warn"}>
+            <ShieldCheck size={12} />
+            {envStatus?.healthy ? t("system.skills.envReady") : t("system.skills.envSetup")}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void refresh()}
+            icon={<RefreshCcw size={14} className={busy ? "spin" : ""} />}
+          >
+            {t("system.skills.refresh")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void skillsAdoptExternalLinks()
+                .then(refresh)
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+            }
+          >
+            {t("system.skills.adopt")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void skillsEnvBootstrap(workPath)
+                .then(() => refresh())
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+            }
+            icon={<Wrench size={14} />}
+          >
+            {t("system.skills.bootstrap")}
+          </Button>
+        </div>
+      </div>
+
+      <div className="skills-manager-grid">
+        <section className="skills-manager-section sources">
+          <div className="skills-section-heading">
+            <h3>{t("system.skills.sources")}</h3>
+            <span>{sources.length}</span>
+          </div>
+          <div className="system-card source-add-card">
+            <div className="skills-source-kind">
+              <button
+                type="button"
+                className={newSourceKind === "linked" ? "active" : ""}
+                onClick={() => setNewSourceKind("linked")}
+              >
+                {t("system.skills.sourceKind.linked")}
+              </button>
+              <button
+                type="button"
+                className={newSourceKind === "cloned" ? "active" : ""}
+                onClick={() => setNewSourceKind("cloned")}
+              >
+                {t("system.skills.sourceKind.cloned")}
+              </button>
+            </div>
+            <label className="field">
+              <span>{t("system.skills.sourceId")}</span>
+              <input
+                value={newSourceId}
+                onChange={(event) => setNewSourceId(event.target.value)}
+                placeholder={t("system.skills.sourceIdPlaceholder")}
+              />
+            </label>
+            <label className="field">
+              <span>
+                {newSourceKind === "linked"
+                  ? t("system.skills.path")
+                  : t("system.skills.repoUrl")}
+              </span>
+              <input
+                value={newSourcePath}
+                onChange={(event) => setNewSourcePath(event.target.value)}
+                placeholder={
+                  newSourceKind === "linked"
+                    ? t("system.skills.linkedPathPlaceholder")
+                    : t("system.skills.repoUrlPlaceholder")
+                }
+              />
+            </label>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!newSourceId.trim() || !newSourcePath.trim() || busy}
+              onClick={() => {
+                setBusy(true);
+                void skillsAddSource({
+                  id: newSourceId.trim(),
+                  kind: newSourceKind,
+                  path: newSourceKind === "linked" ? newSourcePath.trim() : null,
+                  repoUrl: newSourceKind === "cloned" ? newSourcePath.trim() : null,
+                  skillsSubdir: "skills",
+                })
+                  .then(() => {
+                    setNewSourceId("");
+                    setNewSourcePath("");
+                    return refresh();
+                  })
+                  .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {t("system.skills.addSource")}
+            </Button>
+          </div>
+          <ul className="system-skill-list compact">
+            {sources.map((source) => (
+              <li className="system-skill-card source-card" key={source.id}>
+                <div className="source-card-top">
+                  <div>
+                    <div className="system-skill-name">{source.id}</div>
+                    <div className="system-skill-meta">
+                      <span className="skill-status-pill subtle">{source.kind}</span>
+                      <span>
+                        <code>{source.skillsSubdir}</code>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="source-card-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        void skillsRescanSource(source.id)
+                          .then(refresh)
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : String(err)),
+                          )
+                      }
+                    >
+                      {t("system.skills.rescan")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        void skillsSyncSource(source.id)
+                          .then(refresh)
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : String(err)),
+                          )
+                      }
+                    >
+                      {t("system.skills.sync")}
+                    </Button>
+                  </div>
+                </div>
+                <div className="skill-path" title={source.path ?? source.repoUrl ?? ""}>
+                  {source.path ?? source.repoUrl ?? t("system.skills.managedSource")}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="system-card skill-env-card">
+            <div className="skills-section-heading">
+              <h3>{t("system.skills.env")}</h3>
+              <span className={envStatus?.healthy ? "skill-status-pill installed" : "skill-status-pill warn"}>
+                {envStatus?.healthy ? t("system.skills.healthy") : t("system.skills.setup")}
+              </span>
+            </div>
+            {envStatus ? (
+              <>
+                <div className="skill-path" title={envStatus.root}>{envStatus.root}</div>
+                <div className="system-skill-meta">
                   <span>
-                    {t("system.skills.category")}: <code>{skill.category}</code>
+                    {envStatus.venvExists
+                      ? t("system.skills.venvReady")
+                      : t("system.skills.venvMissing")}
                   </span>
-                ) : null}
-                {skill.source ? (
                   <span>
-                    {t("system.skills.source")}: <code>{skill.source}</code>
+                    {envStatus.nodeModulesExists
+                      ? t("system.skills.nodeReady")
+                      : t("system.skills.nodeMissing")}
                   </span>
-                ) : null}
+                </div>
+                {envStatus.lastError ? <p className="inline-error">{envStatus.lastError}</p> : null}
+              </>
+            ) : (
+              <p className="muted">{t("system.skills.envUnavailable")}</p>
+            )}
+          </div>
+        </section>
+
+        <section className="skills-manager-section wide">
+          <div className="skills-catalog-head">
+            <div className="skills-section-heading">
+              <h3>{t("system.skills.skills")}</h3>
+              <span>{filteredSkills.length}/{skills.length}</span>
+            </div>
+            <div className="skills-create-row">
+              <label className="field">
+                <span>{t("system.skills.newManaged")}</span>
+                <input
+                  value={newSkillName}
+                  onChange={(event) => setNewSkillName(event.target.value)}
+                  placeholder={t("system.skills.skillNamePlaceholder")}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Plus size={14} />}
+                disabled={!newSkillName.trim() || busy}
+                onClick={() =>
+                  void skillsCreateSkill(newSkillName.trim(), null)
+                    .then((skill) => {
+                      setNewSkillName("");
+                      void refresh().then(() => loadEditor(skill));
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                }
+              >
+                {t("system.skills.create")}
+              </Button>
+            </div>
+            <div className="skills-list-controls">
+              <label className="search-box skills-search" title={t("system.skills.search")}>
+                <Search size={14} />
+                <input
+                  value={skillQuery}
+                  onChange={(event) => setSkillQuery(event.target.value)}
+                  placeholder={t("system.skills.searchPlaceholder")}
+                />
+              </label>
+              <div
+                className="segmented-control compact skills-filter"
+                role="group"
+                aria-label={t("system.skills.installFilter")}
+              >
+                {skillFilterOptions.map(([id, label, count]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={installFilter === id ? "active" : ""}
+                    onClick={() => setInstallFilter(id)}
+                  >
+                    <span>{label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                ))}
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
+          </div>
+
+          {skills.length === 0 ? (
+            <div className="empty-state compact">
+              <strong>{t("system.skills.empty")}</strong>
+            </div>
+          ) : filteredSkills.length === 0 ? (
+            <div className="empty-state compact">
+              <strong>{t("system.skills.noMatching")}</strong>
+            </div>
+          ) : (
+            <ul className="system-skill-list">
+              {filteredSkills.map((skill) => {
+                const claudeInstalled = installKey.has(`${skill.id}:claude`);
+                const codexInstalled = installKey.has(`${skill.id}:codex`);
+                return (
+                  <li
+                    className={
+                      selectedSkillId === skill.id
+                        ? "system-skill-card skill-card selected"
+                        : "system-skill-card skill-card"
+                    }
+                    key={skill.id}
+                  >
+                    <div className="skill-card-top">
+                      <button
+                        type="button"
+                        className="skill-card-title"
+                        onClick={() => void loadEditor(skill)}
+                      >
+                        <span>
+                          {skill.name}
+                          {skill.dirty ? (
+                            <span className="dirty-pill">{t("system.skills.dirty")}</span>
+                          ) : null}
+                        </span>
+                        <small>{skill.description || skill.title || skill.sourceId}</small>
+                      </button>
+                      <div className="skill-card-badges">
+                        <span
+                          className={claudeInstalled ? "skill-status-pill installed" : "skill-status-pill"}
+                        >
+                          <SquareTerminal size={12} />
+                          Claude
+                        </span>
+                        <span
+                          className={codexInstalled ? "skill-status-pill installed" : "skill-status-pill"}
+                        >
+                          <Code2 size={12} />
+                          Codex
+                        </span>
+                      </div>
+                    </div>
+                    <div className="system-skill-meta">
+                      <span>
+                        {t("system.skills.source")}: <code>{skill.sourceId}</code>
+                      </span>
+                      <span>
+                        {t("system.skills.runtime")}:{" "}
+                        <code>{skill.runtime ?? t("system.skills.none")}</code>
+                      </span>
+                      <span title={skill.absPath}>
+                        <code>{skill.relPath}</code>
+                      </span>
+                    </div>
+                    <div className="skill-card-actions">
+                      <Button variant="secondary" size="sm" onClick={() => void loadEditor(skill)}>
+                        {t("system.skills.edit")}
+                      </Button>
+                      <Button
+                        variant={claudeInstalled ? "ghost" : "primary"}
+                        size="sm"
+                        onClick={() =>
+                          claudeInstalled
+                            ? void uninstall(skill, "claude")
+                            : void install(skill, "claude")
+                        }
+                        disabled={busy}
+                      >
+                        {claudeInstalled
+                          ? t("system.skills.removeTarget", { target: "Claude" })
+                          : t("system.skills.installTarget", { target: "Claude" })}
+                      </Button>
+                      <Button
+                        variant={codexInstalled ? "ghost" : "primary"}
+                        size="sm"
+                        onClick={() =>
+                          codexInstalled
+                            ? void uninstall(skill, "codex")
+                            : void install(skill, "codex")
+                        }
+                        disabled={busy}
+                      >
+                        {codexInstalled
+                          ? t("system.skills.removeTarget", { target: "Codex" })
+                          : t("system.skills.installTarget", { target: "Codex" })}
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {selectedSkill ? (
+          <section className="skills-manager-section editor">
+            <div className="skills-editor-header">
+              <div>
+                <h3>{selectedSkill.name}</h3>
+                <p className="muted" title={selectedSkill.absPath}>{selectedSkill.relPath}</p>
+              </div>
+              {selectedSkill.dirty ? (
+                <span className="dirty-pill">{t("system.skills.linkedSourceDirty")}</span>
+              ) : null}
+              <span className={editorText !== editorBase ? "save-state dirty" : "save-state saved"}>
+                {editorText !== editorBase ? t("system.rules.dirty") : t("system.rules.saved")}
+              </span>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void saveEditor()}
+                disabled={editorText === editorBase || busy}
+                icon={<Save size={14} />}
+              >
+                {t("system.mcp.save")}
+              </Button>
+            </div>
+            <textarea
+              className="source-editor skill-editor"
+              value={editorText}
+              onChange={(event) => setEditorText(event.target.value)}
+              spellCheck={false}
+            />
+          </section>
+        ) : null}
+      </div>
       {error ? (
         <div className="toast" title={error}>
           <AlertTriangle size={13} />
