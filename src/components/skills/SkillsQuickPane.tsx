@@ -31,10 +31,10 @@ export function SkillsQuickPane({
 
   return (
     <section className="skills-quick-pane">
-      <div className="list-header compact">
+      <div className="skills-quick-head">
         <div>
+          <span className="skills-quick-kicker">Skill runner</span>
           <h2>Skills</h2>
-          <span className="workspace-caption">{skills.length} catalog item(s)</span>
         </div>
         <button
           type="button"
@@ -47,7 +47,7 @@ export function SkillsQuickPane({
           <RefreshCcw size={14} className={loading ? "spin" : ""} />
         </button>
       </div>
-      <label className="search-box" title="Search skills">
+      <label className="search-box skills-quick-search" title="Search skills">
         <Search size={14} />
         <input
           value={query}
@@ -55,6 +55,10 @@ export function SkillsQuickPane({
           placeholder="Search skills"
         />
       </label>
+      <div className="skills-quick-meta">
+        <span>{filtered.length} shown</span>
+        <span>{skills.length} total</span>
+      </div>
       <div className="skills-quick-list">
         {filtered.length === 0 ? (
           <div className="empty-state compact">
@@ -69,14 +73,16 @@ export function SkillsQuickPane({
               onClick={() => onRunSkill(skill)}
               title={skill.absPath}
             >
-              <span>
-                <strong>
-                  {skill.name}
-                  <small>{skill.sourceId}</small>
-                </strong>
+              <span className="skills-quick-copy">
+                <span className="skills-quick-titleline">
+                  <strong>{skill.name}</strong>
+                  <span>{skill.sourceId}</span>
+                </span>
                 <small>{skill.description || skill.relPath}</small>
               </span>
-              <Play size={13} />
+              <span className="skills-quick-run" aria-hidden="true">
+                <Play size={12} />
+              </span>
             </button>
           ))
         )}

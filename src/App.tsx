@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   RefreshCcw,
   Settings2,
+  WandSparkles,
   X,
 } from "lucide-react";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
@@ -4091,17 +4092,29 @@ function MainApp() {
 
           <button
             type="button"
-            className="topbar-pill"
+            className="topbar-pill topbar-skill-action"
+            onClick={() => openSkillCompose(null)}
+            title="Apply skill"
+            aria-label="Apply skill"
+          >
+            <WandSparkles size={14} />
+            <span>Skill</span>
+            <span className="kbd">⌘⇧K</span>
+          </button>
+          <button
+            type="button"
+            className="topbar-pill topbar-command-action"
             onClick={openCommandPalette}
             title={t("cmdk.openHint")}
           >
+            <Command size={14} className="topbar-command-icon" />
             <span className="topbar-muted-label">{t("sidebar.commandPalette")}</span>
             <span className="kbd">⌘</span>
             <span className="kbd">K</span>
           </button>
           <button
             type="button"
-            className="topbar-pill"
+            className="topbar-pill topbar-locale-action"
             onClick={toggleLocale}
             title={t("app.locale.label")}
             aria-label={t("app.locale.label")}
@@ -4110,7 +4123,11 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={explorerWorkspaceState.refreshing ? "icon-button refreshing" : "icon-button"}
+            className={
+              explorerWorkspaceState.refreshing
+                ? "icon-button refreshing topbar-refresh-action"
+                : "icon-button topbar-refresh-action"
+            }
             onClick={refreshActiveSurface}
             title={t("app.refresh")}
             aria-label={t("app.refresh")}
@@ -4444,18 +4461,6 @@ function MainApp() {
             ) : null}
           </>
         )}
-
-        <button
-          type="button"
-          className="skill-compose-strip"
-          onClick={() => openSkillCompose(null)}
-          title="Apply skill"
-          aria-label="Apply skill"
-        >
-          <Command size={14} />
-          <span>Apply skill</span>
-          <kbd>⌘⇧K</kbd>
-        </button>
 
         <TerminalPanel
           cwd={activeDocumentWorkspacePath}
