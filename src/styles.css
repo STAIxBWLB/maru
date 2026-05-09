@@ -4307,6 +4307,10 @@ button.git-badge:hover {
   gap: 8px;
 }
 
+.skills-confirm-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+
 /* ─── Toast ────────────────────────────────────────────────────────── */
 
 .toast-stack {

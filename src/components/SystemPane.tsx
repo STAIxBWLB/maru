@@ -18,6 +18,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applySysImport,
@@ -982,6 +983,14 @@ interface SkillOperationState {
   log: string[];
 }
 
+interface SkillConfirmState {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  variant: "primary" | "danger";
+  resolve: (confirmed: boolean) => void;
+}
+
 const EMPTY_SKILL_OPERATION: SkillOperationState = {
   active: false,
   label: "",
@@ -1018,6 +1027,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
   const [installFilter, setInstallFilter] = useState<"all" | "installed" | "uninstalled" | "dirty">("all");
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(() => new Set());
   const [operation, setOperation] = useState<SkillOperationState>(EMPTY_SKILL_OPERATION);
+  const [confirmState, setConfirmState] = useState<SkillConfirmState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1170,6 +1180,34 @@ function SkillsTab({ workPath }: { workPath: string }) {
     setSelectedSkillIds(new Set());
   }, []);
 
+  const closeConfirmation = useCallback((confirmed: boolean) => {
+    setConfirmState((current) => {
+      current?.resolve(confirmed);
+      return null;
+    });
+  }, []);
+
+  const confirmAction = useCallback(
+    (
+      message: string,
+      options: {
+        confirmLabel?: string;
+        title?: string;
+        variant?: "primary" | "danger";
+      } = {},
+    ) =>
+      new Promise<boolean>((resolve) => {
+        setConfirmState({
+          title: options.title ?? t("system.skills.confirmTitle"),
+          message,
+          confirmLabel: options.confirmLabel ?? t("system.skills.confirmProceed"),
+          variant: options.variant ?? "primary",
+          resolve,
+        });
+      }),
+    [t],
+  );
+
   const loadEditor = useCallback(async (skill: SkillRecord) => {
     setError(null);
     try {
@@ -1184,6 +1222,11 @@ function SkillsTab({ workPath }: { workPath: string }) {
 
   const saveEditor = useCallback(async () => {
     if (!selectedSkill) return;
+    if (
+      !(await confirmAction(t("system.skills.saveSkillConfirm", { name: selectedSkill.name })))
+    ) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1195,7 +1238,84 @@ function SkillsTab({ workPath }: { workPath: string }) {
     } finally {
       setBusy(false);
     }
-  }, [editorText, refresh, selectedSkill]);
+  }, [confirmAction, editorText, refresh, selectedSkill, t]);
+
+  const addSource = useCallback(async () => {
+    const id = newSourceId.trim();
+    const path = newSourcePath.trim();
+    if (!id || !path) return;
+    if (!(await confirmAction(t("system.skills.addSourceConfirm", { id })))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await skillsAddSource({
+        id,
+        kind: newSourceKind,
+        path: newSourceKind === "linked" ? path : null,
+        repoUrl: newSourceKind === "cloned" ? path : null,
+        skillsSubdir: "skills",
+      });
+      setNewSourceId("");
+      setNewSourcePath("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [confirmAction, newSourceId, newSourceKind, newSourcePath, refresh, t]);
+
+  const rescanSource = useCallback(
+    async (source: SkillSource) => {
+      if (!(await confirmAction(t("system.skills.rescanConfirm", { id: source.id })))) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsRescanSource(source.id);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [confirmAction, refresh, t],
+  );
+
+  const syncSource = useCallback(
+    async (source: SkillSource) => {
+      if (!(await confirmAction(t("system.skills.syncConfirm", { id: source.id })))) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await skillsSyncSource(source.id);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [confirmAction, refresh, t],
+  );
+
+  const createManagedSkill = useCallback(async () => {
+    const name = newSkillName.trim();
+    if (!name) return;
+    if (!(await confirmAction(t("system.skills.createSkillConfirm", { name })))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const skill = await skillsCreateSkill(name, null);
+      setNewSkillName("");
+      await refresh();
+      await loadEditor(skill);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [confirmAction, loadEditor, newSkillName, refresh, t]);
 
   const installSkills = useCallback(
     async (skillList: SkillRecord[], target: SkillBulkTarget) => {
@@ -1219,12 +1339,12 @@ function SkillsTab({ workPath }: { workPath: string }) {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           t("system.skills.installConfirm", {
             count: tasks.length,
             target: targetLabel,
           }),
-        )
+        ))
       ) {
         return;
       }
@@ -1264,7 +1384,16 @@ function SkillsTab({ workPath }: { workPath: string }) {
         setBusy(false);
       }
     },
-    [finishOperation, installKey, recordOperationError, refresh, startOperation, stepOperation, t],
+    [
+      confirmAction,
+      finishOperation,
+      installKey,
+      recordOperationError,
+      refresh,
+      startOperation,
+      stepOperation,
+      t,
+    ],
   );
 
   const uninstallInstalls = useCallback(
@@ -1277,7 +1406,11 @@ function SkillsTab({ workPath }: { workPath: string }) {
         });
         return;
       }
-      if (!window.confirm(t("system.skills.uninstallConfirm", { count: items.length }))) {
+      if (
+        !(await confirmAction(t("system.skills.uninstallConfirm", { count: items.length }), {
+          variant: "danger",
+        }))
+      ) {
         return;
       }
       setBusy(true);
@@ -1312,7 +1445,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
         setBusy(false);
       }
     },
-    [finishOperation, recordOperationError, refresh, startOperation, stepOperation, t],
+    [confirmAction, finishOperation, recordOperationError, refresh, startOperation, stepOperation, t],
   );
 
   const install = useCallback(
@@ -1339,7 +1472,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
   }, [installs, selectedSkillIds, uninstallInstalls]);
 
   const adoptExternalLinks = useCallback(async () => {
-    if (!window.confirm(t("system.skills.adoptConfirm"))) return;
+    if (!(await confirmAction(t("system.skills.adoptConfirm")))) return;
     setBusy(true);
     setError(null);
     startOperation(t("system.skills.adopting"), 1);
@@ -1360,10 +1493,10 @@ function SkillsTab({ workPath }: { workPath: string }) {
     } finally {
       setBusy(false);
     }
-  }, [finishOperation, refresh, startOperation, stepOperation, t]);
+  }, [confirmAction, finishOperation, refresh, startOperation, stepOperation, t]);
 
   const bootstrapEnv = useCallback(async () => {
-    if (!window.confirm(t("system.skills.bootstrapConfirm"))) return;
+    if (!(await confirmAction(t("system.skills.bootstrapConfirm")))) return;
     setBusy(true);
     setError(null);
     startOperation(t("system.skills.bootstrapping"), 1);
@@ -1442,10 +1575,16 @@ function SkillsTab({ workPath }: { workPath: string }) {
       unlistenDone?.();
       setBusy(false);
     }
-  }, [finishOperation, refresh, startOperation, stepOperation, t, workPath]);
+  }, [confirmAction, finishOperation, refresh, startOperation, stepOperation, t, workPath]);
 
   const resetRegistry = useCallback(async () => {
-    if (!window.confirm(t("system.skills.resetConfirm"))) return;
+    if (
+      !(await confirmAction(t("system.skills.resetConfirm"), {
+        variant: "danger",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     setError(null);
     startOperation(t("system.skills.resetting"), 1);
@@ -1466,7 +1605,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
     } finally {
       setBusy(false);
     }
-  }, [finishOperation, refresh, startOperation, stepOperation, t, workPath]);
+  }, [confirmAction, finishOperation, refresh, startOperation, stepOperation, t, workPath]);
 
   return (
     <div className="system-detail skills-system-detail" style={{ width: "100%" }}>
@@ -1617,23 +1756,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
               variant="secondary"
               size="sm"
               disabled={!newSourceId.trim() || !newSourcePath.trim() || busy}
-              onClick={() => {
-                setBusy(true);
-                void skillsAddSource({
-                  id: newSourceId.trim(),
-                  kind: newSourceKind,
-                  path: newSourceKind === "linked" ? newSourcePath.trim() : null,
-                  repoUrl: newSourceKind === "cloned" ? newSourcePath.trim() : null,
-                  skillsSubdir: "skills",
-                })
-                  .then(() => {
-                    setNewSourceId("");
-                    setNewSourcePath("");
-                    return refresh();
-                  })
-                  .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-                  .finally(() => setBusy(false));
-              }}
+              onClick={() => void addSource()}
             >
               {t("system.skills.addSource")}
             </Button>
@@ -1655,26 +1778,16 @@ function SkillsTab({ workPath }: { workPath: string }) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        void skillsRescanSource(source.id)
-                          .then(refresh)
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err)),
-                          )
-                      }
+                      onClick={() => void rescanSource(source)}
+                      disabled={busy}
                     >
                       {t("system.skills.rescan")}
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        void skillsSyncSource(source.id)
-                          .then(refresh)
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err)),
-                          )
-                      }
+                      onClick={() => void syncSource(source)}
+                      disabled={busy}
                     >
                       {t("system.skills.sync")}
                     </Button>
@@ -1736,14 +1849,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 size="sm"
                 icon={<Plus size={14} />}
                 disabled={!newSkillName.trim() || busy}
-                onClick={() =>
-                  void skillsCreateSkill(newSkillName.trim(), null)
-                    .then((skill) => {
-                      setNewSkillName("");
-                      void refresh().then(() => loadEditor(skill));
-                    })
-                    .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-                }
+                onClick={() => void createManagedSkill()}
               >
                 {t("system.skills.create")}
               </Button>
@@ -1994,6 +2100,37 @@ function SkillsTab({ workPath }: { workPath: string }) {
           </section>
         ) : null}
       </div>
+      <Dialog.Root
+        open={confirmState !== null}
+        onOpenChange={(open) => {
+          if (!open) closeConfirmation(false);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="dialog-content skills-confirm-dialog">
+            <div className="dialog-header">
+              <div>
+                <Dialog.Title>{confirmState?.title ?? t("system.skills.confirmTitle")}</Dialog.Title>
+                <Dialog.Description>
+                  {confirmState?.message ?? t("system.skills.confirmFallback")}
+                </Dialog.Description>
+              </div>
+            </div>
+            <div className="dialog-actions">
+              <Button variant="ghost" onClick={() => closeConfirmation(false)}>
+                {t("dialog.cancel")}
+              </Button>
+              <Button
+                variant={confirmState?.variant ?? "primary"}
+                onClick={() => closeConfirmation(true)}
+              >
+                {confirmState?.confirmLabel ?? t("system.skills.confirmProceed")}
+              </Button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       {error ? (
         <div className="toast" title={error}>
           <AlertTriangle size={13} />
