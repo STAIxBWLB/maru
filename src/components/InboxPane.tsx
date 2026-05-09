@@ -86,13 +86,17 @@ export function InboxPane({
     }
     return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [entries]);
+  const orderedEntries = useMemo(
+    () => entriesByChannel.flatMap(([, channelEntries]) => channelEntries),
+    [entriesByChannel],
+  );
   const rows = useMemo<InboxRow[]>(
     () => [
-      ...entries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
+      ...orderedEntries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
       ...visibleItems.map((entry) => ({ key: `file:${entry.item.id}`, kind: "file" as const, entry })),
       ...gmailMessages.map((entry) => ({ key: `gmail:${entry.message.id}`, kind: "gmail" as const, entry })),
     ],
-    [entries, gmailMessages, visibleItems],
+    [gmailMessages, orderedEntries, visibleItems],
   );
   const selected = useMemo(
     () => rows.filter((row) => selectedKeys.has(row.key)),

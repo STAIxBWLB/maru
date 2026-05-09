@@ -1,4 +1,8 @@
 import type { AnchorSettings, LayoutSettings } from "./settings";
+import {
+  SETTINGS_WINDOW_OPEN_TAB_EVENT,
+  type SettingsWindowOpenTabPayload,
+} from "./settingsWindowEvents";
 import { SKILL_EDITOR_OPEN_EVENT, type SkillEditorOpenPayload } from "./skillEditorEvents";
 
 type LayoutPatch = Partial<AnchorSettings["ui"]["layout"]>;
@@ -15,6 +19,11 @@ export async function openSettingsWindow(workPath: string | null, tab?: string):
   const existing = await WebviewWindow.getByLabel("settings");
   if (existing) {
     await existing.setFocus();
+    if (tab) {
+      const { emitTo } = await import("@tauri-apps/api/event");
+      const payload: SettingsWindowOpenTabPayload = { tab };
+      await emitTo("settings", SETTINGS_WINDOW_OPEN_TAB_EVENT, payload);
+    }
     return;
   }
 

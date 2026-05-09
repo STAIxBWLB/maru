@@ -61,6 +61,10 @@ import {
   SKILLS_UPDATED_EVENT,
   type SkillsUpdatedPayload,
 } from "../lib/skillEditorEvents";
+import {
+  SETTINGS_WINDOW_OPEN_TAB_EVENT,
+  type SettingsWindowOpenTabPayload,
+} from "../lib/settingsWindowEvents";
 import type {
   ImportItem,
   ImportPlan,
@@ -142,6 +146,24 @@ export function SystemPane({
   const [tab, setTab] = useState<SystemTab>(
     isSystemTab(initialTab) ? initialTab : "preferences",
   );
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen(SETTINGS_WINDOW_OPEN_TAB_EVENT, (event) => {
+          const payload = event.payload as SettingsWindowOpenTabPayload | null;
+          if (isSystemTab(payload?.tab)) setTab(payload.tab);
+        }),
+      )
+      .then((off) => {
+        dispose = off;
+      })
+      .catch(() => {
+        // Browser dev shell without Tauri event bridge.
+      });
+    return () => dispose?.();
+  }, []);
 
   if (!workPath) {
     return (

@@ -3058,6 +3058,10 @@ button.git-badge:hover {
   outline: none;
 }
 
+.inbox-pane:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
 .inbox-header {
   display: flex;
   align-items: center;
