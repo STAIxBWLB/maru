@@ -451,8 +451,13 @@ a {
 }
 
 .skill-editor-window-source {
+  grid-row: 2 / -1;
   min-height: 0;
   border-radius: 0;
+}
+
+.skill-editor-window-notice ~ .skill-editor-window-source {
+  grid-row: 3 / -1;
 }
 
 /* ─── Top app bar ──────────────────────────────────────────────────── */
