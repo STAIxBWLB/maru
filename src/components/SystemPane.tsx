@@ -77,6 +77,7 @@ import {
   skillsUninstallSkill,
   type SkillInstall,
   type SkillInstallTarget,
+  type SkillProgressEvent,
   type SkillRecord,
   type SkillSource,
   type SkillsEnvStatus,
@@ -1010,6 +1011,14 @@ function skillTargetsFor(target: SkillBulkTarget): SkillInstallTarget[] {
   return target === "both" ? ["claude", "codex"] : [target];
 }
 
+function makeSkillProgressId(): string {
+  return `skills-op-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function progressLogLine(event: SkillProgressEvent): string {
+  return `[${event.level}] ${event.message}`;
+}
+
 function SkillsTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
   const [sources, setSources] = useState<SkillSource[]>([]);
@@ -1155,6 +1164,21 @@ function SkillsTab({ workPath }: { workPath: string }) {
     }));
   }, []);
 
+  const appendOperationLog = useCallback((message: string) => {
+    setOperation((prev) => ({
+      ...prev,
+      log: [...prev.log.slice(-79), message],
+    }));
+  }, []);
+
+  const updateOperationProgress = useCallback((completed: number, total: number) => {
+    setOperation((prev) => ({
+      ...prev,
+      completed: Math.min(completed, total),
+      total,
+    }));
+  }, []);
+
   const recordOperationError = useCallback((message: string) => {
     setOperation((prev) => ({
       ...prev,
@@ -1168,6 +1192,114 @@ function SkillsTab({ workPath }: { workPath: string }) {
       completed: Math.min(prev.completed + 1, prev.total),
     }));
   }, []);
+
+  const runOperation = useCallback(
+    async <T,>(
+      label: string,
+      total: number,
+      task: () => Promise<T>,
+      completeMessage: (result: T) => string,
+    ): Promise<T | null> => {
+      setBusy(true);
+      setError(null);
+      startOperation(label, total);
+      try {
+        const result = await task();
+        finishOperation(completeMessage(result));
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        finishOperation(message, [message]);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [finishOperation, startOperation],
+  );
+
+  const runBackendProgressOperation = useCallback(
+    async <T,>(
+      label: string,
+      total: number,
+      task: (progressId: string) => Promise<T>,
+      completeMessage: (result: T) => string,
+    ): Promise<T | null> => {
+      setBusy(true);
+      setError(null);
+      startOperation(label, total);
+      const progressId = makeSkillProgressId();
+      let unlisten: (() => void) | null = null;
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlisten = await listen<SkillProgressEvent>("skills-op://progress", (event) => {
+          if (event.payload.progressId !== progressId) return;
+          appendOperationLog(progressLogLine(event.payload));
+          if (
+            typeof event.payload.completed === "number" &&
+            typeof event.payload.total === "number"
+          ) {
+            updateOperationProgress(event.payload.completed, event.payload.total);
+          }
+          if (event.payload.level === "error") recordOperationError(event.payload.message);
+        });
+        const result = await task(progressId);
+        finishOperation(completeMessage(result));
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        finishOperation(message, [message]);
+        return null;
+      } finally {
+        unlisten?.();
+        setBusy(false);
+      }
+    },
+    [
+      appendOperationLog,
+      finishOperation,
+      recordOperationError,
+      startOperation,
+      updateOperationProgress,
+    ],
+  );
+
+  const refreshWithProgress = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    startOperation(t("system.skills.refreshing"), 4);
+    try {
+      appendOperationLog(t("system.skills.log.refreshSources"));
+      const nextSources = await skillsListSources(workPath);
+      setSources(nextSources);
+      stepOperation();
+
+      appendOperationLog(t("system.skills.log.refreshSkills"));
+      const nextSkills = await skillsListSkills(workPath);
+      setSkills(nextSkills);
+      stepOperation();
+
+      appendOperationLog(t("system.skills.log.refreshInstalls"));
+      const nextInstalls = await skillsListInstalls(workPath);
+      setInstalls(nextInstalls);
+      stepOperation();
+
+      appendOperationLog(t("system.skills.log.refreshEnv"));
+      const nextEnv = await skillsEnvStatus(workPath);
+      setEnvStatus(nextEnv);
+      stepOperation();
+
+      finishOperation(t("system.skills.refreshComplete"));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      finishOperation(message, [message]);
+    } finally {
+      setBusy(false);
+    }
+  }, [appendOperationLog, finishOperation, startOperation, stepOperation, t, workPath]);
 
   const toggleSkillSelection = useCallback((skillId: string) => {
     setSelectedSkillIds((prev) => {
@@ -1243,76 +1375,108 @@ function SkillsTab({ workPath }: { workPath: string }) {
     ) {
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
-      await skillsSaveSkillFile(selectedSkill.id, "SKILL.md", editorText);
-      setEditorBase(editorText);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [confirmAction, editorText, refresh, selectedSkill, t]);
+    await runOperation(
+      t("system.skills.savingSkill", { name: selectedSkill.name }),
+      2,
+      async () => {
+        appendOperationLog(t("system.skills.log.saveSkill", { name: selectedSkill.name }));
+        await skillsSaveSkillFile(selectedSkill.id, "SKILL.md", editorText);
+        setEditorBase(editorText);
+        stepOperation();
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        stepOperation();
+        return selectedSkill.name;
+      },
+      (name) => t("system.skills.saveSkillComplete", { name }),
+    );
+  }, [
+    appendOperationLog,
+    confirmAction,
+    editorText,
+    refresh,
+    runOperation,
+    selectedSkill,
+    stepOperation,
+    t,
+  ]);
 
   const addSource = useCallback(async () => {
     const id = newSourceId.trim();
     const path = newSourcePath.trim();
     if (!id || !path) return;
     if (!(await confirmAction(t("system.skills.addSourceConfirm", { id })))) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await skillsAddSource({
-        id,
-        kind: newSourceKind,
-        path: newSourceKind === "linked" ? path : null,
-        repoUrl: newSourceKind === "cloned" ? path : null,
-        skillsSubdir: "skills",
-      });
-      setNewSourceId("");
-      setNewSourcePath("");
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [confirmAction, newSourceId, newSourceKind, newSourcePath, refresh, t]);
+    await runOperation(
+      t("system.skills.addingSource", { id }),
+      3,
+      async () => {
+        appendOperationLog(t("system.skills.log.addSource", { id }));
+        await skillsAddSource({
+          id,
+          kind: newSourceKind,
+          path: newSourceKind === "linked" ? path : null,
+          repoUrl: newSourceKind === "cloned" ? path : null,
+          skillsSubdir: "skills",
+        });
+        stepOperation();
+        setNewSourceId("");
+        setNewSourcePath("");
+        appendOperationLog(t("system.skills.log.sourceAdded", { id }));
+        stepOperation();
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        stepOperation();
+        return id;
+      },
+      (sourceId) => t("system.skills.addSourceComplete", { id: sourceId }),
+    );
+  }, [
+    appendOperationLog,
+    confirmAction,
+    newSourceId,
+    newSourceKind,
+    newSourcePath,
+    refresh,
+    runOperation,
+    stepOperation,
+    t,
+  ]);
 
   const rescanSource = useCallback(
     async (source: SkillSource) => {
       if (!(await confirmAction(t("system.skills.rescanConfirm", { id: source.id })))) return;
-      setBusy(true);
-      setError(null);
-      try {
-        await skillsRescanSource(source.id);
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+      await runBackendProgressOperation(
+        t("system.skills.rescanningSource", { id: source.id }),
+        1,
+        async (progressId) => {
+          const records = await skillsRescanSource(source.id, progressId);
+          appendOperationLog(t("system.skills.log.refreshSkills"));
+          await refresh();
+          return records;
+        },
+        (records) =>
+          t("system.skills.rescanComplete", { id: source.id, count: records.length }),
+      );
     },
-    [confirmAction, refresh, t],
+    [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t],
   );
 
   const syncSource = useCallback(
     async (source: SkillSource) => {
       if (!(await confirmAction(t("system.skills.syncConfirm", { id: source.id })))) return;
-      setBusy(true);
-      setError(null);
-      try {
-        await skillsSyncSource(source.id);
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+      await runBackendProgressOperation(
+        t("system.skills.syncingSource", { id: source.id }),
+        1,
+        async (progressId) => {
+          const records = await skillsSyncSource(source.id, progressId);
+          appendOperationLog(t("system.skills.log.refreshSkills"));
+          await refresh();
+          return records;
+        },
+        (records) => t("system.skills.syncComplete", { id: source.id, count: records.length }),
+      );
     },
-    [confirmAction, refresh, t],
+    [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t],
   );
 
   const removeSource = useCallback(
@@ -1337,10 +1501,17 @@ function SkillsTab({ workPath }: { workPath: string }) {
       );
       setBusy(true);
       setError(null);
-      startOperation(t("system.skills.removingSource", { id: source.id }), 1);
+      startOperation(t("system.skills.removingSource", { id: source.id }), 3);
+      appendOperationLog(
+        t("system.skills.log.removeSourceStart", {
+          id: source.id,
+          count: removedSkillIds.size,
+        }),
+      );
       try {
         await skillsRemoveSource(source.id);
         stepOperation();
+        appendOperationLog(t("system.skills.log.optimisticRemove", { id: source.id }));
         setSources((prev) => prev.filter((item) => item.id !== source.id));
         setSkills((prev) => prev.filter((skill) => skill.sourceId !== source.id));
         if (selectedSkillId && removedSkillIds.has(selectedSkillId)) {
@@ -1352,7 +1523,10 @@ function SkillsTab({ workPath }: { workPath: string }) {
           const next = new Set([...prev].filter((skillId) => !removedSkillIds.has(skillId)));
           return next.size === prev.size ? prev : next;
         });
+        stepOperation();
+        appendOperationLog(t("system.skills.log.refreshSkills"));
         await refresh();
+        stepOperation();
         finishOperation(t("system.skills.removeSourceComplete", { id: source.id }));
       } catch (err) {
         const rawMessage = err instanceof Error ? err.message : String(err);
@@ -1369,6 +1543,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
       }
     },
     [
+      appendOperationLog,
       confirmAction,
       finishOperation,
       refresh,
@@ -1385,19 +1560,34 @@ function SkillsTab({ workPath }: { workPath: string }) {
     const name = newSkillName.trim();
     if (!name) return;
     if (!(await confirmAction(t("system.skills.createSkillConfirm", { name })))) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const skill = await skillsCreateSkill(name, null);
-      setNewSkillName("");
-      await refresh();
-      await loadEditor(skill);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [confirmAction, loadEditor, newSkillName, refresh, t]);
+    await runOperation(
+      t("system.skills.creatingSkill", { name }),
+      3,
+      async () => {
+        appendOperationLog(t("system.skills.log.createSkill", { name }));
+        const skill = await skillsCreateSkill(name, null);
+        setNewSkillName("");
+        stepOperation();
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        stepOperation();
+        appendOperationLog(t("system.skills.log.openSkill", { name: skill.name }));
+        await loadEditor(skill);
+        stepOperation();
+        return skill;
+      },
+      (skill) => t("system.skills.createSkillComplete", { name: skill.name }),
+    );
+  }, [
+    appendOperationLog,
+    confirmAction,
+    loadEditor,
+    newSkillName,
+    refresh,
+    runOperation,
+    stepOperation,
+    t,
+  ]);
 
   const installSkills = useCallback(
     async (skillList: SkillRecord[], target: SkillBulkTarget) => {
@@ -1417,6 +1607,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             codex: 0,
             failed: 0,
           }),
+          log: [t("system.skills.log.noInstallTasks")],
         });
         return;
       }
@@ -1437,19 +1628,38 @@ function SkillsTab({ workPath }: { workPath: string }) {
       const installed = { claude: 0, codex: 0 };
       try {
         for (const task of tasks) {
+          appendOperationLog(
+            t("system.skills.log.installStart", {
+              name: task.skill.name,
+              target: skillTargetLabel(task.target),
+            }),
+          );
           try {
             await skillsInstallSkill(task.skill.id, task.target, task.skill.name);
             installed[task.target] += 1;
+            appendOperationLog(
+              t("system.skills.log.installDone", {
+                name: task.skill.name,
+                target: skillTargetLabel(task.target),
+              }),
+            );
           } catch (err) {
             const message = `${task.skill.name} / ${task.target}: ${
               err instanceof Error ? err.message : String(err)
             }`;
             failures.push(message);
             recordOperationError(message);
+            appendOperationLog(
+              t("system.skills.log.installFailed", {
+                name: task.skill.name,
+                target: skillTargetLabel(task.target),
+              }),
+            );
           } finally {
             stepOperation();
           }
         }
+        appendOperationLog(t("system.skills.log.refreshSkills"));
         await refresh();
         finishOperation(
           t("system.skills.installComplete", {
@@ -1467,6 +1677,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
       }
     },
     [
+      appendOperationLog,
       confirmAction,
       finishOperation,
       installKey,
@@ -1485,6 +1696,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
           ...EMPTY_SKILL_OPERATION,
           label: t("system.skills.uninstalling"),
           message: t("system.skills.uninstallComplete", { count: 0, failed: 0 }),
+          log: [t("system.skills.log.noUninstallTasks")],
         });
         return;
       }
@@ -1502,19 +1714,38 @@ function SkillsTab({ workPath }: { workPath: string }) {
       let removed = 0;
       try {
         for (const item of items) {
+          appendOperationLog(
+            t("system.skills.log.uninstallStart", {
+              name: item.installedAs,
+              target: skillTargetLabel(item.target),
+            }),
+          );
           try {
             await skillsUninstallSkill(item.target, item.installedAs);
             removed += 1;
+            appendOperationLog(
+              t("system.skills.log.uninstallDone", {
+                name: item.installedAs,
+                target: skillTargetLabel(item.target),
+              }),
+            );
           } catch (err) {
             const message = `${item.installedAs} / ${item.target}: ${
               err instanceof Error ? err.message : String(err)
             }`;
             failures.push(message);
             recordOperationError(message);
+            appendOperationLog(
+              t("system.skills.log.uninstallFailed", {
+                name: item.installedAs,
+                target: skillTargetLabel(item.target),
+              }),
+            );
           } finally {
             stepOperation();
           }
         }
+        appendOperationLog(t("system.skills.log.refreshSkills"));
         await refresh();
         finishOperation(
           t("system.skills.uninstallComplete", { count: removed, failed: failures.length }),
@@ -1527,7 +1758,16 @@ function SkillsTab({ workPath }: { workPath: string }) {
         setBusy(false);
       }
     },
-    [confirmAction, finishOperation, recordOperationError, refresh, startOperation, stepOperation, t],
+    [
+      appendOperationLog,
+      confirmAction,
+      finishOperation,
+      recordOperationError,
+      refresh,
+      startOperation,
+      stepOperation,
+      t,
+    ],
   );
 
   const install = useCallback(
@@ -1555,27 +1795,22 @@ function SkillsTab({ workPath }: { workPath: string }) {
 
   const adoptExternalLinks = useCallback(async () => {
     if (!(await confirmAction(t("system.skills.adoptConfirm")))) return;
-    setBusy(true);
-    setError(null);
-    startOperation(t("system.skills.adopting"), 1);
-    try {
-      const outcome = await skillsAdoptExternalLinks();
-      stepOperation();
-      await refresh();
-      finishOperation(
+    await runBackendProgressOperation(
+      t("system.skills.adopting"),
+      1,
+      async (progressId) => {
+        const outcome = await skillsAdoptExternalLinks(progressId);
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        return outcome;
+      },
+      (outcome) =>
         t("system.skills.adoptComplete", {
           adopted: outcome.adopted,
           skipped: outcome.skipped,
         }),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      finishOperation(message, [message]);
-    } finally {
-      setBusy(false);
-    }
-  }, [confirmAction, finishOperation, refresh, startOperation, stepOperation, t]);
+    );
+  }, [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t]);
 
   const bootstrapEnv = useCallback(async () => {
     if (!(await confirmAction(t("system.skills.bootstrapConfirm")))) return;
@@ -1667,27 +1902,22 @@ function SkillsTab({ workPath }: { workPath: string }) {
     ) {
       return;
     }
-    setBusy(true);
-    setError(null);
-    startOperation(t("system.skills.resetting"), 1);
-    try {
-      const outcome = await skillsResetRegistry(workPath);
-      stepOperation();
-      await refresh();
-      finishOperation(
+    await runBackendProgressOperation(
+      t("system.skills.resetting"),
+      1,
+      async (progressId) => {
+        const outcome = await skillsResetRegistry(workPath, progressId);
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        return outcome;
+      },
+      (outcome) =>
         t("system.skills.resetComplete", {
           sources: outcome.sources,
           skills: outcome.skills,
         }),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      finishOperation(message, [message]);
-    } finally {
-      setBusy(false);
-    }
-  }, [confirmAction, finishOperation, refresh, startOperation, stepOperation, t, workPath]);
+    );
+  }, [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t, workPath]);
 
   return (
     <div className="system-detail skills-system-detail" style={{ width: "100%" }}>
@@ -1725,7 +1955,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void refresh()}
+            onClick={() => void refreshWithProgress()}
+            disabled={busy}
             icon={<RefreshCcw size={14} className={busy ? "spin" : ""} />}
           >
             {t("system.skills.refresh")}

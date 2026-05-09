@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 use crate::cli_path::merge_path_env;
@@ -116,6 +117,24 @@ pub struct ResetOutcome {
     pub skills: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillProgressEvent {
+    progress_id: String,
+    level: String,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    total: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct ProgressReporter<'a> {
+    app: Option<&'a AppHandle>,
+    progress_id: Option<&'a str>,
+}
+
 fn default_skills_subdir() -> String {
     "skills".to_string()
 }
@@ -129,6 +148,56 @@ impl Default for SkillsRegistry {
             installs: Vec::new(),
             removed_source_ids: Vec::new(),
         }
+    }
+}
+
+impl<'a> ProgressReporter<'a> {
+    fn new(app: &'a AppHandle, progress_id: Option<&'a str>) -> Self {
+        Self {
+            app: Some(app),
+            progress_id,
+        }
+    }
+
+    fn noop() -> Self {
+        Self {
+            app: None,
+            progress_id: None,
+        }
+    }
+
+    fn emit(
+        self,
+        level: &str,
+        message: impl Into<String>,
+        completed: Option<usize>,
+        total: Option<usize>,
+    ) {
+        let (Some(app), Some(progress_id)) = (self.app, self.progress_id) else {
+            return;
+        };
+        let _ = app.emit(
+            "skills-op://progress",
+            SkillProgressEvent {
+                progress_id: progress_id.to_string(),
+                level: level.to_string(),
+                message: message.into(),
+                completed,
+                total,
+            },
+        );
+    }
+
+    fn info(self, message: impl Into<String>) {
+        self.emit("info", message, None, None);
+    }
+
+    fn success(self, message: impl Into<String>) {
+        self.emit("success", message, None, None);
+    }
+
+    fn progress(self, level: &str, message: impl Into<String>, completed: usize, total: usize) {
+        self.emit(level, message, Some(completed), Some(total));
     }
 }
 
@@ -219,9 +288,24 @@ pub fn skills_remove_source(source_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
+pub fn skills_sync_source(
+    app: AppHandle,
+    source_id: String,
+    progress_id: Option<String>,
+) -> Result<Vec<SkillRecord>, String> {
+    skills_sync_source_impl(
+        source_id,
+        ProgressReporter::new(&app, progress_id.as_deref()),
+    )
+}
+
+fn skills_sync_source_impl(
+    source_id: String,
+    progress: ProgressReporter<'_>,
+) -> Result<Vec<SkillRecord>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
+    progress.info(format!("Resolving source {source_id}"));
     let source = registry
         .sources
         .iter()
@@ -230,6 +314,7 @@ pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String>
         .ok_or_else(|| format!("unknown_source: {source_id}"))?;
     if source.kind == "cloned" {
         let path = source_path(&source)?;
+        progress.info(format!("Pulling latest changes for {source_id}"));
         run_command(
             Command::new("git")
                 .arg("-C")
@@ -237,18 +322,43 @@ pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String>
                 .arg("pull")
                 .arg("--ff-only"),
         )?;
+        progress.success(format!("Git pull complete for {source_id}"));
+    } else {
+        progress.info(format!("Source {source_id} is linked; skipping git pull"));
     }
-    let skills = rescan_source_in_registry(&mut registry, &source_id)?;
+    let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
     save_registry_unlocked(&registry)?;
+    progress.success(format!(
+        "Sync complete for {source_id}: {} skill(s)",
+        skills.len()
+    ));
     Ok(skills)
 }
 
 #[tauri::command]
-pub fn skills_rescan_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
+pub fn skills_rescan_source(
+    app: AppHandle,
+    source_id: String,
+    progress_id: Option<String>,
+) -> Result<Vec<SkillRecord>, String> {
+    skills_rescan_source_impl(
+        source_id,
+        ProgressReporter::new(&app, progress_id.as_deref()),
+    )
+}
+
+fn skills_rescan_source_impl(
+    source_id: String,
+    progress: ProgressReporter<'_>,
+) -> Result<Vec<SkillRecord>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    let skills = rescan_source_in_registry(&mut registry, &source_id)?;
+    let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
     save_registry_unlocked(&registry)?;
+    progress.success(format!(
+        "Rescan complete for {source_id}: {} skill(s)",
+        skills.len()
+    ));
     Ok(skills)
 }
 
@@ -475,7 +585,16 @@ pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<()
 }
 
 #[tauri::command]
-pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
+pub fn skills_adopt_external_links(
+    app: AppHandle,
+    progress_id: Option<String>,
+) -> Result<AdoptOutcome, String> {
+    skills_adopt_external_links_impl(ProgressReporter::new(&app, progress_id.as_deref()))
+}
+
+fn skills_adopt_external_links_impl(
+    progress: ProgressReporter<'_>,
+) -> Result<AdoptOutcome, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
     let mut adopted = 0;
@@ -483,17 +602,28 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
     let mut installs = Vec::new();
     for target in ["claude", "codex"] {
         let dir = install_root(target)?;
+        progress.info(format!("Scanning {target} install root"));
         if !dir.is_dir() {
+            progress.info(format!("{target} install root does not exist; skipping"));
             continue;
         }
-        for entry in fs::read_dir(&dir)
+        let entries = fs::read_dir(&dir)
             .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&dir)))?
-        {
-            let entry = entry.map_err(|err| err.to_string())?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| err.to_string())?;
+        let total = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
             let link_path = entry.path();
             let installed_as = entry.file_name().to_string_lossy().to_string();
+            progress.progress(
+                "info",
+                format!("Checking {target}/{installed_as}"),
+                index,
+                total,
+            );
             let Some(raw_target) = host_fs::read_link_target(&link_path) else {
                 skipped += 1;
+                progress.info(format!("Skipped {target}/{installed_as}: not a symlink"));
                 continue;
             };
             let abs_target = if raw_target.is_absolute() {
@@ -503,10 +633,14 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
             };
             if !abs_target.join("SKILL.md").is_file() {
                 skipped += 1;
+                progress.info(format!(
+                    "Skipped {target}/{installed_as}: target has no SKILL.md"
+                ));
                 continue;
             }
             let source_id = adopted_source_id(&abs_target);
             if !registry.sources.iter().any(|source| source.id == source_id) {
+                progress.info(format!("Registering adopted source {source_id}"));
                 registry.sources.push(SkillSource {
                     id: source_id.clone(),
                     kind: "adopted".to_string(),
@@ -517,9 +651,13 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
                     last_synced_at: None,
                 });
             }
-            let scanned = rescan_source_in_registry(&mut registry, &source_id)?;
+            let scanned =
+                rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
             let Some(skill) = scanned.first() else {
                 skipped += 1;
+                progress.info(format!(
+                    "Skipped {target}/{installed_as}: scan found no skill"
+                ));
                 continue;
             };
             if registry
@@ -528,12 +666,15 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
                 .any(|install| install.target == target && install.installed_as == installed_as)
             {
                 skipped += 1;
+                progress.info(format!(
+                    "Skipped {target}/{installed_as}: already registered"
+                ));
                 continue;
             }
             let install = SkillInstall {
                 skill_id: skill.id.clone(),
                 target: target.to_string(),
-                installed_as,
+                installed_as: installed_as.clone(),
                 managed_by: "external".to_string(),
                 entrypoint_path: host_fs::display_path(&abs_target),
                 target_path: host_fs::display_path(&link_path),
@@ -542,9 +683,18 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
             registry.installs.push(install.clone());
             installs.push(install);
             adopted += 1;
+            progress.progress(
+                "success",
+                format!("Adopted {target}/{installed_as}"),
+                index + 1,
+                total,
+            );
         }
     }
     save_registry_unlocked(&registry)?;
+    progress.success(format!(
+        "Adopt complete: {adopted} registered, {skipped} skipped"
+    ));
     Ok(AdoptOutcome {
         adopted,
         skipped,
@@ -553,9 +703,27 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
 }
 
 #[tauri::command]
-pub fn skills_reset_registry(work_path: Option<String>) -> Result<ResetOutcome, String> {
+pub fn skills_reset_registry(
+    app: AppHandle,
+    work_path: Option<String>,
+    progress_id: Option<String>,
+) -> Result<ResetOutcome, String> {
+    skills_reset_registry_impl(
+        work_path,
+        ProgressReporter::new(&app, progress_id.as_deref()),
+    )
+}
+
+fn skills_reset_registry_impl(
+    work_path: Option<String>,
+    progress: ProgressReporter<'_>,
+) -> Result<ResetOutcome, String> {
     let _guard = registry_guard()?;
     let root = host_fs::skills_root()?;
+    progress.info(format!(
+        "Ensuring skills root {}",
+        host_fs::display_path(&root)
+    ));
     host_fs::ensure_dir(&root)?;
     for name in ["_sources", "_managed", "_imported", "_cache"] {
         host_fs::ensure_dir(&root.join(name))?;
@@ -565,6 +733,10 @@ pub fn skills_reset_registry(work_path: Option<String>) -> Result<ResetOutcome, 
         let backup = path.with_file_name(format!(
             "registry-{}.json.bak",
             Utc::now().format("%Y%m%d%H%M%S%.9f")
+        ));
+        progress.info(format!(
+            "Backing up registry to {}",
+            host_fs::display_path(&backup)
         ));
         fs::copy(&path, &backup).map_err(|err| {
             format!(
@@ -577,21 +749,40 @@ pub fn skills_reset_registry(work_path: Option<String>) -> Result<ResetOutcome, 
     } else {
         None
     };
+    progress.info("Preserving intact install records");
     let preserved_installs = load_registry_unlocked()
         .map(preserved_installs_from_registry)
         .unwrap_or_default();
+    progress.info(format!(
+        "Preserved {} install record(s)",
+        preserved_installs.len()
+    ));
     let mut registry = SkillsRegistry {
         installs: preserved_installs,
         ..SkillsRegistry::default()
     };
+    progress.info("Recreating default sources");
     ensure_default_sources(&mut registry, work_path.as_deref())?;
     let source_ids: Vec<String> = registry
         .sources
         .iter()
         .map(|source| source.id.clone())
         .collect();
-    for source_id in source_ids {
-        let _ = rescan_source_in_registry(&mut registry, &source_id)?;
+    let total_sources = source_ids.len();
+    for (index, source_id) in source_ids.into_iter().enumerate() {
+        progress.progress(
+            "info",
+            format!("Rescanning source {source_id}"),
+            index,
+            total_sources,
+        );
+        let _ = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
+        progress.progress(
+            "success",
+            format!("Rescanned source {source_id}"),
+            index + 1,
+            total_sources,
+        );
     }
     let outcome = ResetOutcome {
         backup_path,
@@ -599,6 +790,10 @@ pub fn skills_reset_registry(work_path: Option<String>) -> Result<ResetOutcome, 
         skills: registry.skills.len(),
     };
     save_registry_unlocked(&registry)?;
+    progress.success(format!(
+        "Registry reset complete: {} source(s), {} skill(s)",
+        outcome.sources, outcome.skills
+    ));
     Ok(outcome)
 }
 
@@ -898,13 +1093,23 @@ fn rescan_source_in_registry(
     registry: &mut SkillsRegistry,
     source_id: &str,
 ) -> Result<Vec<SkillRecord>, String> {
+    rescan_source_in_registry_with_progress(registry, source_id, ProgressReporter::noop())
+}
+
+fn rescan_source_in_registry_with_progress(
+    registry: &mut SkillsRegistry,
+    source_id: &str,
+    progress: ProgressReporter<'_>,
+) -> Result<Vec<SkillRecord>, String> {
+    progress.info(format!("Resolving source {source_id}"));
     let source = registry
         .sources
         .iter()
         .find(|source| source.id == source_id)
         .cloned()
         .ok_or_else(|| format!("unknown_source: {source_id}"))?;
-    let scanned = scan_source(&source)?;
+    progress.info(format!("Scanning source {source_id}"));
+    let scanned = scan_source_with_progress(&source, progress)?;
     registry.skills.retain(|skill| skill.source_id != source_id);
     registry.skills.extend(scanned.clone());
     if let Some(existing) = registry
@@ -914,17 +1119,41 @@ fn rescan_source_in_registry(
     {
         existing.last_synced_at = Some(Utc::now().to_rfc3339());
     }
+    progress.success(format!(
+        "Updated registry for {source_id}: {} skill(s)",
+        scanned.len()
+    ));
     Ok(scanned)
 }
 
-fn scan_source(source: &SkillSource) -> Result<Vec<SkillRecord>, String> {
+fn scan_source_with_progress(
+    source: &SkillSource,
+    progress: ProgressReporter<'_>,
+) -> Result<Vec<SkillRecord>, String> {
     let base = source_path(source)?;
+    progress.info(format!("Source base {}", host_fs::display_path(&base)));
     let skill_roots =
         manifest_skill_roots(&base, source)?.unwrap_or_else(|| discover_skill_roots(&base, source));
+    let total = skill_roots.len();
+    progress.progress(
+        "info",
+        format!("Found {total} skill root(s) in {}", source.id),
+        0,
+        total,
+    );
     let mut skills = Vec::new();
-    for skill_root in skill_roots {
+    for (index, skill_root) in skill_roots.into_iter().enumerate() {
         let skill_md = skill_root.join("SKILL.md");
         if !skill_md.is_file() {
+            progress.progress(
+                "info",
+                format!(
+                    "Skipped {}: missing SKILL.md",
+                    host_fs::display_path(&skill_root)
+                ),
+                index + 1,
+                total,
+            );
             continue;
         }
         let name = skill_root
@@ -932,6 +1161,7 @@ fn scan_source(source: &SkillSource) -> Result<Vec<SkillRecord>, String> {
             .and_then(|value| value.to_str())
             .unwrap_or("skill")
             .to_string();
+        progress.progress("info", format!("Scanning skill {name}"), index, total);
         let content = fs::read_to_string(&skill_md).unwrap_or_default();
         let parts = parse_frontmatter(&content);
         let rel_path = skill_root
@@ -947,7 +1177,7 @@ fn scan_source(source: &SkillSource) -> Result<Vec<SkillRecord>, String> {
         skills.push(SkillRecord {
             id,
             source_id: source.id.clone(),
-            name,
+            name: name.clone(),
             rel_path,
             abs_path: host_fs::display_path(&canonicalize_or_self(&skill_root)),
             title,
@@ -957,6 +1187,7 @@ fn scan_source(source: &SkillSource) -> Result<Vec<SkillRecord>, String> {
             editable: matches!(source.kind.as_str(), "linked" | "cloned" | "managed"),
             dirty,
         });
+        progress.progress("success", format!("Scanned skill {name}"), index + 1, total);
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(skills)
@@ -1309,7 +1540,7 @@ mod tests {
             "stai-public"
         ));
 
-        skills_reset_registry(Some(work_path.clone())).unwrap();
+        skills_reset_registry_impl(Some(work_path.clone()), ProgressReporter::noop()).unwrap();
 
         let refreshed = skills_list_sources(Some(work_path)).unwrap();
         assert!(has_source(&refreshed, "stai-public"));
@@ -1353,7 +1584,7 @@ mod tests {
         });
         save_registry_unlocked(&registry).unwrap();
 
-        skills_reset_registry(Some(work_path)).unwrap();
+        skills_reset_registry_impl(Some(work_path), ProgressReporter::noop()).unwrap();
 
         let registry = load_registry().unwrap();
         assert_eq!(registry.installs.len(), 1);
