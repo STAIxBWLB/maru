@@ -453,6 +453,7 @@ const ko: Record<string, string> = {
   "system.skills.addSource": "소스 추가",
   "system.skills.rescan": "Rescan",
   "system.skills.sync": "Sync",
+  "system.skills.removeSource": "소스 제거",
   "system.skills.managedSource": "managed source",
   "system.skills.env": "Env",
   "system.skills.healthy": "healthy",
@@ -502,6 +503,8 @@ const ko: Record<string, string> = {
   "system.skills.addSourceConfirm": "{id} source를 추가할까요?",
   "system.skills.rescanConfirm": "{id} source를 다시 스캔할까요?",
   "system.skills.syncConfirm": "{id} source를 동기화할까요?",
+  "system.skills.removeSourceConfirm":
+    "{id} source를 registry에서 제거할까요? 스캔된 skill 등록만 제거하며 원본 폴더는 삭제하지 않습니다.",
   "system.skills.createSkillConfirm": "{name} managed skill을 생성할까요?",
   "system.skills.saveSkillConfirm": "{name} SKILL.md 변경사항을 저장할까요?",
   "system.skills.installing": "{target} 설치 중",
@@ -509,6 +512,7 @@ const ko: Record<string, string> = {
   "system.skills.adopting": "외부 링크 등록 중",
   "system.skills.bootstrapping": "Env bootstrap 중",
   "system.skills.resetting": "Registry 초기화 중",
+  "system.skills.removingSource": "{id} 소스 제거 중",
   "system.skills.installComplete":
     "설치 완료: Claude {claude}개, Codex {codex}개, 실패 {failed}개",
   "system.skills.uninstallComplete": "제거 완료: {count}개, 실패 {failed}개",
@@ -516,6 +520,10 @@ const ko: Record<string, string> = {
   "system.skills.bootstrapComplete": "Bootstrap 완료: Env 준비됨",
   "system.skills.bootstrapFailed": "Bootstrap 실패: exit {code}",
   "system.skills.resetComplete": "Registry 초기화 완료: source {sources}개, skill {skills}개 재스캔",
+  "system.skills.removeSourceComplete": "소스 제거 완료: {id}",
+  "system.skills.removeManagedSourceBlocked": "managed source는 제거할 수 없습니다.",
+  "system.skills.removeSourceInstalledBlocked":
+    "{id} source에 설치된 스킬이 있습니다. 먼저 Claude/Codex 설치를 제거하세요.",
   "system.preferences.explorerPane": "Explorer 기본 모드",
   "system.preferences.documentBrowser": "문서 브라우저 기본 보기",
   "system.preferences.documentLabel": "문서 이름 표시",
@@ -1022,6 +1030,7 @@ const en: Record<string, string> = {
   "system.skills.addSource": "Add source",
   "system.skills.rescan": "Rescan",
   "system.skills.sync": "Sync",
+  "system.skills.removeSource": "Remove",
   "system.skills.managedSource": "managed source",
   "system.skills.env": "Env",
   "system.skills.healthy": "healthy",
@@ -1071,6 +1080,8 @@ const en: Record<string, string> = {
   "system.skills.addSourceConfirm": "Add the {id} source?",
   "system.skills.rescanConfirm": "Rescan the {id} source?",
   "system.skills.syncConfirm": "Sync the {id} source?",
+  "system.skills.removeSourceConfirm":
+    "Remove the {id} source from the registry? Only scanned skill records will be removed; the source folder will not be deleted.",
   "system.skills.createSkillConfirm": "Create the {name} managed skill?",
   "system.skills.saveSkillConfirm": "Save changes to {name} SKILL.md?",
   "system.skills.installing": "Installing {target}",
@@ -1078,6 +1089,7 @@ const en: Record<string, string> = {
   "system.skills.adopting": "Adopting external links",
   "system.skills.bootstrapping": "Bootstrapping env",
   "system.skills.resetting": "Resetting registry",
+  "system.skills.removingSource": "Removing {id} source",
   "system.skills.installComplete":
     "Install complete: Claude {claude}, Codex {codex}, failed {failed}",
   "system.skills.uninstallComplete": "Remove complete: {count}, failed {failed}",
@@ -1085,6 +1097,10 @@ const en: Record<string, string> = {
   "system.skills.bootstrapComplete": "Bootstrap complete: Env ready",
   "system.skills.bootstrapFailed": "Bootstrap failed: exit {code}",
   "system.skills.resetComplete": "Registry reset complete: {sources} source(s), {skills} skill(s) rescanned",
+  "system.skills.removeSourceComplete": "Source removed: {id}",
+  "system.skills.removeManagedSourceBlocked": "Managed sources cannot be removed.",
+  "system.skills.removeSourceInstalledBlocked":
+    "The {id} source has installed skills. Remove its Claude/Codex installs first.",
   "system.preferences.explorerPane": "Default Explorer mode",
   "system.preferences.documentBrowser": "Default document browser view",
   "system.preferences.documentLabel": "Document name display",

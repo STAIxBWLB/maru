@@ -69,6 +69,7 @@ import {
   skillsListSkills,
   skillsListSources,
   skillsReadSkill,
+  skillsRemoveSource,
   skillsRescanSource,
   skillsResetRegistry,
   skillsSaveSkillFile,
@@ -1060,6 +1061,11 @@ function SkillsTab({ workPath }: { workPath: string }) {
     installs.forEach((install) => set.add(`${install.skillId}:${install.target}`));
     return set;
   }, [installs]);
+  const installedSkillIds = useMemo(() => {
+    const set = new Set<string>();
+    installs.forEach((install) => set.add(install.skillId));
+    return set;
+  }, [installs]);
   const installTargetsBySkill = useMemo(() => {
     const map = new Map<string, Set<SkillInstallTarget>>();
     installs.forEach((install) => {
@@ -1180,6 +1186,12 @@ function SkillsTab({ workPath }: { workPath: string }) {
     setSelectedSkillIds(new Set());
   }, []);
 
+  const sourceHasInstalledSkills = useCallback(
+    (sourceId: string) =>
+      skills.some((skill) => skill.sourceId === sourceId && installedSkillIds.has(skill.id)),
+    [installedSkillIds, skills],
+  );
+
   const closeConfirmation = useCallback((confirmed: boolean) => {
     setConfirmState((current) => {
       current?.resolve(confirmed);
@@ -1297,6 +1309,68 @@ function SkillsTab({ workPath }: { workPath: string }) {
       }
     },
     [confirmAction, refresh, t],
+  );
+
+  const removeSource = useCallback(
+    async (source: SkillSource) => {
+      if (source.kind === "managed" || source.id === "anchor-managed") {
+        setError(t("system.skills.removeManagedSourceBlocked"));
+        return;
+      }
+      if (sourceHasInstalledSkills(source.id)) {
+        setError(t("system.skills.removeSourceInstalledBlocked", { id: source.id }));
+        return;
+      }
+      if (
+        !(await confirmAction(t("system.skills.removeSourceConfirm", { id: source.id }), {
+          variant: "danger",
+        }))
+      ) {
+        return;
+      }
+      const removedSkillIds = new Set(
+        skills.filter((skill) => skill.sourceId === source.id).map((skill) => skill.id),
+      );
+      setBusy(true);
+      setError(null);
+      startOperation(t("system.skills.removingSource", { id: source.id }), 1);
+      try {
+        await skillsRemoveSource(source.id);
+        stepOperation();
+        if (selectedSkillId && removedSkillIds.has(selectedSkillId)) {
+          setSelectedSkillId(null);
+          setEditorText("");
+          setEditorBase("");
+        }
+        setSelectedSkillIds((prev) => {
+          const next = new Set([...prev].filter((skillId) => !removedSkillIds.has(skillId)));
+          return next.size === prev.size ? prev : next;
+        });
+        await refresh();
+        finishOperation(t("system.skills.removeSourceComplete", { id: source.id }));
+      } catch (err) {
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const message =
+          rawMessage === "source_has_installed_skills"
+            ? t("system.skills.removeSourceInstalledBlocked", { id: source.id })
+            : rawMessage;
+        setError(message);
+        finishOperation(message, [message]);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      confirmAction,
+      finishOperation,
+      refresh,
+      selectedSkillId,
+      skills,
+      sourceHasInstalledSkills,
+      startOperation,
+      stepOperation,
+      t,
+    ],
   );
 
   const createManagedSkill = useCallback(async () => {
@@ -1762,42 +1836,60 @@ function SkillsTab({ workPath }: { workPath: string }) {
             </Button>
           </div>
           <ul className="system-skill-list compact">
-            {sources.map((source) => (
-              <li className="system-skill-card source-card" key={source.id}>
-                <div className="source-card-top">
-                  <div>
-                    <div className="system-skill-name">{source.id}</div>
-                    <div className="system-skill-meta">
-                      <span className="skill-status-pill subtle">{source.kind}</span>
-                      <span>
-                        <code>{source.skillsSubdir}</code>
-                      </span>
+            {sources.map((source) => {
+              const sourceRemovable = source.kind !== "managed" && source.id !== "anchor-managed";
+              const sourceHasInstalls = sourceHasInstalledSkills(source.id);
+              const removeTitle = !sourceRemovable
+                ? t("system.skills.removeManagedSourceBlocked")
+                : sourceHasInstalls
+                  ? t("system.skills.removeSourceInstalledBlocked", { id: source.id })
+                  : t("system.skills.removeSource");
+              return (
+                <li className="system-skill-card source-card" key={source.id}>
+                  <div className="source-card-top">
+                    <div>
+                      <div className="system-skill-name">{source.id}</div>
+                      <div className="system-skill-meta">
+                        <span className="skill-status-pill subtle">{source.kind}</span>
+                        <span>
+                          <code>{source.skillsSubdir}</code>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="source-card-actions">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void rescanSource(source)}
+                        disabled={busy}
+                      >
+                        {t("system.skills.rescan")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void syncSource(source)}
+                        disabled={busy}
+                      >
+                        {t("system.skills.sync")}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => void removeSource(source)}
+                        disabled={busy || !sourceRemovable || sourceHasInstalls}
+                        title={removeTitle}
+                      >
+                        {t("system.skills.removeSource")}
+                      </Button>
                     </div>
                   </div>
-                  <div className="source-card-actions">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void rescanSource(source)}
-                      disabled={busy}
-                    >
-                      {t("system.skills.rescan")}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void syncSource(source)}
-                      disabled={busy}
-                    >
-                      {t("system.skills.sync")}
-                    </Button>
+                  <div className="skill-path" title={source.path ?? source.repoUrl ?? ""}>
+                    {source.path ?? source.repoUrl ?? t("system.skills.managedSource")}
                   </div>
-                </div>
-                <div className="skill-path" title={source.path ?? source.repoUrl ?? ""}>
-                  {source.path ?? source.repoUrl ?? t("system.skills.managedSource")}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
           <div className="system-card skill-env-card">
             <div className="skills-section-heading">
