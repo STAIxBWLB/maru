@@ -518,7 +518,7 @@ pub fn skills_install_skill(
     host_fs::create_symlink_no_clobber(&anchor_entry, &skill_path)?;
 
     let tool_target = install_target_path(&target, &installed_as)?;
-    host_fs::create_symlink_no_clobber(&tool_target, &anchor_entry)?;
+    create_install_target_symlink(&tool_target, &anchor_entry, &skill_path)?;
 
     let install = SkillInstall {
         skill_id,
@@ -809,6 +809,55 @@ fn install_links_are_intact(install: &SkillInstall) -> bool {
     let target_path = PathBuf::from(&install.target_path);
     let entrypoint_path = PathBuf::from(&install.entrypoint_path);
     host_fs::read_link_target(&target_path).as_deref() == Some(entrypoint_path.as_path())
+}
+
+fn create_install_target_symlink(
+    tool_target: &Path,
+    anchor_entry: &Path,
+    skill_path: &Path,
+) -> Result<(), String> {
+    if !tool_target.exists() && fs::symlink_metadata(tool_target).is_err() {
+        return host_fs::create_symlink_no_clobber(tool_target, anchor_entry);
+    }
+    if symlink_target_path_equals(tool_target, anchor_entry) {
+        return Ok(());
+    }
+    if symlink_target_resolves_to(tool_target, skill_path) {
+        fs::remove_file(tool_target).map_err(|err| {
+            format!(
+                "Cannot replace existing install link {}: {err}",
+                host_fs::display_path(tool_target)
+            )
+        })?;
+        return host_fs::create_symlink_no_clobber(tool_target, anchor_entry);
+    }
+    Err(format!(
+        "install_target_exists: {} already exists and does not point to {}",
+        host_fs::display_path(tool_target),
+        host_fs::display_path(anchor_entry)
+    ))
+}
+
+fn symlink_target_path_equals(link: &Path, expected: &Path) -> bool {
+    let Some(target) = host_fs::read_link_target(link) else {
+        return false;
+    };
+    resolve_link_target(link, target) == expected
+}
+
+fn symlink_target_resolves_to(link: &Path, expected: &Path) -> bool {
+    let Some(target) = host_fs::read_link_target(link) else {
+        return false;
+    };
+    let resolved = resolve_link_target(link, target);
+    canonicalize_or_self(&resolved) == canonicalize_or_self(expected)
+}
+
+fn resolve_link_target(link: &Path, target: PathBuf) -> PathBuf {
+    if target.is_absolute() {
+        return target;
+    }
+    link.parent().unwrap_or_else(|| Path::new("")).join(target)
 }
 
 fn registry_guard() -> Result<MutexGuard<'static, ()>, String> {
@@ -1590,6 +1639,46 @@ mod tests {
         assert_eq!(registry.installs.len(), 1);
         assert_eq!(registry.installs[0].installed_as, "alpha");
         assert_eq!(registry.installs[0].managed_by, "anchor");
+    }
+
+    #[test]
+    fn install_target_symlink_repoints_existing_direct_skill_link() {
+        let links = TempDir::new().unwrap();
+        let skill_target = links.path().join("skill-alpha");
+        let anchor_entry = links.path().join("anchor-alpha");
+        let tool_target = links.path().join("tool-alpha");
+        fs::create_dir_all(&skill_target).unwrap();
+        host_fs::create_symlink_no_clobber(&anchor_entry, &skill_target).unwrap();
+        host_fs::create_symlink_no_clobber(&tool_target, &skill_target).unwrap();
+
+        create_install_target_symlink(&tool_target, &anchor_entry, &skill_target).unwrap();
+
+        assert_eq!(
+            host_fs::read_link_target(&tool_target).as_deref(),
+            Some(anchor_entry.as_path())
+        );
+    }
+
+    #[test]
+    fn install_target_symlink_rejects_unrelated_existing_link() {
+        let links = TempDir::new().unwrap();
+        let skill_target = links.path().join("skill-alpha");
+        let anchor_entry = links.path().join("anchor-alpha");
+        let tool_target = links.path().join("tool-alpha");
+        let unrelated = links.path().join("unrelated");
+        fs::create_dir_all(&skill_target).unwrap();
+        fs::create_dir_all(&unrelated).unwrap();
+        host_fs::create_symlink_no_clobber(&anchor_entry, &skill_target).unwrap();
+        host_fs::create_symlink_no_clobber(&tool_target, &unrelated).unwrap();
+
+        let error =
+            create_install_target_symlink(&tool_target, &anchor_entry, &skill_target).unwrap_err();
+
+        assert!(error.contains("install_target_exists"));
+        assert_eq!(
+            host_fs::read_link_target(&tool_target).as_deref(),
+            Some(unrelated.as_path())
+        );
     }
 
     #[test]
