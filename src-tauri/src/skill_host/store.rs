@@ -580,7 +580,7 @@ pub fn skills_install_skill(
     let installed_as = host_fs::safe_entry_name(installed_as.as_deref().unwrap_or(&skill.name))?;
     let anchor_entry = host_fs::skills_root()?.join(&installed_as);
     let skill_path = PathBuf::from(&skill.abs_path);
-    host_fs::create_symlink_no_clobber(&anchor_entry, &skill_path)?;
+    create_anchor_entry_symlink(&anchor_entry, &skill_path, &installed_as)?;
 
     let tool_target = install_target_path(&target, &installed_as)?;
     create_install_target_symlink(&tool_target, &anchor_entry, &skill_path)?;
@@ -876,6 +876,35 @@ fn install_links_are_intact(install: &SkillInstall) -> bool {
     host_fs::read_link_target(&target_path).as_deref() == Some(entrypoint_path.as_path())
 }
 
+fn create_anchor_entry_symlink(
+    anchor_entry: &Path,
+    skill_path: &Path,
+    installed_as: &str,
+) -> Result<(), String> {
+    if !anchor_entry.exists() && fs::symlink_metadata(anchor_entry).is_err() {
+        return host_fs::create_symlink_no_clobber(anchor_entry, skill_path);
+    }
+    if symlink_target_path_equals(anchor_entry, skill_path)
+        || symlink_target_resolves_to(anchor_entry, skill_path)
+    {
+        return Ok(());
+    }
+    if symlink_target_is_skill_named(anchor_entry, installed_as) {
+        fs::remove_file(anchor_entry).map_err(|err| {
+            format!(
+                "Cannot replace existing Anchor skill link {}: {err}",
+                host_fs::display_path(anchor_entry)
+            )
+        })?;
+        return host_fs::create_symlink_no_clobber(anchor_entry, skill_path);
+    }
+    Err(format!(
+        "install_target_exists: {} already exists and does not point to {}",
+        host_fs::display_path(anchor_entry),
+        host_fs::display_path(skill_path)
+    ))
+}
+
 fn create_install_target_symlink(
     tool_target: &Path,
     anchor_entry: &Path,
@@ -901,6 +930,18 @@ fn create_install_target_symlink(
         host_fs::display_path(tool_target),
         host_fs::display_path(anchor_entry)
     ))
+}
+
+fn symlink_target_is_skill_named(link: &Path, expected_name: &str) -> bool {
+    let Some(target) = host_fs::read_link_target(link) else {
+        return false;
+    };
+    let resolved = resolve_link_target(link, target);
+    resolved.join("SKILL.md").is_file()
+        && resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == expected_name)
 }
 
 fn symlink_target_path_equals(link: &Path, expected: &Path) -> bool {
@@ -2155,6 +2196,47 @@ mod tests {
         assert_eq!(
             host_fs::read_link_target(&tool_target).as_deref(),
             Some(unrelated.as_path())
+        );
+    }
+
+    #[test]
+    fn anchor_entry_symlink_repoints_existing_same_named_skill_link() {
+        let links = TempDir::new().unwrap();
+        let old_skill = links.path().join("alpha");
+        let new_skill = links.path().join("new").join("alpha");
+        let anchor_entry = links.path().join("anchor-alpha");
+        fs::create_dir_all(&old_skill).unwrap();
+        fs::create_dir_all(&new_skill).unwrap();
+        fs::write(old_skill.join("SKILL.md"), "# old\n").unwrap();
+        fs::write(new_skill.join("SKILL.md"), "# new\n").unwrap();
+        host_fs::create_symlink_no_clobber(&anchor_entry, &old_skill).unwrap();
+
+        create_anchor_entry_symlink(&anchor_entry, &new_skill, "alpha").unwrap();
+
+        assert_eq!(
+            host_fs::read_link_target(&anchor_entry).as_deref(),
+            Some(new_skill.as_path())
+        );
+    }
+
+    #[test]
+    fn anchor_entry_symlink_rejects_different_named_skill_link() {
+        let links = TempDir::new().unwrap();
+        let old_skill = links.path().join("other");
+        let new_skill = links.path().join("alpha");
+        let anchor_entry = links.path().join("anchor-alpha");
+        fs::create_dir_all(&old_skill).unwrap();
+        fs::create_dir_all(&new_skill).unwrap();
+        fs::write(old_skill.join("SKILL.md"), "# old\n").unwrap();
+        fs::write(new_skill.join("SKILL.md"), "# new\n").unwrap();
+        host_fs::create_symlink_no_clobber(&anchor_entry, &old_skill).unwrap();
+
+        let error = create_anchor_entry_symlink(&anchor_entry, &new_skill, "alpha").unwrap_err();
+
+        assert!(error.contains("install_target_exists"));
+        assert_eq!(
+            host_fs::read_link_target(&anchor_entry).as_deref(),
+            Some(old_skill.as_path())
         );
     }
 
