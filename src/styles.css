@@ -5406,9 +5406,83 @@ button.git-badge:hover {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   overflow: auto;
   padding: 2px 8px 14px;
+}
+
+.skills-quick-group {
+  display: grid;
+  gap: 2px;
+}
+
+.skills-quick-group-head {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  border-radius: 7px;
+  color: var(--faint);
+  padding: 2px 6px 2px 4px;
+  text-align: left;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 100ms ease;
+}
+
+.skills-quick-group-head:hover {
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.skills-quick-group-head:active {
+  transform: scale(0.985);
+}
+
+.skills-quick-group-head svg {
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.skills-quick-group-head.collapsed svg {
+  transform: rotate(0deg);
+}
+
+.skills-quick-group-head span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.skills-quick-group-head strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--faint);
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.skills-quick-group-body {
+  display: grid;
+  gap: 2px;
+}
+
+.skills-quick-group-body.collapsed {
+  display: none;
 }
 
 .skills-quick-row {
