@@ -76,7 +76,12 @@ function ApprovalDialog({
 }) {
   const request = pending?.request ?? null;
   return (
-    <Dialog.Root open={Boolean(request)}>
+    <Dialog.Root
+      open={Boolean(request)}
+      onOpenChange={(open) => {
+        if (!open && request) onCancel();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content approval-dialog">

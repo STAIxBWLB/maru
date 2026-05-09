@@ -42,7 +42,14 @@ export function BulkActionBar({
         <FolderInput size={14} />
         폴더로 이동
       </Button>
-      <button type="button" className="icon-button" disabled={busy} onClick={onCancel}>
+      <button
+        type="button"
+        className="icon-button"
+        disabled={busy}
+        onClick={onCancel}
+        aria-label="선택 해제"
+        title="선택 해제"
+      >
         <X size={14} />
       </button>
     </div>

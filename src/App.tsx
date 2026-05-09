@@ -1726,18 +1726,18 @@ function MainApp() {
         target: fileTargetFolder ?? (decision === "rejected" ? "inbox/rejected" : null),
         payloadPreview: keys.join("\n"),
       };
-      const approvalId = await approvalGate.confirmApproval(approvalInput);
-      if (!approvalId) return;
-      let gmailApprovalId = approvalId;
-      if (fileIds.length > 0 && gmailIds.length > 0) {
-        const duplicate = await prepareApproval(approvalInput);
-        await recordApproval(duplicate.id, "approved", false);
-        gmailApprovalId = duplicate.id;
-      }
-      setInboxActionBusy(true);
-      setError(null);
-      setGmailError(null);
       try {
+        const approvalId = await approvalGate.confirmApproval(approvalInput);
+        if (!approvalId) return;
+        let gmailApprovalId = approvalId;
+        if (fileIds.length > 0 && gmailIds.length > 0) {
+          const duplicate = await prepareApproval(approvalInput);
+          await recordApproval(duplicate.id, "approved", false);
+          gmailApprovalId = duplicate.id;
+        }
+        setInboxActionBusy(true);
+        setError(null);
+        setGmailError(null);
         if (fileIds.length > 0) {
           const outcomes =
             decision === "accepted"
@@ -1780,6 +1780,10 @@ function MainApp() {
           }
         }
         void refreshInbox();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (fileIds.length > 0) setError(message);
+        if (gmailIds.length > 0) setGmailError(message);
       } finally {
         setInboxActionBusy(false);
       }
