@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::cli_path::resolve_program;
+use crate::mission_state;
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::{env_vars_for_runs, get_skill};
 
@@ -295,6 +296,7 @@ fn spawn_background(
         cmd.env(key, value);
     }
     let mut child = cmd.spawn().map_err(|err| format_spawn_error(&err))?;
+    let child_pid = child.id();
     if let Some(payload) = stdin_payload {
         if let Some(mut stdin) = child.stdin.take() {
             thread::spawn(move || {
@@ -322,10 +324,12 @@ fn spawn_background(
         "stderr".to_string(),
         stderr,
     );
+    let _ = mission_state::register_mission(&app, &invocation_id, "skill", child_pid);
     let app_done = app.clone();
     let id_done = invocation_id.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
+            mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
                 AiDoneEvent {
@@ -336,6 +340,7 @@ fn spawn_background(
             );
         }
         Err(err) => {
+            mission_state::fail_mission(&app_done, &id_done, &err.to_string());
             let _ = app_done.emit(
                 "ai://error",
                 AiErrorEvent {
@@ -364,9 +369,10 @@ where
                 AiOutputEvent {
                     invocation_id: invocation_id.clone(),
                     stream: stream_name.clone(),
-                    line,
+                    line: line.clone(),
                 },
             );
+            mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
     });
 }

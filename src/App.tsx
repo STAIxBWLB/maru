@@ -21,6 +21,7 @@ import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { InboxPane } from "./components/InboxPane";
 import { InboxSettingsDialog } from "./components/InboxSettingsDialog";
+import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { Sidebar } from "./components/Sidebar";
@@ -28,6 +29,7 @@ import { SystemPane } from "./components/SystemPane";
 import { TerminalPanel, type TerminalLaunchRequest } from "./components/TerminalPanel";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
+import { useApprovalGate } from "./approval/ApprovalDialog";
 import {
   ComposeDialog,
   type ComposeDialogSeed,
@@ -37,9 +39,13 @@ import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
 import {
   applyFileQueue,
   addWorkspaceRoot,
+  acceptInboxItem,
+  acceptInboxItems,
   createDocument,
   createVersion,
   DEFAULT_INBOX_SETTINGS,
+  decideGmailItem as decideGmailItemApi,
+  decideGmailItems,
   describeFileQueueSources,
   duplicateDocument,
   fetchGmailUnread,
@@ -48,11 +54,15 @@ import {
   listWorkspaceRoots,
   moveDocument,
   readDocument,
+  prepareApproval,
   revealInFileManager,
   readInboxSettings,
   readVaultCache,
   refreshWorkspaceCapabilities,
   removeWorkspaceRoot,
+  recordApproval,
+  rejectInboxItem,
+  rejectInboxItems,
   saveDocument,
   saveInboxSettings,
   scanInboxDrop,
@@ -498,6 +508,7 @@ function clampPaneWidth(value: number, min: number, max: number): number {
 function MainApp() {
   const localeValue = useLocaleState();
   const { t, locale, setLocale } = localeValue;
+  const approvalGate = useApprovalGate();
 
   const [workspaceRegistry, setWorkspaceRegistry] = useState<WorkspaceRegistry>({
     workspaces: [],
@@ -649,6 +660,8 @@ function MainApp() {
   const [inboxSettings, setInboxSettings] = useState<InboxSettings>(DEFAULT_INBOX_SETTINGS);
   const [inboxSettingsOpen, setInboxSettingsOpen] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
+  const [inboxFocusTick, setInboxFocusTick] = useState(0);
+  const [inboxActionBusy, setInboxActionBusy] = useState(false);
   const [updateToast, setUpdateToast] = useState<UpdateToast | null>(null);
   const [terminalLaunchRequest, setTerminalLaunchRequest] =
     useState<TerminalLaunchRequest | null>(null);
@@ -1563,14 +1576,6 @@ function MainApp() {
     }
   }, [inboxWorkspacePath]);
 
-  const decideGmailItem = useCallback((id: string, decision: InboxDecision) => {
-    setGmailDecisions((prev) => {
-      const next = new Map(prev);
-      next.set(id, decision);
-      return next;
-    });
-  }, []);
-
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
       setInboxDrops([]);
@@ -1604,11 +1609,202 @@ function MainApp() {
     [],
   );
 
-  const decideInboxItem = useCallback(
-    (id: string, decision: InboxDecision) => {
-      updateInboxCarry(id, { decision });
+  const targetFolderForInboxItem = useCallback(
+    (id: string, forcedTargetFolder?: string | null) => {
+      const forced = forcedTargetFolder?.trim();
+      if (forced) return forced;
+      const suggested = inboxCarry.get(id)?.classification?.suggestedFolder?.trim();
+      if (suggested) return suggested;
+      const target = window.prompt("이 파일을 이동할 workspace-relative 폴더를 입력하세요.", "inbox/processed");
+      return target?.trim() || null;
     },
-    [updateInboxCarry],
+    [inboxCarry],
+  );
+
+  const decideInboxItem = useCallback(
+    async (id: string, decision: InboxDecision, forcedTargetFolder?: string | null) => {
+      if (!inboxWorkspacePath || decision === "pending") return;
+      const targetFolder =
+        decision === "accepted" ? targetFolderForInboxItem(id, forcedTargetFolder) : null;
+      if (decision === "accepted" && !targetFolder) return;
+      const approvalId = await approvalGate.confirmApproval({
+        kind: decision === "accepted" ? "inbox.file.accept" : "inbox.file.reject",
+        summary:
+          decision === "accepted"
+            ? "Move the selected inbox file into the workspace."
+            : "Move the selected inbox file into the rejected folder.",
+        target: decision === "accepted" ? targetFolder : "inbox/rejected",
+        payloadPreview: id,
+      });
+      if (!approvalId) return;
+      setInboxActionBusy(true);
+      setError(null);
+      try {
+        const outcome =
+          decision === "accepted"
+            ? await acceptInboxItem(inboxWorkspacePath, id, targetFolder ?? "", approvalId)
+            : await rejectInboxItem(inboxWorkspacePath, id, approvalId);
+        if (!outcome.ok) throw new Error(outcome.error ?? "Inbox decision failed.");
+        updateInboxCarry(id, { decision });
+        void refreshInbox();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInboxActionBusy(false);
+      }
+    },
+    [approvalGate, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry],
+  );
+
+  const decideGmailItem = useCallback(
+    async (id: string, decision: InboxDecision) => {
+      if (decision === "pending") return;
+      const approvalId = await approvalGate.confirmApproval({
+        kind: decision === "accepted" ? "gmail.accept" : "gmail.reject",
+        summary:
+          decision === "accepted"
+            ? "Apply the Anchor accepted label and archive this Gmail message."
+            : "Apply the Anchor rejected label to this Gmail message.",
+        target: id,
+        payloadPreview: decision === "accepted" ? "add anchor-accepted; remove INBOX" : "add anchor-rejected",
+      });
+      if (!approvalId) return;
+      setInboxActionBusy(true);
+      setGmailError(null);
+      try {
+        const outcome = await decideGmailItemApi(inboxWorkspacePath, id, decision, approvalId);
+        if (!outcome.ok) throw new Error(outcome.error ?? "Gmail decision failed.");
+        setGmailDecisions((prev) => {
+          const next = new Map(prev);
+          next.set(id, decision);
+          return next;
+        });
+      } catch (err) {
+        setGmailError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInboxActionBusy(false);
+      }
+    },
+    [approvalGate, inboxWorkspacePath],
+  );
+
+  const decideInboxKeys = useCallback(
+    async (
+      keys: string[],
+      decision: Extract<InboxDecision, "accepted" | "rejected">,
+      forcedTargetFolder?: string | null,
+    ) => {
+      if (!inboxWorkspacePath || keys.length === 0) return;
+      const fileIds = keys
+        .filter((key) => key.startsWith("file:"))
+        .map((key) => key.slice("file:".length));
+      const gmailIds = keys
+        .filter((key) => key.startsWith("gmail:"))
+        .map((key) => key.slice("gmail:".length));
+
+      let fileTargetFolder = forcedTargetFolder?.trim() || null;
+      if (decision === "accepted" && fileIds.length > 0 && !fileTargetFolder) {
+        const missing = fileIds.filter(
+          (id) => !inboxCarry.get(id)?.classification?.suggestedFolder?.trim(),
+        );
+        if (missing.length > 0) {
+          const target = window.prompt(
+            `${missing.length}개 파일의 이동 대상 폴더를 입력하세요.`,
+            "inbox/processed",
+          );
+          fileTargetFolder = target?.trim() || null;
+          if (!fileTargetFolder) return;
+        }
+      }
+
+      const approvalInput = {
+        kind: "inbox.bulk",
+        summary:
+          decision === "accepted"
+            ? `Accept ${keys.length} selected inbox item(s).`
+            : `Reject ${keys.length} selected inbox item(s).`,
+        target: fileTargetFolder ?? (decision === "rejected" ? "inbox/rejected" : null),
+        payloadPreview: keys.join("\n"),
+      };
+      const approvalId = await approvalGate.confirmApproval(approvalInput);
+      if (!approvalId) return;
+      let gmailApprovalId = approvalId;
+      if (fileIds.length > 0 && gmailIds.length > 0) {
+        const duplicate = await prepareApproval(approvalInput);
+        await recordApproval(duplicate.id, "approved", false);
+        gmailApprovalId = duplicate.id;
+      }
+      setInboxActionBusy(true);
+      setError(null);
+      setGmailError(null);
+      try {
+        if (fileIds.length > 0) {
+          const outcomes =
+            decision === "accepted"
+              ? await acceptInboxItems(
+                  inboxWorkspacePath,
+                  fileIds.map((id) => ({
+                    id,
+                    targetFolder:
+                      fileTargetFolder ??
+                      inboxCarry.get(id)?.classification?.suggestedFolder ??
+                      null,
+                  })),
+                  approvalId,
+                )
+              : await rejectInboxItems(inboxWorkspacePath, fileIds, approvalId);
+          const failed = outcomes.filter((outcome) => !outcome.ok);
+          outcomes
+            .filter((outcome) => outcome.ok)
+            .forEach((outcome) => updateInboxCarry(outcome.id, { decision }));
+          if (failed.length > 0) {
+            setError(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+          }
+        }
+        if (gmailIds.length > 0) {
+          const outcomes = await decideGmailItems(
+            inboxWorkspacePath,
+            gmailIds.map((messageId) => ({ messageId, decision })),
+            gmailApprovalId,
+          );
+          const failed = outcomes.filter((outcome) => !outcome.ok);
+          setGmailDecisions((prev) => {
+            const next = new Map(prev);
+            outcomes
+              .filter((outcome) => outcome.ok)
+              .forEach((outcome) => next.set(outcome.messageId, decision));
+            return next;
+          });
+          if (failed.length > 0) {
+            setGmailError(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+          }
+        }
+        void refreshInbox();
+      } finally {
+        setInboxActionBusy(false);
+      }
+    },
+    [approvalGate, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry],
+  );
+
+  const bulkAcceptInboxKeys = useCallback(
+    (keys: string[]) => decideInboxKeys(keys, "accepted"),
+    [decideInboxKeys],
+  );
+
+  const bulkRejectInboxKeys = useCallback(
+    (keys: string[]) => decideInboxKeys(keys, "rejected"),
+    [decideInboxKeys],
+  );
+
+  const bulkMoveInboxFiles = useCallback(
+    (keys: string[]) => {
+      const target = window.prompt("선택한 파일을 이동할 workspace-relative 폴더를 입력하세요.", "inbox/processed");
+      const trimmed = target?.trim();
+      if (!trimmed) return;
+      void decideInboxKeys(keys.filter((key) => key.startsWith("file:")), "accepted", trimmed);
+    },
+    [decideInboxKeys],
   );
 
   const classifyItem = useCallback(
@@ -2925,6 +3121,11 @@ function MainApp() {
     setCommandPaletteOpen(true);
   }, []);
 
+  const openInboxAndFocus = useCallback(() => {
+    setPersistedAppMode("inbox");
+    setInboxFocusTick((value) => value + 1);
+  }, [setPersistedAppMode]);
+
   const closeCommandPalette = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -3638,7 +3839,7 @@ function MainApp() {
           refreshActiveSurface();
           break;
         case "open-inbox":
-          setPersistedAppMode("inbox");
+          openInboxAndFocus();
           break;
         case "open-docs":
           setPersistedAppMode("pkm");
@@ -3665,6 +3866,7 @@ function MainApp() {
       openAddWorkspaceDialog,
       openNewDocumentDialog,
       openPreferences,
+      openInboxAndFocus,
       checkForUpdates,
       splitEditorRight,
       closeAllCleanTabs,
@@ -3684,6 +3886,7 @@ function MainApp() {
       "mod+shift+s": () => void snapshotCurrent(),
       "mod+n": openNewDocumentDialog,
       "mod+d": splitActiveSurfaceRight,
+      "mod+i": openInboxAndFocus,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
       "mod+shift+k": () => openSkillCompose(null),
       "mod+p": () =>
@@ -3711,6 +3914,7 @@ function MainApp() {
       saveCurrent,
       snapshotCurrent,
       focusSearch,
+      openInboxAndFocus,
       toggleLocale,
       refreshActiveSurface,
       navigateBack,
@@ -4167,6 +4371,7 @@ function MainApp() {
             refreshTrigger={gitRefreshTick}
             onCommitClick={activeWorkspaceCanModify ? handleCommitClick : undefined}
           />
+          <MissionBadge onError={setError} />
 
           <div className="topbar-spacer" />
 
@@ -4229,7 +4434,7 @@ function MainApp() {
           <button
             type="button"
             className={appMode === "inbox" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("inbox")}
+            onClick={openInboxAndFocus}
             title={t("mode.inbox")}
             aria-label={t("mode.inbox")}
           >
@@ -4317,6 +4522,8 @@ function MainApp() {
             gmailError={gmailError}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
+            focusRequest={inboxFocusTick}
+            actionBusy={inboxActionBusy}
             onRefresh={() => {
               void refreshInbox();
               void refreshGmail();
@@ -4325,6 +4532,9 @@ function MainApp() {
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
             onDecideGmail={decideGmailItem}
+            onBulkAccept={bulkAcceptInboxKeys}
+            onBulkReject={bulkRejectInboxKeys}
+            onBulkMoveFiles={bulkMoveInboxFiles}
           />
         ) : (
           <>
@@ -4714,6 +4924,7 @@ function MainApp() {
           onOpenChange={setInboxSettingsOpen}
           onSave={persistInboxSettings}
         />
+        {approvalGate.dialog}
         <ComposeDialog
           open={composeSeed !== null}
           skills={skills}

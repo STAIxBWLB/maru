@@ -186,7 +186,11 @@ fn validate_queue_source(path: &Path, kind: FileQueueSourceKind) -> Result<(), S
     }
 }
 
-fn copy_source(source: &Path, target: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
+pub(crate) fn copy_source(
+    source: &Path,
+    target: &Path,
+    kind: FileQueueSourceKind,
+) -> Result<(), String> {
     match kind {
         FileQueueSourceKind::File => {
             fs::copy(source, target).map_err(|err| format!("Cannot copy file: {err}"))?;
@@ -196,7 +200,11 @@ fn copy_source(source: &Path, target: &Path, kind: FileQueueSourceKind) -> Resul
     }
 }
 
-fn move_source(source: &Path, target: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
+pub(crate) fn move_source(
+    source: &Path,
+    target: &Path,
+    kind: FileQueueSourceKind,
+) -> Result<(), String> {
     match fs::rename(source, target) {
         Ok(()) => Ok(()),
         Err(_) => {
@@ -377,7 +385,7 @@ fn is_binary_file(path: &Path) -> bool {
     sample.contains(&0) || std::str::from_utf8(sample).is_err()
 }
 
-fn resolve_target_dir(vault: &Path, target_dir: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_target_dir(vault: &Path, target_dir: &str) -> Result<PathBuf, String> {
     let trimmed = target_dir.trim();
     let raw = if trimmed.is_empty() {
         PathBuf::from(".")
@@ -436,7 +444,7 @@ fn resolve_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
     Some(lexical_normalize(&canonical.join(suffix)))
 }
 
-fn unique_path(candidate: PathBuf) -> PathBuf {
+pub(crate) fn unique_path(candidate: PathBuf) -> PathBuf {
     if !candidate.exists() {
         return candidate;
     }

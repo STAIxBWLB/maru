@@ -25,9 +25,16 @@ import type {
   GitFileChange,
   GitStatus,
   GmailMessage,
+  GmailDecisionOutcome,
+  GmailDecisionRequest,
+  ApprovalDecision,
+  ApprovalRequest,
+  InboxAcceptRequest,
   InboxClassification,
+  InboxDecisionOutcome,
   InboxDropItem,
   InboxSettings,
+  MissionRecord,
   MemoDocument,
   MemoEntry,
   MemoFormat,
@@ -126,6 +133,130 @@ export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | 
 export async function scanInboxDrop(vaultPath: string): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
   return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath });
+}
+
+export async function prepareApproval(input: {
+  kind: string;
+  summary: string;
+  target?: string | null;
+  payloadPreview?: string | null;
+}): Promise<ApprovalRequest> {
+  if (!isTauri()) {
+    return {
+      id: `mock-approval-${Date.now()}`,
+      kind: input.kind,
+      summary: input.summary,
+      target: input.target ?? null,
+      payloadPreview: input.payloadPreview ?? null,
+      autoApproved: false,
+    };
+  }
+  return invoke<ApprovalRequest>("prepare_approval", {
+    kind: input.kind,
+    summary: input.summary,
+    target: input.target ?? null,
+    payloadPreview: input.payloadPreview ?? null,
+  });
+}
+
+export async function recordApproval(
+  id: string,
+  decision: ApprovalDecision,
+  rememberKind = false,
+): Promise<ApprovalRequest> {
+  if (!isTauri()) {
+    return {
+      id,
+      kind: "mock",
+      summary: "",
+      target: null,
+      payloadPreview: null,
+      autoApproved: false,
+    };
+  }
+  return invoke<ApprovalRequest>("record_approval", { id, decision, rememberKind });
+}
+
+export async function acceptInboxItem(
+  vaultPath: string,
+  id: string,
+  targetFolder: string,
+  approvalId: string,
+): Promise<InboxDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      id,
+      decision: "accepted",
+      sourcePath: id,
+      targetPath: `${targetFolder}/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<InboxDecisionOutcome>("accept_inbox_item", {
+    vaultPath,
+    id,
+    targetFolder,
+    approvalId,
+  });
+}
+
+export async function acceptInboxItems(
+  vaultPath: string,
+  items: InboxAcceptRequest[],
+  approvalId: string,
+): Promise<InboxDecisionOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => ({
+      id: item.id,
+      decision: "accepted",
+      sourcePath: item.id,
+      targetPath: `${item.targetFolder ?? "."}/${item.id.split("/").pop() ?? "file"}`,
+      fileName: item.id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDecisionOutcome[]>("accept_inbox_items", { vaultPath, items, approvalId });
+}
+
+export async function rejectInboxItem(
+  vaultPath: string,
+  id: string,
+  approvalId: string,
+): Promise<InboxDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      id,
+      decision: "rejected",
+      sourcePath: id,
+      targetPath: `inbox/rejected/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<InboxDecisionOutcome>("reject_inbox_item", { vaultPath, id, approvalId });
+}
+
+export async function rejectInboxItems(
+  vaultPath: string,
+  ids: string[],
+  approvalId: string,
+): Promise<InboxDecisionOutcome[]> {
+  if (!isTauri()) {
+    return ids.map((id) => ({
+      id,
+      decision: "rejected",
+      sourcePath: id,
+      targetPath: `inbox/rejected/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDecisionOutcome[]>("reject_inbox_items", { vaultPath, ids, approvalId });
 }
 
 export async function readDocument(
@@ -395,6 +526,18 @@ export async function startClaudeCliInvocation(
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs, extraEnv });
 }
 
+export async function listAiMissions(): Promise<MissionRecord[]> {
+  if (!isTauri()) return [];
+  return invoke<MissionRecord[]>("list_ai_missions");
+}
+
+export async function stopAiMission(invocationId: string): Promise<MissionRecord> {
+  if (!isTauri()) {
+    throw new Error("Mission stop is only available inside the Tauri shell.");
+  }
+  return invoke<MissionRecord>("stop_ai_mission", { invocationId });
+}
+
 // === Integrated terminal ===
 
 export function terminalAvailable(): boolean {
@@ -466,6 +609,52 @@ export async function fetchGmailUnread(
   const max = typeof maxOrVaultPath === "number" ? maxOrVaultPath : typeof queryOrMax === "number" ? queryOrMax : null;
   const query = typeof queryOrMax === "string" ? queryOrMax : maybeQuery;
   return invoke<GmailMessage[]>("fetch_gmail_unread", { vaultPath, max, query });
+}
+
+export async function decideGmailItem(
+  vaultPath: string | null,
+  messageId: string,
+  decision: "accepted" | "rejected",
+  approvalId: string,
+): Promise<GmailDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      messageId,
+      decision,
+      labelName: decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: decision === "accepted",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<GmailDecisionOutcome>("decide_gmail_item", {
+    vaultPath,
+    messageId,
+    decision,
+    approvalId,
+  });
+}
+
+export async function decideGmailItems(
+  vaultPath: string | null,
+  items: GmailDecisionRequest[],
+  approvalId: string,
+): Promise<GmailDecisionOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => ({
+      messageId: item.messageId,
+      decision: item.decision,
+      labelName: item.decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: item.decision === "accepted",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<GmailDecisionOutcome[]>("decide_gmail_items", {
+    vaultPath,
+    items,
+    approvalId,
+  });
 }
 
 export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {

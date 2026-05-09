@@ -5,12 +5,6 @@
 // `ai://error` if spawn fails). Both inbox classification (Phase 2) and
 // user-skill invocation (Phase 3) drive this surface.
 //
-// v1 deliberately omits kill/cancel. Anchor's invocation pattern is
-// "click → wait for the streamed answer", not long-running pipelines;
-// adding kill needs a global Child registry that we'd rather not pay for
-// before there's a UI button. When a kill button lands, the registry
-// goes here.
-
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
@@ -21,6 +15,7 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
+use crate::mission_state;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +93,7 @@ pub fn start_claude_cli_invocation(
             return Err(format_spawn_error(&err));
         }
     };
+    let child_pid = child.id();
 
     let stdout = child.stdout.take().ok_or_else(|| {
         "stdout_capture_failed: claude subprocess produced no stdout handle".to_string()
@@ -118,12 +114,14 @@ pub fn start_claude_cli_invocation(
         "stderr".to_string(),
         stderr,
     );
+    let _ = mission_state::register_mission(&app, &invocation_id, "claude", child_pid);
 
     // Reaper thread: wait for exit, then emit `ai://done` or `ai://error`.
     let app_done = app.clone();
     let id_done = invocation_id.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
+            mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
                 AiDoneEvent {
@@ -134,6 +132,7 @@ pub fn start_claude_cli_invocation(
             );
         }
         Err(err) => {
+            mission_state::fail_mission(&app_done, &id_done, &err.to_string());
             let _ = app_done.emit(
                 "ai://error",
                 AiErrorEvent {
@@ -164,9 +163,10 @@ where
                 AiOutputEvent {
                     invocation_id: invocation_id.clone(),
                     stream: stream_name.clone(),
-                    line,
+                    line: line.clone(),
                 },
             );
+            mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
     });
 }

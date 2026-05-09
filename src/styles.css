@@ -833,6 +833,35 @@ a {
   color: color-mix(in srgb, var(--accent) 68%, var(--muted));
 }
 
+.mission-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.mission-badge.running {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  color: var(--accent);
+}
+
+.mission-badge.idle {
+  border-color: color-mix(in srgb, var(--warning) 36%, var(--line));
+  color: var(--warning);
+}
+
+.mission-badge .icon-button {
+  width: 22px;
+  height: 22px;
+}
+
 .topbar-command-icon {
   display: none;
 }
@@ -3024,8 +3053,9 @@ button.git-badge:hover {
 
 .inbox-pane {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr auto;
   background: var(--panel);
+  outline: none;
 }
 
 .inbox-header {
@@ -3056,6 +3086,24 @@ button.git-badge:hover {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.inbox-cheatsheet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.inbox-cheatsheet span {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
 }
 
 .inbox-section {
@@ -3115,12 +3163,29 @@ button.git-badge:hover {
 
 .inbox-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 16px;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
+  cursor: default;
+}
+
+.inbox-item.focused {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.inbox-item.selected {
+  background: var(--active-surface);
+}
+
+.inbox-row-check {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  accent-color: var(--accent);
 }
 
 .inbox-item.accepted {
@@ -3221,6 +3286,22 @@ button.git-badge:hover {
 .decision-status {
   min-width: 48px;
   text-align: right;
+}
+
+.bulk-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  font-size: 12px;
 }
 
 .spin {
@@ -4438,6 +4519,63 @@ button.git-badge:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.approval-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.approval-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-body {
+  display: grid;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.approval-body p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.approval-target {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.approval-target span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.approval-preview {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.approval-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .skills-confirm-dialog {

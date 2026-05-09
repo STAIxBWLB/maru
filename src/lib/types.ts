@@ -133,6 +133,23 @@ export interface InboxDropItem {
   receivedAt: string | null;
 }
 
+export interface InboxAcceptRequest {
+  id: string;
+  targetFolder?: string | null;
+}
+
+export interface InboxDecisionOutcome {
+  id: string;
+  decision: InboxDecisionValue;
+  sourcePath: string;
+  targetPath: string | null;
+  fileName: string | null;
+  ok: boolean;
+  error: string | null;
+}
+
+export type InboxDecisionValue = "pending" | "accepted" | "rejected";
+
 /** Live filesystem event from the Rust `notify` watcher. Payload of the
  *  `inbox://file_event` Tauri event; mirrors `InboxFileEvent` in
  *  `src-tauri/src/inbox_watcher.rs`. */
@@ -161,6 +178,43 @@ export interface GmailMessage {
   from: string;
   subject: string;
   date: string;
+}
+
+export interface GmailDecisionRequest {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+}
+
+export interface GmailDecisionOutcome {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+  labelName: string;
+  archived: boolean;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  kind: string;
+  summary: string;
+  target: string | null;
+  payloadPreview: string | null;
+  autoApproved: boolean;
+}
+
+export type ApprovalDecision = "pending" | "approved" | "rejected";
+
+export type MissionStatus = "running" | "idle" | "done" | "failed" | "stopped";
+
+export interface MissionRecord {
+  id: string;
+  kind: string;
+  startedAt: string;
+  lastOutputAt: string;
+  status: MissionStatus;
+  exitCode: number | null;
+  outputLogPath: string | null;
 }
 
 /** Per-workspace inbox configuration persisted at `<workspace>/.anchor/inbox.json`. */

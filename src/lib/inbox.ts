@@ -59,3 +59,42 @@ export function categoryLabel(category: string): string {
       return "분류 없음";
   }
 }
+
+export function firstPendingInboxKey(
+  rows: Array<{ key: string; decision: InboxDecision }>,
+): string | null {
+  return rows.find((row) => row.decision === "pending")?.key ?? null;
+}
+
+export function nextInboxFocusKey(
+  rowKeys: string[],
+  currentKey: string | null,
+  delta: number,
+): string | null {
+  if (rowKeys.length === 0) return null;
+  const current = currentKey ? rowKeys.indexOf(currentKey) : -1;
+  const next = Math.max(0, Math.min(rowKeys.length - 1, current + delta));
+  return rowKeys[next] ?? null;
+}
+
+export function toggleInboxSelectionKeys(
+  rowKeys: string[],
+  selected: Set<string>,
+  key: string,
+  lastSelectedKey: string | null,
+  range: boolean,
+): Set<string> {
+  const next = new Set(selected);
+  if (range && lastSelectedKey) {
+    const from = rowKeys.indexOf(lastSelectedKey);
+    const to = rowKeys.indexOf(key);
+    if (from >= 0 && to >= 0) {
+      const [start, end] = from < to ? [from, to] : [to, from];
+      rowKeys.slice(start, end + 1).forEach((rowKey) => next.add(rowKey));
+      return next;
+    }
+  }
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
