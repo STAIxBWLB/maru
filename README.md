@@ -135,7 +135,17 @@ The `runtime: claude-code` lane is the v1 core — the user's `~/.claude/skills/
 Built-in skill assets live in the repo root `skills/` directory. The bundle is
 embedded into the Tauri binary and materialized into `~/.anchor/skills/_builtin`
 at runtime; `skills/envs/default/setup.sh` is the bootstrap source for
-`~/.anchor/env`. The external `stai-public` source is not auto-created.
+`~/.anchor/env`. Shared slide design catalogs live at
+`skills/docs/slide-decks/` and are also embedded with the bundle. The external
+`stai-public` source is not auto-created.
+
+**Slide deck catalog prep**:
+- V1 only bundles the shared style catalog and fixes its Anchor-local SSOT path.
+- Future Slides work should let the user choose a draft document or free prompt,
+  choose a design deck from `skills/docs/slide-decks`, then generate a slide
+  presentation using that selected design system.
+- The future feature should reuse the catalog rather than duplicating prompts
+  into individual skills or workspace documents.
 
 Five skills:
 1. **inbox-processor** — pick an inbox item → palette → run skill → show diff → stage.

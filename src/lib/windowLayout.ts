@@ -1,4 +1,5 @@
 import type { AnchorSettings, LayoutSettings } from "./settings";
+import { SKILL_EDITOR_OPEN_EVENT, type SkillEditorOpenPayload } from "./skillEditorEvents";
 
 type LayoutPatch = Partial<AnchorSettings["ui"]["layout"]>;
 
@@ -32,6 +33,41 @@ export async function openSettingsWindow(workPath: string | null): Promise<void>
   await new Promise<void>((resolve, reject) => {
     void settingsWindow.once("tauri://created", () => resolve());
     void settingsWindow.once("tauri://error", (event) => reject(event.payload));
+  });
+}
+
+export async function openSkillEditorWindow(
+  workPath: string | null,
+  skillId: string,
+): Promise<void> {
+  if (!tauriAvailable()) {
+    throw new Error("Skill editor requires the Tauri app.");
+  }
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const { emitTo } = await import("@tauri-apps/api/event");
+  const payload: SkillEditorOpenPayload = { workPath, skillId };
+  const existing = await WebviewWindow.getByLabel("skill-editor");
+  if (existing) {
+    await existing.setFocus();
+    await emitTo("skill-editor", SKILL_EDITOR_OPEN_EVENT, payload);
+    return;
+  }
+
+  const params = new URLSearchParams({ window: "skill-editor", skillId });
+  if (workPath) params.set("workPath", workPath);
+  const editorWindow = new WebviewWindow("skill-editor", {
+    url: `/?${params.toString()}`,
+    title: "Skill Editor",
+    width: 880,
+    height: 760,
+    minWidth: 640,
+    minHeight: 520,
+    resizable: true,
+    focus: true,
+  });
+  await new Promise<void>((resolve, reject) => {
+    void editorWindow.once("tauri://created", () => resolve());
+    void editorWindow.once("tauri://error", (event) => reject(event.payload));
   });
 }
 

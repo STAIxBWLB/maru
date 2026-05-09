@@ -32,6 +32,7 @@ import {
   ComposeDialog,
   type ComposeDialogSeed,
 } from "./components/skills/ComposeDialog";
+import { SkillEditorWindowRoot } from "./components/skills/SkillEditorWindow";
 import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
 import {
   applyFileQueue,
@@ -369,6 +370,14 @@ export default function App() {
     typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   if (params?.get("window") === "settings") {
     return <SettingsWindowRoot workPath={params.get("workPath")} />;
+  }
+  if (params?.get("window") === "skill-editor") {
+    return (
+      <SkillEditorWindowRoot
+        workPath={params.get("workPath")}
+        skillId={params.get("skillId")}
+      />
+    );
   }
   return <MainApp />;
 }

@@ -4,13 +4,15 @@
   "description": "Main window permissions for Anchor",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "skill-editor"
   ],
   "permissions": [
     "core:default",
     "core:app:allow-set-app-theme",
     "core:webview:allow-create-webview-window",
     "core:window:allow-available-monitors",
+    "core:window:allow-close",
     "core:window:allow-create",
     "core:window:allow-is-maximized",
     "core:window:allow-maximize",
@@ -19,6 +21,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
+    "core:window:allow-set-title",
     "core:window:allow-start-dragging",
     "dialog:default",
     "updater:default",

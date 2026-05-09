@@ -52,6 +52,10 @@ import {
   parseBinaryFileIncludePatternsText,
 } from "../lib/settings";
 import { normalizeAccentInput } from "../lib/theme";
+import {
+  SKILLS_UPDATED_EVENT,
+  type SkillsUpdatedPayload,
+} from "../lib/skillEditorEvents";
 import type {
   ImportItem,
   ImportPlan,
@@ -68,12 +72,9 @@ import {
   skillsListInstalls,
   skillsListSkills,
   skillsListSources,
-  skillsReadSkill,
   skillsRemoveSource,
   skillsRescanSource,
   skillsResetRegistry,
-  skillsSaveSkillAs,
-  skillsSaveSkillFile,
   skillsSyncSource,
   skillsUninstallSkill,
   type SkillInstall,
@@ -83,6 +84,7 @@ import {
   type SkillSource,
   type SkillsEnvStatus,
 } from "../lib/skills";
+import { openSkillEditorWindow } from "../lib/windowLayout";
 import { Button } from "./ui/Button";
 
 type SystemTab =
@@ -1026,9 +1028,6 @@ function SkillsTab({ workPath }: { workPath: string }) {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [installs, setInstalls] = useState<SkillInstall[]>([]);
   const [envStatus, setEnvStatus] = useState<SkillsEnvStatus | null>(null);
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [editorText, setEditorText] = useState("");
-  const [editorBase, setEditorBase] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSourceId, setNewSourceId] = useState("");
   const [newSourcePath, setNewSourcePath] = useState("");
@@ -1062,14 +1061,26 @@ function SkillsTab({ workPath }: { workPath: string }) {
     void refresh();
   }, [refresh]);
 
-  const selectedSkill = useMemo(
-    () => skills.find((skill) => skill.id === selectedSkillId) ?? null,
-    [selectedSkillId, skills],
-  );
-  const selectedSkillSource = useMemo(
-    () => sources.find((source) => source.id === selectedSkill?.sourceId) ?? null,
-    [selectedSkill, sources],
-  );
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<SkillsUpdatedPayload>(SKILLS_UPDATED_EVENT, (event) => {
+          if (event.payload.workPath === workPath) void refresh();
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refresh, workPath]);
+
   const installKey = useMemo(() => {
     const set = new Set<string>();
     installs.forEach((install) => set.add(`${install.skillId}:${install.target}`));
@@ -1361,90 +1372,14 @@ function SkillsTab({ workPath }: { workPath: string }) {
     [t],
   );
 
-  const loadEditor = useCallback(async (skill: SkillRecord) => {
+  const openSkillEditor = useCallback(async (skill: SkillRecord) => {
     setError(null);
     try {
-      const doc = await skillsReadSkill(skill.id);
-      setSelectedSkillId(doc.skill.id);
-      setEditorText(doc.content);
-      setEditorBase(doc.content);
+      await openSkillEditorWindow(workPath, skill.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
-
-  const saveEditor = useCallback(async () => {
-    if (!selectedSkill) return;
-    if (
-      !(await confirmAction(t("system.skills.saveSkillConfirm", { name: selectedSkill.name })))
-    ) {
-      return;
-    }
-    await runOperation(
-      t("system.skills.savingSkill", { name: selectedSkill.name }),
-      2,
-      async () => {
-        appendOperationLog(t("system.skills.log.saveSkill", { name: selectedSkill.name }));
-        await skillsSaveSkillFile(selectedSkill.id, "SKILL.md", editorText);
-        setEditorBase(editorText);
-        stepOperation();
-        appendOperationLog(t("system.skills.log.refreshSkills"));
-        await refresh();
-        stepOperation();
-        return selectedSkill.name;
-      },
-      (name) => t("system.skills.saveSkillComplete", { name }),
-    );
-  }, [
-    appendOperationLog,
-    confirmAction,
-    editorText,
-    refresh,
-    runOperation,
-    selectedSkill,
-    stepOperation,
-    t,
-  ]);
-
-  const saveEditorAs = useCallback(async () => {
-    if (!selectedSkill) return;
-    const rawName = window.prompt(
-      t("system.skills.saveAsPrompt"),
-      `${selectedSkill.name}-copy`,
-    );
-    const name = rawName?.trim();
-    if (!name) return;
-    if (
-      !(await confirmAction(t("system.skills.saveAsConfirm", { name })))
-    ) {
-      return;
-    }
-    await runOperation(
-      t("system.skills.savingSkillAs", { name }),
-      2,
-      async () => {
-        appendOperationLog(t("system.skills.log.saveSkillAs", { name }));
-        const created = await skillsSaveSkillAs(selectedSkill.id, name, editorText);
-        setSelectedSkillId(created.id);
-        setEditorBase(editorText);
-        stepOperation();
-        appendOperationLog(t("system.skills.log.refreshSkills"));
-        await refresh();
-        stepOperation();
-        return created.name;
-      },
-      (createdName) => t("system.skills.saveAsComplete", { name: createdName }),
-    );
-  }, [
-    appendOperationLog,
-    confirmAction,
-    editorText,
-    refresh,
-    runOperation,
-    selectedSkill,
-    stepOperation,
-    t,
-  ]);
+  }, [workPath]);
 
   const addSource = useCallback(async () => {
     const id = newSourceId.trim();
@@ -1559,11 +1494,6 @@ function SkillsTab({ workPath }: { workPath: string }) {
         appendOperationLog(t("system.skills.log.optimisticRemove", { id: source.id }));
         setSources((prev) => prev.filter((item) => item.id !== source.id));
         setSkills((prev) => prev.filter((skill) => skill.sourceId !== source.id));
-        if (selectedSkillId && removedSkillIds.has(selectedSkillId)) {
-          setSelectedSkillId(null);
-          setEditorText("");
-          setEditorBase("");
-        }
         setSelectedSkillIds((prev) => {
           const next = new Set([...prev].filter((skillId) => !removedSkillIds.has(skillId)));
           return next.size === prev.size ? prev : next;
@@ -1592,7 +1522,6 @@ function SkillsTab({ workPath }: { workPath: string }) {
       confirmAction,
       finishOperation,
       refresh,
-      selectedSkillId,
       skills,
       sourceHasInstalledSkills,
       startOperation,
@@ -1617,7 +1546,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
         await refresh();
         stepOperation();
         appendOperationLog(t("system.skills.log.openSkill", { name: skill.name }));
-        await loadEditor(skill);
+        await openSkillEditor(skill);
         stepOperation();
         return skill;
       },
@@ -1626,8 +1555,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
   }, [
     appendOperationLog,
     confirmAction,
-    loadEditor,
     newSkillName,
+    openSkillEditor,
     refresh,
     runOperation,
     stepOperation,
@@ -2351,11 +2280,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 const codexInstalled = installKey.has(`${skill.id}:codex`);
                 return (
                   <li
-                    className={
-                      selectedSkillId === skill.id
-                        ? "system-skill-card skill-card selected"
-                        : "system-skill-card skill-card"
-                    }
+                    className="system-skill-card skill-card"
                     key={skill.id}
                   >
                     <div className="skill-card-top">
@@ -2370,7 +2295,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                       <button
                         type="button"
                         className="skill-card-title"
-                        onClick={() => void loadEditor(skill)}
+                        onClick={() => void openSkillEditor(skill)}
                       >
                         <span>
                           {skill.name}
@@ -2408,7 +2333,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                       </span>
                     </div>
                     <div className="skill-card-actions">
-                      <Button variant="secondary" size="sm" onClick={() => void loadEditor(skill)}>
+                      <Button variant="secondary" size="sm" onClick={() => void openSkillEditor(skill)}>
                         {t("system.skills.edit")}
                       </Button>
                       <Button
@@ -2446,51 +2371,6 @@ function SkillsTab({ workPath }: { workPath: string }) {
             </ul>
           )}
         </section>
-
-        {selectedSkill ? (
-          <section className="skills-manager-section editor">
-            <div className="skills-editor-header">
-              <div>
-                <h3>{selectedSkill.name}</h3>
-                <p className="muted" title={selectedSkill.absPath}>{selectedSkill.relPath}</p>
-              </div>
-              {selectedSkill.dirty ? (
-                <span className="dirty-pill">
-                  {selectedSkillSource?.kind === "builtin"
-                    ? t("system.skills.builtinSourceDirty")
-                    : t("system.skills.linkedSourceDirty")}
-                </span>
-              ) : null}
-              <span className={editorText !== editorBase ? "save-state dirty" : "save-state saved"}>
-                {editorText !== editorBase ? t("system.rules.dirty") : t("system.rules.saved")}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void saveEditorAs()}
-                disabled={busy}
-                icon={<Save size={14} />}
-              >
-                {t("system.skills.saveAs")}
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void saveEditor()}
-                disabled={editorText === editorBase || busy}
-                icon={<Save size={14} />}
-              >
-                {t("system.mcp.save")}
-              </Button>
-            </div>
-            <textarea
-              className="source-editor skill-editor"
-              value={editorText}
-              onChange={(event) => setEditorText(event.target.value)}
-              spellCheck={false}
-            />
-          </section>
-        ) : null}
       </div>
       <Dialog.Root
         open={confirmState !== null}
