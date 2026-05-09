@@ -153,6 +153,21 @@ export interface InboxNamingConfig {
   route_file: string;
 }
 
+export interface InboxFileDropConfig {
+  channel: string;
+  drop_path: string;
+  operation: "copy";
+}
+
+export interface InboxGmailConfig {
+  enabled: boolean;
+  scan_window_days: number;
+  max_results: number;
+  unread_only: boolean;
+  query: string;
+  gws_path: string | null;
+}
+
 export interface InboxChannelConfig {
   provider: string;
   skill?: string | null;
@@ -168,6 +183,8 @@ export interface InboxRuntimeConfig {
   schema_version?: number | null;
   paths: InboxPathConfig;
   naming: InboxNamingConfig;
+  file_drop: InboxFileDropConfig;
+  gmail: InboxGmailConfig;
   dedupe?: Record<string, unknown>;
   channels: Record<string, InboxChannelConfig>;
   processing?: Record<string, unknown>;
@@ -210,6 +227,27 @@ export interface InboxDecisionOutcome {
 }
 
 export type InboxDecisionValue = "pending" | "accepted" | "rejected";
+
+export interface ScanOptions {
+  includeDotFolders: string[];
+}
+
+export interface InboxDropStageOutcome {
+  id: string;
+  sourcePath: string;
+  targetPath: string | null;
+  fileName: string | null;
+  channel: string;
+  dropPath: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface InboxDropStageRequest {
+  channel?: string | null;
+  dropPath?: string | null;
+  sourcePaths: string[];
+}
 
 /** Live filesystem event from the Rust `notify` watcher. Payload of the
  *  `inbox://file_event` Tauri event; mirrors `InboxFileEvent` in

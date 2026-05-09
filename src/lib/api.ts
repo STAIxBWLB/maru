@@ -33,7 +33,9 @@ import type {
   InboxClassification,
   InboxDecisionOutcome,
   InboxDropItem,
+  InboxDropStageOutcome,
   InboxEntry,
+  InboxDropStageRequest,
   InboxRuntimeConfig,
   InboxSettings,
   MissionRecord,
@@ -41,6 +43,7 @@ import type {
   MemoEntry,
   MemoFormat,
   StoredFileOutcome,
+  ScanOptions,
   VaultEntry,
   WorkspaceFileEntry,
   WorkspaceRegistry,
@@ -84,6 +87,19 @@ export const DEFAULT_INBOX_RUNTIME_CONFIG: InboxRuntimeConfig = {
     extracted_file: "extracted.md",
     summary_file: "summary.md",
     route_file: "route.md",
+  },
+  file_drop: {
+    channel: "incoming",
+    drop_path: "drop/incoming",
+    operation: "copy",
+  },
+  gmail: {
+    enabled: true,
+    scan_window_days: 14,
+    max_results: 20,
+    unread_only: true,
+    query: "",
+    gws_path: null,
   },
   dedupe: { default: "sha256" },
   channels: {
@@ -188,14 +204,17 @@ export async function chooseSaveFile(
   return typeof selected === "string" ? selected : null;
 }
 
-export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
+export async function scanVault(vaultPath: string, scanOptions?: ScanOptions): Promise<VaultEntry[]> {
   if (!isTauri()) return mockEntries(vaultPath);
-  return invoke<VaultEntry[]>("scan_vault", { vaultPath });
+  return invoke<VaultEntry[]>("scan_vault", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
-export async function scanWorkspaceFiles(vaultPath: string): Promise<WorkspaceFileEntry[]> {
+export async function scanWorkspaceFiles(
+  vaultPath: string,
+  scanOptions?: ScanOptions,
+): Promise<WorkspaceFileEntry[]> {
   if (!isTauri()) return mockWorkspaceFiles(vaultPath);
-  return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath });
+  return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
@@ -203,14 +222,38 @@ export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | 
   return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
 }
 
-export async function scanInboxDrop(vaultPath: string): Promise<InboxDropItem[]> {
+export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
-  return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath });
+  return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
-export async function scanInboxEntries(workPath: string): Promise<InboxEntry[]> {
+export async function scanInboxEntries(workPath: string, scanOptions?: ScanOptions): Promise<InboxEntry[]> {
   if (!isTauri()) return [];
-  return invoke<InboxEntry[]>("scan_inbox_entries", { workPath });
+  return invoke<InboxEntry[]>("scan_inbox_entries", { workPath, scanOptions: scanOptions ?? null });
+}
+
+export async function stageInboxDropFiles(
+  workPath: string,
+  request: InboxDropStageRequest,
+): Promise<InboxDropStageOutcome[]> {
+  if (!isTauri()) {
+    return request.sourcePaths.map((sourcePath) => ({
+      id: sourcePath,
+      sourcePath,
+      targetPath: `${workPath}/inbox/${request.dropPath ?? "drop/incoming"}/${sourcePath.split("/").pop() ?? "file"}`,
+      fileName: sourcePath.split("/").pop() ?? "file",
+      channel: request.channel ?? "incoming",
+      dropPath: request.dropPath ?? "drop/incoming",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDropStageOutcome[]>("stage_inbox_drop_files", {
+    workPath,
+    channel: request.channel ?? null,
+    dropPath: request.dropPath ?? null,
+    sourcePaths: request.sourcePaths,
+  });
 }
 
 export async function readInboxRuntimeConfig(workPath: string): Promise<InboxRuntimeConfig> {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildGmailMessageStates, shortFrom } from "./gmail";
+import {
+  buildGmailMessageStates,
+  buildGmailScanQuery,
+  normalizeGmailScanLimit,
+  shortFrom,
+} from "./gmail";
 
 describe("shortFrom", () => {
   it("returns empty string for empty input", () => {
@@ -46,5 +51,39 @@ describe("buildGmailMessageStates", () => {
     expect(result[0].decision).toBe("accepted");
     expect(result[1].decision).toBe("rejected");
     expect(result[2].decision).toBe("pending");
+  });
+});
+
+describe("buildGmailScanQuery", () => {
+  it("uses explicit query when provided", () => {
+    expect(
+      buildGmailScanQuery({
+        enabled: true,
+        scan_window_days: 14,
+        max_results: 20,
+        unread_only: true,
+        query: "label:work newer_than:7d",
+        gws_path: null,
+      }),
+    ).toBe("label:work newer_than:7d");
+  });
+
+  it("builds unread and scan-window query from structured fields", () => {
+    expect(
+      buildGmailScanQuery({
+        enabled: true,
+        scan_window_days: 30,
+        max_results: 20,
+        unread_only: true,
+        query: "",
+        gws_path: null,
+      }),
+    ).toBe("is:unread newer_than:30d");
+  });
+
+  it("clamps scan limits to gws-friendly bounds", () => {
+    expect(normalizeGmailScanLimit(0)).toBe(1);
+    expect(normalizeGmailScanLimit(250)).toBe(200);
+    expect(normalizeGmailScanLimit(42.8)).toBe(42);
   });
 });

@@ -20,7 +20,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
-use crate::inbox_settings;
+use crate::inbox_settings::{self, InboxGmailConfig};
 use crate::vault::resolve_inside_vault;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -113,12 +113,28 @@ pub fn fetch_gmail_unread(
     max: Option<u32>,
     query: Option<String>,
 ) -> Result<Vec<GmailMessage>, String> {
-    let max = max.unwrap_or(20).min(200);
+    let runtime_gmail = vault_path
+        .as_deref()
+        .and_then(|raw| resolve_inside_vault(raw, ".").ok())
+        .and_then(|vault| inbox_settings::load_runtime_config(&vault).ok().flatten())
+        .map(|config| config.gmail);
 
-    let override_path = vault_path.as_deref().and_then(|raw| {
-        let vault = resolve_inside_vault(raw, ".").ok()?;
-        inbox_settings::load(&vault).gws_path
-    });
+    if runtime_gmail.as_ref().is_some_and(|gmail| !gmail.enabled) {
+        return Ok(Vec::new());
+    }
+
+    let max = max
+        .or_else(|| runtime_gmail.as_ref().map(|gmail| gmail.max_results))
+        .unwrap_or(20)
+        .clamp(1, 200);
+    let query = match query {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ => runtime_gmail.as_ref().and_then(gmail_scan_query),
+    };
+
+    let override_path = vault_path
+        .as_deref()
+        .and_then(configured_gws_path_for_vault);
 
     let gws_bin = resolve_gws_path(override_path.as_deref()).ok_or_else(|| {
         "cli_missing: gws CLI not found. Install via `brew install gws` or set the path in inbox settings (https://github.com/googleworkspace/gws)"
@@ -129,11 +145,8 @@ pub fn fetch_gmail_unread(
     cmd.env("PATH", augmented_path());
     cmd.args(["gmail", "+triage", "--format", "json", "--max"])
         .arg(max.to_string());
-    if let Some(q) = query {
-        let trimmed = q.trim();
-        if !trimmed.is_empty() {
-            cmd.args(["--query", trimmed]);
-        }
+    if let Some(q) = query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        cmd.args(["--query", q]);
     }
 
     let output = cmd
@@ -237,14 +250,40 @@ fn decide_gmail_item_now(
 }
 
 fn resolve_gws_for_vault(vault_path: Option<&str>) -> Result<PathBuf, String> {
-    let override_path = vault_path.and_then(|raw| {
-        let vault = resolve_inside_vault(raw, ".").ok()?;
-        inbox_settings::load(&vault).gws_path
-    });
+    let override_path = vault_path.and_then(configured_gws_path_for_vault);
     resolve_gws_path(override_path.as_deref()).ok_or_else(|| {
         "cli_missing: gws CLI not found. Install via `brew install gws` or set the path in inbox settings (https://github.com/googleworkspace/gws)"
             .to_string()
     })
+}
+
+fn configured_gws_path_for_vault(raw: &str) -> Option<String> {
+    let vault = resolve_inside_vault(raw, ".").ok()?;
+    if let Ok(Some(config)) = inbox_settings::load_runtime_config(&vault) {
+        if let Some(path) = config.gmail.gws_path.filter(|path| !path.trim().is_empty()) {
+            return Some(path);
+        }
+    }
+    inbox_settings::load(&vault).gws_path
+}
+
+fn gmail_scan_query(config: &InboxGmailConfig) -> Option<String> {
+    let explicit = config.query.trim();
+    if !explicit.is_empty() {
+        return Some(explicit.to_string());
+    }
+    let mut terms = Vec::new();
+    if config.unread_only {
+        terms.push("is:unread".to_string());
+    }
+    if config.scan_window_days > 0 {
+        terms.push(format!("newer_than:{}d", config.scan_window_days));
+    }
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" "))
+    }
 }
 
 fn ensure_gmail_label(gws_bin: &PathBuf, name: &str) -> Result<GmailLabel, String> {
@@ -448,6 +487,32 @@ mod tests {
         assert!(parse_triage_output("not json").is_err());
         assert!(parse_triage_output("").is_err());
         assert!(parse_triage_output("   ").is_err());
+    }
+
+    #[test]
+    fn gmail_scan_query_uses_explicit_query() {
+        let config = InboxGmailConfig {
+            query: "label:work newer_than:7d".to_string(),
+            ..InboxGmailConfig::default()
+        };
+
+        assert_eq!(
+            gmail_scan_query(&config),
+            Some("label:work newer_than:7d".to_string())
+        );
+    }
+
+    #[test]
+    fn gmail_scan_query_builds_unread_window() {
+        let config = InboxGmailConfig {
+            scan_window_days: 30,
+            ..InboxGmailConfig::default()
+        };
+
+        assert_eq!(
+            gmail_scan_query(&config),
+            Some("is:unread newer_than:30d".to_string())
+        );
     }
 
     #[test]

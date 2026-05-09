@@ -1,10 +1,13 @@
 use crate::inbox_settings::{self, InboxRuntimeConfig, InboxSettings};
 use crate::vault::normalize_existing_dir;
 use crate::vault::{
-    lexical_normalize, load_anchorignore, matches_anchorignore, resolve_inside_vault,
+    lexical_normalize, load_anchorignore, matches_anchorignore, resolve_inside_vault, ScanFilter,
+    ScanOptions,
 };
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
-use crate::workspace_files::{move_source, resolve_target_dir, unique_path, FileQueueSourceKind};
+use crate::workspace_files::{
+    copy_source, move_source, resolve_target_dir, unique_path, FileQueueSourceKind,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -42,6 +45,28 @@ pub struct InboxDecisionOutcome {
     pub file_name: Option<String>,
     pub ok: bool,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxDropStageOutcome {
+    pub id: String,
+    pub source_path: String,
+    pub target_path: Option<String>,
+    pub file_name: Option<String>,
+    pub channel: String,
+    pub drop_path: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxDropStagedEvent {
+    pub work_path: String,
+    pub channel: String,
+    pub drop_path: String,
+    pub outcomes: Vec<InboxDropStageOutcome>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,17 +112,61 @@ const INBOX_FILE_REJECT_KIND: &str = "inbox.file.reject";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 
 #[tauri::command]
-pub fn scan_inbox_drop(vault_path: String) -> Result<Vec<InboxDropItem>, String> {
+pub fn scan_inbox_drop(
+    vault_path: String,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<InboxDropItem>, String> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
+    let scan_filter = ScanFilter::from_options(scan_options)?;
     let settings = inbox_settings::load(&vault);
-    scan_inbox_with_settings(&vault, &settings)
+    scan_inbox_with_settings(&vault, &settings, &scan_filter)
 }
 
 #[tauri::command]
-pub fn scan_inbox_entries(work_path: String) -> Result<Vec<InboxEntry>, String> {
+pub fn scan_inbox_entries(
+    work_path: String,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<InboxEntry>, String> {
     let work = resolve_inside_vault(&work_path, ".")?;
+    let scan_filter = ScanFilter::from_options(scan_options)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
-    scan_inbox_entries_with_config(&work, &config)
+    scan_inbox_entries_with_config(&work, &config, &scan_filter)
+}
+
+#[tauri::command]
+pub fn stage_inbox_drop_files(
+    app: AppHandle,
+    work_path: String,
+    channel: Option<String>,
+    drop_path: Option<String>,
+    source_paths: Vec<String>,
+) -> Result<Vec<InboxDropStageOutcome>, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    assert_anchor_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Create)?;
+    let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
+    let target = resolve_file_drop_target(&work, &config, channel, drop_path)?;
+    fs::create_dir_all(&target.target_dir)
+        .map_err(|err| format!("Cannot create inbox drop directory: {err}"))?;
+    if !target.target_dir.is_dir() {
+        return Err("inbox_drop_target_not_directory".to_string());
+    }
+
+    let mut outcomes = Vec::new();
+    for source in source_paths {
+        outcomes.push(stage_one_drop_file(&target, source));
+    }
+    if outcomes.iter().any(|outcome| outcome.ok) {
+        let _ = app.emit(
+            "inbox://drop_staged",
+            InboxDropStagedEvent {
+                work_path: work.to_string_lossy().to_string(),
+                channel: target.channel.clone(),
+                drop_path: target.drop_path.clone(),
+                outcomes: outcomes.clone(),
+            },
+        );
+    }
+    Ok(outcomes)
 }
 
 #[tauri::command]
@@ -188,6 +257,7 @@ pub fn reject_inbox_items(
 fn scan_inbox_with_settings(
     vault: &Path,
     settings: &InboxSettings,
+    scan_filter: &ScanFilter,
 ) -> Result<Vec<InboxDropItem>, String> {
     let inbox_root = resolve_inside_vault(&vault.to_string_lossy(), settings.inbox_root.as_str())?;
     if !inbox_root.exists() {
@@ -204,15 +274,23 @@ fn scan_inbox_with_settings(
     let allow_all_sources = settings.sources.is_empty();
 
     let mut items = Vec::new();
-    for entry in WalkDir::new(&inbox_root).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(&inbox_root)
+        .into_iter()
+        .filter_entry(|entry| {
+            let path = entry.path();
+            if scan_filter.is_excluded_path(path, vault, &[]) {
+                return false;
+            }
+            let rel = path.strip_prefix(vault).unwrap_or(path);
+            !matches_anchorignore(rel, &ignore_patterns)
+        })
+        .filter_map(Result::ok)
+    {
         if !entry.file_type().is_file() {
             continue;
         }
         let path = lexical_normalize(entry.path());
         let rel_to_vault = path.strip_prefix(vault).unwrap_or(&path).to_path_buf();
-        if matches_anchorignore(&rel_to_vault, &ignore_patterns) {
-            continue;
-        }
         let metadata =
             fs::metadata(&path).map_err(|err| format!("Cannot read inbox item metadata: {err}"))?;
         let rel_path = rel_to_vault.to_string_lossy().to_string();
@@ -259,6 +337,7 @@ fn scan_inbox_with_settings(
 fn scan_inbox_entries_with_config(
     work: &Path,
     config: &InboxRuntimeConfig,
+    scan_filter: &ScanFilter,
 ) -> Result<Vec<InboxEntry>, String> {
     let root = inbox_settings::resolve_runtime_root(work, config)?;
     let ignore_patterns = load_anchorignore(work);
@@ -276,13 +355,24 @@ fn scan_inbox_entries_with_config(
                     drop_root.display()
                 ));
             }
-            for entry in WalkDir::new(&drop_root).into_iter().filter_map(Result::ok) {
+            for entry in WalkDir::new(&drop_root)
+                .into_iter()
+                .filter_entry(|entry| {
+                    let path = entry.path();
+                    if scan_filter.is_excluded_path(path, work, &[]) {
+                        return false;
+                    }
+                    let rel = path.strip_prefix(work).unwrap_or(path);
+                    !matches_anchorignore(rel, &ignore_patterns)
+                })
+                .filter_map(Result::ok)
+            {
                 if !entry.file_type().is_file() {
                     continue;
                 }
                 let path = inbox_settings::lexical_normalize_path(entry.path());
                 let rel_to_work = path.strip_prefix(work).unwrap_or(&path).to_path_buf();
-                if matches_anchorignore(&rel_to_work, &ignore_patterns) || is_inbox_noise(&path) {
+                if is_inbox_noise(&path) {
                     continue;
                 }
                 let metadata = fs::metadata(&path)
@@ -327,6 +417,14 @@ fn scan_inbox_entries_with_config(
         for entry in WalkDir::new(&pending_root)
             .min_depth(1)
             .into_iter()
+            .filter_entry(|entry| {
+                let path = entry.path();
+                if scan_filter.is_excluded_path(path, work, &[]) {
+                    return false;
+                }
+                let rel = path.strip_prefix(work).unwrap_or(path);
+                !matches_anchorignore(rel, &ignore_patterns)
+            })
             .filter_map(Result::ok)
         {
             if !entry.file_type().is_file()
@@ -419,6 +517,141 @@ fn is_inbox_noise(path: &Path) -> bool {
         path.file_name().and_then(|name| name.to_str()),
         Some(".DS_Store" | ".gitkeep" | ".keep" | "Thumbs.db")
     )
+}
+
+#[derive(Debug)]
+struct ResolvedFileDropTarget {
+    channel: String,
+    drop_path: String,
+    target_dir: PathBuf,
+}
+
+fn resolve_file_drop_target(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    channel_override: Option<String>,
+    drop_path_override: Option<String>,
+) -> Result<ResolvedFileDropTarget, String> {
+    let root = inbox_settings::resolve_runtime_root(work, config)?;
+    let explicit = channel_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+        || drop_path_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some();
+
+    let configured_channel = channel_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(config.file_drop.channel.as_str());
+    let configured_drop_path = drop_path_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(config.file_drop.drop_path.as_str());
+
+    if let Some(channel) = config.channels.get(configured_channel) {
+        if channel
+            .drop_paths
+            .iter()
+            .any(|path| path == configured_drop_path)
+        {
+            return resolved_drop_target(&root, configured_channel, configured_drop_path);
+        }
+        if explicit {
+            return Err(format!(
+                "drop_path_not_registered_for_channel: {configured_channel}/{configured_drop_path}"
+            ));
+        }
+    } else if explicit {
+        return Err(format!("unknown_inbox_channel: {configured_channel}"));
+    }
+
+    let Some((fallback_channel, fallback)) = config
+        .channels
+        .iter()
+        .find_map(|(key, channel)| channel.drop_paths.first().map(|path| (key, path)))
+    else {
+        return Err("no_inbox_drop_path_configured".to_string());
+    };
+    resolved_drop_target(&root, fallback_channel, fallback)
+}
+
+fn resolved_drop_target(
+    root: &Path,
+    channel: &str,
+    drop_path: &str,
+) -> Result<ResolvedFileDropTarget, String> {
+    let target_dir = inbox_settings::lexical_normalize_path(&root.join(drop_path));
+    if !target_dir.starts_with(root) {
+        return Err(format!("drop_path_outside_inbox: {drop_path}"));
+    }
+    Ok(ResolvedFileDropTarget {
+        channel: channel.to_string(),
+        drop_path: drop_path.to_string(),
+        target_dir,
+    })
+}
+
+fn stage_one_drop_file(target: &ResolvedFileDropTarget, source: String) -> InboxDropStageOutcome {
+    let source_path = PathBuf::from(&source);
+    match stage_one_drop_file_result(target, &source_path) {
+        Ok((target_path, file_name)) => InboxDropStageOutcome {
+            id: source.clone(),
+            source_path: source,
+            target_path: Some(target_path.to_string_lossy().to_string()),
+            file_name: Some(file_name),
+            channel: target.channel.clone(),
+            drop_path: target.drop_path.clone(),
+            ok: true,
+            error: None,
+        },
+        Err(error) => InboxDropStageOutcome {
+            id: source.clone(),
+            source_path: source,
+            target_path: None,
+            file_name: None,
+            channel: target.channel.clone(),
+            drop_path: target.drop_path.clone(),
+            ok: false,
+            error: Some(error),
+        },
+    }
+}
+
+fn stage_one_drop_file_result(
+    target: &ResolvedFileDropTarget,
+    source_path: &Path,
+) -> Result<(PathBuf, String), String> {
+    let metadata =
+        fs::symlink_metadata(source_path).map_err(|err| format!("Cannot inspect source: {err}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "Source symlinks are not supported: {}",
+            source_path.display()
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(format!("Source is not a file: {}", source_path.display()));
+    }
+    let file_name = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Source file name is not valid UTF-8".to_string())?
+        .to_string();
+    let target_path = unique_path(target.target_dir.join(&file_name));
+    copy_source(source_path, &target_path, FileQueueSourceKind::File)?;
+    let final_name = target_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&file_name)
+        .to_string();
+    Ok((target_path, final_name))
 }
 
 fn accept_inbox_item_at(
@@ -553,7 +786,7 @@ mod tests {
     #[test]
     fn scan_inbox_drop_returns_empty_when_folder_is_absent() {
         let tmp = TempDir::new().unwrap();
-        let items = scan_inbox_drop(tmp.path().to_string_lossy().to_string()).unwrap();
+        let items = scan_inbox_drop(tmp.path().to_string_lossy().to_string(), None).unwrap();
 
         assert!(items.is_empty());
     }
@@ -565,7 +798,7 @@ mod tests {
         fs::create_dir_all(root.join("inbox/downloads/gmail")).unwrap();
         fs::write(root.join("inbox/downloads/gmail/report.pdf"), b"pdf").unwrap();
 
-        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+        let items = scan_inbox_drop(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].source, "gmail");
@@ -583,10 +816,39 @@ mod tests {
         fs::write(root.join("inbox/downloads/sharepoint/.gitkeep"), b"").unwrap();
         fs::write(root.join("inbox/downloads/outlook/real.pdf"), b"abc").unwrap();
 
-        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+        let items = scan_inbox_drop(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "real.pdf");
+    }
+
+    #[test]
+    fn scan_inbox_drop_skips_dot_folders_unless_allowlisted() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("inbox/downloads/kakao/.omc/state")).unwrap();
+        fs::write(
+            root.join("inbox/downloads/kakao/.omc/state/replay.jsonl"),
+            b"junk",
+        )
+        .unwrap();
+        fs::write(root.join("inbox/downloads/kakao/real.txt"), b"real").unwrap();
+
+        let default_items = scan_inbox_drop(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(default_items.len(), 1);
+        assert_eq!(default_items[0].title, "real.txt");
+
+        let allowlisted = scan_inbox_drop(
+            root.to_string_lossy().to_string(),
+            Some(ScanOptions {
+                include_dot_folders: vec!["inbox/downloads/kakao/.omc".to_string()],
+            }),
+        )
+        .unwrap();
+        assert_eq!(allowlisted.len(), 2);
+        assert!(allowlisted
+            .iter()
+            .any(|item| item.rel_path.ends_with("replay.jsonl")));
     }
 
     #[test]
@@ -602,7 +864,7 @@ mod tests {
         )
         .unwrap();
 
-        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+        let items = scan_inbox_drop(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].source, "alpha");
@@ -624,7 +886,7 @@ mod tests {
         )
         .unwrap();
 
-        let items = scan_inbox_drop(root.to_string_lossy().to_string()).unwrap();
+        let items = scan_inbox_drop(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].source, "outlook");
@@ -719,6 +981,71 @@ mod tests {
     }
 
     #[test]
+    fn stage_drop_file_copies_to_configured_target_with_conflict_safe_name() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let source_dir = TempDir::new().unwrap();
+        let source = source_dir.path().join("report.pdf");
+        fs::write(&source, b"new").unwrap();
+        fs::create_dir_all(root.join("inbox/drop/incoming")).unwrap();
+        fs::write(root.join("inbox/drop/incoming/report.pdf"), b"old").unwrap();
+
+        let config = InboxRuntimeConfig::default();
+        let target = resolve_file_drop_target(&root, &config, None, None).unwrap();
+        let outcome = stage_one_drop_file(&target, source.to_string_lossy().to_string());
+
+        assert!(outcome.ok);
+        assert_eq!(outcome.channel, "incoming");
+        assert_eq!(outcome.drop_path, "drop/incoming");
+        assert_eq!(outcome.file_name.as_deref(), Some("report-copy.pdf"));
+        assert_eq!(
+            fs::read(root.join("inbox/drop/incoming/report-copy.pdf")).unwrap(),
+            b"new"
+        );
+        assert!(source.exists(), "staging is copy-only");
+    }
+
+    #[test]
+    fn stage_drop_file_rejects_directory_sources() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("inbox/drop/incoming")).unwrap();
+        let source_dir = TempDir::new().unwrap();
+
+        let config = InboxRuntimeConfig::default();
+        let target = resolve_file_drop_target(&root, &config, None, None).unwrap();
+        let outcome = stage_one_drop_file(&target, source_dir.path().to_string_lossy().to_string());
+
+        assert!(!outcome.ok);
+        assert!(outcome.error.as_deref().unwrap().contains("not a file"));
+    }
+
+    #[test]
+    fn explicit_drop_target_must_match_registered_channel_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let config = InboxRuntimeConfig::default();
+
+        let unknown = resolve_file_drop_target(
+            &root,
+            &config,
+            Some("missing".to_string()),
+            Some("drop/missing".to_string()),
+        )
+        .unwrap_err();
+        assert!(unknown.contains("unknown_inbox_channel"));
+
+        let unregistered = resolve_file_drop_target(
+            &root,
+            &config,
+            Some("incoming".to_string()),
+            Some("drop/other".to_string()),
+        )
+        .unwrap_err();
+        assert!(unregistered.contains("drop_path_not_registered"));
+    }
+
+    #[test]
     fn scan_inbox_entries_reads_configured_drop_files_and_pending_manifests() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -772,7 +1099,7 @@ metadata:
         )
         .unwrap();
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(entries.len(), 2);
         let drop_entry = entries
@@ -798,6 +1125,50 @@ metadata:
     }
 
     #[test]
+    fn scan_inbox_entries_skips_dot_folders_unless_allowlisted() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            r#"
+inbox:
+  root: inbox
+  channels:
+    kakao:
+      provider: kakao
+      kind: bundle
+      dedupe: sha256
+      drop_paths:
+        - drop/kakao
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("inbox/drop/kakao/.omc/state")).unwrap();
+        fs::write(
+            root.join("inbox/drop/kakao/.omc/state/replay.jsonl"),
+            b"junk",
+        )
+        .unwrap();
+        fs::write(root.join("inbox/drop/kakao/real.txt"), b"real").unwrap();
+
+        let default_entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(default_entries.len(), 1);
+        assert_eq!(default_entries[0].title, "real.txt");
+
+        let allowlisted = scan_inbox_entries(
+            root.to_string_lossy().to_string(),
+            Some(ScanOptions {
+                include_dot_folders: vec!["inbox/drop/kakao/.omc".to_string()],
+            }),
+        )
+        .unwrap();
+        assert_eq!(allowlisted.len(), 2);
+        assert!(allowlisted
+            .iter()
+            .any(|entry| entry.rel_path.ends_with("replay.jsonl")));
+    }
+
+    #[test]
     fn scan_inbox_entries_uses_legacy_settings_when_workspace_config_has_no_inbox() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -810,7 +1181,7 @@ metadata:
         fs::create_dir_all(root.join("incoming/spool/alpha")).unwrap();
         fs::write(root.join("incoming/spool/alpha/note.md"), b"legacy").unwrap();
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, "dropFile");

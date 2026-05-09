@@ -68,6 +68,7 @@ import {
   scanWorkspaceFiles,
   scanVault,
   setActiveWorkspaceRoot,
+  stageInboxDropFiles,
   startInboxWatcher,
   stopInboxWatcher,
   trashDocument,
@@ -99,7 +100,12 @@ import {
   type DocumentFilter,
   type DocumentIndex,
 } from "./lib/documentIndex";
-import { buildGmailMessageStates, type GmailMessageState } from "./lib/gmail";
+import {
+  buildGmailMessageStates,
+  buildGmailScanQuery,
+  normalizeGmailScanLimit,
+  type GmailMessageState,
+} from "./lib/gmail";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
 import {
@@ -660,10 +666,8 @@ function MainApp() {
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
 
-  // Gmail surface (gws CLI). Sibling section in InboxPane; lives in
-  // memory only — accept/reject decisions are not yet propagated back
-  // to Gmail labels (follow-up). Empty `gmailError` distinguishes "not
-  // yet fetched" from "fetched, no unread".
+  // Gmail surface (gws CLI). Sibling section in InboxPane; list state is
+  // memory-only, while accept/reject calls write labels/archive through gws.
   const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailError, setGmailError] = useState<string | null>(null);
@@ -684,6 +688,10 @@ function MainApp() {
   );
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [, startExplorerTransition] = useTransition();
+  const scanOptions = useMemo(
+    () => ({ includeDotFolders: anchorSettings.scan.includeDotFolders }),
+    [anchorSettings.scan.includeDotFolders],
+  );
 
   const privateWorkspaces = useMemo(
     () => workspaceRegistry.workspaces.filter((workspace) => workspace.visibility === "private"),
@@ -1574,18 +1582,30 @@ function MainApp() {
     [gmailMessages, gmailDecisions],
   );
 
-  const refreshGmail = useCallback(async () => {
+  const refreshGmail = useCallback(async (runtimeOverride?: InboxRuntimeConfig) => {
+    const runtime = runtimeOverride ?? inboxRuntimeConfig;
+    const gmailConfig = runtime.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
+    if (!gmailConfig.enabled) {
+      setGmailMessages([]);
+      setGmailError(null);
+      setGmailLoading(false);
+      return;
+    }
     setGmailLoading(true);
     setGmailError(null);
     try {
-      const messages = await fetchGmailUnread(inboxWorkspacePath, 20);
+      const messages = await fetchGmailUnread(
+        inboxWorkspacePath,
+        normalizeGmailScanLimit(gmailConfig.max_results),
+        buildGmailScanQuery(gmailConfig),
+      );
       setGmailMessages(messages);
     } catch (err) {
       setGmailError(err instanceof Error ? err.message : String(err));
     } finally {
       setGmailLoading(false);
     }
-  }, [inboxWorkspacePath]);
+  }, [inboxRuntimeConfig, inboxWorkspacePath]);
 
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
@@ -1597,8 +1617,8 @@ function MainApp() {
     setError(null);
     try {
       const [drops, entries] = await Promise.all([
-        scanInboxDrop(inboxWorkspacePath),
-        scanInboxEntries(inboxWorkspacePath),
+        scanInboxDrop(inboxWorkspacePath, scanOptions),
+        scanInboxEntries(inboxWorkspacePath, scanOptions),
       ]);
       setInboxDrops(drops);
       setInboxEntries(entries);
@@ -1607,7 +1627,7 @@ function MainApp() {
     } finally {
       setInboxLoading(false);
     }
-  }, [inboxWorkspacePath]);
+  }, [inboxWorkspacePath, scanOptions]);
 
   const updateInboxCarry = useCallback(
     (id: string, patch: Partial<InboxCarry>) => {
@@ -1890,6 +1910,46 @@ function MainApp() {
     [inboxEntries, inboxRuntimeConfig, inboxWorkspacePath, skills],
   );
 
+  const stageInboxFiles = useCallback(
+    async (sourcePaths: string[]) => {
+      if (!inboxWorkspacePath || sourcePaths.length === 0) return;
+      setInboxActionBusy(true);
+      setError(null);
+      try {
+        const outcomes = await stageInboxDropFiles(inboxWorkspacePath, { sourcePaths });
+        const failed = outcomes.filter((outcome) => !outcome.ok);
+        if (failed.length > 0) {
+          setError(
+            failed
+              .map((outcome) => outcome.error ?? `Cannot stage ${outcome.sourcePath}`)
+              .join("\n"),
+          );
+        }
+        await refreshInbox();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInboxActionBusy(false);
+      }
+    },
+    [inboxWorkspacePath, refreshInbox],
+  );
+
+  const setInboxCollapsedSections = useCallback(
+    (sections: AnchorSettings["ui"]["inboxCollapsedSections"]) => {
+      updateSettings((current) =>
+        normalizeAnchorSettings({
+          ...current,
+          ui: {
+            ...current.ui,
+            inboxCollapsedSections: sections,
+          },
+        }),
+      );
+    },
+    [updateSettings],
+  );
+
   const classifyItem = useCallback(
     async (id: string) => {
       const target = inboxDrops.find((drop) => drop.id === id);
@@ -1948,15 +2008,12 @@ function MainApp() {
     };
   }, [inboxWorkspacePath, refreshInbox]);
 
-  // First entry into Inbox mode triggers a Gmail fetch. Subsequent
-  // refreshes are user-driven via the refresh button / ⌘R.
+  // Entering Inbox and changing Gmail runtime settings both refresh the
+  // envelope list. Message bodies are never fetched.
   useEffect(() => {
     if (appMode !== "inbox") return;
-    if (gmailMessages.length > 0 || gmailLoading) return;
     void refreshGmail();
-    // Only refire on appMode transitions, not on gmail state changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appMode]);
+  }, [appMode, refreshGmail]);
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.
@@ -2021,7 +2078,7 @@ function MainApp() {
     async (path: string, initial = false) => {
       updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
       try {
-        const files = await scanWorkspaceFiles(path);
+        const files = await scanWorkspaceFiles(path, scanOptions);
         updateWorkspaceFileState(path, {
           entries: files,
           loading: false,
@@ -2032,7 +2089,7 @@ function MainApp() {
         updateWorkspaceFileState(path, { loading: false, refreshing: false });
       }
     },
-    [updateWorkspaceFileState],
+    [scanOptions, updateWorkspaceFileState],
   );
 
   useEffect(() => {
@@ -2174,7 +2231,7 @@ function MainApp() {
       const runAuthoritativeScan = async (paintAfterScan: boolean) => {
         if (!paintAfterScan) updateWorkspaceState(path, { refreshing: true });
         try {
-          const fresh = await scanVault(path);
+          const fresh = await scanVault(path, scanOptions);
           if (requestId !== loadWorkspaceRequestRef.current) return;
           if (paintAfterScan) {
             await restorePrimaryTab(fresh);
@@ -2207,7 +2264,7 @@ function MainApp() {
         await runAuthoritativeScan(true);
       }
     },
-    [pushRecent, readStoredTabsForWorkspace, tabs, updateWorkspaceState],
+    [pushRecent, readStoredTabsForWorkspace, scanOptions, tabs, updateWorkspaceState],
   );
 
   const switchActiveWorkspace = useCallback(
@@ -2761,7 +2818,7 @@ function MainApp() {
       }
       for (const workspacePath of groups.keys()) {
         await refreshWorkspaceFiles(workspacePath);
-        const fresh = await scanVault(workspacePath);
+        const fresh = await scanVault(workspacePath, scanOptions);
         updateWorkspaceState(workspacePath, { entries: fresh });
       }
       return outcomes;
@@ -2781,6 +2838,7 @@ function MainApp() {
   }, [
     fileQueue,
     refreshWorkspaceFiles,
+    scanOptions,
     t,
     updateWorkspaceState,
     workspaceRegistry.workspaces,
@@ -2896,7 +2954,7 @@ function MainApp() {
         target.document.path,
         target.draftContent,
       );
-      const fresh = await scanVault(target.workspacePath);
+      const fresh = await scanVault(target.workspacePath, scanOptions);
       updateWorkspaceState(target.workspacePath, { entries: fresh });
       void refreshWorkspaceFiles(target.workspacePath);
       setTabs((prev) =>
@@ -2916,6 +2974,7 @@ function MainApp() {
     t,
     tabs,
     refreshWorkspaceFiles,
+    scanOptions,
     updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
@@ -2947,7 +3006,7 @@ function MainApp() {
         target.draftContent,
         t("snapshot.summary"),
       );
-      const fresh = await scanVault(target.workspacePath);
+      const fresh = await scanVault(target.workspacePath, scanOptions);
       updateWorkspaceState(target.workspacePath, { entries: fresh });
       void refreshWorkspaceFiles(target.workspacePath);
       setTabs((prev) =>
@@ -2965,6 +3024,7 @@ function MainApp() {
     t,
     tabs,
     refreshWorkspaceFiles,
+    scanOptions,
     updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
@@ -2984,7 +3044,7 @@ function MainApp() {
         body,
         targetRelPath,
       );
-      const fresh = await scanVault(activeDocumentWorkspacePath);
+      const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
       updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
       void refreshWorkspaceFiles(activeDocumentWorkspacePath);
       const entry =
@@ -3026,6 +3086,7 @@ function MainApp() {
       pushRecent,
       blockWorkspaceWrite,
       refreshWorkspaceFiles,
+      scanOptions,
       updateWorkspaceState,
     ],
   );
@@ -3061,7 +3122,7 @@ function MainApp() {
         );
         // Refresh draft only when there are no unsaved body edits — never
         // clobber the textarea with an inspector-driven write.
-        const fresh = await scanVault(activeDocumentWorkspacePath);
+        const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
         updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
         void refreshWorkspaceFiles(activeDocumentWorkspacePath);
         updateActiveTab((tab) => {
@@ -3299,13 +3360,13 @@ function MainApp() {
 
   const refreshAfterDocumentMutation = useCallback(
     async (workspacePath: string) => {
-      const fresh = await scanVault(workspacePath);
+      const fresh = await scanVault(workspacePath, scanOptions);
       updateWorkspaceState(workspacePath, { entries: fresh });
       await refreshWorkspaceFiles(workspacePath);
       setGitRefreshTick((n) => n + 1);
       return fresh;
     },
-    [refreshWorkspaceFiles, updateWorkspaceState],
+    [refreshWorkspaceFiles, scanOptions, updateWorkspaceState],
   );
 
   const entryFromPayload = useCallback(
@@ -4621,6 +4682,9 @@ function MainApp() {
             gmailError={gmailError}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
+            collapsedSections={anchorSettings.ui.inboxCollapsedSections}
+            onCollapsedSectionsChange={setInboxCollapsedSections}
+            fileDropTarget={inboxRuntimeConfig.file_drop}
             focusRequest={inboxFocusTick}
             actionBusy={inboxActionBusy}
             onRefresh={() => {
@@ -4636,6 +4700,7 @@ function MainApp() {
             onBulkMoveFiles={bulkMoveInboxFiles}
             onProcessEntries={(keys) => void processInboxKeys(keys)}
             onProcessChannel={(channel) => void processInboxKeys([], channel)}
+            onStageFiles={(paths) => void stageInboxFiles(paths)}
           />
         ) : (
           <>

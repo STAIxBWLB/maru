@@ -42,7 +42,7 @@ use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
 use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
 use inbox::{
     accept_inbox_item, accept_inbox_items, reject_inbox_item, reject_inbox_items, scan_inbox_drop,
-    scan_inbox_entries,
+    scan_inbox_entries, stage_inbox_drop_files,
 };
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_settings::{
@@ -118,6 +118,7 @@ pub fn run() {
             reveal_in_file_manager,
             scan_inbox_drop,
             scan_inbox_entries,
+            stage_inbox_drop_files,
             accept_inbox_item,
             accept_inbox_items,
             reject_inbox_item,

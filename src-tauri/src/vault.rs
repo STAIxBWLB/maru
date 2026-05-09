@@ -66,6 +66,92 @@ pub struct FrontmatterParts {
     pub body: String,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanOptions {
+    #[serde(default)]
+    pub include_dot_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ScanFilter {
+    include_dot_folders: Vec<PathBuf>,
+}
+
+impl ScanFilter {
+    pub fn from_options(options: Option<ScanOptions>) -> Result<Self, String> {
+        let Some(options) = options else {
+            return Ok(Self::default());
+        };
+        let mut include_dot_folders = Vec::new();
+        for raw in options.include_dot_folders {
+            let trimmed = raw.trim().replace('\\', "/");
+            let normalized = trimmed.trim_matches('/').to_string();
+            if normalized.is_empty() {
+                return Err("dot_folder_include_required".to_string());
+            }
+            if normalized.contains('*') || normalized.contains('?') {
+                return Err(format!("dot_folder_include_glob_unsupported: {normalized}"));
+            }
+            let path = Path::new(&normalized);
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir))
+            {
+                return Err(format!(
+                    "dot_folder_include_outside_workspace: {normalized}"
+                ));
+            }
+            let has_dot_segment = path.components().any(|component| {
+                matches!(component, Component::Normal(value) if value.to_string_lossy().starts_with('.'))
+            });
+            if !has_dot_segment {
+                return Err(format!(
+                    "dot_folder_include_missing_dot_segment: {normalized}"
+                ));
+            }
+            include_dot_folders.push(PathBuf::from(normalized));
+        }
+        Ok(Self {
+            include_dot_folders,
+        })
+    }
+
+    pub fn includes_dot_folders(&self) -> bool {
+        !self.include_dot_folders.is_empty()
+    }
+
+    pub fn is_excluded_path(&self, path: &Path, root: &Path, generated_dirs: &[&str]) -> bool {
+        let Ok(rel) = path.strip_prefix(root) else {
+            return true;
+        };
+        if rel.as_os_str().is_empty() {
+            return false;
+        }
+        let mut has_dot_segment = false;
+        for component in rel.components() {
+            let Component::Normal(value) = component else {
+                continue;
+            };
+            let name = value.to_string_lossy();
+            if generated_dirs.iter().any(|dir| name == *dir) {
+                return true;
+            }
+            if name.starts_with('.') {
+                has_dot_segment = true;
+            }
+        }
+        has_dot_segment && !self.dot_path_allowed(rel)
+    }
+
+    fn dot_path_allowed(&self, rel: &Path) -> bool {
+        self.include_dot_folders
+            .iter()
+            .any(|allowed| rel.starts_with(allowed) || allowed.starts_with(rel))
+    }
+}
+
 #[tauri::command]
 pub fn default_vault_path() -> Result<String, String> {
     let base = dirs::document_dir()
@@ -84,8 +170,12 @@ pub fn sample_vault_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
+pub fn scan_vault(
+    vault_path: String,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<VaultEntry>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
+    let scan_filter = ScanFilter::from_options(scan_options)?;
     let ignore_patterns = load_anchorignore(&vault);
     let version_names = collect_version_names(&vault);
 
@@ -106,7 +196,7 @@ pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
             if path == vault {
                 return true;
             }
-            if is_hidden_or_system_path(path, &vault) {
+            if scan_filter.is_excluded_path(path, &vault, GENERATED_DIRS) {
                 return false;
             }
             let rel = path.strip_prefix(&vault).unwrap_or(path);
@@ -137,7 +227,9 @@ pub fn scan_vault(vault_path: String) -> Result<Vec<VaultEntry>, String> {
             .cmp(&a.updated_at)
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
-    let _ = write_vault_cache(&vault, &entries);
+    if !scan_filter.includes_dot_folders() {
+        let _ = write_vault_cache(&vault, &entries);
+    }
     Ok(entries)
 }
 
@@ -350,26 +442,11 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
     })
 }
 
-fn is_hidden_or_system_path(path: &Path, vault: &Path) -> bool {
-    let Ok(rel) = path.strip_prefix(vault) else {
-        return true;
-    };
-    rel.components().any(|component| {
-        let value = component.as_os_str().to_string_lossy();
-        value.starts_with('.') || GENERATED_DIRS.iter().any(|dir| value == *dir)
-    })
-}
-
 /// Built-in patterns that any workspace should ignore even without an
 /// explicit `.anchorignore`. macOS / Windows / git noise that has
 /// nothing to do with the user's notes.
-pub const DEFAULT_ANCHOR_IGNORE: &[&str] = &[
-    ".DS_Store",
-    ".gitkeep",
-    ".keep",
-    "Thumbs.db",
-    "Icon\r",
-];
+pub const DEFAULT_ANCHOR_IGNORE: &[&str] =
+    &[".DS_Store", ".gitkeep", ".keep", "Thumbs.db", "Icon\r"];
 
 /// Load `.anchorignore` patterns from the workspace root, merged with the
 /// built-in defaults. Each non-comment, non-empty line is a pattern.
@@ -495,7 +572,7 @@ mod tests {
         let root = tmp.path();
         write_file(root, "top.md", "# Top\n");
         write_file(root, "a/b/c/d/e/f/g/deep.md", "# Deep\n");
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert!(titles.contains(&"Top"));
         assert!(
@@ -512,7 +589,7 @@ mod tests {
         write_file(root, "keep.md", "# Keep\n");
         write_file(root, "skipme/inside.md", "# Inside\n");
         write_file(root, "_sys/env/python.md", "# Python\n");
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert!(titles.contains(&"Keep"));
         assert!(!titles.contains(&"Inside"), "skipme/ must be excluded");
@@ -528,7 +605,7 @@ mod tests {
             "note.md",
             "---\ntype: meeting\nstatus: 진행중\nproject: \"[[RISE]]\"\n---\n# Hello\n",
         );
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         assert_eq!(entries.len(), 1);
         let fm = &entries[0].frontmatter;
         assert_eq!(
@@ -620,11 +697,42 @@ mod tests {
         write_file(root, "kept.md", "# Kept\n");
         write_file(root, ".hidden/secret.md", "# Secret\n");
         write_file(root, "node_modules/dep/readme.md", "# Dep\n");
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert!(titles.contains(&"Kept"));
         assert!(!titles.contains(&"Secret"));
         assert!(!titles.contains(&"Dep"));
+    }
+
+    #[test]
+    fn scan_vault_includes_dot_folder_only_when_allowlisted() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, ".notes/secret.md", "# Secret\n");
+
+        let default_entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(
+            default_entries
+                .iter()
+                .map(|entry| entry.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Kept"]
+        );
+
+        let allowlisted = scan_vault(
+            root.to_string_lossy().to_string(),
+            Some(ScanOptions {
+                include_dot_folders: vec![".notes".to_string()],
+            }),
+        )
+        .unwrap();
+        let titles: Vec<&str> = allowlisted
+            .iter()
+            .map(|entry| entry.title.as_str())
+            .collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(titles.contains(&"Secret"));
     }
 
     #[test]
@@ -637,7 +745,7 @@ mod tests {
         write_file(root, ".next/generated.md", "# Next\n");
         write_file(root, ".turbo/generated.md", "# Turbo\n");
         write_file(root, ".cache/generated.md", "# Cache\n");
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["Kept"]);
     }
@@ -649,7 +757,7 @@ mod tests {
         write_file(root, "report.md", "# Report\n");
         write_file(root, ".anchor/versions/report-20260503.md", "# Old\n");
         write_file(root, ".anchor/versions/report-20260504.md", "# Older\n");
-        let entries = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let report = entries
             .iter()
             .find(|entry| entry.rel_path == "report.md")
@@ -662,7 +770,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "note.md", "# Note\n");
-        let scanned = scan_vault(root.to_string_lossy().to_string()).unwrap();
+        let scanned = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let cached = read_vault_cache(root.to_string_lossy().to_string())
             .unwrap()
             .expect("cache should exist after scan");
@@ -696,7 +804,7 @@ mod tests {
         let path = std::env::var("ANCHOR_BENCH_WORKSPACE")
             .unwrap_or_else(|_| "/Users/yj.lee/workspace/work".to_string());
         let t0 = std::time::Instant::now();
-        let entries = scan_vault(path.clone()).expect("scan failed");
+        let entries = scan_vault(path.clone(), None).expect("scan failed");
         let dt = t0.elapsed();
         let total_bytes: usize = entries.iter().map(|e| e.snippet.len()).sum();
         eprintln!(

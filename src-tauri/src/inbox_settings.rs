@@ -92,6 +92,46 @@ impl Default for InboxNamingConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InboxFileDropConfig {
+    pub channel: String,
+    pub drop_path: String,
+    pub operation: String,
+}
+
+impl Default for InboxFileDropConfig {
+    fn default() -> Self {
+        Self {
+            channel: "incoming".to_string(),
+            drop_path: "drop/incoming".to_string(),
+            operation: "copy".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InboxGmailConfig {
+    pub enabled: bool,
+    pub scan_window_days: u32,
+    pub max_results: u32,
+    pub unread_only: bool,
+    pub query: String,
+    pub gws_path: Option<String>,
+}
+
+impl Default for InboxGmailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scan_window_days: 14,
+            max_results: 20,
+            unread_only: true,
+            query: String::new(),
+            gws_path: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InboxChannelConfig {
     pub provider: String,
@@ -129,6 +169,10 @@ pub struct InboxRuntimeConfig {
     pub paths: InboxPathConfig,
     #[serde(default)]
     pub naming: InboxNamingConfig,
+    #[serde(default)]
+    pub file_drop: InboxFileDropConfig,
+    #[serde(default)]
+    pub gmail: InboxGmailConfig,
     #[serde(default)]
     pub dedupe: BTreeMap<String, YamlValue>,
     #[serde(default)]
@@ -228,6 +272,8 @@ impl Default for InboxRuntimeConfig {
             schema_version: Some(1),
             paths: InboxPathConfig::default(),
             naming: InboxNamingConfig::default(),
+            file_drop: InboxFileDropConfig::default(),
+            gmail: InboxGmailConfig::default(),
             dedupe: BTreeMap::from([(
                 "default".to_string(),
                 YamlValue::String("sha256".to_string()),
@@ -342,9 +388,20 @@ pub fn validate_inbox_runtime_config(
         config.naming.extracted_file.as_str(),
         config.naming.summary_file.as_str(),
         config.naming.route_file.as_str(),
+        config.file_drop.drop_path.as_str(),
     ];
     for value in path_values {
         validate_relative_fragment(value)?;
+    }
+    validate_channel_key(&config.file_drop.channel)?;
+    if config.file_drop.operation.trim().is_empty() {
+        return Err("file_drop_operation_required".to_string());
+    }
+    if config.gmail.max_results == 0 || config.gmail.max_results > 200 {
+        return Err("gmail_max_results_out_of_range".to_string());
+    }
+    if config.gmail.scan_window_days > 3650 {
+        return Err("gmail_scan_window_out_of_range".to_string());
     }
     for (key, channel) in &config.channels {
         validate_channel_key(key)?;
@@ -419,6 +476,7 @@ pub fn load_runtime_config_or_legacy(work: &Path) -> Result<InboxRuntimeConfig, 
     let legacy = load(work);
     let mut config = InboxRuntimeConfig::default();
     config.root = ".".to_string();
+    config.gmail.gws_path = legacy.gws_path.clone();
     config.channels.clear();
     let sources = if legacy.sources.is_empty() {
         default_sources()
@@ -471,6 +529,18 @@ fn merge_runtime_defaults(config: &mut InboxRuntimeConfig) {
     }
     if config.naming.route_file.trim().is_empty() {
         config.naming.route_file = defaults.naming.route_file;
+    }
+    if config.file_drop.channel.trim().is_empty() {
+        config.file_drop.channel = defaults.file_drop.channel;
+    }
+    if config.file_drop.drop_path.trim().is_empty() {
+        config.file_drop.drop_path = defaults.file_drop.drop_path;
+    }
+    if config.file_drop.operation.trim().is_empty() {
+        config.file_drop.operation = defaults.file_drop.operation;
+    }
+    if config.gmail.max_results == 0 {
+        config.gmail.max_results = defaults.gmail.max_results;
     }
 }
 
@@ -646,6 +716,13 @@ inbox:
     extracted_file: extracted.md
     summary_file: custom-summary.md
     route_file: route.md
+  gmail:
+    enabled: true
+    scan_window_days: 30
+    max_results: 50
+    unread_only: true
+    query: ""
+    gws_path: /opt/homebrew/bin/gws
   channels:
     kakao:
       provider: kakao
@@ -662,6 +739,12 @@ inbox:
 
         assert_eq!(config.root, "inbox");
         assert_eq!(config.naming.summary_file, "custom-summary.md");
+        assert_eq!(config.gmail.scan_window_days, 30);
+        assert_eq!(config.gmail.max_results, 50);
+        assert_eq!(
+            config.gmail.gws_path.as_deref(),
+            Some("/opt/homebrew/bin/gws")
+        );
         assert_eq!(
             config
                 .channels
@@ -713,6 +796,24 @@ projects:
     }
 
     #[test]
+    fn validate_runtime_config_rejects_invalid_gmail_bounds() {
+        let tmp = TempDir::new().unwrap();
+        let mut config = InboxRuntimeConfig::default();
+        config.gmail.max_results = 0;
+        assert_eq!(
+            validate_inbox_runtime_config(tmp.path(), &config).unwrap_err(),
+            "gmail_max_results_out_of_range"
+        );
+
+        config.gmail.max_results = 20;
+        config.gmail.scan_window_days = 3651;
+        assert_eq!(
+            validate_inbox_runtime_config(tmp.path(), &config).unwrap_err(),
+            "gmail_scan_window_out_of_range"
+        );
+    }
+
+    #[test]
     fn validate_runtime_config_rejects_root_and_drop_escapes() {
         let tmp = TempDir::new().unwrap();
         let mut outside_root = InboxRuntimeConfig::default();
@@ -754,6 +855,7 @@ projects:
         let config = load_runtime_config_or_legacy(tmp.path()).unwrap();
 
         assert_eq!(config.root, ".");
+        assert_eq!(config.gmail.gws_path, None);
         assert_eq!(
             config.channels.get("alpha").unwrap().drop_paths,
             vec!["incoming/spool/alpha".to_string()]

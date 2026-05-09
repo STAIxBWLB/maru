@@ -9,6 +9,7 @@ export type AnchorAppMode = "pkm" | "inbox";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
+export type InboxSectionKey = "configuredInbox" | "files" | "gmail";
 
 export interface DocumentViewDefinition {
   id: string;
@@ -100,12 +101,16 @@ export interface AnchorSettings {
     documentViews: DocumentViewDefinition[];
     collapsedTreeFolders: string[];
     collapsedFileFolders: string[];
+    inboxCollapsedSections: InboxSectionKey[];
     documentTreeStateInitialized: boolean;
     fileTreeStateInitialized: boolean;
     fileQueueDefaultOperation: FileQueueDefaultOperation;
     themeMode: ThemeMode;
     accentColor: string;
     layout: LayoutSettings;
+  };
+  scan: {
+    includeDotFolders: string[];
   };
   terminal: {
     defaultPanelOpen: boolean;
@@ -133,6 +138,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     documentViews: [],
     collapsedTreeFolders: [],
     collapsedFileFolders: [],
+    inboxCollapsedSections: [],
     documentTreeStateInitialized: false,
     fileTreeStateInitialized: false,
     fileQueueDefaultOperation: "copy",
@@ -154,6 +160,9 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       windowBounds: null,
       windowMaximized: null,
     },
+  },
+  scan: {
+    includeDotFolders: [],
   },
   terminal: {
     defaultPanelOpen: false,
@@ -209,6 +218,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       documentViews: normalizeDocumentViews(ui.documentViews),
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
+      inboxCollapsedSections: normalizeInboxCollapsedSections(ui.inboxCollapsedSections),
       documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
         ? ui.documentTreeStateInitialized
         : false,
@@ -220,6 +230,9 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       themeMode: parseThemeMode(ui.themeMode) ?? DEFAULT_ANCHOR_SETTINGS.ui.themeMode,
       accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
       layout,
+    },
+    scan: {
+      includeDotFolders: normalizeDotFolderIncludes(value.scan),
     },
     terminal: {
       defaultPanelOpen: layout.terminalOpen,
@@ -261,9 +274,13 @@ function cloneDefaultSettings(): AnchorSettings {
       documentViews: DEFAULT_ANCHOR_SETTINGS.ui.documentViews.map((view) => ({ ...view })),
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedFileFolders],
+      inboxCollapsedSections: [...DEFAULT_ANCHOR_SETTINGS.ui.inboxCollapsedSections],
       documentTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.documentTreeStateInitialized,
       fileTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.fileTreeStateInitialized,
       layout: { ...DEFAULT_ANCHOR_SETTINGS.ui.layout },
+    },
+    scan: {
+      includeDotFolders: [...DEFAULT_ANCHOR_SETTINGS.scan.includeDotFolders],
     },
     terminal: {
       ...DEFAULT_ANCHOR_SETTINGS.terminal,
@@ -348,6 +365,33 @@ function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeInboxCollapsedSections(value: unknown): InboxSectionKey[] {
+  const allowed = new Set<InboxSectionKey>(["configuredInbox", "files", "gmail"]);
+  const sections: InboxSectionKey[] = [];
+  for (const item of parseStringArray(value)) {
+    if (!allowed.has(item as InboxSectionKey)) continue;
+    if (!sections.includes(item as InboxSectionKey)) sections.push(item as InboxSectionKey);
+  }
+  return sections;
+}
+
+export function normalizeDotFolderIncludes(value: unknown): string[] {
+  const source = isRecord(value) ? value.includeDotFolders : value;
+  const includes: string[] = [];
+  const seen = new Set<string>();
+  for (const item of parseStringArray(source)) {
+    const normalized = item.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!normalized || normalized.includes("..") || /[*?]/.test(normalized)) continue;
+    const segments = normalized.split("/").filter(Boolean);
+    if (!segments.some((segment) => segment.startsWith("."))) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    includes.push(normalized);
+  }
+  return includes;
 }
 
 export function formatBinaryFileIncludePatterns(patterns: readonly string[]): string {

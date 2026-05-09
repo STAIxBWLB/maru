@@ -1,4 +1,6 @@
-use crate::vault::{load_anchorignore, matches_anchorignore, normalize_existing_dir};
+use crate::vault::{
+    load_anchorignore, matches_anchorignore, normalize_existing_dir, ScanFilter, ScanOptions,
+};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -83,9 +85,13 @@ pub struct FileQueueSourceInfo {
 }
 
 #[tauri::command]
-pub fn scan_workspace_files(vault_path: String) -> Result<Vec<WorkspaceFileEntry>, String> {
+pub fn scan_workspace_files(
+    vault_path: String,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<WorkspaceFileEntry>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
-    scan_workspace_files_at(&vault)
+    let scan_filter = ScanFilter::from_options(scan_options)?;
+    scan_workspace_files_at(&vault, &scan_filter)
 }
 
 #[tauri::command]
@@ -96,14 +102,20 @@ pub fn describe_file_queue_sources(paths: Vec<String>) -> Result<Vec<FileQueueSo
         let metadata = fs::symlink_metadata(&source_path)
             .map_err(|err| format!("Cannot inspect source: {err}"))?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("Source symlinks are not supported: {}", source_path.display()));
+            return Err(format!(
+                "Source symlinks are not supported: {}",
+                source_path.display()
+            ));
         }
         let source_kind = if metadata.is_dir() {
             FileQueueSourceKind::Directory
         } else if metadata.is_file() {
             FileQueueSourceKind::File
         } else {
-            return Err(format!("Source is not a file or directory: {}", source_path.display()));
+            return Err(format!(
+                "Source is not a file or directory: {}",
+                source_path.display()
+            ));
         };
         let file_name = source_path
             .file_name()
@@ -171,10 +183,13 @@ pub fn apply_file_queue(
 }
 
 fn validate_queue_source(path: &Path, kind: FileQueueSourceKind) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|err| format!("Cannot inspect source: {err}"))?;
+    let metadata =
+        fs::symlink_metadata(path).map_err(|err| format!("Cannot inspect source: {err}"))?;
     if metadata.file_type().is_symlink() {
-        return Err(format!("Source symlinks are not supported: {}", path.display()));
+        return Err(format!(
+            "Source symlinks are not supported: {}",
+            path.display()
+        ));
     }
     match kind {
         FileQueueSourceKind::File if metadata.is_file() => Ok(()),
@@ -233,7 +248,10 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
         let destination = target.join(rel);
         let file_type = entry.file_type();
         if file_type.is_symlink() {
-            return Err(format!("Source symlinks are not supported: {}", path.display()));
+            return Err(format!(
+                "Source symlinks are not supported: {}",
+                path.display()
+            ));
         }
         if file_type.is_dir() {
             fs::create_dir_all(&destination)
@@ -269,7 +287,10 @@ fn reject_target_inside_source(
     }
 }
 
-fn scan_workspace_files_at(vault: &Path) -> Result<Vec<WorkspaceFileEntry>, String> {
+fn scan_workspace_files_at(
+    vault: &Path,
+    scan_filter: &ScanFilter,
+) -> Result<Vec<WorkspaceFileEntry>, String> {
     let ignore_patterns = load_anchorignore(vault);
     let tracked = git_tracked_paths(vault);
     let mut entries = Vec::new();
@@ -281,7 +302,7 @@ fn scan_workspace_files_at(vault: &Path) -> Result<Vec<WorkspaceFileEntry>, Stri
             if path == vault {
                 return true;
             }
-            if is_workspace_safe_excluded(path, vault) {
+            if scan_filter.is_excluded_path(path, vault, GENERATED_DIRS) {
                 return false;
             }
             let rel = path.strip_prefix(vault).unwrap_or(path);
@@ -352,19 +373,6 @@ fn git_tracked_paths(vault: &Path) -> HashSet<String> {
         .filter(|value| !value.is_empty())
         .map(|value| value.replace('\\', "/"))
         .collect()
-}
-
-fn is_workspace_safe_excluded(path: &Path, vault: &Path) -> bool {
-    let Ok(rel) = path.strip_prefix(vault) else {
-        return true;
-    };
-    rel.components().any(|component| match component {
-        Component::Normal(value) => {
-            let name = value.to_string_lossy();
-            name.starts_with('.') || GENERATED_DIRS.iter().any(|dir| name == *dir)
-        }
-        _ => false,
-    })
 }
 
 fn is_binary_file(path: &Path) -> bool {
@@ -499,12 +507,37 @@ mod tests {
         write_file(root, ".anchorignore", b"ignored\n");
         write_file(root, "ignored/file.txt", b"ignore me");
 
-        let entries = scan_workspace_files_at(root).unwrap();
+        let entries = scan_workspace_files_at(root, &ScanFilter::default()).unwrap();
         let rels: Vec<&str> = entries
             .iter()
             .map(|entry| entry.rel_path.as_str())
             .collect();
         assert_eq!(rels, vec!["keep.md"]);
+    }
+
+    #[test]
+    fn scanner_includes_dot_folder_only_when_allowlisted() {
+        let tmp = TempDir::new().unwrap();
+        write_file(tmp.path(), "keep.md", b"# Keep\n");
+        write_file(tmp.path(), ".github/workflows/ci.yml", b"name: ci\n");
+
+        let default_entries = scan_workspace_files_at(tmp.path(), &ScanFilter::default()).unwrap();
+        assert_eq!(
+            default_entries
+                .iter()
+                .map(|entry| entry.rel_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["keep.md"]
+        );
+
+        let filter = ScanFilter::from_options(Some(ScanOptions {
+            include_dot_folders: vec![".github".to_string()],
+        }))
+        .unwrap();
+        let allowlisted = scan_workspace_files_at(tmp.path(), &filter).unwrap();
+        assert!(allowlisted
+            .iter()
+            .any(|entry| entry.rel_path == ".github/workflows/ci.yml"));
     }
 
     #[test]
@@ -514,7 +547,7 @@ mod tests {
         write_file(tmp.path(), "raw.bin", b"a\0b");
         write_file(tmp.path(), "note.txt", b"plain text");
 
-        let entries = scan_workspace_files_at(tmp.path()).unwrap();
+        let entries = scan_workspace_files_at(tmp.path(), &ScanFilter::default()).unwrap();
         let binary: Vec<&str> = entries
             .iter()
             .filter(|entry| entry.binary)
@@ -527,7 +560,7 @@ mod tests {
     fn git_tracked_filter_metadata_falls_back_outside_repo() {
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "note.md", b"# Note\n");
-        let entries = scan_workspace_files_at(tmp.path()).unwrap();
+        let entries = scan_workspace_files_at(tmp.path(), &ScanFilter::default()).unwrap();
         assert_eq!(entries.len(), 1);
         assert!(!entries[0].git_tracked);
     }
@@ -623,8 +656,8 @@ mod tests {
             operation: FileQueueOperation::Copy,
             source_kind: FileQueueSourceKind::Directory,
         };
-        let err =
-            apply_file_queue(workspace.path().to_string_lossy().to_string(), vec![item]).unwrap_err();
+        let err = apply_file_queue(workspace.path().to_string_lossy().to_string(), vec![item])
+            .unwrap_err();
         assert!(err.contains("inside the source"));
     }
 
@@ -647,6 +680,9 @@ mod tests {
 
         assert_eq!(outcomes[0].file_name, "bundle");
         assert!(!source.exists());
-        assert_eq!(fs::read(target_dir.path().join("bundle/a.txt")).unwrap(), b"a");
+        assert_eq!(
+            fs::read(target_dir.path().join("bundle/a.txt")).unwrap(),
+            b"a"
+        );
     }
 }
