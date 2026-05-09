@@ -16,4 +16,10 @@ describe("i18n", () => {
     );
     expect(t("ko", "missing.key")).toBe("missing.key");
   });
+
+  it("treats interpolated values literally without regex replacement tokens", () => {
+    expect(t("en", "snapshot.success", { path: "$& — $1" })).toBe(
+      "Snapshot saved: $& — $1",
+    );
+  });
 });

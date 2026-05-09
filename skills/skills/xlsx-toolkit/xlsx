@@ -1,0 +1,73 @@
+#!/bin/bash
+# xlsx-toolkit wrapper — read/summary/to-csv/to-md subcommands
+#
+# Usage:
+#   ./xlsx read <file.xlsx> [--sheet N|name] [--max-rows N] [--values-only]
+#   ./xlsx summary <file.xlsx>
+#   ./xlsx to-csv <file.xlsx> [--sheet N] [-o out.csv] [--all-sheets]
+#   ./xlsx to-md  <file.xlsx> [--sheet N]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+find_env_python() {
+    local dir="$SCRIPT_DIR"
+    local candidate
+    while [ "$dir" != "/" ]; do
+        for candidate in \
+            "$dir/env/.venv/bin/python3" \
+            "$dir/_sys/skills/env/.venv/bin/python3" \
+            "$dir/skills/env/.venv/bin/python3"; do
+            [ -x "$candidate" ] && printf '%s\n' "$candidate" && return 0
+        done
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+VENV_PY="${SKILL_PYTHON:-}"
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    VENV_PY="$(find_env_python || true)"
+fi
+
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        VENV_PY="$(command -v python3)"
+        echo "[xlsx-toolkit] skills env 없음, python3 fallback 사용: $VENV_PY" >&2
+    else
+        echo "[xlsx-toolkit] venv python 없음" >&2
+        echo "  _sys/skills/env 에서 make setup 실행 필요" >&2
+        exit 1
+    fi
+fi
+
+if [ $# -eq 0 ]; then
+    cat <<USAGE
+xlsx-toolkit — Excel(.xlsx) 파일 read-only 처리
+
+Usage: ./xlsx <command> [args...]
+
+Commands:
+  read       셀 값 추출 → markdown 표
+  summary    시트 목록 + 행/열 카운트
+  to-csv     CSV 출력
+  to-md      markdown 표 출력
+
+Options (commands별 상이):
+  --sheet <N|name>   시트 번호(1-based) 또는 이름
+  --max-rows <N>     처음 N행만
+  --values-only      수식 대신 캐시 값
+  -o, --output <f>   파일 출력 (기본 stdout)
+  --all-sheets       시트별로 각각 처리
+
+Examples:
+  ./xlsx read budget.xlsx
+  ./xlsx summary budget.xlsx
+  ./xlsx to-csv budget.xlsx --sheet "2026" -o budget-2026.csv
+  ./xlsx to-md budget.xlsx --sheet 1
+USAGE
+    exit 0
+fi
+
+exec "$VENV_PY" "$SCRIPT_DIR/scripts/xlsx_cli.py" "$@"

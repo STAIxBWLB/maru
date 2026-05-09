@@ -1,0 +1,18 @@
+schema: inbox-item/v1
+id: ""
+status: pending
+channel: ""
+provider: ""
+kind: file
+received_at: ""
+dedupe_key: ""
+source:
+  uri: ""
+  original_name: ""
+  message_id: ""
+  thread_id: ""
+files: []
+metadata:
+  source_kind: ""
+  processing_context: ""
+  processing_hints: {}

@@ -9,6 +9,9 @@ pub fn home_dir() -> Result<PathBuf, String> {
 }
 
 pub fn anchor_home() -> Result<PathBuf, String> {
+    if let Some(path) = test_anchor_home_override() {
+        return Ok(path.join(".anchor"));
+    }
     Ok(home_dir()?.join(".anchor"))
 }
 
@@ -117,4 +120,14 @@ pub fn safe_entry_name(input: &str) -> Result<String, String> {
         return Err(format!("invalid_skill_name: {name}"));
     }
     Ok(name.to_string())
+}
+
+#[cfg(test)]
+fn test_anchor_home_override() -> Option<PathBuf> {
+    std::env::var_os("ANCHOR_TEST_HOME").map(PathBuf::from)
+}
+
+#[cfg(not(test))]
+fn test_anchor_home_override() -> Option<PathBuf> {
+    None
 }

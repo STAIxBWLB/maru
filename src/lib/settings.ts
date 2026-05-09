@@ -10,6 +10,16 @@ export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
 
+export interface DocumentViewDefinition {
+  id: string;
+  label: string;
+  color: string;
+  type?: string | null;
+  status?: string | null;
+  pathPrefix?: string | null;
+  query?: string | null;
+}
+
 export const DEFAULT_BINARY_FILE_INCLUDE_PATTERNS = [
   "*.tgz",
   "*.gz",
@@ -87,6 +97,7 @@ export interface AnchorSettings {
     documentLabelMode: DocumentLabelMode;
     workspaceFileFilter: WorkspaceFileFilter;
     binaryFileIncludePatterns: string[];
+    documentViews: DocumentViewDefinition[];
     collapsedTreeFolders: string[];
     collapsedFileFolders: string[];
     documentTreeStateInitialized: boolean;
@@ -119,6 +130,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     documentLabelMode: "title",
     workspaceFileFilter: "all",
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
+    documentViews: [],
     collapsedTreeFolders: [],
     collapsedFileFolders: [],
     documentTreeStateInitialized: false,
@@ -194,6 +206,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
         ui.binaryFileIncludePatterns,
       ),
+      documentViews: normalizeDocumentViews(ui.documentViews),
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
       documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
@@ -245,6 +258,7 @@ function cloneDefaultSettings(): AnchorSettings {
       binaryFileIncludePatterns: [
         ...DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,
       ],
+      documentViews: DEFAULT_ANCHOR_SETTINGS.ui.documentViews.map((view) => ({ ...view })),
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedFileFolders],
       documentTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.documentTreeStateInitialized,
@@ -355,6 +369,49 @@ function normalizeBinaryFileIncludePatterns(value: unknown): string[] {
     return normalizePatternList(value, []);
   }
   return [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS];
+}
+
+function normalizeDocumentViews(value: unknown): DocumentViewDefinition[] {
+  if (!Array.isArray(value)) return [];
+  const views: DocumentViewDefinition[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = normalizeViewToken(item.id);
+    const label =
+      typeof item.label === "string" && item.label.trim() ? item.label.trim() : null;
+    if (!id || !label || seen.has(id)) continue;
+    seen.add(id);
+    const color = normalizeHexColor(item.color, "#8f4a80");
+    const view: DocumentViewDefinition = { id, label, color };
+    const type = normalizeOptionalText(item.type);
+    const status = normalizeOptionalText(item.status);
+    const pathPrefix = normalizePathPrefix(item.pathPrefix);
+    const query = normalizeOptionalText(item.query);
+    if (type) view.type = type;
+    if (status) view.status = status;
+    if (pathPrefix) view.pathPrefix = pathPrefix;
+    if (query) view.query = query;
+    if (!view.type && !view.status && !view.pathPrefix && !view.query) continue;
+    views.push(view);
+  }
+  return views;
+}
+
+function normalizeViewToken(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const token = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return token || null;
+}
+
+function normalizeOptionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizePathPrefix(value: unknown): string | null {
+  const text = normalizeOptionalText(value);
+  if (!text) return null;
+  return text.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
 function normalizePatternList(values: unknown[], fallback: readonly string[]): string[] {

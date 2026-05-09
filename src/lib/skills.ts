@@ -9,7 +9,7 @@ declare global {
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
-export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted";
+export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
 export type SkillDispatchRuntime = "claude" | "codex";
 
@@ -35,6 +35,8 @@ export interface SkillRecord {
   category?: string | null;
   editable: boolean;
   dirty: boolean;
+  contentHash?: string | null;
+  savedHash?: string | null;
 }
 
 export interface SkillInstall {
@@ -94,6 +96,25 @@ export interface AdoptOutcome {
   installs: SkillInstall[];
 }
 
+export interface InstallOutcome {
+  install: SkillInstall;
+  anchorEntrypoint: string;
+}
+
+export interface ResetOutcome {
+  backupPath?: string | null;
+  sources: number;
+  skills: number;
+}
+
+export interface SkillProgressEvent {
+  progressId: string;
+  level: "info" | "success" | "warn" | "error" | string;
+  message: string;
+  completed?: number | null;
+  total?: number | null;
+}
+
 export async function skillsListSources(workPath: string | null): Promise<SkillSource[]> {
   if (!isTauri()) return [];
   return invoke<SkillSource[]>("skills_list_sources", { workPath });
@@ -115,14 +136,20 @@ export async function skillsRemoveSource(sourceId: string): Promise<void> {
   await invoke("skills_remove_source", { sourceId });
 }
 
-export async function skillsSyncSource(sourceId: string): Promise<SkillRecord[]> {
+export async function skillsSyncSource(
+  sourceId: string,
+  progressId: string | null = null,
+): Promise<SkillRecord[]> {
   if (!isTauri()) return [];
-  return invoke<SkillRecord[]>("skills_sync_source", { sourceId });
+  return invoke<SkillRecord[]>("skills_sync_source", { sourceId, progressId });
 }
 
-export async function skillsRescanSource(sourceId: string): Promise<SkillRecord[]> {
+export async function skillsRescanSource(
+  sourceId: string,
+  progressId: string | null = null,
+): Promise<SkillRecord[]> {
   if (!isTauri()) return [];
-  return invoke<SkillRecord[]>("skills_rescan_source", { sourceId });
+  return invoke<SkillRecord[]>("skills_rescan_source", { sourceId, progressId });
 }
 
 export async function skillsListSkills(workPath: string | null): Promise<SkillRecord[]> {
@@ -152,6 +179,15 @@ export async function skillsSaveSkillFile(
   return invoke<SkillRecord>("skills_save_skill_file", { skillId, filePath, content });
 }
 
+export async function skillsSaveSkillAs(
+  skillId: string,
+  name: string,
+  content: string,
+): Promise<SkillRecord> {
+  if (!isTauri()) throw new Error("Skill creation requires the Tauri shell.");
+  return invoke<SkillRecord>("skills_save_skill_as", { skillId, name, content });
+}
+
 export async function skillsCreateSkill(
   name: string,
   title: string | null,
@@ -174,9 +210,9 @@ export async function skillsInstallSkill(
   skillId: string,
   target: SkillInstallTarget,
   installedAs: string | null = null,
-): Promise<void> {
+): Promise<InstallOutcome> {
   if (!isTauri()) throw new Error("Skill install requires the Tauri shell.");
-  await invoke("skills_install_skill", { skillId, target, installedAs });
+  return invoke<InstallOutcome>("skills_install_skill", { skillId, target, installedAs });
 }
 
 export async function skillsUninstallSkill(
@@ -187,9 +223,19 @@ export async function skillsUninstallSkill(
   await invoke("skills_uninstall_skill", { target, installedAs });
 }
 
-export async function skillsAdoptExternalLinks(): Promise<AdoptOutcome> {
+export async function skillsAdoptExternalLinks(
+  progressId: string | null = null,
+): Promise<AdoptOutcome> {
   if (!isTauri()) return { adopted: 0, skipped: 0, installs: [] };
-  return invoke<AdoptOutcome>("skills_adopt_external_links");
+  return invoke<AdoptOutcome>("skills_adopt_external_links", { progressId });
+}
+
+export async function skillsResetRegistry(
+  workPath: string | null,
+  progressId: string | null = null,
+): Promise<ResetOutcome> {
+  if (!isTauri()) return { sources: 0, skills: 0 };
+  return invoke<ResetOutcome>("skills_reset_registry", { workPath, progressId });
 }
 
 export async function skillsEnvStatus(workPath: string | null): Promise<SkillsEnvStatus | null> {

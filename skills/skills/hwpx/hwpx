@@ -1,0 +1,104 @@
+#!/bin/bash
+# hwpx skill wrapper — Korean official document authoring toolkit.
+#
+# Usage:
+#   ./hwpx read <file.hwpx> [--format md|text|json]
+#   ./hwpx summary <file.hwpx>
+#   ./hwpx to-md <file.hwpx> [-o out.md]
+#   ./hwpx unpack <file.hwpx> <out_dir> [-f]
+#   ./hwpx repack <dir> <out.hwpx>
+#   ./hwpx fill <template.hwpx> [--data file.json] [--kv k=v ...] [-o out.hwpx]
+#   ./hwpx edit <in.hwpx> <out.hwpx> --replace OLD NEW
+#   ./hwpx create <out.hwpx> [--markdown md | --title T --body B | --json j]
+#   ./hwpx validate <file.hwpx>
+#   ./hwpx to-pdf <file.hwpx> [-o out.pdf]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+find_env_python() {
+    local dir="$SCRIPT_DIR"
+    local candidate
+    while [ "$dir" != "/" ]; do
+        for candidate in \
+            "$dir/env/.venv/bin/python3" \
+            "$dir/_sys/skills/env/.venv/bin/python3" \
+            "$dir/skills/env/.venv/bin/python3"; do
+            [ -x "$candidate" ] && printf '%s\n' "$candidate" && return 0
+        done
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+VENV_PY="${SKILL_PYTHON:-}"
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    VENV_PY="$(find_env_python || true)"
+fi
+
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        VENV_PY="$(command -v python3)"
+        echo "[hwpx] skills env 없음, python3 fallback 사용: $VENV_PY" >&2
+    else
+        echo "[hwpx] venv python 없음" >&2
+        echo "  _sys/skills/env 에서 make setup 실행 필요" >&2
+        exit 1
+    fi
+fi
+
+if [ $# -eq 0 ]; then
+    cat <<USAGE
+hwpx — HWPX 공문서/기안문/사업계획서 authoring toolkit
+
+Usage: ./hwpx <command> [args...]
+
+Commands:
+  read       HWPX → markdown/text/json
+  summary    문서 메타 요약 (섹션/단락/이미지 개수)
+  to-md      markdown 변환
+  unpack     HWPX → 디렉토리 (XML 직접 편집용)
+  repack     디렉토리 → HWPX (mimetype-first STORED 자동)
+  fill       템플릿의 {{anchor}} 치환
+  edit       find/replace 편집
+  create     markdown/JSON으로 신규 HWPX 생성 (단순형)
+  styled     보기 좋은 HWPX 생성 (폰트·여백·줄간격·헤더/푸터·페이지번호)
+  write-java 번들 JRE+hwpxlib로 HWPX 생성 (저수준, Apache-2.0)
+  export-html HTML → HWPX (bundled-JRE → python-hwpx-template → pypandoc cascade)
+  validate   mimetype·manifest·XML 검증
+  to-pdf     LibreOffice(+H2Orestart)로 PDF 변환
+
+Templates (templates/):
+  공문서_기본.hwpx        대외시행 공문 기본형
+  기안문_내부결재.hwpx    내부결재 기안문
+  보고서_일반.hwpx        휴먼명조/개조식 보고서
+  사업계획서_기본.hwpx    9-section skeleton
+  회의록.hwpx             참석자/안건/결정사항
+
+Examples:
+  ./hwpx read report.hwpx
+  ./hwpx fill templates/기안문_내부결재.hwpx \\
+    --kv 제목="AI센터 운영 계획" --kv 본문="1. 목적\\n가. 확인용" \\
+    -o /tmp/out.hwpx
+  ./hwpx validate /tmp/out.hwpx
+  echo '{"제목":"테스트","본문":"본문"}' | \\
+    ./hwpx fill templates/공문서_기본.hwpx --stdin-json -o /tmp/out.hwpx
+
+  # 보기 좋은 문서 (preset)
+  ./hwpx styled --preset gongmun --markdown report.md \\
+    --header "예시대학교" --footer "- # / ## -" -o styled.hwpx
+  ./hwpx styled --preset bogoseo --markdown plan.md -o plan.hwpx
+
+  # 주어진 양식 따라가기 (기관 지정 양식 파일 있을 때)
+  ./hwpx styled --reference 양식.hwpx --markdown 본문.md -o final.hwpx
+
+References (references/):
+  hwpx-structure.md        zip/OWPML 구조
+  korean-official-format.md 공문서 작성 규정 (기안문 10-part 구조)
+  python-hwpx-cheatsheet.md API 레시피
+USAGE
+    exit 0
+fi
+
+exec "$VENV_PY" "$SCRIPT_DIR/scripts/hwpx_cli.py" "$@"

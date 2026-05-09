@@ -41,9 +41,15 @@ import {
   type DocumentTreeRow,
   type VirtualTreeRow,
 } from "../lib/documentTree";
-import { filterDocumentIndex, type DocumentIndex } from "../lib/documentIndex";
+import {
+  documentFilterKey,
+  filterDocumentIndex,
+  isAllDocumentFilter,
+  type DocumentFilter,
+  type DocumentIndex,
+} from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
-import type { DocumentBrowserMode, DocumentLabelMode } from "../lib/settings";
+import type { DocumentBrowserMode, DocumentLabelMode, DocumentViewDefinition } from "../lib/settings";
 import type { ExplorerPaneMode } from "../lib/settings";
 
 const GROUP_ROW_HEIGHT = 28;
@@ -67,7 +73,8 @@ interface DocumentListProps {
   selectedPath: string | null;
   query: string;
   loading: boolean;
-  typeFilter: string | null;
+  documentFilter: DocumentFilter;
+  documentViews: DocumentViewDefinition[];
   workspaceVisibility: WorkspaceVisibility;
   publicWorkspaceAvailable: boolean;
   activeWorkspaceLabel: string | null;
@@ -106,7 +113,8 @@ export const DocumentList = memo(function DocumentList({
   selectedPath,
   query,
   loading,
-  typeFilter,
+  documentFilter,
+  documentViews,
   workspaceVisibility,
   publicWorkspaceAvailable,
   activeWorkspaceLabel,
@@ -151,7 +159,8 @@ export const DocumentList = memo(function DocumentList({
   const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
-  const deferredTypeFilter = useDeferredValue(typeFilter);
+  const deferredDocumentFilter = useDeferredValue(documentFilter);
+  const deferredFilterKey = documentFilterKey(deferredDocumentFilter);
 
   useEffect(() => {
     if (query === lastSentQueryRef.current) return;
@@ -160,14 +169,17 @@ export const DocumentList = memo(function DocumentList({
   }, [query]);
 
   const filtered = useMemo(
-    () => filterDocumentIndex(documentIndex, deferredQuery, deferredTypeFilter),
-    [documentIndex, deferredQuery, deferredTypeFilter],
+    () =>
+      filterDocumentIndex(documentIndex, deferredQuery, deferredDocumentFilter, {
+        customViews: documentViews,
+      }),
+    [documentIndex, deferredQuery, deferredDocumentFilter, documentViews],
   );
 
   // Group by mtime bucket: Today / This week / Earlier
   const grouped = useMemo(() => {
     if (browserMode !== "list") return [];
-    if (deferredQuery.trim() || deferredTypeFilter != null) {
+    if (deferredQuery.trim() || !isAllDocumentFilter(deferredDocumentFilter)) {
       return [{ label: null, items: filtered }];
     }
     const now = Date.now();
@@ -185,7 +197,7 @@ export const DocumentList = memo(function DocumentList({
       else buckets[2].items.push(entry);
     }
     return buckets.filter((b) => b.items.length > 0);
-  }, [browserMode, filtered, deferredQuery, deferredTypeFilter, t]);
+  }, [browserMode, filtered, deferredQuery, deferredDocumentFilter, t]);
 
   const virtualRows = useMemo<VirtualRow[]>(() => {
     if (browserMode !== "list") return [];
@@ -225,7 +237,7 @@ export const DocumentList = memo(function DocumentList({
     );
   }, [virtualLayout.rows, viewport]);
 
-  const forceExpandTree = Boolean(deferredQuery.trim() || deferredTypeFilter != null);
+  const forceExpandTree = Boolean(deferredQuery.trim() || !isAllDocumentFilter(deferredDocumentFilter));
   const folderPaths = useMemo(
     () => collectDocumentTreeFolderPaths(documentIndex.entries),
     [documentIndex.entries],
@@ -281,7 +293,7 @@ export const DocumentList = memo(function DocumentList({
     if (!node) return;
     node.scrollTop = 0;
     setViewport({ scrollTop: 0, height: node.clientHeight || 720 });
-  }, [deferredQuery, deferredTypeFilter]);
+  }, [deferredQuery, deferredFilterKey]);
 
   useEffect(() => {
     if (!pendingRevealTargetPath || browserMode !== "tree") return;
@@ -307,11 +319,7 @@ export const DocumentList = memo(function DocumentList({
     });
   }, [browserMode, loading, onRevealHandled, pendingRevealTargetPath, treeRows]);
 
-  const headerCaption = typeFilter
-    ? typeFilter === "_"
-      ? t("sidebar.types.untyped")
-      : typeFilter
-    : t("list.title");
+  const headerCaption = documentFilterTitle(documentFilter, documentViews, t);
   const copyContextText = (value: string) => {
     if (!value) return;
     const write = navigator.clipboard?.writeText(value);
@@ -1167,6 +1175,25 @@ function FileShape() {
       <path d="M14 4v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
+}
+
+function documentFilterTitle(
+  filter: DocumentFilter,
+  views: readonly DocumentViewDefinition[],
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  switch (filter.kind) {
+    case "all":
+      return t("list.title");
+    case "type":
+      return filter.type;
+    case "untyped":
+      return t("sidebar.types.untyped");
+    case "view":
+      return t(`sidebar.view.${filter.view}`);
+    case "custom":
+      return views.find((view) => view.id === filter.viewId)?.label ?? t("list.title");
+  }
 }
 
 function joinVaultPath(vaultPath: string, relPath: string): string {
