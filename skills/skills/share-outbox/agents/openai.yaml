@@ -1,0 +1,4 @@
+interface:
+  display_name: "Share Outbox"
+  short_description: "Prepare share-ready file copies"
+  default_prompt: "Use $share-outbox to prepare this file for external sharing with a Korean filename."

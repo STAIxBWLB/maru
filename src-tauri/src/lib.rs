@@ -52,7 +52,7 @@ use skill_host::{
     skills_env_bootstrap, skills_env_repair, skills_env_status, skills_install_skill,
     skills_list_installs, skills_list_skills, skills_list_sources, skills_read_skill,
     skills_read_skill_file, skills_remove_source, skills_rescan_source, skills_reset_registry,
-    skills_save_skill_file, skills_sync_source, skills_uninstall_skill,
+    skills_save_skill_as, skills_save_skill_file, skills_sync_source, skills_uninstall_skill,
 };
 use sys_import::{apply_sys_import, plan_sys_import};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
@@ -165,6 +165,7 @@ pub fn run() {
             skills_read_skill,
             skills_read_skill_file,
             skills_save_skill_file,
+            skills_save_skill_as,
             skills_create_skill,
             skills_delete_skill,
             skills_list_installs,

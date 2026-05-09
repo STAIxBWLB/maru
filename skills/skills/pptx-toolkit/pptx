@@ -1,0 +1,70 @@
+#!/bin/bash
+# pptx-toolkit wrapper — read/outline/notes/to-md subcommands
+#
+# Usage:
+#   ./pptx read    <file.pptx> [--slide N]
+#   ./pptx outline <file.pptx>
+#   ./pptx notes   <file.pptx> [--slide N]
+#   ./pptx to-md   <file.pptx> [-o out.md]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+find_env_python() {
+    local dir="$SCRIPT_DIR"
+    local candidate
+    while [ "$dir" != "/" ]; do
+        for candidate in \
+            "$dir/env/.venv/bin/python3" \
+            "$dir/_sys/skills/env/.venv/bin/python3" \
+            "$dir/skills/env/.venv/bin/python3"; do
+            [ -x "$candidate" ] && printf '%s\n' "$candidate" && return 0
+        done
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+VENV_PY="${SKILL_PYTHON:-}"
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    VENV_PY="$(find_env_python || true)"
+fi
+
+if [ -z "$VENV_PY" ] || [ ! -x "$VENV_PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        VENV_PY="$(command -v python3)"
+        echo "[pptx-toolkit] skills env 없음, python3 fallback 사용: $VENV_PY" >&2
+    else
+        echo "[pptx-toolkit] venv python 없음" >&2
+        echo "  _sys/skills/env 에서 make setup 실행 필요" >&2
+        exit 1
+    fi
+fi
+
+if [ $# -eq 0 ]; then
+    cat <<USAGE
+pptx-toolkit — PowerPoint(.pptx) read-only CLI
+
+Usage: ./pptx <command> [args...]
+
+Commands:
+  read       슬라이드 텍스트 + 노트 → markdown
+  outline    슬라이드 제목 목록
+  notes      발표자 노트만 추출
+  to-md      markdown 변환 (파일 저장)
+
+Options:
+  --slide <N>      특정 슬라이드 번호 (1-based)
+  -o, --output     저장 파일 (기본 stdout)
+
+Examples:
+  ./pptx outline presentation.pptx
+  ./pptx read presentation.pptx --slide 5
+  ./pptx notes presentation.pptx
+  ./pptx to-md presentation.pptx -o deck.md
+USAGE
+    exit 0
+fi
+
+exec "$VENV_PY" "$SCRIPT_DIR/scripts/pptx_cli.py" "$@"

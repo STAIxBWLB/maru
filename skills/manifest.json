@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "repoSlug": "STAIxBWLB/skills",
+  "skillsSubdir": "skills",
+  "envSubdir": "envs/default",
+  "libSubdir": "lib",
+  "skills": [
+    {
+      "name": "canva-deck",
+      "path": "skills/canva-deck",
+      "tags": [
+        "slides",
+        "design"
+      ]
+    },
+    {
+      "name": "gaejosik",
+      "path": "skills/gaejosik",
+      "tags": [
+        "korean",
+        "writing"
+      ]
+    },
+    {
+      "name": "git-sync",
+      "path": "skills/git-sync",
+      "tags": [
+        "git",
+        "workflow"
+      ]
+    },
+    {
+      "name": "gpt-images-deck",
+      "path": "skills/gpt-images-deck",
+      "tags": [
+        "slides",
+        "image"
+      ]
+    },
+    {
+      "name": "hwpx",
+      "path": "skills/hwpx",
+      "tags": [
+        "document",
+        "hwp"
+      ]
+    },
+    {
+      "name": "inbox-intake",
+      "path": "skills/inbox-intake",
+      "tags": [
+        "inbox",
+        "io"
+      ]
+    },
+    {
+      "name": "inbox-process",
+      "path": "skills/inbox-process",
+      "tags": [
+        "inbox",
+        "processing"
+      ]
+    },
+    {
+      "name": "io-gws",
+      "path": "skills/io-gws",
+      "tags": [
+        "io",
+        "google-workspace"
+      ]
+    },
+    {
+      "name": "io-kakao",
+      "path": "skills/io-kakao",
+      "tags": [
+        "io",
+        "kakao"
+      ]
+    },
+    {
+      "name": "io-mso",
+      "path": "skills/io-mso",
+      "tags": [
+        "io",
+        "microsoft-365"
+      ]
+    },
+    {
+      "name": "io-telegram",
+      "path": "skills/io-telegram",
+      "tags": [
+        "io",
+        "telegram"
+      ]
+    },
+    {
+      "name": "meeting-notes",
+      "path": "skills/meeting-notes",
+      "tags": [
+        "meeting",
+        "notes"
+      ]
+    },
+    {
+      "name": "notebooklm-deck",
+      "path": "skills/notebooklm-deck",
+      "tags": [
+        "slides",
+        "notebooklm"
+      ]
+    },
+    {
+      "name": "pptx-toolkit",
+      "path": "skills/pptx-toolkit",
+      "tags": [
+        "document",
+        "pptx"
+      ]
+    },
+    {
+      "name": "share-outbox",
+      "path": "skills/share-outbox",
+      "tags": [
+        "share",
+        "outbox"
+      ]
+    },
+    {
+      "name": "skill-mine",
+      "path": "skills/skill-mine",
+      "tags": [
+        "skills",
+        "analysis"
+      ]
+    },
+    {
+      "name": "task-management",
+      "path": "skills/task-management",
+      "tags": [
+        "task",
+        "workflow"
+      ]
+    },
+    {
+      "name": "vault-connect",
+      "path": "skills/vault-connect",
+      "tags": [
+        "vault",
+        "obsidian"
+      ]
+    },
+    {
+      "name": "vault-extract",
+      "path": "skills/vault-extract",
+      "tags": [
+        "vault",
+        "extract"
+      ]
+    },
+    {
+      "name": "vault-graph",
+      "path": "skills/vault-graph",
+      "tags": [
+        "vault",
+        "graph"
+      ]
+    },
+    {
+      "name": "vault-learn",
+      "path": "skills/vault-learn",
+      "tags": [
+        "vault",
+        "learning"
+      ]
+    },
+    {
+      "name": "vault-lint",
+      "path": "skills/vault-lint",
+      "tags": [
+        "vault",
+        "lint"
+      ]
+    },
+    {
+      "name": "vault-next",
+      "path": "skills/vault-next",
+      "tags": [
+        "vault",
+        "planning"
+      ]
+    },
+    {
+      "name": "vault-pipeline",
+      "path": "skills/vault-pipeline",
+      "tags": [
+        "vault",
+        "pipeline"
+      ]
+    },
+    {
+      "name": "vault-refactor",
+      "path": "skills/vault-refactor",
+      "tags": [
+        "vault",
+        "refactor"
+      ]
+    },
+    {
+      "name": "vault-remember",
+      "path": "skills/vault-remember",
+      "tags": [
+        "vault",
+        "memory"
+      ]
+    },
+    {
+      "name": "vault-rename",
+      "path": "skills/vault-rename",
+      "tags": [
+        "vault",
+        "rename"
+      ]
+    },
+    {
+      "name": "vault-rethink",
+      "path": "skills/vault-rethink",
+      "tags": [
+        "vault",
+        "review"
+      ]
+    },
+    {
+      "name": "vault-stats",
+      "path": "skills/vault-stats",
+      "tags": [
+        "vault",
+        "stats"
+      ]
+    },
+    {
+      "name": "vault-sync",
+      "path": "skills/vault-sync",
+      "tags": [
+        "vault",
+        "sync"
+      ]
+    },
+    {
+      "name": "vault-update",
+      "path": "skills/vault-update",
+      "tags": [
+        "vault",
+        "update"
+      ]
+    },
+    {
+      "name": "xlsx-toolkit",
+      "path": "skills/xlsx-toolkit",
+      "tags": [
+        "document",
+        "xlsx"
+      ]
+    }
+  ]
+}

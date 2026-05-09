@@ -132,6 +132,11 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 The `runtime: claude-code` lane is the v1 core — the user's `~/.claude/skills/*` are invoked as-is. **Zero lines rewritten**.
 
+Built-in skill assets live in the repo root `skills/` directory. The bundle is
+embedded into the Tauri binary and materialized into `~/.anchor/skills/_builtin`
+at runtime; `skills/envs/default/setup.sh` is the bootstrap source for
+`~/.anchor/env`. The external `stai-public` source is not auto-created.
+
 Five skills:
 1. **inbox-processor** — pick an inbox item → palette → run skill → show diff → stage.
 2. **meeting-notes** — palette → emit `meetings/YYMMDD-*.md` template (Phase 4 adds voice).

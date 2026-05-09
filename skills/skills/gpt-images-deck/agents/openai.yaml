@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPT Images Deck"
+  short_description: "ChatGPT Images slide deck workflow"
+  default_prompt: "Create a slide deck from my source content using the local slide-deck style catalog and ChatGPT Images 2.0."

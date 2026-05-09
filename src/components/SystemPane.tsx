@@ -72,6 +72,7 @@ import {
   skillsRemoveSource,
   skillsRescanSource,
   skillsResetRegistry,
+  skillsSaveSkillAs,
   skillsSaveSkillFile,
   skillsSyncSource,
   skillsUninstallSkill,
@@ -1065,6 +1066,10 @@ function SkillsTab({ workPath }: { workPath: string }) {
     () => skills.find((skill) => skill.id === selectedSkillId) ?? null,
     [selectedSkillId, skills],
   );
+  const selectedSkillSource = useMemo(
+    () => sources.find((source) => source.id === selectedSkill?.sourceId) ?? null,
+    [selectedSkill, sources],
+  );
   const installKey = useMemo(() => {
     const set = new Set<string>();
     installs.forEach((install) => set.add(`${install.skillId}:${install.target}`));
@@ -1389,6 +1394,46 @@ function SkillsTab({ workPath }: { workPath: string }) {
         return selectedSkill.name;
       },
       (name) => t("system.skills.saveSkillComplete", { name }),
+    );
+  }, [
+    appendOperationLog,
+    confirmAction,
+    editorText,
+    refresh,
+    runOperation,
+    selectedSkill,
+    stepOperation,
+    t,
+  ]);
+
+  const saveEditorAs = useCallback(async () => {
+    if (!selectedSkill) return;
+    const rawName = window.prompt(
+      t("system.skills.saveAsPrompt"),
+      `${selectedSkill.name}-copy`,
+    );
+    const name = rawName?.trim();
+    if (!name) return;
+    if (
+      !(await confirmAction(t("system.skills.saveAsConfirm", { name })))
+    ) {
+      return;
+    }
+    await runOperation(
+      t("system.skills.savingSkillAs", { name }),
+      2,
+      async () => {
+        appendOperationLog(t("system.skills.log.saveSkillAs", { name }));
+        const created = await skillsSaveSkillAs(selectedSkill.id, name, editorText);
+        setSelectedSkillId(created.id);
+        setEditorBase(editorText);
+        stepOperation();
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        stepOperation();
+        return created.name;
+      },
+      (createdName) => t("system.skills.saveAsComplete", { name: createdName }),
     );
   }, [
     appendOperationLog,
@@ -2076,7 +2121,10 @@ function SkillsTab({ workPath }: { workPath: string }) {
           </div>
           <ul className="system-skill-list compact">
             {sources.map((source) => {
-              const sourceRemovable = source.kind !== "managed" && source.id !== "anchor-managed";
+              const sourceRemovable =
+                source.kind !== "managed" &&
+                source.kind !== "builtin" &&
+                source.id !== "anchor-managed";
               const sourceHasInstalls = sourceHasInstalledSkills(source.id);
               const removeTitle = sourceHasInstalls
                   ? t("system.skills.removeSourceInstalledBlocked", { id: source.id })
@@ -2407,11 +2455,24 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 <p className="muted" title={selectedSkill.absPath}>{selectedSkill.relPath}</p>
               </div>
               {selectedSkill.dirty ? (
-                <span className="dirty-pill">{t("system.skills.linkedSourceDirty")}</span>
+                <span className="dirty-pill">
+                  {selectedSkillSource?.kind === "builtin"
+                    ? t("system.skills.builtinSourceDirty")
+                    : t("system.skills.linkedSourceDirty")}
+                </span>
               ) : null}
               <span className={editorText !== editorBase ? "save-state dirty" : "save-state saved"}>
                 {editorText !== editorBase ? t("system.rules.dirty") : t("system.rules.saved")}
               </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void saveEditorAs()}
+                disabled={busy}
+                icon={<Save size={14} />}
+              >
+                {t("system.skills.saveAs")}
+              </Button>
               <Button
                 variant="primary"
                 size="sm"

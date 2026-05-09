@@ -1,0 +1,29 @@
+# 가상환경
+.venv/
+jre/
+node_modules/
+
+# 입력/출력 데이터
+input/
+output/
+temp/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+
+# macOS
+.DS_Store
+
+# 개인 설정
+CLAUDE.local.md
+.omc/
+.omx/

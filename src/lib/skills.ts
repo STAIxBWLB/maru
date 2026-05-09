@@ -9,7 +9,7 @@ declare global {
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
-export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted";
+export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
 export type SkillDispatchRuntime = "claude" | "codex";
 
@@ -35,6 +35,8 @@ export interface SkillRecord {
   category?: string | null;
   editable: boolean;
   dirty: boolean;
+  contentHash?: string | null;
+  savedHash?: string | null;
 }
 
 export interface SkillInstall {
@@ -175,6 +177,15 @@ export async function skillsSaveSkillFile(
 ): Promise<SkillRecord> {
   if (!isTauri()) throw new Error("Skill editing requires the Tauri shell.");
   return invoke<SkillRecord>("skills_save_skill_file", { skillId, filePath, content });
+}
+
+export async function skillsSaveSkillAs(
+  skillId: string,
+  name: string,
+  content: string,
+): Promise<SkillRecord> {
+  if (!isTauri()) throw new Error("Skill creation requires the Tauri shell.");
+  return invoke<SkillRecord>("skills_save_skill_as", { skillId, name, content });
 }
 
 export async function skillsCreateSkill(
