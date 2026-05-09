@@ -53,6 +53,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
 
 const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["ui", "binaryFileIncludePatterns"],
+    &["ui", "documentViews"],
     &["ui", "collapsedTreeFolders"],
     &["ui", "collapsedFileFolders"],
     &["ui", "documentTreeStateInitialized"],
@@ -358,6 +359,7 @@ fn default_settings_json() -> JsonValue {
                 "*.tsv",
                 "*.html"
             ],
+            "documentViews": [],
             "collapsedTreeFolders": [],
             "collapsedFileFolders": [],
             "documentTreeStateInitialized": false,
@@ -1257,7 +1259,16 @@ mod tests {
             "version": 1,
             "ui": {
                 "documentBrowserMode": "tree",
-                "collapsedTreeFolders": ["projects/rise"]
+                "collapsedTreeFolders": ["projects/rise"],
+                "documentViews": [
+                    {
+                        "id": "rise-active",
+                        "label": "RISE Active",
+                        "color": "#884477",
+                        "type": "project",
+                        "status": "active"
+                    }
+                ]
             },
             "terminal": {
                 "defaultPanelOpen": false,
@@ -1281,6 +1292,12 @@ mod tests {
                 .and_then(JsonValue::as_str),
             Some("projects/rise")
         );
+        assert_eq!(
+            reloaded
+                .pointer("/ui/documentViews/0/label")
+                .and_then(JsonValue::as_str),
+            Some("RISE Active")
+        );
         let raw = fs::read_to_string(&global).unwrap();
         assert!(
             raw.contains('\n') && raw.ends_with('\n'),
@@ -1301,12 +1318,19 @@ mod tests {
             Some("tree")
         );
         assert!(global_value.pointer("/ui/collapsedTreeFolders").is_none());
+        assert!(global_value.pointer("/ui/documentViews").is_none());
         let state_value = read_json(&tmp.path().join(".anchor/workspace-state.json")).unwrap();
         assert_eq!(
             state_value
                 .pointer("/ui/collapsedTreeFolders/0")
                 .and_then(JsonValue::as_str),
             Some("projects/rise")
+        );
+        assert_eq!(
+            state_value
+                .pointer("/ui/documentViews/0/id")
+                .and_then(JsonValue::as_str),
+            Some("rise-active")
         );
         assert!(state_value.pointer("/terminal").is_none());
         assert!(state_value.pointer("/connectors").is_none());

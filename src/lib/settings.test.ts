@@ -23,6 +23,22 @@ describe("normalizeAnchorSettings", () => {
         documentLabelMode: "filename",
         workspaceFileFilter: "tracked",
         binaryFileIncludePatterns: ["*.pdf", "*.HWP*", "*.pdf"],
+        documentViews: [
+          {
+            id: "RISE Active",
+            label: "RISE Active",
+            color: "#884477",
+            type: "project",
+            status: "active",
+            pathPrefix: "/projects/rise/",
+            query: " grant ",
+          },
+          {
+            id: "bad",
+            label: "No criteria",
+            color: "invalid",
+          },
+        ],
         collapsedTreeFolders: ["projects/rise"],
         collapsedFileFolders: ["assets"],
         documentTreeStateInitialized: true,
@@ -61,6 +77,17 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.documentLabelMode).toBe("filename");
     expect(settings.ui.workspaceFileFilter).toBe("tracked");
     expect(settings.ui.binaryFileIncludePatterns).toEqual(["*.pdf", "*.HWP*"]);
+    expect(settings.ui.documentViews).toEqual([
+      {
+        id: "rise-active",
+        label: "RISE Active",
+        color: "#884477",
+        type: "project",
+        status: "active",
+        pathPrefix: "projects/rise",
+        query: "grant",
+      },
+    ]);
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
     expect(settings.ui.collapsedFileFolders).toEqual(["assets"]);
     expect(settings.ui.documentTreeStateInitialized).toBe(true);
@@ -98,6 +125,7 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.binaryFileIncludePatterns).toEqual(
       DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,
     );
+    expect(settings.ui.documentViews).toEqual([]);
     expect(settings.ui.fileQueueDefaultOperation).toBe("copy");
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.terminal.defaultPanelOpen).toBe(false);

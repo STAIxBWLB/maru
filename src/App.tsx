@@ -80,8 +80,13 @@ import {
   tabIdsToCloseSaved,
 } from "./lib/editorTabActions";
 import {
+  ALL_DOCUMENTS_FILTER,
   buildDocumentIndex,
+  countDocumentFilter,
+  documentFilterDefaultDocType,
   getRecentEntries,
+  type BuiltInDocumentView,
+  type DocumentFilter,
   type DocumentIndex,
 } from "./lib/documentIndex";
 import { buildGmailMessageStates, type GmailMessageState } from "./lib/gmail";
@@ -139,6 +144,7 @@ import {
   type AnchorSettings,
   type AnchorAppMode,
   type DocumentBrowserMode,
+  type DocumentViewDefinition,
   type EditorViewModeSetting,
   type ExplorerPaneMode,
   type RightPaneTab,
@@ -511,11 +517,11 @@ function MainApp() {
     private: "",
     public: "",
   });
-  const [typeFilterByVisibility, setTypeFilterByVisibility] = useState<
-    Record<WorkspaceVisibility, string | null>
+  const [documentFilterByVisibility, setDocumentFilterByVisibility] = useState<
+    Record<WorkspaceVisibility, DocumentFilter>
   >({
-    private: null,
-    public: null,
+    private: ALL_DOCUMENTS_FILTER,
+    public: ALL_DOCUMENTS_FILTER,
   });
   const [collapsedTreeFoldersByVisibility, setCollapsedTreeFoldersByVisibility] = useState<
     Record<WorkspaceVisibility, string[]>
@@ -544,6 +550,7 @@ function MainApp() {
   const [newDocumentSeed, setNewDocumentSeed] = useState<{
     title: string;
     relPath: string | null;
+    docType?: string | null;
   } | null>(null);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
   const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
@@ -672,7 +679,7 @@ function MainApp() {
   const fileEntries = explorerWorkspaceFilesState.entries;
   const query = queryByVisibility[explorerVisibility];
   const fileQuery = fileQueryByVisibility[explorerVisibility];
-  const typeFilter = typeFilterByVisibility[explorerVisibility];
+  const documentFilter = documentFilterByVisibility[explorerVisibility];
   const savedCollapsedTreeFolders = collapsedTreeFoldersByVisibility[explorerVisibility];
   const savedCollapsedFileFolders = collapsedFileFoldersByVisibility[explorerVisibility];
   const defaultCollapsedTreeFolders = useMemo(
@@ -692,6 +699,47 @@ function MainApp() {
   );
   const collapsedFileFolders = defaultCollapsedFileFolders ?? savedCollapsedFileFolders;
   const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
+  const builtInDocumentViewCounts = useMemo<Record<BuiltInDocumentView, number>>(
+    () => ({
+      inbox: countDocumentFilter(documentIndex, { kind: "view", view: "inbox" }),
+      drafts: countDocumentFilter(documentIndex, { kind: "view", view: "drafts" }),
+      archive: countDocumentFilter(documentIndex, { kind: "view", view: "archive" }),
+      recentlyUpdated: countDocumentFilter(documentIndex, {
+        kind: "view",
+        view: "recentlyUpdated",
+      }),
+    }),
+    [documentIndex],
+  );
+  const customDocumentViewCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        anchorSettings.ui.documentViews.map((view) => [
+          view.id,
+          countDocumentFilter(
+            documentIndex,
+            { kind: "custom", viewId: view.id },
+            { customViews: anchorSettings.ui.documentViews },
+          ),
+        ]),
+      ),
+    [anchorSettings.ui.documentViews, documentIndex],
+  );
+  useEffect(() => {
+    const viewIds = new Set(anchorSettings.ui.documentViews.map((view) => view.id));
+    setDocumentFilterByVisibility((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const visibility of ["private", "public"] as const) {
+        const filter = next[visibility];
+        if (filter.kind === "custom" && !viewIds.has(filter.viewId)) {
+          next[visibility] = { kind: "all" };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [anchorSettings.ui.documentViews]);
   const selectedFilePaths = explorerWorkspacePath
     ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
     : [];
@@ -1400,16 +1448,29 @@ function MainApp() {
     [explorerVisibility, startExplorerTransition],
   );
 
-  const setExplorerTypeFilter = useCallback(
-    (next: string | null) => {
+  const setExplorerDocumentFilter = useCallback(
+    (next: DocumentFilter) => {
       startExplorerTransition(() =>
-        setTypeFilterByVisibility((current) => ({
+        setDocumentFilterByVisibility((current) => ({
           ...current,
           [explorerVisibility]: next,
         })),
       );
     },
     [explorerVisibility, startExplorerTransition],
+  );
+
+  const updateDocumentViews = useCallback(
+    (documentViews: DocumentViewDefinition[]) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          documentViews,
+        },
+      }));
+    },
+    [updateSettings],
   );
 
   // Best-effort persistence of the chosen mode into .anchor/workspace.json.
@@ -2017,7 +2078,7 @@ function MainApp() {
     }
   }, [workspaceRegistry.workspaces, handleAddWorkspace, switchActiveWorkspace]);
 
-  const openNewDocumentDialog = useCallback(() => {
+  const openNewDocumentDialog = useCallback((docType?: string) => {
     if (!activeWorkspaceCanCreate) {
       setError(
         t("workspace.writeBlocked", {
@@ -2028,9 +2089,19 @@ function MainApp() {
       );
       return;
     }
-    setNewDocumentSeed(null);
+    const seededDocType =
+      docType ?? documentFilterDefaultDocType(documentFilter, anchorSettings.ui.documentViews);
+    setNewDocumentSeed(
+      seededDocType ? { title: "", relPath: null, docType: seededDocType } : null,
+    );
     setNewDocumentOpen(true);
-  }, [activeDocumentWorkspace, activeWorkspaceCanCreate, t]);
+  }, [
+    activeDocumentWorkspace,
+    activeWorkspaceCanCreate,
+    anchorSettings.ui.documentViews,
+    documentFilter,
+    t,
+  ]);
 
   const blockWorkspaceWrite = useCallback(
     (action: "create" | "modify" = "modify") => {
@@ -3396,7 +3467,7 @@ function MainApp() {
       if (activePane === "documents") {
         setDocumentBrowserMode("tree");
         setExplorerQuery("");
-        setExplorerTypeFilter(null);
+        setExplorerDocumentFilter({ kind: "all" });
         setCollapsedTreeFoldersByVisibility((current) => {
           const existing = current[tab.visibility] ?? [];
           return {
@@ -3430,7 +3501,7 @@ function MainApp() {
       selectTab,
       setDocumentBrowserMode,
       setExplorerQuery,
-      setExplorerTypeFilter,
+      setExplorerDocumentFilter,
       setWorkspaceFileFilter,
       setWorkspaceFileQuery,
       setPersistedAppMode,
@@ -4212,10 +4283,14 @@ function MainApp() {
           <Sidebar
             contentCount={documentIndex.contentCount}
             typeCounts={documentIndex.typeCounts}
+            documentViews={anchorSettings.ui.documentViews}
+            viewCounts={builtInDocumentViewCounts}
+            customViewCounts={customDocumentViewCounts}
             recentEntries={recentEntries}
             selectedPath={selectedPath}
-            typeFilter={typeFilter}
-            onTypeFilter={setExplorerTypeFilter}
+            documentFilter={documentFilter}
+            onDocumentFilter={setExplorerDocumentFilter}
+            onDocumentViewsChange={updateDocumentViews}
             onNewDocument={openNewDocumentDialog}
             canCreateDocument={activeWorkspaceCanCreate}
             onSelectRecent={selectEntry}
@@ -4250,7 +4325,8 @@ function MainApp() {
                 selectedPath={selectedPath}
                 query={query}
                 loading={(booting || explorerWorkspaceState.loading) && entries.length === 0}
-                typeFilter={typeFilter}
+                documentFilter={documentFilter}
+                documentViews={anchorSettings.ui.documentViews}
                 workspaceVisibility={explorerVisibility}
                 publicWorkspaceAvailable={publicWorkspaceAvailable}
                 activeWorkspaceLabel={explorerWorkspaceCaption}
@@ -4609,6 +4685,7 @@ function MainApp() {
           open={newDocumentOpen}
           initialTitle={newDocumentSeed?.title ?? ""}
           initialRelPath={newDocumentSeed?.relPath ?? null}
+          initialDocType={newDocumentSeed?.docType ?? "reference"}
           onOpenChange={(open) => {
             setNewDocumentOpen(open);
             if (!open) setNewDocumentSeed(null);
