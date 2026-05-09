@@ -6,14 +6,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use walkdir::WalkDir;
 
+use crate::cli_path::merge_path_env;
 use crate::skill_host::fs as host_fs;
 use crate::vault::{parse_frontmatter, title_from_content};
 
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE: &str = "registry.json";
 const MANAGED_SOURCE_ID: &str = "anchor-managed";
+
+static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -118,9 +122,10 @@ impl Default for SkillsRegistry {
 
 #[tauri::command]
 pub fn skills_list_sources(work_path: Option<String>) -> Result<Vec<SkillSource>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     ensure_default_sources(&mut registry, work_path.as_deref())?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(registry.sources)
 }
 
@@ -134,7 +139,8 @@ pub fn skills_add_source(
 ) -> Result<SkillSource, String> {
     let id = normalize_source_id(&id)?;
     let kind = normalize_source_kind(&kind)?;
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     if registry.sources.iter().any(|source| source.id == id) {
         return Err(format!("source_exists: {id}"));
     }
@@ -186,13 +192,14 @@ pub fn skills_add_source(
     };
     registry.sources.push(source.clone());
     rescan_source_in_registry(&mut registry, &source.id)?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(source)
 }
 
 #[tauri::command]
 pub fn skills_remove_source(source_id: String) -> Result<(), String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let skill_ids: BTreeSet<String> = registry
         .skills
         .iter()
@@ -208,12 +215,13 @@ pub fn skills_remove_source(source_id: String) -> Result<(), String> {
     }
     registry.sources.retain(|source| source.id != source_id);
     registry.skills.retain(|skill| skill.source_id != source_id);
-    save_registry(&registry)
+    save_registry_unlocked(&registry)
 }
 
 #[tauri::command]
 pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let source = registry
         .sources
         .iter()
@@ -231,21 +239,23 @@ pub fn skills_sync_source(source_id: String) -> Result<Vec<SkillRecord>, String>
         )?;
     }
     let skills = rescan_source_in_registry(&mut registry, &source_id)?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(skills)
 }
 
 #[tauri::command]
 pub fn skills_rescan_source(source_id: String) -> Result<Vec<SkillRecord>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let skills = rescan_source_in_registry(&mut registry, &source_id)?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(skills)
 }
 
 #[tauri::command]
 pub fn skills_list_skills(work_path: Option<String>) -> Result<Vec<SkillRecord>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     ensure_default_sources(&mut registry, work_path.as_deref())?;
     let source_ids: Vec<String> = registry
         .sources
@@ -255,7 +265,7 @@ pub fn skills_list_skills(work_path: Option<String>) -> Result<Vec<SkillRecord>,
     for source_id in source_ids {
         let _ = rescan_source_in_registry(&mut registry, &source_id);
     }
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(registry.skills)
 }
 
@@ -286,7 +296,8 @@ pub fn skills_save_skill_file(
     file_path: String,
     content: String,
 ) -> Result<SkillRecord, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let skill = registry
         .skills
         .iter()
@@ -308,14 +319,15 @@ pub fn skills_save_skill_file(
         .into_iter()
         .find(|next| next.id == skill_id)
         .ok_or_else(|| format!("skill_missing_after_save: {skill_id}"))?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(refreshed)
 }
 
 #[tauri::command]
 pub fn skills_create_skill(name: String, title: Option<String>) -> Result<SkillRecord, String> {
     let name = host_fs::safe_entry_name(&name)?;
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     ensure_managed_source(&mut registry)?;
     let root = host_fs::skills_root()?.join("_managed").join(&name);
     if root.exists() {
@@ -336,13 +348,14 @@ pub fn skills_create_skill(name: String, title: Option<String>) -> Result<SkillR
         .into_iter()
         .find(|skill| skill.name == name)
         .ok_or_else(|| "managed_skill_scan_failed".to_string())?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(created)
 }
 
 #[tauri::command]
 pub fn skills_delete_skill(skill_id: String) -> Result<(), String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let skill = registry
         .skills
         .iter()
@@ -362,14 +375,15 @@ pub fn skills_delete_skill(skill_id: String) -> Result<(), String> {
     fs::remove_dir_all(&skill.abs_path)
         .map_err(|err| format!("Cannot delete {}: {err}", skill.abs_path))?;
     let _ = rescan_source_in_registry(&mut registry, MANAGED_SOURCE_ID)?;
-    save_registry(&registry)
+    save_registry_unlocked(&registry)
 }
 
 #[tauri::command]
 pub fn skills_list_installs(work_path: Option<String>) -> Result<Vec<SkillInstall>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     ensure_default_sources(&mut registry, work_path.as_deref())?;
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(registry.installs)
 }
 
@@ -379,7 +393,8 @@ pub fn skills_install_skill(
     target: String,
     installed_as: Option<String>,
 ) -> Result<InstallOutcome, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let skill = registry
         .skills
         .iter()
@@ -408,7 +423,7 @@ pub fn skills_install_skill(
         !(existing.target == install.target && existing.installed_as == install.installed_as)
     });
     registry.installs.push(install.clone());
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(InstallOutcome {
         install,
         anchor_entrypoint: host_fs::display_path(&anchor_entry),
@@ -419,7 +434,8 @@ pub fn skills_install_skill(
 pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<(), String> {
     let target = normalize_install_target(&target)?;
     let installed_as = host_fs::safe_entry_name(&installed_as)?;
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let install = registry
         .installs
         .iter()
@@ -455,12 +471,13 @@ pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<()
     registry
         .installs
         .retain(|other| !(other.target == target && other.installed_as == installed_as));
-    save_registry(&registry)
+    save_registry_unlocked(&registry)
 }
 
 #[tauri::command]
 pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     let mut adopted = 0;
     let mut skipped = 0;
     let mut installs = Vec::new();
@@ -527,7 +544,7 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
             adopted += 1;
         }
     }
-    save_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
     Ok(AdoptOutcome {
         adopted,
         skipped,
@@ -535,7 +552,19 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
     })
 }
 
+fn registry_guard() -> Result<MutexGuard<'static, ()>, String> {
+    REGISTRY_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "skills_registry_lock_poisoned".to_string())
+}
+
 pub fn load_registry() -> Result<SkillsRegistry, String> {
+    let _guard = registry_guard()?;
+    load_registry_unlocked()
+}
+
+fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
     let root = host_fs::skills_root()?;
     host_fs::ensure_dir(&root)?;
     for name in ["_sources", "_managed", "_imported", "_cache"] {
@@ -556,7 +585,7 @@ pub fn load_registry() -> Result<SkillsRegistry, String> {
     Ok(registry)
 }
 
-pub fn save_registry(registry: &SkillsRegistry) -> Result<(), String> {
+fn save_registry_unlocked(registry: &SkillsRegistry) -> Result<(), String> {
     host_fs::write_json_pretty(&registry_path()?, registry)
 }
 
@@ -581,16 +610,18 @@ pub fn env_vars_for_runs() -> Result<BTreeMap<String, String>, String> {
         "VIRTUAL_ENV".to_string(),
         host_fs::display_path(&env_root.join(".venv")),
     );
-    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let existing_path = std::env::var_os("PATH");
+    let merged_path = merge_path_env(Some(bin.as_os_str()), existing_path.as_deref());
     vars.insert(
         "PATH".to_string(),
-        format!("{}:{}", host_fs::display_path(&bin), existing_path),
+        merged_path.to_string_lossy().to_string(),
     );
     Ok(vars)
 }
 
 pub fn default_public_env_setup(work_path: Option<&str>) -> Result<Option<PathBuf>, String> {
-    let mut registry = load_registry()?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
     ensure_default_sources(&mut registry, work_path)?;
     for source in &registry.sources {
         if source.id == "stai-public" || source.id.contains("public") {

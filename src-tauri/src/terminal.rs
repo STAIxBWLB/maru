@@ -8,7 +8,7 @@ use std::thread::{self, JoinHandle};
 use std::{env, str};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::cli_path::{augmented_path, resolve_program};
+use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
 
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_ROWS: u16 = 30;
@@ -95,11 +95,19 @@ pub fn terminal_spawn(
     let mut cmd = CommandBuilder::new(program.as_os_str());
     cmd.args(&spec.args);
     cmd.cwd(spec.cwd.as_os_str());
-    cmd.env("PATH", augmented_path());
+    let augmented = augmented_path();
+    let effective_path = merge_path_env(
+        spec.extra_env.get("PATH").map(std::ffi::OsStr::new),
+        Some(augmented.as_os_str()),
+    );
+    cmd.env("PATH", effective_path);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "Anchor");
     for (key, value) in &spec.extra_env {
+        if key == "PATH" {
+            continue;
+        }
         cmd.env(key, value);
     }
 

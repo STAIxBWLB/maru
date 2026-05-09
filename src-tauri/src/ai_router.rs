@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-use crate::cli_path::{augmented_path, resolve_program};
+use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,14 +75,21 @@ pub fn start_claude_cli_invocation(
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    cmd.env("PATH", augmented_path())
+    let extra_env = extra_env.unwrap_or_default();
+    let augmented = augmented_path();
+    let effective_path = merge_path_env(
+        extra_env.get("PATH").map(std::ffi::OsStr::new),
+        Some(augmented.as_os_str()),
+    );
+    cmd.env("PATH", effective_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(extra_env) = extra_env {
-        for (key, value) in extra_env {
-            cmd.env(key, value);
+    for (key, value) in extra_env {
+        if key == "PATH" {
+            continue;
         }
+        cmd.env(key, value);
     }
 
     let mut child = match cmd.spawn() {

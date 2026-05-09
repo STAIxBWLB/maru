@@ -537,7 +537,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
                 onApplySkillToTarget(target, kind);
               }}
             >
-              Apply skill...
+              {t("context.applySkill")}
             </button>
           ) : null}
           <button

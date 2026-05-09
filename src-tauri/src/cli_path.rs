@@ -32,6 +32,23 @@ pub fn augmented_path() -> OsString {
     std::env::join_paths(paths).unwrap_or(existing)
 }
 
+pub fn merge_path_env(primary: Option<&OsStr>, fallback: Option<&OsStr>) -> OsString {
+    let mut paths = Vec::<PathBuf>::new();
+    for value in [primary, fallback].into_iter().flatten() {
+        for path in std::env::split_paths(value) {
+            if !paths.iter().any(|existing| existing == &path) {
+                paths.push(path);
+            }
+        }
+    }
+    std::env::join_paths(paths).unwrap_or_else(|_| {
+        primary
+            .or(fallback)
+            .map(OsStr::to_os_string)
+            .unwrap_or_default()
+    })
+}
+
 pub fn resolve_program(program: &str) -> Option<PathBuf> {
     let trimmed = program.trim();
     if trimmed.is_empty() {
@@ -107,5 +124,23 @@ mod tests {
         assert!(paths.contains(&PathBuf::from(
             "/Applications/cmux.app/Contents/Resources/bin"
         )));
+    }
+
+    #[test]
+    fn merge_path_env_keeps_primary_before_fallback_and_dedupes() {
+        let primary =
+            std::env::join_paths([PathBuf::from("/custom/bin"), PathBuf::from("/bin")]).unwrap();
+        let fallback =
+            std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]).unwrap();
+        let merged = merge_path_env(Some(primary.as_os_str()), Some(fallback.as_os_str()));
+        let paths: Vec<PathBuf> = std::env::split_paths(&merged).collect();
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/custom/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/usr/bin"),
+            ]
+        );
     }
 }

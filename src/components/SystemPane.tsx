@@ -1057,10 +1057,10 @@ function SkillsTab({ workPath }: { workPath: string }) {
     string,
     number,
   ]> = [
-    ["all", "All", skills.length],
-    ["installed", "Installed", installedSkillCount],
-    ["uninstalled", "Open", Math.max(skills.length - installedSkillCount, 0)],
-    ["dirty", "Dirty", skills.filter((skill) => skill.dirty).length],
+    ["all", t("system.skills.filter.all"), skills.length],
+    ["installed", t("system.skills.filter.installed"), installedSkillCount],
+    ["uninstalled", t("system.skills.filter.open"), Math.max(skills.length - installedSkillCount, 0)],
+    ["dirty", t("system.skills.filter.dirty"), skills.filter((skill) => skill.dirty).length],
   ];
 
   const loadEditor = useCallback(async (skill: SkillRecord) => {
@@ -1132,18 +1132,18 @@ function SkillsTab({ workPath }: { workPath: string }) {
         <div className="skills-overview-title">
           <PackageCheck size={18} />
           <div>
-            <h3>Skill catalog</h3>
-            <p>Global store: ~/.anchor/skills</p>
+            <h3>{t("system.skills.catalogTitle")}</h3>
+            <p>{t("system.skills.globalStore")}</p>
           </div>
         </div>
-        <div className="skills-metrics" aria-label="Skill manager summary">
+        <div className="skills-metrics" aria-label={t("system.skills.summary")}>
           <span className="skills-metric">
             <strong>{sources.length}</strong>
-            <span>Sources</span>
+            <span>{t("system.skills.sources")}</span>
           </span>
           <span className="skills-metric">
             <strong>{skills.length}</strong>
-            <span>Skills</span>
+            <span>{t("system.skills.skills")}</span>
           </span>
           <span className="skills-metric">
             <strong>{claudeInstallCount}</strong>
@@ -1157,7 +1157,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
         <div className="skills-overview-actions">
           <span className={envStatus?.healthy ? "skill-status-pill installed" : "skill-status-pill warn"}>
             <ShieldCheck size={12} />
-            {envStatus?.healthy ? "Env ready" : "Env setup"}
+            {envStatus?.healthy ? t("system.skills.envReady") : t("system.skills.envSetup")}
           </span>
           <Button
             variant="ghost"
@@ -1165,7 +1165,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             onClick={() => void refresh()}
             icon={<RefreshCcw size={14} className={busy ? "spin" : ""} />}
           >
-            Refresh
+            {t("system.skills.refresh")}
           </Button>
           <Button
             variant="secondary"
@@ -1176,7 +1176,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 .catch((err) => setError(err instanceof Error ? err.message : String(err)))
             }
           >
-            Adopt
+            {t("system.skills.adopt")}
           </Button>
           <Button
             variant="secondary"
@@ -1188,7 +1188,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             }
             icon={<Wrench size={14} />}
           >
-            Bootstrap
+            {t("system.skills.bootstrap")}
           </Button>
         </div>
       </div>
@@ -1196,7 +1196,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
       <div className="skills-manager-grid">
         <section className="skills-manager-section sources">
           <div className="skills-section-heading">
-            <h3>Sources</h3>
+            <h3>{t("system.skills.sources")}</h3>
             <span>{sources.length}</span>
           </div>
           <div className="system-card source-add-card">
@@ -1206,33 +1206,37 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 className={newSourceKind === "linked" ? "active" : ""}
                 onClick={() => setNewSourceKind("linked")}
               >
-                linked
+                {t("system.skills.sourceKind.linked")}
               </button>
               <button
                 type="button"
                 className={newSourceKind === "cloned" ? "active" : ""}
                 onClick={() => setNewSourceKind("cloned")}
               >
-                cloned
+                {t("system.skills.sourceKind.cloned")}
               </button>
             </div>
             <label className="field">
-              <span>Source id</span>
+              <span>{t("system.skills.sourceId")}</span>
               <input
                 value={newSourceId}
                 onChange={(event) => setNewSourceId(event.target.value)}
-                placeholder="team-skills"
+                placeholder={t("system.skills.sourceIdPlaceholder")}
               />
             </label>
             <label className="field">
-              <span>{newSourceKind === "linked" ? "Path" : "Repo URL"}</span>
+              <span>
+                {newSourceKind === "linked"
+                  ? t("system.skills.path")
+                  : t("system.skills.repoUrl")}
+              </span>
               <input
                 value={newSourcePath}
                 onChange={(event) => setNewSourcePath(event.target.value)}
                 placeholder={
                   newSourceKind === "linked"
-                    ? "~/path/to/skills-repo"
-                    : "https://github.com/org/skills"
+                    ? t("system.skills.linkedPathPlaceholder")
+                    : t("system.skills.repoUrlPlaceholder")
                 }
               />
             </label>
@@ -1258,7 +1262,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                   .finally(() => setBusy(false));
               }}
             >
-              Add source
+              {t("system.skills.addSource")}
             </Button>
           </div>
           <ul className="system-skill-list compact">
@@ -1286,7 +1290,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                           )
                       }
                     >
-                      Rescan
+                      {t("system.skills.rescan")}
                     </Button>
                     <Button
                       variant="ghost"
@@ -1299,34 +1303,42 @@ function SkillsTab({ workPath }: { workPath: string }) {
                           )
                       }
                     >
-                      Sync
+                      {t("system.skills.sync")}
                     </Button>
                   </div>
                 </div>
                 <div className="skill-path" title={source.path ?? source.repoUrl ?? ""}>
-                  {source.path ?? source.repoUrl ?? "managed source"}
+                  {source.path ?? source.repoUrl ?? t("system.skills.managedSource")}
                 </div>
               </li>
             ))}
           </ul>
           <div className="system-card skill-env-card">
             <div className="skills-section-heading">
-              <h3>Env</h3>
+              <h3>{t("system.skills.env")}</h3>
               <span className={envStatus?.healthy ? "skill-status-pill installed" : "skill-status-pill warn"}>
-                {envStatus?.healthy ? "healthy" : "setup"}
+                {envStatus?.healthy ? t("system.skills.healthy") : t("system.skills.setup")}
               </span>
             </div>
             {envStatus ? (
               <>
                 <div className="skill-path" title={envStatus.root}>{envStatus.root}</div>
                 <div className="system-skill-meta">
-                  <span>{envStatus.venvExists ? ".venv ready" : ".venv missing"}</span>
-                  <span>{envStatus.nodeModulesExists ? "node ready" : "node missing"}</span>
+                  <span>
+                    {envStatus.venvExists
+                      ? t("system.skills.venvReady")
+                      : t("system.skills.venvMissing")}
+                  </span>
+                  <span>
+                    {envStatus.nodeModulesExists
+                      ? t("system.skills.nodeReady")
+                      : t("system.skills.nodeMissing")}
+                  </span>
                 </div>
                 {envStatus.lastError ? <p className="inline-error">{envStatus.lastError}</p> : null}
               </>
             ) : (
-              <p className="muted">Env status unavailable.</p>
+              <p className="muted">{t("system.skills.envUnavailable")}</p>
             )}
           </div>
         </section>
@@ -1334,16 +1346,16 @@ function SkillsTab({ workPath }: { workPath: string }) {
         <section className="skills-manager-section wide">
           <div className="skills-catalog-head">
             <div className="skills-section-heading">
-              <h3>Skills</h3>
+              <h3>{t("system.skills.skills")}</h3>
               <span>{filteredSkills.length}/{skills.length}</span>
             </div>
             <div className="skills-create-row">
               <label className="field">
-                <span>New managed skill</span>
+                <span>{t("system.skills.newManaged")}</span>
                 <input
                   value={newSkillName}
                   onChange={(event) => setNewSkillName(event.target.value)}
-                  placeholder="skill-name"
+                  placeholder={t("system.skills.skillNamePlaceholder")}
                 />
               </label>
               <Button
@@ -1360,19 +1372,23 @@ function SkillsTab({ workPath }: { workPath: string }) {
                     .catch((err) => setError(err instanceof Error ? err.message : String(err)))
                 }
               >
-                Create
+                {t("system.skills.create")}
               </Button>
             </div>
             <div className="skills-list-controls">
-              <label className="search-box skills-search" title="Search skills">
+              <label className="search-box skills-search" title={t("system.skills.search")}>
                 <Search size={14} />
                 <input
                   value={skillQuery}
                   onChange={(event) => setSkillQuery(event.target.value)}
-                  placeholder="Search name, source, path"
+                  placeholder={t("system.skills.searchPlaceholder")}
                 />
               </label>
-              <div className="segmented-control compact skills-filter" role="group" aria-label="Skill install filter">
+              <div
+                className="segmented-control compact skills-filter"
+                role="group"
+                aria-label={t("system.skills.installFilter")}
+              >
                 {skillFilterOptions.map(([id, label, count]) => (
                   <button
                     key={id}
@@ -1394,7 +1410,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             </div>
           ) : filteredSkills.length === 0 ? (
             <div className="empty-state compact">
-              <strong>No matching skills</strong>
+              <strong>{t("system.skills.noMatching")}</strong>
             </div>
           ) : (
             <ul className="system-skill-list">
@@ -1418,7 +1434,9 @@ function SkillsTab({ workPath }: { workPath: string }) {
                       >
                         <span>
                           {skill.name}
-                          {skill.dirty ? <span className="dirty-pill">dirty</span> : null}
+                          {skill.dirty ? (
+                            <span className="dirty-pill">{t("system.skills.dirty")}</span>
+                          ) : null}
                         </span>
                         <small>{skill.description || skill.title || skill.sourceId}</small>
                       </button>
@@ -1442,7 +1460,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
                         {t("system.skills.source")}: <code>{skill.sourceId}</code>
                       </span>
                       <span>
-                        {t("system.skills.runtime")}: <code>{skill.runtime ?? "none"}</code>
+                        {t("system.skills.runtime")}:{" "}
+                        <code>{skill.runtime ?? t("system.skills.none")}</code>
                       </span>
                       <span title={skill.absPath}>
                         <code>{skill.relPath}</code>
@@ -1450,7 +1469,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                     </div>
                     <div className="skill-card-actions">
                       <Button variant="secondary" size="sm" onClick={() => void loadEditor(skill)}>
-                        Edit
+                        {t("system.skills.edit")}
                       </Button>
                       <Button
                         variant={claudeInstalled ? "ghost" : "primary"}
@@ -1462,7 +1481,9 @@ function SkillsTab({ workPath }: { workPath: string }) {
                         }
                         disabled={busy}
                       >
-                        {claudeInstalled ? "Remove Claude" : "Install Claude"}
+                        {claudeInstalled
+                          ? t("system.skills.removeTarget", { target: "Claude" })
+                          : t("system.skills.installTarget", { target: "Claude" })}
                       </Button>
                       <Button
                         variant={codexInstalled ? "ghost" : "primary"}
@@ -1474,7 +1495,9 @@ function SkillsTab({ workPath }: { workPath: string }) {
                         }
                         disabled={busy}
                       >
-                        {codexInstalled ? "Remove Codex" : "Install Codex"}
+                        {codexInstalled
+                          ? t("system.skills.removeTarget", { target: "Codex" })
+                          : t("system.skills.installTarget", { target: "Codex" })}
                       </Button>
                     </div>
                   </li>
@@ -1491,7 +1514,9 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 <h3>{selectedSkill.name}</h3>
                 <p className="muted" title={selectedSkill.absPath}>{selectedSkill.relPath}</p>
               </div>
-              {selectedSkill.dirty ? <span className="dirty-pill">linked source dirty</span> : null}
+              {selectedSkill.dirty ? (
+                <span className="dirty-pill">{t("system.skills.linkedSourceDirty")}</span>
+              ) : null}
               <span className={editorText !== editorBase ? "save-state dirty" : "save-state saved"}>
                 {editorText !== editorBase ? t("system.rules.dirty") : t("system.rules.saved")}
               </span>

@@ -1,5 +1,6 @@
 import { ChevronRight, Play, RefreshCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "../../lib/i18n";
 import type { SkillRecord } from "../../lib/skills";
 
 interface SkillsQuickPaneProps {
@@ -17,6 +18,8 @@ interface SkillKind {
 interface SkillGroup extends SkillKind {
   skills: SkillRecord[];
 }
+
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 const KIND_ORDER = [
   "design",
@@ -38,36 +41,49 @@ function titleCase(value: string): string {
     .join(" ");
 }
 
-function kindFromSkill(skill: SkillRecord): SkillKind {
+function kindFromSkill(skill: SkillRecord, t: Translate): SkillKind {
   const category = skill.category?.trim();
   if (category) {
     const id = category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return { id: id || `category:${category}`, label: titleCase(category) || "General" };
+    return {
+      id: id || `category:${category}`,
+      label: titleCase(category) || t("rightPane.skills.kind.general"),
+    };
   }
 
   const name = skill.name.toLowerCase();
-  if (name.startsWith("design-")) return { id: "design", label: "Design" };
-  if (name.startsWith("vault-")) return { id: "vault", label: "Vault" };
-  if (name.startsWith("io-")) return { id: "io", label: "IO" };
-  if (name.startsWith("inbox-")) return { id: "inbox", label: "Inbox" };
-  if (name.endsWith("-deck") || name.includes("deck")) return { id: "decks", label: "Decks" };
+  if (name.startsWith("design-")) {
+    return { id: "design", label: t("rightPane.skills.kind.design") };
+  }
+  if (name.startsWith("vault-")) {
+    return { id: "vault", label: t("rightPane.skills.kind.vault") };
+  }
+  if (name.startsWith("io-")) return { id: "io", label: t("rightPane.skills.kind.io") };
+  if (name.startsWith("inbox-")) {
+    return { id: "inbox", label: t("rightPane.skills.kind.inbox") };
+  }
+  if (name.endsWith("-deck") || name.includes("deck")) {
+    return { id: "decks", label: t("rightPane.skills.kind.decks") };
+  }
   if (
     name.includes("toolkit") ||
     ["gaejosik", "hwpx", "meeting-notes"].includes(name)
   ) {
-    return { id: "documents", label: "Documents" };
+    return { id: "documents", label: t("rightPane.skills.kind.documents") };
   }
   if (["git-sync", "share-outbox", "skill-mine", "task-management"].includes(name)) {
-    return { id: "workspace", label: "Workspace" };
+    return { id: "workspace", label: t("rightPane.skills.kind.workspace") };
   }
-  if (skill.sourceId.toLowerCase().includes("private")) return { id: "private", label: "Private" };
-  return { id: "general", label: "General" };
+  if (skill.sourceId.toLowerCase().includes("private")) {
+    return { id: "private", label: t("rightPane.skills.kind.private") };
+  }
+  return { id: "general", label: t("rightPane.skills.kind.general") };
 }
 
-function groupSkills(skills: SkillRecord[]): SkillGroup[] {
+function groupSkills(skills: SkillRecord[], t: Translate): SkillGroup[] {
   const byKind = new Map<string, SkillGroup>();
   skills.forEach((skill) => {
-    const kind = kindFromSkill(skill);
+    const kind = kindFromSkill(skill, t);
     const group = byKind.get(kind.id) ?? { ...kind, skills: [] };
     group.skills.push(skill);
     byKind.set(kind.id, group);
@@ -91,6 +107,7 @@ export function SkillsQuickPane({
   onRefresh,
   onRunSkill,
 }: SkillsQuickPaneProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const filtered = useMemo(() => {
@@ -113,7 +130,7 @@ export function SkillsQuickPane({
       )
       .slice(0, 40);
   }, [query, skills]);
-  const groups = useMemo(() => groupSkills(filtered), [filtered]);
+  const groups = useMemo(() => groupSkills(filtered, t), [filtered, t]);
 
   function toggleGroup(groupId: string) {
     setCollapsedGroups((current) => {
@@ -131,36 +148,36 @@ export function SkillsQuickPane({
     <section className="skills-quick-pane">
       <div className="skills-quick-head">
         <div>
-          <span className="skills-quick-kicker">Skill runner</span>
-          <h2>Skills</h2>
+          <span className="skills-quick-kicker">{t("rightPane.skills.kicker")}</span>
+          <h2>{t("rightPane.tab.skills")}</h2>
         </div>
         <button
           type="button"
           className="icon-button"
           onClick={onRefresh}
           disabled={loading}
-          title="Refresh skills"
-          aria-label="Refresh skills"
+          title={t("rightPane.skills.refresh")}
+          aria-label={t("rightPane.skills.refresh")}
         >
           <RefreshCcw size={14} className={loading ? "spin" : ""} />
         </button>
       </div>
-      <label className="search-box skills-quick-search" title="Search skills">
+      <label className="search-box skills-quick-search" title={t("rightPane.skills.search")}>
         <Search size={14} />
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search skills"
+          placeholder={t("rightPane.skills.search")}
         />
       </label>
       <div className="skills-quick-meta">
-        <span>{filtered.length} shown</span>
-        <span>{groups.length} groups</span>
+        <span>{t("rightPane.skills.shown", { count: filtered.length })}</span>
+        <span>{t("rightPane.skills.groups", { count: groups.length })}</span>
       </div>
       <div className="skills-quick-list">
         {filtered.length === 0 ? (
           <div className="empty-state compact">
-            <strong>No skills</strong>
+            <strong>{t("rightPane.skills.empty")}</strong>
           </div>
         ) : (
           groups.map((group) => {

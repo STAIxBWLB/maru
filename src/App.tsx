@@ -4094,11 +4094,11 @@ function MainApp() {
             type="button"
             className="topbar-pill topbar-skill-action"
             onClick={() => openSkillCompose(null)}
-            title="Apply skill"
-            aria-label="Apply skill"
+            title={t("cmdk.action.skillCompose")}
+            aria-label={t("cmdk.action.skillCompose")}
           >
             <WandSparkles size={14} />
-            <span>Skill</span>
+            <span>{t("topbar.skill")}</span>
             <span className="kbd">⌘⇧K</span>
           </button>
           <button

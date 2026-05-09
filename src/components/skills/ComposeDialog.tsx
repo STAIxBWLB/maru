@@ -7,6 +7,7 @@ import type {
   SkillRecord,
   TerminalDispatchSpec,
 } from "../../lib/skills";
+import { useTranslation } from "../../lib/i18n";
 import {
   skillsDispatchBackground,
   skillsDispatchCompose,
@@ -40,6 +41,7 @@ export function ComposeDialog({
   onBackgroundDispatch,
   onError,
 }: ComposeDialogProps) {
+  const { t } = useTranslation();
   const [skillId, setSkillId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [skillQuery, setSkillQuery] = useState("");
@@ -150,26 +152,35 @@ export function ComposeDialog({
       <section className="compose-dialog" role="dialog" aria-modal="true">
         <header className="compose-header">
           <div>
-            <h2>Apply skill</h2>
-            <p>{context.length > 0 ? `${context.length} selected item(s)` : "No selection"}</p>
+            <h2>{t("skills.compose.title")}</h2>
+            <p>
+              {context.length > 0
+                ? t("skills.compose.selectedCount", { count: context.length })
+                : t("skills.compose.noSelection")}
+            </p>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label={t("dialog.close")}
+          >
             <X size={14} />
           </button>
         </header>
 
         <div className="compose-body">
           <aside className="compose-run-panel">
-            <label className="search-box compose-skill-search" title="Search skills">
+            <label className="search-box compose-skill-search" title={t("skills.compose.search")}>
               <Search size={14} />
               <input
                 value={skillQuery}
                 onChange={(event) => setSkillQuery(event.target.value)}
-                placeholder="Search skills"
+                placeholder={t("skills.compose.search")}
               />
             </label>
             <label className="field">
-              <span>Skill</span>
+              <span>{t("skills.compose.skill")}</span>
               {visibleSkills.length > 0 ? (
                 <select value={skillId} onChange={(event) => setSkillId(event.target.value)}>
                   {visibleSkills.map((skill) => (
@@ -179,7 +190,7 @@ export function ComposeDialog({
                   ))}
                 </select>
               ) : (
-                <div className="compose-empty-select">No skills available</div>
+                <div className="compose-empty-select">{t("skills.compose.noSkillsAvailable")}</div>
               )}
             </label>
 
@@ -190,14 +201,18 @@ export function ComposeDialog({
               </div>
             ) : (
               <div className="compose-skill-summary muted">
-                <strong>No skill selected</strong>
+                <strong>{t("skills.compose.noSkillSelected")}</strong>
               </div>
             )}
 
             <div className="compose-run-groups">
               <div>
-                <span className="compose-label">Target</span>
-                <div className="segmented-control" role="group" aria-label="Run target">
+                <span className="compose-label">{t("skills.compose.target")}</span>
+                <div
+                  className="segmented-control"
+                  role="group"
+                  aria-label={t("skills.compose.runTarget")}
+                >
                   <button
                     type="button"
                     className={runtime === "claude" ? "active" : ""}
@@ -218,15 +233,19 @@ export function ComposeDialog({
               </div>
 
               <div>
-                <span className="compose-label">Mode</span>
-                <div className="segmented-control" role="group" aria-label="Run mode">
+                <span className="compose-label">{t("skills.compose.mode")}</span>
+                <div
+                  className="segmented-control"
+                  role="group"
+                  aria-label={t("skills.compose.runMode")}
+                >
                   <button
                     type="button"
                     className={mode === "terminal" ? "active" : ""}
                     onClick={() => setMode("terminal")}
                   >
                     <SquareTerminal size={13} />
-                    <span>Terminal</span>
+                    <span>{t("skills.compose.terminal")}</span>
                   </button>
                   <button
                     type="button"
@@ -234,7 +253,7 @@ export function ComposeDialog({
                     onClick={() => setMode("background")}
                   >
                     <Play size={13} />
-                    <span>Background</span>
+                    <span>{t("skills.compose.background")}</span>
                   </button>
                 </div>
               </div>
@@ -249,32 +268,32 @@ export function ComposeDialog({
                   </span>
                 ))
               ) : (
-                <span>No context</span>
+                <span>{t("skills.compose.noContext")}</span>
               )}
             </div>
           </aside>
 
           <section className="compose-main">
             <label className="field">
-              <span>Prompt</span>
+              <span>{t("skills.compose.prompt")}</span>
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Describe the work to run"
+                placeholder={t("skills.compose.promptPlaceholder")}
                 autoFocus
               />
             </label>
 
             <details className="compose-preview">
-              <summary>Prompt preview</summary>
-              <pre>{preview?.prompt ?? "Preview appears after you enter a prompt."}</pre>
+              <summary>{t("skills.compose.preview")}</summary>
+              <pre>{preview?.prompt ?? t("skills.compose.previewEmpty")}</pre>
             </details>
           </section>
         </div>
 
         <footer className="compose-actions">
           <Button variant="secondary" size="sm" onClick={onClose}>
-            Cancel
+            {t("dialog.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -283,7 +302,7 @@ export function ComposeDialog({
             disabled={!canRun || busy}
             icon={mode === "terminal" ? <SquareTerminal size={14} /> : <Play size={14} />}
           >
-            Run
+            {t("skills.compose.run")}
           </Button>
         </footer>
       </section>
