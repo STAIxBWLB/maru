@@ -61,11 +61,27 @@ pub fn skills_env_bootstrap(
     let dry_run = dry_run.unwrap_or(false);
     if dry_run {
         write_status(None, None)?;
+        let _ = app.emit(
+            "skills-env://done",
+            EnvDoneEvent {
+                invocation_id: invocation_id.clone(),
+                success: true,
+                exit_code: Some(0),
+            },
+        );
         return Ok(invocation_id);
     }
     let Some(setup) = setup else {
         host_fs::ensure_dir(&root.join(".venv"))?;
         write_status(None, None)?;
+        let _ = app.emit(
+            "skills-env://done",
+            EnvDoneEvent {
+                invocation_id: invocation_id.clone(),
+                success: true,
+                exit_code: Some(0),
+            },
+        );
         return Ok(invocation_id);
     };
     let app_clone = app.clone();

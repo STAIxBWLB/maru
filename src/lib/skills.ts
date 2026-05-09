@@ -94,6 +94,17 @@ export interface AdoptOutcome {
   installs: SkillInstall[];
 }
 
+export interface InstallOutcome {
+  install: SkillInstall;
+  anchorEntrypoint: string;
+}
+
+export interface ResetOutcome {
+  backupPath?: string | null;
+  sources: number;
+  skills: number;
+}
+
 export async function skillsListSources(workPath: string | null): Promise<SkillSource[]> {
   if (!isTauri()) return [];
   return invoke<SkillSource[]>("skills_list_sources", { workPath });
@@ -174,9 +185,9 @@ export async function skillsInstallSkill(
   skillId: string,
   target: SkillInstallTarget,
   installedAs: string | null = null,
-): Promise<void> {
+): Promise<InstallOutcome> {
   if (!isTauri()) throw new Error("Skill install requires the Tauri shell.");
-  await invoke("skills_install_skill", { skillId, target, installedAs });
+  return invoke<InstallOutcome>("skills_install_skill", { skillId, target, installedAs });
 }
 
 export async function skillsUninstallSkill(
@@ -190,6 +201,11 @@ export async function skillsUninstallSkill(
 export async function skillsAdoptExternalLinks(): Promise<AdoptOutcome> {
   if (!isTauri()) return { adopted: 0, skipped: 0, installs: [] };
   return invoke<AdoptOutcome>("skills_adopt_external_links");
+}
+
+export async function skillsResetRegistry(workPath: string | null): Promise<ResetOutcome> {
+  if (!isTauri()) return { sources: 0, skills: 0 };
+  return invoke<ResetOutcome>("skills_reset_registry", { workPath });
 }
 
 export async function skillsEnvStatus(workPath: string | null): Promise<SkillsEnvStatus | null> {

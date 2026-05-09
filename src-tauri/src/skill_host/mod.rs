@@ -9,5 +9,5 @@ pub use store::{
     skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
     skills_install_skill, skills_list_installs, skills_list_skills, skills_list_sources,
     skills_read_skill, skills_read_skill_file, skills_remove_source, skills_rescan_source,
-    skills_save_skill_file, skills_sync_source, skills_uninstall_skill,
+    skills_reset_registry, skills_save_skill_file, skills_sync_source, skills_uninstall_skill,
 };

@@ -105,6 +105,15 @@ pub struct AdoptOutcome {
     pub installs: Vec<SkillInstall>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetOutcome {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<String>,
+    pub sources: usize,
+    pub skills: usize,
+}
+
 fn default_skills_subdir() -> String {
     "skills".to_string()
 }
@@ -550,6 +559,50 @@ pub fn skills_adopt_external_links() -> Result<AdoptOutcome, String> {
         skipped,
         installs,
     })
+}
+
+#[tauri::command]
+pub fn skills_reset_registry(work_path: Option<String>) -> Result<ResetOutcome, String> {
+    let _guard = registry_guard()?;
+    let root = host_fs::skills_root()?;
+    host_fs::ensure_dir(&root)?;
+    for name in ["_sources", "_managed", "_imported", "_cache"] {
+        host_fs::ensure_dir(&root.join(name))?;
+    }
+    let path = registry_path()?;
+    let backup_path = if path.is_file() {
+        let backup = path.with_file_name(format!(
+            "registry-{}.json.bak",
+            Utc::now().format("%Y%m%d%H%M%S")
+        ));
+        fs::copy(&path, &backup).map_err(|err| {
+            format!(
+                "Cannot back up {} to {}: {err}",
+                host_fs::display_path(&path),
+                host_fs::display_path(&backup)
+            )
+        })?;
+        Some(host_fs::display_path(&backup))
+    } else {
+        None
+    };
+    let mut registry = SkillsRegistry::default();
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    let source_ids: Vec<String> = registry
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect();
+    for source_id in source_ids {
+        let _ = rescan_source_in_registry(&mut registry, &source_id)?;
+    }
+    let outcome = ResetOutcome {
+        backup_path,
+        sources: registry.sources.len(),
+        skills: registry.skills.len(),
+    };
+    save_registry_unlocked(&registry)?;
+    Ok(outcome)
 }
 
 fn registry_guard() -> Result<MutexGuard<'static, ()>, String> {

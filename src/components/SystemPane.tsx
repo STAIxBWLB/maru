@@ -69,6 +69,7 @@ import {
   skillsListSources,
   skillsReadSkill,
   skillsRescanSource,
+  skillsResetRegistry,
   skillsSaveSkillFile,
   skillsSyncSource,
   skillsUninstallSkill,
@@ -969,6 +970,37 @@ function ProjectsTab({ workPath }: { workPath: string }) {
 
 // =============================== Skills ===============================
 
+type SkillBulkTarget = SkillInstallTarget | "both";
+
+interface SkillOperationState {
+  active: boolean;
+  label: string;
+  total: number;
+  completed: number;
+  message: string | null;
+  errors: string[];
+  log: string[];
+}
+
+const EMPTY_SKILL_OPERATION: SkillOperationState = {
+  active: false,
+  label: "",
+  total: 0,
+  completed: 0,
+  message: null,
+  errors: [],
+  log: [],
+};
+
+function skillTargetLabel(target: SkillBulkTarget): string {
+  if (target === "both") return "Claude + Codex";
+  return target === "claude" ? "Claude" : "Codex";
+}
+
+function skillTargetsFor(target: SkillBulkTarget): SkillInstallTarget[] {
+  return target === "both" ? ["claude", "codex"] : [target];
+}
+
 function SkillsTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
   const [sources, setSources] = useState<SkillSource[]>([]);
@@ -984,6 +1016,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
   const [newSourceKind, setNewSourceKind] = useState<"linked" | "cloned">("linked");
   const [skillQuery, setSkillQuery] = useState("");
   const [installFilter, setInstallFilter] = useState<"all" | "installed" | "uninstalled" | "dirty">("all");
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(() => new Set());
+  const [operation, setOperation] = useState<SkillOperationState>(EMPTY_SKILL_OPERATION);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1062,6 +1096,79 @@ function SkillsTab({ workPath }: { workPath: string }) {
     ["uninstalled", t("system.skills.filter.open"), Math.max(skills.length - installedSkillCount, 0)],
     ["dirty", t("system.skills.filter.dirty"), skills.filter((skill) => skill.dirty).length],
   ];
+  const selectedSkills = useMemo(
+    () => skills.filter((skill) => selectedSkillIds.has(skill.id)),
+    [selectedSkillIds, skills],
+  );
+  const selectedInstalledTaskCount = useMemo(
+    () =>
+      selectedSkills.reduce(
+        (count, skill) => count + (installTargetsBySkill.get(skill.id)?.size ?? 0),
+        0,
+      ),
+    [installTargetsBySkill, selectedSkills],
+  );
+
+  useEffect(() => {
+    setSelectedSkillIds((prev) => {
+      const liveIds = new Set(skills.map((skill) => skill.id));
+      const next = new Set([...prev].filter((id) => liveIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [skills]);
+
+  const startOperation = useCallback((label: string, total = 0) => {
+    setOperation({
+      active: true,
+      label,
+      total,
+      completed: 0,
+      message: null,
+      errors: [],
+      log: [],
+    });
+  }, []);
+
+  const finishOperation = useCallback((message: string, errors: string[] = []) => {
+    setOperation((prev) => ({
+      ...prev,
+      active: false,
+      completed: prev.total,
+      message,
+      errors,
+    }));
+  }, []);
+
+  const recordOperationError = useCallback((message: string) => {
+    setOperation((prev) => ({
+      ...prev,
+      errors: [...prev.errors, message],
+    }));
+  }, []);
+
+  const stepOperation = useCallback(() => {
+    setOperation((prev) => ({
+      ...prev,
+      completed: Math.min(prev.completed + 1, prev.total),
+    }));
+  }, []);
+
+  const toggleSkillSelection = useCallback((skillId: string) => {
+    setSelectedSkillIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(skillId)) next.delete(skillId);
+      else next.add(skillId);
+      return next;
+    });
+  }, []);
+
+  const selectFilteredSkills = useCallback(() => {
+    setSelectedSkillIds(new Set(filteredSkills.map((skill) => skill.id)));
+  }, [filteredSkills]);
+
+  const clearSkillSelection = useCallback(() => {
+    setSelectedSkillIds(new Set());
+  }, []);
 
   const loadEditor = useCallback(async (skill: SkillRecord) => {
     setError(null);
@@ -1090,41 +1197,258 @@ function SkillsTab({ workPath }: { workPath: string }) {
     }
   }, [editorText, refresh, selectedSkill]);
 
-  const install = useCallback(
-    async (skill: SkillRecord, target: "claude" | "codex") => {
+  const installSkills = useCallback(
+    async (skillList: SkillRecord[], target: SkillBulkTarget) => {
+      const targets = skillTargetsFor(target);
+      const tasks = skillList.flatMap((skill) =>
+        targets
+          .filter((nextTarget) => !installKey.has(`${skill.id}:${nextTarget}`))
+          .map((nextTarget) => ({ skill, target: nextTarget })),
+      );
+      const targetLabel = skillTargetLabel(target);
+      if (tasks.length === 0) {
+        finishOperation(
+          t("system.skills.installComplete", {
+            claude: 0,
+            codex: 0,
+            failed: 0,
+          }),
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          t("system.skills.installConfirm", {
+            count: tasks.length,
+            target: targetLabel,
+          }),
+        )
+      ) {
+        return;
+      }
       setBusy(true);
       setError(null);
+      startOperation(t("system.skills.installing", { target: targetLabel }), tasks.length);
+      const failures: string[] = [];
+      const installed = { claude: 0, codex: 0 };
       try {
-        await skillsInstallSkill(skill.id, target, skill.name);
+        for (const task of tasks) {
+          try {
+            await skillsInstallSkill(task.skill.id, task.target, task.skill.name);
+            installed[task.target] += 1;
+          } catch (err) {
+            const message = `${task.skill.name} / ${task.target}: ${
+              err instanceof Error ? err.message : String(err)
+            }`;
+            failures.push(message);
+            recordOperationError(message);
+          } finally {
+            stepOperation();
+          }
+        }
         await refresh();
+        finishOperation(
+          t("system.skills.installComplete", {
+            claude: installed.claude,
+            codex: installed.codex,
+            failed: failures.length,
+          }),
+          failures,
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+        finishOperation(err instanceof Error ? err.message : String(err), failures);
       } finally {
         setBusy(false);
       }
     },
-    [refresh],
+    [finishOperation, installKey, recordOperationError, refresh, startOperation, stepOperation, t],
+  );
+
+  const uninstallInstalls = useCallback(
+    async (items: SkillInstall[]) => {
+      if (items.length === 0) {
+        finishOperation(t("system.skills.uninstallComplete", { count: 0, failed: 0 }));
+        return;
+      }
+      if (!window.confirm(t("system.skills.uninstallConfirm", { count: items.length }))) {
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      startOperation(t("system.skills.uninstalling"), items.length);
+      const failures: string[] = [];
+      let removed = 0;
+      try {
+        for (const item of items) {
+          try {
+            await skillsUninstallSkill(item.target, item.installedAs);
+            removed += 1;
+          } catch (err) {
+            const message = `${item.installedAs} / ${item.target}: ${
+              err instanceof Error ? err.message : String(err)
+            }`;
+            failures.push(message);
+            recordOperationError(message);
+          } finally {
+            stepOperation();
+          }
+        }
+        await refresh();
+        finishOperation(
+          t("system.skills.uninstallComplete", { count: removed, failed: failures.length }),
+          failures,
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        finishOperation(err instanceof Error ? err.message : String(err), failures);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [finishOperation, recordOperationError, refresh, startOperation, stepOperation, t],
+  );
+
+  const install = useCallback(
+    async (skill: SkillRecord, target: SkillInstallTarget) => {
+      await installSkills([skill], target);
+    },
+    [installSkills],
   );
 
   const uninstall = useCallback(
-    async (skill: SkillRecord, target: "claude" | "codex") => {
+    async (skill: SkillRecord, target: SkillInstallTarget) => {
       const existing = installs.find(
         (item) => item.skillId === skill.id && item.target === target,
       );
       if (!existing) return;
-      setBusy(true);
-      setError(null);
-      try {
-        await skillsUninstallSkill(target, existing.installedAs);
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+      await uninstallInstalls([existing]);
     },
-    [installs, refresh],
+    [installs, uninstallInstalls],
   );
+
+  const uninstallSelected = useCallback(async () => {
+    const selected = new Set(selectedSkillIds);
+    await uninstallInstalls(installs.filter((installItem) => selected.has(installItem.skillId)));
+  }, [installs, selectedSkillIds, uninstallInstalls]);
+
+  const adoptExternalLinks = useCallback(async () => {
+    if (!window.confirm(t("system.skills.adoptConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    startOperation(t("system.skills.adopting"), 1);
+    try {
+      const outcome = await skillsAdoptExternalLinks();
+      stepOperation();
+      await refresh();
+      finishOperation(
+        t("system.skills.adoptComplete", {
+          adopted: outcome.adopted,
+          skipped: outcome.skipped,
+        }),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      finishOperation(message, [message]);
+    } finally {
+      setBusy(false);
+    }
+  }, [finishOperation, refresh, startOperation, stepOperation, t]);
+
+  const bootstrapEnv = useCallback(async () => {
+    if (!window.confirm(t("system.skills.bootstrapConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    startOperation(t("system.skills.bootstrapping"), 1);
+    let unlistenOutput: (() => void) | null = null;
+    let unlistenDone: (() => void) | null = null;
+    let invocationId: string | null = null;
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      type SkillsEnvDonePayload = {
+        invocationId: string;
+        success: boolean;
+        exitCode: number | null;
+      };
+      const pendingDone: SkillsEnvDonePayload[] = [];
+      unlistenOutput = await listen<{
+        invocationId: string;
+        stream: string;
+        line: string;
+      }>("skills-env://output", (event) => {
+        if (event.payload.invocationId !== invocationId) return;
+        setOperation((prev) => ({
+          ...prev,
+          log: [...prev.log.slice(-11), `[${event.payload.stream}] ${event.payload.line}`],
+        }));
+      });
+      let resolveDone: () => void = () => {};
+      const donePromise = new Promise<void>((resolve) => {
+        resolveDone = resolve;
+      });
+      const handleDone = (payload: SkillsEnvDonePayload) => {
+        if (payload.success) {
+          stepOperation();
+          finishOperation(t("system.skills.bootstrapComplete"));
+        } else {
+          const message = t("system.skills.bootstrapFailed", {
+            code: payload.exitCode ?? "unknown",
+          });
+          setError(message);
+          finishOperation(message, [message]);
+        }
+        resolveDone();
+      };
+      unlistenDone = await listen<SkillsEnvDonePayload>("skills-env://done", (event) => {
+        if (invocationId === null) {
+          pendingDone.push(event.payload);
+          return;
+        }
+        if (event.payload.invocationId !== invocationId) return;
+        handleDone(event.payload);
+      });
+      invocationId = await skillsEnvBootstrap(workPath);
+      const earlyDone = pendingDone.find((payload) => payload.invocationId === invocationId);
+      if (earlyDone) {
+        handleDone(earlyDone);
+      }
+      await donePromise;
+      await refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      finishOperation(message, [message]);
+    } finally {
+      unlistenOutput?.();
+      unlistenDone?.();
+      setBusy(false);
+    }
+  }, [finishOperation, refresh, startOperation, stepOperation, t, workPath]);
+
+  const resetRegistry = useCallback(async () => {
+    if (!window.confirm(t("system.skills.resetConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    startOperation(t("system.skills.resetting"), 1);
+    try {
+      const outcome = await skillsResetRegistry(workPath);
+      stepOperation();
+      await refresh();
+      finishOperation(
+        t("system.skills.resetComplete", {
+          sources: outcome.sources,
+          skills: outcome.skills,
+        }),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      finishOperation(message, [message]);
+    } finally {
+      setBusy(false);
+    }
+  }, [finishOperation, refresh, startOperation, stepOperation, t, workPath]);
 
   return (
     <div className="system-detail skills-system-detail" style={{ width: "100%" }}>
@@ -1170,28 +1494,59 @@ function SkillsTab({ workPath }: { workPath: string }) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              void skillsAdoptExternalLinks()
-                .then(refresh)
-                .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }
+            onClick={() => void adoptExternalLinks()}
+            disabled={busy}
           >
             {t("system.skills.adopt")}
           </Button>
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              void skillsEnvBootstrap(workPath)
-                .then(() => refresh())
-                .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }
+            onClick={() => void bootstrapEnv()}
+            disabled={busy}
             icon={<Wrench size={14} />}
           >
             {t("system.skills.bootstrap")}
           </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => void resetRegistry()}
+            disabled={busy}
+          >
+            {t("system.skills.reset")}
+          </Button>
         </div>
       </div>
+      {operation.active || operation.message || operation.errors.length > 0 ? (
+        <div className={operation.errors.length > 0 ? "skills-operation warn" : "skills-operation"}>
+          <div className="skills-operation-head">
+            <strong>{operation.label || t("system.skills.operation")}</strong>
+            <span>
+              {operation.total > 0
+                ? t("system.skills.progress", {
+                    completed: operation.completed,
+                    total: operation.total,
+                  })
+                : null}
+            </span>
+          </div>
+          {operation.message ? <p>{operation.message}</p> : null}
+          {operation.log.length > 0 ? (
+            <pre>{operation.log.join("\n")}</pre>
+          ) : null}
+          {operation.errors.length > 0 ? (
+            <ul>
+              {operation.errors.slice(0, 6).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+              {operation.errors.length > 6 ? (
+                <li>{t("system.skills.moreErrors", { count: operation.errors.length - 6 })}</li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="skills-manager-grid">
         <section className="skills-manager-section sources">
@@ -1402,6 +1757,80 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 ))}
               </div>
             </div>
+            <div className="skills-bulk-toolbar">
+              <span>
+                {t("system.skills.selected", {
+                  count: selectedSkillIds.size,
+                })}
+              </span>
+              <Button variant="ghost" size="sm" onClick={selectFilteredSkills} disabled={busy}>
+                {t("system.skills.selectVisible")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearSkillSelection}
+                disabled={busy || selectedSkillIds.size === 0}
+              >
+                {t("system.skills.clearSelection")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void installSkills(selectedSkills, "claude")}
+                disabled={busy || selectedSkillIds.size === 0}
+              >
+                {t("system.skills.installSelectedTarget", { target: "Claude" })}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void installSkills(selectedSkills, "codex")}
+                disabled={busy || selectedSkillIds.size === 0}
+              >
+                {t("system.skills.installSelectedTarget", { target: "Codex" })}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void installSkills(selectedSkills, "both")}
+                disabled={busy || selectedSkillIds.size === 0}
+              >
+                {t("system.skills.installSelectedTarget", { target: "Both" })}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void uninstallSelected()}
+                disabled={busy || selectedInstalledTaskCount === 0}
+              >
+                {t("system.skills.removeSelected")}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void installSkills(skills, "claude")}
+                disabled={busy || skills.length === 0}
+              >
+                {t("system.skills.installAllTarget", { target: "Claude" })}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void installSkills(skills, "codex")}
+                disabled={busy || skills.length === 0}
+              >
+                {t("system.skills.installAllTarget", { target: "Codex" })}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void installSkills(skills, "both")}
+                disabled={busy || skills.length === 0}
+              >
+                {t("system.skills.installAllTarget", { target: "Both" })}
+              </Button>
+            </div>
           </div>
 
           {skills.length === 0 ? (
@@ -1427,6 +1856,14 @@ function SkillsTab({ workPath }: { workPath: string }) {
                     key={skill.id}
                   >
                     <div className="skill-card-top">
+                      <label className="skill-select" title={t("system.skills.selectSkill")}>
+                        <input
+                          type="checkbox"
+                          checked={selectedSkillIds.has(skill.id)}
+                          onChange={() => toggleSkillSelection(skill.id)}
+                        />
+                        <span>{t("system.skills.selectSkill")}</span>
+                      </label>
                       <button
                         type="button"
                         className="skill-card-title"

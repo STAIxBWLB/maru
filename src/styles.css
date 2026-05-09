@@ -5036,6 +5036,61 @@ button.git-badge:hover {
   gap: 7px;
 }
 
+.skills-operation {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line-soft));
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--ink);
+  padding: 10px 12px;
+}
+
+.skills-operation.warn {
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--line-soft));
+  background: var(--warn-soft);
+}
+
+.skills-operation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.skills-operation-head span {
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11px;
+}
+
+.skills-operation p,
+.skills-operation ul {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.skills-operation ul {
+  padding-left: 18px;
+}
+
+.skills-operation pre {
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 8px;
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .skills-manager-grid {
   display: grid;
   grid-template-columns: minmax(270px, 0.7fr) minmax(430px, 1.3fr);
@@ -5225,6 +5280,22 @@ button.git-badge:hover {
   align-items: center;
 }
 
+.skills-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}
+
+.skills-bulk-toolbar > span {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  margin-right: auto;
+}
+
 .skills-search {
   min-width: 0;
   background: var(--panel);
@@ -5279,12 +5350,42 @@ button.git-badge:hover {
   min-width: 0;
   display: grid;
   gap: 2px;
+  flex: 1;
   border: 0;
   background: transparent;
   color: var(--ink);
   padding: 0;
   text-align: left;
   cursor: pointer;
+}
+
+.skill-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+
+.skill-select input {
+  appearance: auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: initial;
+  background: initial;
+  accent-color: var(--accent);
+}
+
+.skill-select span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .skill-card-title > span {
