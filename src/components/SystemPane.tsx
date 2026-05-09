@@ -1337,6 +1337,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
       try {
         await skillsRemoveSource(source.id);
         stepOperation();
+        setSources((prev) => prev.filter((item) => item.id !== source.id));
+        setSkills((prev) => prev.filter((skill) => skill.sourceId !== source.id));
         if (selectedSkillId && removedSkillIds.has(selectedSkillId)) {
           setSelectedSkillId(null);
           setEditorText("");
@@ -1353,6 +1355,8 @@ function SkillsTab({ workPath }: { workPath: string }) {
         const message =
           rawMessage === "source_has_installed_skills"
             ? t("system.skills.removeSourceInstalledBlocked", { id: source.id })
+            : rawMessage === "source_not_removable"
+              ? t("system.skills.removeManagedSourceBlocked")
             : rawMessage;
         setError(message);
         finishOperation(message, [message]);
@@ -1839,9 +1843,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             {sources.map((source) => {
               const sourceRemovable = source.kind !== "managed" && source.id !== "anchor-managed";
               const sourceHasInstalls = sourceHasInstalledSkills(source.id);
-              const removeTitle = !sourceRemovable
-                ? t("system.skills.removeManagedSourceBlocked")
-                : sourceHasInstalls
+              const removeTitle = sourceHasInstalls
                   ? t("system.skills.removeSourceInstalledBlocked", { id: source.id })
                   : t("system.skills.removeSource");
               return (
@@ -1873,15 +1875,17 @@ function SkillsTab({ workPath }: { workPath: string }) {
                       >
                         {t("system.skills.sync")}
                       </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => void removeSource(source)}
-                        disabled={busy || !sourceRemovable || sourceHasInstalls}
-                        title={removeTitle}
-                      >
-                        {t("system.skills.removeSource")}
-                      </Button>
+                      {sourceRemovable ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => void removeSource(source)}
+                          disabled={busy || sourceHasInstalls}
+                          title={removeTitle}
+                        >
+                          {t("system.skills.removeSource")}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                   <div className="skill-path" title={source.path ?? source.repoUrl ?? ""}>

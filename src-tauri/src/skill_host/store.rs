@@ -81,6 +81,8 @@ pub struct SkillsRegistry {
     pub skills: Vec<SkillRecord>,
     #[serde(default)]
     pub installs: Vec<SkillInstall>,
+    #[serde(default)]
+    pub removed_source_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +127,7 @@ impl Default for SkillsRegistry {
             sources: Vec::new(),
             skills: Vec::new(),
             installs: Vec::new(),
+            removed_source_ids: Vec::new(),
         }
     }
 }
@@ -199,6 +202,7 @@ pub fn skills_add_source(
         branch: None,
         last_synced_at: None,
     };
+    clear_removed_source(&mut registry, &source.id);
     registry.sources.push(source.clone());
     rescan_source_in_registry(&mut registry, &source.id)?;
     save_registry_unlocked(&registry)?;
@@ -207,23 +211,10 @@ pub fn skills_add_source(
 
 #[tauri::command]
 pub fn skills_remove_source(source_id: String) -> Result<(), String> {
+    let source_id = normalize_source_id(&source_id)?;
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    let skill_ids: BTreeSet<String> = registry
-        .skills
-        .iter()
-        .filter(|skill| skill.source_id == source_id)
-        .map(|skill| skill.id.clone())
-        .collect();
-    if registry
-        .installs
-        .iter()
-        .any(|install| skill_ids.contains(&install.skill_id))
-    {
-        return Err("source_has_installed_skills".to_string());
-    }
-    registry.sources.retain(|source| source.id != source_id);
-    registry.skills.retain(|skill| skill.source_id != source_id);
+    remove_source_from_registry(&mut registry, &source_id)?;
     save_registry_unlocked(&registry)
 }
 
@@ -635,6 +626,7 @@ fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
     let mut registry: SkillsRegistry = serde_json::from_str(&content)
         .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
     registry.version = REGISTRY_VERSION;
+    normalize_removed_source_ids(&mut registry);
     Ok(registry)
 }
 
@@ -721,7 +713,7 @@ fn ensure_default_sources(
     let private_root = yaml_string(skills, "private_root");
     let private_skills = yaml_string(skills, "private_skills");
     if let Some(root) = public_root {
-        upsert_linked_source(
+        upsert_default_linked_source(
             registry,
             "stai-public",
             &root,
@@ -729,7 +721,7 @@ fn ensure_default_sources(
         );
     }
     if let Some(root) = private_root {
-        upsert_linked_source(
+        upsert_default_linked_source(
             registry,
             "stai-private",
             &root,
@@ -740,6 +732,7 @@ fn ensure_default_sources(
 }
 
 fn ensure_managed_source(registry: &mut SkillsRegistry) -> Result<(), String> {
+    clear_removed_source(registry, MANAGED_SOURCE_ID);
     let managed = host_fs::skills_root()?.join("_managed");
     host_fs::ensure_dir(&managed)?;
     if !registry
@@ -758,6 +751,18 @@ fn ensure_managed_source(registry: &mut SkillsRegistry) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+fn upsert_default_linked_source(
+    registry: &mut SkillsRegistry,
+    id: &str,
+    raw_root: &str,
+    skills_subdir: String,
+) {
+    if is_removed_source(registry, id) {
+        return;
+    }
+    upsert_linked_source(registry, id, raw_root, skills_subdir);
 }
 
 fn upsert_linked_source(
@@ -784,6 +789,66 @@ fn upsert_linked_source(
     } else {
         registry.sources.push(source);
     }
+}
+
+fn remove_source_from_registry(
+    registry: &mut SkillsRegistry,
+    source_id: &str,
+) -> Result<(), String> {
+    if source_id == MANAGED_SOURCE_ID {
+        return Err("source_not_removable".to_string());
+    }
+    let skill_ids: BTreeSet<String> = registry
+        .skills
+        .iter()
+        .filter(|skill| skill.source_id == source_id)
+        .map(|skill| skill.id.clone())
+        .collect();
+    if registry
+        .installs
+        .iter()
+        .any(|install| skill_ids.contains(&install.skill_id))
+    {
+        return Err("source_has_installed_skills".to_string());
+    }
+    registry.sources.retain(|source| source.id != source_id);
+    registry.skills.retain(|skill| skill.source_id != source_id);
+    mark_source_removed(registry, source_id);
+    Ok(())
+}
+
+fn is_removed_source(registry: &SkillsRegistry, source_id: &str) -> bool {
+    registry
+        .removed_source_ids
+        .iter()
+        .any(|removed| removed == source_id)
+}
+
+fn mark_source_removed(registry: &mut SkillsRegistry, source_id: &str) {
+    if source_id.is_empty() || is_removed_source(registry, source_id) {
+        return;
+    }
+    registry.removed_source_ids.push(source_id.to_string());
+}
+
+fn clear_removed_source(registry: &mut SkillsRegistry, source_id: &str) {
+    registry
+        .removed_source_ids
+        .retain(|removed| removed != source_id);
+}
+
+fn normalize_removed_source_ids(registry: &mut SkillsRegistry) {
+    let mut seen = BTreeSet::new();
+    registry.removed_source_ids = std::mem::take(&mut registry.removed_source_ids)
+        .into_iter()
+        .filter_map(|source_id| {
+            let trimmed = source_id.trim().to_string();
+            if trimmed.is_empty() || !seen.insert(trimmed.clone()) {
+                return None;
+            }
+            Some(trimmed)
+        })
+        .collect();
 }
 
 fn yaml_string(root: &YamlValue, key: &str) -> Option<String> {
@@ -1107,6 +1172,62 @@ impl IfEmpty for str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use tempfile::TempDir;
+
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct TestHome {
+        _guard: MutexGuard<'static, ()>,
+        _dir: TempDir,
+        previous: Option<OsString>,
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var("ANCHOR_TEST_HOME", previous);
+            } else {
+                std::env::remove_var("ANCHOR_TEST_HOME");
+            }
+        }
+    }
+
+    fn test_home() -> TestHome {
+        let guard = TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let previous = std::env::var_os("ANCHOR_TEST_HOME");
+        std::env::set_var("ANCHOR_TEST_HOME", dir.path());
+        TestHome {
+            _guard: guard,
+            _dir: dir,
+            previous,
+        }
+    }
+
+    fn path_string(path: &Path) -> String {
+        path.to_string_lossy().to_string()
+    }
+
+    fn write_workspace_config(work: &Path, public_root: &Path, private_root: &Path) {
+        fs::create_dir_all(public_root.join("skills")).unwrap();
+        fs::create_dir_all(private_root.join("skills")).unwrap();
+        fs::write(
+            work.join("workspace.config.yaml"),
+            format!(
+                "skills:\n  public_root: {}\n  public_skills: {}/skills\n  private_root: {}\n  private_skills: {}/skills\n",
+                path_string(public_root),
+                path_string(public_root),
+                path_string(private_root),
+                path_string(private_root),
+            ),
+        )
+        .unwrap();
+    }
+
+    fn has_source(sources: &[SkillSource], id: &str) -> bool {
+        sources.iter().any(|source| source.id == id)
+    }
 
     #[test]
     fn source_id_validation_rejects_path_like_values() {
@@ -1127,5 +1248,92 @@ mod tests {
         let root = "/tmp/work/_sys/skills";
         let skills = "/tmp/work/_sys/skills/skills";
         assert_eq!(skills_subdir_for(root, Some(skills)), "skills");
+    }
+
+    #[test]
+    fn removed_default_source_is_not_recreated_on_refresh() {
+        let _home = test_home();
+        let work = TempDir::new().unwrap();
+        let public_root = TempDir::new().unwrap();
+        let private_root = TempDir::new().unwrap();
+        write_workspace_config(work.path(), public_root.path(), private_root.path());
+        let work_path = path_string(work.path());
+
+        let sources = skills_list_sources(Some(work_path.clone())).unwrap();
+        assert!(has_source(&sources, "stai-public"));
+
+        skills_remove_source("stai-public".to_string()).unwrap();
+
+        let refreshed = skills_list_sources(Some(work_path)).unwrap();
+        assert!(!has_source(&refreshed, "stai-public"));
+        assert!(has_source(&refreshed, "stai-private"));
+        let registry = load_registry().unwrap();
+        assert!(registry
+            .removed_source_ids
+            .contains(&"stai-public".to_string()));
+    }
+
+    #[test]
+    fn reset_registry_clears_removed_default_sources() {
+        let _home = test_home();
+        let work = TempDir::new().unwrap();
+        let public_root = TempDir::new().unwrap();
+        let private_root = TempDir::new().unwrap();
+        write_workspace_config(work.path(), public_root.path(), private_root.path());
+        let work_path = path_string(work.path());
+
+        skills_list_sources(Some(work_path.clone())).unwrap();
+        skills_remove_source("stai-public".to_string()).unwrap();
+        assert!(!has_source(
+            &skills_list_sources(Some(work_path.clone())).unwrap(),
+            "stai-public"
+        ));
+
+        skills_reset_registry(Some(work_path.clone())).unwrap();
+
+        let refreshed = skills_list_sources(Some(work_path)).unwrap();
+        assert!(has_source(&refreshed, "stai-public"));
+        assert!(load_registry().unwrap().removed_source_ids.is_empty());
+    }
+
+    #[test]
+    fn managed_source_cannot_be_removed() {
+        let _home = test_home();
+
+        let error = skills_remove_source(MANAGED_SOURCE_ID.to_string()).unwrap_err();
+
+        assert_eq!(error, "source_not_removable");
+    }
+
+    #[test]
+    fn adding_source_clears_removed_source_tombstone() {
+        let _home = test_home();
+        let work = TempDir::new().unwrap();
+        let public_root = TempDir::new().unwrap();
+        let private_root = TempDir::new().unwrap();
+        write_workspace_config(work.path(), public_root.path(), private_root.path());
+        let work_path = path_string(work.path());
+
+        skills_list_sources(Some(work_path.clone())).unwrap();
+        skills_remove_source("stai-public".to_string()).unwrap();
+        assert!(load_registry()
+            .unwrap()
+            .removed_source_ids
+            .contains(&"stai-public".to_string()));
+
+        skills_add_source(
+            "stai-public".to_string(),
+            "linked".to_string(),
+            Some(path_string(public_root.path())),
+            None,
+            Some("skills".to_string()),
+        )
+        .unwrap();
+
+        let registry = load_registry().unwrap();
+        assert!(has_source(&registry.sources, "stai-public"));
+        assert!(!registry
+            .removed_source_ids
+            .contains(&"stai-public".to_string()));
     }
 }
