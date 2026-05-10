@@ -133,6 +133,164 @@ export interface InboxDropItem {
   receivedAt: string | null;
 }
 
+export interface InboxPathConfig {
+  drop: string;
+  items: string;
+  pending: string;
+  done: string;
+  failed: string;
+  duplicate: string;
+  state: string;
+  receipts: string;
+}
+
+export interface InboxNamingConfig {
+  item_id_template: string;
+  raw_dir: string;
+  manifest_file: string;
+  extracted_file: string;
+  summary_file: string;
+  route_file: string;
+}
+
+export interface InboxFileDropConfig {
+  channel: string;
+  drop_path: string;
+  operation: "copy";
+}
+
+export interface InboxGmailConfig {
+  enabled: boolean;
+  scan_window_days: number;
+  max_results: number;
+  auto_refresh_ttl_seconds: number;
+  unread_only: boolean;
+  query: string;
+  gws_path: string | null;
+}
+
+export interface InboxChannelConfig {
+  provider: string;
+  skill?: string | null;
+  kind: string;
+  drop_paths: string[];
+  source_kinds?: Record<string, string>;
+  dedupe: string;
+  [extra: string]: unknown;
+}
+
+export interface InboxRuntimeConfig {
+  root: string;
+  schema_version?: number | null;
+  paths: InboxPathConfig;
+  naming: InboxNamingConfig;
+  file_drop: InboxFileDropConfig;
+  gmail: InboxGmailConfig;
+  dedupe?: Record<string, unknown>;
+  channels: Record<string, InboxChannelConfig>;
+  processing?: Record<string, unknown>;
+  hooks?: Record<string, unknown>;
+  [extra: string]: unknown;
+}
+
+export interface InboxEntry {
+  id: string;
+  kind: "dropFile" | "pendingItem";
+  path: string;
+  relPath: string;
+  title: string;
+  channel: string;
+  sourceKind: string | null;
+  dropPath: string | null;
+  configuredRoot: string;
+  itemId: string | null;
+  status: string | null;
+  manifestPath: string | null;
+  summaryPath: string | null;
+  routePath: string | null;
+  sizeBytes: number;
+  receivedAt: string | null;
+}
+
+export type InboxProcessedStatus = "done" | "failed" | "duplicate";
+
+export interface InboxProcessedItem {
+  id: string;
+  status: InboxProcessedStatus | string;
+  channel: string;
+  provider: string | null;
+  kind: string | null;
+  receivedAt: string | null;
+  itemDir: string;
+  manifestPath: string;
+  summaryPath: string | null;
+  routePath: string | null;
+  extractedPath: string | null;
+  title: string;
+  description: string | null;
+  project: string | null;
+  classification: string | null;
+  routeStatus: string | null;
+  summaryPreview: string;
+  rawFileCount: number;
+  updatedAt: string | null;
+  error: string | null;
+}
+
+export interface InboxProcessedRawFile {
+  path: string;
+  relPath: string;
+  sizeBytes: number;
+}
+
+export interface InboxProcessedItemDetail {
+  item: InboxProcessedItem;
+  manifestText: string;
+  summaryText: string | null;
+  routeText: string | null;
+  extractedText: string | null;
+  extractedTruncated: boolean;
+  rawFiles: InboxProcessedRawFile[];
+}
+
+export interface InboxAcceptRequest {
+  id: string;
+  targetFolder?: string | null;
+}
+
+export interface InboxDecisionOutcome {
+  id: string;
+  decision: InboxDecisionValue;
+  sourcePath: string;
+  targetPath: string | null;
+  fileName: string | null;
+  ok: boolean;
+  error: string | null;
+}
+
+export type InboxDecisionValue = "pending" | "accepted" | "rejected";
+
+export interface ScanOptions {
+  includeDotFolders: string[];
+}
+
+export interface InboxDropStageOutcome {
+  id: string;
+  sourcePath: string;
+  targetPath: string | null;
+  fileName: string | null;
+  channel: string;
+  dropPath: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface InboxDropStageRequest {
+  channel?: string | null;
+  dropPath?: string | null;
+  sourcePaths: string[];
+}
+
 /** Live filesystem event from the Rust `notify` watcher. Payload of the
  *  `inbox://file_event` Tauri event; mirrors `InboxFileEvent` in
  *  `src-tauri/src/inbox_watcher.rs`. */
@@ -161,6 +319,59 @@ export interface GmailMessage {
   from: string;
   subject: string;
   date: string;
+}
+
+export interface GmailDecisionRequest {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+}
+
+export interface GmailDecisionOutcome {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+  labelName: string;
+  archived: boolean;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  kind: string;
+  summary: string;
+  target: string | null;
+  payloadPreview: string | null;
+  autoApproved: boolean;
+}
+
+export type ApprovalDecision = "pending" | "approved" | "rejected";
+
+export type MissionStatus = "running" | "idle" | "done" | "failed" | "stopped";
+
+export interface InboxProcessMissionMetadata {
+  origin: "inboxProcess";
+  channel: string;
+  inputPaths: string[];
+  workspacePath?: string | null;
+  skillName?: string | null;
+}
+
+export type MissionMetadata = InboxProcessMissionMetadata | Record<string, unknown>;
+
+export interface MissionRecord {
+  id: string;
+  kind: string;
+  startedAt: string;
+  lastOutputAt: string;
+  status: MissionStatus;
+  exitCode: number | null;
+  outputLogPath: string | null;
+  metadata?: MissionMetadata | null;
+}
+
+export interface MissionLogTail {
+  invocationId: string;
+  lines: string[];
 }
 
 /** Per-workspace inbox configuration persisted at `<workspace>/.anchor/inbox.json`. */

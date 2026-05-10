@@ -1,6 +1,7 @@
 mod ai_router;
 mod anchor_dir;
 mod app_menu;
+mod approval;
 mod cli_path;
 mod document;
 mod file_manager;
@@ -13,6 +14,7 @@ mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
+mod mission_state;
 mod shelf;
 mod skill_host;
 mod sys_import;
@@ -30,18 +32,26 @@ use anchor_dir::{
     read_anchor_workspace, save_anchor_mcp, save_anchor_projects, save_anchor_rule,
     save_anchor_settings, save_anchor_skills, save_anchor_template, update_anchor_workspace,
 };
+use approval::{prepare_approval, record_approval, ApprovalState};
 use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
     save_document, trash_document, update_frontmatter_field,
 };
 use file_manager::reveal_in_file_manager;
 use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
-use gmail_gws::fetch_gmail_unread;
-use inbox::scan_inbox_drop;
+use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
+use inbox::{
+    accept_inbox_item, accept_inbox_items, read_inbox_processed_item, reject_inbox_item,
+    reject_inbox_items, scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items,
+    stage_inbox_drop_files,
+};
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
-use inbox_settings::{read_inbox_settings, save_inbox_settings};
+use inbox_settings::{
+    read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
+};
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
+use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
@@ -81,6 +91,8 @@ pub fn run() {
         })
         .manage(InboxWatcherState::default())
         .manage(TerminalState::default())
+        .manage(ApprovalState::default())
+        .manage(MissionState::default())
         .invoke_handler(tauri::generate_handler![
             default_vault_path,
             sample_vault_path,
@@ -106,10 +118,20 @@ pub fn run() {
             git_diff,
             reveal_in_file_manager,
             scan_inbox_drop,
+            scan_inbox_entries,
+            scan_inbox_processed_items,
+            read_inbox_processed_item,
+            stage_inbox_drop_files,
+            accept_inbox_item,
+            accept_inbox_items,
+            reject_inbox_item,
+            reject_inbox_items,
             start_inbox_watcher,
             stop_inbox_watcher,
             read_inbox_settings,
             save_inbox_settings,
+            read_inbox_runtime_config,
+            save_inbox_runtime_config,
             parse_korean_date_cmd,
             store_shelf_files,
             store_shelf_files_as,
@@ -119,6 +141,9 @@ pub fn run() {
             delete_memo,
             save_memo_as,
             start_claude_cli_invocation,
+            list_ai_missions,
+            read_ai_mission_log,
+            stop_ai_mission,
             terminal_spawn,
             terminal_write,
             terminal_resize,
@@ -126,6 +151,10 @@ pub fn run() {
             build_inbox_classification_prompt,
             parse_inbox_classification,
             fetch_gmail_unread,
+            decide_gmail_item,
+            decide_gmail_items,
+            prepare_approval,
+            record_approval,
             // workspace pairing + .anchor/ system mode
             detect_workspace,
             read_workspace_config,

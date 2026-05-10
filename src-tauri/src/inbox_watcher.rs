@@ -1,5 +1,5 @@
 // Phase 2 step 2: filesystem watcher layered on top of the polling
-// `scan_inbox_drop` baseline. `notify` watches `<vault>/inbox/downloads/`
+// `scan_inbox_drop` baseline. `notify` watches configured inbox drop/pending paths
 // recursively; relevant create/modify/remove events are forwarded to the
 // frontend via Tauri's event channel as `inbox://file_event` payloads.
 //
@@ -46,16 +46,26 @@ pub fn start_inbox_watcher(
     if !vault.is_dir() {
         return Err(format!("Vault path is not a directory: {vault_path}"));
     }
-    let settings = inbox_settings::load(&vault);
-    let downloads = vault.join(&settings.inbox_root);
-    if !downloads.is_dir() {
-        return Err(format!(
-            "{} is not a directory; create the inbox root first.",
-            downloads.display()
-        ));
+    let config = inbox_settings::load_runtime_config_or_legacy(&vault)?;
+    let inbox_root = inbox_settings::resolve_runtime_root(&vault, &config)?;
+    let mut watch_roots = Vec::new();
+    for channel in config.channels.values() {
+        for drop_path in &channel.drop_paths {
+            let path = inbox_settings::lexical_normalize_path(&inbox_root.join(drop_path));
+            if path.is_dir() && !watch_roots.contains(&path) {
+                watch_roots.push(path);
+            }
+        }
+    }
+    let pending = inbox_settings::lexical_normalize_path(&inbox_root.join(&config.paths.pending));
+    if pending.is_dir() && !watch_roots.contains(&pending) {
+        watch_roots.push(pending);
+    }
+    if watch_roots.is_empty() {
+        return Err("No configured inbox drop or pending directories exist yet.".to_string());
     }
 
-    let downloads_root = downloads.clone();
+    let roots_for_handler = watch_roots.clone();
     let vault_for_handler = vault.clone();
     let vault_string = vault_path.clone();
 
@@ -71,7 +81,13 @@ pub fn start_inbox_watcher(
             if kind_label != "removed" && !path.is_file() {
                 continue;
             }
-            let rel_to_downloads = match path.strip_prefix(&downloads_root) {
+            let matched_root = roots_for_handler
+                .iter()
+                .find(|root| path.starts_with(root.as_path()));
+            let Some(matched_root) = matched_root else {
+                continue;
+            };
+            let rel_to_downloads = match path.strip_prefix(matched_root) {
                 Ok(rel) => rel,
                 Err(_) => continue,
             };
@@ -99,9 +115,11 @@ pub fn start_inbox_watcher(
     })
     .map_err(|err| format!("watcher creation failed: {err}"))?;
 
-    watcher
-        .watch(&downloads, RecursiveMode::Recursive)
-        .map_err(|err| format!("watch start failed: {err}"))?;
+    for root in &watch_roots {
+        watcher
+            .watch(root, RecursiveMode::Recursive)
+            .map_err(|err| format!("watch start failed: {err}"))?;
+    }
 
     let mut guard = state
         .0

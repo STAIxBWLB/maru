@@ -8,11 +8,20 @@ inbox:
   root: ~/workspace/work/inbox
   paths:
     drop: drop
+    items: items
     pending: items/pending
     done: items/done
     failed: items/failed
     duplicate: items/duplicate
+    state: _state
     receipts: _state/index.jsonl
+  naming:
+    item_id_template: "{date}-{channel}-{slug}"
+    raw_dir: raw
+    manifest_file: manifest.yaml
+    extracted_file: extracted.md
+    summary_file: summary.md
+    route_file: route.md
   channels:
     kakao:
       provider: kakao
@@ -34,6 +43,11 @@ inbox:
 ```
 
 Project classification must read the paths configured under `ssot`.
+
+Processing must use `inbox.naming` for generated artifact names. Read manifests
+from `manifest_file`; write extracted text, summaries, and route proposals to
+the configured `extracted_file`, `summary_file`, and `route_file` inside each
+item directory. Raw originals stay under `raw_dir`.
 
 When invoked as `inbox-process <channel> [context...]`, `<channel>` must match
 an `inbox.channels` root key. Remaining free text is processing context; tokens

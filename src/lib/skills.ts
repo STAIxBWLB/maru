@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { MissionMetadata } from "./types";
 
 declare global {
   interface Window {
@@ -283,6 +284,7 @@ export async function skillsDispatchBackground(params: {
   prompt: string;
   cwd?: string | null;
   context?: SkillContextItem[] | null;
+  metadata?: MissionMetadata | null;
 }): Promise<string> {
   if (!isTauri()) throw new Error("Skill background dispatch requires the Tauri shell.");
   return invoke<string>("skills_dispatch_background", params);

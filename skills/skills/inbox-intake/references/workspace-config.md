@@ -16,6 +16,13 @@ inbox:
     duplicate: items/duplicate
     state: _state
     receipts: _state/index.jsonl
+  naming:
+    item_id_template: "{date}-{channel}-{slug}"
+    raw_dir: raw
+    manifest_file: manifest.yaml
+    extracted_file: extracted.md
+    summary_file: summary.md
+    route_file: route.md
   dedupe:
     default: sha256
   channels:
@@ -46,6 +53,11 @@ inbox:
 ```
 
 Provider runtime values live under `io.providers`.
+
+`inbox.naming` controls generated inbox item directories and artifact filenames.
+Preserve original raw filenames inside `raw_dir`; the configured
+`manifest_file`, `extracted_file`, `summary_file`, and `route_file` names are
+used inside each item directory.
 
 `inbox.channels` keys are the channel names accepted by
 `inbox-process <channel>`. Keep user-facing calls on the root channel (`mso`, `gws`,

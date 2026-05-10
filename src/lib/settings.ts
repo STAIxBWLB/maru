@@ -107,6 +107,9 @@ export interface AnchorSettings {
     accentColor: string;
     layout: LayoutSettings;
   };
+  scan: {
+    includeDotFolders: string[];
+  };
   terminal: {
     defaultPanelOpen: boolean;
     lastHeight: number;
@@ -154,6 +157,9 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       windowBounds: null,
       windowMaximized: null,
     },
+  },
+  scan: {
+    includeDotFolders: [],
   },
   terminal: {
     defaultPanelOpen: false,
@@ -221,6 +227,9 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       accentColor: normalizeHexColor(ui.accentColor, DEFAULT_ANCHOR_SETTINGS.ui.accentColor),
       layout,
     },
+    scan: {
+      includeDotFolders: normalizeDotFolderIncludes(value.scan),
+    },
     terminal: {
       defaultPanelOpen: layout.terminalOpen,
       lastHeight: layout.terminalHeight,
@@ -264,6 +273,9 @@ function cloneDefaultSettings(): AnchorSettings {
       documentTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.documentTreeStateInitialized,
       fileTreeStateInitialized: DEFAULT_ANCHOR_SETTINGS.ui.fileTreeStateInitialized,
       layout: { ...DEFAULT_ANCHOR_SETTINGS.ui.layout },
+    },
+    scan: {
+      includeDotFolders: [...DEFAULT_ANCHOR_SETTINGS.scan.includeDotFolders],
     },
     terminal: {
       ...DEFAULT_ANCHOR_SETTINGS.terminal,
@@ -348,6 +360,23 @@ function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+export function normalizeDotFolderIncludes(value: unknown): string[] {
+  const source = isRecord(value) ? value.includeDotFolders : value;
+  const includes: string[] = [];
+  const seen = new Set<string>();
+  for (const item of parseStringArray(source)) {
+    const normalized = item.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!normalized || normalized.includes("..") || /[*?]/.test(normalized)) continue;
+    const segments = normalized.split("/").filter(Boolean);
+    if (!segments.some((segment) => segment.startsWith("."))) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    includes.push(normalized);
+  }
+  return includes;
 }
 
 export function formatBinaryFileIncludePatterns(patterns: readonly string[]): string {

@@ -17,13 +17,16 @@ skill does not summarize, route, extract tasks, or write to a vault.
 ## Boot Sequence
 
 1. Find `workspace.config.yaml` by walking up from the current directory.
-2. Read `inbox` and `io.providers` from that file.
+2. Read `inbox`, including `inbox.paths` and `inbox.naming`, and
+   `io.providers` from that file.
 3. Load `references/manifest-schema.md` before creating or editing a manifest.
 4. Use the configured inbox root. Default layout:
    - `drop/<channel>/` for channel-root or connector drop aliases
    - `items/pending/` for new normalized items
    - `items/done/`, `items/failed/`, `items/duplicate/` for terminal states
    - `_state/index.jsonl` for local receipts
+   - `manifest.yaml`, `raw/`, `extracted.md`, `summary.md`, and `route.md`
+     names come from `inbox.naming`
 
 ## Intake Workflow
 
@@ -39,16 +42,18 @@ skill does not summarize, route, extract tasks, or write to a vault.
    file ID; fall back to SHA-256 of attached files.
 5. If the dedupe key already exists in `_state/index.jsonl`, create or move the
    item under `items/duplicate/` and record the existing receipt.
-6. Create `items/pending/<YYMMDD-channel-slug>/manifest.yaml` from
-   `templates/manifest.yaml`.
-7. Copy or move raw inputs into the item `raw/` directory according to the
-   caller's explicit request. For channel-root imports, default to copy.
+6. Create `<inbox.paths.pending>/<item-id>/<inbox.naming.manifest_file>` from
+   `templates/manifest.yaml`. Build `<item-id>` with
+   `inbox.naming.item_id_template`; the default is `{date}-{channel}-{slug}`.
+7. Copy or move raw inputs into the item `inbox.naming.raw_dir` directory
+   according to the caller's explicit request. For channel-root imports,
+   default to copy.
 8. Append one JSONL receipt to `_state/index.jsonl`.
 
 ## Rules
 
-- Keep original filenames inside `raw/`; normalization happens later in
-  `inbox-process`.
+- Keep original filenames inside `inbox.naming.raw_dir`; normalization happens
+  later in `inbox-process`.
 - Ignore OS noise such as `.DS_Store`.
 - Store channel-specific but non-secret facts under manifest `metadata`.
 - Never embed tokens, account IDs, tenant IDs, chat IDs, or private URLs in this

@@ -1,4 +1,8 @@
 import type { AnchorSettings, LayoutSettings } from "./settings";
+import {
+  SETTINGS_WINDOW_OPEN_TAB_EVENT,
+  type SettingsWindowOpenTabPayload,
+} from "./settingsWindowEvents";
 import { SKILL_EDITOR_OPEN_EVENT, type SkillEditorOpenPayload } from "./skillEditorEvents";
 
 type LayoutPatch = Partial<AnchorSettings["ui"]["layout"]>;
@@ -7,7 +11,7 @@ export function tauriAvailable(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
-export async function openSettingsWindow(workPath: string | null): Promise<void> {
+export async function openSettingsWindow(workPath: string | null, tab?: string): Promise<void> {
   if (!tauriAvailable()) {
     throw new Error("Settings window requires the Tauri app.");
   }
@@ -15,11 +19,17 @@ export async function openSettingsWindow(workPath: string | null): Promise<void>
   const existing = await WebviewWindow.getByLabel("settings");
   if (existing) {
     await existing.setFocus();
+    if (tab) {
+      const { emitTo } = await import("@tauri-apps/api/event");
+      const payload: SettingsWindowOpenTabPayload = { tab };
+      await emitTo("settings", SETTINGS_WINDOW_OPEN_TAB_EVENT, payload);
+    }
     return;
   }
 
   const params = new URLSearchParams({ window: "settings" });
   if (workPath) params.set("workPath", workPath);
+  if (tab) params.set("tab", tab);
   const settingsWindow = new WebviewWindow("settings", {
     url: `/?${params.toString()}`,
     title: "Anchor Settings",

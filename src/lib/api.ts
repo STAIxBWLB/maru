@@ -25,13 +25,29 @@ import type {
   GitFileChange,
   GitStatus,
   GmailMessage,
+  GmailDecisionOutcome,
+  GmailDecisionRequest,
+  ApprovalDecision,
+  ApprovalRequest,
+  InboxAcceptRequest,
   InboxClassification,
+  InboxDecisionOutcome,
   InboxDropItem,
+  InboxDropStageOutcome,
+  InboxEntry,
+  InboxProcessedItem,
+  InboxProcessedItemDetail,
+  InboxProcessedStatus,
+  InboxDropStageRequest,
+  InboxRuntimeConfig,
   InboxSettings,
+  MissionLogTail,
+  MissionRecord,
   MemoDocument,
   MemoEntry,
   MemoFormat,
   StoredFileOutcome,
+  ScanOptions,
   VaultEntry,
   WorkspaceFileEntry,
   WorkspaceRegistry,
@@ -53,6 +69,91 @@ export const DEFAULT_INBOX_SETTINGS: InboxSettings = {
   inboxRoot: "inbox/downloads",
   sources: ["outlook", "sharepoint", "gmail", "kakao", "telegram", "downloads"],
   gwsPath: null,
+};
+
+export const DEFAULT_INBOX_RUNTIME_CONFIG: InboxRuntimeConfig = {
+  root: "inbox",
+  schema_version: 1,
+  paths: {
+    drop: "drop",
+    items: "items",
+    pending: "items/pending",
+    done: "items/done",
+    failed: "items/failed",
+    duplicate: "items/duplicate",
+    state: "_state",
+    receipts: "_state/index.jsonl",
+  },
+  naming: {
+    item_id_template: "{date}-{channel}-{slug}",
+    raw_dir: "raw",
+    manifest_file: "manifest.yaml",
+    extracted_file: "extracted.md",
+    summary_file: "summary.md",
+    route_file: "route.md",
+  },
+  file_drop: {
+    channel: "incoming",
+    drop_path: "drop/incoming",
+    operation: "copy",
+  },
+  gmail: {
+    enabled: true,
+    scan_window_days: 14,
+    max_results: 20,
+    auto_refresh_ttl_seconds: 300,
+    unread_only: true,
+    query: "",
+    gws_path: null,
+  },
+  dedupe: { default: "sha256" },
+  channels: {
+    incoming: { provider: "local", kind: "file", drop_paths: ["drop/incoming"], dedupe: "sha256" },
+    arc: { provider: "local", kind: "file", drop_paths: ["drop/arc"], dedupe: "sha256" },
+    atlas: { provider: "local", kind: "file", drop_paths: ["drop/atlas"], dedupe: "sha256" },
+    chrome: { provider: "local", kind: "file", drop_paths: ["drop/chrome"], dedupe: "sha256" },
+    flow: { provider: "local", kind: "file", drop_paths: ["drop/flow"], dedupe: "sha256" },
+    safari: { provider: "local", kind: "file", drop_paths: ["drop/safari"], dedupe: "sha256" },
+    others: { provider: "local", kind: "file", drop_paths: ["drop/others"], dedupe: "sha256" },
+    transcripts: { provider: "local", kind: "transcript", drop_paths: ["drop/transcripts"], dedupe: "sha256" },
+    mso: {
+      provider: "mso",
+      skill: "io-mso",
+      kind: "bundle",
+      drop_paths: ["drop/mso"],
+      source_kinds: { mail: "message", sharepoint: "document", onedrive: "document" },
+      dedupe: "provider-native",
+    },
+    gws: {
+      provider: "gws",
+      skill: "io-gws",
+      kind: "bundle",
+      drop_paths: ["drop/gws"],
+      source_kinds: { mail: "message", drive: "document", gdrive: "document" },
+      dedupe: "provider-native",
+    },
+    telegram: {
+      provider: "telegram",
+      skill: "io-telegram",
+      kind: "bundle",
+      drop_paths: ["drop/telegram"],
+      source_kinds: { messages: "message", files: "attachment" },
+      dedupe: "provider-native",
+    },
+    kakao: {
+      provider: "kakao",
+      skill: "io-kakao",
+      kind: "bundle",
+      drop_paths: ["drop/kakao"],
+      source_kinds: { messages: "message", files: "attachment", exports: "data" },
+      dedupe: "sha256",
+    },
+  },
+  processing: {
+    require_confirm_before_route: true,
+    summary_schema: "inbox-summary/v1",
+  },
+  hooks: {},
 };
 
 export async function getSampleVaultPath(): Promise<string> {
@@ -108,14 +209,17 @@ export async function chooseSaveFile(
   return typeof selected === "string" ? selected : null;
 }
 
-export async function scanVault(vaultPath: string): Promise<VaultEntry[]> {
+export async function scanVault(vaultPath: string, scanOptions?: ScanOptions): Promise<VaultEntry[]> {
   if (!isTauri()) return mockEntries(vaultPath);
-  return invoke<VaultEntry[]>("scan_vault", { vaultPath });
+  return invoke<VaultEntry[]>("scan_vault", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
-export async function scanWorkspaceFiles(vaultPath: string): Promise<WorkspaceFileEntry[]> {
+export async function scanWorkspaceFiles(
+  vaultPath: string,
+  scanOptions?: ScanOptions,
+): Promise<WorkspaceFileEntry[]> {
   if (!isTauri()) return mockWorkspaceFiles(vaultPath);
-  return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath });
+  return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
@@ -123,9 +227,200 @@ export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | 
   return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
 }
 
-export async function scanInboxDrop(vaultPath: string): Promise<InboxDropItem[]> {
+export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
-  return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath });
+  return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath, scanOptions: scanOptions ?? null });
+}
+
+export async function scanInboxEntries(workPath: string, scanOptions?: ScanOptions): Promise<InboxEntry[]> {
+  if (!isTauri()) return [];
+  return invoke<InboxEntry[]>("scan_inbox_entries", { workPath, scanOptions: scanOptions ?? null });
+}
+
+export async function scanInboxProcessedItems(
+  workPath: string,
+  statuses?: InboxProcessedStatus[] | null,
+  query?: string | null,
+  limit = 100,
+): Promise<InboxProcessedItem[]> {
+  if (!isTauri()) return [];
+  return invoke<InboxProcessedItem[]>("scan_inbox_processed_items", {
+    workPath,
+    statuses: statuses ?? null,
+    query: query ?? null,
+    limit,
+  });
+}
+
+export async function readInboxProcessedItem(
+  workPath: string,
+  itemDir: string,
+): Promise<InboxProcessedItemDetail> {
+  if (!isTauri()) {
+    throw new Error("Processed inbox item details require the Tauri shell.");
+  }
+  return invoke<InboxProcessedItemDetail>("read_inbox_processed_item", { workPath, itemDir });
+}
+
+export async function stageInboxDropFiles(
+  workPath: string,
+  request: InboxDropStageRequest,
+): Promise<InboxDropStageOutcome[]> {
+  if (!isTauri()) {
+    return request.sourcePaths.map((sourcePath) => ({
+      id: sourcePath,
+      sourcePath,
+      targetPath: `${workPath}/inbox/${request.dropPath ?? "drop/incoming"}/${sourcePath.split("/").pop() ?? "file"}`,
+      fileName: sourcePath.split("/").pop() ?? "file",
+      channel: request.channel ?? "incoming",
+      dropPath: request.dropPath ?? "drop/incoming",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDropStageOutcome[]>("stage_inbox_drop_files", {
+    workPath,
+    channel: request.channel ?? null,
+    dropPath: request.dropPath ?? null,
+    sourcePaths: request.sourcePaths,
+  });
+}
+
+export async function readInboxRuntimeConfig(workPath: string): Promise<InboxRuntimeConfig> {
+  if (!isTauri()) return DEFAULT_INBOX_RUNTIME_CONFIG;
+  return invoke<InboxRuntimeConfig>("read_inbox_runtime_config", { workPath });
+}
+
+export async function saveInboxRuntimeConfig(
+  workPath: string,
+  config: InboxRuntimeConfig,
+): Promise<InboxRuntimeConfig> {
+  if (!isTauri()) return config;
+  return invoke<InboxRuntimeConfig>("save_inbox_runtime_config", { workPath, config });
+}
+
+export async function prepareApproval(input: {
+  kind: string;
+  summary: string;
+  target?: string | null;
+  payloadPreview?: string | null;
+}): Promise<ApprovalRequest> {
+  if (!isTauri()) {
+    return {
+      id: `mock-approval-${Date.now()}`,
+      kind: input.kind,
+      summary: input.summary,
+      target: input.target ?? null,
+      payloadPreview: input.payloadPreview ?? null,
+      autoApproved: false,
+    };
+  }
+  return invoke<ApprovalRequest>("prepare_approval", {
+    kind: input.kind,
+    summary: input.summary,
+    target: input.target ?? null,
+    payloadPreview: input.payloadPreview ?? null,
+  });
+}
+
+export async function recordApproval(
+  id: string,
+  decision: ApprovalDecision,
+  rememberKind = false,
+): Promise<ApprovalRequest> {
+  if (!isTauri()) {
+    return {
+      id,
+      kind: "mock",
+      summary: "",
+      target: null,
+      payloadPreview: null,
+      autoApproved: false,
+    };
+  }
+  return invoke<ApprovalRequest>("record_approval", { id, decision, rememberKind });
+}
+
+export async function acceptInboxItem(
+  vaultPath: string,
+  id: string,
+  targetFolder: string,
+  approvalId: string,
+): Promise<InboxDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      id,
+      decision: "accepted",
+      sourcePath: id,
+      targetPath: `${targetFolder}/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<InboxDecisionOutcome>("accept_inbox_item", {
+    vaultPath,
+    id,
+    targetFolder,
+    approvalId,
+  });
+}
+
+export async function acceptInboxItems(
+  vaultPath: string,
+  items: InboxAcceptRequest[],
+  approvalId: string,
+): Promise<InboxDecisionOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => ({
+      id: item.id,
+      decision: "accepted",
+      sourcePath: item.id,
+      targetPath: `${item.targetFolder ?? "."}/${item.id.split("/").pop() ?? "file"}`,
+      fileName: item.id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDecisionOutcome[]>("accept_inbox_items", { vaultPath, items, approvalId });
+}
+
+export async function rejectInboxItem(
+  vaultPath: string,
+  id: string,
+  approvalId: string,
+): Promise<InboxDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      id,
+      decision: "rejected",
+      sourcePath: id,
+      targetPath: `inbox/rejected/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<InboxDecisionOutcome>("reject_inbox_item", { vaultPath, id, approvalId });
+}
+
+export async function rejectInboxItems(
+  vaultPath: string,
+  ids: string[],
+  approvalId: string,
+): Promise<InboxDecisionOutcome[]> {
+  if (!isTauri()) {
+    return ids.map((id) => ({
+      id,
+      decision: "rejected",
+      sourcePath: id,
+      targetPath: `inbox/rejected/${id.split("/").pop() ?? "file"}`,
+      fileName: id.split("/").pop() ?? "file",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<InboxDecisionOutcome[]>("reject_inbox_items", { vaultPath, ids, approvalId });
 }
 
 export async function readDocument(
@@ -395,6 +690,26 @@ export async function startClaudeCliInvocation(
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs, extraEnv });
 }
 
+export async function listAiMissions(): Promise<MissionRecord[]> {
+  if (!isTauri()) return [];
+  return invoke<MissionRecord[]>("list_ai_missions");
+}
+
+export async function readAiMissionLog(
+  invocationId: string,
+  maxLines = 160,
+): Promise<MissionLogTail> {
+  if (!isTauri()) return { invocationId, lines: [] };
+  return invoke<MissionLogTail>("read_ai_mission_log", { invocationId, maxLines });
+}
+
+export async function stopAiMission(invocationId: string): Promise<MissionRecord> {
+  if (!isTauri()) {
+    throw new Error("Mission stop is only available inside the Tauri shell.");
+  }
+  return invoke<MissionRecord>("stop_ai_mission", { invocationId });
+}
+
 // === Integrated terminal ===
 
 export function terminalAvailable(): boolean {
@@ -466,6 +781,52 @@ export async function fetchGmailUnread(
   const max = typeof maxOrVaultPath === "number" ? maxOrVaultPath : typeof queryOrMax === "number" ? queryOrMax : null;
   const query = typeof queryOrMax === "string" ? queryOrMax : maybeQuery;
   return invoke<GmailMessage[]>("fetch_gmail_unread", { vaultPath, max, query });
+}
+
+export async function decideGmailItem(
+  vaultPath: string | null,
+  messageId: string,
+  decision: "accepted" | "rejected",
+  approvalId: string,
+): Promise<GmailDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      messageId,
+      decision,
+      labelName: decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: decision === "accepted",
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<GmailDecisionOutcome>("decide_gmail_item", {
+    vaultPath,
+    messageId,
+    decision,
+    approvalId,
+  });
+}
+
+export async function decideGmailItems(
+  vaultPath: string | null,
+  items: GmailDecisionRequest[],
+  approvalId: string,
+): Promise<GmailDecisionOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => ({
+      messageId: item.messageId,
+      decision: item.decision,
+      labelName: item.decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: item.decision === "accepted",
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<GmailDecisionOutcome[]>("decide_gmail_items", {
+    vaultPath,
+    items,
+    approvalId,
+  });
 }
 
 export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {

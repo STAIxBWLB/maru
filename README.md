@@ -2,7 +2,7 @@
 
 AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 
-## Status (2026-05-04)
+## Status (2026-05-10)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -10,21 +10,18 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
-| 2 — Inbox + AI | 🚧 read-only surface live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with parallel Files / Gmail sections, classify/accept/reject) all shipped. Accept/reject currently updates UI state only; file-move on accept + Gmail label-modify/archive remain. |
+| 2 — Inbox + AI | ✅ write loop live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with Configured Entries / Processing / Processed Items / Files / Gmail sections, classify/accept/reject/process) all shipped. The primary local inbox flow now reads `workspace.config.yaml` `inbox:` settings, stages dropped files into the configured `inbox.file_drop` channel/path, scans `inbox/drop/<channel>/` plus `items/pending/*/manifest.yaml`, and reads processed history from `items/{done,failed,duplicate}` using configured artifact filenames; legacy `inbox/downloads/<source>` remains compatible. Accept/reject runs through an approval gate, Gmail decisions apply Anchor labels, keyboard `a`/`r`/`p`, multi-select, bulk actions, dot folders are hidden unless allowlisted in Settings, and mission state/log/stop hooks are in place. |
 | 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.anchor/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.anchor/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
 | 3 — Built-in Skills + Hub connector | 📋 planned | Command-palette skills plus a read-only connector to the separate `anchor-hub` service. |
 | 4 — Document Edit Mode | 📋 planned | |
 
 ## Next up (immediate)
 
-Phase 2 has crossed the read-only boundary. The next work is the smallest safe write/apply loop:
+Phase 2 now has the safe write/apply loop. The next work is verification depth plus the Phase 3 bridge:
 
-1. **File accept action** — move accepted drops from `inbox/downloads/<source>/...` into the classifier's `suggestedFolder` when present; otherwise require a user-selected target. Keep all moves inside the workspace boundary.
-2. **Gmail accept/reject action** — call `gws` to apply Anchor labels and archive accepted mail. Rejected mail should be labelled or left unread until the policy is chosen.
-3. **Keyboard accept loop** — add focused inbox selection plus `a` / `r` actions so the button-only UI becomes the promised one-keystroke flow.
-4. **Real-workspace verification** — verify dropped files, a real unread mail item, Claude classification, and accept/reject in one Tauri session.
-5. **Phase 3 bridge prep** — the Claude inbox bridge, integrated terminal, and `~/.anchor/settings.json` terminal defaults are in place; next is wiring skills to the command palette with accept/reject diffs.
-6. **Hub connector POC** — keep shared workflow, evidence, KPI, and submission-gate features in the separate `anchor-hub` repo; Anchor only stores a connector endpoint and calls hub APIs/MCP tools when the user explicitly asks.
+1. **Real-workspace verification** — verify configured `inbox/drop/<channel>` processing, legacy dropped files, a safe unread Gmail item, Claude classification, `a`/`r`/`p`, bulk actions, and mission stop in one native Tauri session.
+2. **Phase 3 skill diffs** — skills can be dispatched from Anchor; next is capturing background results as proposed diffs with accept/reject.
+3. **Hub connector POC** — keep shared workflow, evidence, KPI, and submission-gate features in the separate `anchor-hub` repo; Anchor only stores a connector endpoint and calls hub APIs/MCP tools when the user explicitly asks.
 
 ## Architecture
 
@@ -84,18 +81,23 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 ### Phase 2 — Inbox + AI (week 7–10)
 
-**Outcome**: a "Today's inbox" view that ingests Gmail and dropped files (`inbox/downloads/`), Claude classifies and proposes actions, the user accepts with a single `a` keystroke.
+**Outcome**: a "Today's inbox" view that ingests local configured drop files (`inbox/drop/<channel>/`), pending item manifests, legacy `inbox/downloads/` files, and Gmail unread metadata. Claude classifies and proposes actions; the user accepts with `a` or starts `inbox-process <channel>` with `p`.
 
 **Shipped read-only surface**:
 
-1. **Workspace polling scan (✓ shipped)** — `scan_inbox_drop(vault_path)` walks `<workspace>/inbox/downloads/{*}/...` and returns `InboxDropItem[]` (id, source, size, mtime). The Rust command keeps its legacy argument name for compatibility.
-2. **Filesystem watcher (✓ shipped)** — `notify` watches `<workspace>/inbox/downloads/` and emits `inbox://file_event`; the frontend treats events as hints to re-run the cheap polling scan.
+1. **Workspace polling scan (✓ shipped)** — `scan_inbox_entries(work_path)` reads `workspace.config.yaml` `inbox:` runtime config, scans configured `channels[*].drop_paths` and `paths.pending`, and returns `InboxEntry[]` for `dropFile` and `pendingItem` rows. `scan_inbox_drop(vault_path)` still walks legacy `<workspace>/inbox/downloads/{*}/...` and returns `InboxDropItem[]`.
+2. **Filesystem watcher (✓ shipped)** — `notify` watches all configured channel drop paths plus the pending path, falling back to legacy `inbox/downloads/`, and emits `inbox://file_event`; the frontend treats events as hints to re-run the cheap polling scan.
 3. **Korean NL date parser (✓ shipped)** — pure Rust parser for phrases such as "내일", "다음 주 금요일", "3월 15일", and "오늘 오후 3시".
 4. **Claude Code CLI subprocess bridge (✓ shipped)** — `start_claude_cli_invocation(prompt, cwd?, extra_args?)` spawns `claude -p --permission-mode plan` and streams `ai://output`, `ai://done`, and `ai://error`.
 5. **Inbox classifier (✓ shipped)** — `build_inbox_classification_prompt(item)` + `parse_inbox_classification(raw)` with a closed category set (`task`/`reference`/`meeting`/`admin`/`noise`) and tolerant JSON parsing.
 6. **Gmail via `gws` CLI (✓ shipped)** — Anchor shells out to `gws gmail +triage --format json` and exposes `fetch_gmail_unread(max?, query?) -> GmailMessage[]`.
-7. **Inbox UI (✓ shipped)** — `InboxPane` shows parallel Files / Gmail sections and supports classify/accept/reject button actions.
-8. **Browser smoke e2e (✓ shipped)** — Playwright verifies sample workspace boot, multi-tab editor open, source tab, and preview tab.
+7. **Inbox UI (✓ shipped)** — `InboxPane` shows Configured Entries / Processing / Processed Items / Files / Gmail sections, supports process/classify/accept/reject button actions, shows live `inbox-process` mission log tails, and uses the Files section as a local file drop target.
+8. **Settings-integrated inbox runtime (✓ shipped)** — Settings → Inbox Channels edits `workspace.config.yaml` `inbox.root`, `inbox.paths`, `inbox.naming`, `inbox.file_drop`, Gmail scan settings, and channels without rewriting unrelated top-level config. `.anchor/inbox.json` is a read-only legacy fallback. Dot folders are excluded from Inbox/Files/Vault scans by default and can be included only through the Settings allowlist.
+9. **Approved write loop (✓ shipped)** — all new destructive inbox decisions require a Rust-backed approval id. File accept moves to the classifier folder or user-selected folder; file reject moves to the sibling rejected store. Gmail accept applies `anchor-accepted` and removes `INBOX`; Gmail reject applies `anchor-rejected` without archiving.
+10. **Keyboard + bulk loop (✓ shipped)** — Inbox supports focused rows, `⌘I`, `↑`/`↓`, `a`, `r`, `p`, `?`, checkboxes, shift range, cmd-toggle, and a bulk action footer.
+11. **AI mission lifecycle (✓ shipped)** — Claude and background skill runs mirror mission state to `~/.anchor/state/missions/`, emit idle/update events, preserve optional origin metadata such as `inboxProcess`, expose log-tail reads, and expose a stop command with SIGTERM → SIGKILL escalation.
+12. **Processed item history (✓ shipped)** — `scan_inbox_processed_items` reads `items/done`, `items/failed`, and `items/duplicate` using configured `inbox.paths` and `inbox.naming`; detail reads expose Summary / Route / Manifest / Extracted tabs with extracted text capped for large files.
+13. **Browser smoke e2e (✓ shipped)** — Playwright verifies sample workspace boot, multi-tab editor open, source tab, and preview tab.
 
 **Tree + Cursor shell + integrated terminal add-on (✓ shipped)**:
 
@@ -107,15 +109,13 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 6. **Integrated terminal** — `portable-pty` sessions stream through `terminal://output` and `terminal://exit`. Launcher buttons start `claude`, `codex --cd <cwd>`, or the user's shell in independent xterm tabs; closing a tab kills its PTY process. First run keeps the terminal panel collapsed; later launches restore the previous panel height/open/maximized state and auto-start Shell only when the panel is open with no tabs.
 7. **Native menu bar** — the native app menu exposes File, Edit, View, Go, Terminal, Workspace, and Help commands. Menu commands reuse the same application command handlers as keyboard and command-palette actions.
 8. **Auto-updater** — signed GitHub Release updater artifacts are checked at startup and installed automatically when newer than the current app version. The native app menu also exposes `Check for Updates...` for an explicit check.
-9. **Settings window** — Settings opens in a separate Tauri window and edits Explorer default mode, Files default filter, file-queue default operation, document browser mode, document label mode, theme mode, accent color, terminal auto-launch, and raw JSON surfaces for AI, inbox channels, connectors, MCP, projects, and skills.
+9. **Settings window** — Settings opens in a separate Tauri window and edits Explorer default mode, Files default filter, file-queue default operation, document browser mode, document label mode, theme mode, accent color, terminal auto-launch, structured Inbox Channels, and raw JSON surfaces for AI, connectors, MCP, projects, and skills.
 
-**Remaining write/apply work**:
+**Remaining Phase 2 hardening**:
 
-1. **File accept** — move or route accepted files after user confirmation; reject must avoid destructive deletes.
-2. **Gmail accept/reject** — apply labels/archive through `gws`; keep raw mail bodies out of logs and fixtures.
-3. **One-keystroke loop** — focused row selection, `a` accept, `r` reject, and visible pending counts.
-4. **Native Tauri e2e** — cover watcher events, Claude CLI success/failure, and Gmail CLI failure taxonomy.
-5. **KakaoTalk macOS notification watcher (optional)** — still deferred while the full-disk-access prompt is avoidable.
+1. **Native Tauri e2e** — cover watcher events, approved file moves, Gmail CLI failure taxonomy, Claude CLI success/failure, and mission stop.
+2. **Real-workspace smoke** — configured channel drop file + pending manifest + legacy dropped file + Gmail item + Claude classification + `a`/`r`/`p` loop in one native session.
+3. **KakaoTalk macOS notification watcher (optional)** — still deferred while the full-disk-access prompt is avoidable.
 
 **AI / terminal dispatch**:
 - Inbox classification: Claude Code CLI subprocess through `start_claude_cli_invocation`, streamed with the existing `ai://*` events.
@@ -124,7 +124,7 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 **Skip in Phase 2**: iMessage DB, Slack, Outlook (Phase 3 wraps Outlook via the `ms-office` skill).
 
-**Verification gate**: a real unread mail item or dropped file arrives -> anchor classifies, extracts a task/date, and proposes a folder within 30 seconds -> user presses `a` -> item is moved/labelled without leaving the inbox session.
+**Verification gate**: a real unread mail item or configured dropped file arrives -> Anchor classifies or starts `inbox-process <channel>` within 30 seconds -> user presses `a` or `p` -> item is moved, labelled, or handed to the background skill without leaving the inbox session.
 
 ### Phase 3 — Built-in Skills + Hub Connector (week 11–14)
 

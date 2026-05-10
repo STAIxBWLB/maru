@@ -56,8 +56,10 @@ const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["ui", "documentViews"],
     &["ui", "collapsedTreeFolders"],
     &["ui", "collapsedFileFolders"],
+    &["ui", "inboxCollapsedSections"],
     &["ui", "documentTreeStateInitialized"],
     &["ui", "fileTreeStateInitialized"],
+    &["scan"],
     &["inboxChannels"],
 ];
 

@@ -21,6 +21,11 @@ import {
 import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_INBOX_RUNTIME_CONFIG,
+  readInboxRuntimeConfig,
+  saveInboxRuntimeConfig,
+} from "../lib/api";
+import {
   applySysImport,
   deleteAnchorRule,
   deleteAnchorTemplate,
@@ -49,6 +54,7 @@ import type {
 import {
   formatBinaryFileIncludePatterns,
   normalizeAnchorSettings,
+  normalizeDotFolderIncludes,
   parseBinaryFileIncludePatternsText,
 } from "../lib/settings";
 import { normalizeAccentInput } from "../lib/theme";
@@ -56,9 +62,16 @@ import {
   SKILLS_UPDATED_EVENT,
   type SkillsUpdatedPayload,
 } from "../lib/skillEditorEvents";
+import {
+  SETTINGS_WINDOW_OPEN_TAB_EVENT,
+  type SettingsWindowOpenTabPayload,
+} from "../lib/settingsWindowEvents";
 import type {
   ImportItem,
   ImportPlan,
+  InboxChannelConfig,
+  InboxGmailConfig,
+  InboxRuntimeConfig,
   RuleEntry,
   TemplateEntry,
 } from "../lib/types";
@@ -100,15 +113,59 @@ type SystemTab =
   | "skills"
   | "import";
 
+function isSystemTab(value: string | null | undefined): value is SystemTab {
+  return (
+    value === "preferences" ||
+    value === "ai" ||
+    value === "terminal" ||
+    value === "inbox-channels" ||
+    value === "connectors" ||
+    value === "rules" ||
+    value === "templates" ||
+    value === "mcp" ||
+    value === "projects" ||
+    value === "skills" ||
+    value === "import"
+  );
+}
+
 interface SystemPaneProps {
   workPath: string | null;
   settings: AnchorSettings;
   onSettingsChange: (settings: AnchorSettings) => void;
+  onInboxRuntimeConfigChange?: (config: InboxRuntimeConfig) => void;
+  initialTab?: string | null;
 }
 
-export function SystemPane({ workPath, settings, onSettingsChange }: SystemPaneProps) {
+export function SystemPane({
+  workPath,
+  settings,
+  onSettingsChange,
+  onInboxRuntimeConfigChange,
+  initialTab,
+}: SystemPaneProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<SystemTab>("preferences");
+  const [tab, setTab] = useState<SystemTab>(
+    isSystemTab(initialTab) ? initialTab : "preferences",
+  );
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen(SETTINGS_WINDOW_OPEN_TAB_EVENT, (event) => {
+          const payload = event.payload as SettingsWindowOpenTabPayload | null;
+          if (isSystemTab(payload?.tab)) setTab(payload.tab);
+        }),
+      )
+      .then((off) => {
+        dispose = off;
+      })
+      .catch(() => {
+        // Browser dev shell without Tauri event bridge.
+      });
+    return () => dispose?.();
+  }, []);
 
   if (!workPath) {
     return (
@@ -190,17 +247,11 @@ export function SystemPane({ workPath, settings, onSettingsChange }: SystemPaneP
           />
         ) : null}
         {tab === "inbox-channels" ? (
-          <SettingsJsonTab
-            title={t("system.inboxChannels.title")}
-            value={settings.inboxChannels}
-            onSave={(value) =>
-              onSettingsChange(
-                normalizeAnchorSettings({
-                  ...settings,
-                  inboxChannels: value,
-                }),
-              )
-            }
+          <InboxRuntimeConfigTab
+            workPath={workPath}
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+            onSaved={onInboxRuntimeConfigChange}
           />
         ) : null}
         {tab === "connectors" ? (
@@ -470,6 +521,672 @@ function PreferencesTab({
       </div>
     </div>
   );
+}
+
+// ============================ Inbox Runtime ============================
+
+function InboxRuntimeConfigTab({
+  workPath,
+  settings,
+  onSettingsChange,
+  onSaved,
+}: {
+  workPath: string;
+  settings: AnchorSettings;
+  onSettingsChange: (settings: AnchorSettings) => void;
+  onSaved?: (config: InboxRuntimeConfig) => void;
+}) {
+  const { t } = useTranslation();
+  const [config, setConfig] = useState<InboxRuntimeConfig>(() =>
+    cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
+  );
+  const [pristine, setPristine] = useState<InboxRuntimeConfig>(() =>
+    cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
+  );
+  const [selectedKey, setSelectedKey] = useState<string>("incoming");
+  const [channelKeyDraft, setChannelKeyDraft] = useState<string>("incoming");
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dotIncludesText, setDotIncludesText] = useState(() =>
+    settings.scan.includeDotFolders.join("\n"),
+  );
+
+  const channelKeys = useMemo(() => Object.keys(config.channels).sort(), [config.channels]);
+  const selectedChannel = config.channels[selectedKey] ?? null;
+  const fileDrop = config.file_drop ?? DEFAULT_INBOX_RUNTIME_CONFIG.file_drop;
+  const gmail = config.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
+  const fileDropChannel = config.channels[fileDrop.channel] ?? null;
+  const dirty = JSON.stringify(config) !== JSON.stringify(pristine);
+
+  useEffect(() => {
+    setChannelKeyDraft(selectedKey);
+  }, [selectedKey]);
+
+  useEffect(() => {
+    setDotIncludesText(settings.scan.includeDotFolders.join("\n"));
+  }, [settings.scan.includeDotFolders]);
+
+  const load = useCallback(async () => {
+    setError(null);
+    setStatus(null);
+    try {
+      const runtime = await readInboxRuntimeConfig(workPath);
+      setConfig(runtime);
+      setPristine(runtime);
+      setSelectedKey((current) => runtime.channels[current] ? current : Object.keys(runtime.channels).sort()[0] ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [workPath]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const updateConfig = (patch: Partial<InboxRuntimeConfig>) => {
+    setConfig((current) => ({ ...current, ...patch }));
+    setStatus(null);
+  };
+
+  const updatePath = (key: keyof InboxRuntimeConfig["paths"], value: string) => {
+    setConfig((current) => ({
+      ...current,
+      paths: {
+        ...current.paths,
+        [key]: value,
+      },
+    }));
+    setStatus(null);
+  };
+
+  const updateNaming = (key: keyof InboxRuntimeConfig["naming"], value: string) => {
+    setConfig((current) => ({
+      ...current,
+      naming: {
+        ...current.naming,
+        [key]: value,
+      },
+    }));
+    setStatus(null);
+  };
+
+  const updateFileDrop = (patch: Partial<InboxRuntimeConfig["file_drop"]>) => {
+    setConfig((current) => ({
+      ...current,
+      file_drop: {
+        ...(current.file_drop ?? DEFAULT_INBOX_RUNTIME_CONFIG.file_drop),
+        ...patch,
+        operation: "copy",
+      },
+    }));
+    setStatus(null);
+  };
+
+  const updateGmail = (patch: Partial<InboxGmailConfig>) => {
+    setConfig((current) => ({
+      ...current,
+      gmail: {
+        ...(current.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail),
+        ...patch,
+      },
+    }));
+    setStatus(null);
+  };
+
+  const updateDotFolderIncludes = (text: string) => {
+    const includeDotFolders = normalizeDotFolderIncludes(text.split(/\r?\n/));
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        scan: {
+          ...settings.scan,
+          includeDotFolders,
+        },
+      }),
+    );
+  };
+
+  const updateChannel = (key: string, patch: Partial<InboxChannelConfig>) => {
+    setConfig((current) => {
+      const channel = current.channels[key];
+      if (!channel) return current;
+      return {
+        ...current,
+        channels: {
+          ...current.channels,
+          [key]: {
+            ...channel,
+            ...patch,
+          },
+        },
+      };
+    });
+    setStatus(null);
+  };
+
+  const renameChannel = (from: string, toRaw: string) => {
+    const to = toRaw.trim();
+    if (!to || to === from) return;
+    if (!/^[a-z0-9_-]+$/.test(to)) {
+      setError("Channel key must use lowercase letters, numbers, hyphen, or underscore.");
+      return;
+    }
+    if (config.channels[to]) {
+      setError(`Channel already exists: ${to}`);
+      return;
+    }
+    setConfig((current) => {
+      const { [from]: channel, ...rest } = current.channels;
+      if (!channel) return current;
+      return {
+        ...current,
+        channels: {
+          ...rest,
+          [to]: channel,
+        },
+      };
+    });
+    setSelectedKey(to);
+    setError(null);
+    setStatus(null);
+  };
+
+  const addChannel = () => {
+    const key = uniqueChannelKey(config, "incoming");
+    setConfig((current) => ({
+      ...current,
+      channels: {
+        ...current.channels,
+        [key]: {
+          provider: "local",
+          skill: null,
+          kind: "file",
+          drop_paths: [`${current.paths.drop}/${key}`],
+          source_kinds: {},
+          dedupe: "sha256",
+        },
+      },
+    }));
+    setSelectedKey(key);
+    setStatus(null);
+  };
+
+  const duplicateChannel = () => {
+    if (!selectedChannel) return;
+    const key = uniqueChannelKey(config, `${selectedKey}-copy`);
+    setConfig((current) => ({
+      ...current,
+      channels: {
+        ...current.channels,
+        [key]: cloneChannel(selectedChannel),
+      },
+    }));
+    setSelectedKey(key);
+    setStatus(null);
+  };
+
+  const deleteChannel = () => {
+    if (!selectedKey) return;
+    setConfig((current) => {
+      const { [selectedKey]: _deleted, ...channels } = current.channels;
+      return { ...current, channels };
+    });
+    const nextKey = channelKeys.filter((key) => key !== selectedKey)[0] ?? "";
+    setSelectedKey(nextKey);
+    setStatus(null);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const saved = await saveInboxRuntimeConfig(workPath, config);
+      setConfig(saved);
+      setPristine(saved);
+      setSelectedKey((current) => saved.channels[current] ? current : Object.keys(saved.channels).sort()[0] ?? "");
+      onSaved?.(saved);
+      setStatus(t("system.rules.saved"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="system-detail" style={{ width: "100%" }}>
+      <div className="system-detail-actions">
+        <strong>{t("system.inboxChannels.title")}</strong>
+        <span style={{ flex: 1 }} />
+        <span className={dirty ? "save-state dirty" : "save-state saved"}>
+          {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void load()} icon={<RefreshCcw size={14} />}>
+          Refresh
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!dirty || saving}
+          onClick={() => void save()}
+          icon={<Save size={14} />}
+        >
+          {t("system.rules.save")}
+        </Button>
+      </div>
+
+      <div className="settings-form inbox-runtime-editor">
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Overview</strong>
+              <span>Runtime inbox root and configured local file drop target.</span>
+            </div>
+          </div>
+          <label className="field">
+            <span>Inbox root</span>
+            <input
+              value={config.root}
+              onChange={(event) => updateConfig({ root: event.target.value })}
+              spellCheck={false}
+            />
+          </label>
+          <div className="settings-grid two">
+            <label className="field">
+              <span>File drop channel</span>
+              <select
+                value={fileDrop.channel}
+                onChange={(event) => {
+                  const channel = event.target.value;
+                  const dropPath =
+                    config.channels[channel]?.drop_paths[0] ?? `${config.paths.drop}/${channel}`;
+                  updateFileDrop({ channel, drop_path: dropPath });
+                }}
+              >
+                {channelKeys.map((key) => (
+                  <option key={key} value={key}>{key}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>File drop path</span>
+              <select
+                value={fileDrop.drop_path}
+                onChange={(event) => updateFileDrop({ drop_path: event.target.value })}
+              >
+                {(fileDropChannel?.drop_paths ?? [fileDrop.drop_path]).map((path) => (
+                  <option key={path} value={path}>{path}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {!fileDropChannel ? (
+            <small className="settings-warning">Configured file drop channel is missing; Anchor will fall back to the first available channel.</small>
+          ) : null}
+        </section>
+
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Gmail</strong>
+              <span>Envelope scan settings for the Gmail section. Anchor does not fetch raw bodies.</span>
+            </div>
+          </div>
+          <label className="field checkbox-field">
+            <input
+              type="checkbox"
+              checked={gmail.enabled}
+              onChange={(event) => updateGmail({ enabled: event.target.checked })}
+            />
+            <span>Enable Gmail scan</span>
+          </label>
+          <div className="settings-grid two">
+            <label className="field">
+              <span>Scan window (days)</span>
+              <input
+                type="number"
+                min={0}
+                max={3650}
+                value={gmail.scan_window_days}
+                onChange={(event) =>
+                  updateGmail({
+                    scan_window_days: Math.max(
+                      0,
+                      Math.floor(Number(event.target.value) || 0),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Max messages</span>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={gmail.max_results}
+                onChange={(event) =>
+                  updateGmail({
+                    max_results: Math.max(
+                      1,
+                      Math.floor(Number(event.target.value) || 1),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Auto refresh TTL (seconds)</span>
+              <input
+                type="number"
+                min={0}
+                max={86400}
+                value={gmail.auto_refresh_ttl_seconds}
+                onChange={(event) =>
+                  updateGmail({
+                    auto_refresh_ttl_seconds: Math.max(
+                      0,
+                      Math.floor(Number(event.target.value) || 0),
+                    ),
+                  })
+                }
+              />
+            </label>
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={gmail.unread_only}
+                onChange={(event) => updateGmail({ unread_only: event.target.checked })}
+              />
+              <span>Unread only</span>
+            </label>
+            <label className="field">
+              <span>gws CLI path</span>
+              <input
+                value={gmail.gws_path ?? ""}
+                onChange={(event) =>
+                  updateGmail({ gws_path: event.target.value.trim() || null })
+                }
+                placeholder="/opt/homebrew/bin/gws"
+                spellCheck={false}
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Query override</span>
+            <input
+              value={gmail.query}
+              onChange={(event) => updateGmail({ query: event.target.value })}
+              placeholder="is:unread newer_than:14d"
+              spellCheck={false}
+            />
+            <small>Leave empty to build a query from unread-only and scan-window settings.</small>
+          </label>
+        </section>
+
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Paths</strong>
+              <span>Folder names used by inbox-intake and inbox-process.</span>
+            </div>
+          </div>
+          <div className="settings-grid two">
+            {Object.entries(config.paths).map(([key, value]) => (
+              <label className="field" key={key}>
+                <span>{key}</span>
+                <input
+                  value={String(value)}
+                  onChange={(event) =>
+                    updatePath(key as keyof InboxRuntimeConfig["paths"], event.target.value)
+                  }
+                  spellCheck={false}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Artifacts</strong>
+              <span>Generated item directory and artifact file names.</span>
+            </div>
+          </div>
+          <div className="settings-grid two">
+            {Object.entries(config.naming).map(([key, value]) => (
+              <label className="field" key={key}>
+                <span>{key}</span>
+                <input
+                  value={String(value)}
+                  onChange={(event) =>
+                    updateNaming(key as keyof InboxRuntimeConfig["naming"], event.target.value)
+                  }
+                  spellCheck={false}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Channels</strong>
+              <span>Provider channels and local drop paths scanned by Inbox.</span>
+            </div>
+          </div>
+          <div className="inbox-channel-editor">
+            <div className="inbox-channel-list" role="listbox" aria-label="Inbox channels">
+              <div className="inbox-channel-list-actions">
+                <Button size="sm" variant="ghost" onClick={addChannel} icon={<Plus size={14} />}>
+                  Add
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!selectedChannel}
+                  onClick={duplicateChannel}
+                >
+                  Duplicate
+                </Button>
+              </div>
+              {channelKeys.map((key) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={selectedKey === key ? "system-list-item active" : "system-list-item"}
+                  onClick={() => setSelectedKey(key)}
+                >
+                  <strong>{key}</strong>
+                  <span>{config.channels[key]?.provider ?? "local"}</span>
+                </button>
+              ))}
+            </div>
+
+            {selectedChannel ? (
+              <div className="inbox-channel-fields">
+                <div className="system-detail-actions compact">
+                  <strong>{selectedKey}</strong>
+                  <span style={{ flex: 1 }} />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={deleteChannel}
+                    icon={<Trash2 size={14} />}
+                  >
+                    Delete
+                  </Button>
+                </div>
+                <label className="field">
+                  <span>channel key</span>
+                  <input
+                    value={channelKeyDraft}
+                    onChange={(event) => setChannelKeyDraft(event.target.value)}
+                    onBlur={() => renameChannel(selectedKey, channelKeyDraft)}
+                    spellCheck={false}
+                  />
+                </label>
+                <div className="settings-grid two">
+                  <label className="field">
+                    <span>provider</span>
+                    <input
+                      value={selectedChannel.provider}
+                      onChange={(event) =>
+                        updateChannel(selectedKey, { provider: event.target.value })
+                      }
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>skill</span>
+                    <input
+                      value={selectedChannel.skill ?? ""}
+                      onChange={(event) =>
+                        updateChannel(selectedKey, { skill: event.target.value.trim() || null })
+                      }
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>kind</span>
+                    <input
+                      value={selectedChannel.kind}
+                      onChange={(event) =>
+                        updateChannel(selectedKey, { kind: event.target.value })
+                      }
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>dedupe</span>
+                    <input
+                      value={selectedChannel.dedupe}
+                      onChange={(event) =>
+                        updateChannel(selectedKey, { dedupe: event.target.value })
+                      }
+                      spellCheck={false}
+                    />
+                  </label>
+                </div>
+                <label className="field">
+                  <span>drop paths</span>
+                  <textarea
+                    className="settings-textarea"
+                    value={formatStringList(selectedChannel.drop_paths)}
+                    onChange={(event) =>
+                      updateChannel(selectedKey, {
+                        drop_paths: parseStringList(event.target.value),
+                      })
+                    }
+                    spellCheck={false}
+                    rows={4}
+                  />
+                </label>
+                <label className="field">
+                  <span>source kind mapping</span>
+                  <textarea
+                    className="settings-textarea"
+                    value={formatStringMap(selectedChannel.source_kinds)}
+                    onChange={(event) =>
+                      updateChannel(selectedKey, {
+                        source_kinds: parseStringMap(event.target.value),
+                      })
+                    }
+                    spellCheck={false}
+                    rows={5}
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="inbox-empty">No channel selected.</div>
+            )}
+          </div>
+        </section>
+
+        <section className="settings-section-panel">
+          <div className="settings-section-heading">
+            <div>
+              <strong>Scan Visibility</strong>
+              <span>Dot folders are excluded by default. Add explicit workspace-relative prefixes to include them.</span>
+            </div>
+          </div>
+          <label className="field">
+            <span>Include dot folders</span>
+            <textarea
+              className="settings-textarea"
+              value={dotIncludesText}
+              onChange={(event) => setDotIncludesText(event.target.value)}
+              onBlur={() => updateDotFolderIncludes(dotIncludesText)}
+              spellCheck={false}
+              rows={4}
+              placeholder={"inbox/drop/kakao/.omc\n.github"}
+            />
+            <small>One workspace-relative directory prefix per line. Globs and traversal are ignored.</small>
+          </label>
+        </section>
+      </div>
+
+      {status ? <div className="toast">{status}</div> : null}
+      {error ? (
+        <div className="toast" title={error}>
+          <AlertTriangle size={13} />
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function cloneInboxConfig(config: InboxRuntimeConfig): InboxRuntimeConfig {
+  return JSON.parse(JSON.stringify(config)) as InboxRuntimeConfig;
+}
+
+function cloneChannel(channel: InboxChannelConfig): InboxChannelConfig {
+  return JSON.parse(JSON.stringify(channel)) as InboxChannelConfig;
+}
+
+function uniqueChannelKey(config: InboxRuntimeConfig, base: string): string {
+  let key = base.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!key) key = "channel";
+  if (!config.channels[key]) return key;
+  let index = 2;
+  while (config.channels[`${key}-${index}`]) index += 1;
+  return `${key}-${index}`;
+}
+
+function formatStringList(values: string[]): string {
+  return values.join("\n");
+}
+
+function parseStringList(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function formatStringMap(value: Record<string, string> = {}): string {
+  return Object.entries(value)
+    .map(([key, item]) => `${key}=${item}`)
+    .join("\n");
+}
+
+function parseStringMap(value: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const separator = line.includes("=") ? "=" : ":";
+    const [rawKey, ...rest] = line.split(separator);
+    const key = rawKey.trim();
+    const item = rest.join(separator).trim();
+    if (key && item) out[key] = item;
+  }
+  return out;
 }
 
 function SettingsJsonTab({

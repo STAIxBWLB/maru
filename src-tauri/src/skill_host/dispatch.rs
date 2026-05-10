@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,6 +10,7 @@ use uuid::Uuid;
 
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::cli_path::resolve_program;
+use crate::mission_state;
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::{env_vars_for_runs, get_skill};
 
@@ -121,6 +123,7 @@ pub fn skills_dispatch_background(
     prompt: String,
     cwd: Option<String>,
     context: Option<Vec<SkillContextItem>>,
+    metadata: Option<JsonValue>,
 ) -> Result<String, String> {
     let composition = compose(skill_id, prompt, cwd, context.unwrap_or_default())?;
     let runtime = normalize_runtime(&runtime)?;
@@ -140,7 +143,15 @@ pub fn skills_dispatch_background(
             for dir in add_dirs {
                 cmd.arg("--add-dir").arg(dir);
             }
-            spawn_background(app, invocation_id, cmd, composition.cwd, env, None)
+            spawn_background(
+                app,
+                invocation_id,
+                cmd,
+                composition.cwd,
+                env,
+                None,
+                metadata,
+            )
         }
         "codex" => {
             let bin = resolve_program("codex").ok_or_else(|| {
@@ -159,6 +170,7 @@ pub fn skills_dispatch_background(
                 composition.cwd,
                 env,
                 Some(composition.prompt),
+                metadata,
             )
         }
         _ => Err(format!("unsupported_dispatch_runtime: {runtime}")),
@@ -282,6 +294,7 @@ fn spawn_background(
     cwd: String,
     env: BTreeMap<String, String>,
     stdin_payload: Option<String>,
+    metadata: Option<JsonValue>,
 ) -> Result<String, String> {
     cmd.current_dir(cwd)
         .stdin(if stdin_payload.is_some() {
@@ -295,6 +308,7 @@ fn spawn_background(
         cmd.env(key, value);
     }
     let mut child = cmd.spawn().map_err(|err| format_spawn_error(&err))?;
+    let child_pid = child.id();
     if let Some(payload) = stdin_payload {
         if let Some(mut stdin) = child.stdin.take() {
             thread::spawn(move || {
@@ -322,10 +336,18 @@ fn spawn_background(
         "stderr".to_string(),
         stderr,
     );
+    let _ = mission_state::register_mission_with_metadata(
+        &app,
+        &invocation_id,
+        "skill",
+        child_pid,
+        metadata,
+    );
     let app_done = app.clone();
     let id_done = invocation_id.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
+            mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
                 AiDoneEvent {
@@ -336,6 +358,7 @@ fn spawn_background(
             );
         }
         Err(err) => {
+            mission_state::fail_mission(&app_done, &id_done, &err.to_string());
             let _ = app_done.emit(
                 "ai://error",
                 AiErrorEvent {
@@ -364,9 +387,10 @@ where
                 AiOutputEvent {
                     invocation_id: invocation_id.clone(),
                     stream: stream_name.clone(),
-                    line,
+                    line: line.clone(),
                 },
             );
+            mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
     });
 }

@@ -16,7 +16,8 @@ skill. The user may scope processing with `inbox-process <channel>`.
 ## Boot Sequence
 
 1. Find `workspace.config.yaml`.
-2. Read `inbox`, `ssot.project_registry`, `ssot.registry_scoring`, and optional
+2. Read `inbox`, including `inbox.paths` and `inbox.naming`,
+   `ssot.project_registry`, `ssot.registry_scoring`, and optional
    `inbox.hooks`.
 3. Load `inbox-intake/references/manifest-schema.md` before changing item
    state.
@@ -34,16 +35,17 @@ skill. The user may scope processing with `inbox-process <channel>`.
 2. If a channel is provided, scan that channel's configured `drop_paths` first.
    Stage unnormalized files there through `inbox-intake` before processing.
    Ignore `.DS_Store` and other configured OS noise files.
-3. Read each `manifest.yaml` and verify `schema: inbox-item/v1`.
-4. Extract text from `files[]` into `extracted.md`.
+3. Read each `inbox.naming.manifest_file` and verify
+   `schema: inbox-item/v1`.
+4. Extract text from `files[]` into `inbox.naming.extracted_file`.
    - `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.hwpx`, `.hwp`, `.txt`, `.md`, and
      `.csv` should use the closest installed public toolkit or platform reader.
    - Unsupported binaries stay pending with a clear `failed` reason.
-5. Create `summary.md` with the required frontmatter and exactly three body
-   sections: `## 요약`, `## 핵심`, `## 실행`.
+5. Create `inbox.naming.summary_file` with the required frontmatter and
+   exactly three body sections: `## 요약`, `## 핵심`, `## 실행`.
 6. Classify each item as `action`, `schedule`, `info`, `ideation`, or `noise`.
 7. Propose a route using `project-registry.yaml` and the configured scoring
-   spec. Write the decision to `route.md`.
+   spec. Write the decision to `inbox.naming.route_file`.
 8. Ask for confirmation before moving originals or summaries outside the inbox.
 9. Move processed items to `done/`, `failed/`, or `duplicate/` and append a
    receipt to `_state/index.jsonl`.
