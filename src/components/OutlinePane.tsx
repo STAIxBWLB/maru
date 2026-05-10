@@ -51,6 +51,7 @@ import {
 } from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type { RightPaneTab } from "../lib/settings";
 import type {
   DocumentPayload,
@@ -460,6 +461,12 @@ function FilesQueuePane({
   const [working, setWorking] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
   const [dragOverShelf, setDragOverShelf] = useState(false);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -746,10 +753,13 @@ function FilesQueuePane({
       </div>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu"
           role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <button type="button" role="menuitem" onClick={() => { setContextMenu(null); void pickFiles(); }}>
             {t("rightPane.files.pick")}

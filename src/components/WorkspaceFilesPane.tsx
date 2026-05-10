@@ -25,6 +25,7 @@ import {
   useTransition,
 } from "react";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import {
   clearExplorerDragPayload,
   clearFileQueueDragPayload,
@@ -151,6 +152,12 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     entry: WorkspaceFileEntry | null;
     targetKind: "file" | "directory";
   } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
   const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
@@ -496,10 +503,13 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
 
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu"
           role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.relPath}>
             {contextMenu.title}

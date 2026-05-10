@@ -49,6 +49,7 @@ import {
   type DocumentIndex,
 } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type { DocumentBrowserMode, DocumentLabelMode, DocumentViewDefinition } from "../lib/settings";
 import type { ExplorerPaneMode } from "../lib/settings";
 
@@ -156,6 +157,12 @@ export const DocumentList = memo(function DocumentList({
     entry: VaultEntry | null;
     targetKind: "file" | "directory";
   } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
   const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
@@ -700,10 +707,13 @@ export const DocumentList = memo(function DocumentList({
       </div>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu"
           role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.title}>
             {contextMenu.title}

@@ -58,12 +58,10 @@ export function isTelegramMonitorConfigOutsideAnchor(
 ): boolean {
   const trimmed = path?.trim();
   if (!trimmed) return false;
-  return !(
-    trimmed === "~/.anchor" ||
-    trimmed.startsWith("~/.anchor/") ||
-    trimmed === "$HOME/.anchor" ||
-    trimmed.startsWith("$HOME/.anchor/")
-  );
+  if (trimmed === "~/.anchor" || trimmed.startsWith("~/.anchor/")) return false;
+  if (trimmed === "$HOME/.anchor" || trimmed.startsWith("$HOME/.anchor/")) return false;
+  if (trimmed.endsWith("/.anchor") || trimmed.includes("/.anchor/")) return false;
+  return true;
 }
 
 function quoteShell(value: string): string {

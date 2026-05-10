@@ -49,6 +49,13 @@ describe("isTelegramMonitorConfigOutsideAnchor", () => {
     expect(isTelegramMonitorConfigOutsideAnchor("$HOME/.anchor/telegram/config.yaml")).toBe(false);
   });
 
+  it("does not warn for absolute paths inside an Anchor home directory", () => {
+    expect(
+      isTelegramMonitorConfigOutsideAnchor("/Users/yj.lee/.anchor/telegram/config.yaml"),
+    ).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor("/home/foo/.anchor")).toBe(false);
+  });
+
   it("warns for monitor config paths outside Anchor home", () => {
     expect(
       isTelegramMonitorConfigOutsideAnchor(

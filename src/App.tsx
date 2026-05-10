@@ -5535,7 +5535,6 @@ function MainApp() {
             telegramLoading={telegramLoading}
             telegramError={telegramError}
             telegramPollingStatus={telegramPolling}
-            showMigrationBanner={isMac}
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onRefresh={refreshActiveSurface}

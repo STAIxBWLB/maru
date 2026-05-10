@@ -28,7 +28,6 @@ interface CommsPaneProps {
   telegramLoading: boolean;
   telegramError: string | null;
   telegramPollingStatus: TelegramPollingStatus;
-  showMigrationBanner: boolean;
   migrationServices: LegacyLaunchdService[];
   migrationBusy: boolean;
   onRefresh: () => void;
@@ -55,7 +54,6 @@ export function CommsPane({
   telegramLoading,
   telegramError,
   telegramPollingStatus,
-  showMigrationBanner,
   migrationServices,
   migrationBusy,
   onRefresh,
@@ -106,14 +104,12 @@ export function CommsPane({
           </button>
         </div>
       </header>
-      {showMigrationBanner ? (
-        <MigrationBanner
-          services={migrationServices}
-          busy={migrationBusy}
-          onRefresh={onRefreshMigration}
-          onUnload={onUnloadMigration}
-        />
-      ) : null}
+      <MigrationBanner
+        services={migrationServices}
+        busy={migrationBusy}
+        onRefresh={onRefreshMigration}
+        onUnload={onUnloadMigration}
+      />
       <CommsTabs
         activeTab={activeTab}
         onTabChange={setActiveTab}

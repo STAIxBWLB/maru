@@ -15,6 +15,7 @@ import { documentStats } from "../lib/document";
 import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { Button } from "./ui/Button";
 import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
@@ -130,6 +131,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     y: number;
     tab: EditorTabSummary;
   } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
 
   const { handlers: autocompleteHandlers, popup: autocompletePopup } =
     useWikilinkAutocomplete({
@@ -271,10 +278,13 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       </div>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu document-tab-context-menu"
           role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.tab.relPath}>
             {contextMenu.tab.title}
