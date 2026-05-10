@@ -273,13 +273,20 @@ export function CommsSettingsTab({
             className="path-input"
             value={settings.telegram.monitorConfigPath ?? ""}
             onChange={(event) => updateTelegram({ monitorConfigPath: event.target.value || null })}
-            placeholder="~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
+            placeholder={
+              effectiveSettings?.telegram.monitorConfigPath ??
+              "~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
+            }
             title={
               settings.telegram.monitorConfigPath ??
+              effectiveSettings?.telegram.monitorConfigPath ??
               "~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
             }
             spellCheck={false}
           />
+          {!settings.telegram.monitorConfigPath && effectiveSettings?.telegram.monitorConfigPath ? (
+            <small>Using workspace config: {effectiveSettings.telegram.monitorConfigPath}</small>
+          ) : null}
         </label>
         {showTelegramMonitorConfigWarning ? (
           <div className="comms-setup-banner warn">

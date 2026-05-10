@@ -358,9 +358,9 @@ const ko: Record<string, string> = {
   "comms.telegram.settings.description": "~/.anchor/env 의 Telethon 런타임으로 Telegram을 조회합니다.",
   "comms.telegram.sessionFile": "세션 파일",
   "comms.telegram.monitorConfigPath": "Monitor config 경로",
-  "comms.telegram.monitorConfigOutsideAnchor": "Monitor config가 ~/.anchor 밖에 있음",
+  "comms.telegram.monitorConfigOutsideAnchor": "Monitor config가 .anchor 디렉토리 밖에 있음",
   "comms.telegram.monitorConfigOutsideAnchorDetail":
-    "현재 경로 {path} 는 Anchor 홈 밖에 있습니다. 비밀 파일 위치를 의도적으로 선택한 경우에만 유지하세요.",
+    "현재 경로 {path} 는 어느 .anchor 디렉토리에도 포함되지 않습니다. 비밀 파일 위치를 의도적으로 선택한 경우에만 유지하세요.",
   "comms.telegram.pythonPath": "Python 경로",
   "comms.telegram.scriptPath": "스크립트 경로",
   "comms.telegram.interval": "폴링 간격(초)",
@@ -1064,9 +1064,9 @@ const en: Record<string, string> = {
   "comms.telegram.settings.description": "Read Telegram through the Telethon runtime in ~/.anchor/env.",
   "comms.telegram.sessionFile": "Session file",
   "comms.telegram.monitorConfigPath": "Monitor config path",
-  "comms.telegram.monitorConfigOutsideAnchor": "Monitor config is outside ~/.anchor",
+  "comms.telegram.monitorConfigOutsideAnchor": "Monitor config is outside any .anchor directory",
   "comms.telegram.monitorConfigOutsideAnchorDetail":
-    "Current path {path} is outside Anchor home. Keep it only when that secret-file location is intentional.",
+    "Current path {path} is not under any .anchor directory. Keep it only when that secret-file location is intentional.",
   "comms.telegram.pythonPath": "Python path",
   "comms.telegram.scriptPath": "Script path",
   "comms.telegram.interval": "Polling interval (seconds)",
