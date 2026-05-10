@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 
 const workspace = path.resolve(process.env.ANCHOR_MCP_WORKSPACE ?? process.cwd());
+const workspaceReal = realpathSync(workspace);
 
 const tools = [
   {
@@ -146,8 +148,8 @@ async function searchWorkspace(query, limit) {
 }
 
 async function readDocument(relPath) {
-  const file = safeJoin(relPath);
-  return { path: path.relative(workspace, file), content: await fs.readFile(file, "utf8") };
+  const file = await safeJoin(relPath);
+  return { path: path.relative(workspaceReal, file), content: await fs.readFile(file, "utf8") };
 }
 
 async function listSkills() {
@@ -236,12 +238,21 @@ async function readText(file) {
   }
 }
 
-function safeJoin(relPath) {
+async function safeJoin(relPath) {
   const file = path.resolve(workspace, relPath);
-  if (!file.startsWith(`${workspace}${path.sep}`) && file !== workspace) {
+  if (!isInside(file, workspace)) {
     throw new Error("path_escapes_workspace");
   }
-  return file;
+  const realFile = await fs.realpath(file);
+  if (!isInside(realFile, workspaceReal)) {
+    throw new Error("path_escapes_workspace");
+  }
+  return realFile;
+}
+
+function isInside(file, root) {
+  const relative = path.relative(root, file);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function isIgnored(file) {

@@ -139,7 +139,21 @@ fn write_content(path: &Path, content: &str) -> Result<(), String> {
     }
     let tmp = path.with_extension("anchor-write.tmp");
     fs::write(&tmp, content).map_err(|err| format!("Cannot write temp file: {err}"))?;
-    fs::rename(&tmp, path).map_err(|err| format!("Cannot commit protected write: {err}"))
+    replace_file(&tmp, path)
+}
+
+#[cfg(windows)]
+fn replace_file(tmp: &Path, path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_file(path)
+            .map_err(|err| format!("Cannot prepare protected write target: {err}"))?;
+    }
+    fs::rename(tmp, path).map_err(|err| format!("Cannot commit protected write: {err}"))
+}
+
+#[cfg(not(windows))]
+fn replace_file(tmp: &Path, path: &Path) -> Result<(), String> {
+    fs::rename(tmp, path).map_err(|err| format!("Cannot commit protected write: {err}"))
 }
 
 #[cfg(test)]

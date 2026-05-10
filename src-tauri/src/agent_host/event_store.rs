@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::agent_host::contracts::{new_run_event, AgentRunEvent};
 use crate::vault::normalize_existing_dir;
@@ -43,12 +45,18 @@ pub fn append_run_event_at(path: &Path, event: &AgentRunEvent) -> Result<(), Str
     }
     let json =
         serde_json::to_string(event).map_err(|err| format!("Cannot serialize run event: {err}"))?;
+    let line = format!("{json}\n");
+    let append_lock = append_lock_for(path)?;
+    let _guard = append_lock
+        .lock()
+        .map_err(|_| "run_event_append_lock_poisoned".to_string())?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
         .map_err(|err| format!("Cannot open run event log: {err}"))?;
-    writeln!(file, "{json}").map_err(|err| format!("Cannot append run event: {err}"))
+    file.write_all(line.as_bytes())
+        .map_err(|err| format!("Cannot append run event: {err}"))
 }
 
 pub fn append_run_event_payload(
@@ -141,6 +149,19 @@ pub fn validate_run_id(run_id: &str) -> Result<(), String> {
         return Err("agent_run_id_invalid".to_string());
     }
     Ok(())
+}
+
+fn append_lock_for(path: &Path) -> Result<Arc<Mutex<()>>, String> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let key = path.to_path_buf();
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "run_event_lock_registry_poisoned".to_string())?;
+    Ok(locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
 }
 
 #[cfg(test)]

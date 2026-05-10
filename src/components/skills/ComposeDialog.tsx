@@ -84,7 +84,7 @@ export function ComposeDialog({
   const canRun = Boolean(selectedSkill && skillValid && prompt.trim());
 
   useEffect(() => {
-    if (!open || !selectedSkill || !prompt.trim()) {
+    if (!open || !selectedSkill || !skillValid || !prompt.trim()) {
       setPreview(null);
       return;
     }
@@ -107,7 +107,7 @@ export function ComposeDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [context, open, prompt, seed?.cwd, selectedSkill]);
+  }, [context, open, prompt, seed?.cwd, selectedSkill, skillValid]);
 
   if (!open) return null;
 
