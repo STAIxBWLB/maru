@@ -80,10 +80,11 @@ export function ComposeDialog({
     return matches;
   }, [selectedSkill, skillQuery, skills]);
   const context = seed?.context ?? [];
-  const canRun = Boolean(selectedSkill && prompt.trim());
+  const skillValid = selectedSkill?.valid ?? true;
+  const canRun = Boolean(selectedSkill && skillValid && prompt.trim());
 
   useEffect(() => {
-    if (!open || !selectedSkill || !prompt.trim()) {
+    if (!open || !selectedSkill || !skillValid || !prompt.trim()) {
       setPreview(null);
       return;
     }
@@ -106,7 +107,7 @@ export function ComposeDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [context, open, prompt, seed?.cwd, selectedSkill]);
+  }, [context, open, prompt, seed?.cwd, selectedSkill, skillValid]);
 
   if (!open) return null;
 
@@ -195,9 +196,14 @@ export function ComposeDialog({
             </label>
 
             {selectedSkill ? (
-              <div className="compose-skill-summary">
+              <div className={`compose-skill-summary ${skillValid ? "" : "invalid"}`}>
                 <strong>{selectedSkill.title || selectedSkill.name}</strong>
                 <span>{selectedSkill.description || selectedSkill.absPath}</span>
+                {!skillValid ? (
+                  <small>
+                    Invalid frontmatter: {(selectedSkill.validationErrors ?? []).join(", ")}
+                  </small>
+                ) : null}
               </div>
             ) : (
               <div className="compose-skill-summary muted">

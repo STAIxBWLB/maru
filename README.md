@@ -12,7 +12,7 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | ✅ write loop live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with Configured Entries / Processing / Processed Items / Files / Gmail sections, classify/accept/reject/process) all shipped. The primary local inbox flow now reads `workspace.config.yaml` `inbox:` settings, stages dropped files into the configured `inbox.file_drop` channel/path, scans `inbox/drop/<channel>/` plus `items/pending/*/manifest.yaml`, and reads processed history from `items/{done,failed,duplicate}` using configured artifact filenames; legacy `inbox/downloads/<source>` remains compatible. Accept/reject runs through an approval gate, Gmail decisions apply Anchor labels, keyboard `a`/`r`/`p`, multi-select, bulk actions, dot folders are hidden unless allowlisted in Settings, and mission state/log/stop hooks are in place. |
 | 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.anchor/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.anchor/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
-| 3 — Built-in Skills + Hub connector | 📋 planned | Command-palette skills plus a read-only connector to the separate `anchor-hub` service. |
+| 3 — Built-in Skills + Agent OS-lite + Hub connector | 🚧 in progress | Command-palette skills, proposal-first Agent OS run contracts, local event audit logs, provider adapter seams, local MCP sidecar, and a read-only connector to the separate `anchor-hub` service. |
 | 4 — Document Edit Mode | 📋 planned | |
 
 ## Next up (immediate)
@@ -20,7 +20,7 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 Phase 2 now has the safe write/apply loop. The next work is verification depth plus the Phase 3 bridge:
 
 1. **Real-workspace verification** — verify configured `inbox/drop/<channel>` processing, legacy dropped files, a safe unread Gmail item, Claude classification, `a`/`r`/`p`, bulk actions, and mission stop in one native Tauri session.
-2. **Phase 3 skill diffs** — skills can be dispatched from Anchor; next is capturing background results as proposed diffs with accept/reject.
+2. **Phase 3 skill diffs** — background skills now run through an Agent OS-lite boundary and append `<workspace>/.anchor/runs/skills/<invocationId>/events.jsonl`; next is a richer proposal review pane over `proposal.created` events.
 3. **Hub connector POC** — keep shared workflow, evidence, KPI, and submission-gate features in the separate `anchor-hub` repo; Anchor only stores a connector endpoint and calls hub APIs/MCP tools when the user explicitly asks.
 
 ## Architecture
@@ -60,7 +60,7 @@ Phase 2 now has the safe write/apply loop. The next work is verification depth p
 **Module boundary rules**:
 - Rust core **owns** workspace FS / cache / git / frontmatter / inbox scan/watch/classification / Gmail `gws` bridge / layered Anchor settings (`~/.anchor/settings.json` + `.anchor/workspace-state.json`) / Claude inbox subprocess / integrated terminal PTY sessions.
 - React handles **only** BlockNote / command palette / neighborhood / gesture worker / AudioWorklet. No business logic.
-- Node sidecar holds the MCP server + marketplace (Phase 3+).
+- Node sidecar holds the local MCP server + marketplace (Phase 3+).
 - Python sidecar holds Whisper only (Phase 4). HWPX is delegated to the user's `hwpx` Claude Code skill — not rewritten.
 
 ## Roadmap
@@ -129,6 +129,31 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 ### Phase 3 — Built-in Skills + Hub Connector (week 11–14)
 
 **Outcome**: five daily ops move out of the terminal into the command palette, and Anchor can query a separate hub service for shared context without becoming a multi-user server.
+
+**Agent OS-lite implementation track**:
+- Anchor-owned run contracts now wrap the imported Agent OS ideas instead of copying external contracts verbatim: `AgentRunRequest`, `AgentRunEvent`, `SkillProposal`, `ProviderAdapter`, and `ProtectedWriteClaim`.
+- Background skill dispatch creates an `AgentRunRequest`, uses a provider adapter seam for Claude/Codex CLI, and writes append-only events to `<workspace>/.anchor/runs/skills/<invocationId>/events.jsonl`.
+- Background execution remains proposal-first. If provider output contains an `anchor_skill_proposal_v1` JSON proposal, Anchor records `proposal.created`; applying that proposal is a separate approval-gated `agent.proposal.apply` action.
+- Skill frontmatter is validated during registry scans. Invalid skills stay visible in the catalog but dispatch fails closed until the frontmatter is fixed.
+- Protected writes require operation, actor, reason, schema version, and current-hash matching. Autonomous writes are not default behavior.
+- The first 5-role loop contract is bounded: `lead -> planner -> worker -> reviewer`, optional `advisor` for ambiguity/high-risk, and one rework attempt before user-visible failure.
+
+**Provider abstraction track**:
+- `ProviderAdapter` is now the internal boundary. V1 adapters are Claude CLI and Codex CLI wrappers; both are proposal-only and use the tools' native auth.
+- Future OpenAI/Anthropic API adapters must validate `anchor_completion_request_v1` / `anchor_completion_response_v1` and store credentials only in OS keychain or a user-managed secret store.
+
+**Local MCP + marketplace track**:
+- `sidecars/anchor-mcp/` provides a dependency-light stdio MCP server. Initial tools are read-first: `workspace.search`, `document.read`, `skill.list`, `run.status`, `proposal.read`; the only write-shaped tool is `proposal.create`, which appends a proposal event and never edits workspace files.
+- Marketplace manifests are validated as signed, version-pinned `anchor_marketplace_source_v1` metadata before they can sit on top of `~/.anchor/skills`.
+
+**Cloud dashboard track**:
+- Dashboard export starts from local event replay. `agent_export_redacted_run_summary` emits redacted run metadata for opt-in sync: run history, proposal/write counts, provider IDs, and skill IDs.
+- Raw prompts, file bodies, credentials, and private paths are excluded from dashboard export payloads.
+
+**Autonomous write track**:
+- Stage 1 allows autonomous writes only in disposable run workspaces.
+- Stage 2 allows real workspace writes only through `ProtectedWriteClaim` with current hash checks and explicit approval policy.
+- Stage 3 can add user-defined low-risk session auto-approval. Every write path records `write.claimed`, `write.committed`, or `write.conflict`.
 
 The `runtime: claude-code` lane is the v1 core — the user's `~/.claude/skills/*` are invoked as-is. **Zero lines rewritten**.
 
@@ -216,7 +241,7 @@ Out of scope for v1 by explicit decision:
 - NotebookLM, podcast, slide export.
 - Multi-user collab, CRDT, realtime (single user, single device, git for history).
 - PDF annotation, OCR (file-extracted text is enough).
-- Agent-autonomous edits (every Claude write goes through accept/reject diff).
+- Agent-autonomous edits as default behavior. Autonomy is staged behind disposable workspaces, protected writes, approval policy, and audit events.
 - iCloud / Dropbox workspace awareness (user's responsibility).
 - Unsigned / ad-hoc auto-updater feeds (updates are accepted only through signed GitHub Release artifacts).
 
@@ -251,6 +276,9 @@ pnpm tauri build
 
 # Rust unit + integration tests:
 cd src-tauri && cargo test
+
+# Local Anchor MCP sidecar smoke:
+ANCHOR_MCP_WORKSPACE="$PWD" node sidecars/anchor-mcp/index.mjs
 
 # Bench workspace scan on a real workspace:
 cd src-tauri && cargo test --release bench_scan_real_workspace \

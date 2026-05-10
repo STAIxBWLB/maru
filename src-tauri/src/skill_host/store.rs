@@ -63,6 +63,10 @@ pub struct SkillRecord {
     pub runtime: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    #[serde(default = "default_true")]
+    pub valid: bool,
+    #[serde(default)]
+    pub validation_errors: Vec<String>,
     #[serde(default)]
     pub editable: bool,
     #[serde(default)]
@@ -151,6 +155,10 @@ struct ProgressReporter<'a> {
 
 fn default_skills_subdir() -> String {
     "skills".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for SkillsRegistry {
@@ -1634,6 +1642,7 @@ fn scan_source_with_progress(
                 .unwrap_or(false),
             _ => saved_hash != current_hash,
         };
+        let validation_errors = validate_skill_frontmatter(&content, &parts.meta);
         skills.push(SkillRecord {
             id,
             source_id: source.id.clone(),
@@ -1644,6 +1653,8 @@ fn scan_source_with_progress(
             description: yaml_meta_string(&parts.meta, "description"),
             runtime: yaml_meta_string(&parts.meta, "runtime"),
             category: yaml_meta_string(&parts.meta, "category"),
+            valid: validation_errors.is_empty(),
+            validation_errors,
             editable: true,
             dirty,
             content_hash: Some(current_hash),
@@ -1653,6 +1664,69 @@ fn scan_source_with_progress(
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(skills)
+}
+
+fn validate_skill_frontmatter(content: &str, meta: &BTreeMap<String, YamlValue>) -> Vec<String> {
+    let mut errors = Vec::new();
+    if !content.starts_with("---\n") {
+        errors.push("frontmatter_missing".to_string());
+        return errors;
+    }
+    if let Some(end) = content[4..].find("\n---") {
+        let yaml_end = end + 4;
+        let yaml = &content[4..yaml_end];
+        if let Err(err) = serde_yaml::from_str::<BTreeMap<String, YamlValue>>(yaml) {
+            errors.push(format!("frontmatter_yaml_invalid: {err}"));
+            return errors;
+        }
+    } else {
+        errors.push("frontmatter_unclosed".to_string());
+        return errors;
+    }
+    if yaml_meta_string(meta, "name")
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        errors.push("name_required".to_string());
+    }
+    if yaml_meta_string(meta, "description")
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        errors.push("description_required".to_string());
+    }
+    if let Some(runtime) = yaml_meta_string(meta, "runtime") {
+        match runtime.as_str() {
+            "generic" | "claude" | "claude-code" | "codex" | "codex-cli" => {}
+            other => errors.push(format!("runtime_unsupported: {other}")),
+        }
+    }
+    if let Some(schema) = meta
+        .get("schema_version")
+        .or_else(|| meta.get("schemaVersion"))
+    {
+        match schema {
+            YamlValue::Number(number) if number.as_i64() == Some(1) => {}
+            YamlValue::String(value)
+                if value == "anchor_skill_frontmatter_v1"
+                    || value == "agent_os_skill_frontmatter_v1" => {}
+            _ => errors.push("schema_version_unsupported".to_string()),
+        }
+    }
+    if let Some(allowed_tools) = meta
+        .get("allowed-tools")
+        .or_else(|| meta.get("allowed_tools"))
+    {
+        if !matches!(allowed_tools, YamlValue::Sequence(_) | YamlValue::String(_)) {
+            errors.push("allowed_tools_invalid".to_string());
+        }
+    }
+    if let Some(triggers) = meta.get("triggers") {
+        if !matches!(triggers, YamlValue::Sequence(_) | YamlValue::String(_)) {
+            errors.push("triggers_invalid".to_string());
+        }
+    }
+    errors
 }
 
 fn manifest_skill_roots(base: &Path, source: &SkillSource) -> Result<Option<Vec<PathBuf>>, String> {
@@ -2075,6 +2149,15 @@ mod tests {
     }
 
     #[test]
+    fn skill_frontmatter_validation_reports_invalid_state() {
+        let content = "---\nname: demo\nruntime: unknown\n---\n\n# Demo\n";
+        let parts = parse_frontmatter(content);
+        let errors = validate_skill_frontmatter(content, &parts.meta);
+        assert!(errors.contains(&"description_required".to_string()));
+        assert!(errors.contains(&"runtime_unsupported: unknown".to_string()));
+    }
+
+    #[test]
     fn safe_relative_path_rejects_escape() {
         assert!(safe_relative_path("SKILL.md").is_ok());
         assert!(safe_relative_path("../SKILL.md").is_err());
@@ -2400,6 +2483,8 @@ mod tests {
             description: None,
             runtime: None,
             category: None,
+            valid: true,
+            validation_errors: Vec::new(),
             editable: true,
             dirty: false,
             content_hash: None,
@@ -2460,6 +2545,8 @@ mod tests {
             description: None,
             runtime: None,
             category: None,
+            valid: true,
+            validation_errors: Vec::new(),
             editable: true,
             dirty: false,
             content_hash: None,
