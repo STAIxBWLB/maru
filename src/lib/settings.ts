@@ -136,6 +136,7 @@ export interface CommsSettings {
     pythonPath: string | null;
     scriptPath: string | null;
     sessionFile: string | null;
+    monitorConfigPath: string | null;
     legacyAutoDrop: boolean;
   };
 }
@@ -217,6 +218,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       pythonPath: null,
       scriptPath: null,
       sessionFile: null,
+      monitorConfigPath: null,
       legacyAutoDrop: false,
     },
   },
@@ -355,6 +357,15 @@ export function applyWorkspaceCommsOverrides(
         ["sessionFile", "session_file"],
         settings.telegram.sessionFile,
       ),
+      monitorConfigPath: readOptionalString(
+        providerNestedRecord(telegram, "secrets"),
+        ["monitorConfigPath", "monitor_config_path", "monitorConfig", "monitor_config"],
+        readOptionalString(
+          telegram,
+          ["monitorConfigPath", "monitor_config_path", "monitorConfig", "monitor_config"],
+          settings.telegram.monitorConfigPath,
+        ),
+      ),
       legacyAutoDrop: readBoolean(
         telegram,
         ["legacyAutoDrop", "legacy_auto_drop"],
@@ -442,6 +453,7 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
       pythonPath: normalizeOptionalString(telegram.pythonPath),
       scriptPath: normalizeOptionalString(telegram.scriptPath),
       sessionFile: normalizeOptionalString(telegram.sessionFile),
+      monitorConfigPath: normalizeOptionalString(telegram.monitorConfigPath),
       legacyAutoDrop: typeof telegram.legacyAutoDrop === "boolean"
         ? telegram.legacyAutoDrop
         : DEFAULT_ANCHOR_SETTINGS.comms.telegram.legacyAutoDrop,
@@ -458,6 +470,14 @@ function providerConfig(
     if (isRecord(value)) return value;
   }
   return null;
+}
+
+function providerNestedRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record?.[key];
+  return isRecord(value) ? value : null;
 }
 
 function readBoolean(

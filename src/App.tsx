@@ -151,10 +151,8 @@ import type { TerminalKind } from "./lib/terminal";
 import {
   skillsListSkills,
   skillsDispatchBackground,
-  skillsEnvStatus,
   type SkillContextItem,
   type SkillRecord,
-  type SkillsEnvStatus,
   type TerminalDispatchSpec,
 } from "./lib/skills";
 import {
@@ -817,7 +815,6 @@ function MainApp() {
   );
   const [migrationServices, setMigrationServices] = useState<LegacyLaunchdService[]>([]);
   const [migrationBusy, setMigrationBusy] = useState(false);
-  const [commsSkillsEnvStatus, setCommsSkillsEnvStatus] = useState<SkillsEnvStatus | null>(null);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
   const [inboxFocusTick, setInboxFocusTick] = useState(0);
   const [inboxActionBusy, setInboxActionBusy] = useState(false);
@@ -1082,25 +1079,6 @@ function MainApp() {
     () => applyWorkspaceCommsOverrides(anchorSettings.comms, workspaceConfig),
     [anchorSettings.comms, workspaceConfig],
   );
-  useEffect(() => {
-    let cancelled = false;
-    if (appMode !== "comms" || !settingsWorkPath) {
-      setCommsSkillsEnvStatus(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void skillsEnvStatus(settingsWorkPath)
-      .then((status) => {
-        if (!cancelled) setCommsSkillsEnvStatus(status);
-      })
-      .catch(() => {
-        if (!cancelled) setCommsSkillsEnvStatus(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [appMode, settingsWorkPath]);
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
@@ -3908,21 +3886,11 @@ function MainApp() {
     });
   }, [settingsWorkPath]);
 
-  const openSkillsEnvSettings = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath, "skills").catch((err) => {
+  const openCommsSettings = useCallback(() => {
+    void openSettingsWindow(settingsWorkPath, "comms").catch((err) => {
       setError(err instanceof Error ? err.message : String(err));
     });
   }, [settingsWorkPath]);
-
-  const updateCommsSettings = useCallback(
-    (comms: AnchorSettings["comms"]) => {
-      updateSettings((current) => ({
-        ...current,
-        comms,
-      }));
-    },
-    [updateSettings],
-  );
 
   const startTelegramPollingFromSettings = useCallback(() => {
     if (!inboxWorkspacePath) return;
@@ -5426,18 +5394,15 @@ function MainApp() {
             telegramLoading={telegramLoading}
             telegramError={telegramError}
             telegramPollingStatus={telegramPolling}
-            telegramEnvHealthy={commsSkillsEnvStatus?.healthy ?? null}
-            settings={anchorSettings.comms}
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onRefresh={refreshActiveSurface}
             onRefreshTelegram={() => void refreshTelegram()}
             onDecide={decideCommsItem}
-            onSettingsChange={updateCommsSettings}
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}
             onTelegramLogin={startTelegramLogin}
-            onOpenSkillsEnvSettings={openSkillsEnvSettings}
+            onOpenCommsSettings={openCommsSettings}
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={unloadMigrationService}
           />

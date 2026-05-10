@@ -98,12 +98,14 @@ import {
   type SkillsEnvStatus,
 } from "../lib/skills";
 import { openSkillEditorWindow } from "../lib/windowLayout";
+import { CommsSettingsTab } from "./comms/CommsSettingsTab";
 import { Button } from "./ui/Button";
 
 type SystemTab =
   | "preferences"
   | "ai"
   | "terminal"
+  | "comms"
   | "inbox-channels"
   | "connectors"
   | "rules"
@@ -118,6 +120,7 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
     value === "preferences" ||
     value === "ai" ||
     value === "terminal" ||
+    value === "comms" ||
     value === "inbox-channels" ||
     value === "connectors" ||
     value === "rules" ||
@@ -192,6 +195,7 @@ export function SystemPane({
             ["preferences", "system.tab.preferences"],
             ["ai", "system.tab.ai"],
             ["terminal", "system.tab.terminal"],
+            ["comms", "system.tab.comms"],
             ["inbox-channels", "system.tab.inboxChannels"],
             ["connectors", "system.tab.connectors"],
             ["rules", "system.tab.rules"],
@@ -246,6 +250,14 @@ export function SystemPane({
             }
           />
         ) : null}
+        {tab === "comms" ? (
+          <CommsSettingsSystemTab
+            workPath={workPath}
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+            onOpenSkills={() => setTab("skills")}
+          />
+        ) : null}
         {tab === "inbox-channels" ? (
           <InboxRuntimeConfigTab
             workPath={workPath}
@@ -276,6 +288,50 @@ export function SystemPane({
         {tab === "import" ? <ImportTab workPath={workPath} /> : null}
       </section>
     </main>
+  );
+}
+
+function CommsSettingsSystemTab({
+  workPath,
+  settings,
+  onSettingsChange,
+  onOpenSkills,
+}: {
+  workPath: string;
+  settings: AnchorSettings;
+  onSettingsChange: (settings: AnchorSettings) => void;
+  onOpenSkills: () => void;
+}) {
+  const [telegramEnvHealthy, setTelegramEnvHealthy] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void skillsEnvStatus(workPath)
+      .then((status) => {
+        if (!cancelled) setTelegramEnvHealthy(status?.healthy ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setTelegramEnvHealthy(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workPath]);
+
+  return (
+    <CommsSettingsTab
+      settings={settings.comms}
+      telegramEnvHealthy={telegramEnvHealthy}
+      onSettingsChange={(comms) =>
+        onSettingsChange(
+          normalizeAnchorSettings({
+            ...settings,
+            comms,
+          }),
+        )
+      }
+      onOpenSkillsEnvSettings={onOpenSkills}
+    />
   );
 }
 

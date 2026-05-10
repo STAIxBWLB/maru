@@ -5,18 +5,25 @@ import { useTranslation } from "../../lib/i18n";
 
 interface CommsSettingsTabProps {
   settings: CommsSettings;
-  pollingStatus: TelegramPollingStatus;
-  telegramEnvHealthy: boolean | null;
+  pollingStatus?: TelegramPollingStatus;
+  telegramEnvHealthy?: boolean | null;
   onSettingsChange: (settings: CommsSettings) => void;
-  onStartPolling: () => void;
-  onStopPolling: () => void;
-  onTelegramLogin: () => void;
-  onOpenSkillsEnvSettings: () => void;
+  onStartPolling?: () => void;
+  onStopPolling?: () => void;
+  onTelegramLogin?: () => void;
+  onOpenSkillsEnvSettings?: () => void;
 }
 
 export function CommsSettingsTab({
   settings,
-  pollingStatus,
+  pollingStatus = {
+    running: false,
+    intervalSeconds: settings.telegram.intervalSeconds,
+    lastStartedAt: null,
+    lastFetchedAt: null,
+    lastMessageCount: 0,
+    lastError: null,
+  },
   telegramEnvHealthy,
   onSettingsChange,
   onStartPolling,
@@ -76,9 +83,11 @@ export function CommsSettingsTab({
               <strong>{t("comms.telegram.setupRequired")}</strong>
               <p>{t("comms.telegram.setupRequiredDetail")}</p>
             </div>
-            <button type="button" className="secondary-button" onClick={onOpenSkillsEnvSettings}>
-              {t("comms.telegram.openEnvSetup")}
-            </button>
+            {onOpenSkillsEnvSettings ? (
+              <button type="button" className="secondary-button" onClick={onOpenSkillsEnvSettings}>
+                {t("comms.telegram.openEnvSetup")}
+              </button>
+            ) : null}
           </div>
         ) : null}
         <label className="field checkbox-field">
@@ -95,6 +104,14 @@ export function CommsSettingsTab({
             value={settings.telegram.sessionFile ?? ""}
             onChange={(event) => updateTelegram({ sessionFile: event.target.value || null })}
             placeholder="~/.anchor/telegram/monitor.session"
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.monitorConfigPath")}</span>
+          <input
+            value={settings.telegram.monitorConfigPath ?? ""}
+            onChange={(event) => updateTelegram({ monitorConfigPath: event.target.value || null })}
+            placeholder="~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
           />
         </label>
         <label className="field">
@@ -140,23 +157,25 @@ export function CommsSettingsTab({
           />
           <span>{t("comms.telegram.legacyAutoDrop")}</span>
         </label>
-        <div className="comms-settings-actions">
-          <button type="button" className="secondary-button" onClick={onTelegramLogin}>
-            <LogIn size={14} />
-            <span>{t("comms.telegram.login")}</span>
-          </button>
-          {pollingStatus.running ? (
-            <button type="button" className="secondary-button" onClick={onStopPolling}>
-              <Square size={14} />
-              <span>{t("comms.telegram.stopPolling")}</span>
+        {onTelegramLogin && onStartPolling && onStopPolling ? (
+          <div className="comms-settings-actions">
+            <button type="button" className="secondary-button" onClick={onTelegramLogin}>
+              <LogIn size={14} />
+              <span>{t("comms.telegram.login")}</span>
             </button>
-          ) : (
-            <button type="button" className="secondary-button" onClick={onStartPolling}>
-              <Play size={14} />
-              <span>{t("comms.telegram.startPolling")}</span>
-            </button>
-          )}
-        </div>
+            {pollingStatus.running ? (
+              <button type="button" className="secondary-button" onClick={onStopPolling}>
+                <Square size={14} />
+                <span>{t("comms.telegram.stopPolling")}</span>
+              </button>
+            ) : (
+              <button type="button" className="secondary-button" onClick={onStartPolling}>
+                <Play size={14} />
+                <span>{t("comms.telegram.startPolling")}</span>
+              </button>
+            )}
+          </div>
+        ) : null}
       </section>
     </div>
   );

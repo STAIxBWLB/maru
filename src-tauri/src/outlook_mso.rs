@@ -359,12 +359,28 @@ fn classify_m365_error(stderr: &[u8], stdout: &[u8]) -> String {
         || lower.contains("not logged")
         || lower.contains("auth")
         || lower.contains("token")
+        || lower.contains("access is denied")
+        || lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("insufficient privileges")
+        || lower.contains("permission")
     {
         "auth_required"
     } else {
         "m365_failed"
     };
-    format!("{kind}: {detail}")
+    if kind == "auth_required"
+        && (lower.contains("access is denied")
+            || lower.contains("403")
+            || lower.contains("forbidden")
+            || lower.contains("insufficient privileges"))
+    {
+        format!(
+            "{kind}: m365 is connected, but Microsoft Graph mail access is denied. Reconnect with Mail.Read/Mail.ReadWrite consent. {detail}"
+        )
+    } else {
+        format!("{kind}: {detail}")
+    }
 }
 
 fn provider_enabled(work_path: Option<&Path>, provider: &str) -> Option<bool> {
@@ -500,6 +516,11 @@ mod tests {
         assert!(
             classify_m365_error(b"AADSTS device login required", b"").starts_with("auth_required:")
         );
+        assert!(classify_m365_error(
+            b"Error: Access is denied. Check credentials and try again.",
+            b""
+        )
+        .starts_with("auth_required:"));
         assert!(classify_m365_error(b"network down", b"").starts_with("m365_failed:"));
     }
 

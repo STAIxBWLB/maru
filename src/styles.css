@@ -3540,6 +3540,12 @@ button.git-badge:hover {
   font-size: 12px;
 }
 
+.comms-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .comms-tabs {
   display: flex;
   gap: 6px;

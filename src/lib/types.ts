@@ -219,6 +219,7 @@ export interface TelegramFetchOptions {
   pythonPath?: string | null;
   scriptPath?: string | null;
   sessionFile?: string | null;
+  monitorConfigPath?: string | null;
   legacyAutoDrop?: boolean | null;
 }
 

@@ -58,6 +58,7 @@ pub struct TelegramFetchOptions {
     pub python_path: Option<String>,
     pub script_path: Option<String>,
     pub session_file: Option<String>,
+    pub monitor_config_path: Option<String>,
     pub legacy_auto_drop: Option<bool>,
 }
 
@@ -301,6 +302,9 @@ fn fetch_telegram_recent_inner(
         .arg(&config.session_file)
         .arg("--limit")
         .arg(config.max.to_string());
+    if let Some(monitor_config_path) = &config.monitor_config_path {
+        cmd.arg("--config-file").arg(monitor_config_path);
+    }
     if !config.legacy_auto_drop {
         cmd.arg("--output-json");
     }
@@ -337,6 +341,7 @@ struct TelegramCommandConfig {
     python_path: PathBuf,
     script_path: PathBuf,
     session_file: PathBuf,
+    monitor_config_path: Option<PathBuf>,
     env_root: PathBuf,
     max: u32,
     legacy_auto_drop: bool,
@@ -396,10 +401,41 @@ fn resolve_telegram_command_config(
     if !session_file.is_absolute() {
         return Err("session_file_must_be_absolute".to_string());
     }
+    let monitor_config_path = options
+        .monitor_config_path
+        .as_deref()
+        .and_then(non_empty_path)
+        .or_else(|| {
+            work.as_deref()
+                .and_then(|path| {
+                    workspace_provider_nested_string(
+                        path,
+                        "telegram",
+                        &[
+                            &["monitor_config"][..],
+                            &["monitorConfig"][..],
+                            &["monitor_config_path"][..],
+                            &["monitorConfigPath"][..],
+                            &["secrets", "monitor_config"][..],
+                            &["secrets", "monitorConfig"][..],
+                        ],
+                    )
+                })
+                .map(PathBuf::from)
+        });
+    if let Some(path) = &monitor_config_path {
+        if !path.is_file() {
+            return Err(format!(
+                "config_missing: Telegram monitor config not found at {}",
+                path.to_string_lossy()
+            ));
+        }
+    }
     Ok(TelegramCommandConfig {
         python_path,
         script_path,
         session_file,
+        monitor_config_path,
         env_root,
         max: options.max.unwrap_or(50).clamp(1, 200),
         legacy_auto_drop: options.legacy_auto_drop.unwrap_or(false),
@@ -482,6 +518,32 @@ fn workspace_provider_string(work_path: &Path, provider: &str, keys: &[&str]) ->
     None
 }
 
+fn workspace_provider_nested_string(
+    work_path: &Path,
+    provider: &str,
+    key_paths: &[&[&str]],
+) -> Option<String> {
+    let content = fs::read_to_string(work_path.join("workspace.config.yaml")).ok()?;
+    let yaml: YamlValue = serde_yaml::from_str(&content).ok()?;
+    let provider = yaml.get("io")?.get("providers")?.get(provider)?;
+    for key_path in key_paths {
+        let mut value = Some(provider);
+        for key in *key_path {
+            value = value.and_then(|current| current.get(*key));
+        }
+        if let Some(string) = value
+            .and_then(YamlValue::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(host_fs::expand_tilde)
+            .map(|path| path.to_string_lossy().to_string())
+        {
+            return Some(string);
+        }
+    }
+    None
+}
+
 fn timestamp_for_filename() -> String {
     let now: DateTime<Utc> = SystemTime::now().into();
     now.format("%Y%m%dT%H%M%SZ").to_string()
@@ -554,10 +616,32 @@ mod tests {
             python_path: Some("/missing/python".to_string()),
             script_path: Some("/missing/script.py".to_string()),
             session_file: Some("relative.session".to_string()),
+            monitor_config_path: None,
             legacy_auto_drop: None,
         };
         let err = resolve_telegram_command_config(&options).unwrap_err();
         assert!(err.contains("env_missing") || err.contains("session_file_must_be_absolute"));
+    }
+
+    #[test]
+    fn reads_nested_monitor_config_path_from_workspace_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("telegram-monitor.config.yaml");
+        fs::write(&config_path, "telegram:\n  api_id: 1\n  api_hash: test\n").unwrap();
+        fs::write(
+            dir.path().join("workspace.config.yaml"),
+            format!(
+                "io:\n  providers:\n    telegram:\n      secrets:\n        monitor_config: {}\n",
+                config_path.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let resolved = workspace_provider_nested_string(
+            dir.path(),
+            "telegram",
+            &[&["secrets", "monitor_config"][..]],
+        );
+        assert_eq!(resolved, Some(config_path.to_string_lossy().to_string()));
     }
 
     #[test]

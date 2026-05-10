@@ -27,6 +27,7 @@ export function telegramFetchOptions(
     pythonPath: settings.pythonPath,
     scriptPath: settings.scriptPath,
     sessionFile: settings.sessionFile,
+    monitorConfigPath: settings.monitorConfigPath,
     legacyAutoDrop: settings.legacyAutoDrop,
   };
 }
@@ -40,16 +41,20 @@ export function telegramLoginCommand(settings: CommsSettings["telegram"]): {
     ? settings.scriptPath.replace(/telegram_monitor\.py$/, "auth.py")
     : "$HOME/.anchor/skills/_builtin/skills/io-telegram/scripts/auth.py";
   const session = settings.sessionFile?.trim() || "$HOME/.anchor/telegram/monitor.session";
+  const configArg = settings.monitorConfigPath?.trim()
+    ? ` --config-file ${quoteShell(settings.monitorConfigPath.trim())}`
+    : "";
   return {
     command: "/bin/zsh",
     args: [
       "-lc",
-      `exec ${quoteShell(python)} ${quoteShell(script)} --session-file ${quoteShell(session)}`,
+      `exec ${quoteShell(python)} ${quoteShell(script)} --session-file ${quoteShell(session)}${configArg}`,
     ],
   };
 }
 
 function quoteShell(value: string): string {
+  if (value.startsWith("~/")) return `"$HOME/${value.slice(2)}"`;
   if (value.startsWith("$HOME/")) return `"${value}"`;
   return `'${value.replace(/'/g, "'\\''")}'`;
 }

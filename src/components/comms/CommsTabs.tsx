@@ -1,7 +1,7 @@
 import type { CommsProvider } from "../../lib/comms";
 import { useTranslation } from "../../lib/i18n";
 
-export type CommsTab = "all" | CommsProvider | "settings";
+export type CommsTab = "all" | CommsProvider;
 
 interface CommsTabsProps {
   activeTab: CommsTab;
@@ -9,7 +9,7 @@ interface CommsTabsProps {
   counts: Record<CommsProvider, number>;
 }
 
-const TABS: CommsTab[] = ["all", "gmail", "outlook", "telegram", "settings"];
+const TABS: CommsTab[] = ["all", "gmail", "outlook", "telegram"];
 
 export function CommsTabs({ activeTab, onTabChange, counts }: CommsTabsProps) {
   const { t } = useTranslation();
@@ -18,9 +18,7 @@ export function CommsTabs({ activeTab, onTabChange, counts }: CommsTabsProps) {
       {TABS.map((tab) => {
         const count = tab === "all"
           ? counts.gmail + counts.outlook + counts.telegram
-          : tab === "settings"
-            ? null
-            : counts[tab];
+          : counts[tab];
         return (
           <button
             key={tab}
@@ -31,7 +29,7 @@ export function CommsTabs({ activeTab, onTabChange, counts }: CommsTabsProps) {
             onClick={() => onTabChange(tab)}
           >
             <span>{t(`comms.tab.${tab}`)}</span>
-            {count !== null ? <span className="count">{count}</span> : null}
+            <span className="count">{count}</span>
           </button>
         );
       })}

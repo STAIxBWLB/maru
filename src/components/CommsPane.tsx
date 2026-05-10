@@ -1,16 +1,14 @@
-import { RefreshCcw } from "lucide-react";
+import { RefreshCcw, Settings } from "lucide-react";
 import { useState } from "react";
 import type { LegacyLaunchdService } from "../lib/api";
 import type { CommsProvider } from "../lib/comms";
 import type { GmailMessageState } from "../lib/gmail";
 import type { InboxDecision } from "../lib/inbox";
 import type { OutlookMessageState } from "../lib/outlook";
-import type { CommsSettings } from "../lib/settings";
 import type { TelegramMessageState } from "../lib/telegram";
 import type { TelegramPollingStatus } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { AllTab } from "./comms/AllTab";
-import { CommsSettingsTab } from "./comms/CommsSettingsTab";
 import { CommsTabs, type CommsTab } from "./comms/CommsTabs";
 import { GmailTab } from "./comms/GmailTab";
 import { MigrationBanner } from "./comms/MigrationBanner";
@@ -30,18 +28,15 @@ interface CommsPaneProps {
   telegramLoading: boolean;
   telegramError: string | null;
   telegramPollingStatus: TelegramPollingStatus;
-  telegramEnvHealthy: boolean | null;
-  settings: CommsSettings;
   migrationServices: LegacyLaunchdService[];
   migrationBusy: boolean;
   onRefresh: () => void;
   onRefreshTelegram: () => void;
   onDecide: (provider: CommsProvider, id: string, decision: Exclude<InboxDecision, "pending">) => void;
-  onSettingsChange: (settings: CommsSettings) => void;
   onStartTelegramPolling: () => void;
   onStopTelegramPolling: () => void;
   onTelegramLogin: () => void;
-  onOpenSkillsEnvSettings: () => void;
+  onOpenCommsSettings: () => void;
   onRefreshMigration: () => void;
   onUnloadMigration: (plistPath: string) => void;
 }
@@ -59,18 +54,15 @@ export function CommsPane({
   telegramLoading,
   telegramError,
   telegramPollingStatus,
-  telegramEnvHealthy,
-  settings,
   migrationServices,
   migrationBusy,
   onRefresh,
   onRefreshTelegram,
   onDecide,
-  onSettingsChange,
   onStartTelegramPolling,
   onStopTelegramPolling,
   onTelegramLogin,
-  onOpenSkillsEnvSettings,
+  onOpenCommsSettings,
   onRefreshMigration,
   onUnloadMigration,
 }: CommsPaneProps) {
@@ -91,15 +83,26 @@ export function CommsPane({
             {outlookStatus ? ` · Outlook ${outlookStatus}` : ""}
           </p>
         </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={onRefresh}
-          title={t("comms.refresh")}
-          aria-label={t("comms.refresh")}
-        >
-          <RefreshCcw size={14} />
-        </button>
+        <div className="comms-header-actions">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onRefresh}
+            title={t("comms.refresh")}
+            aria-label={t("comms.refresh")}
+          >
+            <RefreshCcw size={14} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onOpenCommsSettings}
+            title={t("comms.openSettings")}
+            aria-label={t("comms.openSettings")}
+          >
+            <Settings size={14} />
+          </button>
+        </div>
       </header>
       <MigrationBanner
         services={migrationServices}
@@ -148,19 +151,11 @@ export function CommsPane({
             error={telegramError}
             pollingStatus={telegramPollingStatus}
             onRefresh={onRefreshTelegram}
-            onDecide={onDecide}
-          />
-        ) : null}
-        {activeTab === "settings" ? (
-          <CommsSettingsTab
-            settings={settings}
-            pollingStatus={telegramPollingStatus}
-            telegramEnvHealthy={telegramEnvHealthy}
-            onSettingsChange={onSettingsChange}
             onStartPolling={onStartTelegramPolling}
             onStopPolling={onStopTelegramPolling}
             onTelegramLogin={onTelegramLogin}
-            onOpenSkillsEnvSettings={onOpenSkillsEnvSettings}
+            onOpenSettings={onOpenCommsSettings}
+            onDecide={onDecide}
           />
         ) : null}
       </section>

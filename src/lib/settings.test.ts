@@ -130,6 +130,7 @@ describe("normalizeAnchorSettings", () => {
           intervalSeconds: 5,
           maxResults: "25",
           sessionFile: " ~/.anchor/telegram/session ",
+          monitorConfigPath: " ~/workspace/work/.secrets/services/telegram-monitor.config.yaml ",
           legacyAutoDrop: true,
         },
       },
@@ -143,6 +144,9 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.comms.telegram.intervalSeconds).toBe(30);
     expect(settings.comms.telegram.maxResults).toBe(25);
     expect(settings.comms.telegram.sessionFile).toBe("~/.anchor/telegram/session");
+    expect(settings.comms.telegram.monitorConfigPath).toBe(
+      "~/workspace/work/.secrets/services/telegram-monitor.config.yaml",
+    );
     expect(settings.comms.telegram.legacyAutoDrop).toBe(true);
   });
 
@@ -167,6 +171,9 @@ describe("normalizeAnchorSettings", () => {
             max_results: 15,
             python_path: "/opt/anchor/python",
             session_file: "/tmp/telegram.session",
+            secrets: {
+              monitor_config: "/tmp/telegram-monitor.yaml",
+            },
             legacy_auto_drop: true,
           },
         },
@@ -181,6 +188,7 @@ describe("normalizeAnchorSettings", () => {
     expect(effective.telegram.maxResults).toBe(15);
     expect(effective.telegram.pythonPath).toBe("/opt/anchor/python");
     expect(effective.telegram.sessionFile).toBe("/tmp/telegram.session");
+    expect(effective.telegram.monitorConfigPath).toBe("/tmp/telegram-monitor.yaml");
     expect(effective.telegram.legacyAutoDrop).toBe(true);
   });
 
