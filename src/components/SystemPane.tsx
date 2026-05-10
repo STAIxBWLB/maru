@@ -36,6 +36,7 @@ import {
   readAnchorProjects,
   readAnchorRule,
   readAnchorTemplate,
+  readWorkspaceConfig,
   saveAnchorMcp,
   saveAnchorRule,
   saveAnchorTemplate,
@@ -52,6 +53,7 @@ import type {
   WorkspaceFileFilter,
 } from "../lib/settings";
 import {
+  applyWorkspaceCommsOverrides,
   formatBinaryFileIncludePatterns,
   normalizeAnchorSettings,
   normalizeDotFolderIncludes,
@@ -70,10 +72,10 @@ import type {
   ImportItem,
   ImportPlan,
   InboxChannelConfig,
-  InboxGmailConfig,
   InboxRuntimeConfig,
   RuleEntry,
   TemplateEntry,
+  WorkspaceConfig,
 } from "../lib/types";
 import {
   skillsAddSource,
@@ -255,6 +257,7 @@ export function SystemPane({
             workPath={workPath}
             settings={settings}
             onSettingsChange={onSettingsChange}
+            onSaved={onInboxRuntimeConfigChange}
             onOpenSkills={() => setTab("skills")}
           />
         ) : null}
@@ -295,14 +298,54 @@ function CommsSettingsSystemTab({
   workPath,
   settings,
   onSettingsChange,
+  onSaved,
   onOpenSkills,
 }: {
   workPath: string;
   settings: AnchorSettings;
   onSettingsChange: (settings: AnchorSettings) => void;
+  onSaved?: (config: InboxRuntimeConfig) => void;
   onOpenSkills: () => void;
 }) {
+  const { t } = useTranslation();
   const [telegramEnvHealthy, setTelegramEnvHealthy] = useState<boolean | null>(null);
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
+  const effectiveComms = useMemo(
+    () => applyWorkspaceCommsOverrides(settings.comms, workspaceConfig),
+    [settings.comms, workspaceConfig],
+  );
+  const [draftComms, setDraftComms] = useState(effectiveComms);
+  const [config, setConfig] = useState<InboxRuntimeConfig>(() =>
+    cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
+  );
+  const [pristine, setPristine] = useState<InboxRuntimeConfig>(() =>
+    cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
+  );
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const effectiveGwsPath = useMemo(
+    () =>
+      readWorkspaceProviderString(workspaceConfig, ["gws", "gmail"], [
+        "gws_binary",
+        "gwsBinary",
+        "gws_path",
+        "gwsPath",
+        "command",
+        "commandPath",
+        "command_path",
+      ]),
+    [workspaceConfig],
+  );
+  const gmail = config.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
+  const dirty =
+    JSON.stringify(draftComms) !== JSON.stringify(effectiveComms) ||
+    JSON.stringify(gmail) !==
+      JSON.stringify(pristine.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail);
+
+  useEffect(() => {
+    setDraftComms(effectiveComms);
+  }, [effectiveComms]);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,21 +361,130 @@ function CommsSettingsSystemTab({
     };
   }, [workPath]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void readWorkspaceConfig(workPath)
+      .then((next) => {
+        if (!cancelled) setWorkspaceConfig(next);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workPath]);
+
+  const load = useCallback(async () => {
+    setError(null);
+    setStatus(null);
+    try {
+      const runtime = await readInboxRuntimeConfig(workPath);
+      setConfig(runtime);
+      setPristine(runtime);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [workPath]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const saved = await saveInboxRuntimeConfig(workPath, {
+        ...config,
+        gmail,
+      });
+      setConfig(saved);
+      setPristine(saved);
+      onSaved?.(saved);
+      onSettingsChange(
+        normalizeAnchorSettings({
+          ...settings,
+          comms: draftComms,
+        }),
+      );
+      setStatus(t("system.rules.saved"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <CommsSettingsTab
-      settings={settings.comms}
-      telegramEnvHealthy={telegramEnvHealthy}
-      onSettingsChange={(comms) =>
-        onSettingsChange(
-          normalizeAnchorSettings({
-            ...settings,
-            comms,
-          }),
-        )
-      }
-      onOpenSkillsEnvSettings={onOpenSkills}
-    />
+    <div className="system-detail" style={{ width: "100%" }}>
+      <div className="system-detail-actions">
+        <strong>{t("system.tab.comms")}</strong>
+        <span style={{ flex: 1 }} />
+        <span className={dirty ? "save-state dirty" : "save-state saved"}>
+          {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void load()} icon={<RefreshCcw size={14} />}>
+          Refresh
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!dirty || saving}
+          onClick={() => void save()}
+          icon={<Save size={14} />}
+        >
+          {t("system.rules.save")}
+        </Button>
+      </div>
+      {error ? <div className="inbox-error">{error}</div> : null}
+      {status ? <div className="save-state saved">{status}</div> : null}
+      <CommsSettingsTab
+        settings={draftComms}
+        gmailSettings={gmail}
+        effectiveGwsPath={effectiveGwsPath}
+        telegramEnvHealthy={telegramEnvHealthy}
+        onSettingsChange={(comms) => {
+          setDraftComms(comms);
+          setStatus(null);
+        }}
+        onGmailSettingsChange={(nextGmail) => {
+          setConfig((current) => ({
+            ...current,
+            gmail: nextGmail,
+          }));
+          setStatus(null);
+        }}
+        onOpenSkillsEnvSettings={onOpenSkills}
+      />
+    </div>
   );
+}
+
+function readWorkspaceProviderString(
+  config: WorkspaceConfig | null,
+  providerNames: string[],
+  keys: string[],
+): string | null {
+  const io = isUnknownRecord(config?.io) ? config.io : null;
+  const providers = isUnknownRecord(io?.providers) ? io.providers : null;
+  if (!providers) return null;
+  for (const providerName of providerNames) {
+    const provider = isUnknownRecord(providers[providerName])
+      ? providers[providerName]
+      : null;
+    if (!provider) continue;
+    for (const key of keys) {
+      const value = provider[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return null;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // ============================ Preferences ============================
@@ -611,7 +763,6 @@ function InboxRuntimeConfigTab({
   const channelKeys = useMemo(() => Object.keys(config.channels).sort(), [config.channels]);
   const selectedChannel = config.channels[selectedKey] ?? null;
   const fileDrop = config.file_drop ?? DEFAULT_INBOX_RUNTIME_CONFIG.file_drop;
-  const gmail = config.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
   const fileDropChannel = config.channels[fileDrop.channel] ?? null;
   const dirty = JSON.stringify(config) !== JSON.stringify(pristine);
 
@@ -674,17 +825,6 @@ function InboxRuntimeConfigTab({
         ...(current.file_drop ?? DEFAULT_INBOX_RUNTIME_CONFIG.file_drop),
         ...patch,
         operation: "copy",
-      },
-    }));
-    setStatus(null);
-  };
-
-  const updateGmail = (patch: Partial<InboxGmailConfig>) => {
-    setConfig((current) => ({
-      ...current,
-      gmail: {
-        ...(current.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail),
-        ...patch,
       },
     }));
     setStatus(null);
@@ -881,105 +1021,6 @@ function InboxRuntimeConfigTab({
           {!fileDropChannel ? (
             <small className="settings-warning">Configured file drop channel is missing; Anchor will fall back to the first available channel.</small>
           ) : null}
-        </section>
-
-        <section className="settings-section-panel">
-          <div className="settings-section-heading">
-            <div>
-              <strong>Gmail</strong>
-              <span>Envelope scan settings for the Gmail section. Anchor does not fetch raw bodies.</span>
-            </div>
-          </div>
-          <label className="field checkbox-field">
-            <input
-              type="checkbox"
-              checked={gmail.enabled}
-              onChange={(event) => updateGmail({ enabled: event.target.checked })}
-            />
-            <span>Enable Gmail scan</span>
-          </label>
-          <div className="settings-grid two">
-            <label className="field">
-              <span>Scan window (days)</span>
-              <input
-                type="number"
-                min={0}
-                max={3650}
-                value={gmail.scan_window_days}
-                onChange={(event) =>
-                  updateGmail({
-                    scan_window_days: Math.max(
-                      0,
-                      Math.floor(Number(event.target.value) || 0),
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Max messages</span>
-              <input
-                type="number"
-                min={1}
-                max={200}
-                value={gmail.max_results}
-                onChange={(event) =>
-                  updateGmail({
-                    max_results: Math.max(
-                      1,
-                      Math.floor(Number(event.target.value) || 1),
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Auto refresh TTL (seconds)</span>
-              <input
-                type="number"
-                min={0}
-                max={86400}
-                value={gmail.auto_refresh_ttl_seconds}
-                onChange={(event) =>
-                  updateGmail({
-                    auto_refresh_ttl_seconds: Math.max(
-                      0,
-                      Math.floor(Number(event.target.value) || 0),
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="field checkbox-field">
-              <input
-                type="checkbox"
-                checked={gmail.unread_only}
-                onChange={(event) => updateGmail({ unread_only: event.target.checked })}
-              />
-              <span>Unread only</span>
-            </label>
-            <label className="field">
-              <span>gws CLI path</span>
-              <input
-                value={gmail.gws_path ?? ""}
-                onChange={(event) =>
-                  updateGmail({ gws_path: event.target.value.trim() || null })
-                }
-                placeholder="/opt/homebrew/bin/gws"
-                spellCheck={false}
-              />
-            </label>
-          </div>
-          <label className="field">
-            <span>Query override</span>
-            <input
-              value={gmail.query}
-              onChange={(event) => updateGmail({ query: event.target.value })}
-              placeholder="is:unread newer_than:14d"
-              spellCheck={false}
-            />
-            <small>Leave empty to build a query from unread-only and scan-window settings.</small>
-          </label>
         </section>
 
         <section className="settings-section-panel">

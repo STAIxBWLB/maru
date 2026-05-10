@@ -17,6 +17,12 @@ describe("i18n", () => {
     expect(t("ko", "missing.key")).toBe("missing.key");
   });
 
+  it("keeps Comms provider status strings localized", () => {
+    expect(t("ko", "comms.telegram.login")).toBe("로그인");
+    expect(t("ko", "comms.migration.loaded")).toBe("로드됨");
+    expect(t("en", "comms.telegram.unknownChat")).toBe("Telegram chat");
+  });
+
   it("treats interpolated values literally without regex replacement tokens", () => {
     expect(t("en", "snapshot.success", { path: "$& — $1" })).toBe(
       "Snapshot saved: $& — $1",

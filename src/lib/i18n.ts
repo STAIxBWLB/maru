@@ -353,7 +353,8 @@ const ko: Record<string, string> = {
   "comms.telegram.scriptPath": "스크립트 경로",
   "comms.telegram.interval": "폴링 간격(초)",
   "comms.telegram.legacyAutoDrop": "Legacy auto-drop 사용",
-  "comms.telegram.login": "Login",
+  "comms.telegram.login": "로그인",
+  "comms.telegram.unknownChat": "Telegram 채팅",
   "comms.telegram.setupRequired": "Telegram 런타임 설정 필요",
   "comms.telegram.setupRequiredDetail": "~/.anchor/env 가 준비되어야 Telegram 로그인, 새로고침, 폴링을 실행할 수 있습니다.",
   "comms.telegram.openEnvSetup": "Skills env 열기",
@@ -367,6 +368,7 @@ const ko: Record<string, string> = {
   "comms.migration.refresh": "다시 확인",
   "comms.migration.unload": "언로드 및 제거",
   "comms.migration.confirm": "기존 Telegram monitor LaunchAgent를 unload하고 plist를 삭제할까요?",
+  "comms.migration.loaded": "로드됨",
 
   "commit.title": "변경사항 커밋",
   "commit.summary": "{staged} staged · {modified} 수정 · {untracked} 새 파일 (총 {total})",
@@ -1046,6 +1048,7 @@ const en: Record<string, string> = {
   "comms.telegram.interval": "Polling interval (seconds)",
   "comms.telegram.legacyAutoDrop": "Use legacy auto-drop",
   "comms.telegram.login": "Login",
+  "comms.telegram.unknownChat": "Telegram chat",
   "comms.telegram.setupRequired": "Telegram runtime setup required",
   "comms.telegram.setupRequiredDetail": "~/.anchor/env must be ready before Telegram login, refresh, or polling can run.",
   "comms.telegram.openEnvSetup": "Open Skills env",
@@ -1059,6 +1062,7 @@ const en: Record<string, string> = {
   "comms.migration.refresh": "Check again",
   "comms.migration.unload": "Unload and remove",
   "comms.migration.confirm": "Unload the legacy Telegram monitor LaunchAgent and delete its plist?",
+  "comms.migration.loaded": "loaded",
 
   "commit.title": "Commit changes",
   "commit.summary": "{staged} staged · {modified} modified · {untracked} new ({total} total)",

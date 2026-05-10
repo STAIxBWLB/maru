@@ -164,10 +164,10 @@ describe("normalizeAnchorSettings", () => {
           outlook: {
             enabled: false,
             max_results: 75,
-            m365_path: "/usr/local/bin/m365",
+            command: "/usr/local/bin/m365",
           },
           telegram: {
-            interval_seconds: 10,
+            interval_seconds: 7200,
             max_results: 15,
             python_path: "/opt/anchor/python",
             session_file: "/tmp/telegram.session",
@@ -184,7 +184,7 @@ describe("normalizeAnchorSettings", () => {
     expect(effective.outlook.enabled).toBe(false);
     expect(effective.outlook.maxResults).toBe(75);
     expect(effective.outlook.m365Path).toBe("/usr/local/bin/m365");
-    expect(effective.telegram.intervalSeconds).toBe(30);
+    expect(effective.telegram.intervalSeconds).toBe(7200);
     expect(effective.telegram.maxResults).toBe(15);
     expect(effective.telegram.pythonPath).toBe("/opt/anchor/python");
     expect(effective.telegram.sessionFile).toBe("/tmp/telegram.session");

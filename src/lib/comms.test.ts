@@ -49,4 +49,37 @@ describe("buildCommsFeedRows", () => {
     expect(rows.map((row) => row.key)).toEqual(["outlook:o", "gmail:g", "telegram:t"]);
     expect(rows.map((row) => row.decision)).toEqual(["pending", "accepted", "rejected"]);
   });
+
+  it("keeps empty provider titles for the rendering layer to localize", () => {
+    const rows = buildCommsFeedRows({
+      gmail: [
+        {
+          message: {
+            id: "g",
+            from: "g@example.com",
+            subject: "",
+            date: "2026-05-10T01:00:00Z",
+          },
+          decision: "pending",
+        },
+      ],
+      outlook: [],
+      telegram: [
+        {
+          message: {
+            id: "t",
+            chatId: "42",
+            chatTitle: "",
+            sender: "Lee",
+            text: "message",
+            date: "2026-05-10T00:30:00Z",
+            permalink: null,
+          },
+          decision: "pending",
+        },
+      ],
+    });
+
+    expect(rows.map((row) => row.title)).toEqual(["", ""]);
+  });
 });

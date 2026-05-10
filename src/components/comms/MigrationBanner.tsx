@@ -22,7 +22,7 @@ export function MigrationBanner({ services, busy, onRefresh, onUnload }: Migrati
           {services.map((service) => (
             <span key={service.plistPath}>
               {service.label}
-              {service.loaded ? " · loaded" : ""}
+              {service.loaded ? ` · ${t("comms.migration.loaded")}` : ""}
             </span>
           ))}
         </div>

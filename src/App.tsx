@@ -254,6 +254,29 @@ const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
+const OUTLOOK_REFRESH_TTL_MS = 60_000;
+const TELEGRAM_REFRESH_TTL_MS = 60_000;
+
+interface ProviderRefreshCache {
+  fetchedAt: number | null;
+  key: string;
+}
+
+function shouldSkipProviderRefresh(
+  cache: ProviderRefreshCache,
+  key: string,
+  force: boolean,
+  loading: boolean,
+  ttlMs: number,
+): boolean {
+  if (force) return false;
+  if (loading) return true;
+  return Boolean(
+    cache.fetchedAt &&
+      cache.key === key &&
+      Date.now() - cache.fetchedAt < ttlMs,
+  );
+}
 
 type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
@@ -726,6 +749,11 @@ function MainApp() {
   const gmailScanStatusRef = useRef<GmailScanStatus>(DEFAULT_GMAIL_SCAN_STATUS);
   const gmailLoadingRef = useRef(false);
   const gmailRequestSeqRef = useRef(0);
+  const outlookLoadingRef = useRef(false);
+  const outlookRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
+  const telegramLoadingRef = useRef(false);
+  const telegramRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
+  const migrationCheckedRef = useRef(false);
   const processingMissionIdsRef = useRef<Set<string>>(new Set());
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
@@ -781,8 +809,8 @@ function MainApp() {
   const [processingMissions, setProcessingMissions] = useState<MissionRecord[]>([]);
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
 
-  // Gmail surface (gws CLI). Sibling section in InboxPane; list state is
-  // memory-only, while accept/reject calls write labels/archive through gws.
+  // Gmail surface (gws CLI). List state is memory-only in Comms, while
+  // accept/reject calls write labels/archive through gws.
   const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailError, setGmailError] = useState<string | null>(null);
@@ -1898,12 +1926,31 @@ function MainApp() {
     }
   }, [inboxRuntimeConfig, inboxWorkspacePath, updateGmailScanStatus]);
 
-  const refreshOutlook = useCallback(async () => {
+  const refreshOutlook = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!inboxWorkspacePath || !effectiveCommsSettings.outlook.enabled) {
+      outlookLoadingRef.current = false;
+      outlookRefreshCacheRef.current = { fetchedAt: null, key: "" };
       setOutlookMessages([]);
       setOutlookStatus("");
       return;
     }
+    const refreshKey = JSON.stringify({
+      workPath: inboxWorkspacePath,
+      max: effectiveCommsSettings.outlook.maxResults,
+      m365Path: effectiveCommsSettings.outlook.m365Path ?? null,
+    });
+    if (
+      shouldSkipProviderRefresh(
+        outlookRefreshCacheRef.current,
+        refreshKey,
+        force,
+        outlookLoadingRef.current,
+        OUTLOOK_REFRESH_TTL_MS,
+      )
+    ) {
+      return;
+    }
+    outlookLoadingRef.current = true;
     setOutlookLoading(true);
     setOutlookError(null);
     const startedAt = Date.now();
@@ -1914,20 +1961,48 @@ function MainApp() {
         effectiveCommsSettings.outlook.m365Path,
       );
       setOutlookMessages(messages);
+      outlookRefreshCacheRef.current = {
+        fetchedAt: Date.now(),
+        key: refreshKey,
+      };
       setOutlookStatus(`${messages.length.toLocaleString(locale)} · ${Date.now() - startedAt}ms`);
     } catch (err) {
       setOutlookError(err instanceof Error ? err.message : String(err));
       setOutlookStatus("");
     } finally {
+      outlookLoadingRef.current = false;
       setOutlookLoading(false);
     }
   }, [effectiveCommsSettings.outlook, inboxWorkspacePath, locale]);
 
-  const refreshTelegram = useCallback(async () => {
+  const refreshTelegram = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!inboxWorkspacePath || !effectiveCommsSettings.telegram.enabled) {
+      telegramLoadingRef.current = false;
+      telegramRefreshCacheRef.current = { fetchedAt: null, key: "" };
       setTelegramMessages([]);
       return;
     }
+    const refreshKey = JSON.stringify({
+      workPath: inboxWorkspacePath,
+      max: effectiveCommsSettings.telegram.maxResults,
+      pythonPath: effectiveCommsSettings.telegram.pythonPath ?? null,
+      scriptPath: effectiveCommsSettings.telegram.scriptPath ?? null,
+      sessionFile: effectiveCommsSettings.telegram.sessionFile ?? null,
+      monitorConfigPath: effectiveCommsSettings.telegram.monitorConfigPath ?? null,
+      legacyAutoDrop: effectiveCommsSettings.telegram.legacyAutoDrop,
+    });
+    if (
+      shouldSkipProviderRefresh(
+        telegramRefreshCacheRef.current,
+        refreshKey,
+        force,
+        telegramLoadingRef.current,
+        TELEGRAM_REFRESH_TTL_MS,
+      )
+    ) {
+      return;
+    }
+    telegramLoadingRef.current = true;
     setTelegramLoading(true);
     setTelegramError(null);
     try {
@@ -1935,12 +2010,25 @@ function MainApp() {
         telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
       );
       setTelegramMessages(messages);
+      telegramRefreshCacheRef.current = {
+        fetchedAt: Date.now(),
+        key: refreshKey,
+      };
     } catch (err) {
       setTelegramError(err instanceof Error ? err.message : String(err));
     } finally {
+      telegramLoadingRef.current = false;
       setTelegramLoading(false);
     }
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
+
+  const refreshCommsProviders = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    await Promise.allSettled([
+      refreshGmail({ force }),
+      refreshOutlook({ force }),
+      refreshTelegram({ force }),
+    ]);
+  }, [refreshGmail, refreshOutlook, refreshTelegram]);
 
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
@@ -2498,10 +2586,8 @@ function MainApp() {
   // Provider message lists are transient and refresh only inside Comms.
   useEffect(() => {
     if (appMode !== "comms") return;
-    void refreshGmail();
-    void refreshOutlook();
-    void refreshTelegram();
-  }, [appMode, refreshGmail, refreshOutlook, refreshTelegram]);
+    void refreshCommsProviders();
+  }, [appMode, refreshCommsProviders]);
 
   useEffect(() => {
     if (appMode !== "comms") return;
@@ -2512,11 +2598,14 @@ function MainApp() {
         if (!disposed) setTelegramPolling(status);
       })
       .catch(() => {});
-    void detectLegacyTelegramLaunchd()
-      .then((services) => {
-        if (!disposed) setMigrationServices(services);
-      })
-      .catch(() => {});
+    if (!migrationCheckedRef.current) {
+      migrationCheckedRef.current = true;
+      void detectLegacyTelegramLaunchd()
+        .then((services) => {
+          if (!disposed) setMigrationServices(services);
+        })
+        .catch(() => {});
+    }
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
         listen("telegram://messages", (event) => {
@@ -3953,9 +4042,7 @@ function MainApp() {
       void refreshProcessedItems();
       void refreshProcessingMissions();
     } else if (appMode === "comms") {
-      void refreshGmail({ force: true });
-      void refreshOutlook();
-      void refreshTelegram();
+      void refreshCommsProviders({ force: true });
     } else if (anchorSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
@@ -3966,12 +4053,10 @@ function MainApp() {
     appMode,
     explorerWorkspacePath,
     refreshCurrent,
-    refreshGmail,
+    refreshCommsProviders,
     refreshInbox,
-    refreshOutlook,
     refreshProcessedItems,
     refreshProcessingMissions,
-    refreshTelegram,
     refreshWorkspaceFiles,
   ]);
 
@@ -5397,7 +5482,7 @@ function MainApp() {
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onRefresh={refreshActiveSurface}
-            onRefreshTelegram={() => void refreshTelegram()}
+            onRefreshTelegram={() => void refreshTelegram({ force: true })}
             onDecide={decideCommsItem}
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}

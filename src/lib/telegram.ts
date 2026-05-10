@@ -33,7 +33,7 @@ export function telegramFetchOptions(
 }
 
 export function telegramLoginCommand(settings: CommsSettings["telegram"]): {
-  command: string;
+  command: string | null;
   args: string[];
 } {
   const python = settings.pythonPath?.trim() || "$HOME/.anchor/env/.venv/bin/python";
@@ -45,7 +45,7 @@ export function telegramLoginCommand(settings: CommsSettings["telegram"]): {
     ? ` --config-file ${quoteShell(settings.monitorConfigPath.trim())}`
     : "";
   return {
-    command: "/bin/zsh",
+    command: null,
     args: [
       "-lc",
       `exec ${quoteShell(python)} ${quoteShell(script)} --session-file ${quoteShell(session)}${configArg}`,

@@ -141,6 +141,11 @@ export interface CommsSettings {
   };
 }
 
+export const COMMS_PROVIDER_RESULTS_MIN = 1;
+export const COMMS_PROVIDER_RESULTS_MAX = 200;
+export const TELEGRAM_POLL_INTERVAL_MIN_SECONDS = 30;
+export const TELEGRAM_POLL_INTERVAL_MAX_SECONDS = 86400;
+
 export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   version: 1,
   ui: {
@@ -315,12 +320,22 @@ export function applyWorkspaceCommsOverrides(
         outlook,
         ["maxResults", "max_results", "limit"],
         settings.outlook.maxResults,
-        1,
-        200,
+        COMMS_PROVIDER_RESULTS_MIN,
+        COMMS_PROVIDER_RESULTS_MAX,
       ),
       m365Path: readOptionalString(
         outlook,
-        ["m365Path", "m365_path", "cliPath", "cli_path"],
+        [
+          "m365Path",
+          "m365_path",
+          "cliPath",
+          "cli_path",
+          "command",
+          "commandPath",
+          "command_path",
+          "m365Command",
+          "m365_command",
+        ],
         settings.outlook.m365Path,
       ),
     },
@@ -332,15 +347,15 @@ export function applyWorkspaceCommsOverrides(
         telegram,
         ["intervalSeconds", "interval_seconds", "pollSeconds", "poll_seconds"],
         settings.telegram.intervalSeconds,
-        30,
-        3600,
+        TELEGRAM_POLL_INTERVAL_MIN_SECONDS,
+        TELEGRAM_POLL_INTERVAL_MAX_SECONDS,
       ),
       maxResults: readInteger(
         telegram,
         ["maxResults", "max_results", "limit"],
         settings.telegram.maxResults,
-        1,
-        200,
+        COMMS_PROVIDER_RESULTS_MIN,
+        COMMS_PROVIDER_RESULTS_MAX,
       ),
       pythonPath: readOptionalString(
         telegram,
@@ -426,8 +441,8 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
       maxResults: normalizeInteger(
         outlook.maxResults,
         DEFAULT_ANCHOR_SETTINGS.comms.outlook.maxResults,
-        1,
-        200,
+        COMMS_PROVIDER_RESULTS_MIN,
+        COMMS_PROVIDER_RESULTS_MAX,
       ),
       m365Path: normalizeOptionalString(outlook.m365Path),
     },
@@ -441,14 +456,14 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
       intervalSeconds: normalizeInteger(
         telegram.intervalSeconds,
         DEFAULT_ANCHOR_SETTINGS.comms.telegram.intervalSeconds,
-        30,
-        86400,
+        TELEGRAM_POLL_INTERVAL_MIN_SECONDS,
+        TELEGRAM_POLL_INTERVAL_MAX_SECONDS,
       ),
       maxResults: normalizeInteger(
         telegram.maxResults,
         DEFAULT_ANCHOR_SETTINGS.comms.telegram.maxResults,
-        1,
-        200,
+        COMMS_PROVIDER_RESULTS_MIN,
+        COMMS_PROVIDER_RESULTS_MAX,
       ),
       pythonPath: normalizeOptionalString(telegram.pythonPath),
       scriptPath: normalizeOptionalString(telegram.scriptPath),

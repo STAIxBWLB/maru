@@ -29,7 +29,7 @@ export function buildCommsFeedRows({
     ...gmail.map((entry) => ({
       key: `gmail:${entry.message.id}`,
       provider: "gmail" as const,
-      title: entry.message.subject || "(no subject)",
+      title: entry.message.subject,
       sender: entry.message.from,
       preview: "",
       date: entry.message.date,
@@ -39,7 +39,7 @@ export function buildCommsFeedRows({
     ...outlook.map((entry) => ({
       key: `outlook:${entry.message.id}`,
       provider: "outlook" as const,
-      title: entry.message.subject || "(no subject)",
+      title: entry.message.subject,
       sender: entry.message.from,
       preview: entry.message.bodyPreview,
       date: entry.message.date,
@@ -49,7 +49,7 @@ export function buildCommsFeedRows({
     ...telegram.map((entry) => ({
       key: `telegram:${entry.message.id}`,
       provider: "telegram" as const,
-      title: entry.message.chatTitle || "Telegram",
+      title: entry.message.chatTitle,
       sender: entry.message.sender,
       preview: entry.message.text,
       date: entry.message.date,

@@ -14,7 +14,7 @@ const TABS: CommsTab[] = ["all", "gmail", "outlook", "telegram"];
 export function CommsTabs({ activeTab, onTabChange, counts }: CommsTabsProps) {
   const { t } = useTranslation();
   return (
-    <div className="comms-tabs" role="tablist" aria-label={t("comms.tabs.label")}>
+    <div className="comms-tabs" aria-label={t("comms.tabs.label")}>
       {TABS.map((tab) => {
         const count = tab === "all"
           ? counts.gmail + counts.outlook + counts.telegram
@@ -23,8 +23,7 @@ export function CommsTabs({ activeTab, onTabChange, counts }: CommsTabsProps) {
           <button
             key={tab}
             type="button"
-            role="tab"
-            aria-selected={activeTab === tab}
+            aria-pressed={activeTab === tab}
             className={activeTab === tab ? "comms-tab active" : "comms-tab"}
             onClick={() => onTabChange(tab)}
           >
