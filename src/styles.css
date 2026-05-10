@@ -6493,6 +6493,11 @@ button.git-badge:hover {
   padding: 10px;
 }
 
+.compose-skill-summary.invalid {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line-soft));
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel-2));
+}
+
 .compose-skill-summary strong {
   font-size: 13px;
   line-height: 1.3;
@@ -6502,6 +6507,12 @@ button.git-badge:hover {
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.45;
+}
+
+.compose-skill-summary small {
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .compose-context {

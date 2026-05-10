@@ -34,6 +34,8 @@ export interface SkillRecord {
   description?: string | null;
   runtime?: string | null;
   category?: string | null;
+  valid?: boolean;
+  validationErrors?: string[];
   editable: boolean;
   dirty: boolean;
   contentHash?: string | null;
@@ -89,6 +91,81 @@ export interface TerminalDispatchSpec {
   extraArgs: string[];
   extraEnv: Record<string, string>;
   title: string;
+}
+
+export interface AgentRunEvent {
+  id: string;
+  runId: string;
+  ts: string;
+  type: string;
+  actor: string;
+  payload: unknown;
+  schemaVersion: string;
+  parentId?: string | null;
+}
+
+export interface RunReplaySummary {
+  runId: string;
+  eventCount: number;
+  lastType?: string | null;
+  proposalCount: number;
+  writeClaimedCount: number;
+  writeCommittedCount: number;
+  writeConflictCount: number;
+}
+
+export interface RedactedRunSummary extends RunReplaySummary {
+  providers: string[];
+  skills: string[];
+}
+
+export interface SkillProposalFile {
+  path: string;
+  operation: "create" | "replace" | "append" | "delete" | string;
+  content?: string | null;
+  expectedHash?: string | null;
+  diff?: string | null;
+}
+
+export interface SkillProposalCommand {
+  command: string;
+  cwd?: string | null;
+  requiresApproval: boolean;
+}
+
+export interface SkillProposal {
+  summary: string;
+  files: SkillProposalFile[];
+  commands: SkillProposalCommand[];
+  risks: string[];
+  requiresApproval: boolean;
+  schemaVersion: string;
+}
+
+export interface ProposalApplyReport {
+  summary: string;
+  writes: Array<{
+    path: string;
+    operation: string;
+    previousHash?: string | null;
+    committedHash?: string | null;
+  }>;
+}
+
+export interface MarketplaceSourceManifest {
+  schemaVersion: string;
+  sourceId: string;
+  name: string;
+  version: string;
+  skillsSubdir: string;
+  signed: boolean;
+  signature?: string | null;
+  repoUrl?: string | null;
+}
+
+export interface MarketplaceValidationReport {
+  valid: boolean;
+  errors: string[];
 }
 
 export interface AdoptOutcome {
@@ -288,4 +365,77 @@ export async function skillsDispatchBackground(params: {
 }): Promise<string> {
   if (!isTauri()) throw new Error("Skill background dispatch requires the Tauri shell.");
   return invoke<string>("skills_dispatch_background", params);
+}
+
+export async function agentReadRunEvents(
+  cwd: string,
+  runId: string,
+): Promise<AgentRunEvent[]> {
+  if (!isTauri()) return [];
+  return invoke<AgentRunEvent[]>("agent_read_run_events", { cwd, runId });
+}
+
+export async function agentReplayRunSummary(
+  cwd: string,
+  runId: string,
+): Promise<RunReplaySummary> {
+  if (!isTauri()) {
+    return {
+      runId,
+      eventCount: 0,
+      lastType: null,
+      proposalCount: 0,
+      writeClaimedCount: 0,
+      writeCommittedCount: 0,
+      writeConflictCount: 0,
+    };
+  }
+  return invoke<RunReplaySummary>("agent_replay_run_summary", { cwd, runId });
+}
+
+export async function agentExportRedactedRunSummary(
+  cwd: string,
+  runId: string,
+): Promise<RedactedRunSummary> {
+  if (!isTauri()) {
+    return {
+      runId,
+      eventCount: 0,
+      lastType: null,
+      proposalCount: 0,
+      writeClaimedCount: 0,
+      writeCommittedCount: 0,
+      writeConflictCount: 0,
+      providers: [],
+      skills: [],
+    };
+  }
+  return invoke<RedactedRunSummary>("agent_export_redacted_run_summary", { cwd, runId });
+}
+
+export async function agentParseSkillProposal(raw: string): Promise<SkillProposal> {
+  if (!isTauri()) throw new Error("Proposal parsing requires the Tauri shell.");
+  return invoke<SkillProposal>("agent_parse_skill_proposal", { raw });
+}
+
+export async function agentApplySkillProposal(params: {
+  cwd: string;
+  proposal: SkillProposal;
+  approvalId: string;
+  runId?: string | null;
+}): Promise<ProposalApplyReport> {
+  if (!isTauri()) throw new Error("Proposal apply requires the Tauri shell.");
+  return invoke<ProposalApplyReport>("agent_apply_skill_proposal", {
+    cwd: params.cwd,
+    proposal: params.proposal,
+    approvalId: params.approvalId,
+    runId: params.runId ?? null,
+  });
+}
+
+export async function agentValidateMarketplaceManifest(
+  manifest: MarketplaceSourceManifest,
+): Promise<MarketplaceValidationReport> {
+  if (!isTauri()) return { valid: false, errors: ["tauri_required"] };
+  return invoke<MarketplaceValidationReport>("agent_validate_marketplace_manifest", { manifest });
 }

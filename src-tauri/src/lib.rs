@@ -1,3 +1,4 @@
+pub mod agent_host;
 mod ai_router;
 mod anchor_dir;
 mod app_menu;
@@ -24,6 +25,10 @@ mod vault_list;
 mod workspace;
 mod workspace_files;
 
+use agent_host::{
+    agent_apply_skill_proposal, agent_export_redacted_run_summary, agent_parse_skill_proposal,
+    agent_read_run_events, agent_replay_run_summary, agent_validate_marketplace_manifest,
+};
 use ai_router::start_claude_cli_invocation;
 use anchor_dir::{
     bootstrap_anchor_dir, delete_anchor_rule, delete_anchor_template, list_anchor_rules,
@@ -208,6 +213,12 @@ pub fn run() {
             skills_dispatch_compose,
             skills_dispatch_terminal,
             skills_dispatch_background,
+            agent_read_run_events,
+            agent_replay_run_summary,
+            agent_export_redacted_run_summary,
+            agent_parse_skill_proposal,
+            agent_apply_skill_proposal,
+            agent_validate_marketplace_manifest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Anchor");

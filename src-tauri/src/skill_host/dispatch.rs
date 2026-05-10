@@ -4,12 +4,19 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use crate::agent_host::contracts::{
+    AgentRunContextItem, AgentRunRequest, CompletionRequest, AGENT_RUN_REQUEST_SCHEMA_VERSION,
+    COMPLETION_REQUEST_SCHEMA_VERSION,
+};
+use crate::agent_host::event_store::append_run_event_payload;
+use crate::agent_host::proposal::parse_skill_proposal;
+use crate::agent_host::provider::{build_cli_command, CliProviderKind};
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
-use crate::cli_path::resolve_program;
 use crate::mission_state;
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::{env_vars_for_runs, get_skill};
@@ -130,51 +137,28 @@ pub fn skills_dispatch_background(
     let invocation_id = format!("ai-{}", Uuid::new_v4());
     let add_dirs = add_dirs(&composition);
     let env = composition.extra_env.clone();
-    match runtime.as_str() {
-        "claude" => {
-            let bin = resolve_program("claude").ok_or_else(|| {
-                "cli_missing: claude CLI not found in PATH or common install locations".to_string()
-            })?;
-            let mut cmd = Command::new(bin);
-            cmd.arg("-p")
-                .arg(&composition.prompt)
-                .arg("--permission-mode")
-                .arg("plan");
-            for dir in add_dirs {
-                cmd.arg("--add-dir").arg(dir);
-            }
-            spawn_background(
-                app,
-                invocation_id,
-                cmd,
-                composition.cwd,
-                env,
-                None,
-                metadata,
-            )
-        }
-        "codex" => {
-            let bin = resolve_program("codex").ok_or_else(|| {
-                "cli_missing: codex CLI not found in PATH or common install locations".to_string()
-            })?;
-            let mut cmd = Command::new(bin);
-            cmd.arg("exec").arg("--cd").arg(&composition.cwd);
-            for dir in add_dirs {
-                cmd.arg("--add-dir").arg(dir);
-            }
-            cmd.arg("-");
-            spawn_background(
-                app,
-                invocation_id,
-                cmd,
-                composition.cwd,
-                env,
-                Some(composition.prompt),
-                metadata,
-            )
-        }
-        _ => Err(format!("unsupported_dispatch_runtime: {runtime}")),
-    }
+    let run_request =
+        build_agent_run_request(&composition, &runtime, "background", metadata.clone())?;
+    let completion_request = CompletionRequest {
+        schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
+        provider: runtime.clone(),
+        prompt: composition.prompt.clone(),
+        cwd: composition.cwd.clone(),
+        mode: "background".to_string(),
+        metadata: metadata.clone(),
+    };
+    let provider = CliProviderKind::parse(&runtime)?;
+    let (cmd, stdin_payload) = build_cli_command(provider, &completion_request, &add_dirs)?;
+    spawn_background(
+        app,
+        invocation_id,
+        cmd,
+        composition.cwd,
+        env,
+        stdin_payload,
+        metadata,
+        run_request,
+    )
 }
 
 fn compose(
@@ -187,6 +171,12 @@ fn compose(
         return Err("skill_prompt_required".to_string());
     }
     let skill = get_skill(&skill_id)?;
+    if !skill.valid {
+        return Err(format!(
+            "skill_frontmatter_invalid: {}",
+            skill.validation_errors.join(", ")
+        ));
+    }
     let skill_md = Path::new(&skill.abs_path).join("SKILL.md");
     let skill_content = std::fs::read_to_string(&skill_md)
         .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&skill_md)))?;
@@ -230,6 +220,34 @@ fn build_prompt(
     out.push_str(prompt.trim());
     out.push_str("\n</user_prompt>\n");
     out
+}
+
+fn build_agent_run_request(
+    composition: &DispatchComposition,
+    runtime: &str,
+    mode: &str,
+    metadata: Option<JsonValue>,
+) -> Result<AgentRunRequest, String> {
+    let request = AgentRunRequest {
+        intent: composition.prompt.clone(),
+        runtime_provider: runtime.to_string(),
+        skill_id: Some(composition.skill_id.clone()),
+        cwd: composition.cwd.clone(),
+        context: composition
+            .context
+            .iter()
+            .map(|item| AgentRunContextItem {
+                path: item.path.clone(),
+                kind: item.kind.clone(),
+            })
+            .collect(),
+        mode: mode.to_string(),
+        approval_policy: "proposal-only".to_string(),
+        schema_version: AGENT_RUN_REQUEST_SCHEMA_VERSION.to_string(),
+        metadata,
+    };
+    request.validate()?;
+    Ok(request)
 }
 
 fn resolve_cwd(cwd: Option<&str>, context: &[SkillContextItem]) -> Result<PathBuf, String> {
@@ -295,8 +313,18 @@ fn spawn_background(
     env: BTreeMap<String, String>,
     stdin_payload: Option<String>,
     metadata: Option<JsonValue>,
+    run_request: AgentRunRequest,
 ) -> Result<String, String> {
-    cmd.current_dir(cwd)
+    let _ = append_run_event_payload(
+        &cwd,
+        &invocation_id,
+        "run.started",
+        "anchor.skill_host",
+        serde_json::json!({
+            "request": run_request,
+        }),
+    );
+    cmd.current_dir(&cwd)
         .stdin(if stdin_payload.is_some() {
             Stdio::piped()
         } else {
@@ -307,7 +335,20 @@ fn spawn_background(
     for (key, value) in env {
         cmd.env(key, value);
     }
-    let mut child = cmd.spawn().map_err(|err| format_spawn_error(&err))?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            let message = format_spawn_error(&err);
+            let _ = append_run_event_payload(
+                &cwd,
+                &invocation_id,
+                "run.failed",
+                "anchor.skill_host",
+                serde_json::json!({ "error": message }),
+            );
+            return Err(message);
+        }
+    };
     let child_pid = child.id();
     if let Some(payload) = stdin_payload {
         if let Some(mut stdin) = child.stdin.take() {
@@ -324,17 +365,22 @@ fn spawn_background(
         .stderr
         .take()
         .ok_or_else(|| "stderr_capture_failed".to_string())?;
+    let stdout_buffer = Arc::new(Mutex::new(String::new()));
     spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
+        cwd.clone(),
         "stdout".to_string(),
         stdout,
+        Some(stdout_buffer.clone()),
     );
     spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
+        cwd.clone(),
         "stderr".to_string(),
         stderr,
+        None,
     );
     let _ = mission_state::register_mission_with_metadata(
         &app,
@@ -345,8 +391,32 @@ fn spawn_background(
     );
     let app_done = app.clone();
     let id_done = invocation_id.clone();
+    let cwd_done = cwd.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
+            if status.success() {
+                if let Ok(raw) = stdout_buffer.lock().map(|buffer| buffer.clone()) {
+                    if let Ok(proposal) = parse_skill_proposal(&raw) {
+                        let _ = append_run_event_payload(
+                            &cwd_done,
+                            &id_done,
+                            "proposal.created",
+                            "anchor.skill_host",
+                            serde_json::json!({ "proposal": proposal }),
+                        );
+                    }
+                }
+            }
+            let _ = append_run_event_payload(
+                &cwd_done,
+                &id_done,
+                "run.completed",
+                "anchor.skill_host",
+                serde_json::json!({
+                    "exitCode": status.code(),
+                    "success": status.success(),
+                }),
+            );
             mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
@@ -358,6 +428,13 @@ fn spawn_background(
             );
         }
         Err(err) => {
+            let _ = append_run_event_payload(
+                &cwd_done,
+                &id_done,
+                "run.failed",
+                "anchor.skill_host",
+                serde_json::json!({ "error": err.to_string() }),
+            );
             mission_state::fail_mission(&app_done, &id_done, &err.to_string());
             let _ = app_done.emit(
                 "ai://error",
@@ -372,8 +449,14 @@ fn spawn_background(
     Ok(invocation_id)
 }
 
-fn spawn_line_pump<R>(app: AppHandle, invocation_id: String, stream_name: String, source: R)
-where
+fn spawn_line_pump<R>(
+    app: AppHandle,
+    invocation_id: String,
+    cwd: String,
+    stream_name: String,
+    source: R,
+    buffer: Option<Arc<Mutex<String>>>,
+) where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
@@ -382,6 +465,12 @@ where
             let Ok(line) = line else {
                 break;
             };
+            if let Some(buffer) = buffer.as_ref() {
+                if let Ok(mut buffer) = buffer.lock() {
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                }
+            }
             let _ = app.emit(
                 "ai://output",
                 AiOutputEvent {
@@ -389,6 +478,16 @@ where
                     stream: stream_name.clone(),
                     line: line.clone(),
                 },
+            );
+            let _ = append_run_event_payload(
+                &cwd,
+                &invocation_id,
+                "provider.output",
+                "provider",
+                serde_json::json!({
+                    "stream": stream_name.clone(),
+                    "line": line.clone(),
+                }),
             );
             mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
