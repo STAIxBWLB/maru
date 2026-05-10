@@ -8,7 +8,6 @@ import {
   HelpCircle,
   Inbox,
   Loader2,
-  Mail,
   Play,
   RefreshCcw,
   Search,
@@ -25,14 +24,17 @@ import {
   hasExplorerDragPayload,
   readExplorerDragPayload,
 } from "../lib/fileDrag";
-import { type GmailMessageState, shortFrom } from "../lib/gmail";
 import {
   categoryLabel,
   countInboxSources,
   filterItemsBySource,
+  inboxContextActionKeys,
+  inboxTrashTargetsForRows,
+  shouldHandleInboxDeleteShortcut,
   uniqueSources,
   type InboxDecision,
   type InboxItemState,
+  type InboxTrashableRow,
 } from "../lib/inbox";
 import { useTranslation } from "../lib/i18n";
 import type {
@@ -41,6 +43,7 @@ import type {
   InboxProcessedItem,
   InboxProcessedItemDetail,
   InboxProcessedStatus,
+  InboxTrashTarget,
   MissionRecord,
 } from "../lib/types";
 import { BulkActionBar } from "./BulkActionBar";
@@ -49,10 +52,6 @@ interface InboxPaneProps {
   items: InboxItemState[];
   entries: InboxEntry[];
   loading: boolean;
-  gmailMessages: GmailMessageState[];
-  gmailLoading: boolean;
-  gmailError: string | null;
-  gmailStatus: string;
   processedItems: InboxProcessedItem[];
   processedLoading: boolean;
   processedError: string | null;
@@ -70,7 +69,6 @@ interface InboxPaneProps {
   actionBusy?: boolean;
   onClassify: (id: string) => void;
   onDecide: (id: string, decision: InboxDecision) => void | Promise<void>;
-  onDecideGmail: (id: string, decision: InboxDecision) => void | Promise<void>;
   onBulkAccept: (keys: string[]) => void | Promise<void>;
   onBulkReject: (keys: string[]) => void | Promise<void>;
   onBulkMoveFiles: (keys: string[]) => void | Promise<void>;
@@ -81,22 +79,26 @@ interface InboxPaneProps {
   onRefreshProcessed: () => void;
   onSelectProcessedItem: (item: InboxProcessedItem) => void | Promise<void>;
   onRevealPath: (path: string) => void;
+  onTrashItems: (targets: InboxTrashTarget[]) => void | Promise<void>;
   onStopProcessingMission: (id: string) => void | Promise<void>;
 }
 
 type InboxRow =
   | { key: string; kind: "entry"; entry: InboxEntry }
-  | { key: string; kind: "file"; entry: InboxItemState }
-  | { key: string; kind: "gmail"; entry: GmailMessageState };
+  | { key: string; kind: "file"; entry: InboxItemState };
+
+type InboxContextMenuState = {
+  x: number;
+  y: number;
+  title: string;
+  path: string;
+  targets: InboxTrashTarget[];
+};
 
 export function InboxPane({
   items,
   entries,
   loading,
-  gmailMessages,
-  gmailLoading,
-  gmailError,
-  gmailStatus,
   processedItems,
   processedLoading,
   processedError,
@@ -114,7 +116,6 @@ export function InboxPane({
   actionBusy = false,
   onClassify,
   onDecide,
-  onDecideGmail,
   onBulkAccept,
   onBulkReject,
   onBulkMoveFiles,
@@ -125,6 +126,7 @@ export function InboxPane({
   onRefreshProcessed,
   onSelectProcessedItem,
   onRevealPath,
+  onTrashItems,
   onStopProcessingMission,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
@@ -134,6 +136,7 @@ export function InboxPane({
   const [lastSelectedKey, setLastSelectedKey] = useState<string | null>(null);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [dragOverDrop, setDragOverDrop] = useState(false);
+  const [contextMenu, setContextMenu] = useState<InboxContextMenuState | null>(null);
   const [processedDetailTab, setProcessedDetailTab] =
     useState<"summary" | "route" | "manifest" | "extracted">("summary");
   const sources = useMemo(() => uniqueSources(items), [items]);
@@ -144,14 +147,12 @@ export function InboxPane({
   );
   const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
   const entryPending = entries.filter((entry) => entry.status !== "done").length;
-  const gmailPending = gmailMessages.filter((entry) => entry.decision === "pending").length;
   const rows = useMemo<InboxRow[]>(
     () => [
       ...entries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
       ...visibleItems.map((entry) => ({ key: `file:${entry.item.id}`, kind: "file" as const, entry })),
-      ...gmailMessages.map((entry) => ({ key: `gmail:${entry.message.id}`, kind: "gmail" as const, entry })),
     ],
-    [entries, gmailMessages, visibleItems],
+    [entries, visibleItems],
   );
   const selected = useMemo(
     () => rows.filter((row) => selectedKeys.has(row.key)),
@@ -164,6 +165,10 @@ export function InboxPane({
   const selectedFileCount = selected.filter((row) => row.kind === "file").length;
   const selectedEntryCount = selected.filter((row) => row.kind === "entry").length;
   const selectedDecisionCount = selectedDecisionKeys.length;
+  const trashableRows = useMemo<InboxTrashableRow[]>(
+    () => rows.map((row) => ({ key: row.key, trashTarget: trashTargetForRow(row) })),
+    [rows],
+  );
 
   useEffect(() => {
     const valid = new Set(rows.map((row) => row.key));
@@ -200,6 +205,20 @@ export function InboxPane({
     return () => dispose?.();
   }, [onStageFiles]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
   const actOnKeys = async (keys: string[], decision: InboxDecision) => {
     const decisionKeys = keys.filter((key) => !key.startsWith("entry:"));
     if (decisionKeys.length > 1) {
@@ -210,7 +229,6 @@ export function InboxPane({
     const key = decisionKeys[0];
     if (!key) return;
     if (key.startsWith("file:")) await onDecide(key.slice("file:".length), decision);
-    else if (key.startsWith("gmail:")) await onDecideGmail(key.slice("gmail:".length), decision);
   };
 
   const processActionKeys = () => {
@@ -226,6 +244,23 @@ export function InboxPane({
     if (keys.length > 0) return keys;
     const fallback = firstPendingKey(rows) ?? rows[0]?.key;
     return fallback ? [fallback] : [];
+  };
+
+  const trashActionKeys = () => {
+    if (selectedKeys.size > 0) return [...selectedKeys];
+    return focusedKey ? [focusedKey] : [];
+  };
+
+  const trashRows = async (keys = trashActionKeys()) => {
+    if (keys.length === 0) return;
+    const targets = inboxTrashTargetsForRows(trashableRows, keys);
+    if (targets.length === 0) {
+      window.alert(t("inbox.delete.unsupported"));
+      return;
+    }
+    await onTrashItems(targets);
+    setSelectedKeys((current) => new Set([...current].filter((key) => !keys.includes(key))));
+    if (focusedKey && keys.includes(focusedKey)) setFocusedKey(null);
   };
 
   const moveFocus = (delta: number) => {
@@ -268,6 +303,65 @@ export function InboxPane({
     else setFocusedKey(key);
   };
 
+  const openRowContextMenu = (event: React.MouseEvent, row: InboxRow) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const keys = inboxContextActionKeys(selectedKeys, row.key);
+    if (!selectedKeys.has(row.key)) {
+      setSelectedKeys(new Set([row.key]));
+      setLastSelectedKey(row.key);
+    }
+    setFocusedKey(row.key);
+    const targets = inboxTrashTargetsForRows(trashableRows, keys);
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title:
+        keys.length > 1
+          ? t("inbox.menu.selectionTitle", { count: keys.length })
+          : titleForRow(row),
+      path: pathForRow(row),
+      targets,
+    });
+  };
+
+  const openProcessedContextMenu = (event: React.MouseEvent, item: InboxProcessedItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: item.title || item.id,
+      path: item.itemDir,
+      targets: [{ id: item.id, kind: "processedItem", path: item.itemDir }],
+    });
+  };
+
+  const copyContextPath = () => {
+    if (!contextMenu?.path) return;
+    void navigator.clipboard?.writeText(contextMenu.path).catch(() => {});
+    setContextMenu(null);
+  };
+
+  const trashContextTargets = async () => {
+    const targets = contextMenu?.targets ?? [];
+    setContextMenu(null);
+    if (targets.length === 0) {
+      window.alert(t("inbox.delete.unsupported"));
+      return;
+    }
+    await onTrashItems(targets);
+    const targetPaths = new Set(targets.map((target) => target.path));
+    setSelectedKeys((current) =>
+      new Set(
+        [...current].filter((key) => {
+          const target = inboxTrashTargetsForRows(trashableRows, [key])[0];
+          return target ? !targetPaths.has(target.path) : true;
+        }),
+      ),
+    );
+  };
+
   const pickDropFiles = async () => {
     const paths = await chooseFiles("Choose files for Inbox");
     if (paths.length > 0) await onStageFiles(paths);
@@ -298,9 +392,22 @@ export function InboxPane({
       ref={paneRef}
       tabIndex={-1}
       onKeyDown={(event) => {
-        if (event.metaKey || event.ctrlKey || event.altKey) return;
         const tag = (event.target as HTMLElement | null)?.tagName.toLowerCase();
-        if (tag === "input" || tag === "textarea" || (event.target as HTMLElement | null)?.isContentEditable) {
+        const isContentEditable = Boolean((event.target as HTMLElement | null)?.isContentEditable);
+        if (shouldHandleInboxDeleteShortcut({
+          key: event.key,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          targetTag: tag,
+          isContentEditable,
+        })) {
+          event.preventDefault();
+          void trashRows();
+          return;
+        }
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (tag === "input" || tag === "textarea" || isContentEditable) {
           return;
         }
         if (event.key === "ArrowDown") {
@@ -330,10 +437,8 @@ export function InboxPane({
           <p>
             {t("inbox.subtitle.combined", {
               files: pending.toLocaleString(locale),
-              gmail: gmailPending.toLocaleString(locale),
             })}
             {entryPending > 0 ? ` · process ${entryPending.toLocaleString(locale)}` : ""}
-            {gmailStatus ? ` · Gmail ${gmailStatus}` : ""}
           </p>
         </div>
         <div className="inbox-header-actions">
@@ -417,12 +522,14 @@ export function InboxPane({
               ) : null}
               {entries.map((entry) => {
                     const key = `entry:${entry.id}`;
+                    const row: InboxRow = { key, kind: "entry", entry };
                     return (
                       <article
                         className={`inbox-item configured-inbox-item${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
                         key={entry.id}
                         data-inbox-row-key={key}
                         onClick={(event) => handleRowClick(event, key)}
+                        onContextMenu={(event) => openRowContextMenu(event, row)}
                       >
                         <input
                           type="checkbox"
@@ -566,6 +673,7 @@ export function InboxPane({
                       : `processed-row ${item.status}`
                   }
                   onClick={() => void onSelectProcessedItem(item)}
+                  onContextMenu={(event) => openProcessedContextMenu(event, item)}
                 >
                   <div className="processed-row-title">
                     <span className={`status-chip ${item.status}`}>{statusLabel(item.status)}</span>
@@ -637,12 +745,14 @@ export function InboxPane({
             ) : null}
             {visibleItems.map((entry) => {
               const key = `file:${entry.item.id}`;
+              const row: InboxRow = { key, kind: "file", entry };
               return (
               <article
                 className={`inbox-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
                 key={entry.item.id}
                 data-inbox-row-key={key}
                 onClick={(event) => handleRowClick(event, key)}
+                onContextMenu={(event) => openRowContextMenu(event, row)}
               >
                 <input
                   type="checkbox"
@@ -739,83 +849,40 @@ export function InboxPane({
           </div>
         </InboxSection>
 
-        <InboxSection
-          title="GMAIL"
-        >
-          <div className="inbox-list">
-            {gmailLoading ? <div className="inbox-empty">{t("inbox.gmail.loading")}</div> : null}
-            {gmailError ? <div className="inbox-error gmail-error">{gmailError}</div> : null}
-            {!gmailLoading && !gmailError && gmailMessages.length === 0 ? (
-              <div className="inbox-empty" title={t("inbox.gmail.empty.title")}>
-                <Mail size={24} />
-                <strong>{t("inbox.gmail.empty.title")}</strong>
-                <span>{t("inbox.gmail.empty.description")}</span>
-              </div>
-            ) : null}
-            {gmailMessages.map((entry) => {
-              const key = `gmail:${entry.message.id}`;
-              return (
-              <article
-                className={`inbox-item gmail-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
-                key={entry.message.id}
-                data-inbox-row-key={key}
-                onClick={(event) => handleRowClick(event, key)}
-              >
-                <input
-                  type="checkbox"
-                  className="inbox-row-check"
-                  checked={selectedKeys.has(key)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleSelection(key, event.shiftKey);
-                  }}
-                  onChange={() => {}}
-                  aria-label={`Select ${entry.message.subject || "Gmail message"}`}
-                />
-                <div className="inbox-item-main">
-                  <div className="inbox-item-title">
-                    <span className="source-chip gmail">gmail</span>
-                    <strong>{entry.message.subject || t("inbox.gmail.noSubject")}</strong>
-                  </div>
-                  <p className="gmail-from">{shortFrom(entry.message.from)}</p>
-                  <div className="inbox-item-meta">
-                    {entry.message.date ? <time>{entry.message.date}</time> : null}
-                  </div>
-                </div>
-
-                <div className="inbox-decision">
-                  <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecideGmail(entry.message.id, "accepted");
-                    }}
-                    title={t("inbox.accept")}
-                    aria-label={t("inbox.accept")}
-                  >
-                    <Check size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecideGmail(entry.message.id, "rejected");
-                    }}
-                    title={t("inbox.reject")}
-                    aria-label={t("inbox.reject")}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </article>
-            );
-            })}
-          </div>
-        </InboxSection>
       </div>
+      {contextMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="context-menu-title" title={contextMenu.path}>
+            {contextMenu.title}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const path = contextMenu.path;
+              setContextMenu(null);
+              onRevealPath(path);
+            }}
+          >
+            <span>{t("inbox.menu.revealFinder")}</span>
+          </button>
+          <button type="button" onClick={copyContextPath}>
+            <span>{t("inbox.menu.copyPath")}</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            type="button"
+            className="danger"
+            disabled={contextMenu.targets.length === 0 || actionBusy}
+            onClick={() => void trashContextTargets()}
+          >
+            <span>{t("inbox.menu.delete")}</span>
+          </button>
+        </div>
+      ) : null}
       <BulkActionBar
         count={selectedKeys.size}
         fileCount={selectedFileCount}
@@ -964,6 +1031,29 @@ function inboxProcessChannel(mission: MissionRecord): string | null {
   return null;
 }
 
+function trashTargetForRow(row: InboxRow): InboxTrashTarget {
+  if (row.kind === "entry") {
+    return {
+      id: row.entry.id,
+      kind: row.entry.kind,
+      path: row.entry.path,
+    };
+  }
+  return {
+    id: row.entry.item.id,
+    kind: "dropFile",
+    path: row.entry.item.path,
+  };
+}
+
+function titleForRow(row: InboxRow): string {
+  return row.kind === "entry" ? row.entry.title : row.entry.item.title;
+}
+
+function pathForRow(row: InboxRow): string {
+  return row.kind === "entry" ? row.entry.path : row.entry.item.path;
+}
+
 function formatShortDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -979,7 +1069,7 @@ function firstPendingKey(rows: InboxRow[]): string | null {
   const row = rows.find((entry) => {
     if (entry.kind === "entry") return entry.entry.status !== "done";
     if (entry.kind === "file") return entry.entry.decision === "pending";
-    return entry.entry.decision === "pending";
+    return false;
   });
   return row?.key ?? null;
 }

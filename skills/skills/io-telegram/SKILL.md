@@ -25,6 +25,14 @@ Provide Telegram primitives and normalized inbox export.
 - bot notification when configured
 - session-backed read when configured
 
+## Anchor Runtime
+
+- `scripts/telegram_monitor.py --output-json --once --session-file <absolute>`
+  prints normalized recent messages to stdout and does not write to the inbox.
+- `scripts/auth.py --session-file <absolute>` runs interactive Telethon login in
+  a terminal. API id/hash and tokens must come from environment or
+  workspace-local runtime config.
+
 ## Rules
 
 - Use chat/message IDs only in workspace-local manifests or receipts.

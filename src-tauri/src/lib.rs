@@ -15,10 +15,13 @@ mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
 mod korean_date;
+mod launchd_migration;
 mod mission_state;
+mod outlook_mso;
 mod shelf;
 mod skill_host;
 mod sys_import;
+mod telegram_io;
 mod terminal;
 mod vault;
 mod vault_list;
@@ -48,7 +51,7 @@ use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
 use inbox::{
     accept_inbox_item, accept_inbox_items, read_inbox_processed_item, reject_inbox_item,
     reject_inbox_items, scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items,
-    stage_inbox_drop_files,
+    stage_inbox_drop_files, trash_inbox_items,
 };
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_settings::{
@@ -56,7 +59,9 @@ use inbox_settings::{
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
+use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
+use outlook_mso::{decide_outlook_item, decide_outlook_items, fetch_outlook_unread};
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
@@ -70,6 +75,11 @@ use skill_host::{
     skills_save_skill_as, skills_save_skill_file, skills_sync_source, skills_uninstall_skill,
 };
 use sys_import::{apply_sys_import, plan_sys_import};
+use tauri::Manager;
+use telegram_io::{
+    accept_telegram_item, fetch_telegram_recent, reject_telegram_item, start_telegram_polling,
+    stop_poller_on_exit, stop_telegram_polling, telegram_polling_status, TelegramIoState,
+};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
 use vault_list::{
@@ -95,6 +105,7 @@ pub fn run() {
             }
         })
         .manage(InboxWatcherState::default())
+        .manage(TelegramIoState::default())
         .manage(TerminalState::default())
         .manage(ApprovalState::default())
         .manage(MissionState::default())
@@ -126,6 +137,7 @@ pub fn run() {
             scan_inbox_entries,
             scan_inbox_processed_items,
             read_inbox_processed_item,
+            trash_inbox_items,
             stage_inbox_drop_files,
             accept_inbox_item,
             accept_inbox_items,
@@ -158,6 +170,17 @@ pub fn run() {
             fetch_gmail_unread,
             decide_gmail_item,
             decide_gmail_items,
+            fetch_outlook_unread,
+            decide_outlook_item,
+            decide_outlook_items,
+            fetch_telegram_recent,
+            accept_telegram_item,
+            reject_telegram_item,
+            start_telegram_polling,
+            stop_telegram_polling,
+            telegram_polling_status,
+            detect_legacy_telegram_launchd,
+            unload_legacy_telegram_launchd,
             prepare_approval,
             record_approval,
             // workspace pairing + .anchor/ system mode
@@ -220,6 +243,15 @@ pub fn run() {
             agent_apply_skill_proposal,
             agent_validate_marketplace_manifest,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Anchor");
+        .build(tauri::generate_context!())
+        .expect("error while building Anchor")
+        .run(|app_handle, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                let state = app_handle.state::<TelegramIoState>();
+                stop_poller_on_exit(state.inner());
+            }
+        });
 }

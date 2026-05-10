@@ -169,6 +169,68 @@ export interface InboxGmailConfig {
   gws_path: string | null;
 }
 
+export interface OutlookMessage {
+  id: string;
+  from: string;
+  subject: string;
+  date: string;
+  bodyPreview: string;
+  webLink: string | null;
+  categories: string[];
+  isRead: boolean;
+}
+
+export interface OutlookDecisionRequest {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+}
+
+export interface OutlookDecisionOutcome {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+  categoryName: string;
+  archived: boolean;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface TelegramMessage {
+  id: string;
+  chatId: string;
+  chatTitle: string;
+  sender: string;
+  text: string;
+  date: string;
+  permalink: string | null;
+}
+
+export interface TelegramPollingStatus {
+  running: boolean;
+  intervalSeconds: number;
+  lastStartedAt: string | null;
+  lastFetchedAt: string | null;
+  lastMessageCount: number;
+  lastError: string | null;
+}
+
+export interface TelegramFetchOptions {
+  workPath?: string | null;
+  max?: number | null;
+  pythonPath?: string | null;
+  scriptPath?: string | null;
+  sessionFile?: string | null;
+  monitorConfigPath?: string | null;
+  legacyAutoDrop?: boolean | null;
+}
+
+export interface TelegramDecisionOutcome {
+  messageId: string;
+  decision: Extract<InboxDecisionValue, "accepted" | "rejected">;
+  targetPath: string | null;
+  ok: boolean;
+  error: string | null;
+}
+
 export interface InboxChannelConfig {
   provider: string;
   skill?: string | null;
@@ -269,6 +331,22 @@ export interface InboxDecisionOutcome {
 }
 
 export type InboxDecisionValue = "pending" | "accepted" | "rejected";
+
+export type InboxTrashKind = "dropFile" | "pendingItem" | "processedItem";
+
+export interface InboxTrashTarget {
+  id: string;
+  kind: InboxTrashKind;
+  path: string;
+}
+
+export interface InboxTrashOutcome {
+  id: string;
+  kind: InboxTrashKind;
+  originalPath: string;
+  ok: boolean;
+  error: string | null;
+}
 
 export interface ScanOptions {
   includeDotFolders: string[];
@@ -488,6 +566,7 @@ export interface WorkspaceConfig {
   paths: WorkspacePaths;
   ssot?: Record<string, string>;
   skills?: Record<string, unknown>;
+  io?: Record<string, unknown>;
   inbox?: Record<string, unknown>;
   /** Unmodelled keys in workspace.config.yaml are surfaced here. */
   [extra: string]: unknown;

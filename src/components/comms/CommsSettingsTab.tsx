@@ -1,0 +1,376 @@
+import { LogIn, Play, Square } from "lucide-react";
+import type { InboxGmailConfig } from "../../lib/types";
+import {
+  COMMS_PROVIDER_RESULTS_MAX,
+  COMMS_PROVIDER_RESULTS_MIN,
+  TELEGRAM_POLL_INTERVAL_MAX_SECONDS,
+  TELEGRAM_POLL_INTERVAL_MIN_SECONDS,
+  type CommsSettings,
+} from "../../lib/settings";
+import type { TelegramPollingStatus } from "../../lib/types";
+import { useTranslation } from "../../lib/i18n";
+
+interface CommsSettingsTabProps {
+  settings: CommsSettings;
+  effectiveSettings?: CommsSettings;
+  gmailSettings: InboxGmailConfig;
+  effectiveGwsPath?: string | null;
+  pollingStatus?: TelegramPollingStatus;
+  telegramEnvHealthy?: boolean | null;
+  onSettingsChange: (settings: CommsSettings) => void;
+  onGmailSettingsChange: (settings: InboxGmailConfig) => void;
+  onStartPolling?: () => void;
+  onStopPolling?: () => void;
+  onTelegramLogin?: () => void;
+  onOpenSkillsEnvSettings?: () => void;
+}
+
+export function CommsSettingsTab({
+  settings,
+  effectiveSettings,
+  gmailSettings,
+  effectiveGwsPath = null,
+  pollingStatus = {
+    running: false,
+    intervalSeconds: settings.telegram.intervalSeconds,
+    lastStartedAt: null,
+    lastFetchedAt: null,
+    lastMessageCount: 0,
+    lastError: null,
+  },
+  telegramEnvHealthy,
+  onSettingsChange,
+  onGmailSettingsChange,
+  onStartPolling,
+  onStopPolling,
+  onTelegramLogin,
+  onOpenSkillsEnvSettings,
+}: CommsSettingsTabProps) {
+  const { t } = useTranslation();
+  const updateGmail = (patch: Partial<InboxGmailConfig>) =>
+    onGmailSettingsChange({ ...gmailSettings, ...patch });
+  const updateOutlook = (patch: Partial<CommsSettings["outlook"]>) =>
+    onSettingsChange({ ...settings, outlook: { ...settings.outlook, ...patch } });
+  const updateTelegram = (patch: Partial<CommsSettings["telegram"]>) =>
+    onSettingsChange({ ...settings, telegram: { ...settings.telegram, ...patch } });
+  const gwsValue = gmailSettings.gws_path ?? "";
+  const effectiveM365Path = effectiveSettings?.outlook.m365Path ?? null;
+
+  return (
+    <div className="settings-form comms-settings-form">
+      <section className="settings-section-panel">
+        <div className="settings-section-heading">
+          <div>
+            <strong>Gmail / Google Workspace</strong>
+            <span>Envelope scan settings for Gmail through gws.</span>
+          </div>
+        </div>
+        <label className="field checkbox-field">
+          <input
+            type="checkbox"
+            checked={gmailSettings.enabled}
+            onChange={(event) => updateGmail({ enabled: event.target.checked })}
+          />
+          <span>{t("comms.enabled")}</span>
+        </label>
+        <div className="settings-grid two">
+          <label className="field">
+            <span>Scan window (days)</span>
+            <input
+              type="number"
+              min={0}
+              max={3650}
+              value={gmailSettings.scan_window_days}
+              onChange={(event) =>
+                updateGmail({
+                  scan_window_days: boundedInteger(
+                    event.target.value,
+                    gmailSettings.scan_window_days,
+                    0,
+                    3650,
+                  ),
+                })
+              }
+            />
+          </label>
+          <label className="field">
+            <span>{t("comms.maxResults")}</span>
+            <input
+              type="number"
+              min={COMMS_PROVIDER_RESULTS_MIN}
+              max={COMMS_PROVIDER_RESULTS_MAX}
+              value={gmailSettings.max_results}
+              onChange={(event) =>
+                updateGmail({
+                  max_results: boundedInteger(
+                    event.target.value,
+                    gmailSettings.max_results,
+                    COMMS_PROVIDER_RESULTS_MIN,
+                    COMMS_PROVIDER_RESULTS_MAX,
+                  ),
+                })
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Auto refresh TTL (seconds)</span>
+            <input
+              type="number"
+              min={0}
+              max={TELEGRAM_POLL_INTERVAL_MAX_SECONDS}
+              value={gmailSettings.auto_refresh_ttl_seconds}
+              onChange={(event) =>
+                updateGmail({
+                  auto_refresh_ttl_seconds: boundedInteger(
+                    event.target.value,
+                    gmailSettings.auto_refresh_ttl_seconds,
+                    0,
+                    TELEGRAM_POLL_INTERVAL_MAX_SECONDS,
+                  ),
+                })
+              }
+            />
+          </label>
+          <label className="field checkbox-field">
+            <input
+              type="checkbox"
+              checked={gmailSettings.unread_only}
+              onChange={(event) => updateGmail({ unread_only: event.target.checked })}
+            />
+            <span>Unread only</span>
+          </label>
+          <label className="field">
+            <span>gws CLI path</span>
+            <input
+              className="path-input"
+              value={gwsValue}
+              onChange={(event) => {
+                const value = event.target.value.trim();
+                updateGmail({ gws_path: value || null });
+              }}
+              placeholder={effectiveGwsPath ?? "/opt/homebrew/bin/gws"}
+              title={gwsValue || effectiveGwsPath || "/opt/homebrew/bin/gws"}
+              spellCheck={false}
+            />
+            {!gmailSettings.gws_path && effectiveGwsPath ? (
+              <small>Using workspace config: {effectiveGwsPath}</small>
+            ) : null}
+          </label>
+        </div>
+        <label className="field">
+          <span>Query override</span>
+          <input
+            value={gmailSettings.query}
+            onChange={(event) => updateGmail({ query: event.target.value })}
+            placeholder="is:unread newer_than:14d"
+            spellCheck={false}
+          />
+          <small>Leave empty to build a query from unread-only and scan-window settings.</small>
+        </label>
+      </section>
+
+      <section className="settings-section-panel">
+        <div className="settings-section-heading">
+          <div>
+            <strong>{t("comms.outlook.title")}</strong>
+            <span>{t("comms.outlook.settings.description")}</span>
+          </div>
+        </div>
+        <label className="field checkbox-field">
+          <input
+            type="checkbox"
+            checked={settings.outlook.enabled}
+            onChange={(event) => updateOutlook({ enabled: event.target.checked })}
+          />
+          <span>{t("comms.enabled")}</span>
+        </label>
+        <label className="field">
+          <span>{t("comms.outlook.m365Path")}</span>
+          <input
+            className="path-input"
+            value={settings.outlook.m365Path ?? ""}
+            onChange={(event) => {
+              const value = event.target.value.trim();
+              updateOutlook({ m365Path: value || null });
+            }}
+            placeholder={effectiveM365Path ?? "/opt/homebrew/bin/m365"}
+            title={settings.outlook.m365Path ?? effectiveM365Path ?? "/opt/homebrew/bin/m365"}
+            spellCheck={false}
+          />
+          {!settings.outlook.m365Path && effectiveM365Path ? (
+            <small>Using workspace config: {effectiveM365Path}</small>
+          ) : null}
+        </label>
+        <label className="field">
+          <span>{t("comms.maxResults")}</span>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={settings.outlook.maxResults}
+            onChange={(event) =>
+              updateOutlook({
+                maxResults: boundedInteger(
+                  event.target.value,
+                  settings.outlook.maxResults,
+                  COMMS_PROVIDER_RESULTS_MIN,
+                  COMMS_PROVIDER_RESULTS_MAX,
+                ),
+              })
+            }
+          />
+        </label>
+      </section>
+
+      <section className="settings-section-panel">
+        <div className="settings-section-heading">
+          <div>
+            <strong>{t("comms.telegram.title")}</strong>
+            <span>{t("comms.telegram.settings.description")}</span>
+          </div>
+        </div>
+        {telegramEnvHealthy === false ? (
+          <div className="comms-setup-banner">
+            <div>
+              <strong>{t("comms.telegram.setupRequired")}</strong>
+              <p>{t("comms.telegram.setupRequiredDetail")}</p>
+            </div>
+            {onOpenSkillsEnvSettings ? (
+              <button type="button" className="secondary-button" onClick={onOpenSkillsEnvSettings}>
+                {t("comms.telegram.openEnvSetup")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <label className="field checkbox-field">
+          <input
+            type="checkbox"
+            checked={settings.telegram.enabled}
+            onChange={(event) => updateTelegram({ enabled: event.target.checked })}
+          />
+          <span>{t("comms.enabled")}</span>
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.sessionFile")}</span>
+          <input
+            className="path-input"
+            value={settings.telegram.sessionFile ?? ""}
+            onChange={(event) => updateTelegram({ sessionFile: event.target.value || null })}
+            placeholder="~/.anchor/telegram/monitor.session"
+            title={settings.telegram.sessionFile ?? "~/.anchor/telegram/monitor.session"}
+            spellCheck={false}
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.monitorConfigPath")}</span>
+          <input
+            className="path-input"
+            value={settings.telegram.monitorConfigPath ?? ""}
+            onChange={(event) => updateTelegram({ monitorConfigPath: event.target.value || null })}
+            placeholder="~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
+            title={
+              settings.telegram.monitorConfigPath ??
+              "~/workspace/work/.secrets/services/telegram-monitor.config.yaml"
+            }
+            spellCheck={false}
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.pythonPath")}</span>
+          <input
+            className="path-input"
+            value={settings.telegram.pythonPath ?? ""}
+            onChange={(event) => updateTelegram({ pythonPath: event.target.value || null })}
+            placeholder="~/.anchor/env/.venv/bin/python"
+            title={settings.telegram.pythonPath ?? "~/.anchor/env/.venv/bin/python"}
+            spellCheck={false}
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.scriptPath")}</span>
+          <input
+            className="path-input"
+            value={settings.telegram.scriptPath ?? ""}
+            onChange={(event) => updateTelegram({ scriptPath: event.target.value || null })}
+            placeholder="~/.anchor/skills/_builtin/skills/io-telegram/scripts/telegram_monitor.py"
+            title={
+              settings.telegram.scriptPath ??
+              "~/.anchor/skills/_builtin/skills/io-telegram/scripts/telegram_monitor.py"
+            }
+            spellCheck={false}
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.telegram.interval")}</span>
+          <input
+            type="number"
+            min={30}
+            value={settings.telegram.intervalSeconds}
+            onChange={(event) =>
+              updateTelegram({
+                intervalSeconds: boundedInteger(
+                  event.target.value,
+                  settings.telegram.intervalSeconds,
+                  TELEGRAM_POLL_INTERVAL_MIN_SECONDS,
+                  TELEGRAM_POLL_INTERVAL_MAX_SECONDS,
+                ),
+              })
+            }
+          />
+        </label>
+        <label className="field">
+          <span>{t("comms.maxResults")}</span>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={settings.telegram.maxResults}
+            onChange={(event) =>
+              updateTelegram({
+                maxResults: boundedInteger(
+                  event.target.value,
+                  settings.telegram.maxResults,
+                  COMMS_PROVIDER_RESULTS_MIN,
+                  COMMS_PROVIDER_RESULTS_MAX,
+                ),
+              })
+            }
+          />
+        </label>
+        <label className="field checkbox-field">
+          <input
+            type="checkbox"
+            checked={settings.telegram.legacyAutoDrop}
+            onChange={(event) => updateTelegram({ legacyAutoDrop: event.target.checked })}
+          />
+          <span>{t("comms.telegram.legacyAutoDrop")}</span>
+        </label>
+        {onTelegramLogin && onStartPolling && onStopPolling ? (
+          <div className="comms-settings-actions">
+            <button type="button" className="secondary-button" onClick={onTelegramLogin}>
+              <LogIn size={14} />
+              <span>{t("comms.telegram.login")}</span>
+            </button>
+            {pollingStatus.running ? (
+              <button type="button" className="secondary-button" onClick={onStopPolling}>
+                <Square size={14} />
+                <span>{t("comms.telegram.stopPolling")}</span>
+              </button>
+            ) : (
+              <button type="button" className="secondary-button" onClick={onStartPolling}>
+                <Play size={14} />
+                <span>{t("comms.telegram.startPolling")}</span>
+              </button>
+            )}
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function boundedInteger(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}

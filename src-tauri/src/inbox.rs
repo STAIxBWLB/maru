@@ -49,6 +49,24 @@ pub struct InboxDecisionOutcome {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxTrashTarget {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxTrashOutcome {
+    pub id: String,
+    pub kind: String,
+    pub original_path: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxDropStageOutcome {
@@ -196,6 +214,7 @@ struct ProcessedProcessingHints {
 
 const INBOX_FILE_ACCEPT_KIND: &str = "inbox.file.accept";
 const INBOX_FILE_REJECT_KIND: &str = "inbox.file.reject";
+const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 
 #[tauri::command]
@@ -240,6 +259,25 @@ pub fn read_inbox_processed_item(
     let work = normalize_existing_dir(&work_path)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
     read_processed_item_with_config(&work, &config, &item_dir)
+}
+
+#[tauri::command]
+pub fn trash_inbox_items(
+    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    targets: Vec<InboxTrashTarget>,
+    approval_id: Option<String>,
+) -> Result<Vec<InboxTrashOutcome>, String> {
+    crate::approval::require_approval(&approvals, approval_id, INBOX_FILE_TRASH_KIND)?;
+    let work = normalize_existing_dir(&work_path)?;
+    assert_anchor_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Delete)?;
+    let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
+    Ok(trash_inbox_items_with(
+        &work,
+        &config,
+        targets,
+        move_path_to_system_trash,
+    ))
 }
 
 #[tauri::command]
@@ -693,6 +731,184 @@ fn read_processed_item_with_config(
     })
 }
 
+fn trash_inbox_items_with<F>(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    targets: Vec<InboxTrashTarget>,
+    mut trasher: F,
+) -> Vec<InboxTrashOutcome>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
+    targets
+        .into_iter()
+        .map(|target| {
+            let kind = target.kind.clone();
+            let id = target.id.clone();
+            match resolve_inbox_trash_target(work, config, &target) {
+                Ok(path) => {
+                    let original_path = path.to_string_lossy().to_string();
+                    match trasher(&path) {
+                        Ok(()) => InboxTrashOutcome {
+                            id,
+                            kind,
+                            original_path,
+                            ok: true,
+                            error: None,
+                        },
+                        Err(err) => InboxTrashOutcome {
+                            id,
+                            kind,
+                            original_path,
+                            ok: false,
+                            error: Some(err),
+                        },
+                    }
+                }
+                Err(err) => InboxTrashOutcome {
+                    id,
+                    kind,
+                    original_path: target.path,
+                    ok: false,
+                    error: Some(err),
+                },
+            }
+        })
+        .collect()
+}
+
+fn resolve_inbox_trash_target(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    target: &InboxTrashTarget,
+) -> Result<PathBuf, String> {
+    let raw_path = target.path.trim();
+    if raw_path.is_empty() {
+        return Err("inbox_trash_path_required".to_string());
+    }
+    let path = resolve_inside_vault(&work.to_string_lossy(), raw_path)?;
+    if !path.exists() {
+        return Err("inbox_trash_target_missing".to_string());
+    }
+    reject_symlink_trash_target(&path)?;
+
+    match target.kind.as_str() {
+        "dropFile" => {
+            if !path.is_file() {
+                return Err("inbox_trash_drop_file_not_file".to_string());
+            }
+            if !is_configured_drop_file(work, config, &path)? {
+                return Err("inbox_trash_drop_file_outside_configured_roots".to_string());
+            }
+        }
+        "pendingItem" => {
+            if !path.is_dir() {
+                return Err("inbox_trash_pending_item_not_directory".to_string());
+            }
+            if !is_pending_item_dir(work, config, &path)? {
+                return Err("inbox_trash_pending_item_outside_pending_root".to_string());
+            }
+        }
+        "processedItem" => {
+            if !path.is_dir() {
+                return Err("inbox_trash_processed_item_not_directory".to_string());
+            }
+            if !is_processed_item_dir(work, config, &path)? {
+                return Err("inbox_trash_processed_item_outside_processed_roots".to_string());
+            }
+        }
+        other => return Err(format!("inbox_trash_kind_unsupported: {other}")),
+    }
+
+    Ok(path)
+}
+
+fn reject_symlink_trash_target(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("Cannot inspect inbox trash target: {err}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("inbox_trash_target_symlink_unsupported".to_string());
+    }
+    Ok(())
+}
+
+fn is_configured_drop_file(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    path: &Path,
+) -> Result<bool, String> {
+    let settings = inbox_settings::load(work);
+    let legacy_root = resolve_inside_vault(&work.to_string_lossy(), settings.inbox_root.as_str())?;
+    if path.starts_with(&legacy_root) {
+        return Ok(true);
+    }
+
+    let runtime_root = inbox_settings::resolve_runtime_root(work, config)?;
+    let mut drop_roots = Vec::new();
+    for channel in config.channels.values() {
+        for drop_path in &channel.drop_paths {
+            drop_roots.push(runtime_drop_root(&runtime_root, drop_path)?);
+        }
+    }
+    drop_roots.push(runtime_drop_root(
+        &runtime_root,
+        &config.file_drop.drop_path,
+    )?);
+    Ok(drop_roots.into_iter().any(|root| path.starts_with(root)))
+}
+
+fn runtime_drop_root(runtime_root: &Path, drop_path: &str) -> Result<PathBuf, String> {
+    let root = inbox_settings::lexical_normalize_path(&runtime_root.join(drop_path));
+    if !root.starts_with(runtime_root) {
+        return Err(format!("inbox_drop_path_outside_root: {drop_path}"));
+    }
+    Ok(root)
+}
+
+fn is_pending_item_dir(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    path: &Path,
+) -> Result<bool, String> {
+    let root = inbox_settings::resolve_runtime_root(work, config)?;
+    let pending_root = processed_status_dir(&root, config, "pending")?;
+    if path == pending_root || !path.starts_with(&pending_root) {
+        return Ok(false);
+    }
+    Ok(path.join(&config.naming.manifest_file).is_file())
+}
+
+fn is_processed_item_dir(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    path: &Path,
+) -> Result<bool, String> {
+    let root = inbox_settings::resolve_runtime_root(work, config)?;
+    for status in ["done", "failed", "duplicate"] {
+        let status_dir = processed_status_dir(&root, config, status)?;
+        if path.parent() == Some(status_dir.as_path()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut context = trash::TrashContext::new();
+        context.set_delete_method(DeleteMethod::NsFileManager);
+        context
+            .delete(path)
+            .map_err(|err| format!("Cannot move inbox item to system trash: {err}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        trash::delete(path).map_err(|err| format!("Cannot move inbox item to system trash: {err}"))
+    }
+}
+
 fn normalize_processed_statuses(statuses: Option<Vec<String>>) -> Result<Vec<String>, String> {
     let default = vec![
         "done".to_string(),
@@ -856,7 +1072,12 @@ fn build_processed_item(
     let manifest_raw_file_count = manifest
         .files
         .iter()
-        .filter(|file| file.path.as_deref().map(str::trim).is_some_and(|path| !path.is_empty()))
+        .filter(|file| {
+            file.path
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|path| !path.is_empty())
+        })
         .count();
     let raw_file_count = if manifest_raw_file_count > 0 {
         manifest_raw_file_count
@@ -1374,6 +1595,7 @@ fn emit_decision(app: &AppHandle, event: &str, outcome: &InboxDecisionOutcome) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1905,7 +2127,11 @@ files:
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
         let dir = root.join("inbox/items/failed/missing-fields");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("manifest.yaml"), "files:\n  - original_name: source.txt\n").unwrap();
+        fs::write(
+            dir.join("manifest.yaml"),
+            "files:\n  - original_name: source.txt\n",
+        )
+        .unwrap();
         fs::write(
             dir.join("summary.md"),
             "---\ndescription: field sparse item\n---\n\nsummary\n",
@@ -1953,6 +2179,150 @@ files:
         .unwrap();
         assert!(detail.extracted_truncated);
         assert!(detail.extracted_text.unwrap().len() <= 200 * 1024);
+    }
+
+    #[test]
+    fn trash_inbox_items_validates_and_trashes_local_inbox_targets() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let config = runtime_config_with_kakao_drop();
+        let drop_file = root.join("inbox/drop/kakao/chat.txt");
+        let pending_dir = root.join("inbox/items/pending/pending-a");
+        let processed_dir = root.join("inbox/items/done/done-a");
+        fs::create_dir_all(drop_file.parent().unwrap()).unwrap();
+        fs::write(&drop_file, b"chat").unwrap();
+        fs::create_dir_all(&pending_dir).unwrap();
+        fs::write(
+            pending_dir.join("manifest.yaml"),
+            "id: pending-a\nstatus: pending\nchannel: kakao\n",
+        )
+        .unwrap();
+        fs::create_dir_all(&processed_dir).unwrap();
+        fs::write(
+            processed_dir.join("manifest.yaml"),
+            "id: done-a\nstatus: done\nchannel: kakao\n",
+        )
+        .unwrap();
+
+        let mut trashed = Vec::new();
+        let outcomes = trash_inbox_items_with(
+            &root,
+            &config,
+            vec![
+                trash_target("drop", "dropFile", &drop_file),
+                trash_target("pending", "pendingItem", &pending_dir),
+                trash_target("processed", "processedItem", &processed_dir),
+            ],
+            |path| {
+                trashed.push(path.to_path_buf());
+                remove_for_test(path)
+            },
+        );
+
+        assert!(outcomes.iter().all(|outcome| outcome.ok));
+        assert_eq!(trashed, vec![drop_file, pending_dir, processed_dir]);
+        assert!(outcomes
+            .iter()
+            .all(|outcome| !outcome.original_path.is_empty()));
+    }
+
+    #[test]
+    fn trash_inbox_items_rejects_outside_missing_and_wrong_kind_targets() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("outside.txt");
+        fs::write(&outside_file, b"outside").unwrap();
+        let config = runtime_config_with_kakao_drop();
+        let drop_file = root.join("inbox/drop/kakao/chat.txt");
+        fs::create_dir_all(drop_file.parent().unwrap()).unwrap();
+        fs::write(&drop_file, b"chat").unwrap();
+
+        let outcomes = trash_inbox_items_with(
+            &root,
+            &config,
+            vec![
+                trash_target("outside", "dropFile", &outside_file),
+                InboxTrashTarget {
+                    id: "missing".to_string(),
+                    kind: "dropFile".to_string(),
+                    path: "inbox/drop/kakao/missing.txt".to_string(),
+                },
+                trash_target("wrong", "pendingItem", &drop_file),
+            ],
+            |_| Ok(()),
+        );
+
+        assert_eq!(outcomes.len(), 3);
+        assert!(outcomes.iter().all(|outcome| !outcome.ok));
+        assert!(outcomes[0].error.as_deref().unwrap().contains("escapes"));
+        assert_eq!(
+            outcomes[1].error.as_deref(),
+            Some("inbox_trash_target_missing")
+        );
+        assert_eq!(
+            outcomes[2].error.as_deref(),
+            Some("inbox_trash_pending_item_not_directory")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trash_inbox_items_rejects_symlink_targets() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let config = runtime_config_with_kakao_drop();
+        fs::create_dir_all(root.join("inbox/drop/kakao")).unwrap();
+        let real = root.join("inbox/drop/kakao/real.txt");
+        let link = root.join("inbox/drop/kakao/link.txt");
+        fs::write(&real, b"real").unwrap();
+        symlink(&real, &link).unwrap();
+
+        let outcomes = trash_inbox_items_with(
+            &root,
+            &config,
+            vec![trash_target("link", "dropFile", &link)],
+            |_| Ok(()),
+        );
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(!outcomes[0].ok);
+        assert_eq!(
+            outcomes[0].error.as_deref(),
+            Some("inbox_trash_target_symlink_unsupported")
+        );
+        assert!(link.exists());
+    }
+
+    #[test]
+    fn trash_inbox_items_keeps_batch_failures_per_item() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let config = runtime_config_with_kakao_drop();
+        let drop_file = root.join("inbox/drop/kakao/chat.txt");
+        fs::create_dir_all(drop_file.parent().unwrap()).unwrap();
+        fs::write(&drop_file, b"chat").unwrap();
+
+        let outcomes = trash_inbox_items_with(
+            &root,
+            &config,
+            vec![
+                trash_target("ok", "dropFile", &drop_file),
+                InboxTrashTarget {
+                    id: "missing".to_string(),
+                    kind: "dropFile".to_string(),
+                    path: "inbox/drop/kakao/missing.txt".to_string(),
+                },
+            ],
+            remove_for_test,
+        );
+
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes[0].ok);
+        assert!(!outcomes[1].ok);
+        assert!(!drop_file.exists());
     }
 
     fn write_processed_config(root: &Path, summary: &str, route: &str, extracted: &str) {
@@ -2046,5 +2416,38 @@ inbox:
         )
         .unwrap();
         fs::write(dir.join(extracted_name), "extracted").unwrap();
+    }
+
+    fn runtime_config_with_kakao_drop() -> InboxRuntimeConfig {
+        let mut config = InboxRuntimeConfig::default();
+        config.channels.insert(
+            "kakao".to_string(),
+            inbox_settings::InboxChannelConfig {
+                provider: "local".to_string(),
+                skill: None,
+                kind: "file".to_string(),
+                drop_paths: vec!["drop/kakao".to_string()],
+                source_kinds: BTreeMap::new(),
+                dedupe: "sha256".to_string(),
+                extra: BTreeMap::new(),
+            },
+        );
+        config
+    }
+
+    fn trash_target(id: &str, kind: &str, path: &Path) -> InboxTrashTarget {
+        InboxTrashTarget {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            path: path.to_string_lossy().to_string(),
+        }
+    }
+
+    fn remove_for_test(path: &Path) -> Result<(), String> {
+        if path.is_dir() {
+            fs::remove_dir_all(path).map_err(|err| format!("remove dir failed: {err}"))
+        } else {
+            fs::remove_file(path).map_err(|err| format!("remove file failed: {err}"))
+        }
     }
 }

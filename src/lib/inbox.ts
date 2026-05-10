@@ -5,6 +5,7 @@ import type {
   InboxProcessedItem,
   InboxProcessedStatus,
   InboxRuntimeConfig,
+  InboxTrashTarget,
   MissionRecord,
 } from "./types";
 
@@ -66,17 +67,58 @@ export function countInboxSources<T extends { item: { source: string } }>(
 export function buildInboxFeedRowKeys({
   entries,
   files,
-  gmail,
 }: {
   entries: Array<{ id: string }>;
   files: Array<{ item: { id: string } }>;
-  gmail: Array<{ message: { id: string } }>;
 }): string[] {
   return [
     ...entries.map((entry) => `entry:${entry.id}`),
     ...files.map((entry) => `file:${entry.item.id}`),
-    ...gmail.map((entry) => `gmail:${entry.message.id}`),
   ];
+}
+
+export interface InboxTrashableRow {
+  key: string;
+  trashTarget: InboxTrashTarget | null;
+}
+
+export function inboxContextActionKeys(
+  selectedKeys: Iterable<string>,
+  targetKey: string,
+): string[] {
+  const selected = [...selectedKeys];
+  return selected.includes(targetKey) ? selected : [targetKey];
+}
+
+export function inboxTrashTargetsForRows(
+  rows: InboxTrashableRow[],
+  keys: string[],
+): InboxTrashTarget[] {
+  const byKey = new Map(rows.map((row) => [row.key, row.trashTarget] as const));
+  return keys
+    .map((key) => byKey.get(key) ?? null)
+    .filter((target): target is InboxTrashTarget => target !== null);
+}
+
+export function shouldHandleInboxDeleteShortcut({
+  key,
+  metaKey = false,
+  ctrlKey = false,
+  altKey = false,
+  targetTag = null,
+  isContentEditable = false,
+}: {
+  key: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  targetTag?: string | null;
+  isContentEditable?: boolean;
+}): boolean {
+  if (metaKey || ctrlKey || altKey) return false;
+  if (key !== "Delete" && key !== "Backspace") return false;
+  const tag = targetTag?.toLowerCase() ?? "";
+  return tag !== "input" && tag !== "textarea" && !isContentEditable;
 }
 
 export function categoryLabel(category: string): string {

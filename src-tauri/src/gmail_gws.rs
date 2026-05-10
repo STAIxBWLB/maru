@@ -12,11 +12,13 @@
 // locations and falls back to a user-provided absolute path stored in
 // `<vault>/.anchor/inbox.json`.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
@@ -264,7 +266,49 @@ fn configured_gws_path_for_vault(raw: &str) -> Option<String> {
             return Some(path);
         }
     }
+    if let Some(path) = workspace_provider_string(
+        &vault,
+        &["gws", "gmail"],
+        &[
+            "gws_binary",
+            "gwsBinary",
+            "gws_path",
+            "gwsPath",
+            "command",
+            "commandPath",
+            "command_path",
+        ],
+    ) {
+        return Some(path);
+    }
     inbox_settings::load(&vault).gws_path
+}
+
+fn workspace_provider_string(
+    work_path: &Path,
+    providers: &[&str],
+    keys: &[&str],
+) -> Option<String> {
+    let content = fs::read_to_string(work_path.join("workspace.config.yaml")).ok()?;
+    let yaml: YamlValue = serde_yaml::from_str(&content).ok()?;
+    let provider_root = yaml.get("io")?.get("providers")?;
+    for provider_name in providers {
+        let Some(provider) = provider_root.get(*provider_name) else {
+            continue;
+        };
+        for key in keys {
+            if let Some(value) = provider
+                .get(*key)
+                .and_then(YamlValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+            {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 fn gmail_scan_query(config: &InboxGmailConfig) -> Option<String> {
@@ -551,6 +595,21 @@ mod tests {
         // Result depends on host PATH; we only assert no panic and that
         // an empty-string override is treated as "no override".
         let _ = resolved;
+    }
+
+    #[test]
+    fn reads_gws_binary_from_workspace_provider_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("workspace.config.yaml"),
+            "io:\n  providers:\n    gws:\n      gws_binary: /opt/homebrew/bin/gws\n",
+        )
+        .unwrap();
+
+        let resolved =
+            workspace_provider_string(tmp.path(), &["gws", "gmail"], &["gws_binary", "command"]);
+
+        assert_eq!(resolved.as_deref(), Some("/opt/homebrew/bin/gws"));
     }
 
     #[test]

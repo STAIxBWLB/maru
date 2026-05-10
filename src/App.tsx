@@ -6,6 +6,7 @@ import {
   Command,
   FileText,
   Inbox,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCcw,
@@ -16,6 +17,7 @@ import {
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
+import { CommsPane } from "./components/CommsPane";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
@@ -45,9 +47,16 @@ import {
   DEFAULT_INBOX_RUNTIME_CONFIG,
   decideGmailItem as decideGmailItemApi,
   decideGmailItems,
+  decideOutlookItem as decideOutlookItemApi,
+  decideOutlookItems,
+  acceptTelegramItem,
+  rejectTelegramItem,
+  detectLegacyTelegramLaunchd,
   describeFileQueueSources,
   duplicateDocument,
   fetchGmailUnread,
+  fetchOutlookUnread,
+  fetchTelegramRecent,
   getSampleVaultPath,
   gitStatus,
   listAiMissions,
@@ -60,6 +69,7 @@ import {
   readInboxProcessedItem,
   readInboxRuntimeConfig,
   readVaultCache,
+  unloadLegacyTelegramLaunchd,
   refreshWorkspaceCapabilities,
   removeWorkspaceRoot,
   recordApproval,
@@ -74,13 +84,19 @@ import {
   setActiveWorkspaceRoot,
   stageInboxDropFiles,
   startInboxWatcher,
+  startTelegramPolling,
   stopAiMission,
   stopInboxWatcher,
+  stopTelegramPolling,
+  telegramPollingStatus,
   trashDocument,
+  trashInboxItems,
   updateFrontmatterField,
+  type LegacyLaunchdService,
 } from "./lib/api";
 import {
   readAnchorSettings,
+  readWorkspaceConfig,
   registerWorkspaceRoots,
   saveAnchorSettings,
   listenAnchorSettingsUpdated,
@@ -124,6 +140,13 @@ import {
   type InboxDecision,
   type InboxItemState,
 } from "./lib/inbox";
+import { buildOutlookMessageStates, type OutlookMessageState } from "./lib/outlook";
+import {
+  buildTelegramMessageStates,
+  telegramFetchOptions,
+  telegramLoginCommand,
+  type TelegramMessageState,
+} from "./lib/telegram";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import type { TerminalKind } from "./lib/terminal";
 import {
@@ -151,6 +174,9 @@ import type {
   FileStoreOperation,
   GitStatus,
   GmailMessage,
+  OutlookMessage,
+  TelegramMessage,
+  TelegramPollingStatus,
   InboxClassification,
   InboxDropItem,
   InboxEntry,
@@ -158,9 +184,11 @@ import type {
   InboxProcessedItemDetail,
   InboxProcessedStatus,
   InboxRuntimeConfig,
+  InboxTrashTarget,
   MissionRecord,
   VaultEntry,
   WorkspaceFileEntry,
+  WorkspaceConfig,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -173,6 +201,7 @@ import {
 } from "./lib/fileDrag";
 import {
   DEFAULT_ANCHOR_SETTINGS,
+  applyWorkspaceCommsOverrides,
   normalizeAnchorSettings,
   type AnchorSettings,
   type AnchorAppMode,
@@ -227,6 +256,29 @@ const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
+const OUTLOOK_REFRESH_TTL_MS = 60_000;
+const TELEGRAM_REFRESH_TTL_MS = 60_000;
+
+interface ProviderRefreshCache {
+  fetchedAt: number | null;
+  key: string;
+}
+
+function shouldSkipProviderRefresh(
+  cache: ProviderRefreshCache,
+  key: string,
+  force: boolean,
+  loading: boolean,
+  ttlMs: number,
+): boolean {
+  if (force) return false;
+  if (loading) return true;
+  return Boolean(
+    cache.fetchedAt &&
+      cache.key === key &&
+      Date.now() - cache.fetchedAt < ttlMs,
+  );
+}
 
 type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
@@ -607,6 +659,7 @@ function MainApp() {
     },
     hiddenDefaults: [],
   });
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
   const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
   const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
   const [explorerVisibility, setExplorerVisibility] =
@@ -698,6 +751,11 @@ function MainApp() {
   const gmailScanStatusRef = useRef<GmailScanStatus>(DEFAULT_GMAIL_SCAN_STATUS);
   const gmailLoadingRef = useRef(false);
   const gmailRequestSeqRef = useRef(0);
+  const outlookLoadingRef = useRef(false);
+  const outlookRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
+  const telegramLoadingRef = useRef(false);
+  const telegramRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
+  const migrationCheckedRef = useRef(false);
   const processingMissionIdsRef = useRef<Set<string>>(new Set());
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
@@ -753,8 +811,8 @@ function MainApp() {
   const [processingMissions, setProcessingMissions] = useState<MissionRecord[]>([]);
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
 
-  // Gmail surface (gws CLI). Sibling section in InboxPane; list state is
-  // memory-only, while accept/reject calls write labels/archive through gws.
+  // Gmail surface (gws CLI). List state is memory-only in Comms, while
+  // accept/reject calls write labels/archive through gws.
   const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailError, setGmailError] = useState<string | null>(null);
@@ -764,6 +822,29 @@ function MainApp() {
   const [gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
     () => new Map(),
   );
+  const [outlookMessages, setOutlookMessages] = useState<OutlookMessage[]>([]);
+  const [outlookLoading, setOutlookLoading] = useState(false);
+  const [outlookError, setOutlookError] = useState<string | null>(null);
+  const [outlookStatus, setOutlookStatus] = useState("");
+  const [outlookDecisions, setOutlookDecisions] = useState<Map<string, InboxDecision>>(
+    () => new Map(),
+  );
+  const [telegramMessages, setTelegramMessages] = useState<TelegramMessage[]>([]);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [telegramPolling, setTelegramPolling] = useState<TelegramPollingStatus>({
+    running: false,
+    intervalSeconds: 60,
+    lastStartedAt: null,
+    lastFetchedAt: null,
+    lastMessageCount: 0,
+    lastError: null,
+  });
+  const [telegramDecisions, setTelegramDecisions] = useState<Map<string, InboxDecision>>(
+    () => new Map(),
+  );
+  const [migrationServices, setMigrationServices] = useState<LegacyLaunchdService[]>([]);
+  const [migrationBusy, setMigrationBusy] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
   const [inboxFocusTick, setInboxFocusTick] = useState(0);
   const [inboxActionBusy, setInboxActionBusy] = useState(false);
@@ -1004,6 +1085,30 @@ function MainApp() {
   const settingsWritable =
     settingsWorkPath != null &&
     (settingsWorkspace?.visibility !== "public" || workspaceCan(settingsWorkspace, "modify"));
+  const workspaceConfigPath = settingsWorkPath ?? inboxWorkspacePath;
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceConfigPath) {
+      setWorkspaceConfig(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void readWorkspaceConfig(workspaceConfigPath)
+      .then((config) => {
+        if (!cancelled) setWorkspaceConfig(config);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceConfigPath]);
+  const effectiveCommsSettings = useMemo(
+    () => applyWorkspaceCommsOverrides(anchorSettings.comms, workspaceConfig),
+    [anchorSettings.comms, workspaceConfig],
+  );
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
     [document, draftContent],
@@ -1715,6 +1820,14 @@ function MainApp() {
     () => buildGmailMessageStates(gmailMessages, gmailDecisions),
     [gmailMessages, gmailDecisions],
   );
+  const outlookItems = useMemo<OutlookMessageState[]>(
+    () => buildOutlookMessageStates(outlookMessages, outlookDecisions),
+    [outlookMessages, outlookDecisions],
+  );
+  const telegramItems = useMemo<TelegramMessageState[]>(
+    () => buildTelegramMessageStates(telegramMessages, telegramDecisions),
+    [telegramMessages, telegramDecisions],
+  );
 
   const gmailStatus = useMemo(
     () => formatGmailScanStatus(gmailScanStatus, gmailLoading, locale),
@@ -1814,6 +1927,114 @@ function MainApp() {
       }
     }
   }, [inboxRuntimeConfig, inboxWorkspacePath, updateGmailScanStatus]);
+
+  const refreshOutlook = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (!inboxWorkspacePath || !effectiveCommsSettings.outlook.enabled) {
+      outlookLoadingRef.current = false;
+      outlookRefreshCacheRef.current = { fetchedAt: null, key: "" };
+      setOutlookMessages([]);
+      setOutlookLoading(false);
+      setOutlookError(null);
+      setOutlookStatus("");
+      return;
+    }
+    const refreshKey = JSON.stringify({
+      workPath: inboxWorkspacePath,
+      max: effectiveCommsSettings.outlook.maxResults,
+      m365Path: effectiveCommsSettings.outlook.m365Path ?? null,
+    });
+    if (
+      shouldSkipProviderRefresh(
+        outlookRefreshCacheRef.current,
+        refreshKey,
+        force,
+        outlookLoadingRef.current,
+        OUTLOOK_REFRESH_TTL_MS,
+      )
+    ) {
+      return;
+    }
+    outlookLoadingRef.current = true;
+    setOutlookLoading(true);
+    setOutlookError(null);
+    const startedAt = Date.now();
+    try {
+      const messages = await fetchOutlookUnread(
+        inboxWorkspacePath,
+        effectiveCommsSettings.outlook.maxResults,
+        effectiveCommsSettings.outlook.m365Path,
+      );
+      setOutlookMessages(messages);
+      outlookRefreshCacheRef.current = {
+        fetchedAt: Date.now(),
+        key: refreshKey,
+      };
+      setOutlookStatus(`${messages.length.toLocaleString(locale)} · ${Date.now() - startedAt}ms`);
+    } catch (err) {
+      setOutlookError(err instanceof Error ? err.message : String(err));
+      setOutlookStatus("");
+    } finally {
+      outlookLoadingRef.current = false;
+      setOutlookLoading(false);
+    }
+  }, [effectiveCommsSettings.outlook, inboxWorkspacePath, locale]);
+
+  const refreshTelegram = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (!inboxWorkspacePath || !effectiveCommsSettings.telegram.enabled) {
+      telegramLoadingRef.current = false;
+      telegramRefreshCacheRef.current = { fetchedAt: null, key: "" };
+      setTelegramMessages([]);
+      setTelegramLoading(false);
+      setTelegramError(null);
+      return;
+    }
+    const refreshKey = JSON.stringify({
+      workPath: inboxWorkspacePath,
+      max: effectiveCommsSettings.telegram.maxResults,
+      pythonPath: effectiveCommsSettings.telegram.pythonPath ?? null,
+      scriptPath: effectiveCommsSettings.telegram.scriptPath ?? null,
+      sessionFile: effectiveCommsSettings.telegram.sessionFile ?? null,
+      monitorConfigPath: effectiveCommsSettings.telegram.monitorConfigPath ?? null,
+      legacyAutoDrop: effectiveCommsSettings.telegram.legacyAutoDrop,
+    });
+    if (
+      shouldSkipProviderRefresh(
+        telegramRefreshCacheRef.current,
+        refreshKey,
+        force,
+        telegramLoadingRef.current,
+        TELEGRAM_REFRESH_TTL_MS,
+      )
+    ) {
+      return;
+    }
+    telegramLoadingRef.current = true;
+    setTelegramLoading(true);
+    setTelegramError(null);
+    try {
+      const messages = await fetchTelegramRecent(
+        telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
+      );
+      setTelegramMessages(messages);
+      telegramRefreshCacheRef.current = {
+        fetchedAt: Date.now(),
+        key: refreshKey,
+      };
+    } catch (err) {
+      setTelegramError(err instanceof Error ? err.message : String(err));
+    } finally {
+      telegramLoadingRef.current = false;
+      setTelegramLoading(false);
+    }
+  }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
+
+  const refreshCommsProviders = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    await Promise.allSettled([
+      refreshGmail({ force }),
+      refreshOutlook({ force }),
+      refreshTelegram({ force }),
+    ]);
+  }, [refreshGmail, refreshOutlook, refreshTelegram]);
 
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
@@ -1995,6 +2216,85 @@ function MainApp() {
     [approvalGate, inboxWorkspacePath],
   );
 
+  const decideOutlookItem = useCallback(
+    async (id: string, decision: InboxDecision) => {
+      if (decision === "pending") return;
+      const approvalId = await approvalGate.confirmApproval({
+        kind: decision === "accepted" ? "outlook.accept" : "outlook.reject",
+        summary:
+          decision === "accepted"
+            ? "Apply the Anchor accepted category to this Outlook message."
+            : "Apply the Anchor rejected category to this Outlook message.",
+        target: id,
+        payloadPreview: decision === "accepted" ? "add anchor-accepted" : "add anchor-rejected",
+      });
+      if (!approvalId) return;
+      setOutlookError(null);
+      try {
+        const outcome = await decideOutlookItemApi(
+          inboxWorkspacePath,
+          id,
+          decision,
+          approvalId,
+          effectiveCommsSettings.outlook.m365Path,
+        );
+        if (!outcome.ok) throw new Error(outcome.error ?? "Outlook decision failed.");
+        setOutlookDecisions((prev) => {
+          const next = new Map(prev);
+          next.set(id, decision);
+          return next;
+        });
+      } catch (err) {
+        setOutlookError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [effectiveCommsSettings.outlook.m365Path, approvalGate, inboxWorkspacePath],
+  );
+
+  const decideTelegramItem = useCallback(
+    async (id: string, decision: InboxDecision) => {
+      if (!inboxWorkspacePath || decision === "pending") return;
+      const message = telegramMessages.find((item) => item.id === id);
+      if (!message) return;
+      const approvalId = await approvalGate.confirmApproval({
+        kind: decision === "accepted" ? "telegram.accept" : "telegram.reject",
+        summary:
+          decision === "accepted"
+            ? "Write this Telegram message into the configured Telegram inbox drop."
+            : "Dismiss this Telegram message from the transient comms list.",
+        target: decision === "accepted" ? "inbox/drop/telegram" : id,
+        payloadPreview: message.text,
+      });
+      if (!approvalId) return;
+      setTelegramError(null);
+      try {
+        const outcome =
+          decision === "accepted"
+            ? await acceptTelegramItem(inboxWorkspacePath, message, approvalId)
+            : await rejectTelegramItem(id, approvalId);
+        if (!outcome.ok) throw new Error(outcome.error ?? "Telegram decision failed.");
+        setTelegramDecisions((prev) => {
+          const next = new Map(prev);
+          next.set(id, decision);
+          return next;
+        });
+        if (decision === "accepted") void refreshInbox();
+      } catch (err) {
+        setTelegramError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [approvalGate, inboxWorkspacePath, refreshInbox, telegramMessages],
+  );
+
+  const decideCommsItem = useCallback(
+    (provider: "gmail" | "outlook" | "telegram", id: string, decision: Exclude<InboxDecision, "pending">) => {
+      if (provider === "gmail") void decideGmailItem(id, decision);
+      else if (provider === "outlook") void decideOutlookItem(id, decision);
+      else void decideTelegramItem(id, decision);
+    },
+    [decideGmailItem, decideOutlookItem, decideTelegramItem],
+  );
+
   const decideInboxKeys = useCallback(
     async (
       keys: string[],
@@ -2116,6 +2416,51 @@ function MainApp() {
       void decideInboxKeys(keys.filter((key) => key.startsWith("file:")), "accepted", trimmed);
     },
     [decideInboxKeys],
+  );
+
+  const trashInboxTargets = useCallback(
+    async (targets: InboxTrashTarget[]) => {
+      if (!inboxWorkspacePath || targets.length === 0) return;
+      const title =
+        targets.length === 1
+          ? targets[0].id
+          : t("inbox.menu.selectionTitle", { count: targets.length });
+      if (!window.confirm(t("inbox.delete.confirm", { count: targets.length, name: title }))) {
+        return;
+      }
+      const approvalId = await approvalGate.confirmApproval({
+        kind: "inbox.file.trash",
+        summary: t("inbox.delete.approvalSummary", { count: targets.length }),
+        target: "System Trash",
+        payloadPreview: targets.map((target) => `${target.kind}: ${target.path}`).join("\n"),
+      });
+      if (!approvalId) return;
+      setInboxActionBusy(true);
+      setError(null);
+      try {
+        const outcomes = await trashInboxItems(inboxWorkspacePath, targets, approvalId);
+        const failed = outcomes.filter((outcome) => !outcome.ok);
+        if (targets.some((target) => target.kind === "processedItem" && target.path === processedDetail?.item.itemDir)) {
+          setProcessedDetail(null);
+        }
+        await Promise.all([refreshInbox(), refreshProcessedItems()]);
+        if (failed.length > 0) {
+          setError(
+            [
+              t("inbox.delete.partialFailure", { count: failed.length }),
+              ...failed.map((outcome) => outcome.error).filter(Boolean),
+            ].join("\n"),
+          );
+        } else {
+          setError(t("inbox.delete.success", { count: outcomes.length }));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInboxActionBusy(false);
+      }
+    },
+    [approvalGate, inboxWorkspacePath, processedDetail?.item.itemDir, refreshInbox, refreshProcessedItems, t],
   );
 
   const processInboxKeys = useCallback(
@@ -2289,12 +2634,48 @@ function MainApp() {
     };
   }, [inboxWorkspacePath, refreshInbox, refreshProcessedItems]);
 
-  // Entering Inbox and changing Gmail runtime settings both refresh the
-  // envelope list. Message bodies are never fetched.
   useEffect(() => {
-    if (appMode !== "inbox") return;
-    void refreshGmail();
-  }, [appMode, refreshGmail]);
+    if (appMode !== "comms") return;
+    let disposed = false;
+    let unlistenTelegram: (() => void) | null = null;
+    void telegramPollingStatus()
+      .then((status) => {
+        if (!disposed) setTelegramPolling(status);
+      })
+      .catch(() => {});
+    if (!migrationCheckedRef.current) {
+      migrationCheckedRef.current = true;
+      void detectLegacyTelegramLaunchd()
+        .then((services) => {
+          if (!disposed) setMigrationServices(services);
+        })
+        .catch(() => {});
+    }
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("telegram://messages", (event) => {
+          const payload = event.payload as
+            | {
+                workPath?: string | null;
+                messages?: TelegramMessage[];
+                status?: TelegramPollingStatus;
+              }
+            | null;
+          if (payload?.workPath && payload.workPath !== inboxWorkspacePath) return;
+          if (payload?.messages) setTelegramMessages(payload.messages);
+          if (payload?.status) setTelegramPolling(payload.status);
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlistenTelegram = off;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlistenTelegram?.();
+    };
+  }, [appMode, inboxWorkspacePath]);
 
   useEffect(() => {
     if (appMode !== "inbox") return;
@@ -3614,6 +3995,10 @@ function MainApp() {
     setInboxFocusTick((value) => value + 1);
   }, [setPersistedAppMode]);
 
+  const openComms = useCallback(() => {
+    setPersistedAppMode("comms");
+  }, [setPersistedAppMode]);
+
   const closeCommandPalette = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -3635,6 +4020,63 @@ function MainApp() {
     });
   }, [settingsWorkPath]);
 
+  const openCommsSettings = useCallback(() => {
+    void openSettingsWindow(settingsWorkPath, "comms").catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+  }, [settingsWorkPath]);
+
+  const startTelegramPollingFromSettings = useCallback(() => {
+    if (!inboxWorkspacePath) return;
+    void startTelegramPolling(
+      telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
+      effectiveCommsSettings.telegram.intervalSeconds,
+    )
+      .then(setTelegramPolling)
+      .catch((err) => setTelegramError(err instanceof Error ? err.message : String(err)));
+  }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
+
+  const stopTelegramPollingFromSettings = useCallback(() => {
+    void stopTelegramPolling()
+      .then(setTelegramPolling)
+      .catch((err) => setTelegramError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  const startTelegramLogin = useCallback(() => {
+    const command = telegramLoginCommand(effectiveCommsSettings.telegram);
+    setTerminalLaunchRequest({
+      kind: "shell",
+      nonce: Date.now(),
+      title: "Telegram Login",
+      cwd: inboxWorkspacePath,
+      command: command.command,
+      extraArgs: command.args,
+    });
+    updateLayoutSettings({ terminalOpen: true });
+  }, [effectiveCommsSettings.telegram, inboxWorkspacePath, updateLayoutSettings]);
+
+  const refreshMigrationServices = useCallback(() => {
+    setMigrationBusy(true);
+    void detectLegacyTelegramLaunchd()
+      .then(setMigrationServices)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setMigrationBusy(false));
+  }, []);
+
+  const unloadMigrationService = useCallback(
+    (plistPath: string) => {
+      const ok = window.confirm(t("comms.migration.confirm"));
+      if (!ok) return;
+      setMigrationBusy(true);
+      void unloadLegacyTelegramLaunchd(plistPath)
+        .then(() => detectLegacyTelegramLaunchd())
+        .then(setMigrationServices)
+        .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setMigrationBusy(false));
+    },
+    [t],
+  );
+
   const toggleLocale = useCallback(() => {
     setLocale(locale === "ko" ? "en" : "ko");
   }, [locale, setLocale]);
@@ -3642,7 +4084,10 @@ function MainApp() {
   const refreshActiveSurface = useCallback(() => {
     if (appMode === "inbox") {
       void refreshInbox();
-      void refreshGmail({ force: true });
+      void refreshProcessedItems();
+      void refreshProcessingMissions();
+    } else if (appMode === "comms") {
+      void refreshCommsProviders({ force: true });
     } else if (anchorSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
@@ -3653,8 +4098,10 @@ function MainApp() {
     appMode,
     explorerWorkspacePath,
     refreshCurrent,
-    refreshGmail,
+    refreshCommsProviders,
     refreshInbox,
+    refreshProcessedItems,
+    refreshProcessingMissions,
     refreshWorkspaceFiles,
   ]);
 
@@ -4335,6 +4782,9 @@ function MainApp() {
         case "open-inbox":
           openInboxAndFocus();
           break;
+        case "open-comms":
+          openComms();
+          break;
         case "open-docs":
           setPersistedAppMode("pkm");
           break;
@@ -4361,6 +4811,7 @@ function MainApp() {
       openNewDocumentDialog,
       openPreferences,
       openInboxAndFocus,
+      openComms,
       checkForUpdates,
       splitEditorRight,
       closeAllCleanTabs,
@@ -4381,6 +4832,7 @@ function MainApp() {
       "mod+n": openNewDocumentDialog,
       "mod+d": splitActiveSurfaceRight,
       "mod+i": openInboxAndFocus,
+      "mod+shift+m": openComms,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
       "mod+shift+k": () => openSkillCompose(null),
       "mod+p": () =>
@@ -4409,6 +4861,7 @@ function MainApp() {
       snapshotCurrent,
       focusSearch,
       openInboxAndFocus,
+      openComms,
       toggleLocale,
       refreshActiveSurface,
       navigateBack,
@@ -4576,7 +5029,8 @@ function MainApp() {
     };
   }, [runMenuCommand]);
 
-  const modeClass = appMode === "inbox" ? " inbox-mode" : "";
+  const modeClass =
+    appMode === "inbox" ? " inbox-mode" : appMode === "comms" ? " comms-mode" : "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -4936,6 +5390,15 @@ function MainApp() {
           </button>
           <button
             type="button"
+            className={appMode === "comms" ? "activity-button active" : "activity-button"}
+            onClick={openComms}
+            title={t("mode.comms")}
+            aria-label={t("mode.comms")}
+          >
+            <MessageSquare size={20} />
+          </button>
+          <button
+            type="button"
             className="activity-button"
             onClick={openCommandPalette}
             title={t("sidebar.commandPalette")}
@@ -5012,10 +5475,6 @@ function MainApp() {
             items={inboxItems}
             entries={inboxEntries}
             loading={inboxLoading}
-            gmailMessages={gmailItems}
-            gmailLoading={gmailLoading}
-            gmailError={gmailError}
-            gmailStatus={gmailStatus}
             processedItems={processedItems}
             processedLoading={processedLoading}
             processedError={processedError}
@@ -5033,12 +5492,10 @@ function MainApp() {
               void refreshInbox();
               void refreshProcessedItems();
               void refreshProcessingMissions();
-              void refreshGmail({ force: true });
             }}
             onOpenSettings={openInboxSettings}
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
-            onDecideGmail={decideGmailItem}
             onBulkAccept={bulkAcceptInboxKeys}
             onBulkReject={bulkRejectInboxKeys}
             onBulkMoveFiles={bulkMoveInboxFiles}
@@ -5051,7 +5508,34 @@ function MainApp() {
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
+            onTrashItems={(targets) => void trashInboxTargets(targets)}
             onStopProcessingMission={(id) => void stopProcessingMission(id)}
+          />
+        ) : appMode === "comms" ? (
+          <CommsPane
+            gmailMessages={gmailItems}
+            gmailLoading={gmailLoading}
+            gmailError={gmailError}
+            gmailStatus={gmailStatus}
+            outlookMessages={outlookItems}
+            outlookLoading={outlookLoading}
+            outlookError={outlookError}
+            outlookStatus={outlookStatus}
+            telegramMessages={telegramItems}
+            telegramLoading={telegramLoading}
+            telegramError={telegramError}
+            telegramPollingStatus={telegramPolling}
+            migrationServices={migrationServices}
+            migrationBusy={migrationBusy}
+            onRefresh={refreshActiveSurface}
+            onRefreshTelegram={() => void refreshTelegram({ force: true })}
+            onDecide={decideCommsItem}
+            onStartTelegramPolling={startTelegramPollingFromSettings}
+            onStopTelegramPolling={stopTelegramPollingFromSettings}
+            onTelegramLogin={startTelegramLogin}
+            onOpenCommsSettings={openCommsSettings}
+            onRefreshMigration={refreshMigrationServices}
+            onUnloadMigration={unloadMigrationService}
           />
         ) : (
           <>
