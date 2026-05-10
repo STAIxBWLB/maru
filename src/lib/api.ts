@@ -274,6 +274,7 @@ export async function readInboxProcessedItem(
 export async function trashInboxItems(
   workPath: string,
   targets: InboxTrashTarget[],
+  approvalId: string,
 ): Promise<InboxTrashOutcome[]> {
   if (!isTauri()) {
     return targets.map((target) => ({
@@ -284,7 +285,7 @@ export async function trashInboxItems(
       error: null,
     }));
   }
-  return invoke<InboxTrashOutcome[]>("trash_inbox_items", { workPath, targets });
+  return invoke<InboxTrashOutcome[]>("trash_inbox_items", { workPath, targets, approvalId });
 }
 
 export async function stageInboxDropFiles(

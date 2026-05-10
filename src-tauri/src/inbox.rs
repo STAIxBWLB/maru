@@ -214,6 +214,7 @@ struct ProcessedProcessingHints {
 
 const INBOX_FILE_ACCEPT_KIND: &str = "inbox.file.accept";
 const INBOX_FILE_REJECT_KIND: &str = "inbox.file.reject";
+const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 
 #[tauri::command]
@@ -262,9 +263,12 @@ pub fn read_inbox_processed_item(
 
 #[tauri::command]
 pub fn trash_inbox_items(
+    approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
     targets: Vec<InboxTrashTarget>,
+    approval_id: Option<String>,
 ) -> Result<Vec<InboxTrashOutcome>, String> {
+    crate::approval::require_approval(&approvals, approval_id, INBOX_FILE_TRASH_KIND)?;
     let work = normalize_existing_dir(&work_path)?;
     assert_anchor_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Delete)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
@@ -1068,7 +1072,12 @@ fn build_processed_item(
     let manifest_raw_file_count = manifest
         .files
         .iter()
-        .filter(|file| file.path.as_deref().map(str::trim).is_some_and(|path| !path.is_empty()))
+        .filter(|file| {
+            file.path
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|path| !path.is_empty())
+        })
         .count();
     let raw_file_count = if manifest_raw_file_count > 0 {
         manifest_raw_file_count

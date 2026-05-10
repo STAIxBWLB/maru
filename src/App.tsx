@@ -2428,10 +2428,17 @@ function MainApp() {
       if (!window.confirm(t("inbox.delete.confirm", { count: targets.length, name: title }))) {
         return;
       }
+      const approvalId = await approvalGate.confirmApproval({
+        kind: "inbox.file.trash",
+        summary: t("inbox.delete.approvalSummary", { count: targets.length }),
+        target: "System Trash",
+        payloadPreview: targets.map((target) => `${target.kind}: ${target.path}`).join("\n"),
+      });
+      if (!approvalId) return;
       setInboxActionBusy(true);
       setError(null);
       try {
-        const outcomes = await trashInboxItems(inboxWorkspacePath, targets);
+        const outcomes = await trashInboxItems(inboxWorkspacePath, targets, approvalId);
         const failed = outcomes.filter((outcome) => !outcome.ok);
         if (targets.some((target) => target.kind === "processedItem" && target.path === processedDetail?.item.itemDir)) {
           setProcessedDetail(null);
@@ -2453,7 +2460,7 @@ function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [inboxWorkspacePath, processedDetail?.item.itemDir, refreshInbox, refreshProcessedItems, t],
+    [approvalGate, inboxWorkspacePath, processedDetail?.item.itemDir, refreshInbox, refreshProcessedItems, t],
   );
 
   const processInboxKeys = useCallback(
