@@ -27,6 +27,13 @@ import type {
   GmailMessage,
   GmailDecisionOutcome,
   GmailDecisionRequest,
+  OutlookMessage,
+  OutlookDecisionOutcome,
+  OutlookDecisionRequest,
+  TelegramMessage,
+  TelegramFetchOptions,
+  TelegramPollingStatus,
+  TelegramDecisionOutcome,
   ApprovalDecision,
   ApprovalRequest,
   InboxAcceptRequest,
@@ -829,6 +836,167 @@ export async function decideGmailItems(
   });
 }
 
+export async function fetchOutlookUnread(
+  workPath: string | null,
+  max?: number | null,
+  m365Path?: string | null,
+): Promise<OutlookMessage[]> {
+  if (!isTauri()) return mockOutlookUnread();
+  return invoke<OutlookMessage[]>("fetch_outlook_unread", {
+    workPath,
+    max: max ?? null,
+    m365Path: m365Path ?? null,
+  });
+}
+
+export async function decideOutlookItem(
+  workPath: string | null,
+  messageId: string,
+  decision: OutlookDecisionRequest["decision"],
+  approvalId?: string | null,
+  m365Path?: string | null,
+): Promise<OutlookDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      messageId,
+      decision,
+      categoryName: decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: false,
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<OutlookDecisionOutcome>("decide_outlook_item", {
+    workPath,
+    messageId,
+    decision,
+    approvalId: approvalId ?? null,
+    m365Path: m365Path ?? null,
+  });
+}
+
+export async function decideOutlookItems(
+  workPath: string | null,
+  items: OutlookDecisionRequest[],
+  approvalId?: string | null,
+  m365Path?: string | null,
+): Promise<OutlookDecisionOutcome[]> {
+  if (!isTauri()) {
+    return items.map((item) => ({
+      messageId: item.messageId,
+      decision: item.decision,
+      categoryName: item.decision === "accepted" ? "anchor-accepted" : "anchor-rejected",
+      archived: false,
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<OutlookDecisionOutcome[]>("decide_outlook_items", {
+    workPath,
+    items,
+    approvalId: approvalId ?? null,
+    m365Path: m365Path ?? null,
+  });
+}
+
+export async function fetchTelegramRecent(
+  options: TelegramFetchOptions,
+): Promise<TelegramMessage[]> {
+  if (!isTauri()) return mockTelegramRecent();
+  return invoke<TelegramMessage[]>("fetch_telegram_recent", { options });
+}
+
+export async function acceptTelegramItem(
+  workPath: string,
+  message: TelegramMessage,
+  approvalId?: string | null,
+): Promise<TelegramDecisionOutcome> {
+  if (!isTauri()) {
+    return {
+      messageId: message.id,
+      decision: "accepted",
+      targetPath: `${workPath}/inbox/drop/telegram/${message.id}.json`,
+      ok: true,
+      error: null,
+    };
+  }
+  return invoke<TelegramDecisionOutcome>("accept_telegram_item", {
+    workPath,
+    message,
+    approvalId: approvalId ?? null,
+  });
+}
+
+export async function rejectTelegramItem(
+  messageId: string,
+  approvalId?: string | null,
+): Promise<TelegramDecisionOutcome> {
+  if (!isTauri()) {
+    return { messageId, decision: "rejected", targetPath: null, ok: true, error: null };
+  }
+  return invoke<TelegramDecisionOutcome>("reject_telegram_item", {
+    messageId,
+    approvalId: approvalId ?? null,
+  });
+}
+
+export async function startTelegramPolling(
+  options: TelegramFetchOptions,
+  intervalSeconds?: number | null,
+): Promise<TelegramPollingStatus> {
+  if (!isTauri()) {
+    return {
+      running: true,
+      intervalSeconds: intervalSeconds ?? 60,
+      lastStartedAt: new Date().toISOString(),
+      lastFetchedAt: null,
+      lastMessageCount: 0,
+      lastError: null,
+    };
+  }
+  return invoke<TelegramPollingStatus>("start_telegram_polling", {
+    options,
+    intervalSeconds: intervalSeconds ?? null,
+  });
+}
+
+export async function stopTelegramPolling(): Promise<TelegramPollingStatus> {
+  if (!isTauri()) {
+    return {
+      running: false,
+      intervalSeconds: 60,
+      lastStartedAt: null,
+      lastFetchedAt: null,
+      lastMessageCount: 0,
+      lastError: null,
+    };
+  }
+  return invoke<TelegramPollingStatus>("stop_telegram_polling");
+}
+
+export async function telegramPollingStatus(): Promise<TelegramPollingStatus> {
+  if (!isTauri()) return stopTelegramPolling();
+  return invoke<TelegramPollingStatus>("telegram_polling_status");
+}
+
+export interface LegacyLaunchdService {
+  label: string;
+  plistPath: string;
+  loaded: boolean;
+}
+
+export async function detectLegacyTelegramLaunchd(): Promise<LegacyLaunchdService[]> {
+  if (!isTauri()) return [];
+  return invoke<LegacyLaunchdService[]>("detect_legacy_telegram_launchd");
+}
+
+export async function unloadLegacyTelegramLaunchd(
+  plistPath: string,
+): Promise<LegacyLaunchdService> {
+  if (!isTauri()) return { label: "telegram-monitor", plistPath, loaded: false };
+  return invoke<LegacyLaunchdService>("unload_legacy_telegram_launchd", { plistPath });
+}
+
 export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {
   if (!isTauri()) return { ...DEFAULT_INBOX_SETTINGS };
   return invoke<InboxSettings>("read_inbox_settings", { vaultPath });
@@ -965,6 +1133,35 @@ function mockGmailUnread(): GmailMessage[] {
       from: "no-reply@plaud.ai",
       subject: "[mock] Plaud-AutoFlow 회의 요약",
       date: "Tue, 28 Apr 2026 00:29:08 +0000",
+    },
+  ];
+}
+
+function mockOutlookUnread(): OutlookMessage[] {
+  return [
+    {
+      id: "outlook-1",
+      from: "Operations <ops@example.com>",
+      subject: "Project update",
+      date: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      bodyPreview: "Please review the latest update.",
+      webLink: null,
+      categories: [],
+      isRead: false,
+    },
+  ];
+}
+
+function mockTelegramRecent(): TelegramMessage[] {
+  return [
+    {
+      id: "telegram-1",
+      chatId: "ops",
+      chatTitle: "Ops",
+      sender: "Lee",
+      text: "확인할 메시지입니다.",
+      date: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      permalink: null,
     },
   ];
 }

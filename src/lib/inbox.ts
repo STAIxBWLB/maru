@@ -66,16 +66,13 @@ export function countInboxSources<T extends { item: { source: string } }>(
 export function buildInboxFeedRowKeys({
   entries,
   files,
-  gmail,
 }: {
   entries: Array<{ id: string }>;
   files: Array<{ item: { id: string } }>;
-  gmail: Array<{ message: { id: string } }>;
 }): string[] {
   return [
     ...entries.map((entry) => `entry:${entry.id}`),
     ...files.map((entry) => `file:${entry.item.id}`),
-    ...gmail.map((entry) => `gmail:${entry.message.id}`),
   ];
 }
 

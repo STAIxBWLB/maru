@@ -5,7 +5,7 @@ export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
-export type AnchorAppMode = "pkm" | "inbox";
+export type AnchorAppMode = "pkm" | "inbox" | "comms";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
@@ -117,8 +117,27 @@ export interface AnchorSettings {
     launchers: Record<TerminalLauncherId, TerminalLauncherSettings>;
   };
   ai: Record<string, unknown>;
+  comms: CommsSettings;
   inboxChannels: Record<string, unknown>;
   connectors: Record<string, unknown>;
+}
+
+export interface CommsSettings {
+  outlook: {
+    enabled: boolean;
+    maxResults: number;
+    m365Path: string | null;
+  };
+  telegram: {
+    enabled: boolean;
+    polling: boolean;
+    intervalSeconds: number;
+    maxResults: number;
+    pythonPath: string | null;
+    scriptPath: string | null;
+    sessionFile: string | null;
+    legacyAutoDrop: boolean;
+  };
 }
 
 export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
@@ -183,6 +202,23 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   ai: {
     providers: {},
     defaults: {},
+  },
+  comms: {
+    outlook: {
+      enabled: true,
+      maxResults: 50,
+      m365Path: null,
+    },
+    telegram: {
+      enabled: true,
+      polling: false,
+      intervalSeconds: 60,
+      maxResults: 50,
+      pythonPath: null,
+      scriptPath: null,
+      sessionFile: null,
+      legacyAutoDrop: false,
+    },
   },
   inboxChannels: {},
   connectors: {},
@@ -250,6 +286,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       },
     },
     ai: normalizeFutureAi(value.ai),
+    comms: normalizeCommsSettings(value.comms),
     inboxChannels: isRecord(value.inboxChannels) ? value.inboxChannels : {},
     connectors: isRecord(value.connectors) ? value.connectors : {},
   };
@@ -257,6 +294,74 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
 
 export function serializeAnchorSettings(settings: AnchorSettings): unknown {
   return normalizeAnchorSettings(settings);
+}
+
+export function applyWorkspaceCommsOverrides(
+  settings: CommsSettings,
+  workspaceConfig: { io?: unknown } | null,
+): CommsSettings {
+  const io = isRecord(workspaceConfig?.io) ? workspaceConfig.io : null;
+  const providers = isRecord(io?.providers) ? io.providers : null;
+  if (!providers) return settings;
+  const outlook = providerConfig(providers, "outlook", "mso");
+  const telegram = providerConfig(providers, "telegram");
+  return {
+    outlook: {
+      ...settings.outlook,
+      enabled: readBoolean(outlook, ["enabled"], settings.outlook.enabled),
+      maxResults: readInteger(
+        outlook,
+        ["maxResults", "max_results", "limit"],
+        settings.outlook.maxResults,
+        1,
+        200,
+      ),
+      m365Path: readOptionalString(
+        outlook,
+        ["m365Path", "m365_path", "cliPath", "cli_path"],
+        settings.outlook.m365Path,
+      ),
+    },
+    telegram: {
+      ...settings.telegram,
+      enabled: readBoolean(telegram, ["enabled"], settings.telegram.enabled),
+      polling: readBoolean(telegram, ["polling"], settings.telegram.polling),
+      intervalSeconds: readInteger(
+        telegram,
+        ["intervalSeconds", "interval_seconds", "pollSeconds", "poll_seconds"],
+        settings.telegram.intervalSeconds,
+        30,
+        3600,
+      ),
+      maxResults: readInteger(
+        telegram,
+        ["maxResults", "max_results", "limit"],
+        settings.telegram.maxResults,
+        1,
+        200,
+      ),
+      pythonPath: readOptionalString(
+        telegram,
+        ["pythonPath", "python_path"],
+        settings.telegram.pythonPath,
+      ),
+      scriptPath: readOptionalString(
+        telegram,
+        ["scriptPath", "script_path"],
+        settings.telegram.scriptPath,
+      ),
+      sessionFile: readOptionalString(
+        telegram,
+        ["sessionFile", "session_file"],
+        settings.telegram.sessionFile,
+      ),
+      legacyAutoDrop: readBoolean(
+        telegram,
+        ["legacyAutoDrop", "legacy_auto_drop"],
+        settings.telegram.legacyAutoDrop,
+      ),
+    },
+  };
 }
 
 function cloneDefaultSettings(): AnchorSettings {
@@ -289,9 +394,116 @@ function cloneDefaultSettings(): AnchorSettings {
       providers: {},
       defaults: {},
     },
+    comms: {
+      outlook: { ...DEFAULT_ANCHOR_SETTINGS.comms.outlook },
+      telegram: { ...DEFAULT_ANCHOR_SETTINGS.comms.telegram },
+    },
     inboxChannels: {},
     connectors: {},
   };
+}
+
+function normalizeCommsSettings(value: unknown): CommsSettings {
+  const comms = isRecord(value) ? value : {};
+  const outlook = isRecord(comms.outlook) ? comms.outlook : {};
+  const telegram = isRecord(comms.telegram) ? comms.telegram : {};
+  return {
+    outlook: {
+      enabled: typeof outlook.enabled === "boolean"
+        ? outlook.enabled
+        : DEFAULT_ANCHOR_SETTINGS.comms.outlook.enabled,
+      maxResults: normalizeInteger(
+        outlook.maxResults,
+        DEFAULT_ANCHOR_SETTINGS.comms.outlook.maxResults,
+        1,
+        200,
+      ),
+      m365Path: normalizeOptionalString(outlook.m365Path),
+    },
+    telegram: {
+      enabled: typeof telegram.enabled === "boolean"
+        ? telegram.enabled
+        : DEFAULT_ANCHOR_SETTINGS.comms.telegram.enabled,
+      polling: typeof telegram.polling === "boolean"
+        ? telegram.polling
+        : DEFAULT_ANCHOR_SETTINGS.comms.telegram.polling,
+      intervalSeconds: normalizeInteger(
+        telegram.intervalSeconds,
+        DEFAULT_ANCHOR_SETTINGS.comms.telegram.intervalSeconds,
+        30,
+        86400,
+      ),
+      maxResults: normalizeInteger(
+        telegram.maxResults,
+        DEFAULT_ANCHOR_SETTINGS.comms.telegram.maxResults,
+        1,
+        200,
+      ),
+      pythonPath: normalizeOptionalString(telegram.pythonPath),
+      scriptPath: normalizeOptionalString(telegram.scriptPath),
+      sessionFile: normalizeOptionalString(telegram.sessionFile),
+      legacyAutoDrop: typeof telegram.legacyAutoDrop === "boolean"
+        ? telegram.legacyAutoDrop
+        : DEFAULT_ANCHOR_SETTINGS.comms.telegram.legacyAutoDrop,
+    },
+  };
+}
+
+function providerConfig(
+  providers: Record<string, unknown>,
+  ...names: string[]
+): Record<string, unknown> | null {
+  for (const name of names) {
+    const value = providers[name];
+    if (isRecord(value)) return value;
+  }
+  return null;
+}
+
+function readBoolean(
+  record: Record<string, unknown> | null,
+  keys: string[],
+  fallback: boolean,
+): boolean {
+  const value = readKey(record, keys);
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readInteger(
+  record: Record<string, unknown> | null,
+  keys: string[],
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return normalizeInteger(readKey(record, keys), fallback, min, max);
+}
+
+function readOptionalString(
+  record: Record<string, unknown> | null,
+  keys: string[],
+  fallback: string | null,
+): string | null {
+  const value = readKey(record, keys);
+  return value === undefined ? fallback : normalizeOptionalString(value);
+}
+
+function readKey(record: Record<string, unknown> | null, keys: string[]): unknown {
+  if (!record) return undefined;
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(number)));
 }
 
 function normalizeLauncher(
@@ -312,7 +524,7 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 }
 
 function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
-  return value === "pkm" || value === "inbox" ? value : null;
+  return value === "pkm" || value === "inbox" || value === "comms" ? value : null;
 }
 
 function parseWorkspaceVisibilitySetting(value: unknown): WorkspaceVisibilitySetting | null {

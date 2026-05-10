@@ -13,49 +13,48 @@ import {
 import type { InboxEntry, InboxProcessedItem, InboxRuntimeConfig, MissionRecord } from "../lib/types";
 
 describe("inbox keyboard helpers", () => {
-  const keys = ["file:a", "file:b", "gmail:c", "gmail:d"];
+  const keys = ["entry:a", "file:a", "file:b", "file:c"];
 
-  it("finds the first pending row across file and gmail keys", () => {
+  it("finds the first pending local inbox row", () => {
     expect(
       firstPendingInboxKey([
         { key: "file:a", decision: "accepted" },
-        { key: "gmail:c", decision: "pending" },
+        { key: "file:b", decision: "pending" },
       ]),
-    ).toBe("gmail:c");
+    ).toBe("file:b");
   });
 
   it("moves focus with clamped arrow navigation", () => {
-    expect(nextInboxFocusKey(keys, null, 1)).toBe("file:a");
-    expect(nextInboxFocusKey(keys, "file:a", 1)).toBe("file:b");
-    expect(nextInboxFocusKey(keys, "gmail:d", 1)).toBe("gmail:d");
-    expect(nextInboxFocusKey(keys, "file:a", -1)).toBe("file:a");
+    expect(nextInboxFocusKey(keys, null, 1)).toBe("entry:a");
+    expect(nextInboxFocusKey(keys, "entry:a", 1)).toBe("file:a");
+    expect(nextInboxFocusKey(keys, "file:c", 1)).toBe("file:c");
+    expect(nextInboxFocusKey(keys, "entry:a", -1)).toBe("entry:a");
   });
 
   it("toggles command-click style selection", () => {
-    const selected = toggleInboxSelectionKeys(keys, new Set(), "file:b", null, false);
-    expect([...selected]).toEqual(["file:b"]);
-    expect([...toggleInboxSelectionKeys(keys, selected, "file:b", "file:b", false)]).toEqual([]);
+    const selected = toggleInboxSelectionKeys(keys, new Set(), "file:a", null, false);
+    expect([...selected]).toEqual(["file:a"]);
+    expect([...toggleInboxSelectionKeys(keys, selected, "file:a", "file:a", false)]).toEqual([]);
   });
 
   it("adds a shift range without dropping existing selections", () => {
     const selected = toggleInboxSelectionKeys(
       keys,
-      new Set(["file:a"]),
-      "gmail:d",
+      new Set(["entry:a"]),
+      "file:c",
       "file:b",
       true,
     );
-    expect([...selected]).toEqual(["file:a", "file:b", "gmail:c", "gmail:d"]);
+    expect([...selected]).toEqual(["entry:a", "file:b", "file:c"]);
   });
 
-  it("keeps configured, file, gmail row order without collapse filtering", () => {
+  it("keeps configured and staged file row order without collapse filtering", () => {
     expect(
       buildInboxFeedRowKeys({
         entries: [{ id: "configured-a" }, { id: "configured-b" }],
         files: [{ item: { id: "file-a" } }],
-        gmail: [{ message: { id: "gmail-a" } }],
       }),
-    ).toEqual(["entry:configured-a", "entry:configured-b", "file:file-a", "gmail:gmail-a"]);
+    ).toEqual(["entry:configured-a", "entry:configured-b", "file:file-a"]);
   });
 
   it("counts inbox sources in one pass for filter chips", () => {

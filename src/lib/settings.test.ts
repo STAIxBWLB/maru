@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ANCHOR_SETTINGS,
+  applyWorkspaceCommsOverrides,
   normalizeAnchorSettings,
   parseBinaryFileIncludePatternsText,
 } from "./settings";
@@ -111,6 +112,76 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.terminal.launchers.claude.enabled).toBe(true);
     expect(settings.terminal.launchers.shell.enabled).toBe(true);
     expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+  });
+
+  it("parses comms mode and clamps comms settings", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        activeAppMode: "comms",
+      },
+      comms: {
+        outlook: {
+          enabled: false,
+          maxResults: 999,
+          m365Path: " /opt/homebrew/bin/m365 ",
+        },
+        telegram: {
+          polling: true,
+          intervalSeconds: 5,
+          maxResults: "25",
+          sessionFile: " ~/.anchor/telegram/session ",
+          legacyAutoDrop: true,
+        },
+      },
+    });
+
+    expect(settings.ui.activeAppMode).toBe("comms");
+    expect(settings.comms.outlook.enabled).toBe(false);
+    expect(settings.comms.outlook.maxResults).toBe(200);
+    expect(settings.comms.outlook.m365Path).toBe("/opt/homebrew/bin/m365");
+    expect(settings.comms.telegram.polling).toBe(true);
+    expect(settings.comms.telegram.intervalSeconds).toBe(30);
+    expect(settings.comms.telegram.maxResults).toBe(25);
+    expect(settings.comms.telegram.sessionFile).toBe("~/.anchor/telegram/session");
+    expect(settings.comms.telegram.legacyAutoDrop).toBe(true);
+  });
+
+  it("applies workspace io provider overrides without rewriting base comms defaults", () => {
+    const base = normalizeAnchorSettings({
+      comms: {
+        outlook: { maxResults: 20 },
+        telegram: { intervalSeconds: 60, maxResults: 40 },
+      },
+    }).comms;
+
+    const effective = applyWorkspaceCommsOverrides(base, {
+      io: {
+        providers: {
+          outlook: {
+            enabled: false,
+            max_results: 75,
+            m365_path: "/usr/local/bin/m365",
+          },
+          telegram: {
+            interval_seconds: 10,
+            max_results: 15,
+            python_path: "/opt/anchor/python",
+            session_file: "/tmp/telegram.session",
+            legacy_auto_drop: true,
+          },
+        },
+      },
+    });
+
+    expect(base.outlook.enabled).toBe(true);
+    expect(effective.outlook.enabled).toBe(false);
+    expect(effective.outlook.maxResults).toBe(75);
+    expect(effective.outlook.m365Path).toBe("/usr/local/bin/m365");
+    expect(effective.telegram.intervalSeconds).toBe(30);
+    expect(effective.telegram.maxResults).toBe(15);
+    expect(effective.telegram.pythonPath).toBe("/opt/anchor/python");
+    expect(effective.telegram.sessionFile).toBe("/tmp/telegram.session");
+    expect(effective.telegram.legacyAutoDrop).toBe(true);
   });
 
   it("defaults first-run terminal layout to collapsed shell autoload", () => {

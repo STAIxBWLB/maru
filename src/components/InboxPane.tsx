@@ -8,7 +8,6 @@ import {
   HelpCircle,
   Inbox,
   Loader2,
-  Mail,
   Play,
   RefreshCcw,
   Search,
@@ -25,7 +24,6 @@ import {
   hasExplorerDragPayload,
   readExplorerDragPayload,
 } from "../lib/fileDrag";
-import { type GmailMessageState, shortFrom } from "../lib/gmail";
 import {
   categoryLabel,
   countInboxSources,
@@ -49,10 +47,6 @@ interface InboxPaneProps {
   items: InboxItemState[];
   entries: InboxEntry[];
   loading: boolean;
-  gmailMessages: GmailMessageState[];
-  gmailLoading: boolean;
-  gmailError: string | null;
-  gmailStatus: string;
   processedItems: InboxProcessedItem[];
   processedLoading: boolean;
   processedError: string | null;
@@ -70,7 +64,6 @@ interface InboxPaneProps {
   actionBusy?: boolean;
   onClassify: (id: string) => void;
   onDecide: (id: string, decision: InboxDecision) => void | Promise<void>;
-  onDecideGmail: (id: string, decision: InboxDecision) => void | Promise<void>;
   onBulkAccept: (keys: string[]) => void | Promise<void>;
   onBulkReject: (keys: string[]) => void | Promise<void>;
   onBulkMoveFiles: (keys: string[]) => void | Promise<void>;
@@ -86,17 +79,12 @@ interface InboxPaneProps {
 
 type InboxRow =
   | { key: string; kind: "entry"; entry: InboxEntry }
-  | { key: string; kind: "file"; entry: InboxItemState }
-  | { key: string; kind: "gmail"; entry: GmailMessageState };
+  | { key: string; kind: "file"; entry: InboxItemState };
 
 export function InboxPane({
   items,
   entries,
   loading,
-  gmailMessages,
-  gmailLoading,
-  gmailError,
-  gmailStatus,
   processedItems,
   processedLoading,
   processedError,
@@ -114,7 +102,6 @@ export function InboxPane({
   actionBusy = false,
   onClassify,
   onDecide,
-  onDecideGmail,
   onBulkAccept,
   onBulkReject,
   onBulkMoveFiles,
@@ -144,14 +131,12 @@ export function InboxPane({
   );
   const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
   const entryPending = entries.filter((entry) => entry.status !== "done").length;
-  const gmailPending = gmailMessages.filter((entry) => entry.decision === "pending").length;
   const rows = useMemo<InboxRow[]>(
     () => [
       ...entries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
       ...visibleItems.map((entry) => ({ key: `file:${entry.item.id}`, kind: "file" as const, entry })),
-      ...gmailMessages.map((entry) => ({ key: `gmail:${entry.message.id}`, kind: "gmail" as const, entry })),
     ],
-    [entries, gmailMessages, visibleItems],
+    [entries, visibleItems],
   );
   const selected = useMemo(
     () => rows.filter((row) => selectedKeys.has(row.key)),
@@ -210,7 +195,6 @@ export function InboxPane({
     const key = decisionKeys[0];
     if (!key) return;
     if (key.startsWith("file:")) await onDecide(key.slice("file:".length), decision);
-    else if (key.startsWith("gmail:")) await onDecideGmail(key.slice("gmail:".length), decision);
   };
 
   const processActionKeys = () => {
@@ -330,10 +314,8 @@ export function InboxPane({
           <p>
             {t("inbox.subtitle.combined", {
               files: pending.toLocaleString(locale),
-              gmail: gmailPending.toLocaleString(locale),
             })}
             {entryPending > 0 ? ` · process ${entryPending.toLocaleString(locale)}` : ""}
-            {gmailStatus ? ` · Gmail ${gmailStatus}` : ""}
           </p>
         </div>
         <div className="inbox-header-actions">
@@ -739,82 +721,6 @@ export function InboxPane({
           </div>
         </InboxSection>
 
-        <InboxSection
-          title="GMAIL"
-        >
-          <div className="inbox-list">
-            {gmailLoading ? <div className="inbox-empty">{t("inbox.gmail.loading")}</div> : null}
-            {gmailError ? <div className="inbox-error gmail-error">{gmailError}</div> : null}
-            {!gmailLoading && !gmailError && gmailMessages.length === 0 ? (
-              <div className="inbox-empty" title={t("inbox.gmail.empty.title")}>
-                <Mail size={24} />
-                <strong>{t("inbox.gmail.empty.title")}</strong>
-                <span>{t("inbox.gmail.empty.description")}</span>
-              </div>
-            ) : null}
-            {gmailMessages.map((entry) => {
-              const key = `gmail:${entry.message.id}`;
-              return (
-              <article
-                className={`inbox-item gmail-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
-                key={entry.message.id}
-                data-inbox-row-key={key}
-                onClick={(event) => handleRowClick(event, key)}
-              >
-                <input
-                  type="checkbox"
-                  className="inbox-row-check"
-                  checked={selectedKeys.has(key)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleSelection(key, event.shiftKey);
-                  }}
-                  onChange={() => {}}
-                  aria-label={`Select ${entry.message.subject || "Gmail message"}`}
-                />
-                <div className="inbox-item-main">
-                  <div className="inbox-item-title">
-                    <span className="source-chip gmail">gmail</span>
-                    <strong>{entry.message.subject || t("inbox.gmail.noSubject")}</strong>
-                  </div>
-                  <p className="gmail-from">{shortFrom(entry.message.from)}</p>
-                  <div className="inbox-item-meta">
-                    {entry.message.date ? <time>{entry.message.date}</time> : null}
-                  </div>
-                </div>
-
-                <div className="inbox-decision">
-                  <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecideGmail(entry.message.id, "accepted");
-                    }}
-                    title={t("inbox.accept")}
-                    aria-label={t("inbox.accept")}
-                  >
-                    <Check size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecideGmail(entry.message.id, "rejected");
-                    }}
-                    title={t("inbox.reject")}
-                    aria-label={t("inbox.reject")}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </article>
-            );
-            })}
-          </div>
-        </InboxSection>
       </div>
       <BulkActionBar
         count={selectedKeys.size}
@@ -979,7 +885,7 @@ function firstPendingKey(rows: InboxRow[]): string | null {
   const row = rows.find((entry) => {
     if (entry.kind === "entry") return entry.entry.status !== "done";
     if (entry.kind === "file") return entry.entry.decision === "pending";
-    return entry.entry.decision === "pending";
+    return false;
   });
   return row?.key ?? null;
 }

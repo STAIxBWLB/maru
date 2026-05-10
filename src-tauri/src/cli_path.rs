@@ -14,9 +14,13 @@ pub fn extra_path_dirs() -> Vec<PathBuf> {
     ];
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         out.push(home.join(".local/bin"));
+        out.push(home.join(".npm-global/bin"));
         out.push(home.join("go/bin"));
         out.push(home.join(".cargo/bin"));
+        out.push(home.join(".nvm/versions/node/current/bin"));
     }
+    out.push(PathBuf::from("/opt/homebrew/lib/node_modules/.bin"));
+    out.push(PathBuf::from("/usr/local/lib/node_modules/.bin"));
     out
 }
 
@@ -124,6 +128,7 @@ mod tests {
         assert!(paths.contains(&PathBuf::from(
             "/Applications/cmux.app/Contents/Resources/bin"
         )));
+        assert!(paths.contains(&PathBuf::from("/opt/homebrew/lib/node_modules/.bin")));
     }
 
     #[test]

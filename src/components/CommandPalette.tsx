@@ -56,6 +56,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "toggle-locale", label: t("cmdk.action.toggleLocale"), shortcut: "⌘ ⇧ L" },
       { id: "refresh-workspace", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
       { id: "open-inbox", label: t("cmdk.action.openInbox") },
+      { id: "open-comms", label: t("cmdk.action.openComms"), shortcut: "⌘ ⇧ M" },
       { id: "open-docs", label: t("cmdk.action.openDocs") },
       { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
       { id: "check-updates", label: t("cmdk.action.checkUpdates") },
