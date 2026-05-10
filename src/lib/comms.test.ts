@@ -7,7 +7,7 @@ describe("buildCommsFeedRows", () => {
       gmail: [
         {
           message: {
-            id: "g",
+            id: "g:thread",
             from: "g@example.com",
             subject: "Gmail",
             date: "2026-05-10T01:00:00Z",
@@ -46,8 +46,30 @@ describe("buildCommsFeedRows", () => {
       ],
     });
 
-    expect(rows.map((row) => row.key)).toEqual(["outlook:o", "gmail:g", "telegram:t"]);
+    expect(rows.map((row) => row.key)).toEqual(["outlook:o", "gmail:g:thread", "telegram:t"]);
+    expect(rows.map((row) => row.id)).toEqual(["o", "g:thread", "t"]);
     expect(rows.map((row) => row.decision)).toEqual(["pending", "accepted", "rejected"]);
+  });
+
+  it("keeps raw provider ids separate from render keys", () => {
+    const rows = buildCommsFeedRows({
+      gmail: [
+        {
+          message: {
+            id: "provider:id:with:colons",
+            from: "g@example.com",
+            subject: "Gmail",
+            date: "2026-05-10T01:00:00Z",
+          },
+          decision: "pending",
+        },
+      ],
+      outlook: [],
+      telegram: [],
+    });
+
+    expect(rows[0].key).toBe("gmail:provider:id:with:colons");
+    expect(rows[0].id).toBe("provider:id:with:colons");
   });
 
   it("keeps empty provider titles for the rendering layer to localize", () => {

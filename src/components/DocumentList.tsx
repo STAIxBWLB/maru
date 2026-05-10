@@ -701,6 +701,7 @@ export const DocumentList = memo(function DocumentList({
       {contextMenu ? (
         <div
           className="context-menu"
+          role="menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -710,6 +711,7 @@ export const DocumentList = memo(function DocumentList({
           {contextMenu.entry ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 const entry = contextMenu.entry;
                 setContextMenu(null);
@@ -721,6 +723,7 @@ export const DocumentList = memo(function DocumentList({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const target = contextMenu.targetPath;
               setContextMenu(null);
@@ -731,9 +734,10 @@ export const DocumentList = memo(function DocumentList({
           </button>
           {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
             <>
-              <div className="context-menu-separator" />
+              <div className="context-menu-separator" role="separator" />
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -745,6 +749,7 @@ export const DocumentList = memo(function DocumentList({
               </button>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -756,11 +761,11 @@ export const DocumentList = memo(function DocumentList({
               </button>
             </>
           ) : null}
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => copyContextText(contextMenu.targetPath)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.targetPath)}>
             {t("context.copyPath")}
           </button>
-          <button type="button" onClick={() => copyContextText(contextMenu.relPath)}>
+          <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.relPath)}>
             {t("context.copyRelativePath")}
           </button>
         </div>

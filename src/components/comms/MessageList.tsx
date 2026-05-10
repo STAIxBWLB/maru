@@ -61,7 +61,7 @@ export function MessageList({
                 disabled={row.decision !== "pending"}
                 title={t("inbox.accept")}
                 aria-label={t("inbox.accept")}
-                onClick={() => onDecide(row.provider, row.key.split(":").slice(1).join(":"), "accepted")}
+                onClick={() => onDecide(row.provider, row.id, "accepted")}
               >
                 <Check size={15} />
               </button>
@@ -71,7 +71,7 @@ export function MessageList({
                 disabled={row.decision !== "pending"}
                 title={t("inbox.reject")}
                 aria-label={t("inbox.reject")}
-                onClick={() => onDecide(row.provider, row.key.split(":").slice(1).join(":"), "rejected")}
+                onClick={() => onDecide(row.provider, row.id, "rejected")}
               >
                 <X size={15} />
               </button>

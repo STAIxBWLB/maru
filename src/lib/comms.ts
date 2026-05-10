@@ -7,6 +7,7 @@ export type CommsProvider = "gmail" | "outlook" | "telegram";
 
 export interface CommsFeedRow {
   key: string;
+  id: string;
   provider: CommsProvider;
   title: string;
   sender: string;
@@ -28,6 +29,7 @@ export function buildCommsFeedRows({
   return [
     ...gmail.map((entry) => ({
       key: `gmail:${entry.message.id}`,
+      id: entry.message.id,
       provider: "gmail" as const,
       title: entry.message.subject,
       sender: entry.message.from,
@@ -38,6 +40,7 @@ export function buildCommsFeedRows({
     })),
     ...outlook.map((entry) => ({
       key: `outlook:${entry.message.id}`,
+      id: entry.message.id,
       provider: "outlook" as const,
       title: entry.message.subject,
       sender: entry.message.from,
@@ -48,6 +51,7 @@ export function buildCommsFeedRows({
     })),
     ...telegram.map((entry) => ({
       key: `telegram:${entry.message.id}`,
+      id: entry.message.id,
       provider: "telegram" as const,
       title: entry.message.chatTitle,
       sender: entry.message.sender,

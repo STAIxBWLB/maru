@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAnchorSettings } from "./settings";
-import { telegramLoginCommand } from "./telegram";
+import {
+  isTelegramMonitorConfigOutsideAnchor,
+  telegramLoginCommand,
+} from "./telegram";
 
 describe("telegramLoginCommand", () => {
   it("runs through the user shell and expands tilde paths before quoting", () => {
@@ -33,5 +36,25 @@ describe("telegramLoginCommand", () => {
     expect(command.args[1]).toContain(
       '--config-file "$HOME/workspace/work/.secrets/services/telegram-monitor.config.yaml"',
     );
+  });
+});
+
+describe("isTelegramMonitorConfigOutsideAnchor", () => {
+  it("does not warn for empty or Anchor-home monitor config paths", () => {
+    expect(isTelegramMonitorConfigOutsideAnchor(null)).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor("")).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor(" ~/.anchor ")).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor("~/.anchor/telegram/config.yaml")).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor("$HOME/.anchor")).toBe(false);
+    expect(isTelegramMonitorConfigOutsideAnchor("$HOME/.anchor/telegram/config.yaml")).toBe(false);
+  });
+
+  it("warns for monitor config paths outside Anchor home", () => {
+    expect(
+      isTelegramMonitorConfigOutsideAnchor(
+        "~/workspace/work/.secrets/services/telegram-monitor.config.yaml",
+      ),
+    ).toBe(true);
+    expect(isTelegramMonitorConfigOutsideAnchor("/tmp/telegram-monitor.yaml")).toBe(true);
   });
 });

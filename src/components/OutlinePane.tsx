@@ -747,18 +747,20 @@ function FilesQueuePane({
       {contextMenu ? (
         <div
           className="context-menu"
+          role="menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" onClick={() => { setContextMenu(null); void pickFiles(); }}>
+          <button type="button" role="menuitem" onClick={() => { setContextMenu(null); void pickFiles(); }}>
             {t("rightPane.files.pick")}
           </button>
-          <button type="button" onClick={() => { setContextMenu(null); void pickFolders(); }}>
+          <button type="button" role="menuitem" onClick={() => { setContextMenu(null); void pickFolders(); }}>
             {t("rightPane.files.pickFolder")}
           </button>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
             disabled={selectedIds.length === 0}
             onClick={() => {
               setContextMenu(null);
@@ -769,6 +771,7 @@ function FilesQueuePane({
           </button>
           <button
             type="button"
+            role="menuitem"
             disabled={queue.length === 0}
             onClick={() => {
               setContextMenu(null);

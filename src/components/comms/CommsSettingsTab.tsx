@@ -1,4 +1,4 @@
-import { LogIn, Play, Square } from "lucide-react";
+import { AlertTriangle, LogIn, Play, Square } from "lucide-react";
 import type { InboxGmailConfig } from "../../lib/types";
 import {
   COMMS_PROVIDER_RESULTS_MAX,
@@ -7,6 +7,7 @@ import {
   TELEGRAM_POLL_INTERVAL_MIN_SECONDS,
   type CommsSettings,
 } from "../../lib/settings";
+import { isTelegramMonitorConfigOutsideAnchor } from "../../lib/telegram";
 import type { TelegramPollingStatus } from "../../lib/types";
 import { useTranslation } from "../../lib/i18n";
 
@@ -55,6 +56,11 @@ export function CommsSettingsTab({
     onSettingsChange({ ...settings, telegram: { ...settings.telegram, ...patch } });
   const gwsValue = gmailSettings.gws_path ?? "";
   const effectiveM365Path = effectiveSettings?.outlook.m365Path ?? null;
+  const effectiveTelegramMonitorConfigPath =
+    effectiveSettings?.telegram.monitorConfigPath ?? settings.telegram.monitorConfigPath ?? null;
+  const showTelegramMonitorConfigWarning = isTelegramMonitorConfigOutsideAnchor(
+    effectiveTelegramMonitorConfigPath,
+  );
 
   return (
     <div className="settings-form comms-settings-form">
@@ -275,6 +281,19 @@ export function CommsSettingsTab({
             spellCheck={false}
           />
         </label>
+        {showTelegramMonitorConfigWarning ? (
+          <div className="comms-setup-banner warn">
+            <AlertTriangle size={14} />
+            <div>
+              <strong>{t("comms.telegram.monitorConfigOutsideAnchor")}</strong>
+              <p>
+                {t("comms.telegram.monitorConfigOutsideAnchorDetail", {
+                  path: effectiveTelegramMonitorConfigPath ?? "",
+                })}
+              </p>
+            </div>
+          </div>
+        ) : null}
         <label className="field">
           <span>{t("comms.telegram.pythonPath")}</span>
           <input

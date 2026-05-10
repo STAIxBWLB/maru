@@ -853,6 +853,7 @@ export function InboxPane({
       {contextMenu ? (
         <div
           className="context-menu"
+          role="menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -861,6 +862,7 @@ export function InboxPane({
           </div>
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const path = contextMenu.path;
               setContextMenu(null);
@@ -869,12 +871,13 @@ export function InboxPane({
           >
             <span>{t("inbox.menu.revealFinder")}</span>
           </button>
-          <button type="button" onClick={copyContextPath}>
+          <button type="button" role="menuitem" onClick={copyContextPath}>
             <span>{t("inbox.menu.copyPath")}</span>
           </button>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
             className="danger"
             disabled={contextMenu.targets.length === 0 || actionBusy}
             onClick={() => void trashContextTargets()}

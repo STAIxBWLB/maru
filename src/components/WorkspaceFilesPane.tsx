@@ -497,6 +497,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
       {contextMenu ? (
         <div
           className="context-menu"
+          role="menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -506,6 +507,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           {contextMenu.entry && isOpenableDocumentFile(contextMenu.entry) ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 const entry = contextMenu.entry;
                 if (!entry) return;
@@ -518,6 +520,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const entry = contextMenu.entry;
               setContextMenu(null);
@@ -530,6 +533,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           {onApplySkillToTarget ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 const target = contextMenu.targetPath;
                 const kind = contextMenu.targetKind;
@@ -542,6 +546,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const target = contextMenu.targetPath;
               setContextMenu(null);
@@ -552,9 +557,10 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           </button>
           {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
             <>
-              <div className="context-menu-separator" />
+              <div className="context-menu-separator" role="separator" />
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -566,6 +572,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
               </button>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -577,11 +584,11 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
               </button>
             </>
           ) : null}
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => copyText(contextMenu.targetPath)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.targetPath)}>
             {t("context.copyPath")}
           </button>
-          <button type="button" onClick={() => copyText(contextMenu.relPath)}>
+          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.relPath)}>
             {t("context.copyRelativePath")}
           </button>
         </div>

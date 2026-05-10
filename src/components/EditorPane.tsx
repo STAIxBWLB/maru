@@ -272,43 +272,45 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       {contextMenu ? (
         <div
           className="context-menu document-tab-context-menu"
+          role="menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="context-menu-title" title={contextMenu.tab.relPath}>
             {contextMenu.tab.title}
           </div>
-          <button type="button" onClick={() => runTabAction(onCloseTab)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseTab)}>
             <span>{t("editor.tabs.menu.close")}</span>
             <span className="context-menu-shortcut" aria-hidden="true">
               ⌘W
             </span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseOtherTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseOtherTabs)}>
             <span>{t("editor.tabs.menu.closeOthers")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseTabsToRight)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseTabsToRight)}>
             <span>{t("editor.tabs.menu.closeRight")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseSavedTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseSavedTabs)}>
             <span>{t("editor.tabs.menu.closeSaved")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseAllTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseAllTabs)}>
             <span>{t("editor.tabs.menu.closeAllSaved")}</span>
           </button>
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => runTabAction(onCopyTabName)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabName)}>
             <span>{t("editor.tabs.menu.copyName")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCopyTabPath)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabPath)}>
             <span>{t("editor.tabs.menu.copyPath")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCopyTabRelativePath)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabRelativePath)}>
             <span>{t("editor.tabs.menu.copyRelativePath")}</span>
           </button>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canRenameMove}
             title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onRenameTab)}
@@ -317,6 +319,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canRenameMove}
             title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onMoveTab)}
@@ -325,6 +328,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canCreate}
             title={!contextMenu.tab.canCreate ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onDuplicateTab)}
@@ -333,6 +337,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             className="danger"
             disabled={!contextMenu.tab.canDelete}
             title={!contextMenu.tab.canDelete ? mutationDisabledTitle : undefined}
@@ -340,14 +345,14 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           >
             <span>{t("editor.tabs.menu.delete")}</span>
           </button>
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => runTabAction(onOpenTabPreview)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runTabAction(onOpenTabPreview)}>
             <span>{t("editor.tabs.menu.openPreview")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onRevealTabInFinder)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onRevealTabInFinder)}>
             <span>{t("editor.tabs.menu.revealFinder")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onRevealTabInExplorer)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onRevealTabInExplorer)}>
             <span>{t("editor.tabs.menu.revealExplorer")}</span>
           </button>
         </div>
