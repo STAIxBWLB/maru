@@ -37,6 +37,7 @@ import {
   type InboxTrashableRow,
 } from "../lib/inbox";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
   InboxEntry,
   InboxFileDropConfig,
@@ -137,6 +138,12 @@ export function InboxPane({
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [dragOverDrop, setDragOverDrop] = useState(false);
   const [contextMenu, setContextMenu] = useState<InboxContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
   const [processedDetailTab, setProcessedDetailTab] =
     useState<"summary" | "route" | "manifest" | "extracted">("summary");
   const sources = useMemo(() => uniqueSources(items), [items]);
@@ -852,15 +859,20 @@ export function InboxPane({
       </div>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu"
+          role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.path}>
             {contextMenu.title}
           </div>
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const path = contextMenu.path;
               setContextMenu(null);
@@ -869,12 +881,13 @@ export function InboxPane({
           >
             <span>{t("inbox.menu.revealFinder")}</span>
           </button>
-          <button type="button" onClick={copyContextPath}>
+          <button type="button" role="menuitem" onClick={copyContextPath}>
             <span>{t("inbox.menu.copyPath")}</span>
           </button>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
             className="danger"
             disabled={contextMenu.targets.length === 0 || actionBusy}
             onClick={() => void trashContextTargets()}

@@ -132,6 +132,7 @@ import {
 } from "./lib/gmail";
 import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
+import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
   buildInboxProcessPrompt,
   buildInboxItemStates,
@@ -650,6 +651,7 @@ function MainApp() {
   const localeValue = useLocaleState();
   const { t, locale, setLocale } = localeValue;
   const approvalGate = useApprovalGate();
+  const isMac = useMemo(() => isMacPlatform(currentPlatform()), []);
 
   const [workspaceRegistry, setWorkspaceRegistry] = useState<WorkspaceRegistry>({
     workspaces: [],
@@ -2643,7 +2645,9 @@ function MainApp() {
         if (!disposed) setTelegramPolling(status);
       })
       .catch(() => {});
-    if (!migrationCheckedRef.current) {
+    if (!isMac) {
+      setMigrationServices([]);
+    } else if (!migrationCheckedRef.current) {
       migrationCheckedRef.current = true;
       void detectLegacyTelegramLaunchd()
         .then((services) => {
@@ -2675,7 +2679,7 @@ function MainApp() {
       disposed = true;
       unlistenTelegram?.();
     };
-  }, [appMode, inboxWorkspacePath]);
+  }, [appMode, inboxWorkspacePath, isMac]);
 
   useEffect(() => {
     if (appMode !== "inbox") return;
@@ -4056,15 +4060,21 @@ function MainApp() {
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath, updateLayoutSettings]);
 
   const refreshMigrationServices = useCallback(() => {
+    if (!isMac) {
+      setMigrationServices([]);
+      setMigrationBusy(false);
+      return;
+    }
     setMigrationBusy(true);
     void detectLegacyTelegramLaunchd()
       .then(setMigrationServices)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setMigrationBusy(false));
-  }, []);
+  }, [isMac]);
 
   const unloadMigrationService = useCallback(
     (plistPath: string) => {
+      if (!isMac) return;
       const ok = window.confirm(t("comms.migration.confirm"));
       if (!ok) return;
       setMigrationBusy(true);
@@ -4074,7 +4084,7 @@ function MainApp() {
         .catch((err) => setError(err instanceof Error ? err.message : String(err)))
         .finally(() => setMigrationBusy(false));
     },
-    [t],
+    [isMac, t],
   );
 
   const toggleLocale = useCallback(() => {

@@ -15,6 +15,7 @@ import { documentStats } from "../lib/document";
 import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { Button } from "./ui/Button";
 import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
@@ -130,6 +131,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     y: number;
     tab: EditorTabSummary;
   } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
 
   const { handlers: autocompleteHandlers, popup: autocompletePopup } =
     useWikilinkAutocomplete({
@@ -271,44 +278,49 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       </div>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu document-tab-context-menu"
+          role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.tab.relPath}>
             {contextMenu.tab.title}
           </div>
-          <button type="button" onClick={() => runTabAction(onCloseTab)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseTab)}>
             <span>{t("editor.tabs.menu.close")}</span>
             <span className="context-menu-shortcut" aria-hidden="true">
               ⌘W
             </span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseOtherTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseOtherTabs)}>
             <span>{t("editor.tabs.menu.closeOthers")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseTabsToRight)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseTabsToRight)}>
             <span>{t("editor.tabs.menu.closeRight")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseSavedTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseSavedTabs)}>
             <span>{t("editor.tabs.menu.closeSaved")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCloseAllTabs)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCloseAllTabs)}>
             <span>{t("editor.tabs.menu.closeAllSaved")}</span>
           </button>
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => runTabAction(onCopyTabName)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabName)}>
             <span>{t("editor.tabs.menu.copyName")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCopyTabPath)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabPath)}>
             <span>{t("editor.tabs.menu.copyPath")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onCopyTabRelativePath)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onCopyTabRelativePath)}>
             <span>{t("editor.tabs.menu.copyRelativePath")}</span>
           </button>
-          <div className="context-menu-separator" />
+          <div className="context-menu-separator" role="separator" />
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canRenameMove}
             title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onRenameTab)}
@@ -317,6 +329,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canRenameMove}
             title={!contextMenu.tab.canRenameMove ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onMoveTab)}
@@ -325,6 +338,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             disabled={!contextMenu.tab.canCreate}
             title={!contextMenu.tab.canCreate ? mutationDisabledTitle : undefined}
             onClick={() => runTabAction(onDuplicateTab)}
@@ -333,6 +347,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
           <button
             type="button"
+            role="menuitem"
             className="danger"
             disabled={!contextMenu.tab.canDelete}
             title={!contextMenu.tab.canDelete ? mutationDisabledTitle : undefined}
@@ -340,14 +355,14 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           >
             <span>{t("editor.tabs.menu.delete")}</span>
           </button>
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => runTabAction(onOpenTabPreview)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runTabAction(onOpenTabPreview)}>
             <span>{t("editor.tabs.menu.openPreview")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onRevealTabInFinder)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onRevealTabInFinder)}>
             <span>{t("editor.tabs.menu.revealFinder")}</span>
           </button>
-          <button type="button" onClick={() => runTabAction(onRevealTabInExplorer)}>
+          <button type="button" role="menuitem" onClick={() => runTabAction(onRevealTabInExplorer)}>
             <span>{t("editor.tabs.menu.revealExplorer")}</span>
           </button>
         </div>

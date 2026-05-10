@@ -53,6 +53,17 @@ export function telegramLoginCommand(settings: CommsSettings["telegram"]): {
   };
 }
 
+export function isTelegramMonitorConfigOutsideAnchor(
+  path: string | null | undefined,
+): boolean {
+  const trimmed = path?.trim();
+  if (!trimmed) return false;
+  if (trimmed === "~/.anchor" || trimmed.startsWith("~/.anchor/")) return false;
+  if (trimmed === "$HOME/.anchor" || trimmed.startsWith("$HOME/.anchor/")) return false;
+  if (trimmed.endsWith("/.anchor") || trimmed.includes("/.anchor/")) return false;
+  return true;
+}
+
 function quoteShell(value: string): string {
   if (value.startsWith("~/")) return `"$HOME/${value.slice(2)}"`;
   if (value.startsWith("$HOME/")) return `"${value}"`;

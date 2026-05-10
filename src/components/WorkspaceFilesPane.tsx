@@ -25,6 +25,7 @@ import {
   useTransition,
 } from "react";
 import { useTranslation } from "../lib/i18n";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import {
   clearExplorerDragPayload,
   clearFileQueueDragPayload,
@@ -151,6 +152,12 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     entry: WorkspaceFileEntry | null;
     targetKind: "file" | "directory";
   } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
   const [dragOverTargetPath, setDragOverTargetPath] = useState<string | null>(null);
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
@@ -496,9 +503,13 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
 
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="context-menu"
+          role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
           <div className="context-menu-title" title={contextMenu.relPath}>
             {contextMenu.title}
@@ -506,6 +517,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           {contextMenu.entry && isOpenableDocumentFile(contextMenu.entry) ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 const entry = contextMenu.entry;
                 if (!entry) return;
@@ -518,6 +530,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const entry = contextMenu.entry;
               setContextMenu(null);
@@ -530,6 +543,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           {onApplySkillToTarget ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 const target = contextMenu.targetPath;
                 const kind = contextMenu.targetKind;
@@ -542,6 +556,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               const target = contextMenu.targetPath;
               setContextMenu(null);
@@ -552,9 +567,10 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           </button>
           {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
             <>
-              <div className="context-menu-separator" />
+              <div className="context-menu-separator" role="separator" />
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -566,6 +582,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
               </button>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   const target = contextMenu.targetPath;
                   const kind = contextMenu.targetKind;
@@ -577,11 +594,11 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
               </button>
             </>
           ) : null}
-          <div className="context-menu-separator" />
-          <button type="button" onClick={() => copyText(contextMenu.targetPath)}>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.targetPath)}>
             {t("context.copyPath")}
           </button>
-          <button type="button" onClick={() => copyText(contextMenu.relPath)}>
+          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.relPath)}>
             {t("context.copyRelativePath")}
           </button>
         </div>

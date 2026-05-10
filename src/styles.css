@@ -3708,6 +3708,10 @@ button.git-badge:hover {
   background: var(--warn-soft);
 }
 
+.comms-setup-banner.warn {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .comms-setup-banner strong {
   display: block;
   color: var(--warn);
