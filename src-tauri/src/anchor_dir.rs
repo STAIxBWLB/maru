@@ -49,6 +49,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["terminal"],
     &["ai"],
     &["connectors"],
+    &["meetings"],
 ];
 
 const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
@@ -408,6 +409,26 @@ fn default_settings_json() -> JsonValue {
         "ai": {
             "providers": {},
             "defaults": {}
+        },
+        "meetings": {
+            "enabled": true,
+            "root": "meetings",
+            "filenameTemplate": "MM-DD {type} - {topic} - {detail}.md",
+            "guides": {
+                "quickStart": null,
+                "glossary": null,
+                "people": null,
+                "tagStandards": null,
+                "notesGuidelines": null
+            },
+            "hooks": {
+                "autoTaskExtract": true,
+                "autoVaultExtract": true,
+                "autoVaultConnect": true,
+                "appendVaultLog": true
+            },
+            "defaultTypes": ["회의", "상담", "강의", "워크숍", "발표"],
+            "calendarStartHour": 8
         },
         "inboxChannels": {},
         "connectors": {}

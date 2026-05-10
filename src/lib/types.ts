@@ -452,6 +452,33 @@ export interface MissionLogTail {
   lines: string[];
 }
 
+export interface MeetingNoteRow {
+  path: string;
+  relPath: string;
+  fileName: string;
+  sizeBytes: number;
+  updatedAt: string | null;
+}
+
+export interface MeetingMetadata {
+  relPath: string;
+  frontmatter: Record<string, unknown>;
+  tags: string[];
+  attendees: string[];
+  date: string | null;
+  preview: string;
+  lineCount: number;
+  charCount: number;
+}
+
+export interface MeetingGuides {
+  quickStart: string | null;
+  glossary: string | null;
+  people: string | null;
+  tagStandards: string | null;
+  notesGuidelines: string | null;
+}
+
 /** Per-workspace inbox configuration persisted at `<workspace>/.anchor/inbox.json`. */
 export interface InboxSettings {
   /** Workspace-relative path to the inbox root directory. */

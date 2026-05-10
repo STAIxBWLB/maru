@@ -3,6 +3,9 @@ import type {
   DeletedDocument,
   DocumentPayload,
   InboxDropItem,
+  MeetingGuides,
+  MeetingMetadata,
+  MeetingNoteRow,
   VaultEntry,
   WorkspaceFileEntry,
   WorkspaceRegistry,
@@ -372,4 +375,51 @@ export function mockInboxDropItems(): InboxDropItem[] {
       receivedAt: "2026-04-26T14:30:00+09:00",
     },
   ];
+}
+
+export function mockMeetingNoteRows(rootPath = MOCK_VAULT_PATH): MeetingNoteRow[] {
+  return [
+    {
+      path: `${rootPath}/meetings/2026/2026-04/04-20 회의 - Anchor 사업 주간 점검 - KPI.md`,
+      relPath: "meetings/2026/2026-04/04-20 회의 - Anchor 사업 주간 점검 - KPI.md",
+      fileName: "04-20 회의 - Anchor 사업 주간 점검 - KPI.md",
+      sizeBytes: sampleContent.length,
+      updatedAt: now,
+    },
+    {
+      path: `${rootPath}/meetings/2026/2026-05/05-04 상담 - Skills 관리 - Codex.md`,
+      relPath: "meetings/2026/2026-05/05-04 상담 - Skills 관리 - Codex.md",
+      fileName: "05-04 상담 - Skills 관리 - Codex.md",
+      sizeBytes: referenceContent.length,
+      updatedAt: "2026-05-04T11:00:00+09:00",
+    },
+  ];
+}
+
+export function mockMeetingMetadata(relPath: string): MeetingMetadata {
+  return {
+    relPath,
+    frontmatter: {
+      type: "meeting",
+      tags: ["회의록", "anchor"],
+      attendees: ["Young Joon Lee", "Anchor Team"],
+      date: "2026-04-20",
+    },
+    tags: ["회의록", "anchor"],
+    attendees: ["Young Joon Lee", "Anchor Team"],
+    date: "2026-04-20",
+    preview: "# Anchor 사업 주간 점검\n\nKPI 산식과 예산 집행률 기준을 정리한다.",
+    lineCount: 3,
+    charCount: 44,
+  };
+}
+
+export function mockMeetingGuides(): MeetingGuides {
+  return {
+    quickStart: "# Quick Start\n\n6 sections.",
+    glossary: "# Glossary\n\nAnchor = local-first workspace.",
+    people: "# People\n\nYoung Joon Lee.",
+    tagStandards: "# Tags\n\n#회의록",
+    notesGuidelines: "# Notes Guidelines\n\nUse concise Korean.",
+  };
 }

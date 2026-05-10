@@ -5,7 +5,7 @@ export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
-export type AnchorAppMode = "pkm" | "inbox" | "comms";
+export type AnchorAppMode = "pkm" | "inbox" | "comms" | "meetings";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
@@ -118,6 +118,7 @@ export interface AnchorSettings {
   };
   ai: Record<string, unknown>;
   comms: CommsSettings;
+  meetings: MeetingsSettings;
   inboxChannels: Record<string, unknown>;
   connectors: Record<string, unknown>;
 }
@@ -141,10 +142,33 @@ export interface CommsSettings {
   };
 }
 
+export interface MeetingsSettings {
+  enabled: boolean;
+  root: string | null;
+  filenameTemplate: string;
+  guides: {
+    quickStart: string | null;
+    glossary: string | null;
+    people: string | null;
+    tagStandards: string | null;
+    notesGuidelines: string | null;
+  };
+  hooks: {
+    autoTaskExtract: boolean;
+    autoVaultExtract: boolean;
+    autoVaultConnect: boolean;
+    appendVaultLog: boolean;
+  };
+  defaultTypes: string[];
+  calendarStartHour: number;
+}
+
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
 export const COMMS_PROVIDER_RESULTS_MAX = 200;
 export const TELEGRAM_POLL_INTERVAL_MIN_SECONDS = 30;
 export const TELEGRAM_POLL_INTERVAL_MAX_SECONDS = 86400;
+export const MEETINGS_CALENDAR_START_HOUR_MIN = 0;
+export const MEETINGS_CALENDAR_START_HOUR_MAX = 23;
 
 export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   version: 1,
@@ -227,6 +251,26 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       legacyAutoDrop: false,
     },
   },
+  meetings: {
+    enabled: true,
+    root: "meetings",
+    filenameTemplate: "MM-DD {type} - {topic} - {detail}.md",
+    guides: {
+      quickStart: null,
+      glossary: null,
+      people: null,
+      tagStandards: null,
+      notesGuidelines: null,
+    },
+    hooks: {
+      autoTaskExtract: true,
+      autoVaultExtract: true,
+      autoVaultConnect: true,
+      appendVaultLog: true,
+    },
+    defaultTypes: ["회의", "상담", "강의", "워크숍", "발표"],
+    calendarStartHour: 8,
+  },
   inboxChannels: {},
   connectors: {},
 };
@@ -294,6 +338,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
     },
     ai: normalizeFutureAi(value.ai),
     comms: normalizeCommsSettings(value.comms),
+    meetings: normalizeMeetingsSettings(value.meetings),
     inboxChannels: isRecord(value.inboxChannels) ? value.inboxChannels : {},
     connectors: isRecord(value.connectors) ? value.connectors : {},
   };
@@ -390,6 +435,96 @@ export function applyWorkspaceCommsOverrides(
   };
 }
 
+export function applyWorkspaceMeetingsOverrides(
+  settings: MeetingsSettings,
+  workspaceConfig: Record<string, unknown> | null,
+): MeetingsSettings {
+  const meetingNotes = isRecord(workspaceConfig?.meeting_notes)
+    ? workspaceConfig.meeting_notes
+    : isRecord(workspaceConfig?.meetings)
+      ? workspaceConfig.meetings
+      : null;
+  if (!meetingNotes) return settings;
+  const guides = isRecord(meetingNotes.guides) ? meetingNotes.guides : null;
+  const hooks = isRecord(meetingNotes.hooks) ? meetingNotes.hooks : null;
+  return {
+    ...settings,
+    enabled: readBoolean(meetingNotes, ["enabled"], settings.enabled),
+    root: readOptionalString(meetingNotes, ["root", "path"], settings.root),
+    filenameTemplate:
+      readOptionalString(
+        meetingNotes,
+        ["filenameTemplate", "filename_template", "template"],
+        settings.filenameTemplate,
+      ) ?? settings.filenameTemplate,
+    guides: {
+      quickStart: readOptionalString(
+        guides,
+        ["quickStart", "quick_start", "quickStartPath", "quick_start_path"],
+        settings.guides.quickStart,
+      ),
+      glossary: readOptionalString(
+        guides,
+        ["glossary", "glossaryPath", "glossary_path"],
+        settings.guides.glossary,
+      ),
+      people: readOptionalString(
+        guides,
+        ["people", "peoplePath", "people_path"],
+        settings.guides.people,
+      ),
+      tagStandards: readOptionalString(
+        guides,
+        ["tagStandards", "tag_standards", "tagStandardsPath", "tag_standards_path"],
+        settings.guides.tagStandards,
+      ),
+      notesGuidelines: readOptionalString(
+        guides,
+        [
+          "notesGuidelines",
+          "notes_guidelines",
+          "notesGuidelinesPath",
+          "notes_guidelines_path",
+        ],
+        settings.guides.notesGuidelines,
+      ),
+    },
+    hooks: {
+      autoTaskExtract: readBoolean(
+        hooks,
+        ["autoTaskExtract", "auto_task_extract"],
+        settings.hooks.autoTaskExtract,
+      ),
+      autoVaultExtract: readBoolean(
+        hooks,
+        ["autoVaultExtract", "auto_vault_extract"],
+        settings.hooks.autoVaultExtract,
+      ),
+      autoVaultConnect: readBoolean(
+        hooks,
+        ["autoVaultConnect", "auto_vault_connect"],
+        settings.hooks.autoVaultConnect,
+      ),
+      appendVaultLog: readBoolean(
+        hooks,
+        ["appendVaultLog", "append_vault_log"],
+        settings.hooks.appendVaultLog,
+      ),
+    },
+    defaultTypes: normalizeStringList(
+      readKey(meetingNotes, ["defaultTypes", "default_types"]),
+      settings.defaultTypes,
+    ),
+    calendarStartHour: readInteger(
+      meetingNotes,
+      ["calendarStartHour", "calendar_start_hour"],
+      settings.calendarStartHour,
+      MEETINGS_CALENDAR_START_HOUR_MIN,
+      MEETINGS_CALENDAR_START_HOUR_MAX,
+    ),
+  };
+}
+
 function cloneDefaultSettings(): AnchorSettings {
   return {
     ...DEFAULT_ANCHOR_SETTINGS,
@@ -423,6 +558,12 @@ function cloneDefaultSettings(): AnchorSettings {
     comms: {
       outlook: { ...DEFAULT_ANCHOR_SETTINGS.comms.outlook },
       telegram: { ...DEFAULT_ANCHOR_SETTINGS.comms.telegram },
+    },
+    meetings: {
+      ...DEFAULT_ANCHOR_SETTINGS.meetings,
+      guides: { ...DEFAULT_ANCHOR_SETTINGS.meetings.guides },
+      hooks: { ...DEFAULT_ANCHOR_SETTINGS.meetings.hooks },
+      defaultTypes: [...DEFAULT_ANCHOR_SETTINGS.meetings.defaultTypes],
     },
     inboxChannels: {},
     connectors: {},
@@ -473,6 +614,61 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
         ? telegram.legacyAutoDrop
         : DEFAULT_ANCHOR_SETTINGS.comms.telegram.legacyAutoDrop,
     },
+  };
+}
+
+function normalizeMeetingsSettings(value: unknown): MeetingsSettings {
+  const meetings = isRecord(value) ? value : {};
+  const guides = isRecord(meetings.guides) ? meetings.guides : {};
+  const hooks = isRecord(meetings.hooks) ? meetings.hooks : {};
+  return {
+    enabled:
+      typeof meetings.enabled === "boolean"
+        ? meetings.enabled
+        : DEFAULT_ANCHOR_SETTINGS.meetings.enabled,
+    root:
+      typeof meetings.root === "undefined"
+        ? DEFAULT_ANCHOR_SETTINGS.meetings.root
+        : normalizeOptionalString(meetings.root),
+    filenameTemplate:
+      typeof meetings.filenameTemplate === "string" && meetings.filenameTemplate.trim()
+        ? meetings.filenameTemplate.trim()
+        : DEFAULT_ANCHOR_SETTINGS.meetings.filenameTemplate,
+    guides: {
+      quickStart: normalizeOptionalString(guides.quickStart),
+      glossary: normalizeOptionalString(guides.glossary),
+      people: normalizeOptionalString(guides.people),
+      tagStandards: normalizeOptionalString(guides.tagStandards),
+      notesGuidelines: normalizeOptionalString(guides.notesGuidelines),
+    },
+    hooks: {
+      autoTaskExtract:
+        typeof hooks.autoTaskExtract === "boolean"
+          ? hooks.autoTaskExtract
+          : DEFAULT_ANCHOR_SETTINGS.meetings.hooks.autoTaskExtract,
+      autoVaultExtract:
+        typeof hooks.autoVaultExtract === "boolean"
+          ? hooks.autoVaultExtract
+          : DEFAULT_ANCHOR_SETTINGS.meetings.hooks.autoVaultExtract,
+      autoVaultConnect:
+        typeof hooks.autoVaultConnect === "boolean"
+          ? hooks.autoVaultConnect
+          : DEFAULT_ANCHOR_SETTINGS.meetings.hooks.autoVaultConnect,
+      appendVaultLog:
+        typeof hooks.appendVaultLog === "boolean"
+          ? hooks.appendVaultLog
+          : DEFAULT_ANCHOR_SETTINGS.meetings.hooks.appendVaultLog,
+    },
+    defaultTypes: normalizeStringList(
+      meetings.defaultTypes,
+      DEFAULT_ANCHOR_SETTINGS.meetings.defaultTypes,
+    ),
+    calendarStartHour: normalizeInteger(
+      meetings.calendarStartHour,
+      DEFAULT_ANCHOR_SETTINGS.meetings.calendarStartHour,
+      MEETINGS_CALENDAR_START_HOUR_MIN,
+      MEETINGS_CALENDAR_START_HOUR_MAX,
+    ),
   };
 }
 
@@ -559,7 +755,9 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 }
 
 function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
-  return value === "pkm" || value === "inbox" || value === "comms" ? value : null;
+  return value === "pkm" || value === "inbox" || value === "comms" || value === "meetings"
+    ? value
+    : null;
 }
 
 function parseWorkspaceVisibilitySetting(value: unknown): WorkspaceVisibilitySetting | null {
@@ -607,6 +805,27 @@ function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeStringList(value: unknown, fallback: readonly string[]): string[] {
+  const source =
+    typeof value === "string"
+      ? value.split(",")
+      : Array.isArray(value)
+        ? value
+        : fallback;
+  const items: string[] = [];
+  const seen = new Set<string>();
+  for (const item of source) {
+    if (typeof item !== "string") continue;
+    const normalized = item.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(normalized);
+  }
+  return items.length > 0 ? items : [...fallback];
 }
 
 export function normalizeDotFolderIncludes(value: unknown): string[] {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ANCHOR_SETTINGS,
   applyWorkspaceCommsOverrides,
+  applyWorkspaceMeetingsOverrides,
   normalizeAnchorSettings,
   parseBinaryFileIncludePatternsText,
 } from "./settings";
@@ -150,6 +151,47 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.comms.telegram.legacyAutoDrop).toBe(true);
   });
 
+  it("parses meetings mode and normalizes meetings settings", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        activeAppMode: "meetings",
+      },
+      meetings: {
+        enabled: false,
+        root: " meetings ",
+        filenameTemplate: " MM-DD {type} - {topic}.md ",
+        guides: {
+          quickStart: " docs/QUICK_START.md ",
+          glossary: " docs/GLOSSARY.md ",
+          people: " docs/PEOPLE.md ",
+          tagStandards: " docs/TAGS.md ",
+          notesGuidelines: " docs/NOTES.md ",
+        },
+        hooks: {
+          autoTaskExtract: false,
+          autoVaultExtract: false,
+          autoVaultConnect: true,
+          appendVaultLog: false,
+        },
+        defaultTypes: "회의, 상담, 회의, 강의",
+        calendarStartHour: 99,
+      },
+    });
+
+    expect(settings.ui.activeAppMode).toBe("meetings");
+    expect(settings.meetings.enabled).toBe(false);
+    expect(settings.meetings.root).toBe("meetings");
+    expect(settings.meetings.filenameTemplate).toBe("MM-DD {type} - {topic}.md");
+    expect(settings.meetings.guides.quickStart).toBe("docs/QUICK_START.md");
+    expect(settings.meetings.guides.tagStandards).toBe("docs/TAGS.md");
+    expect(settings.meetings.hooks.autoTaskExtract).toBe(false);
+    expect(settings.meetings.hooks.autoVaultExtract).toBe(false);
+    expect(settings.meetings.hooks.autoVaultConnect).toBe(true);
+    expect(settings.meetings.hooks.appendVaultLog).toBe(false);
+    expect(settings.meetings.defaultTypes).toEqual(["회의", "상담", "강의"]);
+    expect(settings.meetings.calendarStartHour).toBe(23);
+  });
+
   it("applies workspace io provider overrides without rewriting base comms defaults", () => {
     const base = normalizeAnchorSettings({
       comms: {
@@ -192,6 +234,46 @@ describe("normalizeAnchorSettings", () => {
     expect(effective.telegram.legacyAutoDrop).toBe(true);
   });
 
+  it("applies workspace meeting note overrides without rewriting base meetings defaults", () => {
+    const base = normalizeAnchorSettings({
+      meetings: {
+        root: "meetings",
+        defaultTypes: ["회의", "상담"],
+        hooks: { autoVaultConnect: true },
+      },
+    }).meetings;
+
+    const effective = applyWorkspaceMeetingsOverrides(base, {
+      meeting_notes: {
+        enabled: false,
+        root: "meetings/notes",
+        filename_template: "MM-DD {topic}.md",
+        guides: {
+          quick_start: "docs/QUICK_START.md",
+          tag_standards: "docs/TAGS.md",
+        },
+        hooks: {
+          auto_vault_connect: false,
+          append_vault_log: false,
+        },
+        default_types: ["강의", "워크숍"],
+        calendar_start_hour: 7,
+      },
+    });
+
+    expect(base.enabled).toBe(true);
+    expect(base.root).toBe("meetings");
+    expect(effective.enabled).toBe(false);
+    expect(effective.root).toBe("meetings/notes");
+    expect(effective.filenameTemplate).toBe("MM-DD {topic}.md");
+    expect(effective.guides.quickStart).toBe("docs/QUICK_START.md");
+    expect(effective.guides.tagStandards).toBe("docs/TAGS.md");
+    expect(effective.hooks.autoVaultConnect).toBe(false);
+    expect(effective.hooks.appendVaultLog).toBe(false);
+    expect(effective.defaultTypes).toEqual(["강의", "워크숍"]);
+    expect(effective.calendarStartHour).toBe(7);
+  });
+
   it("defaults first-run terminal layout to collapsed shell autoload", () => {
     const settings = normalizeAnchorSettings({});
 
@@ -201,6 +283,10 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.editorViewMode).toBe("source");
     expect(settings.ui.rightPaneTab).toBe("outline");
     expect(settings.ui.workspaceFileFilter).toBe("all");
+    expect(settings.meetings.root).toBe("meetings");
+    expect(settings.meetings.defaultTypes).toEqual(
+      DEFAULT_ANCHOR_SETTINGS.meetings.defaultTypes,
+    );
     expect(settings.ui.binaryFileIncludePatterns).toEqual(
       DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,
     );

@@ -7,6 +7,9 @@ import {
   mockDuplicateDocument,
   mockEntries,
   mockInboxDropItems,
+  mockMeetingGuides,
+  mockMeetingMetadata,
+  mockMeetingNoteRows,
   mockMoveDocument,
   mockSetActiveWorkspaceRoot,
   mockTrashDocument,
@@ -52,6 +55,9 @@ import type {
   InboxTrashTarget,
   MissionLogTail,
   MissionRecord,
+  MeetingGuides,
+  MeetingMetadata,
+  MeetingNoteRow,
   MemoDocument,
   MemoEntry,
   MemoFormat,
@@ -229,6 +235,32 @@ export async function scanWorkspaceFiles(
 ): Promise<WorkspaceFileEntry[]> {
   if (!isTauri()) return mockWorkspaceFiles(vaultPath);
   return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath, scanOptions: scanOptions ?? null });
+}
+
+export async function scanMeetingNotes(
+  workPath: string,
+  root?: string | null,
+): Promise<MeetingNoteRow[]> {
+  if (!isTauri()) return mockMeetingNoteRows(workPath);
+  return invoke<MeetingNoteRow[]>("scan_meeting_notes", { workPath, root: root ?? null });
+}
+
+export async function readMeetingMetadata(
+  workPath: string,
+  relPath: string,
+): Promise<MeetingMetadata> {
+  if (!isTauri()) return mockMeetingMetadata(relPath);
+  return invoke<MeetingMetadata>("read_meeting_metadata", { workPath, relPath });
+}
+
+export async function readMeetingGuides(workPath: string): Promise<MeetingGuides> {
+  if (!isTauri()) return mockMeetingGuides();
+  return invoke<MeetingGuides>("read_meeting_guides", { workPath });
+}
+
+export async function appendMeetingsLog(workPath: string, line: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("append_meetings_log", { workPath, line });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {

@@ -1,11 +1,13 @@
 import { ChevronRight, Play, RefreshCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
+import type { AnchorAppMode } from "../../lib/settings";
 import type { SkillRecord } from "../../lib/skills";
 
 interface SkillsQuickPaneProps {
   skills: SkillRecord[];
   loading?: boolean;
+  appMode?: AnchorAppMode;
   onRefresh: () => void;
   onRunSkill: (skill: SkillRecord) => void;
 }
@@ -101,9 +103,25 @@ function groupSkills(skills: SkillRecord[], t: Translate): SkillGroup[] {
   });
 }
 
+function prioritizeSkills(skills: SkillRecord[], appMode?: AnchorAppMode): SkillRecord[] {
+  if (appMode !== "meetings") return skills;
+  const priority = new Map(
+    ["meeting-notes", "vault-extract", "vault-connect", "task-management", "gaejosik"].map(
+      (name, index) => [name, index],
+    ),
+  );
+  return [...skills].sort((a, b) => {
+    const aPriority = priority.get(a.name) ?? priority.size;
+    const bPriority = priority.get(b.name) ?? priority.size;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function SkillsQuickPane({
   skills,
   loading = false,
+  appMode,
   onRefresh,
   onRunSkill,
 }: SkillsQuickPaneProps) {
@@ -112,8 +130,9 @@ export function SkillsQuickPane({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return skills.slice(0, 40);
-    return skills
+    const prioritized = prioritizeSkills(skills, appMode);
+    if (!q) return prioritized.slice(0, 40);
+    return prioritized
       .filter((skill) =>
         [
           skill.name,
@@ -129,7 +148,7 @@ export function SkillsQuickPane({
           .includes(q),
       )
       .slice(0, 40);
-  }, [query, skills]);
+  }, [appMode, query, skills]);
   const groups = useMemo(() => groupSkills(filtered, t), [filtered, t]);
 
   function toggleGroup(groupId: string) {

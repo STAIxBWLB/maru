@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import type React from "react";
 import {
   AlertTriangle,
+  CalendarDays,
   Clock3,
   Command,
   FileText,
@@ -22,6 +23,7 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { InboxPane } from "./components/InboxPane";
+import { MeetingsPane } from "./components/meetings/MeetingsPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
@@ -203,6 +205,7 @@ import {
 import {
   DEFAULT_ANCHOR_SETTINGS,
   applyWorkspaceCommsOverrides,
+  applyWorkspaceMeetingsOverrides,
   normalizeAnchorSettings,
   type AnchorSettings,
   type AnchorAppMode,
@@ -214,6 +217,7 @@ import {
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
+import { activeMeetingsMissions, isMeetingsMission } from "./lib/meetings";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
   openSettingsWindow,
@@ -435,7 +439,16 @@ function upsertMission(current: MissionRecord[], next: MissionRecord): MissionRe
   if (matchesActiveMission(next)) {
     merged.unshift(next);
   }
-  return activeInboxProcessMissions(merged);
+  return activeTrackedMissions(merged);
+}
+
+function activeTrackedMissions(missions: MissionRecord[]): MissionRecord[] {
+  const byId = new Map<string, MissionRecord>();
+  for (const mission of activeInboxProcessMissions(missions)) byId.set(mission.id, mission);
+  for (const mission of activeMeetingsMissions(missions)) byId.set(mission.id, mission);
+  return Array.from(byId.values()).sort(
+    (a, b) => b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt),
+  );
 }
 
 function formatGmailTtl(seconds: number): string {
@@ -1110,6 +1123,10 @@ function MainApp() {
   const effectiveCommsSettings = useMemo(
     () => applyWorkspaceCommsOverrides(anchorSettings.comms, workspaceConfig),
     [anchorSettings.comms, workspaceConfig],
+  );
+  const effectiveMeetingsSettings = useMemo(
+    () => applyWorkspaceMeetingsOverrides(anchorSettings.meetings, workspaceConfig),
+    [anchorSettings.meetings, workspaceConfig],
   );
   const dirty = useMemo(
     () => Boolean(document && draftContent !== document.content),
@@ -2103,7 +2120,7 @@ function MainApp() {
 
   const refreshProcessingMissions = useCallback(async () => {
     try {
-      const missions = activeInboxProcessMissions(await listAiMissions());
+      const missions = activeTrackedMissions(await listAiMissions());
       setProcessingMissions(missions);
       processingMissionIdsRef.current = new Set(missions.map((mission) => mission.id));
       const tails = await Promise.all(
@@ -2544,13 +2561,26 @@ function MainApp() {
   const stopProcessingMission = useCallback(async (id: string) => {
     try {
       const record = await stopAiMission(id);
-      if (isInboxProcessMission(record)) {
+      if (isInboxProcessMission(record) || isMeetingsMission(record)) {
         setProcessingMissions((current) => upsertMission(current, record));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  const handleMeetingsMissionStarted = useCallback(
+    (invocationId: string) => {
+      processingMissionIdsRef.current = new Set([
+        ...processingMissionIdsRef.current,
+        invocationId,
+      ]);
+      setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
+      setError(`Background meeting-note run started: ${invocationId}`);
+      void refreshProcessingMissions();
+    },
+    [refreshProcessingMissions],
+  );
 
   const stageInboxFiles = useCallback(
     async (sourcePaths: string[]) => {
@@ -2682,7 +2712,7 @@ function MainApp() {
   }, [appMode, inboxWorkspacePath, isMac]);
 
   useEffect(() => {
-    if (appMode !== "inbox") return;
+    if (appMode !== "inbox" && appMode !== "meetings") return;
     void refreshProcessedItems();
     void refreshProcessingMissions();
   }, [appMode, refreshProcessedItems, refreshProcessingMissions]);
@@ -2696,9 +2726,11 @@ function MainApp() {
       .then(async ({ listen }) => {
         const offMission = await listen<MissionRecord>("ai://mission_update", (event) => {
           const record = event.payload;
-          if (!isInboxProcessMission(record)) return;
-          setProcessingMissions((current) => activeInboxProcessMissions(upsertMission(current, record)));
-          if (!matchesActiveMission(record)) {
+          const inboxMission = isInboxProcessMission(record);
+          const meetingsMission = isMeetingsMission(record);
+          if (!inboxMission && !meetingsMission) return;
+          setProcessingMissions((current) => upsertMission(current, record));
+          if (inboxMission && !matchesActiveMission(record)) {
             void refreshProcessedItems();
             void readAiMissionLog(record.id, 100)
               .then((tail) =>
@@ -3314,7 +3346,7 @@ function MainApp() {
   );
 
   const openSkillCompose = useCallback(
-    (skill: SkillRecord | null = null, contextOverride?: SkillContextItem[]) => {
+    (skill: SkillRecord | null = null, contextOverride?: SkillContextItem[], prompt?: string) => {
       const context =
         contextOverride ??
         (selectedEntry
@@ -3331,6 +3363,7 @@ function MainApp() {
       setComposeSeed({
         skill,
         context,
+        prompt,
         cwd: activeDocumentWorkspacePath ?? explorerWorkspacePath ?? settingsWorkPath,
       });
     },
@@ -4003,6 +4036,10 @@ function MainApp() {
     setPersistedAppMode("comms");
   }, [setPersistedAppMode]);
 
+  const openMeetings = useCallback(() => {
+    setPersistedAppMode("meetings");
+  }, [setPersistedAppMode]);
+
   const closeCommandPalette = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -4026,6 +4063,12 @@ function MainApp() {
 
   const openCommsSettings = useCallback(() => {
     void openSettingsWindow(settingsWorkPath, "comms").catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+  }, [settingsWorkPath]);
+
+  const openMeetingsSettings = useCallback(() => {
+    void openSettingsWindow(settingsWorkPath, "meetings").catch((err) => {
       setError(err instanceof Error ? err.message : String(err));
     });
   }, [settingsWorkPath]);
@@ -4098,6 +4141,8 @@ function MainApp() {
       void refreshProcessingMissions();
     } else if (appMode === "comms") {
       void refreshCommsProviders({ force: true });
+    } else if (appMode === "meetings") {
+      void refreshProcessingMissions();
     } else if (anchorSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
@@ -4795,6 +4840,9 @@ function MainApp() {
         case "open-comms":
           openComms();
           break;
+        case "open-meetings":
+          openMeetings();
+          break;
         case "open-docs":
           setPersistedAppMode("pkm");
           break;
@@ -4822,6 +4870,7 @@ function MainApp() {
       openPreferences,
       openInboxAndFocus,
       openComms,
+      openMeetings,
       checkForUpdates,
       splitEditorRight,
       closeAllCleanTabs,
@@ -5040,7 +5089,13 @@ function MainApp() {
   }, [runMenuCommand]);
 
   const modeClass =
-    appMode === "inbox" ? " inbox-mode" : appMode === "comms" ? " comms-mode" : "";
+    appMode === "inbox"
+      ? " inbox-mode"
+      : appMode === "comms"
+        ? " comms-mode"
+        : appMode === "meetings"
+          ? " meetings-mode"
+          : "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -5409,6 +5464,15 @@ function MainApp() {
           </button>
           <button
             type="button"
+            className={appMode === "meetings" ? "activity-button active" : "activity-button"}
+            onClick={openMeetings}
+            title={t("mode.meetings")}
+            aria-label={t("mode.meetings")}
+          >
+            <CalendarDays size={20} />
+          </button>
+          <button
+            type="button"
             className="activity-button"
             onClick={openCommandPalette}
             title={t("sidebar.commandPalette")}
@@ -5491,7 +5555,7 @@ function MainApp() {
             processedStatusFilter={processedStatusFilter}
             processedQuery={processedQuery}
             processedDetail={processedDetail}
-            processingMissions={processingMissions}
+            processingMissions={activeInboxProcessMissions(processingMissions)}
             processingLogLines={processingLogLines}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
@@ -5546,6 +5610,26 @@ function MainApp() {
             onOpenCommsSettings={openCommsSettings}
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={unloadMigrationService}
+          />
+        ) : appMode === "meetings" ? (
+          <MeetingsPane
+            workPath={inboxWorkspacePath}
+            settings={anchorSettings.meetings}
+            effectiveSettings={effectiveMeetingsSettings}
+            skills={skills}
+            processingMissions={activeMeetingsMissions(processingMissions)}
+            processingLogLines={processingLogLines}
+            onRefreshMissions={refreshProcessingMissions}
+            onOpenSettings={openMeetingsSettings}
+            onOpenSkillCompose={(skill, context, prompt) =>
+              openSkillCompose(skill, context, prompt)
+            }
+            onMissionStarted={handleMeetingsMissionStarted}
+            onStopMission={(id) => void stopProcessingMission(id)}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
           />
         ) : (
           <>
@@ -5759,6 +5843,7 @@ function MainApp() {
                   <SkillsQuickPane
                     skills={skills}
                     loading={skillsLoading}
+                    appMode={appMode}
                     onRefresh={refreshSkills}
                     onRunSkill={(skill) => openSkillCompose(skill)}
                   />

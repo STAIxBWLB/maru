@@ -152,10 +152,10 @@ test("switches between public provider roots and gates read-only actions", async
 
   await page.locator(".document-tab.active").click({ button: "right" });
   const menu = page.locator(".document-tab-context-menu");
-  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeDisabled();
-  await expect(menu.getByRole("button", { name: "이동..." })).toBeDisabled();
-  await expect(menu.getByRole("button", { name: "복제..." })).toBeDisabled();
-  await expect(menu.getByRole("button", { name: "삭제" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "이름 변경..." })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "이동..." })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "복제..." })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "삭제" })).toBeDisabled();
 });
 
 test("restores direct write policy when leaving Obsidian provider", async ({ page }) => {
@@ -286,6 +286,35 @@ test("restores the previous app state on startup", async ({ page }) => {
   await expect(page.locator(".editor-split-shell.split .editor-pane")).toHaveCount(2);
 });
 
+test("opens meetings mode with list, detail, and calendar views", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".activity-rail").getByRole("button", { name: "회의록" }).click();
+  await expect(page.locator(".meetings-pane")).toBeVisible();
+  const meetingsPane = page.locator(".meetings-pane");
+  await expect(
+    meetingsPane.getByRole("button", { name: /Anchor 사업 주간 점검/ }),
+  ).toBeVisible();
+
+  await meetingsPane.getByRole("button", { name: /Skills 관리/ }).click();
+  await expect(page.locator(".meetings-detail-pane")).toContainText("Skills 관리");
+
+  await meetingsPane.getByRole("button", { name: "캘린더" }).click();
+  await expect(page.locator(".meetings-calendar .rbc-calendar")).toBeVisible();
+  await expect(page.locator(".meetings-calendar")).toContainText("Skills 관리");
+});
+
+test("shows the meetings settings tab in the settings window shell", async ({ page }) => {
+  await page.goto("/?window=settings&workPath=mock%3A%2F%2Fanchor-sample-workspace&tab=meetings");
+
+  await expect(page.getByRole("tab", { name: "회의록" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByText("회의록 루트", { exact: true })).toBeVisible();
+  await expect(page.getByText("작업 로그 append", { exact: true })).toBeVisible();
+});
+
 test("supports tree bulk controls and Finder context menu", async ({ page }) => {
   await page.goto("/");
 
@@ -305,10 +334,10 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   await documentList.getByRole("button", { name: /Anchor 용어집/ }).click({
     button: "right",
   });
-  await expect(page.getByRole("button", { name: "파일 열기" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "경로 복사", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "파일 열기" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Finder에서 보기" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "경로 복사", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "상대 경로 복사" })).toBeVisible();
 });
 
 test("shows supported document tab menu items and performs file operations", async ({
@@ -326,26 +355,26 @@ test("shows supported document tab menu items and performs file operations", asy
   await glossaryTab.click({ button: "right" });
 
   const menu = page.locator(".document-tab-context-menu");
-  await expect(menu.getByRole("button", { name: "닫기", exact: true })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "다른 탭 닫기" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "오른쪽 탭 닫기" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "저장된 탭 닫기" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "이름 복사" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "상대 경로 복사" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "이름 변경..." })).toBeEnabled();
-  await expect(menu.getByRole("button", { name: "이동..." })).toBeEnabled();
-  await expect(menu.getByRole("button", { name: "복제..." })).toBeEnabled();
-  await expect(menu.getByRole("button", { name: "삭제" })).toBeEnabled();
-  await expect(menu.getByRole("button", { name: "미리보기 열기" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "Finder에서 보기" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: "Explorer View에서 보기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "닫기", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "다른 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "오른쪽 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "저장된 탭 닫기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "이름 복사" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "상대 경로 복사" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "이름 변경..." })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "이동..." })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "복제..." })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "삭제" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "미리보기 열기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Finder에서 보기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Explorer View에서 보기" })).toBeVisible();
   await expect(menu).not.toContainText("Remote URL");
   await expect(menu).not.toContainText("Share");
   await expect(menu).not.toContainText("Open Changes");
   await expect(menu).not.toContainText("File History");
   await expect(menu).not.toContainText("Reopen Editor With");
 
-  await menu.getByRole("button", { name: "Explorer View에서 보기" }).click();
+  await menu.getByRole("menuitem", { name: "Explorer View에서 보기" }).click();
   const revealedGlossary = documentList.getByRole("button", { name: /Anchor 용어집/ });
   await expect(documentList.getByRole("button", { name: "트리" })).toHaveClass(/active/);
   await expect(revealedGlossary).toBeVisible();
@@ -354,7 +383,7 @@ test("shows supported document tab menu items and performs file operations", asy
   await glossaryTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
-    .getByRole("button", { name: "복제..." })
+    .getByRole("menuitem", { name: "복제..." })
     .click();
   const copyTab = page.locator(".document-tab[title='references/anchor-glossary-copy.md']");
   await expect(copyTab).toBeVisible();
@@ -366,7 +395,7 @@ test("shows supported document tab menu items and performs file operations", asy
   await copyTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
-    .getByRole("button", { name: "이름 변경..." })
+    .getByRole("menuitem", { name: "이름 변경..." })
     .click();
   const renamedTab = page.locator(".document-tab[title='references/anchor-glossary-renamed.md']");
   await expect(renamedTab).toBeVisible();
@@ -378,7 +407,7 @@ test("shows supported document tab menu items and performs file operations", asy
   await renamedTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
-    .getByRole("button", { name: "이동..." })
+    .getByRole("menuitem", { name: "이동..." })
     .click();
   const movedTab = page.locator(".document-tab[title='moved/anchor-glossary-renamed.md']");
   await expect(movedTab).toBeVisible();
@@ -391,7 +420,7 @@ test("shows supported document tab menu items and performs file operations", asy
   await movedTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
-    .getByRole("button", { name: "삭제" })
+    .getByRole("menuitem", { name: "삭제" })
     .click();
   await expect(movedTab).toHaveCount(0);
   await expect(page.locator(".toast", { hasText: ".anchor/trash/documents/moved/" })).toBeVisible();
@@ -480,7 +509,7 @@ test("switches between Documents and Files explorer modes", async ({ page }) => 
   });
   await page
     .locator(".document-tab-context-menu")
-    .getByRole("button", { name: "Explorer View에서 보기" })
+    .getByRole("menuitem", { name: "Explorer View에서 보기" })
     .click();
   const revealedFile = explorer.getByRole("button", { name: /anchor-glossary\.md/ });
   await expect(explorer.getByRole("button", { name: "Files" })).toHaveClass(/active/);
@@ -557,7 +586,7 @@ test("copies selected Files shelf items into a tree context target", async ({ pa
   await weeklyItem.click({ modifiers: ["Shift"] });
 
   await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
-  await page.getByRole("button", { name: "선택 항목 2개 여기에 복사" }).click();
+  await page.getByRole("menuitem", { name: "선택 항목 2개 여기에 복사" }).click();
   await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
 });
 
