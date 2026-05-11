@@ -9,17 +9,23 @@ import {
   FileText,
   FolderOpen,
   GitCompare,
+  History,
+  Languages,
   Link2,
   List,
   Loader2,
   Pencil,
   Play,
   RefreshCcw,
+  RotateCw,
   Search,
   Settings,
+  ShieldAlert,
   Square,
   Trash2,
+  Users,
   WandSparkles,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -37,8 +43,17 @@ import {
   readDocument,
   readMeetingGuides,
   readMeetingMetadata,
+  readMeetingsLog,
   scanMeetingNotes,
 } from "../../lib/api";
+import {
+  logLinePhase,
+  logLineSeverity,
+  parseMeetingsLogLine,
+  serializeMeetingsLogLine,
+  type MeetingsLogEventInput,
+  type MeetingsLogLine,
+} from "../../lib/meetingsLog";
 import { useTranslation } from "../../lib/i18n";
 import {
   createMeetingReviewChecks,
@@ -78,9 +93,14 @@ import {
   type SkillProposal,
   type SkillRecord,
 } from "../../lib/skills";
-import type { MeetingMetadata, MeetingNoteRow, MissionRecord } from "../../lib/types";
+import type {
+  MeetingMetadata,
+  MeetingNoteRow,
+  MeetingsLogLineRecord,
+  MissionRecord,
+} from "../../lib/types";
 
-type MeetingsView = "all" | "month" | "transcript" | "external" | "date";
+type MeetingsView = "all" | "month" | "transcript" | "external" | "date" | "activity";
 type DisplayMode = "list" | "calendar";
 
 interface MeetingsPaneProps {
@@ -152,6 +172,7 @@ export function MeetingsPane({
   const [clearedRunIds, setClearedRunIds] = useState<Set<string>>(() =>
     readClearedMeetingRunIds(clearedRunStorageKey),
   );
+  const [lastClearedMissionId, setLastClearedMissionId] = useState<string | null>(null);
 
   const entries = useMemo(() => rowsToMeetingEntries(rows), [rows]);
   const availableTypes = useMemo(
@@ -194,7 +215,54 @@ export function MeetingsPane({
       writeClearedMeetingRunIds(clearedRunStorageKey, next);
       return next;
     });
-  }, [clearedRunStorageKey]);
+    setLastClearedMissionId(id);
+    const mission = meetingsMissions.find((m) => m.id === id) ?? null;
+    if (workPath && effectiveSettings.hooks.appendVaultLog) {
+      void appendMeetingsLog(
+        workPath,
+        serializeMeetingsLogLine({
+          event: "clear",
+          runId: id,
+          status: "cleared",
+          skill: mission ? meetingMissionSkillName(mission) ?? "meeting-notes" : "meeting-notes",
+          target: mission ? meetingMissionTitle(mission) : undefined,
+        }),
+      ).catch((err) => console.warn("meetings clear audit log failed", err));
+    }
+  }, [
+    clearedRunStorageKey,
+    effectiveSettings.hooks.appendVaultLog,
+    meetingsMissions,
+    workPath,
+  ]);
+
+  const undoClearMission = useCallback((id: string) => {
+    setClearedRunIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      writeClearedMeetingRunIds(clearedRunStorageKey, next);
+      return next;
+    });
+    setLastClearedMissionId(null);
+    if (workPath && effectiveSettings.hooks.appendVaultLog) {
+      void appendMeetingsLog(
+        workPath,
+        serializeMeetingsLogLine({
+          event: "clear",
+          runId: id,
+          status: "undone",
+          skill: "meeting-notes",
+        }),
+      ).catch(() => {});
+    }
+  }, [clearedRunStorageKey, effectiveSettings.hooks.appendVaultLog, workPath]);
+
+  useEffect(() => {
+    if (!lastClearedMissionId) return;
+    const handle = window.setTimeout(() => setLastClearedMissionId(null), 6000);
+    return () => window.clearTimeout(handle);
+  }, [lastClearedMissionId]);
 
   const refresh = useCallback(async () => {
     if (!workPath || !effectiveSettings.enabled) {
@@ -279,7 +347,21 @@ export function MeetingsPane({
           onNewMeeting={openNewMeeting}
           onOpenSettings={onOpenSettings}
         />
-        {view === "transcript" ? (
+        {lastClearedMissionId ? (
+          <div className="meetings-undo-toast" role="status">
+            <span>{t("meetings.progress.cleared")}</span>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => undoClearMission(lastClearedMissionId)}
+            >
+              {t("meetings.progress.undoClear")}
+            </button>
+          </div>
+        ) : null}
+        {view === "activity" ? (
+          <MeetingsActivityPane workPath={workPath} onError={onError} />
+        ) : view === "transcript" ? (
           <MeetingsTranscriptFlow
             workPath={workPath}
             settings={effectiveSettings}
@@ -409,6 +491,7 @@ function MeetingsSidebar({
     { id: "transcript", label: t("meetings.sidebar.transcript"), icon: <FileText size={15} /> },
     { id: "external", label: t("meetings.sidebar.external"), icon: <WandSparkles size={15} /> },
     { id: "date", label: t("meetings.sidebar.date"), count: dateCount, icon: <Search size={15} /> },
+    { id: "activity", label: t("meetings.sidebar.activity"), icon: <History size={15} /> },
   ];
   return (
     <aside className="meetings-sidebar">
@@ -727,20 +810,222 @@ function MeetingsDetailPane({
   );
 }
 
-function MeetingsTranscriptFlow({
+const ACTIVITY_EVENT_FILTERS: readonly string[] = [
+  "apply",
+  "clear",
+  "error",
+  "retry",
+  "followup",
+  "start",
+];
+
+function MeetingsActivityPane({
   workPath,
-  settings,
-  skills,
-  missions,
-  logLines,
-  onMissionStarted,
-  onStopMission,
-  onClearMission,
-  onRefreshMissions,
-  onConfirmApproval,
-  onApplied,
   onError,
 }: {
+  workPath: string | null;
+  onError: (message: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [entries, setEntries] = useState<MeetingsLogLineRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activeEvents, setActiveEvents] = useState<Set<string>>(
+    () => new Set(ACTIVITY_EVENT_FILTERS),
+  );
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+
+  const refresh = useCallback(async () => {
+    if (!workPath) {
+      setEntries([]);
+      return;
+    }
+    setLoading(true);
+    onError(null);
+    try {
+      const next = await readMeetingsLog(workPath, { limit: 500 });
+      setEntries(next);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [onError, workPath]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return entries.filter((entry) => {
+      if (!activeEvents.has(entry.event)) return false;
+      if (!needle) return true;
+      const haystack = [
+        entry.target ?? "",
+        entry.runId ?? "",
+        entry.skill ?? "",
+        entry.raw,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [activeEvents, entries, search]);
+
+  const groups = useMemo(() => groupActivityByDay(filtered), [filtered]);
+
+  const toggleEvent = (event: string) => {
+    setActiveEvents((current) => {
+      const next = new Set(current);
+      if (next.has(event)) next.delete(event);
+      else next.add(event);
+      return next;
+    });
+  };
+
+  return (
+    <section className="meetings-activity">
+      <header className="meetings-activity-head">
+        <div>
+          <h2>{t("meetings.activity.title")}</h2>
+          <p>{t("meetings.activity.description")}</p>
+        </div>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => void refresh()}
+          aria-label={t("meetings.refresh")}
+          title={t("meetings.refresh")}
+        >
+          <RefreshCcw size={14} className={loading ? "spin" : ""} />
+        </button>
+      </header>
+      <div className="meetings-activity-controls">
+        <label className="search-box meetings-search">
+          <Search size={14} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("meetings.activity.searchPlaceholder")}
+            aria-label={t("meetings.activity.searchPlaceholder")}
+          />
+        </label>
+        <div className="meetings-activity-filters" role="group" aria-label={t("meetings.activity.filterLabel")}>
+          {ACTIVITY_EVENT_FILTERS.map((event) => (
+            <button
+              key={event}
+              type="button"
+              className={activeEvents.has(event) ? "active" : ""}
+              aria-pressed={activeEvents.has(event)}
+              onClick={() => toggleEvent(event)}
+            >
+              {t(`meetings.activity.event.${event}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="meetings-activity-empty">
+          <ClipboardCheck size={18} />
+          <strong>{t("meetings.activity.emptyTitle")}</strong>
+          <span>{t("meetings.activity.emptyDescription")}</span>
+        </div>
+      ) : (
+        <div className="meetings-activity-groups">
+          {groups.map(([groupLabel, items]) => (
+            <section key={groupLabel} className="meetings-activity-group">
+              <h3>{t(`meetings.activity.group.${groupLabel}`)}</h3>
+              <ul>
+                {items.map((entry) => {
+                  const detailIndex = entries.indexOf(entry);
+                  const expandedRow = expanded.has(detailIndex);
+                  return (
+                    <li
+                      key={`${entry.ts ?? "no-ts"}-${detailIndex}`}
+                      data-event={entry.event}
+                      data-legacy={entry.legacy ? "true" : "false"}
+                    >
+                      <button
+                        type="button"
+                        className="meetings-activity-row"
+                        aria-expanded={expandedRow}
+                        onClick={() =>
+                          setExpanded((current) => {
+                            const next = new Set(current);
+                            if (next.has(detailIndex)) next.delete(detailIndex);
+                            else next.add(detailIndex);
+                            return next;
+                          })
+                        }
+                      >
+                        <span className="meetings-activity-event">
+                          {ACTIVITY_EVENT_FILTERS.includes(entry.event)
+                            ? t(`meetings.activity.event.${entry.event}`)
+                            : entry.event}
+                        </span>
+                        <span className="meetings-activity-skill">
+                          {entry.skill ?? t("meetings.activity.unknownSkill")}
+                        </span>
+                        <span className="meetings-activity-target">
+                          {entry.target ?? entry.runId ?? entry.raw.slice(0, 80)}
+                        </span>
+                        <span className="meetings-activity-time">
+                          {entry.ts ? formatMissionTime(entry.ts) : "—"}
+                        </span>
+                      </button>
+                      {expandedRow ? (
+                        <pre className="meetings-activity-payload">{entry.raw}</pre>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function groupActivityByDay(
+  entries: MeetingsLogLineRecord[],
+): Array<[string, MeetingsLogLineRecord[]]> {
+  const today = new Date();
+  const todayKey = formatIsoDay(today);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const yesterdayKey = formatIsoDay(yesterday);
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - 7);
+  const weekKey = formatIsoDay(weekStart);
+  const groups = new Map<string, MeetingsLogLineRecord[]>();
+  for (const entry of entries) {
+    const day = entry.ts ? entry.ts.slice(0, 10) : "—";
+    let label: string;
+    if (day === todayKey) label = "today";
+    else if (day === yesterdayKey) label = "yesterday";
+    else if (day >= weekKey) label = "thisWeek";
+    else label = "earlier";
+    const bucket = groups.get(label) ?? [];
+    bucket.push(entry);
+    groups.set(label, bucket);
+  }
+  const order = ["today", "yesterday", "thisWeek", "earlier"];
+  return order
+    .filter((key) => groups.has(key))
+    .map((key) => [key, groups.get(key)!] as [string, MeetingsLogLineRecord[]]);
+}
+
+function formatIsoDay(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function MeetingsTranscriptFlow(props: {
   workPath: string | null;
   settings: MeetingsSettings;
   skills: SkillRecord[];
@@ -754,23 +1039,7 @@ function MeetingsTranscriptFlow({
   onApplied: () => void;
   onError: (message: string | null) => void;
 }) {
-  return (
-    <MeetingsSkillWorkbench
-      sourceKind="transcript"
-      workPath={workPath}
-      settings={settings}
-      skills={skills}
-      missions={missions}
-      logLines={logLines}
-      onMissionStarted={onMissionStarted}
-      onStopMission={onStopMission}
-      onClearMission={onClearMission}
-      onRefreshMissions={onRefreshMissions}
-      onConfirmApproval={onConfirmApproval}
-      onApplied={onApplied}
-      onError={onError}
-    />
-  );
+  return <MeetingsSkillWorkbench sourceKind="transcript" {...props} />;
 }
 
 function MeetingsExternalFlow({
@@ -830,6 +1099,7 @@ interface MeetingReviewBundle {
   files: MeetingProposalFileDraft[];
   checks: MeetingReviewCheck[];
   followups: MeetingFollowupCandidate[];
+  continuationSelected: boolean;
 }
 
 interface MeetingApplyResult {
@@ -905,6 +1175,17 @@ function MeetingsSkillWorkbench({
     setLocalRuns((current) => current.filter((mission) => !missionIds.has(mission.id)));
   }, [missions]);
 
+  useEffect(() => {
+    if (!runtimeChooserOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRuntimeChooserOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [runtimeChooserOpen]);
+
   const run = async (runtime: SkillDispatchRuntime) => {
     if (!workPath || !canRun) return;
     const skill = findSkill(skills, "meeting-notes");
@@ -964,6 +1245,34 @@ function MeetingsSkillWorkbench({
     }
   };
 
+  const retryMission = async (mission: MissionRecord) => {
+    if (!workPath) return;
+    const originalRuntime =
+      normalizeSkillDispatchRuntime(meetingMissionRuntimeValue(mission)) ?? "claude";
+    if (!hasSource) {
+      onError(t("meetings.progress.retryNeedsSource"));
+      return;
+    }
+    if (settings.hooks.appendVaultLog) {
+      try {
+        await appendMeetingsLog(
+          workPath,
+          serializeMeetingsLogLine({
+            event: "retry",
+            runId: mission.id,
+            status: "started",
+            skill: meetingMissionSkillName(mission) ?? "meeting-notes",
+            target: meetingMissionTitle(mission),
+            extra: { parentRunId: mission.id, runtime: originalRuntime },
+          }),
+        );
+      } catch (err) {
+        console.warn("meetings retry audit log failed", err);
+      }
+    }
+    await run(originalRuntime);
+  };
+
   const loadReviewResult = async (mission: MissionRecord) => {
     if (!workPath) return;
     setReviewLoading(true);
@@ -987,7 +1296,7 @@ function MeetingsSkillWorkbench({
           diff: file.diff ?? null,
         })),
       );
-      setBundle({
+      const draftBundle: MeetingReviewBundle = {
         runId: mission.id,
         mission,
         rawOutput: raw,
@@ -996,7 +1305,10 @@ function MeetingsSkillWorkbench({
         files,
         checks: createMeetingReviewChecks(review),
         followups: review.followups,
-      });
+        continuationSelected: false,
+      };
+      draftBundle.continuationSelected = meetingApprovalContinuationAvailable(draftBundle);
+      setBundle(draftBundle);
       setApplyResult(null);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -1010,6 +1322,7 @@ function MeetingsSkillWorkbench({
   const selectedFollowups = bundle ? selectedMeetingFollowupCount(bundle.followups) : 0;
   const appliedCurrentRun = Boolean(bundle && appliedRunIds.has(bundle.runId));
   const continuationAvailable = bundle ? meetingApprovalContinuationAvailable(bundle) : false;
+  const continuationActive = continuationAvailable && Boolean(bundle?.continuationSelected);
   const canApply = bundle
     ? !appliedCurrentRun && meetingReviewCanApply({
       proposal: bundle.proposal,
@@ -1017,9 +1330,21 @@ function MeetingsSkillWorkbench({
       followups: bundle.followups,
       checksComplete,
       applyBusy,
-      continuationAvailable,
+      continuationAvailable: continuationActive,
     })
     : false;
+
+  const writeAuditLine = useCallback(
+    async (input: MeetingsLogEventInput) => {
+      if (!workPath || !settings.hooks.appendVaultLog) return;
+      try {
+        await appendMeetingsLog(workPath, serializeMeetingsLogLine(input));
+      } catch (err) {
+        console.warn("meetings audit log append failed", err);
+      }
+    },
+    [settings.hooks.appendVaultLog, workPath],
+  );
 
   const applyReview = async () => {
     if (!workPath || !bundle || !canApply) return;
@@ -1031,18 +1356,18 @@ function MeetingsSkillWorkbench({
       kind: "meetings.proposal.apply",
       summary: t("meetings.review.applySummaryDetailed", {
         files: proposal?.files.length ?? 0,
-        followups: selectedFollowups + (continuationAvailable ? 1 : 0),
+        followups: selectedFollowups + (continuationActive ? 1 : 0),
       }),
       target: [
         ...(proposal?.files.map((file) => file.path) ?? []),
         ...selectedFollowupItems.map((item) => `${item.skill}: ${item.title}`),
-        continuationAvailable ? `${meetingMissionTitle(bundle.mission)}: MCP Obsidian continuation` : null,
+        continuationActive ? `${meetingMissionTitle(bundle.mission)}: MCP Obsidian continuation` : null,
       ].filter(Boolean).join("\n"),
       payloadPreview: [
         proposal?.summary ?? bundle.review.summary,
         ...bundle.checks.map((check) => `${check.kind}: ${check.label} -> ${check.normalized} (${check.status})`),
         ...selectedFollowupItems.map((item) => `followup: ${item.skill} - ${item.title}`),
-        continuationAvailable ? `approved-continuation:\n${bundle.rawOutput}` : null,
+        continuationActive ? `approved-continuation:\n${bundle.rawOutput}` : null,
       ].filter(Boolean).join("\n"),
     });
     if (!approvalId) return;
@@ -1065,7 +1390,7 @@ function MeetingsSkillWorkbench({
           onMissionStarted,
         });
       }
-      if (continuationAvailable) {
+      if (continuationActive) {
         await dispatchApprovedFollowupContinuation({
           workPath,
           skills,
@@ -1073,18 +1398,42 @@ function MeetingsSkillWorkbench({
           onMissionStarted,
         });
       }
+      const totalFollowups = selectedFollowupItems.length + (continuationActive ? 1 : 0);
       setApplyResult({
         runId: bundle.runId,
         files: proposal?.files.length ?? 0,
-        followups: selectedFollowupItems.length + (continuationAvailable ? 1 : 0),
+        followups: totalFollowups,
         appliedAt: new Date().toISOString(),
       });
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
       onError(t("meetings.review.applySuccess"));
+      const targetPath =
+        proposal?.files[0]?.path ?? selectedFollowupItems[0]?.title ?? meetingMissionTitle(bundle.mission);
+      await writeAuditLine({
+        event: "apply",
+        runId: bundle.runId,
+        status: "completed",
+        skill: "meeting-notes",
+        target: targetPath,
+        extra: {
+          files: proposal?.files.length ?? 0,
+          followups: totalFollowups,
+          continuation: continuationActive,
+        },
+      });
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      onError(message);
+      await writeAuditLine({
+        event: "error",
+        runId: bundle.runId,
+        status: "failed",
+        skill: "meeting-notes",
+        target: meetingMissionTitle(bundle.mission),
+        extra: { phase: "apply", error: message },
+      });
     } finally {
       setApplyBusy(false);
     }
@@ -1162,10 +1511,13 @@ function MeetingsSkillWorkbench({
           bundle={bundle}
           loading={reviewLoading}
           applyBusy={applyBusy}
+          applied={appliedCurrentRun}
           canApply={canApply}
           applyResult={applyResult?.runId === bundle?.runId ? applyResult : null}
           continuationAvailable={continuationAvailable}
+          continuationSelected={Boolean(bundle?.continuationSelected)}
           onApply={() => void applyReview()}
+          onDismissApplyResult={() => setApplyResult(null)}
           onUpdateFile={(id, patch) => {
             setBundle((current) => current ? {
               ...current,
@@ -1186,6 +1538,12 @@ function MeetingsSkillWorkbench({
               ),
             } : current);
           }}
+          onToggleContinuation={() => {
+            setBundle((current) => current ? {
+              ...current,
+              continuationSelected: !current.continuationSelected,
+            } : current);
+          }}
         />
 
         <MeetingsRunPanel
@@ -1195,10 +1553,12 @@ function MeetingsSkillWorkbench({
           reviewBundle={bundle}
           appliedRunIds={appliedRunIds}
           loadingReview={reviewLoading}
+          retryBusy={busy}
           onRefresh={onRefreshMissions}
           onStopMission={onStopMission}
           onClearMission={onClearMission}
           onReviewResult={(mission) => void loadReviewResult(mission)}
+          onRetryMission={(mission) => void retryMission(mission)}
         />
       </div>
     </section>
@@ -1258,24 +1618,32 @@ function MeetingReviewPanel({
   bundle,
   loading,
   applyBusy,
+  applied,
   canApply,
   applyResult,
   continuationAvailable,
+  continuationSelected,
   onApply,
+  onDismissApplyResult,
   onUpdateFile,
   onUpdateCheck,
   onToggleFollowup,
+  onToggleContinuation,
 }: {
   bundle: MeetingReviewBundle | null;
   loading: boolean;
   applyBusy: boolean;
+  applied: boolean;
   canApply: boolean;
   applyResult: MeetingApplyResult | null;
   continuationAvailable: boolean;
+  continuationSelected: boolean;
   onApply: () => void;
+  onDismissApplyResult: () => void;
   onUpdateFile: (id: string, patch: Partial<MeetingProposalFileDraft>) => void;
   onUpdateCheck: (id: string, patch: Partial<MeetingReviewCheck>) => void;
   onToggleFollowup: (id: string) => void;
+  onToggleContinuation: () => void;
 }) {
   const { t } = useTranslation();
   const pendingRequired = bundle?.checks.filter((check) => check.required && check.status === "pending").length ?? 0;
@@ -1307,7 +1675,15 @@ function MeetingReviewPanel({
       {!bundle ? (
         <div className="meetings-review-empty">
           <ClipboardCheck size={18} />
-          <span>{t("meetings.review.empty")}</span>
+          <strong>{t("meetings.review.empty")}</strong>
+          <span>{t("meetings.review.emptyCta")}</span>
+        </div>
+      ) : null}
+
+      {bundle ? (
+        <div className="meetings-review-active" role="status">
+          <span>{t("meetings.review.reviewingLabel")}</span>
+          <strong>{meetingMissionTitle(bundle.mission)}</strong>
         </div>
       ) : null}
 
@@ -1319,7 +1695,7 @@ function MeetingReviewPanel({
           </div>
 
           {applyResult ? (
-            <div className="meetings-apply-result">
+            <div className="meetings-apply-result" role="status">
               <CheckCircle2 size={16} />
               <div>
                 <strong>{t("meetings.review.applyDoneTitle")}</strong>
@@ -1329,6 +1705,15 @@ function MeetingReviewPanel({
                   time: formatMissionTime(applyResult.appliedAt),
                 })}</span>
               </div>
+              <button
+                type="button"
+                className="icon-button meetings-apply-result-dismiss"
+                onClick={onDismissApplyResult}
+                aria-label={t("meetings.review.dismissApplyResult")}
+                title={t("meetings.review.dismissApplyResult")}
+              >
+                <X size={13} />
+              </button>
             </div>
           ) : null}
 
@@ -1340,7 +1725,11 @@ function MeetingReviewPanel({
               </div>
             ) : null}
             {bundle.files.map((file) => (
-              <article className="meetings-proposal-file" key={file.id}>
+              <article
+                className="meetings-proposal-file"
+                data-operation={file.operation}
+                key={file.id}
+              >
                 <header>
                   <label>
                     <input
@@ -1350,9 +1739,16 @@ function MeetingReviewPanel({
                     />
                     <span>{t("meetings.review.applyFile")}</span>
                   </label>
+                  <span
+                    className="meetings-operation-badge"
+                    data-operation={file.operation}
+                  >
+                    {file.operation}
+                  </span>
                   <select
                     value={file.operation}
                     onChange={(event) => onUpdateFile(file.id, { operation: event.target.value })}
+                    aria-label={t("meetings.review.operationLabel")}
                   >
                     <option value="create">create</option>
                     <option value="replace">replace</option>
@@ -1367,6 +1763,12 @@ function MeetingReviewPanel({
                     onChange={(event) => onUpdateFile(file.id, { path: event.target.value })}
                   />
                 </label>
+                {file.operation === "delete" ? (
+                  <div className="meetings-delete-warning" role="alert">
+                    <ShieldAlert size={14} />
+                    <span>{t("meetings.review.deleteWarning")}</span>
+                  </div>
+                ) : null}
                 <div className="meetings-before-after">
                   <label>
                     <span>{t("meetings.review.before")}</span>
@@ -1374,11 +1776,16 @@ function MeetingReviewPanel({
                   </label>
                   <label>
                     <span>{t("meetings.review.after")}</span>
-                    <textarea
-                      value={file.afterContent}
-                      onChange={(event) => onUpdateFile(file.id, { afterContent: event.target.value })}
-                      disabled={file.operation === "delete"}
-                    />
+                    {file.operation === "delete" ? (
+                      <pre className="meetings-delete-placeholder">
+                        {t("meetings.review.deletePlaceholder")}
+                      </pre>
+                    ) : (
+                      <textarea
+                        value={file.afterContent}
+                        onChange={(event) => onUpdateFile(file.id, { afterContent: event.target.value })}
+                      />
+                    )}
                   </label>
                 </div>
               </article>
@@ -1396,31 +1803,57 @@ function MeetingReviewPanel({
             {checkGroups.map(([kind, checks]) => (
               <section className="meetings-check-group" key={kind}>
                 <header>
-                  <strong>{t(`meetings.review.kind.${kind}`)}</strong>
+                  <strong>
+                    <CheckKindIcon kind={kind} />
+                    {t(`meetings.review.kind.${kind}`)}
+                  </strong>
                   <span>{t("meetings.review.pending", {
                     count: checks.filter((check) => check.required && check.status === "pending").length,
                   })}</span>
                 </header>
                 {checks.map((check) => (
-                  <article className={`meetings-check-row ${check.status}`} key={check.id}>
+                  <article
+                    className={`meetings-check-row ${check.status}`}
+                    data-status={check.status}
+                    data-required={check.required ? "true" : "false"}
+                    key={check.id}
+                  >
                     <div>
-                      <span>{t(`meetings.review.kind.${check.kind}`)}</span>
+                      <span>
+                        {t(`meetings.review.kind.${check.kind}`)}
+                        {check.required ? (
+                          <span
+                            className="meetings-check-required"
+                            aria-label={t("meetings.review.requiredLabel")}
+                            title={t("meetings.review.requiredLabel")}
+                          >
+                            *
+                          </span>
+                        ) : null}
+                      </span>
                       <strong>{check.label}</strong>
                       {check.note ? <small>{check.note}</small> : null}
                     </div>
                     <input
                       value={check.normalized}
+                      aria-label={t("meetings.review.normalizedFor", { label: check.label })}
+                      aria-required={check.required ? "true" : "false"}
                       onChange={(event) => onUpdateCheck(check.id, {
                         normalized: event.target.value,
                         status: "edited",
                       })}
                     />
-                    <div className="meetings-check-actions">
+                    <div
+                      className="meetings-check-actions"
+                      role="group"
+                      aria-label={t("meetings.review.checkActions")}
+                    >
                       {(["accepted", "edited", "rejected"] as MeetingReviewCheckStatus[]).map((status) => (
                         <button
                           key={status}
                           type="button"
                           className={check.status === status ? "active" : ""}
+                          aria-pressed={check.status === status}
                           onClick={() => onUpdateCheck(check.id, { status })}
                         >
                           {t(`meetings.review.status.${status}`)}
@@ -1435,19 +1868,29 @@ function MeetingReviewPanel({
 
           <div className="meetings-followups">
             <h3>{t("meetings.review.followups")}</h3>
-            {bundle.followups.length === 0 ? (
-              continuationAvailable ? (
-                <div className="meetings-followup-row continuation">
-                  <CheckCircle2 size={15} />
-                  <div>
-                    <strong>{meetingMissionTitle(bundle.mission)}</strong>
-                    <span>{t("meetings.review.approvedContinuation")}</span>
-                    <small>{t("meetings.review.approvedContinuationHelp")}</small>
-                  </div>
+            {bundle.followups.length === 0 && !continuationAvailable ? (
+              <div className="meetings-review-empty compact">{t("meetings.review.noFollowups")}</div>
+            ) : null}
+            {continuationAvailable ? (
+              <label
+                className="meetings-followup-row continuation"
+                data-selected={continuationSelected ? "true" : "false"}
+              >
+                <input
+                  type="checkbox"
+                  checked={continuationSelected}
+                  onChange={onToggleContinuation}
+                />
+                <div>
+                  <strong>{meetingMissionTitle(bundle.mission)}</strong>
+                  <span>{t("meetings.review.approvedContinuation")}</span>
+                  <small>
+                    {continuationSelected
+                      ? t("meetings.review.approvedContinuationHelp")
+                      : t("meetings.review.approvedContinuationDisabled")}
+                  </small>
                 </div>
-              ) : (
-                <div className="meetings-review-empty compact">{t("meetings.review.noFollowups")}</div>
-              )
+              </label>
             ) : null}
             {bundle.followups.map((item) => (
               <label className="meetings-followup-row" key={item.id}>
@@ -1465,23 +1908,30 @@ function MeetingReviewPanel({
             ))}
           </div>
 
-          <div className="meetings-review-actions">
+          <div className="meetings-review-actions" data-applied={applied ? "true" : "false"}>
             <span>
               {pendingRequired > 0
                 ? t("meetings.review.applyBlocked", { count: pendingRequired })
-                : applyResult
+                : applied
                   ? t("meetings.review.applyDoneDetailed", {
-                    files: applyResult.files,
-                    followups: applyResult.followups,
+                    files: applyResult?.files ?? 0,
+                    followups: applyResult?.followups ?? 0,
                   })
                 : t("meetings.review.applyReadyDetailed", {
                   files: selectedFiles,
-                  followups: selectedFollowups + (continuationAvailable ? 1 : 0),
+                  followups: selectedFollowups + (continuationAvailable && continuationSelected ? 1 : 0),
                 })}
             </span>
-            <button type="button" className="primary-button" disabled={!canApply} onClick={onApply}>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!canApply}
+              aria-disabled={!canApply}
+              data-state={applied ? "applied" : canApply ? "ready" : "pending"}
+              onClick={onApply}
+            >
               {applyBusy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
-              {applyResult ? t("meetings.review.applied") : t("meetings.review.apply")}
+              {applied ? t("meetings.review.applied") : t("meetings.review.apply")}
             </button>
           </div>
         </>
@@ -1497,10 +1947,12 @@ function MeetingsRunPanel({
   reviewBundle,
   appliedRunIds,
   loadingReview,
+  retryBusy,
   onRefresh,
   onStopMission,
   onClearMission,
   onReviewResult,
+  onRetryMission,
 }: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -1508,10 +1960,12 @@ function MeetingsRunPanel({
   reviewBundle: MeetingReviewBundle | null;
   appliedRunIds: Set<string>;
   loadingReview: boolean;
+  retryBusy: boolean;
   onRefresh: () => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
   onReviewResult: (mission: MissionRecord) => void;
+  onRetryMission: (mission: MissionRecord) => void;
 }) {
   const { t } = useTranslation();
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set());
@@ -1547,15 +2001,25 @@ function MeetingsRunPanel({
         {missions.length === 0 ? (
           <div className="meetings-run-empty">
             <ClipboardCheck size={16} />
-            <span>{t("meetings.progress.empty")}</span>
+            <strong>{t("meetings.progress.empty")}</strong>
+            <span>{t("meetings.progress.emptyCta")}</span>
           </div>
         ) : null}
         {missions.map((mission) => {
           const lines = logLines[mission.id] ?? [];
           const canStop = mission.status === "running" || mission.status === "idle";
-          const canReview = mission.status === "done" || activeRunId === mission.id;
-          const statusClass = activeRunId === mission.id ? "review-ready" : mission.status;
-          const activeBundle = activeRunId === mission.id && reviewBundle?.runId === mission.id
+          const isFailed =
+            mission.status === "failed" ||
+            mission.status === "stopped" ||
+            (mission.exitCode !== null && mission.exitCode !== 0);
+          const canReview = !isFailed && (mission.status === "done" || activeRunId === mission.id);
+          const isActive = activeRunId === mission.id;
+          const statusClass = isFailed
+            ? "failed"
+            : isActive
+              ? "review-ready"
+              : mission.status;
+          const activeBundle = isActive && reviewBundle?.runId === mission.id
             ? reviewBundle
             : null;
           const checksComplete = activeBundle ? meetingReviewChecksComplete(activeBundle.checks) : false;
@@ -1567,25 +2031,44 @@ function MeetingsRunPanel({
             applied: appliedRunIds.has(mission.id),
           });
           const expanded = expandedLogs.has(mission.id);
-          const latestLog = lines.at(-1) ?? t("meetings.progress.noLog");
+          const parsedLines: MeetingsLogLine[] = lines.map(parseMeetingsLogLine);
+          const latestParsed = parsedLines.at(-1);
+          const latestLog = latestParsed?.raw ?? t("meetings.progress.noLog");
           return (
-            <article className={`meetings-run-card ${statusClass}`} key={mission.id}>
+            <article
+              className={`meetings-run-card ${statusClass}`}
+              data-active={isActive ? "true" : "false"}
+              key={mission.id}
+            >
               <div className="meetings-run-card-head">
                 <div>
                   <strong>{meetingMissionTitle(mission)}</strong>
                   <span>{mission.status} · {formatMissionTime(mission.startedAt)}</span>
                 </div>
-                {canStop ? (
-                  <button type="button" className="button button-ghost button-sm" onClick={() => onStopMission(mission.id)}>
-                    <Square size={12} />
-                    <span>{t("meetings.progress.stop")}</span>
-                  </button>
-                ) : (
-                  <button type="button" className="button button-ghost button-sm" onClick={() => onClearMission(mission.id)}>
-                    <Trash2 size={12} />
-                    <span>{t("meetings.progress.clear")}</span>
-                  </button>
-                )}
+                <div className="meetings-run-card-head-actions">
+                  {isFailed ? (
+                    <button
+                      type="button"
+                      className="button button-ghost button-sm meetings-run-retry"
+                      disabled={retryBusy}
+                      onClick={() => onRetryMission(mission)}
+                    >
+                      {retryBusy ? <Loader2 size={12} className="spin" /> : <RotateCw size={12} />}
+                      <span>{t("meetings.progress.retry")}</span>
+                    </button>
+                  ) : null}
+                  {canStop ? (
+                    <button type="button" className="button button-ghost button-sm" onClick={() => onStopMission(mission.id)}>
+                      <Square size={12} />
+                      <span>{t("meetings.progress.stop")}</span>
+                    </button>
+                  ) : (
+                    <button type="button" className="button button-ghost button-sm" onClick={() => onClearMission(mission.id)}>
+                      <Trash2 size={12} />
+                      <span>{t("meetings.progress.clear")}</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="meetings-run-meta">
                 <span>{meetingMissionRuntime(mission)}</span>
@@ -1600,9 +2083,12 @@ function MeetingsRunPanel({
                 ))}
               </ol>
               <div className="meetings-run-log-summary">
-                <span>{latestLog}</span>
+                <span data-severity={latestParsed ? logLineSeverity(latestParsed) : "info"}>
+                  {latestLog}
+                </span>
                 <button
                   type="button"
+                  aria-expanded={expanded}
                   onClick={() =>
                     setExpandedLogs((current) => {
                       const next = new Set(current);
@@ -1616,14 +2102,38 @@ function MeetingsRunPanel({
                 </button>
               </div>
               {expanded ? (
-                <pre>{lines.length > 0 ? lines.slice(-8).join("\n") : t("meetings.progress.noLog")}</pre>
+                parsedLines.length > 0 ? (
+                  <ul
+                    className="meetings-run-log"
+                    aria-label={t("meetings.progress.logLines")}
+                  >
+                    {parsedLines.slice(-60).map((parsed, index) => {
+                      const phase = logLinePhase(parsed);
+                      const severity = logLineSeverity(parsed);
+                      return (
+                        <li
+                          key={`${mission.id}-log-${index}`}
+                          data-severity={severity}
+                          data-phase={phase ?? undefined}
+                        >
+                          {phase ? <span className="meetings-run-log-phase">{phase}</span> : null}
+                          <span className="meetings-run-log-text">{parsed.raw}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <pre>{t("meetings.progress.noLog")}</pre>
+                )
               ) : null}
               <div className="meetings-run-card-actions">
                 <span>{appliedRunIds.has(mission.id)
                   ? t("meetings.step.applyDone")
-                  : steps.some((step) => step.id === "confirm" && step.status === "blocked")
-                    ? t("meetings.step.confirmBlocked")
-                    : t("meetings.progress.status", { status: mission.status })}</span>
+                  : isFailed
+                    ? t("meetings.progress.failedStatus")
+                    : steps.some((step) => step.id === "confirm" && step.status === "blocked")
+                      ? t("meetings.step.confirmBlocked")
+                      : t("meetings.progress.status", { status: mission.status })}</span>
                 {canReview ? (
                   <button type="button" className="secondary-button" disabled={loadingReview} onClick={() => onReviewResult(mission)}>
                     {loadingReview && activeRunId === mission.id ? <Loader2 size={14} className="spin" /> : <Pencil size={14} />}
@@ -1679,7 +2189,7 @@ function MeetingsProgressDock({
 function readClearedMeetingRunIds(key: string): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.sessionStorage.getItem(key);
+    const raw = window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
@@ -1691,9 +2201,25 @@ function readClearedMeetingRunIds(key: string): Set<string> {
 function writeClearedMeetingRunIds(key: string, ids: Set<string>) {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(key, JSON.stringify(Array.from(ids).slice(-200)));
+    window.localStorage.setItem(key, JSON.stringify(Array.from(ids).slice(-200)));
+    window.sessionStorage.removeItem(key);
   } catch {
     // Non-critical UI state; ignore storage failures such as private-mode quota errors.
+  }
+}
+
+function CheckKindIcon({ kind }: { kind: MeetingReviewCheckKind }) {
+  switch (kind) {
+    case "term":
+      return <Languages size={13} aria-hidden="true" />;
+    case "person":
+      return <Users size={13} aria-hidden="true" />;
+    case "properNoun":
+      return <FileText size={13} aria-hidden="true" />;
+    case "uncertainty":
+      return <AlertTriangle size={13} aria-hidden="true" />;
+    default:
+      return null;
   }
 }
 
