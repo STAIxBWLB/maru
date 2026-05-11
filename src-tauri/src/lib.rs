@@ -62,7 +62,8 @@ use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use meetings::{
-    append_meetings_log, read_meeting_guides, read_meeting_metadata, scan_meeting_notes,
+    append_meetings_log, read_meeting_guides, read_meeting_metadata, read_meetings_log,
+    scan_meeting_notes,
 };
 use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
 use outlook_mso::{decide_outlook_item, decide_outlook_items, fetch_outlook_unread};
@@ -158,6 +159,7 @@ pub fn run() {
             read_meeting_metadata,
             read_meeting_guides,
             append_meetings_log,
+            read_meetings_log,
             store_shelf_files,
             store_shelf_files_as,
             list_memos,

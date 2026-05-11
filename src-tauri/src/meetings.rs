@@ -11,6 +11,9 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
+const MEETINGS_LOG_DEFAULT_LIMIT: usize = 200;
+const MEETINGS_LOG_MAX_LIMIT: usize = 2000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingNoteRow {
@@ -32,6 +35,20 @@ pub struct MeetingMetadata {
     pub preview: String,
     pub line_count: usize,
     pub char_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingsLogLine {
+    pub raw: String,
+    pub ts: Option<String>,
+    pub event: String,
+    pub run_id: Option<String>,
+    pub status: Option<String>,
+    pub skill: Option<String>,
+    pub target: Option<String>,
+    pub payload: Option<JsonValue>,
+    pub legacy: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -165,6 +182,123 @@ pub fn append_meetings_log(work_path: String, line: String) -> Result<(), String
         .map_err(|err| format!("Cannot open meetings log: {err}"))?;
     writeln!(file, "{line}").map_err(|err| format!("Cannot append meetings log: {err}"))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn read_meetings_log(
+    work_path: String,
+    limit: Option<usize>,
+    event_filter: Option<Vec<String>>,
+) -> Result<Vec<MeetingsLogLine>, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let log_path = work.join(".anchor").join("meetings-log.md");
+    if !log_path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read_to_string(&log_path)
+        .map_err(|err| format!("Cannot read meetings log: {err}"))?;
+    let cap = limit
+        .unwrap_or(MEETINGS_LOG_DEFAULT_LIMIT)
+        .min(MEETINGS_LOG_MAX_LIMIT)
+        .max(1);
+    let filter: Option<BTreeSet<String>> = event_filter
+        .map(|values| values.into_iter().filter(|v| !v.is_empty()).collect())
+        .filter(|set: &BTreeSet<String>| !set.is_empty());
+
+    let mut entries: Vec<MeetingsLogLine> = raw
+        .lines()
+        .rev()
+        .filter_map(|line| {
+            let trimmed = line.trim_end_matches('\r');
+            if trimmed.trim().is_empty() {
+                None
+            } else {
+                Some(parse_meetings_log_line(trimmed))
+            }
+        })
+        .filter(|entry| filter.as_ref().is_none_or(|set| set.contains(&entry.event)))
+        .take(cap)
+        .collect();
+    entries.shrink_to_fit();
+    Ok(entries)
+}
+
+fn parse_meetings_log_line(raw: &str) -> MeetingsLogLine {
+    let trimmed_dash = raw.trim_start().trim_start_matches('-').trim_start();
+    let (ts, rest) = split_iso_timestamp(trimmed_dash);
+
+    if let Some(rest) = rest {
+        if let Some(after_bracket) = rest.strip_prefix('[') {
+            if let Some(end) = after_bracket.find(']') {
+                let event = after_bracket[..end].trim().to_string();
+                let payload_text = after_bracket[end + 1..].trim();
+                let payload = if payload_text.is_empty() {
+                    None
+                } else {
+                    serde_json::from_str::<JsonValue>(payload_text).ok()
+                };
+                let payload_ref = payload.as_ref();
+                return MeetingsLogLine {
+                    raw: raw.to_string(),
+                    ts,
+                    run_id: payload_ref.and_then(|p| string_field(p, "runId")),
+                    status: payload_ref.and_then(|p| string_field(p, "status")),
+                    skill: payload_ref.and_then(|p| string_field(p, "skill")),
+                    target: payload_ref.and_then(|p| string_field(p, "target")),
+                    payload,
+                    event,
+                    legacy: false,
+                };
+            }
+        }
+
+        if let Some((skill, target)) = rest.split_once(':') {
+            let skill = skill.trim();
+            let target = target.trim();
+            if !skill.is_empty() {
+                return MeetingsLogLine {
+                    raw: raw.to_string(),
+                    ts,
+                    event: "followup".to_string(),
+                    run_id: None,
+                    status: Some("started".to_string()),
+                    skill: Some(skill.to_string()),
+                    target: if target.is_empty() { None } else { Some(target.to_string()) },
+                    payload: None,
+                    legacy: true,
+                };
+            }
+        }
+    }
+
+    MeetingsLogLine {
+        raw: raw.to_string(),
+        ts,
+        event: "unknown".to_string(),
+        run_id: None,
+        status: None,
+        skill: None,
+        target: None,
+        payload: None,
+        legacy: true,
+    }
+}
+
+fn split_iso_timestamp(input: &str) -> (Option<String>, Option<&str>) {
+    let trimmed = input.trim_start();
+    let end = trimmed
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace())
+        .map(|(idx, _)| idx)
+        .unwrap_or(trimmed.len());
+    let head = &trimmed[..end];
+    let rest = trimmed[end..].trim_start();
+    let rest = if rest.is_empty() { None } else { Some(rest) };
+    if DateTime::parse_from_rfc3339(head).is_ok() {
+        (Some(head.to_string()), rest)
+    } else {
+        (None, Some(trimmed))
+    }
 }
 
 fn should_enter_meeting_path(path: &Path, root: &Path) -> bool {
@@ -495,5 +629,101 @@ mod tests {
 
         let log = fs::read_to_string(tmp.path().join(".anchor/meetings-log.md")).unwrap();
         assert_eq!(log, "- entry\n");
+    }
+
+    #[test]
+    fn reads_meetings_log_returns_empty_when_missing() {
+        let tmp = tempdir().unwrap();
+        let entries =
+            read_meetings_log(tmp.path().to_string_lossy().to_string(), None, None).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn reads_structured_meetings_log_lines() {
+        let tmp = tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        append_meetings_log(
+            work.clone(),
+            "- 2026-05-12T08:14:33Z [apply] {\"runId\":\"r1\",\"status\":\"completed\",\"skill\":\"meeting-notes\",\"files\":2,\"followups\":1,\"target\":\"meetings/2026/2026-05/note.md\"}".to_string(),
+        )
+        .unwrap();
+        append_meetings_log(
+            work.clone(),
+            "- 2026-05-12T08:15:00Z [clear] {\"runId\":\"r1\",\"status\":\"cleared\",\"skill\":\"meeting-notes\"}".to_string(),
+        )
+        .unwrap();
+
+        let entries = read_meetings_log(work, None, None).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].event, "clear");
+        assert_eq!(entries[0].run_id.as_deref(), Some("r1"));
+        assert_eq!(entries[0].status.as_deref(), Some("cleared"));
+        assert!(!entries[0].legacy);
+        assert_eq!(entries[1].event, "apply");
+        assert_eq!(entries[1].target.as_deref(), Some("meetings/2026/2026-05/note.md"));
+        assert!(entries[1]
+            .payload
+            .as_ref()
+            .and_then(|value| value.get("files"))
+            .and_then(JsonValue::as_i64)
+            .is_some());
+    }
+
+    #[test]
+    fn reads_legacy_meetings_log_lines() {
+        let tmp = tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        append_meetings_log(
+            work.clone(),
+            "- 2026-05-12T08:14:33.111Z vault-extract: meetings/2026/2026-05/note.md".to_string(),
+        )
+        .unwrap();
+        append_meetings_log(work.clone(), "free text without prefix".to_string()).unwrap();
+
+        let entries = read_meetings_log(work, None, None).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].legacy);
+        assert_eq!(entries[0].event, "unknown");
+        assert_eq!(entries[1].event, "followup");
+        assert_eq!(entries[1].skill.as_deref(), Some("vault-extract"));
+        assert_eq!(
+            entries[1].target.as_deref(),
+            Some("meetings/2026/2026-05/note.md")
+        );
+        assert_eq!(entries[1].status.as_deref(), Some("started"));
+        assert!(entries[1].legacy);
+    }
+
+    #[test]
+    fn reads_meetings_log_respects_limit_and_filter() {
+        let tmp = tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        for index in 0..5 {
+            append_meetings_log(
+                work.clone(),
+                format!(
+                    "- 2026-05-12T08:14:0{index}Z [apply] {{\"runId\":\"r{index}\",\"status\":\"completed\",\"skill\":\"meeting-notes\"}}",
+                ),
+            )
+            .unwrap();
+            append_meetings_log(
+                work.clone(),
+                format!(
+                    "- 2026-05-12T08:15:0{index}Z [clear] {{\"runId\":\"r{index}\",\"status\":\"cleared\",\"skill\":\"meeting-notes\"}}",
+                ),
+            )
+            .unwrap();
+        }
+
+        let limited = read_meetings_log(work.clone(), Some(3), None).unwrap();
+        assert_eq!(limited.len(), 3);
+        assert_eq!(limited[0].event, "clear");
+        assert_eq!(limited[0].run_id.as_deref(), Some("r4"));
+
+        let filtered =
+            read_meetings_log(work, Some(10), Some(vec!["apply".to_string()])).unwrap();
+        assert_eq!(filtered.len(), 5);
+        assert!(filtered.iter().all(|entry| entry.event == "apply"));
     }
 }
