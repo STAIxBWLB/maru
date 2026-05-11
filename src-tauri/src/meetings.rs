@@ -1,9 +1,11 @@
-use crate::vault::{normalize_existing_dir, resolve_inside_vault};
+use crate::vault::{
+    lexical_normalize, normalize_existing_dir, parse_frontmatter, resolve_inside_vault,
+};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use serde_yaml::Value as YamlValue;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -48,7 +50,7 @@ pub fn scan_meeting_notes(
     root: Option<String>,
 ) -> Result<Vec<MeetingNoteRow>, String> {
     let work = normalize_existing_dir(&work_path)?;
-    let scan_root = resolve_config_path(&work, root.as_deref().unwrap_or("meetings"));
+    let scan_root = resolve_meetings_root(&work, root.as_deref().unwrap_or("meetings"))?;
     if !scan_root.exists() {
         return Ok(Vec::new());
     }
@@ -111,17 +113,18 @@ pub fn read_meeting_metadata(
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let raw = fs::read_to_string(&path)
         .map_err(|err| format!("Cannot read meeting note metadata: {err}"))?;
-    let (frontmatter, body) = parse_frontmatter(&raw);
-    let frontmatter_json = yaml_to_json(frontmatter.as_ref());
+    let parts = parse_frontmatter(&raw);
+    let frontmatter_json = yaml_to_json(&parts.meta);
     let tags = string_list_field(&frontmatter_json, "tags");
-    let attendees = string_list_field(&frontmatter_json, "attendees")
-        .into_iter()
-        .chain(string_list_field(&frontmatter_json, "people"))
-        .collect();
+    let attendees = unique_strings(
+        string_list_field(&frontmatter_json, "attendees")
+            .into_iter()
+            .chain(string_list_field(&frontmatter_json, "people")),
+    );
     let date = string_field(&frontmatter_json, "date")
         .or_else(|| string_field(&frontmatter_json, "created_at"))
         .or_else(|| string_field(&frontmatter_json, "created"));
-    let preview = body.lines().take(200).collect::<Vec<_>>().join("\n");
+    let preview = parts.body.lines().take(200).collect::<Vec<_>>().join("\n");
     Ok(MeetingMetadata {
         rel_path,
         frontmatter: frontmatter_json,
@@ -150,7 +153,7 @@ pub fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
 #[tauri::command]
 pub fn append_meetings_log(work_path: String, line: String) -> Result<(), String> {
     let work = normalize_existing_dir(&work_path)?;
-    let log_path = work.join("vault").join("log.md");
+    let log_path = work.join(".anchor").join("meetings-log.md");
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create meetings log dir: {err}"))?;
@@ -199,26 +202,23 @@ fn resolve_config_path(work: &Path, raw: &str) -> PathBuf {
     }
 }
 
-fn parse_frontmatter(raw: &str) -> (Option<YamlValue>, String) {
-    if !raw.starts_with("---\n") {
-        return (None, raw.to_string());
+fn resolve_meetings_root(work: &Path, raw: &str) -> Result<PathBuf, String> {
+    let candidate = lexical_normalize(&resolve_config_path(work, raw));
+    if candidate.starts_with(work) {
+        return Ok(candidate);
     }
-    let mut offset = 4;
-    for line in raw[4..].split_inclusive('\n') {
-        if line.trim_end() == "---" {
-            let yaml = &raw[4..offset];
-            let body = raw[offset + line.len()..].to_string();
-            let parsed = serde_yaml::from_str::<YamlValue>(yaml).ok();
-            return (parsed, body);
+    if let Ok(canonical) = candidate.canonicalize() {
+        if canonical.starts_with(work) {
+            return Ok(canonical);
         }
-        offset += line.len();
     }
-    (None, raw.to_string())
+    Err("meeting_notes_root_escapes_workspace".to_string())
 }
 
-fn yaml_to_json(value: Option<&YamlValue>) -> JsonValue {
-    value
-        .and_then(|frontmatter| serde_json::to_value(frontmatter).ok())
+fn yaml_to_json(value: &BTreeMap<String, YamlValue>) -> JsonValue {
+    serde_json::to_value(value)
+        .ok()
+        .filter(JsonValue::is_object)
         .unwrap_or_else(|| JsonValue::Object(JsonMap::new()))
 }
 
@@ -258,6 +258,17 @@ fn string_list_field(value: &JsonValue, key: &str) -> Vec<String> {
     }
 }
 
+fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+    for value in values {
+        if seen.insert(value.clone()) {
+            unique.push(value);
+        }
+    }
+    unique
+}
+
 fn read_guide_paths(work: &Path) -> BTreeMap<String, String> {
     let mut paths = BTreeMap::new();
     if let Some(settings) = read_global_settings_json() {
@@ -266,6 +277,10 @@ fn read_guide_paths(work: &Path) -> BTreeMap<String, String> {
     let workspace_config = work.join("workspace.config.yaml");
     if let Ok(raw) = fs::read_to_string(workspace_config) {
         if let Ok(value) = serde_yaml::from_str::<YamlValue>(&raw) {
+            collect_yaml_guide_paths(
+                value.get("meetings").and_then(|v| v.get("guides")),
+                &mut paths,
+            );
             collect_yaml_guide_paths(
                 value.get("meeting_notes").and_then(|v| v.get("guides")),
                 &mut paths,
@@ -386,6 +401,20 @@ mod tests {
     }
 
     #[test]
+    fn scan_notes_rejects_roots_outside_workspace() {
+        let tmp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+
+        let err = scan_meeting_notes(
+            tmp.path().to_string_lossy().to_string(),
+            Some(outside.path().to_string_lossy().to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "meeting_notes_root_escapes_workspace");
+    }
+
+    #[test]
     fn metadata_reads_frontmatter_preview_and_counts() {
         let tmp = tempdir().unwrap();
         let note = tmp
@@ -394,7 +423,7 @@ mod tests {
         fs::create_dir_all(note.parent().unwrap()).unwrap();
         fs::write(
             &note,
-            "---\ntags:\n  - 회의록\nattendees:\n  - Lee\ndate: 2026-04-20\n---\n# Body\n\nText",
+            "---\ntags:\n  - 회의록\nattendees:\n  - Lee\n  - Kim\npeople:\n  - Lee\ndate: 2026-04-20\n---\n# Body\n\nText",
         )
         .unwrap();
 
@@ -405,10 +434,28 @@ mod tests {
         .unwrap();
 
         assert_eq!(metadata.tags, vec!["회의록"]);
-        assert_eq!(metadata.attendees, vec!["Lee"]);
+        assert_eq!(metadata.attendees, vec!["Lee", "Kim"]);
         assert_eq!(metadata.date.as_deref(), Some("2026-04-20"));
         assert!(metadata.preview.contains("# Body"));
         assert!(metadata.line_count > 0);
+    }
+
+    #[test]
+    fn scalar_frontmatter_is_returned_as_empty_object() {
+        let tmp = tempdir().unwrap();
+        let note = tmp
+            .path()
+            .join("meetings/2026/2026-04/04-20 회의 - Anchor - KPI.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(&note, "---\n- invalid\n---\n# Body").unwrap();
+
+        let metadata = read_meeting_metadata(
+            tmp.path().to_string_lossy().to_string(),
+            "meetings/2026/2026-04/04-20 회의 - Anchor - KPI.md".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(metadata.frontmatter, JsonValue::Object(JsonMap::new()));
     }
 
     #[test]
@@ -421,6 +468,23 @@ mod tests {
     }
 
     #[test]
+    fn reads_guides_from_meetings_workspace_alias() {
+        let tmp = tempdir().unwrap();
+        let guide = tmp.path().join("docs/GLOSSARY.md");
+        fs::create_dir_all(guide.parent().unwrap()).unwrap();
+        fs::write(&guide, "# Glossary").unwrap();
+        fs::write(
+            tmp.path().join("workspace.config.yaml"),
+            "meetings:\n  guides:\n    glossary: docs/GLOSSARY.md\n",
+        )
+        .unwrap();
+
+        let guides = read_meeting_guides(tmp.path().to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(guides.glossary.as_deref(), Some("# Glossary"));
+    }
+
+    #[test]
     fn appends_meetings_log() {
         let tmp = tempdir().unwrap();
         append_meetings_log(
@@ -429,7 +493,7 @@ mod tests {
         )
         .unwrap();
 
-        let log = fs::read_to_string(tmp.path().join("vault/log.md")).unwrap();
+        let log = fs::read_to_string(tmp.path().join(".anchor/meetings-log.md")).unwrap();
         assert_eq!(log, "- entry\n");
     }
 }

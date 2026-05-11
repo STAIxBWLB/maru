@@ -933,10 +933,14 @@ function formatGuide(label: string, content: string | null): string | null {
 
 function hashType(type: string): number {
   let hash = 0;
-  for (const char of type) hash = (hash + char.charCodeAt(0)) % 6;
-  return hash;
+  for (const char of type) hash = (hash + char.charCodeAt(0)) % 5;
+  return hash + 1;
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

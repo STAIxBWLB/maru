@@ -2718,7 +2718,7 @@ function MainApp() {
   }, [appMode, refreshProcessedItems, refreshProcessingMissions]);
 
   useEffect(() => {
-    if (appMode !== "inbox") return;
+    if (appMode !== "inbox" && appMode !== "meetings") return;
     let cancelled = false;
     let unlistenMission: (() => void) | null = null;
     let unlistenOutput: (() => void) | null = null;
@@ -2765,7 +2765,7 @@ function MainApp() {
       unlistenMission?.();
       unlistenOutput?.();
     };
-  }, [appMode, refreshProcessedItems]);
+  }, [appMode, matchesActiveMission, refreshProcessedItems]);
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.

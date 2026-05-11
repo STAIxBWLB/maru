@@ -33,6 +33,8 @@ export function parseMeetingFilename(
   row?: Partial<MeetingNoteRow>,
 ): MeetingNoteEntry | null {
   const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const absPath = row?.path?.trim();
+  if (!absPath) return null;
   const segments = normalized.split("/").filter(Boolean);
   const fileName = segments.at(-1);
   if (!fileName || !/\.md$/i.test(fileName)) return null;
@@ -59,7 +61,7 @@ export function parseMeetingFilename(
   if (!type || !topic) return null;
   const date = `${year}-${pad2(month)}-${pad2(day)}`;
   return {
-    absPath: row?.path ?? normalized,
+    absPath,
     relPath: row?.relPath ?? normalized,
     fileName,
     date,

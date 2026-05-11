@@ -52,6 +52,7 @@ describe("parseMeetingFilename", () => {
 
   it("excludes invalid names and mismatched folder months", () => {
     expect(parseMeetingFilename("meetings/2026/2026-05/not-a-meeting.md")).toBeNull();
+    expect(parseMeetingFilename("meetings/2026/2026-05/05-20 회의 - Anchor - KPI.md")).toBeNull();
     expect(
       parseMeetingFilename("meetings/2026/2026-05/04-20 회의 - Anchor - KPI.md"),
     ).toBeNull();
