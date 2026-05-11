@@ -45,9 +45,11 @@ import {
   emptyMeetingReviewArtifact,
   extractProviderOutput,
   extractSkillProposal,
+  meetingReviewCanApply,
   meetingReviewChecksComplete,
   parseMeetingReviewArtifact,
   rebuildSkillProposal,
+  selectedMeetingFollowupCount,
   selectedProposalFileCount,
   type MeetingFollowupCandidate,
   type MeetingProposalFileDraft,
@@ -954,36 +956,59 @@ function MeetingsSkillWorkbench({
 
   const checksComplete = bundle ? meetingReviewChecksComplete(bundle.checks) : false;
   const selectedFiles = bundle ? selectedProposalFileCount(bundle.files) : 0;
-  const canApply = Boolean(bundle?.proposal && checksComplete && selectedFiles > 0 && !applyBusy);
+  const selectedFollowups = bundle ? selectedMeetingFollowupCount(bundle.followups) : 0;
+  const canApply = bundle
+    ? meetingReviewCanApply({
+      proposal: bundle.proposal,
+      files: bundle.files,
+      followups: bundle.followups,
+      checksComplete,
+      applyBusy,
+    })
+    : false;
 
   const applyReview = async () => {
-    if (!workPath || !bundle?.proposal || !canApply) return;
-    const proposal = rebuildSkillProposal(bundle.proposal, bundle.files);
+    if (!workPath || !bundle || !canApply) return;
+    const proposal = bundle.proposal && selectedFiles > 0
+      ? rebuildSkillProposal(bundle.proposal, bundle.files)
+      : null;
+    const selectedFollowupItems = bundle.followups.filter((item) => item.selected);
     const approvalId = await onConfirmApproval({
       kind: "meetings.proposal.apply",
-      summary: t("meetings.review.applySummary", { count: proposal.files.length }),
-      target: proposal.files.map((file) => file.path).join("\n"),
+      summary: t("meetings.review.applySummaryDetailed", {
+        files: proposal?.files.length ?? 0,
+        followups: selectedFollowups,
+      }),
+      target: [
+        ...(proposal?.files.map((file) => file.path) ?? []),
+        ...selectedFollowupItems.map((item) => `${item.skill}: ${item.title}`),
+      ].join("\n"),
       payloadPreview: [
-        proposal.summary,
+        proposal?.summary ?? bundle.review.summary,
         ...bundle.checks.map((check) => `${check.kind}: ${check.label} -> ${check.normalized} (${check.status})`),
+        ...selectedFollowupItems.map((item) => `followup: ${item.skill} - ${item.title}`),
       ].join("\n"),
     });
     if (!approvalId) return;
     setApplyBusy(true);
     onError(null);
     try {
-      await agentApplySkillProposal({
-        cwd: workPath,
-        proposal,
-        approvalId,
-        runId: bundle.runId,
-      });
-      await dispatchSelectedFollowups({
-        workPath,
-        skills,
-        bundle,
-        onMissionStarted,
-      });
+      if (proposal) {
+        await agentApplySkillProposal({
+          cwd: workPath,
+          proposal,
+          approvalId,
+          runId: bundle.runId,
+        });
+      }
+      if (selectedFollowupItems.length > 0) {
+        await dispatchSelectedFollowups({
+          workPath,
+          skills,
+          bundle,
+          onMissionStarted,
+        });
+      }
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
@@ -1178,6 +1203,7 @@ function MeetingReviewPanel({
   const { t } = useTranslation();
   const pendingRequired = bundle?.checks.filter((check) => check.required && check.status === "pending").length ?? 0;
   const selectedFiles = bundle ? selectedProposalFileCount(bundle.files) : 0;
+  const selectedFollowups = bundle ? selectedMeetingFollowupCount(bundle.followups) : 0;
   const checkGroups = bundle
     ? ([
       ["term", bundle.checks.filter((check) => check.kind === "term")],
@@ -1341,7 +1367,10 @@ function MeetingReviewPanel({
             <span>
               {pendingRequired > 0
                 ? t("meetings.review.applyBlocked", { count: pendingRequired })
-                : t("meetings.review.applyReady", { count: selectedFiles })}
+                : t("meetings.review.applyReadyDetailed", {
+                  files: selectedFiles,
+                  followups: selectedFollowups,
+                })}
             </span>
             <button type="button" className="primary-button" disabled={!canApply} onClick={onApply}>
               {applyBusy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}

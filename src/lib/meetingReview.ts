@@ -153,6 +153,30 @@ export function selectedProposalFileCount(files: MeetingProposalFileDraft[]): nu
   return files.filter((file) => file.selected).length;
 }
 
+export function selectedMeetingFollowupCount(followups: MeetingFollowupCandidate[]): number {
+  return followups.filter((followup) => followup.selected).length;
+}
+
+export function meetingReviewCanApply({
+  proposal,
+  files,
+  followups,
+  checksComplete,
+  applyBusy = false,
+}: {
+  proposal: SkillProposal | null;
+  files: MeetingProposalFileDraft[];
+  followups: MeetingFollowupCandidate[];
+  checksComplete: boolean;
+  applyBusy?: boolean;
+}): boolean {
+  if (applyBusy || !checksComplete) return false;
+  const selectedFiles = selectedProposalFileCount(files);
+  const selectedFollowups = selectedMeetingFollowupCount(followups);
+  if (selectedFiles === 0 && selectedFollowups === 0) return false;
+  return selectedFiles === 0 || Boolean(proposal);
+}
+
 export function deriveMeetingRunSteps({
   missionStatus,
   logLines = [],

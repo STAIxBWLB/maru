@@ -5,9 +5,11 @@ import {
   deriveMeetingRunSteps,
   extractProviderOutput,
   extractSkillProposal,
+  meetingReviewCanApply,
   meetingReviewChecksComplete,
   parseMeetingReviewArtifact,
   rebuildSkillProposal,
+  selectedMeetingFollowupCount,
   type MeetingProposalFileDraft,
 } from "./meetingReview";
 import type { AgentRunEvent, SkillProposal } from "./skills";
@@ -116,6 +118,62 @@ describe("proposal rebuild", () => {
 
     expect(rebuilt.files).toHaveLength(1);
     expect(rebuilt.files[0]).toMatchObject({ path: "meetings/a.md", content: "after a" });
+  });
+});
+
+describe("meeting review apply readiness", () => {
+  it("allows follow-up only apply after required checks are complete", () => {
+    expect(selectedMeetingFollowupCount([
+      {
+        id: "followup-1",
+        skill: "vault-connect",
+        title: "Connect",
+        prompt: "Connect",
+        reason: "Useful",
+        selected: true,
+      },
+    ])).toBe(1);
+    expect(meetingReviewCanApply({
+      proposal: null,
+      files: [],
+      followups: [
+        {
+          id: "followup-1",
+          skill: "vault-connect",
+          title: "Connect",
+          prompt: "Connect",
+          reason: "Useful",
+          selected: true,
+        },
+      ],
+      checksComplete: true,
+    })).toBe(true);
+  });
+
+  it("keeps apply blocked when nothing is selected or checks remain", () => {
+    const followups = [
+      {
+        id: "followup-1",
+        skill: "vault-connect",
+        title: "Connect",
+        prompt: "Connect",
+        reason: "Useful",
+        selected: true,
+      },
+    ];
+
+    expect(meetingReviewCanApply({
+      proposal: null,
+      files: [],
+      followups: [],
+      checksComplete: true,
+    })).toBe(false);
+    expect(meetingReviewCanApply({
+      proposal: null,
+      files: [],
+      followups,
+      checksComplete: false,
+    })).toBe(false);
   });
 });
 
