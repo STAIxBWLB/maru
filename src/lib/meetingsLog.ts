@@ -35,6 +35,7 @@ export interface MeetingsLogEventInput {
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const ERROR_KEYWORDS = /\b(error|failed|exception|panic|fatal)\b/i;
 const WARN_KEYWORDS = /\b(warn|warning|deprecat|retrying)\b/i;
+const STREAM_PREFIX = /^\s*(?:-\s*)?\[(?:stdout|stderr)\]\s*/i;
 
 export function serializeMeetingsLogLine(input: MeetingsLogEventInput): string {
   const ts = input.ts ?? new Date().toISOString();
@@ -47,17 +48,18 @@ export function serializeMeetingsLogLine(input: MeetingsLogEventInput): string {
 }
 
 export function parseMeetingsLogLine(raw: string): MeetingsLogLine {
-  const trimmed = raw.replace(/^-\s*/, "").trim();
+  const displayRaw = stripMeetingsLogStreamPrefix(raw);
+  const trimmed = displayRaw.replace(/^-\s*/, "").trim();
   const [headToken, ...rest] = trimmed.split(/\s+/);
   const head = headToken ?? "";
   if (ISO_TIMESTAMP.test(head)) {
     const remainder = rest.join(" ").trim();
-    const structured = parseStructured(raw, head, remainder);
+    const structured = parseStructured(displayRaw, head, remainder);
     if (structured) return structured;
-    const legacy = parseLegacy(raw, head, remainder);
+    const legacy = parseLegacy(displayRaw, head, remainder);
     if (legacy) return legacy;
     return {
-      raw,
+      raw: displayRaw,
       ts: head,
       event: remainder ? "unknown" : "unknown",
       runId: null,
@@ -69,7 +71,7 @@ export function parseMeetingsLogLine(raw: string): MeetingsLogLine {
     };
   }
   return {
-    raw,
+    raw: displayRaw,
     ts: null,
     event: "unknown",
     runId: null,
@@ -79,6 +81,10 @@ export function parseMeetingsLogLine(raw: string): MeetingsLogLine {
     payload: null,
     legacy: true,
   };
+}
+
+export function stripMeetingsLogStreamPrefix(raw: string): string {
+  return raw.replace(STREAM_PREFIX, "");
 }
 
 export function logLineSeverity(line: MeetingsLogLine | string): MeetingsLogSeverity {

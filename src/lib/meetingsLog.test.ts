@@ -4,6 +4,7 @@ import {
   logLineSeverity,
   parseMeetingsLogLine,
   serializeMeetingsLogLine,
+  stripMeetingsLogStreamPrefix,
 } from "./meetingsLog";
 
 describe("meetingsLog serializer", () => {
@@ -70,6 +71,13 @@ describe("meetingsLog parser", () => {
     expect(line.event).toBe("unknown");
     expect(line.ts).toBeNull();
     expect(line.legacy).toBe(true);
+  });
+
+  it("strips provider stream prefixes from displayed raw text", () => {
+    const line = parseMeetingsLogLine("[stderr] [phase:draft] drafting note");
+    expect(line.raw).toBe("[phase:draft] drafting note");
+    expect(stripMeetingsLogStreamPrefix("[stdout] proposal ready")).toBe("proposal ready");
+    expect(stripMeetingsLogStreamPrefix("- [stderr] failed")).toBe("failed");
   });
 });
 

@@ -51,6 +51,7 @@ import {
   logLineSeverity,
   parseMeetingsLogLine,
   serializeMeetingsLogLine,
+  stripMeetingsLogStreamPrefix,
   type MeetingsLogEventInput,
   type MeetingsLogLine,
 } from "../../lib/meetingsLog";
@@ -347,18 +348,6 @@ export function MeetingsPane({
           onNewMeeting={openNewMeeting}
           onOpenSettings={onOpenSettings}
         />
-        {lastClearedMissionId ? (
-          <div className="meetings-undo-toast" role="status">
-            <span>{t("meetings.progress.cleared")}</span>
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => undoClearMission(lastClearedMissionId)}
-            >
-              {t("meetings.progress.undoClear")}
-            </button>
-          </div>
-        ) : null}
         {view === "activity" ? (
           <MeetingsActivityPane workPath={workPath} onError={onError} />
         ) : view === "transcript" ? (
@@ -371,6 +360,8 @@ export function MeetingsPane({
             onMissionStarted={onMissionStarted}
             onStopMission={onStopMission}
             onClearMission={clearMeetingMission}
+            lastClearedMissionId={lastClearedMissionId}
+            onUndoClearMission={undoClearMission}
             onRefreshMissions={onRefreshMissions}
             onConfirmApproval={onConfirmApproval}
             onApplied={() => void refresh()}
@@ -386,6 +377,8 @@ export function MeetingsPane({
             onMissionStarted={onMissionStarted}
             onStopMission={onStopMission}
             onClearMission={clearMeetingMission}
+            lastClearedMissionId={lastClearedMissionId}
+            onUndoClearMission={undoClearMission}
             onRefreshMissions={onRefreshMissions}
             onConfirmApproval={onConfirmApproval}
             onApplied={() => void refresh()}
@@ -1034,6 +1027,8 @@ function MeetingsTranscriptFlow(props: {
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
+  lastClearedMissionId: string | null;
+  onUndoClearMission: (id: string) => void;
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
@@ -1051,6 +1046,8 @@ function MeetingsExternalFlow({
   onMissionStarted,
   onStopMission,
   onClearMission,
+  lastClearedMissionId,
+  onUndoClearMission,
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
@@ -1064,6 +1061,8 @@ function MeetingsExternalFlow({
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
+  lastClearedMissionId: string | null;
+  onUndoClearMission: (id: string) => void;
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
@@ -1080,6 +1079,8 @@ function MeetingsExternalFlow({
       onMissionStarted={onMissionStarted}
       onStopMission={onStopMission}
       onClearMission={onClearMission}
+      lastClearedMissionId={lastClearedMissionId}
+      onUndoClearMission={onUndoClearMission}
       onRefreshMissions={onRefreshMissions}
       onConfirmApproval={onConfirmApproval}
       onApplied={onApplied}
@@ -1119,6 +1120,8 @@ function MeetingsSkillWorkbench({
   onMissionStarted,
   onStopMission,
   onClearMission,
+  lastClearedMissionId,
+  onUndoClearMission,
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
@@ -1133,6 +1136,8 @@ function MeetingsSkillWorkbench({
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
+  lastClearedMissionId: string | null;
+  onUndoClearMission: (id: string) => void;
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
@@ -1554,9 +1559,11 @@ function MeetingsSkillWorkbench({
           appliedRunIds={appliedRunIds}
           loadingReview={reviewLoading}
           retryBusy={busy}
+          lastClearedMissionId={lastClearedMissionId}
           onRefresh={onRefreshMissions}
           onStopMission={onStopMission}
           onClearMission={onClearMission}
+          onUndoClearMission={onUndoClearMission}
           onReviewResult={(mission) => void loadReviewResult(mission)}
           onRetryMission={(mission) => void retryMission(mission)}
         />
@@ -1948,9 +1955,11 @@ function MeetingsRunPanel({
   appliedRunIds,
   loadingReview,
   retryBusy,
+  lastClearedMissionId,
   onRefresh,
   onStopMission,
   onClearMission,
+  onUndoClearMission,
   onReviewResult,
   onRetryMission,
 }: {
@@ -1961,9 +1970,11 @@ function MeetingsRunPanel({
   appliedRunIds: Set<string>;
   loadingReview: boolean;
   retryBusy: boolean;
+  lastClearedMissionId: string | null;
   onRefresh: () => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
+  onUndoClearMission: (id: string) => void;
   onReviewResult: (mission: MissionRecord) => void;
   onRetryMission: (mission: MissionRecord) => void;
 }) {
@@ -1978,6 +1989,14 @@ function MeetingsRunPanel({
           <p>{t("meetings.progress.count", { count: missions.length })}</p>
         </div>
         <div className="meetings-run-header-actions">
+          {lastClearedMissionId ? (
+            <span className="meetings-run-clear-status" role="status">
+              <span>{t("meetings.progress.cleared")}</span>
+              <button type="button" onClick={() => onUndoClearMission(lastClearedMissionId)}>
+                {t("meetings.progress.undoClear")}
+              </button>
+            </span>
+          ) : null}
           <button type="button" className="icon-button" onClick={onRefresh} title={t("meetings.refresh")} aria-label={t("meetings.refresh")}>
             <RefreshCcw size={14} />
           </button>
@@ -2173,7 +2192,7 @@ function MeetingsProgressDock({
               <strong>{mission.id}</strong>
               <span>{mission.status}</span>
             </div>
-            <pre>{(logLines[mission.id] ?? []).slice(-4).join("\n") || t("meetings.progress.noLog")}</pre>
+            <pre>{formatMeetingsLogPreview(logLines[mission.id] ?? [], 4) || t("meetings.progress.noLog")}</pre>
             {mission.status === "running" || mission.status === "idle" ? (
               <button type="button" className="icon-button" onClick={() => onStopMission(mission.id)} aria-label={t("meetings.progress.stop")} title={t("meetings.progress.stop")}>
                 <Square size={13} />
@@ -2206,6 +2225,13 @@ function writeClearedMeetingRunIds(key: string, ids: Set<string>) {
   } catch {
     // Non-critical UI state; ignore storage failures such as private-mode quota errors.
   }
+}
+
+function formatMeetingsLogPreview(lines: string[], limit: number): string {
+  return lines
+    .slice(-limit)
+    .map(stripMeetingsLogStreamPrefix)
+    .join("\n");
 }
 
 function CheckKindIcon({ kind }: { kind: MeetingReviewCheckKind }) {

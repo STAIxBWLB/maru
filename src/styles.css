@@ -8706,30 +8706,6 @@ button.git-badge:hover {
   cursor: default;
 }
 
-.meetings-undo-toast {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 12px;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--info) 32%, var(--line-soft));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--info) 8%, var(--panel-raised));
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.meetings-undo-toast .link-button {
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 .meetings-run-card[data-active="true"] {
   box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }
@@ -9261,7 +9237,40 @@ button.git-badge:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+.meetings-run-clear-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--info) 28%, var(--line-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--info) 7%, var(--panel-raised));
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.meetings-run-clear-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meetings-run-clear-status button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
 }
 
 .meetings-run-card {
