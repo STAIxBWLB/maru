@@ -105,18 +105,24 @@ describe("activeMeetingsMissions", () => {
       mission("a", "meetingNotesFromTranscript"),
       mission("b", "inboxProcess"),
       mission("c", "meetingNotesExternalRefine"),
+      mission("d", "meetingNotesVaultExtract"),
+      {
+        ...mission("e", "other"),
+        metadata: { reviewFlow: true, skillName: "task-management" },
+      },
     ];
 
-    expect(activeMeetingsMissions(missions).map((item) => item.id)).toEqual(["c", "a"]);
+    expect(activeMeetingsMissions(missions).map((item) => item.id)).toEqual(["e", "d", "c", "a"]);
   });
 });
 
 function mission(id: string, origin: string): MissionRecord {
+  const minute = id === "e" ? 4 : id === "d" ? 3 : id === "c" ? 2 : 1;
   return {
     id,
     kind: "skill",
-    startedAt: `2026-05-04T10:0${id === "c" ? 2 : 1}:00+09:00`,
-    lastOutputAt: `2026-05-04T10:0${id === "c" ? 2 : 1}:00+09:00`,
+    startedAt: `2026-05-04T10:0${minute}:00+09:00`,
+    lastOutputAt: `2026-05-04T10:0${minute}:00+09:00`,
     status: "running",
     exitCode: null,
     outputLogPath: null,

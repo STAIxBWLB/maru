@@ -302,6 +302,15 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await meetingsPane.getByRole("button", { name: "캘린더" }).click();
   await expect(page.locator(".meetings-calendar .rbc-calendar")).toBeVisible();
   await expect(page.locator(".meetings-calendar")).toContainText("Skills 관리");
+
+  await meetingsPane.getByRole("button", { name: "녹취록 처리" }).click();
+  await expect(page.locator(".meetings-workbench")).toBeVisible();
+  await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
+  await expect(page.locator(".meetings-review-card")).toContainText("결과 대기");
+
+  await meetingsPane.getByRole("button", { name: "외부 노트 정제" }).click();
+  await expect(page.locator(".meetings-source-card textarea")).toBeVisible();
+  await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
 });
 
 test("shows the meetings settings tab in the settings window shell", async ({ page }) => {

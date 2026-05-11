@@ -33,6 +33,47 @@ skill is provider-neutral and does not require inbox staging.
    `task-management` or prepare vault extraction candidates. Do not write vault
    notes directly.
 
+## Anchor Run Contract
+
+When Anchor runs this skill in background/review mode:
+
+1. Emit concise human-readable progress logs while working.
+2. Do not directly write files, update the vault, or run follow-up skills.
+3. Return one `anchor_skill_proposal_v1` JSON object with the meeting note file
+   write proposal.
+4. Return one `anchor_meeting_review_v1` JSON object for user confirmation:
+
+```json
+{
+  "schemaVersion": "anchor_meeting_review_v1",
+  "summary": "short review summary",
+  "terms": [
+    { "label": "source term", "normalized": "workspace term", "note": "why", "required": true }
+  ],
+  "people": [
+    { "label": "source person", "normalized": "canonical person", "note": "role", "required": true }
+  ],
+  "properNouns": [
+    { "label": "source name", "normalized": "canonical name", "note": "context", "required": true }
+  ],
+  "uncertainties": [
+    { "label": "uncertain item", "normalized": "best guess", "note": "needs user check", "required": true }
+  ],
+  "followups": [
+    {
+      "skill": "vault-extract",
+      "title": "Extract durable knowledge",
+      "prompt": "proposal-only follow-up prompt",
+      "reason": "why this is useful",
+      "selected": false
+    }
+  ]
+}
+```
+
+Allowed follow-up skills are `vault-extract`, `vault-connect`, and
+`task-management`. Follow-ups must be proposals for the user to review.
+
 ## Rules
 
 - Do not assume a specific transcript vendor.

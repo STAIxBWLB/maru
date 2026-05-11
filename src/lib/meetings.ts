@@ -26,7 +26,10 @@ export interface MeetingCalendarEvent {
 
 export type MeetingsMissionOrigin =
   | "meetingNotesFromTranscript"
-  | "meetingNotesExternalRefine";
+  | "meetingNotesExternalRefine"
+  | "meetingNotesVaultExtract"
+  | "meetingNotesVaultConnect"
+  | "meetingNotesTaskManagement";
 
 export function parseMeetingFilename(
   relPath: string,
@@ -148,7 +151,8 @@ export function isMeetingsMission(mission: MissionRecord): boolean {
   const metadata = mission.metadata;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
   const origin = (metadata as Record<string, unknown>).origin;
-  return origin === "meetingNotesFromTranscript" || origin === "meetingNotesExternalRefine";
+  if (typeof origin === "string" && origin.startsWith("meetingNotes")) return true;
+  return (metadata as Record<string, unknown>).reviewFlow === true;
 }
 
 function compareMeetingEntries(a: MeetingNoteEntry, b: MeetingNoteEntry): number {

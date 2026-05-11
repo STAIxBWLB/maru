@@ -1,14 +1,18 @@
 import "react-big-calendar/lib/css/react-big-calendar.css";
 
 import {
+  AlertTriangle,
   Calendar as CalendarIcon,
   CheckCircle2,
+  ClipboardCheck,
   FilePlus2,
   FileText,
   FolderOpen,
+  GitCompare,
   Link2,
   List,
   Loader2,
+  Pencil,
   Play,
   RefreshCcw,
   Search,
@@ -29,11 +33,27 @@ import { enUS } from "date-fns/locale/en-US";
 import {
   appendMeetingsLog,
   chooseFiles,
+  readDocument,
   readMeetingGuides,
   readMeetingMetadata,
   scanMeetingNotes,
 } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
+import {
+  createMeetingReviewChecks,
+  emptyMeetingReviewArtifact,
+  extractProviderOutput,
+  extractSkillProposal,
+  meetingReviewChecksComplete,
+  parseMeetingReviewArtifact,
+  rebuildSkillProposal,
+  selectedProposalFileCount,
+  type MeetingFollowupCandidate,
+  type MeetingProposalFileDraft,
+  type MeetingReviewArtifact,
+  type MeetingReviewCheck,
+  type MeetingReviewCheckStatus,
+} from "../../lib/meetingReview";
 import {
   activeMeetingsMissions,
   filterMeetingsByQuery,
@@ -44,8 +64,12 @@ import {
 } from "../../lib/meetings";
 import type { MeetingsSettings } from "../../lib/settings";
 import {
+  agentApplySkillProposal,
+  agentParseSkillProposal,
+  agentReadRunEvents,
   skillsDispatchBackground,
   type SkillContextItem,
+  type SkillProposal,
   type SkillRecord,
 } from "../../lib/skills";
 import type { MeetingMetadata, MeetingNoteRow, MissionRecord } from "../../lib/types";
@@ -69,6 +93,12 @@ interface MeetingsPaneProps {
   ) => void;
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
+  onConfirmApproval: (input: {
+    kind: string;
+    summary: string;
+    target?: string | null;
+    payloadPreview?: string | null;
+  }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   onError: (message: string | null) => void;
 }
@@ -94,6 +124,7 @@ export function MeetingsPane({
   onOpenSkillCompose,
   onMissionStarted,
   onStopMission,
+  onConfirmApproval,
   onRevealPath,
   onError,
 }: MeetingsPaneProps) {
@@ -222,7 +253,13 @@ export function MeetingsPane({
             workPath={workPath}
             settings={effectiveSettings}
             skills={skills}
+            missions={meetingsMissions}
+            logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
+            onStopMission={onStopMission}
+            onRefreshMissions={onRefreshMissions}
+            onConfirmApproval={onConfirmApproval}
+            onApplied={() => void refresh()}
             onError={onError}
           />
         ) : view === "external" ? (
@@ -230,7 +267,13 @@ export function MeetingsPane({
             workPath={workPath}
             settings={effectiveSettings}
             skills={skills}
+            missions={meetingsMissions}
+            logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
+            onStopMission={onStopMission}
+            onRefreshMissions={onRefreshMissions}
+            onConfirmApproval={onConfirmApproval}
+            onApplied={() => void refresh()}
             onError={onError}
           />
         ) : (
@@ -299,11 +342,13 @@ export function MeetingsPane({
             </div>
           </>
         )}
-        <MeetingsProgressDock
-          missions={meetingsMissions}
-          logLines={processingLogLines}
-          onStopMission={onStopMission}
-        />
+        {view === "transcript" || view === "external" ? null : (
+          <MeetingsProgressDock
+            missions={meetingsMissions}
+            logLines={processingLogLines}
+            onStopMission={onStopMission}
+          />
+        )}
       </main>
     </section>
   );
@@ -653,90 +698,42 @@ function MeetingsTranscriptFlow({
   workPath,
   settings,
   skills,
+  missions,
+  logLines,
   onMissionStarted,
+  onStopMission,
+  onRefreshMissions,
+  onConfirmApproval,
+  onApplied,
   onError,
 }: {
   workPath: string | null;
   settings: MeetingsSettings;
   skills: SkillRecord[];
+  missions: MissionRecord[];
+  logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
+  onStopMission: (id: string) => void;
+  onRefreshMissions: () => void;
+  onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
+  onApplied: () => void;
   onError: (message: string | null) => void;
 }) {
-  const { t } = useTranslation();
-  const [paths, setPaths] = useState<string[]>([]);
-  const [type, setType] = useState(settings.defaultTypes[0] ?? "회의");
-  const [topic, setTopic] = useState("");
-  const [detail, setDetail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const canRun = Boolean(workPath && paths.length > 0 && topic.trim());
-  const run = async () => {
-    if (!workPath || !canRun) return;
-    const skill = findSkill(skills, "meeting-notes");
-    if (!skill) {
-      onError(t("meetings.error.skillMissing", { skill: "meeting-notes" }));
-      return;
-    }
-    setBusy(true);
-    onError(null);
-    try {
-      const prompt = [
-        "Convert the selected transcript file(s) into a polished meeting note.",
-        `Root: ${settings.root ?? "meetings"}`,
-        `Filename template: ${settings.filenameTemplate}`,
-        `Type: ${type}`,
-        `Topic: ${topic.trim()}`,
-        detail.trim() ? `Detail: ${detail.trim()}` : null,
-        "Use the six-section meeting note structure, normalized tags, and wiki-link conventions.",
-      ].filter(Boolean).join("\n");
-      const invocationId = await skillsDispatchBackground({
-        skillId: skill.id,
-        runtime: "claude",
-        cwd: workPath,
-        prompt,
-        context: paths.map((path) => ({ path, kind: "file" })),
-        metadata: {
-          origin: "meetingNotesFromTranscript",
-          inputPaths: paths,
-          workspacePath: workPath,
-          skillName: "meeting-notes",
-        },
-      });
-      onMissionStarted(invocationId);
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
-    <section className="meetings-flow">
-      <h2>{t("meetings.transcript.title")}</h2>
-      <p>{t("meetings.transcript.description")}</p>
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={() => void chooseFiles(t("meetings.transcript.pick")).then(setPaths)}
-      >
-        <FolderOpen size={14} />
-        {t("meetings.transcript.pick")}
-      </button>
-      <div className="meetings-selected-files">
-        {paths.map((path) => <span key={path}>{path}</span>)}
-      </div>
-      <FlowFields
-        types={settings.defaultTypes}
-        type={type}
-        topic={topic}
-        detail={detail}
-        onType={setType}
-        onTopic={setTopic}
-        onDetail={setDetail}
-      />
-      <button type="button" className="primary-button" disabled={!canRun || busy} onClick={() => void run()}>
-        {busy ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-        {t("meetings.transcript.run")}
-      </button>
-    </section>
+    <MeetingsSkillWorkbench
+      sourceKind="transcript"
+      workPath={workPath}
+      settings={settings}
+      skills={skills}
+      missions={missions}
+      logLines={logLines}
+      onMissionStarted={onMissionStarted}
+      onStopMission={onStopMission}
+      onRefreshMissions={onRefreshMissions}
+      onConfirmApproval={onConfirmApproval}
+      onApplied={onApplied}
+      onError={onError}
+    />
   );
 }
 
@@ -744,13 +741,82 @@ function MeetingsExternalFlow({
   workPath,
   settings,
   skills,
+  missions,
+  logLines,
   onMissionStarted,
+  onStopMission,
+  onRefreshMissions,
+  onConfirmApproval,
+  onApplied,
   onError,
 }: {
   workPath: string | null;
   settings: MeetingsSettings;
   skills: SkillRecord[];
+  missions: MissionRecord[];
+  logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
+  onStopMission: (id: string) => void;
+  onRefreshMissions: () => void;
+  onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
+  onApplied: () => void;
+  onError: (message: string | null) => void;
+}) {
+  return (
+    <MeetingsSkillWorkbench
+      sourceKind="external"
+      workPath={workPath}
+      settings={settings}
+      skills={skills}
+      missions={missions}
+      logLines={logLines}
+      onMissionStarted={onMissionStarted}
+      onStopMission={onStopMission}
+      onRefreshMissions={onRefreshMissions}
+      onConfirmApproval={onConfirmApproval}
+      onApplied={onApplied}
+      onError={onError}
+    />
+  );
+}
+
+type MeetingSourceKind = "transcript" | "external";
+
+interface MeetingReviewBundle {
+  runId: string;
+  mission: MissionRecord;
+  proposal: SkillProposal | null;
+  review: MeetingReviewArtifact;
+  files: MeetingProposalFileDraft[];
+  checks: MeetingReviewCheck[];
+  followups: MeetingFollowupCandidate[];
+}
+
+function MeetingsSkillWorkbench({
+  sourceKind,
+  workPath,
+  settings,
+  skills,
+  missions,
+  logLines,
+  onMissionStarted,
+  onStopMission,
+  onRefreshMissions,
+  onConfirmApproval,
+  onApplied,
+  onError,
+}: {
+  sourceKind: MeetingSourceKind;
+  workPath: string | null;
+  settings: MeetingsSettings;
+  skills: SkillRecord[];
+  missions: MissionRecord[];
+  logLines: Record<string, string[]>;
+  onMissionStarted: (invocationId: string) => void;
+  onStopMission: (id: string) => void;
+  onRefreshMissions: () => void;
+  onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
+  onApplied: () => void;
   onError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -760,7 +826,22 @@ function MeetingsExternalFlow({
   const [topic, setTopic] = useState("");
   const [detail, setDetail] = useState("");
   const [busy, setBusy] = useState(false);
-  const canRun = Boolean(workPath && (paths.length > 0 || note.trim()) && topic.trim());
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [bundle, setBundle] = useState<MeetingReviewBundle | null>(null);
+  const isExternal = sourceKind === "external";
+  const canRun = Boolean(
+    workPath &&
+      topic.trim() &&
+      (isExternal ? paths.length > 0 || note.trim() : paths.length > 0),
+  );
+  const sourceTitle = isExternal ? t("meetings.external.title") : t("meetings.transcript.title");
+  const sourceDescription = isExternal
+    ? t("meetings.external.description")
+    : t("meetings.transcript.description");
+  const runLabel = isExternal ? t("meetings.external.run") : t("meetings.transcript.run");
+  const pickLabel = isExternal ? t("meetings.external.pick") : t("meetings.transcript.pick");
+
   const run = async () => {
     if (!workPath || !canRun) return;
     const skill = findSkill(skills, "meeting-notes");
@@ -771,21 +852,16 @@ function MeetingsExternalFlow({
     setBusy(true);
     onError(null);
     try {
-      const guides = await readMeetingGuides(workPath);
-      const prompt = [
-        "Refine the external note into the workspace meeting-note standard.",
-        `Root: ${settings.root ?? "meetings"}`,
-        `Filename template: ${settings.filenameTemplate}`,
-        `Type: ${type}`,
-        `Topic: ${topic.trim()}`,
-        detail.trim() ? `Detail: ${detail.trim()}` : null,
-        formatGuide("QUICK_START", guides.quickStart),
-        formatGuide("GLOSSARY", guides.glossary),
-        formatGuide("PEOPLE", guides.people),
-        formatGuide("TAG_STANDARDS", guides.tagStandards),
-        formatGuide("NOTES_GUIDELINES", guides.notesGuidelines),
-        note.trim() ? `EXTERNAL_NOTE:\n${note.trim()}` : null,
-      ].filter(Boolean).join("\n\n");
+      const guides = isExternal ? await readMeetingGuides(workPath) : null;
+      const prompt = buildMeetingNotesPrompt({
+        sourceKind,
+        settings,
+        type,
+        topic,
+        detail,
+        note,
+        guides,
+      });
       const invocationId = await skillsDispatchBackground({
         skillId: skill.id,
         runtime: "claude",
@@ -793,53 +869,190 @@ function MeetingsExternalFlow({
         prompt,
         context: paths.map((path) => ({ path, kind: "file" })),
         metadata: {
-          origin: "meetingNotesExternalRefine",
+          origin: sourceKind === "transcript"
+            ? "meetingNotesFromTranscript"
+            : "meetingNotesExternalRefine",
+          reviewFlow: true,
+          sourceKind,
           inputPaths: paths,
           workspacePath: workPath,
           skillName: "meeting-notes",
         },
       });
       onMissionStarted(invocationId);
+      onRefreshMissions();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   };
+
+  const loadReviewResult = async (mission: MissionRecord) => {
+    if (!workPath) return;
+    setReviewLoading(true);
+    onError(null);
+    try {
+      const events = await agentReadRunEvents(workPath, mission.id);
+      const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
+      const proposal = extractSkillProposal(events) ?? await parseProposalFallback(raw);
+      const review =
+        parseMeetingReviewArtifact(raw) ??
+        emptyMeetingReviewArtifact(proposal?.summary ?? t("meetings.review.noReview"));
+      const files = await Promise.all(
+        (proposal?.files ?? []).map(async (file, index) => ({
+          id: `${mission.id}-${index}`,
+          selected: file.operation !== "delete",
+          path: file.path,
+          operation: file.operation,
+          beforeContent: await readProposalBeforeContent(workPath, file),
+          afterContent: file.content ?? "",
+          expectedHash: file.expectedHash ?? null,
+          diff: file.diff ?? null,
+        })),
+      );
+      setBundle({
+        runId: mission.id,
+        mission,
+        proposal,
+        review,
+        files,
+        checks: createMeetingReviewChecks(review),
+        followups: review.followups,
+      });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const checksComplete = bundle ? meetingReviewChecksComplete(bundle.checks) : false;
+  const selectedFiles = bundle ? selectedProposalFileCount(bundle.files) : 0;
+  const canApply = Boolean(bundle?.proposal && checksComplete && selectedFiles > 0 && !applyBusy);
+
+  const applyReview = async () => {
+    if (!workPath || !bundle?.proposal || !canApply) return;
+    const proposal = rebuildSkillProposal(bundle.proposal, bundle.files);
+    const approvalId = await onConfirmApproval({
+      kind: "meetings.proposal.apply",
+      summary: t("meetings.review.applySummary", { count: proposal.files.length }),
+      target: proposal.files.map((file) => file.path).join("\n"),
+      payloadPreview: [
+        proposal.summary,
+        ...bundle.checks.map((check) => `${check.kind}: ${check.label} -> ${check.normalized} (${check.status})`),
+      ].join("\n"),
+    });
+    if (!approvalId) return;
+    setApplyBusy(true);
+    onError(null);
+    try {
+      await agentApplySkillProposal({
+        cwd: workPath,
+        proposal,
+        approvalId,
+        runId: bundle.runId,
+      });
+      await dispatchSelectedFollowups({
+        workPath,
+        skills,
+        bundle,
+        onMissionStarted,
+      });
+      onApplied();
+      onRefreshMissions();
+      onError(t("meetings.review.applySuccess"));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplyBusy(false);
+    }
+  };
+
   return (
-    <section className="meetings-flow">
-      <h2>{t("meetings.external.title")}</h2>
-      <p>{t("meetings.external.description")}</p>
-      <textarea
-        className="meetings-textarea"
-        value={note}
-        onChange={(event) => setNote(event.target.value)}
-        placeholder={t("meetings.external.placeholder")}
-      />
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={() => void chooseFiles(t("meetings.external.pick")).then(setPaths)}
-      >
-        <FolderOpen size={14} />
-        {t("meetings.external.pick")}
-      </button>
-      <div className="meetings-selected-files">
-        {paths.map((path) => <span key={path}>{path}</span>)}
+    <section className="meetings-workbench">
+      <div className="meetings-workbench-grid">
+        <section className="meetings-workbench-card meetings-source-card">
+          <header>
+            <div>
+              <span>{t("meetings.workbench.source")}</span>
+              <h2>{sourceTitle}</h2>
+              <p>{sourceDescription}</p>
+            </div>
+          </header>
+          {isExternal ? (
+            <textarea
+              className="meetings-textarea compact"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder={t("meetings.external.placeholder")}
+            />
+          ) : null}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void chooseFiles(pickLabel).then(setPaths)}
+          >
+            <FolderOpen size={14} />
+            {pickLabel}
+          </button>
+          <div className="meetings-selected-files compact">
+            {paths.length === 0 ? <span>{t("meetings.workbench.noFiles")}</span> : null}
+            {paths.map((path) => <span key={path}>{path}</span>)}
+          </div>
+          <FlowFields
+            types={settings.defaultTypes}
+            type={type}
+            topic={topic}
+            detail={detail}
+            onType={setType}
+            onTopic={setTopic}
+            onDetail={setDetail}
+          />
+          <button type="button" className="primary-button" disabled={!canRun || busy} onClick={() => void run()}>
+            {busy ? <Loader2 size={14} className="spin" /> : isExternal ? <WandSparkles size={14} /> : <Play size={14} />}
+            {runLabel}
+          </button>
+        </section>
+
+        <MeetingReviewPanel
+          bundle={bundle}
+          loading={reviewLoading}
+          applyBusy={applyBusy}
+          canApply={canApply}
+          onApply={() => void applyReview()}
+          onUpdateFile={(id, patch) => {
+            setBundle((current) => current ? {
+              ...current,
+              files: current.files.map((file) => file.id === id ? { ...file, ...patch } : file),
+            } : current);
+          }}
+          onUpdateCheck={(id, patch) => {
+            setBundle((current) => current ? {
+              ...current,
+              checks: current.checks.map((check) => check.id === id ? { ...check, ...patch } : check),
+            } : current);
+          }}
+          onToggleFollowup={(id) => {
+            setBundle((current) => current ? {
+              ...current,
+              followups: current.followups.map((item) =>
+                item.id === id ? { ...item, selected: !item.selected } : item,
+              ),
+            } : current);
+          }}
+        />
+
+        <MeetingsRunPanel
+          missions={missions}
+          logLines={logLines}
+          activeRunId={bundle?.runId ?? null}
+          loadingReview={reviewLoading}
+          onRefresh={onRefreshMissions}
+          onStopMission={onStopMission}
+          onReviewResult={(mission) => void loadReviewResult(mission)}
+        />
       </div>
-      <FlowFields
-        types={settings.defaultTypes}
-        type={type}
-        topic={topic}
-        detail={detail}
-        onType={setType}
-        onTopic={setTopic}
-        onDetail={setDetail}
-      />
-      <button type="button" className="primary-button" disabled={!canRun || busy} onClick={() => void run()}>
-        {busy ? <Loader2 size={14} className="spin" /> : <WandSparkles size={14} />}
-        {t("meetings.external.run")}
-      </button>
     </section>
   );
 }
@@ -879,6 +1092,260 @@ function FlowFields({
         <input value={detail} onChange={(event) => onDetail(event.target.value)} />
       </label>
     </div>
+  );
+}
+
+function MeetingReviewPanel({
+  bundle,
+  loading,
+  applyBusy,
+  canApply,
+  onApply,
+  onUpdateFile,
+  onUpdateCheck,
+  onToggleFollowup,
+}: {
+  bundle: MeetingReviewBundle | null;
+  loading: boolean;
+  applyBusy: boolean;
+  canApply: boolean;
+  onApply: () => void;
+  onUpdateFile: (id: string, patch: Partial<MeetingProposalFileDraft>) => void;
+  onUpdateCheck: (id: string, patch: Partial<MeetingReviewCheck>) => void;
+  onToggleFollowup: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const pendingRequired = bundle?.checks.filter((check) => check.required && check.status === "pending").length ?? 0;
+  const selectedFiles = bundle ? selectedProposalFileCount(bundle.files) : 0;
+  return (
+    <section className="meetings-workbench-card meetings-review-card">
+      <header>
+        <div>
+          <span>{t("meetings.workbench.review")}</span>
+          <h2>{bundle ? t("meetings.review.ready") : t("meetings.review.waiting")}</h2>
+          <p>
+            {bundle
+              ? bundle.review.summary || bundle.proposal?.summary || t("meetings.review.noReview")
+              : t("meetings.review.waitingDescription")}
+          </p>
+        </div>
+        {loading ? <Loader2 size={16} className="spin" /> : <GitCompare size={16} />}
+      </header>
+
+      {!bundle ? (
+        <div className="meetings-review-empty">
+          <ClipboardCheck size={18} />
+          <span>{t("meetings.review.empty")}</span>
+        </div>
+      ) : null}
+
+      {bundle ? (
+        <>
+          <div className="meetings-review-summary">
+            <span>{t("meetings.review.files", { count: bundle.files.length })}</span>
+            <span>{t("meetings.review.pending", { count: pendingRequired })}</span>
+          </div>
+
+          <div className="meetings-proposal-files">
+            {bundle.files.length === 0 ? (
+              <div className="meetings-review-empty compact">
+                <AlertTriangle size={15} />
+                <span>{t("meetings.review.noProposal")}</span>
+              </div>
+            ) : null}
+            {bundle.files.map((file) => (
+              <article className="meetings-proposal-file" key={file.id}>
+                <header>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={file.selected}
+                      onChange={(event) => onUpdateFile(file.id, { selected: event.target.checked })}
+                    />
+                    <span>{t("meetings.review.applyFile")}</span>
+                  </label>
+                  <select
+                    value={file.operation}
+                    onChange={(event) => onUpdateFile(file.id, { operation: event.target.value })}
+                  >
+                    <option value="create">create</option>
+                    <option value="replace">replace</option>
+                    <option value="append">append</option>
+                    <option value="delete">delete</option>
+                  </select>
+                </header>
+                <label className="field">
+                  <span>{t("meetings.review.targetPath")}</span>
+                  <input
+                    value={file.path}
+                    onChange={(event) => onUpdateFile(file.id, { path: event.target.value })}
+                  />
+                </label>
+                <div className="meetings-before-after">
+                  <label>
+                    <span>{t("meetings.review.before")}</span>
+                    <pre>{file.beforeContent || t("meetings.review.newFile")}</pre>
+                  </label>
+                  <label>
+                    <span>{t("meetings.review.after")}</span>
+                    <textarea
+                      value={file.afterContent}
+                      onChange={(event) => onUpdateFile(file.id, { afterContent: event.target.value })}
+                      disabled={file.operation === "delete"}
+                    />
+                  </label>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="meetings-confirmation-panel">
+            <h3>{t("meetings.review.confirmTitle")}</h3>
+            {bundle.checks.length === 0 ? (
+              <div className="meetings-review-empty compact">
+                <CheckCircle2 size={15} />
+                <span>{t("meetings.review.noChecks")}</span>
+              </div>
+            ) : null}
+            {bundle.checks.map((check) => (
+              <article className={`meetings-check-row ${check.status}`} key={check.id}>
+                <div>
+                  <span>{t(`meetings.review.kind.${check.kind}`)}</span>
+                  <strong>{check.label}</strong>
+                  {check.note ? <small>{check.note}</small> : null}
+                </div>
+                <input
+                  value={check.normalized}
+                  onChange={(event) => onUpdateCheck(check.id, {
+                    normalized: event.target.value,
+                    status: "edited",
+                  })}
+                />
+                <div className="meetings-check-actions">
+                  {(["accepted", "edited", "rejected"] as MeetingReviewCheckStatus[]).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className={check.status === status ? "active" : ""}
+                      onClick={() => onUpdateCheck(check.id, { status })}
+                    >
+                      {t(`meetings.review.status.${status}`)}
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="meetings-followups">
+            <h3>{t("meetings.review.followups")}</h3>
+            {bundle.followups.length === 0 ? (
+              <div className="meetings-review-empty compact">{t("meetings.review.noFollowups")}</div>
+            ) : null}
+            {bundle.followups.map((item) => (
+              <label className="meetings-followup-row" key={item.id}>
+                <input
+                  type="checkbox"
+                  checked={item.selected}
+                  onChange={() => onToggleFollowup(item.id)}
+                />
+                <div>
+                  <strong>{item.skill}</strong>
+                  <span>{item.title}</span>
+                  {item.reason ? <small>{item.reason}</small> : null}
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="meetings-review-actions">
+            <span>
+              {pendingRequired > 0
+                ? t("meetings.review.applyBlocked", { count: pendingRequired })
+                : t("meetings.review.applyReady", { count: selectedFiles })}
+            </span>
+            <button type="button" className="primary-button" disabled={!canApply} onClick={onApply}>
+              {applyBusy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
+              {t("meetings.review.apply")}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function MeetingsRunPanel({
+  missions,
+  logLines,
+  activeRunId,
+  loadingReview,
+  onRefresh,
+  onStopMission,
+  onReviewResult,
+}: {
+  missions: MissionRecord[];
+  logLines: Record<string, string[]>;
+  activeRunId: string | null;
+  loadingReview: boolean;
+  onRefresh: () => void;
+  onStopMission: (id: string) => void;
+  onReviewResult: (mission: MissionRecord) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="meetings-workbench-card meetings-run-panel">
+      <header>
+        <div>
+          <span>{t("meetings.workbench.status")}</span>
+          <h2>{t("meetings.progress.title")}</h2>
+          <p>{t("meetings.progress.count", { count: missions.length })}</p>
+        </div>
+        <button type="button" className="icon-button" onClick={onRefresh} title={t("meetings.refresh")} aria-label={t("meetings.refresh")}>
+          <RefreshCcw size={14} />
+        </button>
+      </header>
+      <div className="meetings-run-list">
+        {missions.length === 0 ? (
+          <div className="meetings-run-empty">
+            <ClipboardCheck size={16} />
+            <span>{t("meetings.progress.empty")}</span>
+          </div>
+        ) : null}
+        {missions.map((mission) => {
+          const lines = logLines[mission.id] ?? [];
+          const canStop = mission.status === "running" || mission.status === "idle";
+          const canReview = mission.status === "done" || mission.status === "failed";
+          const statusClass = activeRunId === mission.id ? "review-ready" : mission.status;
+          return (
+            <article className={`meetings-run-card ${statusClass}`} key={mission.id}>
+              <div className="meetings-run-card-head">
+                <div>
+                  <strong>{meetingMissionTitle(mission)}</strong>
+                  <span>{mission.status} · {formatMissionTime(mission.startedAt)}</span>
+                </div>
+                {canStop ? (
+                  <button type="button" className="button button-ghost button-sm" onClick={() => onStopMission(mission.id)}>
+                    <Square size={12} />
+                    <span>{t("meetings.progress.stop")}</span>
+                  </button>
+                ) : null}
+              </div>
+              <pre>{lines.length > 0 ? lines.slice(-8).join("\n") : t("meetings.progress.noLog")}</pre>
+              <div className="meetings-run-card-actions">
+                <span>{meetingMissionSource(mission)}</span>
+                {canReview ? (
+                  <button type="button" className="secondary-button" disabled={loadingReview} onClick={() => onReviewResult(mission)}>
+                    {loadingReview && activeRunId === mission.id ? <Loader2 size={14} className="spin" /> : <Pencil size={14} />}
+                    {t("meetings.review.result")}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -929,6 +1396,147 @@ function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
 
 function formatGuide(label: string, content: string | null): string | null {
   return content ? `${label}:\n${content}` : null;
+}
+
+function buildMeetingNotesPrompt({
+  sourceKind,
+  settings,
+  type,
+  topic,
+  detail,
+  note,
+  guides,
+}: {
+  sourceKind: MeetingSourceKind;
+  settings: MeetingsSettings;
+  type: string;
+  topic: string;
+  detail: string;
+  note: string;
+  guides: Awaited<ReturnType<typeof readMeetingGuides>> | null;
+}): string {
+  const action = sourceKind === "transcript"
+    ? "Convert the selected transcript file(s) into a polished meeting note."
+    : "Refine the external note into the workspace meeting-note standard.";
+  return [
+    action,
+    "",
+    "Run contract:",
+    "- Do not directly write files.",
+    "- Emit concise human-readable progress logs while working.",
+    "- Final output must include exactly one JSON object with schemaVersion \"anchor_skill_proposal_v1\".",
+    "- Final output must include exactly one JSON object with schemaVersion \"anchor_meeting_review_v1\".",
+    "- The review JSON must include summary, terms, people, properNouns, uncertainties, and followups.",
+    "- Followups may include only vault-extract, vault-connect, and task-management.",
+    "",
+    `Root: ${settings.root ?? "meetings"}`,
+    `Filename template: ${settings.filenameTemplate}`,
+    `Type: ${type}`,
+    `Topic: ${topic.trim()}`,
+    detail.trim() ? `Detail: ${detail.trim()}` : null,
+    "Use the six-section meeting note structure, normalized tags, and wiki-link conventions.",
+    guides ? formatGuide("QUICK_START", guides.quickStart) : null,
+    guides ? formatGuide("GLOSSARY", guides.glossary) : null,
+    guides ? formatGuide("PEOPLE", guides.people) : null,
+    guides ? formatGuide("TAG_STANDARDS", guides.tagStandards) : null,
+    guides ? formatGuide("NOTES_GUIDELINES", guides.notesGuidelines) : null,
+    note.trim() ? `EXTERNAL_NOTE:\n${note.trim()}` : null,
+  ].filter(Boolean).join("\n\n");
+}
+
+async function parseProposalFallback(raw: string): Promise<SkillProposal | null> {
+  if (!raw.trim()) return null;
+  try {
+    return await agentParseSkillProposal(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function readProposalBeforeContent(
+  workPath: string,
+  file: SkillProposal["files"][number],
+): Promise<string> {
+  if (file.operation === "create") return "";
+  try {
+    const document = await readDocument(workPath, file.path);
+    return document.content;
+  } catch {
+    return "";
+  }
+}
+
+async function dispatchSelectedFollowups({
+  workPath,
+  skills,
+  bundle,
+  onMissionStarted,
+}: {
+  workPath: string;
+  skills: SkillRecord[];
+  bundle: MeetingReviewBundle;
+  onMissionStarted: (invocationId: string) => void;
+}) {
+  const selected = bundle.followups.filter((item) => item.selected);
+  const appliedPaths = bundle.files.filter((file) => file.selected).map((file) => file.path);
+  for (const followup of selected) {
+    const skill = findSkill(skills, followup.skill);
+    if (!skill) continue;
+    const invocationId = await skillsDispatchBackground({
+      skillId: skill.id,
+      runtime: "claude",
+      cwd: workPath,
+      prompt: [
+        followup.prompt,
+        "",
+        "Run contract:",
+        "- Do not directly write files.",
+        "- Emit progress logs.",
+        "- Return an anchor_skill_proposal_v1 JSON proposal for user review.",
+        appliedPaths.length > 0 ? `Meeting note path(s):\n${appliedPaths.join("\n")}` : null,
+      ].filter(Boolean).join("\n"),
+      context: appliedPaths.map((path) => ({ path, kind: "document" })),
+      metadata: {
+        origin: followupOrigin(followup.skill),
+        reviewFlow: true,
+        parentRunId: bundle.runId,
+        workspacePath: workPath,
+        skillName: followup.skill,
+      },
+    });
+    onMissionStarted(invocationId);
+  }
+}
+
+function followupOrigin(skill: string): string {
+  if (skill === "vault-connect") return "meetingNotesVaultConnect";
+  if (skill === "task-management") return "meetingNotesTaskManagement";
+  return "meetingNotesVaultExtract";
+}
+
+function meetingMissionTitle(mission: MissionRecord): string {
+  const metadata = mission.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return mission.id;
+  const skillName = (metadata as Record<string, unknown>).skillName;
+  return typeof skillName === "string" && skillName.trim() ? skillName : mission.id;
+}
+
+function meetingMissionSource(mission: MissionRecord): string {
+  const metadata = mission.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return mission.id;
+  const sourceKind = (metadata as Record<string, unknown>).sourceKind;
+  const origin = (metadata as Record<string, unknown>).origin;
+  return typeof sourceKind === "string"
+    ? sourceKind
+    : typeof origin === "string"
+      ? origin
+      : mission.id;
+}
+
+function formatMissionTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function hashType(type: string): number {

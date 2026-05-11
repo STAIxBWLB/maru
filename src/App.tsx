@@ -5626,6 +5626,7 @@ function MainApp() {
             }
             onMissionStarted={handleMeetingsMissionStarted}
             onStopMission={(id) => void stopProcessingMission(id)}
+            onConfirmApproval={approvalGate.confirmApproval}
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
