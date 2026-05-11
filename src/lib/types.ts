@@ -479,6 +479,18 @@ export interface MeetingGuides {
   notesGuidelines: string | null;
 }
 
+export interface MeetingsLogLineRecord {
+  raw: string;
+  ts: string | null;
+  event: string;
+  runId: string | null;
+  status: string | null;
+  skill: string | null;
+  target: string | null;
+  payload: Record<string, unknown> | null;
+  legacy: boolean;
+}
+
 /** Per-workspace inbox configuration persisted at `<workspace>/.anchor/inbox.json`. */
 export interface InboxSettings {
   /** Workspace-relative path to the inbox root directory. */

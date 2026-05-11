@@ -58,6 +58,7 @@ import type {
   MeetingGuides,
   MeetingMetadata,
   MeetingNoteRow,
+  MeetingsLogLineRecord,
   MemoDocument,
   MemoEntry,
   MemoFormat,
@@ -261,6 +262,18 @@ export async function readMeetingGuides(workPath: string): Promise<MeetingGuides
 export async function appendMeetingsLog(workPath: string, line: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("append_meetings_log", { workPath, line });
+}
+
+export async function readMeetingsLog(
+  workPath: string,
+  options?: { limit?: number | null; eventFilter?: string[] | null },
+): Promise<MeetingsLogLineRecord[]> {
+  if (!isTauri()) return [];
+  return invoke<MeetingsLogLineRecord[]>("read_meetings_log", {
+    workPath,
+    limit: options?.limit ?? null,
+    eventFilter: options?.eventFilter ?? null,
+  });
 }
 
 export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | null> {
