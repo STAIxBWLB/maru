@@ -305,6 +305,14 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
 
   await meetingsPane.getByRole("button", { name: "녹취록 처리" }).click();
   await expect(page.locator(".meetings-workbench")).toBeVisible();
+  const transcriptTextarea = page.locator(".meetings-source-card textarea");
+  await expect(transcriptTextarea).toBeVisible();
+  await expect(transcriptTextarea).toHaveAttribute("placeholder", /녹취록 전문/);
+  await expect(meetingsPane.getByRole("button", { name: "회의록 생성" })).toBeDisabled();
+  await transcriptTextarea.fill("참석자들이 워크숍 일정과 후속 작업을 논의했다.");
+  await expect(meetingsPane.getByRole("button", { name: "회의록 생성" })).toBeEnabled();
+  await expect(page.getByText("주제 힌트 (선택)")).toBeVisible();
+  await expect(page.getByText("세부 힌트 (선택)")).toBeVisible();
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
   await expect(page.locator(".meetings-review-card")).toContainText("결과 대기");
 

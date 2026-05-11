@@ -8344,6 +8344,11 @@ button.git-badge:hover {
   top: 0;
 }
 
+.meetings-source-input {
+  display: grid;
+  gap: 10px;
+}
+
 .meetings-textarea.compact {
   min-height: clamp(120px, 20vh, 220px);
 }
@@ -8352,6 +8357,73 @@ button.git-badge:hover {
   min-height: 28px;
   max-height: 82px;
   overflow: auto;
+}
+
+.meetings-metadata-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel-2) 68%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--panel) 74%, transparent);
+}
+
+.meetings-metadata-grid {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.72fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.meetings-metadata-panel .field {
+  min-width: 0;
+  gap: 5px;
+}
+
+.meetings-metadata-panel .field span {
+  color: var(--ink-2);
+  font-size: 11.25px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.meetings-metadata-panel input,
+.meetings-metadata-panel select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  padding: 0 10px;
+  font-size: 12.25px;
+  outline: 0;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--panel) 80%, transparent);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.meetings-metadata-panel input::placeholder {
+  color: var(--faint);
+}
+
+.meetings-metadata-panel input:focus,
+.meetings-metadata-panel select:focus {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
+  background: var(--panel-raised);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.meetings-field-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.25px;
+  line-height: 1.45;
+  text-wrap: pretty;
 }
 
 .meetings-review-card {
@@ -8883,6 +8955,7 @@ button.git-badge:hover {
 
   .meetings-workbench-grid,
   .meetings-before-after,
+  .meetings-metadata-grid,
   .meetings-check-row {
     grid-template-columns: 1fr;
   }

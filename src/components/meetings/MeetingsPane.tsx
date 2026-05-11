@@ -830,17 +830,17 @@ function MeetingsSkillWorkbench({
   const [applyBusy, setApplyBusy] = useState(false);
   const [bundle, setBundle] = useState<MeetingReviewBundle | null>(null);
   const isExternal = sourceKind === "external";
-  const canRun = Boolean(
-    workPath &&
-      topic.trim() &&
-      (isExternal ? paths.length > 0 || note.trim() : paths.length > 0),
-  );
+  const hasSource = paths.length > 0 || note.trim().length > 0;
+  const canRun = Boolean(workPath && hasSource);
   const sourceTitle = isExternal ? t("meetings.external.title") : t("meetings.transcript.title");
   const sourceDescription = isExternal
     ? t("meetings.external.description")
     : t("meetings.transcript.description");
   const runLabel = isExternal ? t("meetings.external.run") : t("meetings.transcript.run");
   const pickLabel = isExternal ? t("meetings.external.pick") : t("meetings.transcript.pick");
+  const pastePlaceholder = isExternal
+    ? t("meetings.external.placeholder")
+    : t("meetings.transcript.placeholder");
 
   const run = async () => {
     if (!workPath || !canRun) return;
@@ -980,25 +980,25 @@ function MeetingsSkillWorkbench({
               <p>{sourceDescription}</p>
             </div>
           </header>
-          {isExternal ? (
+          <div className="meetings-source-input">
             <textarea
               className="meetings-textarea compact"
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder={t("meetings.external.placeholder")}
+              placeholder={pastePlaceholder}
             />
-          ) : null}
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void chooseFiles(pickLabel).then(setPaths)}
-          >
-            <FolderOpen size={14} />
-            {pickLabel}
-          </button>
-          <div className="meetings-selected-files compact">
-            {paths.length === 0 ? <span>{t("meetings.workbench.noFiles")}</span> : null}
-            {paths.map((path) => <span key={path}>{path}</span>)}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void chooseFiles(pickLabel).then(setPaths)}
+            >
+              <FolderOpen size={14} />
+              {pickLabel}
+            </button>
+            <div className="meetings-selected-files compact">
+              {paths.length === 0 ? <span>{t("meetings.workbench.noFiles")}</span> : null}
+              {paths.map((path) => <span key={path}>{path}</span>)}
+            </div>
           </div>
           <FlowFields
             types={settings.defaultTypes}
@@ -1013,6 +1013,7 @@ function MeetingsSkillWorkbench({
             {busy ? <Loader2 size={14} className="spin" /> : isExternal ? <WandSparkles size={14} /> : <Play size={14} />}
             {runLabel}
           </button>
+          {!hasSource ? <p className="meetings-field-help">{t("meetings.source.noSource")}</p> : null}
         </section>
 
         <MeetingReviewPanel
@@ -1076,21 +1077,32 @@ function FlowFields({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="settings-grid two">
-      <label className="field">
-        <span>{t("meetings.field.type")}</span>
-        <select value={type} onChange={(event) => onType(event.target.value)}>
-          {types.map((item) => <option key={item}>{item}</option>)}
-        </select>
-      </label>
-      <label className="field">
-        <span>{t("meetings.field.topic")}</span>
-        <input value={topic} onChange={(event) => onTopic(event.target.value)} />
-      </label>
-      <label className="field">
-        <span>{t("meetings.field.detail")}</span>
-        <input value={detail} onChange={(event) => onDetail(event.target.value)} />
-      </label>
+    <div className="meetings-metadata-panel">
+      <div className="meetings-metadata-grid">
+        <label className="field">
+          <span>{t("meetings.field.type")}</span>
+          <select value={type} onChange={(event) => onType(event.target.value)}>
+            {types.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("meetings.field.topic")}</span>
+          <input
+            value={topic}
+            onChange={(event) => onTopic(event.target.value)}
+            placeholder={t("meetings.field.topicPlaceholder")}
+          />
+        </label>
+        <label className="field">
+          <span>{t("meetings.field.detail")}</span>
+          <input
+            value={detail}
+            onChange={(event) => onDetail(event.target.value)}
+            placeholder={t("meetings.field.detailPlaceholder")}
+          />
+        </label>
+      </div>
+      <p className="meetings-field-help">{t("meetings.field.help")}</p>
     </div>
   );
 }
@@ -1432,15 +1444,18 @@ function buildMeetingNotesPrompt({
     `Root: ${settings.root ?? "meetings"}`,
     `Filename template: ${settings.filenameTemplate}`,
     `Type: ${type}`,
-    `Topic: ${topic.trim()}`,
+    topic.trim() ? `Topic: ${topic.trim()}` : null,
     detail.trim() ? `Detail: ${detail.trim()}` : null,
+    !topic.trim() || !detail.trim() ? "Infer topic/detail from the transcript or note body." : null,
     "Use the six-section meeting note structure, normalized tags, and wiki-link conventions.",
     guides ? formatGuide("QUICK_START", guides.quickStart) : null,
     guides ? formatGuide("GLOSSARY", guides.glossary) : null,
     guides ? formatGuide("PEOPLE", guides.people) : null,
     guides ? formatGuide("TAG_STANDARDS", guides.tagStandards) : null,
     guides ? formatGuide("NOTES_GUIDELINES", guides.notesGuidelines) : null,
-    note.trim() ? `EXTERNAL_NOTE:\n${note.trim()}` : null,
+    note.trim()
+      ? `${sourceKind === "transcript" ? "TRANSCRIPT_TEXT" : "EXTERNAL_NOTE"}:\n${note.trim()}`
+      : null,
   ].filter(Boolean).join("\n\n");
 }
 
