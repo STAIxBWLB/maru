@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MEETING_REVIEW_SCHEMA_VERSION,
   createMeetingReviewChecks,
+  deriveMeetingRunSteps,
   extractProviderOutput,
   extractSkillProposal,
   meetingReviewChecksComplete,
@@ -118,6 +119,55 @@ describe("proposal rebuild", () => {
   });
 });
 
+describe("meeting run step derivation", () => {
+  it("marks running runs as executing and drafting", () => {
+    const steps = deriveMeetingRunSteps({
+      missionStatus: "running",
+      logLines: ["[phase:source] reading", "[phase:normalize] guides"],
+    });
+
+    expect(stepStatus(steps, "input")).toBe("complete");
+    expect(stepStatus(steps, "run")).toBe("active");
+    expect(stepStatus(steps, "draft")).toBe("active");
+    expect(stepStatus(steps, "review")).toBe("pending");
+  });
+
+  it("advances to review and blocks apply until required checks are complete", () => {
+    const steps = deriveMeetingRunSteps({
+      missionStatus: "done",
+      logLines: ["[phase:proposal] proposal ready", "[phase:review] review ready"],
+      reviewLoaded: true,
+      checksComplete: false,
+    });
+
+    expect(stepStatus(steps, "draft")).toBe("complete");
+    expect(stepStatus(steps, "review")).toBe("complete");
+    expect(stepStatus(steps, "confirm")).toBe("blocked");
+    expect(stepStatus(steps, "apply")).toBe("pending");
+  });
+
+  it("marks final apply complete after approval applies the proposal", () => {
+    const steps = deriveMeetingRunSteps({
+      missionStatus: "done",
+      reviewLoaded: true,
+      checksComplete: true,
+      applied: true,
+    });
+
+    expect(stepStatus(steps, "confirm")).toBe("complete");
+    expect(stepStatus(steps, "apply")).toBe("complete");
+  });
+
+  it("carries failed or stopped runs into the step timeline as errors", () => {
+    const failed = deriveMeetingRunSteps({ missionStatus: "failed" });
+    const stopped = deriveMeetingRunSteps({ missionStatus: "stopped" });
+
+    expect(stepStatus(failed, "run")).toBe("error");
+    expect(stepStatus(failed, "apply")).toBe("error");
+    expect(stepStatus(stopped, "run")).toBe("error");
+  });
+});
+
 function event(type: string, payload: unknown): AgentRunEvent {
   return {
     id: type,
@@ -128,4 +178,11 @@ function event(type: string, payload: unknown): AgentRunEvent {
     payload,
     schemaVersion: "anchor_agent_run_event_v1",
   };
+}
+
+function stepStatus(
+  steps: ReturnType<typeof deriveMeetingRunSteps>,
+  id: ReturnType<typeof deriveMeetingRunSteps>[number]["id"],
+) {
+  return steps.find((step) => step.id === id)?.status;
 }

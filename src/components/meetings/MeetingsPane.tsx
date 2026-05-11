@@ -41,6 +41,7 @@ import {
 import { useTranslation } from "../../lib/i18n";
 import {
   createMeetingReviewChecks,
+  deriveMeetingRunSteps,
   emptyMeetingReviewArtifact,
   extractProviderOutput,
   extractSkillProposal,
@@ -52,6 +53,7 @@ import {
   type MeetingProposalFileDraft,
   type MeetingReviewArtifact,
   type MeetingReviewCheck,
+  type MeetingReviewCheckKind,
   type MeetingReviewCheckStatus,
 } from "../../lib/meetingReview";
 import {
@@ -68,6 +70,7 @@ import {
   agentParseSkillProposal,
   agentReadRunEvents,
   skillsDispatchBackground,
+  type SkillDispatchRuntime,
   type SkillContextItem,
   type SkillProposal,
   type SkillRecord,
@@ -826,12 +829,16 @@ function MeetingsSkillWorkbench({
   const [topic, setTopic] = useState("");
   const [detail, setDetail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [runtimeChooserOpen, setRuntimeChooserOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [bundle, setBundle] = useState<MeetingReviewBundle | null>(null);
+  const [appliedRunIds, setAppliedRunIds] = useState<Set<string>>(() => new Set());
+  const [localRuns, setLocalRuns] = useState<MissionRecord[]>([]);
   const isExternal = sourceKind === "external";
   const hasSource = paths.length > 0 || note.trim().length > 0;
   const canRun = Boolean(workPath && hasSource);
+  const visibleMissions = useMemo(() => mergeMeetingsMissions(missions, localRuns), [localRuns, missions]);
   const sourceTitle = isExternal ? t("meetings.external.title") : t("meetings.transcript.title");
   const sourceDescription = isExternal
     ? t("meetings.external.description")
@@ -842,7 +849,13 @@ function MeetingsSkillWorkbench({
     ? t("meetings.external.placeholder")
     : t("meetings.transcript.placeholder");
 
-  const run = async () => {
+  useEffect(() => {
+    if (missions.length === 0) return;
+    const missionIds = new Set(missions.map((mission) => mission.id));
+    setLocalRuns((current) => current.filter((mission) => !missionIds.has(mission.id)));
+  }, [missions]);
+
+  const run = async (runtime: SkillDispatchRuntime) => {
     if (!workPath || !canRun) return;
     const skill = findSkill(skills, "meeting-notes");
     if (!skill) {
@@ -864,7 +877,7 @@ function MeetingsSkillWorkbench({
       });
       const invocationId = await skillsDispatchBackground({
         skillId: skill.id,
-        runtime: "claude",
+        runtime,
         cwd: workPath,
         prompt,
         context: paths.map((path) => ({ path, kind: "file" })),
@@ -872,6 +885,7 @@ function MeetingsSkillWorkbench({
           origin: sourceKind === "transcript"
             ? "meetingNotesFromTranscript"
             : "meetingNotesExternalRefine",
+          runtime,
           reviewFlow: true,
           sourceKind,
           inputPaths: paths,
@@ -879,6 +893,17 @@ function MeetingsSkillWorkbench({
           skillName: "meeting-notes",
         },
       });
+      setRuntimeChooserOpen(false);
+      setLocalRuns((current) => [
+        createOptimisticMeetingMission({
+          id: invocationId,
+          runtime,
+          sourceKind,
+          inputPaths: paths,
+          workPath,
+        }),
+        ...current.filter((mission) => mission.id !== invocationId),
+      ]);
       onMissionStarted(invocationId);
       onRefreshMissions();
     } catch (err) {
@@ -959,6 +984,7 @@ function MeetingsSkillWorkbench({
         bundle,
         onMissionStarted,
       });
+      setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
       onError(t("meetings.review.applySuccess"));
@@ -1009,10 +1035,31 @@ function MeetingsSkillWorkbench({
             onTopic={setTopic}
             onDetail={setDetail}
           />
-          <button type="button" className="primary-button" disabled={!canRun || busy} onClick={() => void run()}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!canRun || busy}
+            onClick={() => setRuntimeChooserOpen((open) => !open)}
+          >
             {busy ? <Loader2 size={14} className="spin" /> : isExternal ? <WandSparkles size={14} /> : <Play size={14} />}
             {runLabel}
           </button>
+          {runtimeChooserOpen && canRun && !busy ? (
+            <div className="meetings-runtime-chooser">
+              <div>
+                <strong>{t("meetings.runtime.title")}</strong>
+                <span>{t("meetings.runtime.description")}</span>
+              </div>
+              <div className="meetings-runtime-actions">
+                <button type="button" className="secondary-button" onClick={() => void run("claude")}>
+                  {t("meetings.runtime.claude")}
+                </button>
+                <button type="button" className="secondary-button" onClick={() => void run("codex")}>
+                  {t("meetings.runtime.codex")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {!hasSource ? <p className="meetings-field-help">{t("meetings.source.noSource")}</p> : null}
         </section>
 
@@ -1045,9 +1092,11 @@ function MeetingsSkillWorkbench({
         />
 
         <MeetingsRunPanel
-          missions={missions}
+          missions={visibleMissions}
           logLines={logLines}
           activeRunId={bundle?.runId ?? null}
+          reviewBundle={bundle}
+          appliedRunIds={appliedRunIds}
           loadingReview={reviewLoading}
           onRefresh={onRefreshMissions}
           onStopMission={onStopMission}
@@ -1129,6 +1178,14 @@ function MeetingReviewPanel({
   const { t } = useTranslation();
   const pendingRequired = bundle?.checks.filter((check) => check.required && check.status === "pending").length ?? 0;
   const selectedFiles = bundle ? selectedProposalFileCount(bundle.files) : 0;
+  const checkGroups = bundle
+    ? ([
+      ["term", bundle.checks.filter((check) => check.kind === "term")],
+      ["person", bundle.checks.filter((check) => check.kind === "person")],
+      ["properNoun", bundle.checks.filter((check) => check.kind === "properNoun")],
+      ["uncertainty", bundle.checks.filter((check) => check.kind === "uncertainty")],
+    ] as Array<[MeetingReviewCheckKind, MeetingReviewCheck[]]>).filter(([, checks]) => checks.length > 0)
+    : [];
   return (
     <section className="meetings-workbench-card meetings-review-card">
       <header>
@@ -1219,33 +1276,43 @@ function MeetingReviewPanel({
                 <span>{t("meetings.review.noChecks")}</span>
               </div>
             ) : null}
-            {bundle.checks.map((check) => (
-              <article className={`meetings-check-row ${check.status}`} key={check.id}>
-                <div>
-                  <span>{t(`meetings.review.kind.${check.kind}`)}</span>
-                  <strong>{check.label}</strong>
-                  {check.note ? <small>{check.note}</small> : null}
-                </div>
-                <input
-                  value={check.normalized}
-                  onChange={(event) => onUpdateCheck(check.id, {
-                    normalized: event.target.value,
-                    status: "edited",
-                  })}
-                />
-                <div className="meetings-check-actions">
-                  {(["accepted", "edited", "rejected"] as MeetingReviewCheckStatus[]).map((status) => (
-                    <button
-                      key={status}
-                      type="button"
-                      className={check.status === status ? "active" : ""}
-                      onClick={() => onUpdateCheck(check.id, { status })}
-                    >
-                      {t(`meetings.review.status.${status}`)}
-                    </button>
-                  ))}
-                </div>
-              </article>
+            {checkGroups.map(([kind, checks]) => (
+              <section className="meetings-check-group" key={kind}>
+                <header>
+                  <strong>{t(`meetings.review.kind.${kind}`)}</strong>
+                  <span>{t("meetings.review.pending", {
+                    count: checks.filter((check) => check.required && check.status === "pending").length,
+                  })}</span>
+                </header>
+                {checks.map((check) => (
+                  <article className={`meetings-check-row ${check.status}`} key={check.id}>
+                    <div>
+                      <span>{t(`meetings.review.kind.${check.kind}`)}</span>
+                      <strong>{check.label}</strong>
+                      {check.note ? <small>{check.note}</small> : null}
+                    </div>
+                    <input
+                      value={check.normalized}
+                      onChange={(event) => onUpdateCheck(check.id, {
+                        normalized: event.target.value,
+                        status: "edited",
+                      })}
+                    />
+                    <div className="meetings-check-actions">
+                      {(["accepted", "edited", "rejected"] as MeetingReviewCheckStatus[]).map((status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          className={check.status === status ? "active" : ""}
+                          onClick={() => onUpdateCheck(check.id, { status })}
+                        >
+                          {t(`meetings.review.status.${status}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </section>
             ))}
           </div>
 
@@ -1291,6 +1358,8 @@ function MeetingsRunPanel({
   missions,
   logLines,
   activeRunId,
+  reviewBundle,
+  appliedRunIds,
   loadingReview,
   onRefresh,
   onStopMission,
@@ -1299,12 +1368,15 @@ function MeetingsRunPanel({
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   activeRunId: string | null;
+  reviewBundle: MeetingReviewBundle | null;
+  appliedRunIds: Set<string>;
   loadingReview: boolean;
   onRefresh: () => void;
   onStopMission: (id: string) => void;
   onReviewResult: (mission: MissionRecord) => void;
 }) {
   const { t } = useTranslation();
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set());
   return (
     <section className="meetings-workbench-card meetings-run-panel">
       <header>
@@ -1327,8 +1399,21 @@ function MeetingsRunPanel({
         {missions.map((mission) => {
           const lines = logLines[mission.id] ?? [];
           const canStop = mission.status === "running" || mission.status === "idle";
-          const canReview = mission.status === "done" || mission.status === "failed";
+          const canReview = mission.status === "done" || activeRunId === mission.id;
           const statusClass = activeRunId === mission.id ? "review-ready" : mission.status;
+          const activeBundle = activeRunId === mission.id && reviewBundle?.runId === mission.id
+            ? reviewBundle
+            : null;
+          const checksComplete = activeBundle ? meetingReviewChecksComplete(activeBundle.checks) : false;
+          const steps = deriveMeetingRunSteps({
+            missionStatus: mission.status,
+            logLines: lines,
+            reviewLoaded: Boolean(activeBundle),
+            checksComplete,
+            applied: appliedRunIds.has(mission.id),
+          });
+          const expanded = expandedLogs.has(mission.id);
+          const latestLog = lines.at(-1) ?? t("meetings.progress.noLog");
           return (
             <article className={`meetings-run-card ${statusClass}`} key={mission.id}>
               <div className="meetings-run-card-head">
@@ -1343,9 +1428,43 @@ function MeetingsRunPanel({
                   </button>
                 ) : null}
               </div>
-              <pre>{lines.length > 0 ? lines.slice(-8).join("\n") : t("meetings.progress.noLog")}</pre>
-              <div className="meetings-run-card-actions">
+              <div className="meetings-run-meta">
+                <span>{meetingMissionRuntime(mission)}</span>
                 <span>{meetingMissionSource(mission)}</span>
+              </div>
+              <ol className="meetings-run-steps" aria-label={t("meetings.progress.steps")}>
+                {steps.map((step) => (
+                  <li className={`meetings-run-step ${step.status}`} key={step.id}>
+                    <span className="meetings-run-step-dot" aria-hidden="true" />
+                    <span>{t(`meetings.step.${step.id}`)}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="meetings-run-log-summary">
+                <span>{latestLog}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedLogs((current) => {
+                      const next = new Set(current);
+                      if (next.has(mission.id)) next.delete(mission.id);
+                      else next.add(mission.id);
+                      return next;
+                    })
+                  }
+                >
+                  {expanded ? t("meetings.progress.hideLog") : t("meetings.progress.showLog")}
+                </button>
+              </div>
+              {expanded ? (
+                <pre>{lines.length > 0 ? lines.slice(-8).join("\n") : t("meetings.progress.noLog")}</pre>
+              ) : null}
+              <div className="meetings-run-card-actions">
+                <span>{appliedRunIds.has(mission.id)
+                  ? t("meetings.step.applyDone")
+                  : steps.some((step) => step.id === "confirm" && step.status === "blocked")
+                    ? t("meetings.step.confirmBlocked")
+                    : t("meetings.progress.status", { status: mission.status })}</span>
                 {canReview ? (
                   <button type="button" className="secondary-button" disabled={loadingReview} onClick={() => onReviewResult(mission)}>
                     {loadingReview && activeRunId === mission.id ? <Loader2 size={14} className="spin" /> : <Pencil size={14} />}
@@ -1436,6 +1555,7 @@ function buildMeetingNotesPrompt({
     "Run contract:",
     "- Do not directly write files.",
     "- Emit concise human-readable progress logs while working.",
+    "- Prefix major progress logs with phase markers: [phase:source], [phase:normalize], [phase:draft], [phase:proposal], [phase:review].",
     "- Final output must include exactly one JSON object with schemaVersion \"anchor_skill_proposal_v1\".",
     "- Final output must include exactly one JSON object with schemaVersion \"anchor_meeting_review_v1\".",
     "- The review JSON must include summary, terms, people, properNouns, uncertainties, and followups.",
@@ -1515,12 +1635,61 @@ async function dispatchSelectedFollowups({
         origin: followupOrigin(followup.skill),
         reviewFlow: true,
         parentRunId: bundle.runId,
+        parentRuntime: meetingMissionRuntimeValue(bundle.mission),
         workspacePath: workPath,
         skillName: followup.skill,
       },
     });
     onMissionStarted(invocationId);
   }
+}
+
+function mergeMeetingsMissions(
+  missions: MissionRecord[],
+  localRuns: MissionRecord[],
+): MissionRecord[] {
+  const byId = new Map<string, MissionRecord>();
+  for (const mission of localRuns) byId.set(mission.id, mission);
+  for (const mission of missions) byId.set(mission.id, mission);
+  return Array.from(byId.values()).sort(
+    (a, b) => b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt),
+  );
+}
+
+function createOptimisticMeetingMission({
+  id,
+  runtime,
+  sourceKind,
+  inputPaths,
+  workPath,
+}: {
+  id: string;
+  runtime: SkillDispatchRuntime;
+  sourceKind: MeetingSourceKind;
+  inputPaths: string[];
+  workPath: string;
+}): MissionRecord {
+  const now = new Date().toISOString();
+  return {
+    id,
+    kind: "skill",
+    startedAt: now,
+    lastOutputAt: now,
+    status: "idle",
+    exitCode: null,
+    outputLogPath: null,
+    metadata: {
+      origin: sourceKind === "transcript"
+        ? "meetingNotesFromTranscript"
+        : "meetingNotesExternalRefine",
+      runtime,
+      reviewFlow: true,
+      sourceKind,
+      inputPaths,
+      workspacePath: workPath,
+      skillName: "meeting-notes",
+    },
+  };
 }
 
 function followupOrigin(skill: string): string {
@@ -1546,6 +1715,20 @@ function meetingMissionSource(mission: MissionRecord): string {
     : typeof origin === "string"
       ? origin
       : mission.id;
+}
+
+function meetingMissionRuntime(mission: MissionRecord): string {
+  const runtime = meetingMissionRuntimeValue(mission);
+  if (runtime === "codex") return "Codex";
+  if (runtime === "claude") return "Claude";
+  return runtime ?? "Runtime";
+}
+
+function meetingMissionRuntimeValue(mission: MissionRecord): string | null {
+  const metadata = mission.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const runtime = (metadata as Record<string, unknown>).runtime;
+  return typeof runtime === "string" && runtime.trim() ? runtime : null;
 }
 
 function formatMissionTime(value: string): string {

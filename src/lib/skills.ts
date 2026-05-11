@@ -10,6 +10,31 @@ declare global {
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
+const MOCK_BUILTIN_SKILLS = [
+  "meeting-notes",
+  "vault-extract",
+  "vault-connect",
+  "task-management",
+  "gaejosik",
+  "inbox-process",
+].map((name): SkillRecord => ({
+  id: `mock:${name}`,
+  sourceId: "mock-builtin",
+  name,
+  relPath: `skills/${name}/SKILL.md`,
+  absPath: `mock://skills/${name}/SKILL.md`,
+  title: name,
+  description: null,
+  runtime: null,
+  category: null,
+  valid: true,
+  validationErrors: [],
+  editable: false,
+  dirty: false,
+  contentHash: null,
+  savedHash: null,
+}));
+
 export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
 export type SkillDispatchRuntime = "claude" | "codex";
@@ -231,7 +256,7 @@ export async function skillsRescanSource(
 }
 
 export async function skillsListSkills(workPath: string | null): Promise<SkillRecord[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) return MOCK_BUILTIN_SKILLS;
   return invoke<SkillRecord[]>("skills_list_skills", { workPath });
 }
 
@@ -363,7 +388,7 @@ export async function skillsDispatchBackground(params: {
   context?: SkillContextItem[] | null;
   metadata?: MissionMetadata | null;
 }): Promise<string> {
-  if (!isTauri()) throw new Error("Skill background dispatch requires the Tauri shell.");
+  if (!isTauri()) return `mock-skill-run-${params.runtime}-${Date.now()}`;
   return invoke<string>("skills_dispatch_background", params);
 }
 

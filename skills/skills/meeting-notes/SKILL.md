@@ -37,7 +37,15 @@ skill is provider-neutral and does not require inbox staging.
 
 When Anchor runs this skill in background/review mode:
 
-1. Emit concise human-readable progress logs while working.
+1. Emit concise human-readable progress logs while working. Prefix major
+   progress logs with stable phase markers so Anchor can render stepwise
+   status:
+   - `[phase:source]` after source text/files are identified.
+   - `[phase:normalize]` while applying guides, glossary, people, and naming
+     conventions.
+   - `[phase:draft]` while drafting the meeting note.
+   - `[phase:proposal]` when preparing the `anchor_skill_proposal_v1` block.
+   - `[phase:review]` when preparing the `anchor_meeting_review_v1` block.
 2. Do not directly write files, update the vault, or run follow-up skills.
 3. Return one `anchor_skill_proposal_v1` JSON object with the meeting note file
    write proposal.

@@ -313,11 +313,20 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await expect(meetingsPane.getByRole("button", { name: "회의록 생성" })).toBeEnabled();
   await expect(page.getByText("주제 힌트 (선택)")).toBeVisible();
   await expect(page.getByText("세부 힌트 (선택)")).toBeVisible();
+  await meetingsPane.getByRole("button", { name: "회의록 생성" }).click();
+  await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
+  await expect(page.getByRole("button", { name: "Claude로 실행" })).toBeVisible();
+  await page.getByRole("button", { name: "Codex로 실행" }).click();
+  await expect(page.locator(".meetings-run-panel")).toContainText("Codex");
+  await expect(page.locator(".meetings-run-steps")).toContainText("스킬 실행");
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
   await expect(page.locator(".meetings-review-card")).toContainText("결과 대기");
 
   await meetingsPane.getByRole("button", { name: "외부 노트 정제" }).click();
   await expect(page.locator(".meetings-source-card textarea")).toBeVisible();
+  await page.locator(".meetings-source-card textarea").fill("외부 노트 초안을 회의록 형식으로 정리한다.");
+  await meetingsPane.getByRole("button", { name: "정제 실행" }).click();
+  await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
 });
 
