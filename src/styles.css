@@ -8272,12 +8272,14 @@ button.git-badge:hover {
 }
 
 .meetings-workbench-grid {
+  width: min(100%, 1760px);
+  margin: 0 auto;
   min-height: 0;
   display: grid;
   grid-template-columns:
-    minmax(260px, 0.75fr)
-    minmax(420px, 1.45fr)
-    minmax(280px, 0.8fr);
+    minmax(340px, 0.92fr)
+    minmax(420px, 1.15fr)
+    minmax(300px, 0.85fr);
   gap: 14px;
   align-items: start;
 }
@@ -8346,16 +8348,31 @@ button.git-badge:hover {
 
 .meetings-source-input {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
   gap: 10px;
 }
 
+.meetings-source-input .meetings-textarea {
+  grid-column: 1 / -1;
+}
+
+.meetings-source-input .secondary-button {
+  min-height: 34px;
+  justify-self: start;
+  white-space: nowrap;
+}
+
 .meetings-textarea.compact {
-  min-height: clamp(120px, 20vh, 220px);
+  height: clamp(132px, 16vh, 190px);
+  min-height: 132px;
 }
 
 .meetings-selected-files.compact {
-  min-height: 28px;
-  max-height: 82px;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 64px;
+  align-items: center;
   overflow: auto;
 }
 
@@ -8371,7 +8388,7 @@ button.git-badge:hover {
 
 .meetings-metadata-grid {
   display: grid;
-  grid-template-columns: minmax(118px, 0.72fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(106px, 0.62fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   align-items: end;
 }
@@ -8424,6 +8441,11 @@ button.git-badge:hover {
   font-size: 11.25px;
   line-height: 1.45;
   text-wrap: pretty;
+}
+
+.meetings-source-card .primary-button {
+  width: 100%;
+  min-height: 38px;
 }
 
 .meetings-review-card {
@@ -8792,6 +8814,8 @@ button.git-badge:hover {
 }
 
 .meetings-textarea {
+  width: 100%;
+  min-width: 0;
   min-height: 180px;
   resize: vertical;
   border: 1px solid var(--line-soft);
@@ -8955,9 +8979,14 @@ button.git-badge:hover {
 
   .meetings-workbench-grid,
   .meetings-before-after,
+  .meetings-source-input,
   .meetings-metadata-grid,
   .meetings-check-row {
     grid-template-columns: 1fr;
+  }
+
+  .meetings-source-input .secondary-button {
+    justify-self: stretch;
   }
 
   .meetings-review-card {
