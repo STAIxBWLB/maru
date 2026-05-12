@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 YEAR_RE = re.compile(r"^[0-9]{4}$")
 
 
@@ -119,6 +120,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if not DOMAIN_RE.match(args.domain):
+        raise SystemExit(f"ERROR: domain must be lowercase-hyphenated: {args.domain}")
     if not SLUG_RE.match(args.slug):
         raise SystemExit(f"ERROR: slug must be lowercase-hyphenated: {args.slug}")
     if args.start_year and not YEAR_RE.match(args.start_year):

@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 YEAR_RE = re.compile(r"^[0-9]{4}$")
 YEAR_FOLDER_RE = re.compile(r"^[0-9]{4}-Y([0-9]+)$")
 
@@ -32,10 +34,13 @@ def find_business_unit(workspace: Path, slug: str, domain: str | None) -> Path:
             raise SystemExit(f"ERROR: business unit not found: {target}")
         return target
 
+    projects_root = workspace / "projects"
+    if not projects_root.is_dir():
+        raise SystemExit(f"ERROR: projects root not found: {projects_root}")
     matches = [
-        path
-        for path in (workspace / "projects").glob(f"*/{slug}")
-        if path.is_dir()
+        domain_dir / slug
+        for domain_dir in projects_root.iterdir()
+        if domain_dir.is_dir() and (domain_dir / slug).is_dir()
     ]
     if not matches:
         raise SystemExit(f"ERROR: business unit '{slug}' not found under projects/")
@@ -66,6 +71,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if not SLUG_RE.match(args.slug):
+        raise SystemExit(f"ERROR: slug must be lowercase-hyphenated: {args.slug}")
+    if args.domain is not None and not DOMAIN_RE.match(args.domain):
+        raise SystemExit(f"ERROR: domain must be lowercase-hyphenated: {args.domain}")
     if not YEAR_RE.match(args.year):
         raise SystemExit(f"ERROR: year must be 4 digits: {args.year}")
     if args.year_number is not None and args.year_number < 1:

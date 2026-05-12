@@ -32,10 +32,11 @@ Use the bundled script whenever the user asks to create the standard structure:
 python3 ~/.anchor/skills/business-unit-lifecycle/scripts/new_business_unit.py <domain> <slug> [--start-year YYYY]
 ```
 
-If the skill is being edited from the source repo, run the source script:
+If you are editing the skill from a clone of this repo, run the in-tree
+script from the repo root:
 
 ```bash
-python3 dev/anchor/skills/skills/business-unit-lifecycle/scripts/new_business_unit.py <domain> <slug> [--start-year YYYY]
+python3 skills/skills/business-unit-lifecycle/scripts/new_business_unit.py <domain> <slug> [--start-year YYYY]
 ```
 
 The script creates `projects/<domain>/<slug>/`, optionally creates
