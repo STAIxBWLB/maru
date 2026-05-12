@@ -432,9 +432,22 @@ export interface InboxProcessMissionMetadata {
   inputPaths: string[];
   workspacePath?: string | null;
   skillName?: string | null;
+  runtime?: string | null;
+  sourceKind?: string | null;
+  parentRunId?: string | null;
 }
 
-export type MissionMetadata = InboxProcessMissionMetadata | Record<string, unknown>;
+export interface SkillMissionMetadata {
+  origin?: string | null;
+  skillName?: string | null;
+  runtime?: string | null;
+  workspacePath?: string | null;
+  inputPaths?: string[];
+  sourceKind?: string | null;
+  parentRunId?: string | null;
+}
+
+export type MissionMetadata = InboxProcessMissionMetadata | SkillMissionMetadata | Record<string, unknown>;
 
 export interface MissionRecord {
   id: string;
@@ -477,6 +490,18 @@ export interface MeetingGuides {
   people: string | null;
   tagStandards: string | null;
   notesGuidelines: string | null;
+}
+
+export interface MeetingsLogLineRecord {
+  raw: string;
+  ts: string | null;
+  event: string;
+  runId: string | null;
+  status: string | null;
+  skill: string | null;
+  target: string | null;
+  payload: Record<string, unknown> | null;
+  legacy: boolean;
 }
 
 /** Per-workspace inbox configuration persisted at `<workspace>/.anchor/inbox.json`. */

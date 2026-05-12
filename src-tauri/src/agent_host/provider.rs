@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use crate::agent_host::contracts::{
@@ -67,11 +68,12 @@ pub fn build_cli_command(
     provider: CliProviderKind,
     request: &CompletionRequest,
     add_dirs: &[String],
+    command_override: Option<&str>,
 ) -> Result<(Command, Option<String>), String> {
     request.validate()?;
     match provider {
         CliProviderKind::Claude => {
-            let bin = resolve_program("claude").ok_or_else(|| {
+            let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
                 "cli_missing: claude CLI not found in PATH or common install locations".to_string()
             })?;
             let mut cmd = Command::new(bin);
@@ -86,7 +88,7 @@ pub fn build_cli_command(
             Ok((cmd, None))
         }
         CliProviderKind::Codex => {
-            let bin = resolve_program("codex").ok_or_else(|| {
+            let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
                 "cli_missing: codex CLI not found in PATH or common install locations".to_string()
             })?;
             let mut cmd = Command::new(bin);
@@ -98,6 +100,15 @@ pub fn build_cli_command(
             Ok((cmd, Some(request.prompt.clone())))
         }
     }
+}
+
+pub fn resolve_provider_binary(
+    provider: CliProviderKind,
+    command_override: Option<&str>,
+) -> Option<PathBuf> {
+    command_override
+        .and_then(resolve_program)
+        .or_else(|| resolve_program(provider.id()))
 }
 
 #[derive(Debug, Clone)]

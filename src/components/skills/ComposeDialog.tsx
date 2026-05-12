@@ -1,9 +1,10 @@
-import { Code2, FileText, Play, Search, SquareTerminal, X } from "lucide-react";
+import { Code2, FileText, Loader2, Play, Search, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   DispatchComposition,
   SkillContextItem,
   SkillDispatchRuntime,
+  SkillRuntimeStatus,
   SkillRecord,
   TerminalDispatchSpec,
 } from "../../lib/skills";
@@ -12,6 +13,7 @@ import {
   skillsDispatchBackground,
   skillsDispatchCompose,
   skillsDispatchTerminal,
+  skillsRuntimeStatus,
 } from "../../lib/skills";
 import { Button } from "../ui/Button";
 
@@ -29,6 +31,7 @@ interface ComposeDialogProps {
   onClose: () => void;
   onTerminalDispatch: (spec: TerminalDispatchSpec) => void;
   onBackgroundDispatch?: (invocationId: string) => void;
+  runtimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   onError: (message: string | null) => void;
 }
 
@@ -39,6 +42,7 @@ export function ComposeDialog({
   onClose,
   onTerminalDispatch,
   onBackgroundDispatch,
+  runtimeCommands = {},
   onError,
 }: ComposeDialogProps) {
   const { t } = useTranslation();
@@ -46,19 +50,60 @@ export function ComposeDialog({
   const [prompt, setPrompt] = useState("");
   const [skillQuery, setSkillQuery] = useState("");
   const [runtime, setRuntime] = useState<SkillDispatchRuntime>("claude");
-  const [mode, setMode] = useState<"terminal" | "background">("terminal");
+  const [mode, setMode] = useState<"terminal" | "background">("background");
   const [preview, setPreview] = useState<DispatchComposition | null>(null);
   const [busy, setBusy] = useState(false);
+  const [runtimeStatuses, setRuntimeStatuses] = useState<
+    Partial<Record<SkillDispatchRuntime, SkillRuntimeStatus>>
+  >({});
+  const [runtimeStatusLoading, setRuntimeStatusLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setSkillId(seed?.skill?.id ?? skills[0]?.id ?? "");
     setPrompt(seed?.prompt ?? "");
     setSkillQuery("");
-    setRuntime("claude");
-    setMode("terminal");
+    setRuntime(readLastSkillRuntime() ?? "claude");
+    setMode("background");
     setPreview(null);
   }, [open, seed, skills]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setRuntimeStatusLoading(true);
+    Promise.all(
+      (["claude", "codex"] as SkillDispatchRuntime[]).map(async (candidate) => {
+        const status = await skillsRuntimeStatus({
+          runtime: candidate,
+          commandOverride: runtimeCommands[candidate] ?? null,
+        });
+        return [candidate, status] as const;
+      }),
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        const next = Object.fromEntries(entries) as Partial<
+          Record<SkillDispatchRuntime, SkillRuntimeStatus>
+        >;
+        setRuntimeStatuses(next);
+        setRuntime((current) => {
+          if (next[current]?.available) return current;
+          if (next.claude?.available) return "claude";
+          if (next.codex?.available) return "codex";
+          return current;
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeStatusLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, onError, runtimeCommands]);
 
   const selectedSkill = useMemo(
     () => skills.find((skill) => skill.id === skillId) ?? null,
@@ -81,7 +126,9 @@ export function ComposeDialog({
   }, [selectedSkill, skillQuery, skills]);
   const context = seed?.context ?? [];
   const skillValid = selectedSkill?.valid ?? true;
-  const canRun = Boolean(selectedSkill && skillValid && prompt.trim());
+  const selectedRuntimeStatus = runtimeStatuses[runtime] ?? null;
+  const runtimeReady = selectedRuntimeStatus?.available === true;
+  const canRun = Boolean(selectedSkill && skillValid && prompt.trim() && runtimeReady);
 
   useEffect(() => {
     if (!open || !selectedSkill || !skillValid || !prompt.trim()) {
@@ -112,7 +159,7 @@ export function ComposeDialog({
   if (!open) return null;
 
   async function run() {
-    if (!selectedSkill || !prompt.trim()) return;
+    if (!selectedSkill || !prompt.trim() || !runtimeReady) return;
     setBusy(true);
     onError(null);
     try {
@@ -123,6 +170,7 @@ export function ComposeDialog({
           prompt,
           cwd: seed?.cwd ?? null,
           context,
+          commandOverride: runtimeCommands[runtime] ?? null,
         });
         onTerminalDispatch(spec);
       } else {
@@ -132,9 +180,18 @@ export function ComposeDialog({
           prompt,
           cwd: seed?.cwd ?? null,
           context,
+          commandOverride: runtimeCommands[runtime] ?? null,
+          metadata: {
+            origin: "skillCompose",
+            skillName: selectedSkill.name,
+            runtime,
+            workspacePath: seed?.cwd ?? null,
+            inputPaths: context.map((item) => item.path),
+          },
         });
         onBackgroundDispatch?.(invocationId);
       }
+      writeLastSkillRuntime(runtime);
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -223,6 +280,7 @@ export function ComposeDialog({
                     type="button"
                     className={runtime === "claude" ? "active" : ""}
                     onClick={() => setRuntime("claude")}
+                    disabled={runtimeStatuses.claude?.available === false}
                   >
                     <SquareTerminal size={13} />
                     <span>Claude</span>
@@ -231,10 +289,36 @@ export function ComposeDialog({
                     type="button"
                     className={runtime === "codex" ? "active" : ""}
                     onClick={() => setRuntime("codex")}
+                    disabled={runtimeStatuses.codex?.available === false}
                   >
                     <Code2 size={13} />
                     <span>Codex</span>
                   </button>
+                </div>
+                <div
+                  className="compose-runtime-status"
+                  data-state={runtimeStatusState(selectedRuntimeStatus, runtimeStatusLoading)}
+                >
+                  {runtimeStatusLoading && !selectedRuntimeStatus ? (
+                    <>
+                      <Loader2 size={12} className="spin" />
+                      <span>{t("skills.runtime.checking")}</span>
+                    </>
+                  ) : selectedRuntimeStatus?.available ? (
+                    <span>
+                      {t("skills.runtime.ready", {
+                        runtime: runtimeLabel(runtime),
+                        version: selectedRuntimeStatus.version ?? "",
+                      })}
+                    </span>
+                  ) : (
+                    <span>
+                      {selectedRuntimeStatus?.message ?? t("skills.runtime.unavailable")}
+                    </span>
+                  )}
+                  {selectedRuntimeStatus?.suggestedAction ? (
+                    <small>{selectedRuntimeStatus.suggestedAction}</small>
+                  ) : null}
                 </div>
               </div>
 
@@ -262,6 +346,15 @@ export function ComposeDialog({
                     <span>{t("skills.compose.background")}</span>
                   </button>
                 </div>
+                {mode === "terminal" ? (
+                  <p className="compose-mode-note">
+                    {t("skills.compose.terminalFreeRun")}
+                  </p>
+                ) : (
+                  <p className="compose-mode-note">
+                    {t("skills.compose.backgroundTracked")}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -308,10 +401,37 @@ export function ComposeDialog({
             disabled={!canRun || busy}
             icon={mode === "terminal" ? <SquareTerminal size={14} /> : <Play size={14} />}
           >
-            {t("skills.compose.run")}
+            {busy ? t("skills.compose.running") : t("skills.compose.run")}
           </Button>
         </footer>
       </section>
     </div>
   );
+}
+
+function runtimeLabel(runtime: SkillDispatchRuntime): string {
+  return runtime === "codex" ? "Codex" : "Claude";
+}
+
+function runtimeStatusState(
+  status: SkillRuntimeStatus | null,
+  loading: boolean,
+): "loading" | "ready" | "blocked" {
+  if (loading && !status) return "loading";
+  return status?.available ? "ready" : "blocked";
+}
+
+function readLastSkillRuntime(): SkillDispatchRuntime | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem("anchor:last-skill-runtime");
+  return value === "claude" || value === "codex" ? value : null;
+}
+
+function writeLastSkillRuntime(runtime: SkillDispatchRuntime) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem("anchor:last-skill-runtime", runtime);
+  } catch {
+    // Best-effort preference only.
+  }
 }

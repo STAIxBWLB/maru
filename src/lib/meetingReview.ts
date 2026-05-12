@@ -4,6 +4,21 @@ export const MEETING_REVIEW_SCHEMA_VERSION = "anchor_meeting_review_v1";
 
 export type MeetingReviewCheckKind = "term" | "person" | "properNoun" | "uncertainty";
 export type MeetingReviewCheckStatus = "pending" | "accepted" | "edited" | "rejected";
+export type MeetingRunStepId = "input" | "run" | "draft" | "review" | "confirm" | "apply";
+export type MeetingRunStepStatus = "pending" | "active" | "complete" | "blocked" | "error";
+
+export interface MeetingRunStep {
+  id: MeetingRunStepId;
+  status: MeetingRunStepStatus;
+}
+
+export interface MeetingRunStepInput {
+  missionStatus: string;
+  logLines?: string[];
+  reviewLoaded?: boolean;
+  checksComplete?: boolean;
+  applied?: boolean;
+}
 
 export interface MeetingReviewEntity {
   id: string;
@@ -138,6 +153,93 @@ export function selectedProposalFileCount(files: MeetingProposalFileDraft[]): nu
   return files.filter((file) => file.selected).length;
 }
 
+export function selectedMeetingFollowupCount(followups: MeetingFollowupCandidate[]): number {
+  return followups.filter((followup) => followup.selected).length;
+}
+
+export function meetingReviewCanApply({
+  proposal,
+  files,
+  followups,
+  checksComplete,
+  applyBusy = false,
+  continuationAvailable = false,
+}: {
+  proposal: SkillProposal | null;
+  files: MeetingProposalFileDraft[];
+  followups: MeetingFollowupCandidate[];
+  checksComplete: boolean;
+  applyBusy?: boolean;
+  continuationAvailable?: boolean;
+}): boolean {
+  if (applyBusy || !checksComplete) return false;
+  const selectedFiles = selectedProposalFileCount(files);
+  const selectedFollowups = selectedMeetingFollowupCount(followups);
+  if (continuationAvailable) return true;
+  if (selectedFiles === 0 && selectedFollowups === 0) return false;
+  return selectedFiles === 0 || Boolean(proposal);
+}
+
+export function deriveMeetingRunSteps({
+  missionStatus,
+  logLines = [],
+  reviewLoaded = false,
+  checksComplete = false,
+  applied = false,
+}: MeetingRunStepInput): MeetingRunStep[] {
+  const failed = missionStatus === "failed" || missionStatus === "stopped";
+  const done = missionStatus === "done" || reviewLoaded || applied;
+  const running = missionStatus === "running" || missionStatus === "idle";
+  const hasDraftSignal =
+    hasPhase(logLines, "draft") ||
+    hasPhase(logLines, "proposal") ||
+    hasPhase(logLines, "review") ||
+    logLines.some((line) => /anchor_skill_proposal_v1|proposal\.created/i.test(line));
+  const hasReviewSignal =
+    reviewLoaded ||
+    hasPhase(logLines, "review") ||
+    logLines.some((line) => /anchor_meeting_review_v1/i.test(line));
+
+  const runStatus: MeetingRunStepStatus = failed ? "error" : running ? "active" : "complete";
+  const draftStatus: MeetingRunStepStatus = failed
+    ? "error"
+    : done || hasDraftSignal
+      ? "complete"
+      : running
+        ? "active"
+        : "pending";
+  const reviewStatus: MeetingRunStepStatus = failed
+    ? "error"
+    : reviewLoaded
+      ? "complete"
+      : done || hasReviewSignal
+        ? "active"
+        : "pending";
+  const confirmStatus: MeetingRunStepStatus = failed
+    ? "error"
+    : !reviewLoaded
+      ? "pending"
+      : checksComplete
+        ? "complete"
+        : "blocked";
+  const applyStatus: MeetingRunStepStatus = failed
+    ? "error"
+    : applied
+      ? "complete"
+      : checksComplete
+        ? "active"
+        : "pending";
+
+  return [
+    { id: "input", status: "complete" },
+    { id: "run", status: runStatus },
+    { id: "draft", status: draftStatus },
+    { id: "review", status: reviewStatus },
+    { id: "confirm", status: confirmStatus },
+    { id: "apply", status: applyStatus },
+  ];
+}
+
 function normalizeReviewArtifact(value: UnknownRecord): MeetingReviewArtifact {
   return {
     schemaVersion: MEETING_REVIEW_SCHEMA_VERSION,
@@ -148,6 +250,11 @@ function normalizeReviewArtifact(value: UnknownRecord): MeetingReviewArtifact {
     uncertainties: normalizeEntities(value.uncertainties, "uncertainty"),
     followups: normalizeFollowups(value.followups ?? value.vaultFollowups ?? value.vault_followups),
   };
+}
+
+function hasPhase(lines: string[], phase: string): boolean {
+  const pattern = new RegExp(`(?:\\[phase:${phase}\\]|phase\\s*[:=]\\s*${phase})`, "i");
+  return lines.some((line) => pattern.test(line));
 }
 
 function normalizeEntities(value: unknown, prefix: string): MeetingReviewEntity[] {

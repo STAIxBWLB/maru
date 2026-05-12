@@ -38,6 +38,7 @@ import {
   type ComposeDialogSeed,
 } from "./components/skills/ComposeDialog";
 import { SkillEditorWindowRoot } from "./components/skills/SkillEditorWindow";
+import { SkillRunsPanel } from "./components/skills/SkillRunsPanel";
 import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
 import {
   applyFileQueue,
@@ -155,10 +156,13 @@ import type { TerminalKind } from "./lib/terminal";
 import {
   skillsListSkills,
   skillsDispatchBackground,
+  skillsRuntimeStatus,
   type SkillContextItem,
+  type SkillDispatchRuntime,
   type SkillRecord,
   type TerminalDispatchSpec,
 } from "./lib/skills";
+import { activeSkillMissions, isSkillMission } from "./lib/skillRuns";
 import {
   checkAppUpdate,
   installAppUpdate,
@@ -217,7 +221,7 @@ import {
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
-import { activeMeetingsMissions, isMeetingsMission } from "./lib/meetings";
+import { activeMeetingsMissions } from "./lib/meetings";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
   openSettingsWindow,
@@ -436,17 +440,12 @@ function matchesActiveMission(record: MissionRecord): boolean {
 
 function upsertMission(current: MissionRecord[], next: MissionRecord): MissionRecord[] {
   const merged = current.filter((mission) => mission.id !== next.id);
-  if (matchesActiveMission(next)) {
-    merged.unshift(next);
-  }
+  merged.unshift(next);
   return activeTrackedMissions(merged);
 }
 
 function activeTrackedMissions(missions: MissionRecord[]): MissionRecord[] {
-  const byId = new Map<string, MissionRecord>();
-  for (const mission of activeInboxProcessMissions(missions)) byId.set(mission.id, mission);
-  for (const mission of activeMeetingsMissions(missions)) byId.set(mission.id, mission);
-  return Array.from(byId.values()).sort(
+  return activeSkillMissions(missions).sort(
     (a, b) => b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt),
   );
 }
@@ -877,6 +876,16 @@ function MainApp() {
   const scanOptions = useMemo(
     () => ({ includeDotFolders: anchorSettings.scan.includeDotFolders }),
     [anchorSettings.scan.includeDotFolders],
+  );
+  const skillRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
+    () => ({
+      claude: anchorSettings.terminal.launchers.claude.command ?? null,
+      codex: anchorSettings.terminal.launchers.codex.command ?? null,
+    }),
+    [
+      anchorSettings.terminal.launchers.claude.command,
+      anchorSettings.terminal.launchers.codex.command,
+    ],
   );
 
   const privateWorkspaces = useMemo(
@@ -2517,6 +2526,17 @@ function MainApp() {
       setInboxActionBusy(true);
       setError(null);
       try {
+        const runtime: SkillDispatchRuntime = "claude";
+        const commandOverride = skillRuntimeCommands[runtime] ?? null;
+        const runtimeStatus = await skillsRuntimeStatus({ runtime, commandOverride });
+        if (!runtimeStatus.available) {
+          throw new Error(
+            [
+              runtimeStatus.message,
+              runtimeStatus.suggestedAction,
+            ].filter(Boolean).join(" "),
+          );
+        }
         for (const [channel, entries] of grouped) {
           const prompt = buildInboxProcessPrompt({
             channel,
@@ -2530,16 +2550,18 @@ function MainApp() {
           const inputPaths = context.map((item) => item.path);
           const invocationId = await skillsDispatchBackground({
             skillId: processSkill.id,
-            runtime: "claude",
+            runtime,
             prompt,
             cwd: inboxWorkspacePath,
             context,
+            commandOverride,
             metadata: {
               origin: "inboxProcess",
               channel,
               inputPaths,
               workspacePath: inboxWorkspacePath,
               skillName: "inbox-process",
+              runtime,
             },
           });
           processingMissionIdsRef.current = new Set([
@@ -2555,13 +2577,20 @@ function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [inboxEntries, inboxRuntimeConfig, inboxWorkspacePath, refreshProcessingMissions, skills],
+    [
+      inboxEntries,
+      inboxRuntimeConfig,
+      inboxWorkspacePath,
+      refreshProcessingMissions,
+      skillRuntimeCommands,
+      skills,
+    ],
   );
 
   const stopProcessingMission = useCallback(async (id: string) => {
     try {
       const record = await stopAiMission(id);
-      if (isInboxProcessMission(record) || isMeetingsMission(record)) {
+      if (isSkillMission(record)) {
         setProcessingMissions((current) => upsertMission(current, record));
       }
     } catch (err) {
@@ -2576,7 +2605,7 @@ function MainApp() {
         invocationId,
       ]);
       setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
-      setError(`Background meeting-note run started: ${invocationId}`);
+      setError(`Background skill run started: ${invocationId}`);
       void refreshProcessingMissions();
     },
     [refreshProcessingMissions],
@@ -2712,13 +2741,13 @@ function MainApp() {
   }, [appMode, inboxWorkspacePath, isMac]);
 
   useEffect(() => {
-    if (appMode !== "inbox" && appMode !== "meetings") return;
-    void refreshProcessedItems();
-    void refreshProcessingMissions();
-  }, [appMode, refreshProcessedItems, refreshProcessingMissions]);
+    if (appMode === "inbox") void refreshProcessedItems();
+    if (appMode === "inbox" || appMode === "meetings" || rightPaneTab === "skills") {
+      void refreshProcessingMissions();
+    }
+  }, [appMode, refreshProcessedItems, refreshProcessingMissions, rightPaneTab]);
 
   useEffect(() => {
-    if (appMode !== "inbox" && appMode !== "meetings") return;
     let cancelled = false;
     let unlistenMission: (() => void) | null = null;
     let unlistenOutput: (() => void) | null = null;
@@ -2727,11 +2756,16 @@ function MainApp() {
         const offMission = await listen<MissionRecord>("ai://mission_update", (event) => {
           const record = event.payload;
           const inboxMission = isInboxProcessMission(record);
-          const meetingsMission = isMeetingsMission(record);
-          if (!inboxMission && !meetingsMission) return;
+          if (!isSkillMission(record)) return;
+          processingMissionIdsRef.current = new Set([
+            ...processingMissionIdsRef.current,
+            record.id,
+          ]);
           setProcessingMissions((current) => upsertMission(current, record));
           if (inboxMission && !matchesActiveMission(record)) {
             void refreshProcessedItems();
+          }
+          if (!matchesActiveMission(record)) {
             void readAiMissionLog(record.id, 100)
               .then((tail) =>
                 setProcessingLogLines((current) => ({
@@ -2765,7 +2799,7 @@ function MainApp() {
       unlistenMission?.();
       unlistenOutput?.();
     };
-  }, [appMode, matchesActiveMission, refreshProcessedItems]);
+  }, [matchesActiveMission, refreshProcessedItems]);
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.
@@ -5617,6 +5651,7 @@ function MainApp() {
             settings={anchorSettings.meetings}
             effectiveSettings={effectiveMeetingsSettings}
             skills={skills}
+            runtimeCommands={skillRuntimeCommands}
             processingMissions={activeMeetingsMissions(processingMissions)}
             processingLogLines={processingLogLines}
             onRefreshMissions={refreshProcessingMissions}
@@ -5841,13 +5876,26 @@ function MainApp() {
                 onTabChange={setPersistedRightPaneTab}
                 paneRef={outlinePaneRef}
                 skillsNode={
-                  <SkillsQuickPane
-                    skills={skills}
-                    loading={skillsLoading}
-                    appMode={appMode}
-                    onRefresh={refreshSkills}
-                    onRunSkill={(skill) => openSkillCompose(skill)}
-                  />
+                  <div className="skills-pane-stack">
+                    <SkillRunsPanel
+                      workPath={activeDocumentWorkspacePath ?? inboxWorkspacePath}
+                      missions={activeSkillMissions(processingMissions)}
+                      logLines={processingLogLines}
+                      runtimeCommands={skillRuntimeCommands}
+                      onRefresh={refreshProcessingMissions}
+                      onStopMission={(id) => void stopProcessingMission(id)}
+                      onMissionStarted={handleMeetingsMissionStarted}
+                      onConfirmApproval={approvalGate.confirmApproval}
+                      onError={setError}
+                    />
+                    <SkillsQuickPane
+                      skills={skills}
+                      loading={skillsLoading}
+                      appMode={appMode}
+                      onRefresh={refreshSkills}
+                      onRunSkill={(skill) => openSkillCompose(skill)}
+                    />
+                  </div>
                 }
               />
             ) : null}
@@ -6025,8 +6073,10 @@ function MainApp() {
           onClose={() => setComposeSeed(null)}
           onTerminalDispatch={launchSkillTerminal}
           onBackgroundDispatch={(invocationId) => {
-            setError(`Background skill run started: ${invocationId}`);
+            handleMeetingsMissionStarted(invocationId);
+            setPersistedRightPaneTab("skills");
           }}
+          runtimeCommands={skillRuntimeCommands}
           onError={setError}
         />
         <CommandPalette

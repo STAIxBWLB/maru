@@ -27,8 +27,9 @@ skill is provider-neutral and does not require inbox staging.
 2. Identify meeting date, type, topic, participants, venue, decisions, and action
    items from the provided material.
 3. Normalize terms and people using configured local guides when available.
-4. Write the note using `templates/meeting-note.md`.
-5. File it under the configured meeting root, usually `YYYY/YYYY-MM/`.
+4. Draft the note using `templates/meeting-note.md`.
+5. Propose filing it under the configured meeting root, usually
+   `YYYY/YYYY-MM/`; Anchor applies the write only after user approval.
 6. If configured and explicitly requested, create task candidates with
    `task-management` or prepare vault extraction candidates. Do not write vault
    notes directly.
@@ -37,7 +38,20 @@ skill is provider-neutral and does not require inbox staging.
 
 When Anchor runs this skill in background/review mode:
 
-1. Emit concise human-readable progress logs while working.
+1. Emit concise human-readable progress logs while working. Prefix major
+   progress logs with stable phase markers so Anchor can render stepwise
+   status:
+   - `[phase:source]` after source text/files are identified.
+   - `[phase:normalize]` while applying guides, glossary, people, and naming
+     conventions.
+   - `[phase:draft]` while drafting the meeting note.
+   - `[phase:proposal]` when preparing the `anchor_skill_proposal_v1` block.
+   - `[phase:review]` when preparing the `anchor_meeting_review_v1` block.
+   - Always include exactly one phase marker per line and keep that marker
+     at the start of the line (after the timestamp) so the run-card parser
+     and Activity panel can colour-code each phase reliably.
+   - For errors, prepend `ERROR:` to the message or use `[phase:error]` so
+     the UI can surface them in red.
 2. Do not directly write files, update the vault, or run follow-up skills.
 3. Return one `anchor_skill_proposal_v1` JSON object with the meeting note file
    write proposal.

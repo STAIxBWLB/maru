@@ -3,7 +3,10 @@ pub mod env;
 pub mod fs;
 pub mod store;
 
-pub use dispatch::{skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal};
+pub use dispatch::{
+    skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal,
+    skills_runtime_status,
+};
 pub use env::{skills_env_bootstrap, skills_env_repair, skills_env_status};
 pub use store::{
     skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
