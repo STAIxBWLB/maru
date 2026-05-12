@@ -21,6 +21,7 @@ There is no category subdirectory split or legacy helper directory split in this
 - Korean writing: `gaejosik`
 - Slide deck prompts: `canva-deck`, `notebooklm-deck`, `gpt-images-deck`
 - Design system: `design-init`, `design-motion`, `design-system`, `design-review`, `design-a11y`
+- Project workflows: `business-unit-lifecycle`
 - Task and git: `task-management`, `git-sync`
 - IO and inbox/outbox: `io-mso`, `io-gws`, `io-telegram`, `io-kakao`, `inbox-intake`, `inbox-process`, `meeting-notes`, `share-outbox`
 - Vault workflows: `vault-extract`, `vault-connect`, `vault-sync`, `vault-learn`, `vault-lint`, `vault-graph`, `vault-pipeline`, `vault-refactor`, `vault-rename`, `vault-update`, `vault-next`, `vault-remember`, `vault-rethink`, `vault-stats`
