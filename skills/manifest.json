@@ -22,6 +22,14 @@
       ]
     },
     {
+      "name": "business-unit-lifecycle",
+      "path": "skills/business-unit-lifecycle",
+      "tags": [
+        "project",
+        "workflow"
+      ]
+    },
+    {
       "name": "git-sync",
       "path": "skills/git-sync",
       "tags": [
