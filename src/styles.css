@@ -306,6 +306,13 @@ a {
     "activity sidebar terminal terminal terminal";
 }
 
+.app-shell.tasks-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar tasks tasks tasks"
+    "activity sidebar terminal terminal terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -335,13 +342,21 @@ a {
     "activity sidebar terminal terminal terminal";
 }
 
+.app-shell.terminal-maximized.tasks-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar terminal terminal terminal"
+    "activity sidebar terminal terminal terminal";
+}
+
 .app-shell.terminal-maximized .document-list,
 .app-shell.terminal-maximized .pane-resize-handle,
 .app-shell.terminal-maximized .editor-split-shell,
 .app-shell.terminal-maximized .outline-pane,
 .app-shell.terminal-maximized .inbox-pane,
 .app-shell.terminal-maximized .comms-pane,
-.app-shell.terminal-maximized .meetings-pane {
+.app-shell.terminal-maximized .meetings-pane,
+.app-shell.terminal-maximized .tasks-pane {
   display: none;
 }
 
@@ -380,6 +395,10 @@ a {
 }
 .meetings-pane {
   grid-area: meetings;
+}
+
+.tasks-pane {
+  grid-area: tasks;
 }
 .terminal-panel {
   grid-area: terminal;
@@ -7349,6 +7368,15 @@ button.git-badge:hover {
       "terminal";
   }
 
+  .app-shell.tasks-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "tasks"
+      "terminal";
+  }
+
   .app-shell.system-mode {
     grid-template-areas:
       "topbar"
@@ -8005,6 +8033,15 @@ button.git-badge:hover {
       "activity"
       "sidebar"
       "meetings"
+      "terminal";
+  }
+
+  .app-shell.tasks-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "tasks"
       "terminal";
   }
 
@@ -9731,14 +9768,26 @@ button.git-badge:hover {
 }
 
 .tasks-pane {
+  grid-area: tasks;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: 210px minmax(520px, 1fr) minmax(280px, 340px);
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 72%, var(--bg)) 0, var(--bg) 260px);
   color: var(--ink);
   font-size: 13px;
+}
+
+.tasks-pane.details-collapsed {
+  grid-template-columns: 210px minmax(520px, 1fr) 44px;
+}
+
+.tasks-pane.tasks-empty {
+  display: grid;
+  place-items: center;
 }
 
 .tasks-sidebar {
@@ -9816,9 +9865,9 @@ button.git-badge:hover {
 }
 
 .tasks-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding: 18px 22px 15px;
   border-bottom: 1px solid var(--line-soft);
@@ -9841,6 +9890,38 @@ button.git-badge:hover {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.tasks-header-actions {
+  justify-content: flex-end;
+}
+
+.tasks-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  padding: 2px;
+}
+
+.tasks-view-switcher button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tasks-view-switcher button.active {
+  background: var(--ink);
+  color: var(--bg);
 }
 
 .tasks-toolbar {
@@ -9875,6 +9956,13 @@ button.git-badge:hover {
   border-radius: 8px;
   background: var(--panel-raised);
   padding: 0 10px;
+}
+
+.tasks-result-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .tasks-loading,
@@ -9984,23 +10072,139 @@ button.git-badge:hover {
 }
 
 .tasks-calendar-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 12px;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   padding: 0 22px 18px;
 }
 
-.tasks-calendar-shell .rbc-calendar {
+.tasks-calendar-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tasks-calendar-frame .rbc-calendar {
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-raised);
   padding: 8px;
 }
 
+.tasks-calendar-frame .rbc-toolbar {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tasks-calendar-frame .rbc-toolbar button {
+  border-color: var(--line-soft);
+  color: var(--ink);
+}
+
+.tasks-calendar-frame .rbc-time-view,
+.tasks-calendar-frame .rbc-month-view {
+  border-color: var(--line-soft);
+}
+
+.tasks-calendar-frame .rbc-header,
+.tasks-calendar-frame .rbc-time-content,
+.tasks-calendar-frame .rbc-timeslot-group,
+.tasks-calendar-frame .rbc-day-bg + .rbc-day-bg {
+  border-color: var(--line-soft);
+}
+
+.tasks-calendar-empty {
+  position: absolute;
+  z-index: 2;
+  top: 56px;
+  right: 18px;
+  justify-content: flex-start;
+  max-width: 260px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-raised) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.tasks-unscheduled-tray {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  padding: 12px;
+}
+
+.tasks-unscheduled-tray header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tasks-unscheduled-tray header span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-unscheduled-tray p {
+  margin: 6px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tasks-unscheduled-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.unscheduled-task {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel-2) 76%, var(--bg));
+  padding: 8px;
+  text-align: left;
+}
+
+.unscheduled-task strong,
+.unscheduled-task span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unscheduled-task span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.unscheduled-task:hover,
+.unscheduled-task.selected {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: var(--active-surface);
+}
+
 .task-detail-drawer {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
   gap: 13px;
   min-width: 0;
   min-height: 0;
@@ -10008,6 +10212,14 @@ button.git-badge:hover {
   border-left: 1px solid var(--line-soft);
   background: var(--panel-raised);
   padding: 14px;
+}
+
+.task-detail-drawer.collapsed {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+  padding: 14px 6px;
 }
 
 .task-detail-drawer.empty {
@@ -10020,6 +10232,12 @@ button.git-badge:hover {
   gap: 10px;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.task-detail-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-detail-header h2 {
@@ -10040,6 +10258,29 @@ button.git-badge:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
+}
+
+.task-schedule-editor {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+  padding: 10px;
+}
+
+.task-schedule-editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-schedule-editor h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
 }
 
 .task-detail-meta div,
@@ -10272,6 +10513,38 @@ button.git-badge:hover {
   .meetings-content-grid,
   .tasks-pane {
     grid-template-columns: 1fr;
+  }
+
+  .tasks-pane,
+  .tasks-pane.details-collapsed {
+    height: auto;
+    overflow: visible;
+    grid-template-columns: 1fr;
+  }
+
+  .tasks-header {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .tasks-view-switcher,
+  .tasks-header-actions {
+    justify-self: start;
+  }
+
+  .tasks-calendar-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(420px, 1fr) minmax(180px, auto);
+    height: min(760px, 80dvh);
+  }
+
+  .tasks-unscheduled-tray {
+    min-height: 180px;
+  }
+
+  .task-detail-drawer.collapsed {
+    min-height: 48px;
+    align-items: center;
   }
 
   .meetings-sidebar,

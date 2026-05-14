@@ -1,7 +1,15 @@
-import { FolderOpen, Play, WandSparkles } from "lucide-react";
+import {
+  FolderOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Play,
+  Save,
+  WandSparkles,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
-import type { TaskMetadata } from "../../lib/types";
+import type { TaskMetadata, TaskSchedulePatch } from "../../lib/types";
 import type { SkillContextItem, SkillRecord } from "../../lib/skills";
 import { Button } from "../ui/Button";
 
@@ -10,12 +18,15 @@ interface TaskDetailDrawerProps {
   metadata: TaskMetadata | null;
   loading: boolean;
   skills: SkillRecord[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onRevealPath?: (path: string) => void;
   onOpenSkillCompose: (
     skill: SkillRecord | null,
     context: SkillContextItem[],
     prompt?: string,
   ) => void;
+  onUpdateSchedule: (entry: TaskEntry, fields: TaskSchedulePatch) => Promise<void>;
 }
 
 export function TaskDetailDrawer({
@@ -23,15 +34,82 @@ export function TaskDetailDrawer({
   metadata,
   loading,
   skills,
+  collapsed,
+  onToggleCollapsed,
   onRevealPath,
   onOpenSkillCompose,
+  onUpdateSchedule,
 }: TaskDetailDrawerProps) {
   const { t } = useTranslation();
-  if (!entry) {
-    return <aside className="task-detail-drawer empty">{t("tasks.detail.empty")}</aside>;
+  const [project, setProject] = useState("");
+  const [priority, setPriority] = useState("medium");
+  const [due, setDue] = useState("");
+  const [calendarStart, setCalendarStart] = useState("");
+  const [calendarEnd, setCalendarEnd] = useState("");
+  const [estimateMinutes, setEstimateMinutes] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setProject(entry?.project ?? "");
+    setPriority(entry?.priority === "none" ? "medium" : entry?.priority ?? "medium");
+    setDue(entry?.due ?? "");
+    setCalendarStart(toDateTimeInput(entry?.calendarStart));
+    setCalendarEnd(toDateTimeInput(entry?.calendarEnd));
+    setEstimateMinutes(String(readEstimateMinutes(entry?.frontmatter) ?? ""));
+  }, [entry]);
+
+  if (collapsed) {
+    return (
+      <aside className="task-detail-drawer collapsed">
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onToggleCollapsed}
+          title={t("tasks.actions.expandDetails")}
+          aria-label={t("tasks.actions.expandDetails")}
+        >
+          <PanelRightOpen size={15} />
+        </button>
+      </aside>
+    );
   }
+
+  if (!entry) {
+    return (
+      <aside className="task-detail-drawer empty">
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onToggleCollapsed}
+          title={t("tasks.actions.collapseDetails")}
+          aria-label={t("tasks.actions.collapseDetails")}
+        >
+          <PanelRightClose size={15} />
+        </button>
+        <span>{t("tasks.detail.empty")}</span>
+      </aside>
+    );
+  }
+
   const context = [{ path: entry.absPath, kind: "document" }];
   const taskManagement = findSkill(skills, "task-management");
+
+  const saveSchedule = async () => {
+    setBusy(true);
+    try {
+      await onUpdateSchedule(entry, {
+        project: project.trim() || null,
+        priority,
+        due: due || null,
+        calendarStart: calendarStart || null,
+        calendarEnd: calendarEnd || null,
+        estimateMinutes: estimateMinutes.trim() ? Number(estimateMinutes) : null,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <aside className="task-detail-drawer">
       <header className="task-detail-header">
@@ -40,17 +118,28 @@ export function TaskDetailDrawer({
           <h2>{entry.title}</h2>
           <p>{entry.relPath}</p>
         </div>
-        {onRevealPath ? (
+        <div className="task-detail-header-actions">
+          {onRevealPath ? (
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => onRevealPath(entry.absPath)}
+              title={t("context.revealInFinder")}
+              aria-label={t("context.revealInFinder")}
+            >
+              <FolderOpen size={14} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="icon-button"
-            onClick={() => onRevealPath(entry.absPath)}
-            title={t("context.revealInFinder")}
-            aria-label={t("context.revealInFinder")}
+            onClick={onToggleCollapsed}
+            title={t("tasks.actions.collapseDetails")}
+            aria-label={t("tasks.actions.collapseDetails")}
           >
-            <FolderOpen size={14} />
+            <PanelRightClose size={15} />
           </button>
-        ) : null}
+        </div>
       </header>
       <div className="task-detail-actions">
         <Button
@@ -76,18 +165,72 @@ export function TaskDetailDrawer({
           {t("tasks.actions.otherSkill")}
         </Button>
       </div>
+      <section className="task-schedule-editor">
+        <header>
+          <h3>{t("tasks.detail.schedule")}</h3>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Save size={14} />}
+            disabled={busy}
+            onClick={() => void saveSchedule()}
+          >
+            {t("tasks.actions.saveSchedule")}
+          </Button>
+        </header>
+        <div className="settings-grid two">
+          <label className="field">
+            <span>{t("tasks.field.project")}</span>
+            <input value={project} onChange={(event) => setProject(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>{t("tasks.field.priority")}</span>
+            <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+              <option value="highest">{t("tasks.priority.highest")}</option>
+              <option value="high">{t("tasks.priority.high")}</option>
+              <option value="medium">{t("tasks.priority.medium")}</option>
+              <option value="low">{t("tasks.priority.low")}</option>
+              <option value="none">{t("tasks.priority.none")}</option>
+            </select>
+          </label>
+        </div>
+        <div className="settings-grid two">
+          <label className="field">
+            <span>{t("tasks.field.due")}</span>
+            <input type="date" value={due} onChange={(event) => setDue(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>{t("tasks.field.estimate")}</span>
+            <input
+              type="number"
+              min="0"
+              step="15"
+              value={estimateMinutes}
+              onChange={(event) => setEstimateMinutes(event.target.value)}
+            />
+          </label>
+        </div>
+        <label className="field">
+          <span>{t("tasks.field.start")}</span>
+          <input
+            type="datetime-local"
+            value={calendarStart}
+            onChange={(event) => setCalendarStart(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>{t("tasks.field.end")}</span>
+          <input
+            type="datetime-local"
+            value={calendarEnd}
+            onChange={(event) => setCalendarEnd(event.target.value)}
+          />
+        </label>
+      </section>
       <dl className="task-detail-meta">
         <div>
           <dt>{t("tasks.field.status")}</dt>
           <dd>{t(`tasks.status.${statusKey(entry.status)}`)}</dd>
-        </div>
-        <div>
-          <dt>{t("tasks.field.priority")}</dt>
-          <dd>{t(`tasks.priority.${entry.priority}`)}</dd>
-        </div>
-        <div>
-          <dt>{t("tasks.field.due")}</dt>
-          <dd>{entry.due ?? "-"}</dd>
         </div>
         <div>
           <dt>{t("tasks.field.bucket")}</dt>
@@ -128,6 +271,20 @@ function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
 
 function statusKey(status: TaskEntry["status"]): string {
   return status === "in-progress" ? "inProgress" : status;
+}
+
+function toDateTimeInput(value: string | null | undefined): string {
+  if (!value) return "";
+  return value.slice(0, 16);
+}
+
+function readEstimateMinutes(frontmatter: Record<string, unknown> | undefined): number | null {
+  const value = frontmatter?.estimateMinutes ?? frontmatter?.estimate_minutes;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
 }
 
 function formatValue(value: unknown): string {

@@ -7,6 +7,8 @@ import {
   normalizeTaskPriority,
   normalizeTaskStatus,
   rowsToTaskEntries,
+  selectVisibleTask,
+  taskFilterCounts,
   tasksToCalendarEvents,
 } from "./tasks";
 
@@ -87,6 +89,9 @@ describe("task entry helpers", () => {
     expect(
       filterTasksByQuery(entries, "", { due: "overdue" }).map((entry) => entry.title),
     ).toEqual([]);
+    expect(
+      filterTasksByQuery(entries, "", { due: "today", today: "2026-05-14" }).map((entry) => entry.title),
+    ).toEqual(["Anchor tasks mode"]);
   });
 
   it("detects overdue tasks with done and cancelled excluded", () => {
@@ -116,7 +121,59 @@ describe("task entry helpers", () => {
 
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({ title: "Anchor tasks mode", allDay: true });
+    expect(events[0].start.getFullYear()).toBe(2026);
+    expect(events[0].start.getMonth()).toBe(4);
+    expect(events[0].start.getDate()).toBe(14);
     expect(events[1]).toMatchObject({ title: "Timed call", allDay: false });
+    expect(events[1].end.getTime()).toBeGreaterThan(events[1].start.getTime());
+  });
+
+  it("counts schedule filters with done and backlog excluded from active counts", () => {
+    const timed: TaskNoteRow = {
+      path: "/work/tasks/active/timed.md",
+      relPath: "tasks/active/timed.md",
+      fileName: "timed.md",
+      bucket: "active",
+      sizeBytes: 10,
+      updatedAt: null,
+      frontmatter: {
+        title: "Timed task",
+        status: "active",
+        calendarStart: "2026-05-14T14:00:00+09:00",
+      },
+    };
+    const unscheduled: TaskNoteRow = {
+      path: "/work/tasks/active/unscheduled.md",
+      relPath: "tasks/active/unscheduled.md",
+      fileName: "unscheduled.md",
+      bucket: "active",
+      sizeBytes: 10,
+      updatedAt: null,
+      frontmatter: {
+        title: "Unscheduled task",
+        status: "active",
+      },
+    };
+
+    const counts = taskFilterCounts(rowsToTaskEntries([...rows, timed, unscheduled]), "2026-05-14");
+
+    expect(counts).toEqual({
+      scheduled: 2,
+      today: 2,
+      overdue: 0,
+      unscheduled: 1,
+      backlog: 1,
+      done: 1,
+    });
+  });
+
+  it("falls back to a visible task when selected path is filtered out", () => {
+    const visible = rowsToTaskEntries(rows).filter((entry) => entry.bucket === "active");
+
+    expect(selectVisibleTask(visible, "tasks/archive/done.md")?.relPath).toBe(
+      "tasks/active/260514-anchor-tasks.md",
+    );
+    expect(selectVisibleTask([], "tasks/archive/done.md")).toBeNull();
   });
 });
 

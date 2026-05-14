@@ -115,6 +115,17 @@ pub struct CreateTaskDraft {
     pub bucket: TaskBucket,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateTaskScheduleFields {
+    pub project: Option<Option<String>>,
+    pub priority: Option<Option<String>>,
+    pub due: Option<Option<String>>,
+    pub calendar_start: Option<Option<String>>,
+    pub calendar_end: Option<Option<String>>,
+    pub estimate_minutes: Option<Option<f64>>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksLogLine {
@@ -268,6 +279,31 @@ pub fn update_task_status(
     }
     fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))?;
     task_row_for_path(&work, &target, target_bucket)
+}
+
+#[tauri::command]
+pub fn update_task_schedule_fields(
+    work_path: String,
+    rel_path: String,
+    fields: UpdateTaskScheduleFields,
+) -> Result<TaskNoteRow, String> {
+    assert_anchor_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let path = resolve_inside_vault(&work_path, &rel_path)?;
+    let original =
+        fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
+    let mut updated = original.clone();
+    updated = patch_optional_string_field(updated, "project", fields.project)?;
+    updated = patch_optional_string_field(updated, "priority", fields.priority)?;
+    updated = patch_optional_string_field(updated, "due", fields.due)?;
+    updated = patch_optional_string_field(updated, "calendarStart", fields.calendar_start)?;
+    updated = patch_optional_string_field(updated, "calendarEnd", fields.calendar_end)?;
+    updated = patch_optional_number_field(updated, "estimateMinutes", fields.estimate_minutes)?;
+    if updated != original {
+        fs::write(&path, &updated).map_err(|err| format!("Cannot update task schedule: {err}"))?;
+    }
+    let bucket = bucket_from_rel_path(&rel_path).unwrap_or(TaskBucket::Active);
+    task_row_for_path(&work, &path, bucket)
 }
 
 #[tauri::command]
@@ -471,6 +507,35 @@ fn resolve_tasks_root(work: &Path, raw: &str) -> Result<PathBuf, String> {
         }
     }
     Err("tasks_root_escapes_workspace".to_string())
+}
+
+fn patch_optional_string_field(
+    content: String,
+    key: &str,
+    value: Option<Option<String>>,
+) -> Result<String, String> {
+    let Some(value) = value else {
+        return Ok(content);
+    };
+    let next = value
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .map(FrontmatterValue::String);
+    update_frontmatter_content(&content, key, next)
+}
+
+fn patch_optional_number_field(
+    content: String,
+    key: &str,
+    value: Option<Option<f64>>,
+) -> Result<String, String> {
+    let Some(value) = value else {
+        return Ok(content);
+    };
+    let next = value
+        .filter(|number| number.is_finite() && *number > 0.0)
+        .map(FrontmatterValue::Number);
+    update_frontmatter_content(&content, key, next)
 }
 
 fn target_path_for_bucket(
@@ -720,6 +785,109 @@ mod tests {
         assert!(raw.contains("status: done"));
         assert!(raw.contains("priority: high"));
         assert!(raw.contains("# Body"));
+    }
+
+    #[test]
+    fn update_task_schedule_fields_preserves_body_and_unrelated_frontmatter() {
+        let tmp = tempdir().unwrap();
+        let note = tmp.path().join("tasks/active/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(
+            &note,
+            "---\nstatus: active\nowner: Luca\n---\n# Body\n\nKeep me.\n",
+        )
+        .unwrap();
+
+        let row = update_task_schedule_fields(
+            tmp.path().to_string_lossy().to_string(),
+            "tasks/active/task.md".to_string(),
+            UpdateTaskScheduleFields {
+                project: Some(Some("Anchor".to_string())),
+                priority: Some(Some("high".to_string())),
+                due: Some(Some("2026-05-15".to_string())),
+                calendar_start: Some(Some("2026-05-15T09:00".to_string())),
+                calendar_end: Some(Some("2026-05-15T10:00".to_string())),
+                estimate_minutes: Some(Some(60.0)),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(row.rel_path, "tasks/active/task.md");
+        let raw = fs::read_to_string(&note).unwrap();
+        assert!(raw.contains("status: active"));
+        assert!(raw.contains("owner: Luca"));
+        assert!(raw.contains("project: Anchor"));
+        assert!(raw.contains("priority: high"));
+        assert!(raw.contains("due: 2026-05-15"));
+        assert!(raw.contains("calendarStart: \"2026-05-15T09:00\""));
+        assert!(raw.contains("calendarEnd: \"2026-05-15T10:00\""));
+        assert!(raw.contains("estimateMinutes: 60"));
+        assert!(raw.contains("# Body\n\nKeep me."));
+    }
+
+    #[test]
+    fn update_task_schedule_fields_rejects_path_escape() {
+        let tmp = tempdir().unwrap();
+
+        let err = update_task_schedule_fields(
+            tmp.path().to_string_lossy().to_string(),
+            "../outside.md".to_string(),
+            UpdateTaskScheduleFields {
+                project: Some(Some("Anchor".to_string())),
+                priority: None,
+                due: None,
+                calendar_start: None,
+                calendar_end: None,
+                estimate_minutes: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.contains("escapes") || err.contains("outside"));
+    }
+
+    #[test]
+    fn update_task_schedule_fields_removes_empty_or_null_fields() {
+        let tmp = tempdir().unwrap();
+        let note = tmp.path().join("tasks/active/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(
+            &note,
+            "---\nproject: Anchor\ndue: 2026-05-15\ncalendarStart: 2026-05-15T09:00\nestimateMinutes: 45\n---\n# Body\n",
+        )
+        .unwrap();
+
+        update_task_schedule_fields(
+            tmp.path().to_string_lossy().to_string(),
+            "tasks/active/task.md".to_string(),
+            UpdateTaskScheduleFields {
+                project: Some(None),
+                priority: None,
+                due: Some(Some(" ".to_string())),
+                calendar_start: Some(None),
+                calendar_end: None,
+                estimate_minutes: Some(None),
+            },
+        )
+        .unwrap();
+
+        let raw = fs::read_to_string(&note).unwrap();
+        assert!(!raw.contains("project:"));
+        assert!(!raw.contains("due:"));
+        assert!(!raw.contains("calendarStart:"));
+        assert!(!raw.contains("estimateMinutes:"));
+        assert!(raw.contains("# Body"));
+    }
+
+    #[test]
+    fn update_task_schedule_fields_rejects_unknown_fields() {
+        let err = serde_json::from_value::<UpdateTaskScheduleFields>(json!({
+            "project": "Anchor",
+            "unknown": "no",
+        }))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field"));
     }
 
     #[test]

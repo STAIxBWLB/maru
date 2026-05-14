@@ -15,6 +15,9 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
   const [title, setTitle] = useState("");
   const [project, setProject] = useState("");
   const [due, setDue] = useState("");
+  const [calendarStart, setCalendarStart] = useState("");
+  const [calendarEnd, setCalendarEnd] = useState("");
+  const [estimateMinutes, setEstimateMinutes] = useState("");
   const [priority, setPriority] = useState("medium");
   const [bucket, setBucket] = useState<TaskBucket>("active");
   const [busy, setBusy] = useState(false);
@@ -39,12 +42,18 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
           priority,
           ...(project.trim() ? { project: project.trim() } : {}),
           ...(due ? { due } : {}),
+          ...(calendarStart ? { calendarStart } : {}),
+          ...(calendarEnd ? { calendarEnd } : {}),
+          ...(estimateMinutes.trim() ? { estimateMinutes: Number(estimateMinutes) } : {}),
         },
         body: `# ${title.trim()}\n\n`,
       });
       setTitle("");
       setProject("");
       setDue("");
+      setCalendarStart("");
+      setCalendarEnd("");
+      setEstimateMinutes("");
       setPriority("medium");
       setBucket("active");
       onClose();
@@ -93,6 +102,24 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
           </div>
           <div className="settings-grid two">
             <label className="field">
+              <span>{t("tasks.new.field.start")}</span>
+              <input
+                type="datetime-local"
+                value={calendarStart}
+                onChange={(event) => setCalendarStart(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>{t("tasks.new.field.end")}</span>
+              <input
+                type="datetime-local"
+                value={calendarEnd}
+                onChange={(event) => setCalendarEnd(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="settings-grid two">
+            <label className="field">
               <span>{t("tasks.new.field.priority")}</span>
               <select value={priority} onChange={(event) => setPriority(event.target.value)}>
                 <option value="highest">{t("tasks.priority.highest")}</option>
@@ -110,6 +137,16 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
               </select>
             </label>
           </div>
+          <label className="field">
+            <span>{t("tasks.new.field.estimate")}</span>
+            <input
+              type="number"
+              min="0"
+              step="15"
+              value={estimateMinutes}
+              onChange={(event) => setEstimateMinutes(event.target.value)}
+            />
+          </label>
         </div>
         <footer>
           <Button size="sm" variant="ghost" onClick={onClose}>

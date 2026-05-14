@@ -297,7 +297,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     root: "tasks",
     timezone: "Asia/Seoul",
     gwsBinary: null,
-    defaultView: "list",
+    defaultView: "week",
     weekStartsOn: 1,
     calendarStartHour: 8,
     defaultTaskList: null,

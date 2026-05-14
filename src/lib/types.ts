@@ -534,6 +534,15 @@ export interface CreateTaskDraft {
   bucket: TaskBucket;
 }
 
+export interface TaskSchedulePatch {
+  project?: string | null;
+  priority?: string | null;
+  due?: string | null;
+  calendarStart?: string | null;
+  calendarEnd?: string | null;
+  estimateMinutes?: number | null;
+}
+
 export interface TasksLogLineRecord {
   raw: string;
   ts: string | null;

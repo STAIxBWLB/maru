@@ -31,6 +31,24 @@ export interface TaskFilters {
   projects?: readonly string[];
   priorities?: readonly TaskPriority[];
   due?: "today" | "overdue" | "scheduled" | "unscheduled" | null;
+  today?: string;
+}
+
+export type TaskScheduleFilterView =
+  | "scheduled"
+  | "today"
+  | "overdue"
+  | "unscheduled"
+  | "backlog"
+  | "done";
+
+export interface TaskFilterCounts {
+  scheduled: number;
+  today: number;
+  overdue: number;
+  unscheduled: number;
+  backlog: number;
+  done: number;
 }
 
 export interface TaskCalendarEvent {
@@ -87,13 +105,13 @@ export function filterTasksByQuery(
   const buckets = setOrNull(filters.buckets);
   const projects = setOrNull(filters.projects?.map((item) => item.toLowerCase()));
   const priorities = setOrNull(filters.priorities);
-  const today = todayIso();
+  const today = filters.today ?? todayIso();
   return entries.filter((entry) => {
     if (statuses && !statuses.has(entry.status)) return false;
     if (buckets && !buckets.has(entry.bucket)) return false;
     if (projects && !projects.has((entry.project ?? "").toLowerCase())) return false;
     if (priorities && !priorities.has(entry.priority)) return false;
-    if (filters.due === "today" && entry.due !== today) return false;
+    if (filters.due === "today" && scheduledDate(entry) !== today) return false;
     if (filters.due === "overdue" && !isOverdue(entry, today)) return false;
     if (filters.due === "scheduled" && !entry.due && !entry.calendarStart) return false;
     if (filters.due === "unscheduled" && (entry.due || entry.calendarStart)) return false;
@@ -118,21 +136,24 @@ export function filterTasksByQuery(
 export function tasksToCalendarEvents(entries: TaskEntry[]): TaskCalendarEvent[] {
   return entries
     .filter((entry) => entry.due || entry.calendarStart)
-    .map((entry) => {
+    .flatMap((entry) => {
       if (entry.calendarStart) {
         const start = new Date(entry.calendarStart);
+        if (Number.isNaN(start.getTime())) return [];
         const end = entry.calendarEnd ? new Date(entry.calendarEnd) : addHours(start, 1);
+        const safeEnd = Number.isNaN(end.getTime()) || end <= start ? addHours(start, 1) : end;
         return {
           id: entry.relPath,
           title: entry.title,
           start,
-          end,
+          end: safeEnd,
           allDay: false,
           resource: entry,
         };
       }
       const due = entry.due ?? entry.calendarStart?.slice(0, 10) ?? "1970-01-01";
       const start = new Date(`${due}T00:00:00`);
+      if (Number.isNaN(start.getTime())) return [];
       const end = new Date(start);
       end.setDate(start.getDate() + 1);
       return {
@@ -146,6 +167,49 @@ export function tasksToCalendarEvents(entries: TaskEntry[]): TaskCalendarEvent[]
     });
 }
 
+export function taskFilterCounts(
+  entries: TaskEntry[],
+  today: string = todayIso(),
+): TaskFilterCounts {
+  return entries.reduce<TaskFilterCounts>(
+    (counts, entry) => {
+      if (entry.bucket === "backlog" || entry.status === "backlog") {
+        counts.backlog += 1;
+        return counts;
+      }
+      if (entry.bucket === "archive" || entry.status === "done" || entry.status === "cancelled") {
+        counts.done += 1;
+        return counts;
+      }
+      if (!isActionableTask(entry)) return counts;
+
+      if (entry.due || entry.calendarStart) {
+        counts.scheduled += 1;
+      } else {
+        counts.unscheduled += 1;
+      }
+      if (scheduledDate(entry) === today) counts.today += 1;
+      if (isOverdue(entry, today)) counts.overdue += 1;
+      return counts;
+    },
+    {
+      scheduled: 0,
+      today: 0,
+      overdue: 0,
+      unscheduled: 0,
+      backlog: 0,
+      done: 0,
+    },
+  );
+}
+
+export function selectVisibleTask(
+  entries: TaskEntry[],
+  selectedRelPath: string | null,
+): TaskEntry | null {
+  return entries.find((entry) => entry.relPath === selectedRelPath) ?? entries[0] ?? null;
+}
+
 export function groupTasksByStatus(entries: TaskEntry[]): Map<TaskStatus, TaskEntry[]> {
   return groupBy(entries, (entry) => entry.status);
 }
@@ -155,9 +219,10 @@ export function groupTasksByProject(entries: TaskEntry[]): Map<string, TaskEntry
 }
 
 export function isOverdue(entry: TaskEntry, today: string = todayIso()): boolean {
-  if (!entry.due) return false;
+  const date = scheduledDate(entry);
+  if (!date) return false;
   if (entry.status === "done" || entry.status === "cancelled") return false;
-  return entry.due < today;
+  return date < today;
 }
 
 export function activeTasksMissions(missions: MissionRecord[]): MissionRecord[] {
@@ -233,6 +298,20 @@ function normalizeDateTimeLike(value: unknown): string | null {
   if (!text) return null;
   const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : text;
+}
+
+function scheduledDate(entry: TaskEntry): string | null {
+  return entry.due ?? entry.calendarStart?.slice(0, 10) ?? null;
+}
+
+function isActionableTask(entry: TaskEntry): boolean {
+  return (
+    entry.bucket !== "archive"
+    && entry.bucket !== "backlog"
+    && entry.status !== "done"
+    && entry.status !== "cancelled"
+    && entry.status !== "backlog"
+  );
 }
 
 function setOrNull<T>(values: readonly T[] | undefined): Set<T> | null {

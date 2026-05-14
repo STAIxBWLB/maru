@@ -1,9 +1,13 @@
-import { AlertTriangle, Archive, CalendarDays, CheckCircle2, Inbox, ListTodo } from "lucide-react";
+import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Inbox, ListTodo } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "../../lib/i18n";
-import type { TaskEntry } from "../../lib/tasks";
+import {
+  taskFilterCounts,
+  type TaskEntry,
+  type TaskScheduleFilterView,
+} from "../../lib/tasks";
 
-export type TasksFilterView = "active" | "backlog" | "today" | "overdue" | "done" | "all";
+export type TasksFilterView = TaskScheduleFilterView;
 
 interface TasksSidebarProps {
   entries: TaskEntry[];
@@ -23,10 +27,10 @@ export function TasksSidebar({
   today,
 }: TasksSidebarProps) {
   const { t } = useTranslation();
+  const counts = taskFilterCounts(entries, today);
   const projects = Array.from(
     new Set(entries.map((entry) => entry.project).filter((value): value is string => Boolean(value))),
   ).sort((a, b) => a.localeCompare(b));
-  const doneCount = entries.filter((entry) => entry.bucket === "archive" || entry.status === "done").length;
   const views: Array<{
     id: TasksFilterView;
     label: string;
@@ -34,42 +38,40 @@ export function TasksSidebar({
     icon: ReactNode;
   }> = [
     {
-      id: "active",
-      label: t("tasks.filter.active"),
-      count: entries.filter((entry) => entry.status === "active" || entry.status === "in-progress").length,
-      icon: <ListTodo size={14} />,
-    },
-    {
-      id: "backlog",
-      label: t("tasks.filter.backlog"),
-      count: entries.filter((entry) => entry.bucket === "backlog" || entry.status === "backlog").length,
-      icon: <Inbox size={14} />,
+      id: "scheduled",
+      label: t("tasks.filter.scheduled"),
+      count: counts.scheduled,
+      icon: <CalendarClock size={14} />,
     },
     {
       id: "today",
       label: t("tasks.filter.today"),
-      count: entries.filter((entry) => entry.due === today).length,
+      count: counts.today,
       icon: <CalendarDays size={14} />,
     },
     {
       id: "overdue",
       label: t("tasks.filter.overdue"),
-      count: entries.filter(
-        (entry) => entry.due && entry.due < today && !["cancelled", "done"].includes(entry.status),
-      ).length,
+      count: counts.overdue,
       icon: <AlertTriangle size={14} />,
+    },
+    {
+      id: "unscheduled",
+      label: t("tasks.filter.unscheduled"),
+      count: counts.unscheduled,
+      icon: <ListTodo size={14} />,
+    },
+    {
+      id: "backlog",
+      label: t("tasks.filter.backlog"),
+      count: counts.backlog,
+      icon: <Inbox size={14} />,
     },
     {
       id: "done",
       label: t("tasks.filter.done"),
-      count: doneCount,
+      count: counts.done,
       icon: <CheckCircle2 size={14} />,
-    },
-    {
-      id: "all",
-      label: t("tasks.filter.all"),
-      count: entries.length,
-      icon: <Archive size={14} />,
     },
   ];
 

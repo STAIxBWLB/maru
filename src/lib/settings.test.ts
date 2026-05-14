@@ -369,7 +369,7 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.workspaceFileFilter).toBe("all");
     expect(settings.meetings.root).toBe("meetings");
     expect(settings.tasks.root).toBe("tasks");
-    expect(settings.tasks.defaultView).toBe("list");
+    expect(settings.tasks.defaultView).toBe("week");
     expect(settings.meetings.defaultTypes).toEqual(
       DEFAULT_ANCHOR_SETTINGS.meetings.defaultTypes,
     );

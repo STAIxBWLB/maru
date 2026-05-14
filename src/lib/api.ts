@@ -69,6 +69,7 @@ import type {
   TaskBucket,
   TaskMetadata,
   TaskNoteRow,
+  TaskSchedulePatch,
   TaskStatus,
   TasksLogLineRecord,
   ScanOptions,
@@ -316,6 +317,15 @@ export async function updateTaskStatus(
 ): Promise<TaskNoteRow> {
   if (!isTauri()) return mockTaskNoteRows(workPath)[0];
   return invoke<TaskNoteRow>("update_task_status", { workPath, relPath, status });
+}
+
+export async function updateTaskScheduleFields(
+  workPath: string,
+  relPath: string,
+  fields: TaskSchedulePatch,
+): Promise<TaskNoteRow> {
+  if (!isTauri()) return mockTaskNoteRows(workPath)[0];
+  return invoke<TaskNoteRow>("update_task_schedule_fields", { workPath, relPath, fields });
 }
 
 export async function moveTaskNote(
