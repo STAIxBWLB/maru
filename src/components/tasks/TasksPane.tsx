@@ -1,4 +1,5 @@
 import {
+  CalendarPlus,
   Calendar,
   CheckCircle2,
   List,
@@ -25,6 +26,7 @@ import type { TasksSettings } from "../../lib/settings";
 import type { SkillContextItem, SkillRecord } from "../../lib/skills";
 import {
   activeTasksMissions,
+  buildTaskManagementSchedulePrompt,
   filterTasksByQuery,
   groupTasksByStatus,
   rowsToTaskEntries,
@@ -41,6 +43,7 @@ import type {
   TaskStatus,
 } from "../../lib/types";
 import { Button } from "../ui/Button";
+import { NaturalScheduleDialog } from "./NaturalScheduleDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
 import { TasksSidebar, type TasksFilterView } from "./TasksSidebar";
@@ -61,6 +64,7 @@ interface TasksPaneProps {
     skill: SkillRecord | null,
     context: SkillContextItem[],
     prompt?: string,
+    cwd?: string | null,
   ) => void;
   onRevealPath?: (path: string) => void;
   onError: (message: string | null) => void;
@@ -94,6 +98,7 @@ export function TasksPane({
   const [metadata, setMetadata] = useState<TaskMetadata | null>(null);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [naturalScheduleOpen, setNaturalScheduleOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
   const [bodyHits, setBodyHits] = useState<Set<string>>(() => new Set());
@@ -268,6 +273,29 @@ export function TasksPane({
       skill,
       context,
       `Sync local markdown tasks with the configured task-management workflow for ${target}.`,
+      workPath,
+    );
+  };
+
+  const openNaturalScheduleSkill = async (rawText: string) => {
+    const skill = findSkill(skills, "task-management");
+    const root = effectiveSettings.root ?? "tasks";
+    if (workPath && effectiveSettings.hooks.appendVaultLog) {
+      const payload = JSON.stringify({
+        skill: "task-management",
+        target: root,
+        textLength: rawText.trim().length,
+      });
+      await appendTasksLog(
+        workPath,
+        `- ${new Date().toISOString()} [natural-schedule] ${payload}`,
+      ).catch((err) => onError(err instanceof Error ? err.message : String(err)));
+    }
+    onOpenSkillCompose(
+      skill,
+      [],
+      buildTaskManagementSchedulePrompt(rawText, effectiveSettings),
+      workPath,
     );
   };
 
@@ -314,6 +342,9 @@ export function TasksPane({
           <div className="tasks-header-actions">
             <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => setNewTaskOpen(true)}>
               {t("tasks.actions.new")}
+            </Button>
+            <Button size="sm" variant="secondary" icon={<CalendarPlus size={14} />} onClick={() => setNaturalScheduleOpen(true)}>
+              {t("tasks.actions.scheduleFromText")}
             </Button>
             <Button size="sm" variant="secondary" icon={<RefreshCcw size={14} />} onClick={() => void load()}>
               {t("tasks.actions.refresh")}
@@ -412,6 +443,11 @@ export function TasksPane({
         onUpdateSchedule={updateSchedule}
       />
       <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreate={createTask} />
+      <NaturalScheduleDialog
+        open={naturalScheduleOpen}
+        onClose={() => setNaturalScheduleOpen(false)}
+        onSubmit={openNaturalScheduleSkill}
+      />
     </main>
   );
 }

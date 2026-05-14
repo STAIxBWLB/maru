@@ -136,4 +136,27 @@ describe("buildMonthLayout", () => {
     expect(week!.timedByColumn.flat()).toHaveLength(2);
     expect(week!.overflowPerCell.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
   });
+
+  it("keeps month display bounded with two all-day lanes and two timed rows", () => {
+    const allDayEvents = Array.from({ length: 4 }, (_, i) =>
+      evt(`a-${i}`, "2026-05-14T00:00:00", "2026-05-15T00:00:00"),
+    );
+    const timedEvents = Array.from({ length: 4 }, (_, i) =>
+      evt(`t-${i}`, `2026-05-14T1${i}:00:00`, `2026-05-14T1${i}:30:00`, {
+        allDay: false,
+      }),
+    );
+    const weeks = buildMonthLayout(viewMonth, [...allDayEvents, ...timedEvents], {
+      weekStartsOn: 0,
+      today,
+      maxLanes: 2,
+      maxTimedPerCell: 2,
+    });
+
+    const week = weeks.find((w) => w.cells.some((cell) => cell.date.getDate() === 14));
+    expect(week).toBeDefined();
+    expect(week!.lanes).toHaveLength(2);
+    expect(week!.timedByColumn.flat()).toHaveLength(2);
+    expect(week!.overflowPerCell.reduce((sum, value) => sum + value, 0)).toBe(4);
+  });
 });

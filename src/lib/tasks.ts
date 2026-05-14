@@ -4,6 +4,7 @@ import type {
   TaskNoteRow,
   TaskStatus,
 } from "./types";
+import type { TasksSettings } from "./settings";
 
 export type TaskPriority = "highest" | "high" | "medium" | "low" | "none";
 
@@ -232,8 +233,45 @@ export function activeTasksMissions(missions: MissionRecord[]): MissionRecord[] 
 export function isTasksMission(mission: MissionRecord): boolean {
   const metadata = mission.metadata;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
-  const origin = (metadata as Record<string, unknown>).origin;
-  return typeof origin === "string" && origin.startsWith("taskManagement");
+  const record = metadata as Record<string, unknown>;
+  const origin = record.origin;
+  if (typeof origin === "string" && origin.startsWith("taskManagement")) return true;
+  const skillName = record.skillName;
+  return origin === "skillCompose" && typeof skillName === "string" && skillName === "task-management";
+}
+
+export function buildTaskManagementSchedulePrompt(
+  rawText: string,
+  settings: Pick<
+    TasksSettings,
+    "root" | "timezone" | "defaultTaskList" | "defaultCalendar"
+  >,
+): string {
+  const root = settings.root?.trim() || "tasks";
+  const timezone = settings.timezone?.trim() || "Asia/Seoul";
+  const defaultTaskList = settings.defaultTaskList?.trim() || "(workspace default)";
+  const defaultCalendar = settings.defaultCalendar?.trim() || "(workspace default)";
+  return [
+    "Use the task-management skill to register the following unstructured schedule text.",
+    "",
+    "Runtime and source-of-truth rules:",
+    "- Load workspace.config.yaml and its task_management section before writing.",
+    `- Keep markdown task files as the local source of truth under ${root}.`,
+    "- Create an actionable task note under active/ when there is follow-up work.",
+    "- Create a calendar-only markdown receipt under calendar/ when this is only a schedule item.",
+    "- Normalize title, status, priority, due, calendarStart, calendarEnd, timezone, project, tags, and body.",
+    `- Use timezone ${timezone} unless the text states another timezone.`,
+    `- Use default Google Tasks list ${defaultTaskList} only through task-management's approved execution path.`,
+    `- Use default calendar ${defaultCalendar} only through task-management's approved execution path.`,
+    "- Do not call Google APIs directly from Anchor.",
+    "- Do not write directly to any vault; create only a local vault-promotion proposal if needed.",
+    "- Before dispatching writes, show the proposed markdown path and frontmatter.",
+    "",
+    "Raw schedule text:",
+    '"""',
+    rawText.trim(),
+    '"""',
+  ].join("\n");
 }
 
 export function normalizeTaskStatus(value: unknown, bucket: TaskBucket = "active"): TaskStatus {

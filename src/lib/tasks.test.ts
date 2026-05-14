@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MissionRecord, TaskNoteRow } from "./types";
 import {
   activeTasksMissions,
+  buildTaskManagementSchedulePrompt,
   filterTasksByQuery,
   isOverdue,
   normalizeTaskPriority,
@@ -189,19 +190,45 @@ describe("task normalizers", () => {
 });
 
 describe("activeTasksMissions", () => {
-  it("keeps only task-management background missions", () => {
+  it("keeps task-management background and compose missions", () => {
     const missions: MissionRecord[] = [
       mission("a", "taskManagementSync"),
       mission("b", "meetingNotesVaultExtract"),
       mission("c", "taskManagementVaultExtract"),
+      mission("d", "skillCompose", { skillName: "task-management" }),
+      mission("e", "skillCompose", { skillName: "vault-extract" }),
     ];
 
-    expect(activeTasksMissions(missions).map((item) => item.id)).toEqual(["c", "a"]);
+    expect(activeTasksMissions(missions).map((item) => item.id)).toEqual(["d", "c", "a"]);
   });
 });
 
-function mission(id: string, origin: string): MissionRecord {
-  const minute = id === "c" ? 3 : id === "b" ? 2 : 1;
+describe("buildTaskManagementSchedulePrompt", () => {
+  it("builds a task-management prompt for unstructured schedule text", () => {
+    const prompt = buildTaskManagementSchedulePrompt("내일 오후 3시 대구 회의 준비", {
+      root: "tasks",
+      timezone: "Asia/Seoul",
+      defaultTaskList: "reclaim",
+      defaultCalendar: "chu_aio",
+    });
+
+    expect(prompt).toContain("내일 오후 3시 대구 회의 준비");
+    expect(prompt).toContain("workspace.config.yaml");
+    expect(prompt).toContain("source of truth under tasks");
+    expect(prompt).toContain("calendarStart");
+    expect(prompt).toContain("Asia/Seoul");
+    expect(prompt).toContain("approved execution path");
+    expect(prompt).toContain("Do not call Google APIs directly from Anchor");
+    expect(prompt).toContain("Do not write directly to any vault");
+  });
+});
+
+function mission(
+  id: string,
+  origin: string,
+  metadata: Record<string, unknown> = {},
+): MissionRecord {
+  const minute = id === "d" ? 4 : id === "c" ? 3 : id === "b" ? 2 : 1;
   return {
     id,
     kind: "skill",
@@ -210,6 +237,6 @@ function mission(id: string, origin: string): MissionRecord {
     status: "running",
     exitCode: null,
     outputLogPath: null,
-    metadata: { origin },
+    metadata: { origin, ...metadata },
   };
 }

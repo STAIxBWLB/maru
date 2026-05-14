@@ -8,6 +8,13 @@ import type {
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
 
+const MONTH_BAR_LANES = 2;
+const MONTH_TIMED_ROWS = 2;
+const MONTH_DAY_ROW = 1;
+const MONTH_BAR_START_ROW = 2;
+const MONTH_TIMED_START_ROW = MONTH_BAR_START_ROW + MONTH_BAR_LANES;
+const MONTH_OVERFLOW_ROW = MONTH_TIMED_START_ROW + MONTH_TIMED_ROWS;
+
 interface MonthGridProps<T> {
   viewMonth: Date;
   events: Array<UnifiedCalendarEvent<T>>;
@@ -30,7 +37,13 @@ export function MonthGrid<T>({
   onSelectDate,
 }: MonthGridProps<T>) {
   const layout = useMemo(
-    () => buildMonthLayout(viewMonth, events, { weekStartsOn, today }),
+    () =>
+      buildMonthLayout(viewMonth, events, {
+        weekStartsOn,
+        today,
+        maxLanes: MONTH_BAR_LANES,
+        maxTimedPerCell: MONTH_TIMED_ROWS,
+      }),
     [viewMonth, events, weekStartsOn, today],
   );
   const localeObj = locale === "ko" ? ko : enUS;
@@ -49,16 +62,11 @@ export function MonthGrid<T>({
       </div>
       <div className="cal-month-body">
         {layout.map((week, weekIdx) => {
-          const laneCount = week.lanes.length;
-          const styles: React.CSSProperties = {
-            gridTemplateRows: `28px repeat(${laneCount}, 22px) minmax(0, 1fr)`,
-          };
           return (
             <div
               key={weekIdx}
               className="cal-week-row"
-              style={styles}
-              data-lanes={laneCount}
+              data-lanes={week.lanes.length}
             >
               {week.cells.map((cell, col) => (
                 <button
@@ -78,7 +86,7 @@ export function MonthGrid<T>({
                       ? "cal-day-number cal-day-number-today"
                       : "cal-day-number"
                   }
-                  style={{ gridColumn: col + 1, gridRow: 1 }}
+                  style={{ gridColumn: col + 1, gridRow: MONTH_DAY_ROW }}
                 >
                   {format(cell.date, "d")}
                 </span>
@@ -91,7 +99,7 @@ export function MonthGrid<T>({
                     className={barClassName(seg.event.category, seg.openLeft, seg.openRight)}
                     style={{
                       gridColumn: `${seg.startColumn + 1} / span ${seg.endColumn - seg.startColumn + 1}`,
-                      gridRow: laneIdx + 2,
+                      gridRow: MONTH_BAR_START_ROW + laneIdx,
                     }}
                     title={seg.event.title}
                     onClick={(event) => {
@@ -105,40 +113,54 @@ export function MonthGrid<T>({
                   </button>
                 )),
               )}
-              {week.cells.map((_, col) => {
+              {week.cells.flatMap((cell, col) => {
                 const chips = week.timedByColumn[col];
                 const overflow = week.overflowPerCell[col];
-                if (chips.length === 0 && overflow === 0) return null;
-                return (
-                  <div
-                    key={`extras-${col}`}
-                    className="cal-extras"
-                    style={{ gridColumn: col + 1, gridRow: -2 }}
+                const chipButtons = chips.map((chip, chipIdx) => (
+                  <button
+                    key={`chip-${col}-${chipIdx}-${chip.event.id}`}
+                    type="button"
+                    className={`cal-time-chip cal-month-time-chip cat-${chip.event.category}`}
+                    style={{
+                      gridColumn: col + 1,
+                      gridRow: MONTH_TIMED_START_ROW + chipIdx,
+                    }}
+                    title={chip.event.title}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectEvent?.(chip.event);
+                    }}
                   >
-                    {chips.map((chip) => (
-                      <button
-                        key={chip.event.id}
-                        type="button"
-                        className={`cal-time-chip cat-${chip.event.category}`}
-                        title={chip.event.title}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onSelectEvent?.(chip.event);
-                        }}
-                      >
-                        <span className="cal-time-chip-time">
-                          {format(chip.event.start, locale === "ko" ? "a h:mm" : "h:mma", {
-                            locale: localeObj,
-                          })}
-                        </span>
-                        <span className="cal-time-chip-title">{chip.event.title}</span>
-                      </button>
-                    ))}
-                    {overflow > 0 ? (
-                      <span className="cal-overflow">+{overflow}</span>
-                    ) : null}
-                  </div>
-                );
+                    <span className="cal-time-chip-time">
+                      {format(chip.event.start, locale === "ko" ? "a h:mm" : "h:mma", {
+                        locale: localeObj,
+                      })}
+                    </span>
+                    <span className="cal-time-chip-title">{chip.event.title}</span>
+                  </button>
+                ));
+                if (overflow <= 0) return chipButtons;
+                return [
+                  ...chipButtons,
+                  <button
+                    key={`overflow-${col}`}
+                    type="button"
+                    className="cal-overflow-button"
+                    style={{ gridColumn: col + 1, gridRow: MONTH_OVERFLOW_ROW }}
+                    title={format(cell.date, "PPPP", { locale: localeObj })}
+                    aria-label={
+                      locale === "ko"
+                        ? `${format(cell.date, "PPP", { locale: localeObj })} 추가 일정 ${overflow}개 보기`
+                        : `Show ${overflow} more events on ${format(cell.date, "PPP", { locale: localeObj })}`
+                    }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectDate?.(cell.date);
+                    }}
+                  >
+                    +{overflow}
+                  </button>,
+                ];
               })}
             </div>
           );

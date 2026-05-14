@@ -3388,7 +3388,12 @@ function MainApp() {
   );
 
   const openSkillCompose = useCallback(
-    (skill: SkillRecord | null = null, contextOverride?: SkillContextItem[], prompt?: string) => {
+    (
+      skill: SkillRecord | null = null,
+      contextOverride?: SkillContextItem[],
+      prompt?: string,
+      cwdOverride?: string | null,
+    ) => {
       const context =
         contextOverride ??
         (selectedEntry
@@ -3406,7 +3411,7 @@ function MainApp() {
         skill,
         context,
         prompt,
-        cwd: activeDocumentWorkspacePath ?? explorerWorkspacePath ?? settingsWorkPath,
+        cwd: cwdOverride ?? activeDocumentWorkspacePath ?? explorerWorkspacePath ?? settingsWorkPath,
       });
     },
     [
@@ -5713,8 +5718,8 @@ function MainApp() {
             processingLogLines={processingLogLines}
             onRefreshMissions={refreshProcessingMissions}
             onOpenSettings={openTasksSettings}
-            onOpenSkillCompose={(skill, context, prompt) =>
-              openSkillCompose(skill, context, prompt)
+            onOpenSkillCompose={(skill, context, prompt, cwd) =>
+              openSkillCompose(skill, context, prompt, cwd)
             }
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
