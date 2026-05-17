@@ -229,6 +229,16 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.tasks.hooks.appendVaultLog).toBe(false);
   });
 
+  it("parses e2e mode for the guided Anchor flow", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        activeAppMode: "e2e",
+      },
+    });
+
+    expect(settings.ui.activeAppMode).toBe("e2e");
+  });
+
   it("applies workspace io provider overrides without rewriting base comms defaults", () => {
     const base = normalizeAnchorSettings({
       comms: {

@@ -88,7 +88,9 @@ describe("task entry helpers", () => {
       }).map((entry) => entry.title),
     ).toEqual(["Sync tasks"]);
     expect(
-      filterTasksByQuery(entries, "", { due: "overdue" }).map((entry) => entry.title),
+      filterTasksByQuery(entries, "", { due: "overdue", today: "2026-05-14" }).map(
+        (entry) => entry.title,
+      ),
     ).toEqual([]);
     expect(
       filterTasksByQuery(entries, "", { due: "today", today: "2026-05-14" }).map((entry) => entry.title),

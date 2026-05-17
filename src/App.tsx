@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCcw,
+  Route,
   Settings2,
   UsersRound,
   WandSparkles,
@@ -24,6 +25,7 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { InboxPane } from "./components/InboxPane";
+import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
 import { TasksPane } from "./components/tasks/TasksPane";
 import { MissionBadge } from "./components/MissionBadge";
@@ -110,6 +112,7 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
   replaceEditorTabIds,
   tabIdsToCloseOthers,
@@ -812,6 +815,7 @@ function MainApp() {
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_ANCHOR_SETTINGS.ui.activeAppMode);
+  const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -1497,6 +1501,12 @@ function MainApp() {
     },
     [updateSettings],
   );
+
+  useEffect(() => {
+    if (!e2eFlowEnabled && appMode === "e2e") {
+      setPersistedAppMode("pkm");
+    }
+  }, [appMode, e2eFlowEnabled, setPersistedAppMode]);
 
   const setPersistedEditorViewMode = useCallback(
     (editorViewMode: EditorViewModeSetting) => {
@@ -5160,8 +5170,10 @@ function MainApp() {
     comms: " comms-mode",
     meetings: " meetings-mode",
     tasks: " tasks-mode",
+    e2e: " e2e-mode",
   };
-  const modeClass = modeClassByAppMode[appMode] ?? "";
+  const visibleAppMode: AppMode = appMode === "e2e" && !e2eFlowEnabled ? "pkm" : appMode;
+  const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -5503,7 +5515,7 @@ function MainApp() {
         <nav className="activity-rail" aria-label={t("activity.label")}>
           <button
             type="button"
-            className={appMode === "pkm" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "pkm" ? "activity-button active" : "activity-button"}
             onClick={() => setPersistedAppMode("pkm")}
             title={t("mode.pkm")}
             aria-label={t("mode.pkm")}
@@ -5512,7 +5524,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "inbox" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "inbox" ? "activity-button active" : "activity-button"}
             onClick={openInboxAndFocus}
             title={t("mode.inbox")}
             aria-label={t("mode.inbox")}
@@ -5521,7 +5533,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "comms" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "comms" ? "activity-button active" : "activity-button"}
             onClick={openComms}
             title={t("mode.comms")}
             aria-label={t("mode.comms")}
@@ -5530,7 +5542,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "meetings" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "meetings" ? "activity-button active" : "activity-button"}
             onClick={openMeetings}
             title={t("mode.meetings")}
             aria-label={t("mode.meetings")}
@@ -5539,13 +5551,24 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "tasks" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "tasks" ? "activity-button active" : "activity-button"}
             onClick={openTasks}
             title={t("mode.tasks")}
             aria-label={t("mode.tasks")}
           >
             <ListTodo size={20} strokeWidth={1.9} />
           </button>
+          {e2eFlowEnabled ? (
+            <button
+              type="button"
+              className={visibleAppMode === "e2e" ? "activity-button active" : "activity-button"}
+              onClick={() => setPersistedAppMode("e2e")}
+              title={t("mode.e2e")}
+              aria-label={t("mode.e2e")}
+            >
+              <Route size={20} strokeWidth={1.9} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="activity-button"
@@ -5619,7 +5642,15 @@ function MainApp() {
           />
         ) : null}
 
-        {appMode === "inbox" ? (
+        {visibleAppMode === "e2e" ? (
+          <E2EFlowPane
+            workPath={inboxWorkspacePath}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
+          />
+        ) : visibleAppMode === "inbox" ? (
           <InboxPane
             items={inboxItems}
             entries={inboxEntries}
@@ -5660,7 +5691,7 @@ function MainApp() {
             onTrashItems={(targets) => void trashInboxTargets(targets)}
             onStopProcessingMission={(id) => void stopProcessingMission(id)}
           />
-        ) : appMode === "comms" ? (
+        ) : visibleAppMode === "comms" ? (
           <CommsPane
             gmailMessages={gmailItems}
             gmailLoading={gmailLoading}
@@ -5686,7 +5717,7 @@ function MainApp() {
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={unloadMigrationService}
           />
-        ) : appMode === "meetings" ? (
+        ) : visibleAppMode === "meetings" ? (
           <MeetingsPane
             workPath={inboxWorkspacePath}
             settings={anchorSettings.meetings}
@@ -5708,7 +5739,7 @@ function MainApp() {
             }}
             onError={setError}
           />
-        ) : appMode === "tasks" ? (
+        ) : visibleAppMode === "tasks" ? (
           <TasksPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
