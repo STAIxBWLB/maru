@@ -43,4 +43,16 @@ describe("extractGuidelineIds", () => {
     });
     expect(ids).toEqual(["gdl_keep", "gdl_other"]);
   });
+
+  it("preserves frontmatter order before legacy comment ids", () => {
+    // Phase 4 W7: frontmatter is the canonical source. A legacy comment
+    // trailer (from W5) only contributes ids that aren't already in the
+    // frontmatter list, so the frontmatter ordering wins.
+    const body =
+      "# Doc\n\n<!-- anchor:guidelines gdl_a, gdl_b, gdl_c -->\n";
+    const ids = extractGuidelineIds(body, {
+      guideline_ids: ["gdl_b", "gdl_d"],
+    });
+    expect(ids).toEqual(["gdl_b", "gdl_d", "gdl_a", "gdl_c"]);
+  });
 });

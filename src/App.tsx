@@ -400,31 +400,10 @@ function titleFromWikilinkTarget(target: string): string {
   return leaf ?? cleaned;
 }
 
-/**
- * Append a small provenance block to the body when the user picked a Hub
- * template or guideline set. Phase 4 (Document Studio) replaces this with
- * proper frontmatter prefill.
- */
-function appendHubProvenance(
-  body: string,
-  extras: import("./components/NewDocumentDialog").NewDocumentExtras,
-): string {
-  const lines: string[] = [];
-  if (extras.templateSlug) {
-    lines.push(
-      `<!-- anchor:template ${extras.templateSlug} v${extras.templateVersion ?? "?"} -->`,
-    );
-  }
-  if (extras.businessUnit) {
-    lines.push(`<!-- anchor:business_unit ${extras.businessUnit} -->`);
-  }
-  if (extras.guidelineIds && extras.guidelineIds.length > 0) {
-    lines.push(`<!-- anchor:guidelines ${extras.guidelineIds.join(", ")} -->`);
-  }
-  if (lines.length === 0) return body;
-  const trailer = lines.join("\n");
-  return body.length === 0 ? trailer : `${body}\n\n${trailer}\n`;
-}
+// (Phase 4 W7) The W5 `appendHubProvenance` helper that emitted
+// `<!-- anchor:template … -->` comment trailers has been removed: the Hub
+// template / guideline metadata now flows into proper frontmatter via
+// `CreateDocumentExtras` in lib/api.ts and document::create_document.
 
 function visibilityAvailable(
   registry: WorkspaceRegistry,
@@ -3888,19 +3867,24 @@ function MainApp() {
     ) => {
       if (!activeDocumentWorkspacePath) return;
       if (blockWorkspaceWrite("create")) return;
-      // If the dialog returned a Hub template/guideline selection, fold
-      // the metadata into the document body as an HTML comment so the
-      // newly created doc carries a paper-trail to its source. A proper
-      // frontmatter prefill belongs to Phase 4 (Document Studio).
-      const finalBody = extras && (extras.templateSlug || extras.guidelineIds?.length)
-        ? appendHubProvenance(body, extras)
-        : body;
+      // Phase 4 W7: Hub template/guideline metadata flows into proper
+      // frontmatter via `extras`, not an HTML comment trailer. Rust core
+      // preserves byte-identity for any unrelated fields downstream.
       const created = await createDocument(
         activeDocumentWorkspacePath,
         title,
         docType,
-        finalBody,
+        body,
         targetRelPath,
+        extras && (extras.templateSlug || extras.templateId || extras.guidelineIds?.length)
+          ? {
+              templateId: extras.templateId,
+              templateSlug: extras.templateSlug,
+              templateVersion: extras.templateVersion,
+              guidelineIds: extras.guidelineIds,
+              businessUnit: extras.businessUnit,
+            }
+          : undefined,
       );
       const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
       updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });

@@ -1,11 +1,15 @@
-// Phase 3 W6 — Writing Guideline right-pane sidebar.
+// Phase 3 W6 / Phase 4 W7 — Writing Guideline right-pane sidebar.
 //
-// Resolves the guideline IDs from either (a) the document frontmatter
-// `guideline_ids: [...]` field per frontmatter-schema.md §2, or
-// (b) the `<!-- anchor:guidelines gdl_... -->` provenance comment that
-// `appendHubProvenance` writes when a document is created from a Hub
-// template. Fetches each guideline body from the Hub Library and shows
-// the active one with a tab switcher.
+// Resolves the guideline IDs in this priority order:
+//   1. Frontmatter `guideline_ids: [...]` (snake_case, accepts camelCase
+//      fallback) — this is the canonical source after Phase 4 W7's
+//      create_document frontmatter prefill.
+//   2. Legacy `<!-- anchor:guidelines gdl_... -->` provenance comment for
+//      documents created by the Phase 3 W5 implementation, before W7
+//      promoted the metadata to frontmatter.
+// Frontmatter IDs always come first; comment IDs are appended only if
+// they aren't already present. Each ID is then fetched from the Hub
+// Library and rendered in a multi-tab body viewer.
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchGuideline, type Guideline } from "../../lib/hubLibrary";

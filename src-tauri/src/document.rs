@@ -143,6 +143,27 @@ pub fn update_frontmatter_field(
     read_document(vault_path, path.to_string_lossy().to_string())
 }
 
+/// Optional Hub-driven prefill values. When the user picks a template +
+/// guidelines in NewDocumentDialog, the resulting metadata flows here so
+/// the new document carries it as proper frontmatter (no HTML comment
+/// trailer). All fields are optional — empty values are not written.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDocumentExtras {
+    #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
+    pub template_slug: Option<String>,
+    #[serde(default)]
+    pub template_version: Option<u32>,
+    #[serde(default)]
+    pub guideline_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub business_unit: Option<String>,
+    #[serde(default)]
+    pub program_id: Option<String>,
+}
+
 #[tauri::command]
 pub fn create_document(
     vault_path: String,
@@ -150,6 +171,7 @@ pub fn create_document(
     doc_type: String,
     body: String,
     target_rel_path: Option<String>,
+    #[allow(non_snake_case)] extras: Option<CreateDocumentExtras>,
 ) -> Result<CreatedDocument, String> {
     assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let now = Utc::now().to_rfc3339();
@@ -171,9 +193,10 @@ pub fn create_document(
     }
 
     // Frontmatter authored in deliberate order: type → status → created_at
-    // → updated_at → id. build_frontmatter preserves this ordering, unlike
-    // BTreeMap serialization which alphabetizes.
-    let fields = vec![
+    // → updated_at → id (+ optional Hub prefill after). build_frontmatter
+    // preserves this ordering, unlike BTreeMap serialization which
+    // alphabetizes.
+    let mut fields: Vec<(&str, FrontmatterValue)> = vec![
         ("type", FrontmatterValue::String(doc_type)),
         ("status", FrontmatterValue::String("draft".to_string())),
         ("created_at", FrontmatterValue::String(now.clone())),
@@ -183,6 +206,41 @@ pub fn create_document(
             FrontmatterValue::String(format!("doc-{}", Uuid::new_v4())),
         ),
     ];
+
+    if let Some(extras) = extras.as_ref() {
+        if let Some(value) = non_empty_string(&extras.template_id) {
+            fields.push(("template_id", FrontmatterValue::String(value)));
+        }
+        if let Some(value) = non_empty_string(&extras.template_slug) {
+            fields.push(("template_slug", FrontmatterValue::String(value)));
+        }
+        if let Some(version) = extras.template_version {
+            fields.push((
+                "template_version",
+                FrontmatterValue::String(format!("v{}", version)),
+            ));
+        }
+        if let Some(value) = non_empty_string(&extras.business_unit) {
+            fields.push((
+                "business_unit",
+                FrontmatterValue::String(format!("[[{}]]", value)),
+            ));
+        }
+        if let Some(value) = non_empty_string(&extras.program_id) {
+            fields.push(("program_id", FrontmatterValue::String(value)));
+        }
+        if let Some(ids) = extras.guideline_ids.as_ref() {
+            let cleaned: Vec<String> = ids
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !cleaned.is_empty() {
+                fields.push(("guideline_ids", FrontmatterValue::List(cleaned)));
+            }
+        }
+    }
+
     let body_with_heading = format!("# {title}\n\n{body}\n");
     let content = build_frontmatter(&fields, &body_with_heading);
 
@@ -197,6 +255,14 @@ pub fn create_document(
         rel_path,
         title,
     })
+}
+
+fn non_empty_string(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 fn validate_target_rel_path(target: &str) -> Result<String, String> {
@@ -582,6 +648,7 @@ mod tests {
             "meeting".to_string(),
             "본문".to_string(),
             None,
+            None,
         )
         .unwrap();
 
@@ -619,6 +686,7 @@ mod tests {
             "meeting".to_string(),
             "".to_string(),
             Some("meetings/새 회의록".to_string()),
+            None,
         )
         .unwrap();
 
@@ -637,6 +705,7 @@ mod tests {
             "reference".to_string(),
             "".to_string(),
             Some("../Bad".to_string()),
+            None,
         );
         assert!(traversal.is_err());
 
@@ -646,8 +715,90 @@ mod tests {
             "reference".to_string(),
             "".to_string(),
             Some("projects/CON".to_string()),
+            None,
         );
         assert!(reserved.is_err());
+    }
+
+    #[test]
+    fn create_document_emits_hub_prefill_in_deterministic_order() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let created = create_document(
+            root,
+            "Y2-2 중간보고".to_string(),
+            "report".to_string(),
+            "본문".to_string(),
+            None,
+            Some(CreateDocumentExtras {
+                template_id: Some("tpl_01HZ8FX9TESTTEMPLATEABC123".to_string()),
+                template_slug: Some("business-plan-default".to_string()),
+                template_version: Some(1),
+                guideline_ids: Some(vec![
+                    "gdl_gaejosik".to_string(),
+                    "gdl_vocational_writing_style".to_string(),
+                ]),
+                business_unit: Some("koica-tiu".to_string()),
+                program_id: Some("prg_01HZ8FX9KOICATIU000000001".to_string()),
+            }),
+        )
+        .unwrap();
+        let content = fs::read_to_string(tmp.path().join(&created.rel_path)).unwrap();
+
+        // Deterministic order: core fields first, then Hub prefill in spec
+        // order (template_id → template_slug → template_version →
+        // business_unit → program_id → guideline_ids).
+        let positions = [
+            "\ntype:",
+            "\nstatus:",
+            "\ncreated_at:",
+            "\nupdated_at:",
+            "\nid:",
+            "\ntemplate_id:",
+            "\ntemplate_slug:",
+            "\ntemplate_version:",
+            "\nbusiness_unit:",
+            "\nprogram_id:",
+            "\nguideline_ids:",
+        ];
+        let mut last = 0;
+        for key in positions {
+            let pos = content
+                .find(key)
+                .unwrap_or_else(|| panic!("missing field {key} in:\n{content}"));
+            assert!(pos > last, "field {key} out of order");
+            last = pos;
+        }
+        assert!(content.contains("business_unit: \"[[koica-tiu]]\""));
+        assert!(content.contains("template_version: v1"));
+        assert!(content.contains("- \"gdl_gaejosik\""));
+        assert!(content.contains("- \"gdl_vocational_writing_style\""));
+    }
+
+    #[test]
+    fn create_document_skips_empty_extras() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let created = create_document(
+            root,
+            "noop".to_string(),
+            "reference".to_string(),
+            "".to_string(),
+            None,
+            Some(CreateDocumentExtras {
+                template_id: Some("   ".to_string()),
+                template_slug: None,
+                template_version: None,
+                guideline_ids: Some(vec!["".to_string(), "  ".to_string()]),
+                business_unit: None,
+                program_id: None,
+            }),
+        )
+        .unwrap();
+        let content = fs::read_to_string(tmp.path().join(&created.rel_path)).unwrap();
+        assert!(!content.contains("template_id:"));
+        assert!(!content.contains("template_slug:"));
+        assert!(!content.contains("guideline_ids:"));
     }
 
     #[test]
