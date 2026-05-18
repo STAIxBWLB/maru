@@ -70,6 +70,22 @@ const tools = [
       required: ["runId", "proposal"],
     },
   },
+  {
+    name: "artifact.list",
+    description: "List saved Anchor E2E artifacts from .anchor/e2e-runs.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "artifact.read",
+    description: "Read saved Anchor E2E artifact metadata and file inventory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        runId: { type: "string" },
+      },
+      required: ["runId"],
+    },
+  },
 ];
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -127,6 +143,10 @@ async function callTool(name, args) {
       return readProposals(String(args.runId ?? ""));
     case "proposal.create":
       return createProposal(String(args.runId ?? ""), args.proposal ?? {});
+    case "artifact.list":
+      return listArtifacts();
+    case "artifact.read":
+      return readArtifact(String(args.runId ?? ""));
     default:
       throw new Error(`unknown_tool: ${name}`);
   }
@@ -205,6 +225,55 @@ async function createProposal(runId, proposal) {
   return { runId, eventId: event.id };
 }
 
+async function listArtifacts() {
+  const root = path.join(workspace, ".anchor", "e2e-runs");
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  const artifacts = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const runId = entry.name;
+    if (!isValidRunId(runId)) continue;
+    const dir = path.join(root, runId);
+    const metadata = await readJsonIfExists(path.join(dir, "metadata.json"));
+    artifacts.push({
+      runId,
+      status: metadata?.localStorageResult?.status ?? null,
+      reportTitle: metadata?.reportArtifact?.title ?? null,
+      slideTitle: metadata?.slideArtifact?.title ?? null,
+      path: path.relative(workspace, dir),
+    });
+  }
+  artifacts.sort((a, b) => a.runId.localeCompare(b.runId));
+  return { workspace, artifacts };
+}
+
+async function readArtifact(runId) {
+  validateRunId(runId);
+  const root = path.join(workspace, ".anchor", "e2e-runs", runId);
+  const realRoot = await fs.realpath(root);
+  if (!isInside(realRoot, workspaceReal)) {
+    throw new Error("path_escapes_workspace");
+  }
+  const files = [];
+  for (const name of ["metadata.json", "report.md", "slides.html", "todos.json", "timings.json"]) {
+    const file = path.join(realRoot, name);
+    try {
+      const stat = await fs.stat(file);
+      if (stat.isFile()) files.push(name);
+    } catch {
+      // Missing optional artifacts are reflected by omission.
+    }
+  }
+  return {
+    runId,
+    path: path.relative(workspaceReal, realRoot),
+    files,
+    metadata: await readJsonIfExists(path.join(realRoot, "metadata.json")),
+    todos: await readJsonIfExists(path.join(realRoot, "todos.json")),
+    timings: await readJsonIfExists(path.join(realRoot, "timings.json")),
+  };
+}
+
 async function readEvents(runId) {
   validateRunId(runId);
   const eventsPath = path.join(workspace, ".anchor", "runs", "skills", runId, "events.jsonl");
@@ -213,6 +282,16 @@ async function readEvents(runId) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+async function readJsonIfExists(file) {
+  try {
+    const text = await fs.readFile(file, "utf8");
+    return JSON.parse(text);
+  } catch (err) {
+    if (err?.code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 async function* walk(dir) {
@@ -267,7 +346,11 @@ function snippet(text, query) {
 }
 
 function validateRunId(runId) {
-  if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error("run_id_invalid");
+  if (!isValidRunId(runId)) throw new Error("run_id_invalid");
+}
+
+function isValidRunId(runId) {
+  return Boolean(runId && /^[A-Za-z0-9_-]+$/.test(runId));
 }
 
 function send(message) {

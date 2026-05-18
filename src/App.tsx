@@ -6,11 +6,13 @@ import {
   Command,
   FileText,
   Inbox,
+  LayoutGrid,
   ListTodo,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCcw,
+  Route,
   Settings2,
   UsersRound,
   WandSparkles,
@@ -23,7 +25,10 @@ import { CommsPane } from "./components/CommsPane";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
+import { CatalogPane } from "./components/catalog/CatalogPane";
+import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { InboxPane } from "./components/InboxPane";
+import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
 import { TasksPane } from "./components/tasks/TasksPane";
 import { MissionBadge } from "./components/MissionBadge";
@@ -99,6 +104,7 @@ import {
   updateFrontmatterField,
   type LegacyLaunchdService,
 } from "./lib/api";
+import { exportPlan, exportValidate, summarizeValidation, type ExportFormat } from "./lib/export";
 import {
   readAnchorSettings,
   readWorkspaceConfig,
@@ -110,6 +116,7 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
   replaceEditorTabIds,
   tabIdsToCloseOthers,
@@ -393,6 +400,11 @@ function titleFromWikilinkTarget(target: string): string {
   const leaf = cleaned.split("/").filter(Boolean).pop();
   return leaf ?? cleaned;
 }
+
+// (Phase 4 W7) The W5 `appendHubProvenance` helper that emitted
+// `<!-- anchor:template … -->` comment trailers has been removed: the Hub
+// template / guideline metadata now flows into proper frontmatter via
+// `CreateDocumentExtras` in lib/api.ts and document::create_document.
 
 function visibilityAvailable(
   registry: WorkspaceRegistry,
@@ -731,7 +743,9 @@ function MainApp() {
     title: string;
     relPath: string | null;
     docType?: string | null;
+    openLibrary?: boolean;
   } | null>(null);
+  const [lastExportManifestPath, setLastExportManifestPath] = useState<string | null>(null);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
   const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
     useState<WorkspaceVisibility>("private");
@@ -812,6 +826,7 @@ function MainApp() {
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_ANCHOR_SETTINGS.ui.activeAppMode);
+  const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -1497,6 +1512,12 @@ function MainApp() {
     },
     [updateSettings],
   );
+
+  useEffect(() => {
+    if (!e2eFlowEnabled && appMode === "e2e") {
+      setPersistedAppMode("pkm");
+    }
+  }, [appMode, e2eFlowEnabled, setPersistedAppMode]);
 
   const setPersistedEditorViewMode = useCallback(
     (editorViewMode: EditorViewModeSetting) => {
@@ -3226,7 +3247,7 @@ function MainApp() {
     }
   }, [workspaceRegistry.workspaces, handleAddWorkspace, switchActiveWorkspace]);
 
-  const openNewDocumentDialog = useCallback((docType?: string) => {
+  const openNewDocumentDialog = useCallback((docType?: string, options?: { fromLibrary?: boolean }) => {
     if (!activeWorkspaceCanCreate) {
       setError(
         t("workspace.writeBlocked", {
@@ -3239,8 +3260,11 @@ function MainApp() {
     }
     const seededDocType =
       docType ?? documentFilterDefaultDocType(documentFilter, anchorSettings.ui.documentViews);
+    const fromLibrary = options?.fromLibrary === true;
     setNewDocumentSeed(
-      seededDocType ? { title: "", relPath: null, docType: seededDocType } : null,
+      seededDocType || fromLibrary
+        ? { title: "", relPath: null, docType: seededDocType ?? null, openLibrary: fromLibrary }
+        : null,
     );
     setNewDocumentOpen(true);
   }, [
@@ -3836,15 +3860,33 @@ function MainApp() {
   }, [resolvedActiveTabId, snapshotTab]);
 
   const createNew = useCallback(
-    async (title: string, docType: string, body: string, targetRelPath: string | null) => {
+    async (
+      title: string,
+      docType: string,
+      body: string,
+      targetRelPath: string | null,
+      extras?: import("./components/NewDocumentDialog").NewDocumentExtras,
+    ) => {
       if (!activeDocumentWorkspacePath) return;
       if (blockWorkspaceWrite("create")) return;
+      // Phase 4 W7: Hub template/guideline metadata flows into proper
+      // frontmatter via `extras`, not an HTML comment trailer. Rust core
+      // preserves byte-identity for any unrelated fields downstream.
       const created = await createDocument(
         activeDocumentWorkspacePath,
         title,
         docType,
         body,
         targetRelPath,
+        extras && (extras.templateSlug || extras.templateId || extras.guidelineIds?.length)
+          ? {
+              templateId: extras.templateId,
+              templateSlug: extras.templateSlug,
+              templateVersion: extras.templateVersion,
+              guidelineIds: extras.guidelineIds,
+              businessUnit: extras.businessUnit,
+            }
+          : undefined,
       );
       const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
       updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
@@ -4860,6 +4902,50 @@ function MainApp() {
     });
   }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
+  const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
+    const workspaceRoot = activeDocumentWorkspacePath;
+    const sourceAbs = document?.path;
+    const sourceRel = document?.relPath;
+    if (!workspaceRoot || !sourceAbs || !sourceRel) {
+      setError(t("export.error.noDocument"));
+      return;
+    }
+    try {
+      const formats: ExportFormat[] = ["docx", "hwpx", "pdf"];
+      const resp = await exportPlan({
+        workspaceRoot,
+        sourcePath: sourceRel,
+        formats,
+      });
+      setLastExportManifestPath(resp.manifest_path);
+      setError(
+        t("export.success", {
+          count: String(resp.manifest.outputs.length),
+          manifest: resp.manifest_path,
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [activeDocumentWorkspacePath, document, t]);
+
+  const validateLastExportBundle = useCallback(async (): Promise<void> => {
+    if (!lastExportManifestPath) {
+      setError(t("export.error.noManifest"));
+      return;
+    }
+    try {
+      const report = await exportValidate(lastExportManifestPath);
+      setError(
+        t("export.validate.success", {
+          summary: summarizeValidation(report),
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [lastExportManifestPath, t]);
+
   const runCommand = useCallback(
     (id: string) => {
       if (id.startsWith("skill:")) {
@@ -4870,6 +4956,18 @@ function MainApp() {
       switch (id) {
         case "new-document":
           openNewDocumentDialog();
+          break;
+        case "new-document-from-template":
+          openNewDocumentDialog(undefined, { fromLibrary: true });
+          break;
+        case "open-catalog":
+          setPersistedAppMode("catalog");
+          break;
+        case "export-bundle":
+          void exportActiveDocumentBundle();
+          break;
+        case "export-validate":
+          void validateLastExportBundle();
           break;
         case "save":
           void saveCurrent();
@@ -4946,6 +5044,8 @@ function MainApp() {
       outlineOpen,
       openSkillCompose,
       skills,
+      exportActiveDocumentBundle,
+      validateLastExportBundle,
     ],
   );
 
@@ -5160,8 +5260,11 @@ function MainApp() {
     comms: " comms-mode",
     meetings: " meetings-mode",
     tasks: " tasks-mode",
+    catalog: " catalog-mode",
+    e2e: " e2e-mode",
   };
-  const modeClass = modeClassByAppMode[appMode] ?? "";
+  const visibleAppMode: AppMode = appMode === "e2e" && !e2eFlowEnabled ? "pkm" : appMode;
+  const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -5503,7 +5606,7 @@ function MainApp() {
         <nav className="activity-rail" aria-label={t("activity.label")}>
           <button
             type="button"
-            className={appMode === "pkm" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "pkm" ? "activity-button active" : "activity-button"}
             onClick={() => setPersistedAppMode("pkm")}
             title={t("mode.pkm")}
             aria-label={t("mode.pkm")}
@@ -5512,7 +5615,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "inbox" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "inbox" ? "activity-button active" : "activity-button"}
             onClick={openInboxAndFocus}
             title={t("mode.inbox")}
             aria-label={t("mode.inbox")}
@@ -5521,7 +5624,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "comms" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "comms" ? "activity-button active" : "activity-button"}
             onClick={openComms}
             title={t("mode.comms")}
             aria-label={t("mode.comms")}
@@ -5530,7 +5633,7 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "meetings" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "meetings" ? "activity-button active" : "activity-button"}
             onClick={openMeetings}
             title={t("mode.meetings")}
             aria-label={t("mode.meetings")}
@@ -5539,13 +5642,33 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={appMode === "tasks" ? "activity-button active" : "activity-button"}
+            className={visibleAppMode === "tasks" ? "activity-button active" : "activity-button"}
             onClick={openTasks}
             title={t("mode.tasks")}
             aria-label={t("mode.tasks")}
           >
             <ListTodo size={20} strokeWidth={1.9} />
           </button>
+          <button
+            type="button"
+            className={visibleAppMode === "catalog" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("catalog")}
+            title={t("mode.catalog")}
+            aria-label={t("mode.catalog")}
+          >
+            <LayoutGrid size={20} strokeWidth={1.9} />
+          </button>
+          {e2eFlowEnabled ? (
+            <button
+              type="button"
+              className={visibleAppMode === "e2e" ? "activity-button active" : "activity-button"}
+              onClick={() => setPersistedAppMode("e2e")}
+              title={t("mode.e2e")}
+              aria-label={t("mode.e2e")}
+            >
+              <Route size={20} strokeWidth={1.9} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="activity-button"
@@ -5619,7 +5742,23 @@ function MainApp() {
           />
         ) : null}
 
-        {appMode === "inbox" ? (
+        {visibleAppMode === "e2e" ? (
+          <E2EFlowPane
+            workPath={inboxWorkspacePath}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
+          />
+        ) : visibleAppMode === "catalog" ? (
+          <CatalogPane
+            workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
+            onReveal={(path) => {
+              const root = inboxWorkspacePath ?? settingsWorkPath;
+              if (root) void revealInFileManager(root, path);
+            }}
+          />
+        ) : visibleAppMode === "inbox" ? (
           <InboxPane
             items={inboxItems}
             entries={inboxEntries}
@@ -5660,7 +5799,7 @@ function MainApp() {
             onTrashItems={(targets) => void trashInboxTargets(targets)}
             onStopProcessingMission={(id) => void stopProcessingMission(id)}
           />
-        ) : appMode === "comms" ? (
+        ) : visibleAppMode === "comms" ? (
           <CommsPane
             gmailMessages={gmailItems}
             gmailLoading={gmailLoading}
@@ -5686,7 +5825,7 @@ function MainApp() {
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={unloadMigrationService}
           />
-        ) : appMode === "meetings" ? (
+        ) : visibleAppMode === "meetings" ? (
           <MeetingsPane
             workPath={inboxWorkspacePath}
             settings={anchorSettings.meetings}
@@ -5708,7 +5847,7 @@ function MainApp() {
             }}
             onError={setError}
           />
-        ) : appMode === "tasks" ? (
+        ) : visibleAppMode === "tasks" ? (
           <TasksPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
@@ -5955,6 +6094,13 @@ function MainApp() {
                     />
                   </div>
                 }
+                guidelineNode={
+                  <WritingGuidelineSidebar
+                    workspaceRoot={activeDocumentWorkspacePath}
+                    documentBody={draftContent || document?.content || ""}
+                    frontmatter={document?.meta ?? null}
+                  />
+                }
               />
             ) : null}
           </>
@@ -6107,9 +6253,11 @@ function MainApp() {
 
         <NewDocumentDialog
           open={newDocumentOpen}
+          workspaceRoot={activeDocumentWorkspacePath}
           initialTitle={newDocumentSeed?.title ?? ""}
           initialRelPath={newDocumentSeed?.relPath ?? null}
           initialDocType={newDocumentSeed?.docType ?? "reference"}
+          initialOpenLibrary={newDocumentSeed?.openLibrary ?? false}
           onOpenChange={(open) => {
             setNewDocumentOpen(open);
             if (!open) setNewDocumentSeed(null);

@@ -635,12 +635,32 @@ export async function updateFrontmatterField(
   });
 }
 
+/**
+ * Optional Hub-driven frontmatter prefill values.
+ *
+ * Mirrors `document::CreateDocumentExtras` on the Rust side. Anchor sends
+ * these via `create_document` so the new file's frontmatter carries a
+ * proper `template_id` / `template_slug` / `template_version` /
+ * `business_unit` / `program_id` / `guideline_ids` block alongside the
+ * standard `type` → `status` → `created_at` → `updated_at` → `id` fields.
+ * (Phase 4 W7 replaces the W5 HTML-comment provenance trailer.)
+ */
+export interface CreateDocumentExtras {
+  templateId?: string;
+  templateSlug?: string;
+  templateVersion?: number;
+  guidelineIds?: string[];
+  businessUnit?: string;
+  programId?: string;
+}
+
 export async function createDocument(
   vaultPath: string,
   title: string,
   docType: string,
   body: string,
   targetRelPath?: string | null,
+  extras?: CreateDocumentExtras,
 ): Promise<CreatedDocument> {
   if (!isTauri()) return mockCreateDocument(title, docType, body);
   return invoke<CreatedDocument>("create_document", {
@@ -649,6 +669,7 @@ export async function createDocument(
     docType,
     body,
     targetRelPath: targetRelPath ?? null,
+    extras: extras ?? null,
   });
 }
 

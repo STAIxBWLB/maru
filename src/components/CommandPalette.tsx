@@ -47,6 +47,13 @@ export const CommandPalette = memo(function CommandPalette({
   const actions: CommandAction[] = useMemo(
     () => [
       { id: "new-document", label: t("cmdk.action.newDocument"), shortcut: "⌘ N" },
+      {
+        id: "new-document-from-template",
+        label: t("cmdk.action.newDocumentFromTemplate"),
+      },
+      { id: "open-catalog", label: t("cmdk.action.openCatalog") },
+      { id: "export-bundle", label: t("cmdk.action.exportBundle") },
+      { id: "export-validate", label: t("cmdk.action.exportValidate") },
       { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },
       { id: "snapshot", label: t("cmdk.action.snapshot"), shortcut: "⌘ ⇧ S" },
       { id: "split-right", label: t("cmdk.action.splitRight"), shortcut: "⌘ D" },

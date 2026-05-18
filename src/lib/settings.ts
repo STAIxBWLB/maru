@@ -5,10 +5,10 @@ export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
-export type AnchorAppMode = "pkm" | "inbox" | "comms" | "meetings" | "tasks";
+export type AnchorAppMode = "pkm" | "inbox" | "comms" | "meetings" | "tasks" | "catalog" | "e2e";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
-export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills";
+export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills" | "guideline";
 export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
 
@@ -917,7 +917,7 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 
 function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
   return value === "pkm" || value === "inbox" || value === "comms" || value === "meetings"
-    || value === "tasks"
+    || value === "tasks" || value === "e2e"
     ? value
     : null;
 }
@@ -944,7 +944,7 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
   return value === "outline" || value === "files" || value === "memo" || value === "info"
-    || value === "skills"
+    || value === "skills" || value === "guideline"
     ? value
     : null;
 }
