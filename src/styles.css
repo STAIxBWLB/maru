@@ -5639,6 +5639,80 @@ button.git-badge:hover {
   margin-top: 2px;
 }
 
+/* Writing Guideline right-pane sidebar */
+.writing-guideline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+.writing-guideline--empty {
+  color: var(--muted, #888);
+  font-size: 12px;
+  padding: 16px 14px;
+}
+.writing-guideline--empty .muted {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted-2, #555);
+}
+.writing-guideline__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.writing-guideline__tabs button {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #2a2a2a);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.writing-guideline__tabs button.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border-color: var(--accent, #2563eb);
+}
+.writing-guideline__header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.writing-guideline__meta {
+  font-size: 10px;
+  color: var(--muted, #888);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.writing-guideline__markdown {
+  font-family: var(--mono, ui-monospace);
+  font-size: 11px;
+  line-height: 1.55;
+  background: var(--input-bg, #0e0e0e);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.writing-guideline__status,
+.writing-guideline__error {
+  font-size: 11px;
+  color: var(--muted, #888);
+  margin: 0;
+}
+.writing-guideline__error {
+  color: var(--danger, #ef4444);
+}
+
 @keyframes overlay-in {
   from {
     opacity: 0;

@@ -26,6 +26,7 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { CatalogPane } from "./components/catalog/CatalogPane";
+import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { InboxPane } from "./components/InboxPane";
 import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
@@ -6054,6 +6055,13 @@ function MainApp() {
                       onRunSkill={(skill) => openSkillCompose(skill)}
                     />
                   </div>
+                }
+                guidelineNode={
+                  <WritingGuidelineSidebar
+                    workspaceRoot={activeDocumentWorkspacePath}
+                    documentBody={draftContent || document?.content || ""}
+                    frontmatter={document?.meta ?? null}
+                  />
                 }
               />
             ) : null}
