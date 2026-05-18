@@ -399,6 +399,32 @@ function titleFromWikilinkTarget(target: string): string {
   return leaf ?? cleaned;
 }
 
+/**
+ * Append a small provenance block to the body when the user picked a Hub
+ * template or guideline set. Phase 4 (Document Studio) replaces this with
+ * proper frontmatter prefill.
+ */
+function appendHubProvenance(
+  body: string,
+  extras: import("./components/NewDocumentDialog").NewDocumentExtras,
+): string {
+  const lines: string[] = [];
+  if (extras.templateSlug) {
+    lines.push(
+      `<!-- anchor:template ${extras.templateSlug} v${extras.templateVersion ?? "?"} -->`,
+    );
+  }
+  if (extras.businessUnit) {
+    lines.push(`<!-- anchor:business_unit ${extras.businessUnit} -->`);
+  }
+  if (extras.guidelineIds && extras.guidelineIds.length > 0) {
+    lines.push(`<!-- anchor:guidelines ${extras.guidelineIds.join(", ")} -->`);
+  }
+  if (lines.length === 0) return body;
+  const trailer = lines.join("\n");
+  return body.length === 0 ? trailer : `${body}\n\n${trailer}\n`;
+}
+
 function visibilityAvailable(
   registry: WorkspaceRegistry,
   visibility: WorkspaceVisibilitySetting,
@@ -736,6 +762,7 @@ function MainApp() {
     title: string;
     relPath: string | null;
     docType?: string | null;
+    openLibrary?: boolean;
   } | null>(null);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
   const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
@@ -3238,7 +3265,7 @@ function MainApp() {
     }
   }, [workspaceRegistry.workspaces, handleAddWorkspace, switchActiveWorkspace]);
 
-  const openNewDocumentDialog = useCallback((docType?: string) => {
+  const openNewDocumentDialog = useCallback((docType?: string, options?: { fromLibrary?: boolean }) => {
     if (!activeWorkspaceCanCreate) {
       setError(
         t("workspace.writeBlocked", {
@@ -3251,8 +3278,11 @@ function MainApp() {
     }
     const seededDocType =
       docType ?? documentFilterDefaultDocType(documentFilter, anchorSettings.ui.documentViews);
+    const fromLibrary = options?.fromLibrary === true;
     setNewDocumentSeed(
-      seededDocType ? { title: "", relPath: null, docType: seededDocType } : null,
+      seededDocType || fromLibrary
+        ? { title: "", relPath: null, docType: seededDocType ?? null, openLibrary: fromLibrary }
+        : null,
     );
     setNewDocumentOpen(true);
   }, [
@@ -3848,14 +3878,27 @@ function MainApp() {
   }, [resolvedActiveTabId, snapshotTab]);
 
   const createNew = useCallback(
-    async (title: string, docType: string, body: string, targetRelPath: string | null) => {
+    async (
+      title: string,
+      docType: string,
+      body: string,
+      targetRelPath: string | null,
+      extras?: import("./components/NewDocumentDialog").NewDocumentExtras,
+    ) => {
       if (!activeDocumentWorkspacePath) return;
       if (blockWorkspaceWrite("create")) return;
+      // If the dialog returned a Hub template/guideline selection, fold
+      // the metadata into the document body as an HTML comment so the
+      // newly created doc carries a paper-trail to its source. A proper
+      // frontmatter prefill belongs to Phase 4 (Document Studio).
+      const finalBody = extras && (extras.templateSlug || extras.guidelineIds?.length)
+        ? appendHubProvenance(body, extras)
+        : body;
       const created = await createDocument(
         activeDocumentWorkspacePath,
         title,
         docType,
-        body,
+        finalBody,
         targetRelPath,
       );
       const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
@@ -4882,6 +4925,12 @@ function MainApp() {
       switch (id) {
         case "new-document":
           openNewDocumentDialog();
+          break;
+        case "new-document-from-template":
+          openNewDocumentDialog(undefined, { fromLibrary: true });
+          break;
+        case "open-catalog":
+          setPersistedAppMode("catalog");
           break;
         case "save":
           void saveCurrent();
@@ -6158,9 +6207,11 @@ function MainApp() {
 
         <NewDocumentDialog
           open={newDocumentOpen}
+          workspaceRoot={activeDocumentWorkspacePath}
           initialTitle={newDocumentSeed?.title ?? ""}
           initialRelPath={newDocumentSeed?.relPath ?? null}
           initialDocType={newDocumentSeed?.docType ?? "reference"}
+          initialOpenLibrary={newDocumentSeed?.openLibrary ?? false}
           onOpenChange={(open) => {
             setNewDocumentOpen(open);
             if (!open) setNewDocumentSeed(null);
