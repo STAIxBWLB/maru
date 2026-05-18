@@ -12,6 +12,7 @@ mod filename_rules;
 mod frontmatter;
 mod git;
 mod gmail_gws;
+mod hub_client;
 mod inbox;
 mod inbox_classifier;
 mod inbox_settings;
@@ -20,6 +21,7 @@ mod korean_date;
 mod launchd_migration;
 mod meetings;
 mod mission_state;
+mod ops_catalog;
 mod outlook_mso;
 mod shelf;
 mod skill_host;
@@ -54,6 +56,7 @@ use e2e_flow::{anchor_e2e_read, anchor_e2e_run};
 use file_manager::reveal_in_file_manager;
 use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
 use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
+use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
     accept_inbox_item, accept_inbox_items, read_inbox_processed_item, reject_inbox_item,
     reject_inbox_items, scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items,
@@ -71,6 +74,7 @@ use meetings::{
     scan_meeting_notes,
 };
 use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
+use ops_catalog::{catalog_drilldown, catalog_query, catalog_scan};
 use outlook_mso::{decide_outlook_item, decide_outlook_items, fetch_outlook_unread};
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
@@ -274,6 +278,15 @@ pub fn run() {
             agent_validate_marketplace_manifest,
             anchor_e2e_run,
             anchor_e2e_read,
+            // M1 Operations Catalog (Phase 3)
+            catalog_scan,
+            catalog_query,
+            catalog_drilldown,
+            // M7 Hub Connector (Phase 3 read, Phase 6 write)
+            hub_status,
+            hub_fetch_catalog,
+            hub_submit_gate,
+            hub_poll_gate,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")
