@@ -21,12 +21,14 @@
 // Future weeks layer the actual skill dispatch + hwpx-validate + OOXML
 // validate + PDF font-embed checks on top of this manifest.
 
+pub mod dispatch;
 pub mod manifest;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub use dispatch::export_dispatch;
 pub use manifest::{
     compute_source_sha256, plan_bundle, record_output_failure, record_output_pending,
     record_output_success, ExportFormat, ExportManifest, ExportOutputEntry, ExportOutputStatus,
@@ -71,9 +73,13 @@ pub fn export_plan(req: ExportPlanRequest) -> Result<ExportPlanResponse, String>
         return Err("at least one format is required".to_string());
     }
 
-    let (manifest_path, manifest) =
-        plan_bundle(&workspace, &req.source_path, &parsed_formats, req.output_dir.as_deref())
-            .map_err(|e| e.to_string())?;
+    let (manifest_path, manifest) = plan_bundle(
+        &workspace,
+        &req.source_path,
+        &parsed_formats,
+        req.output_dir.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(ExportPlanResponse {
         manifest_path: manifest_path.to_string_lossy().to_string(),

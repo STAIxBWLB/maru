@@ -109,6 +109,35 @@ export async function exportRecordFailure(
   });
 }
 
+export interface ExportDispatchResult {
+  format: ExportFormat;
+  output_path: string;
+  success: boolean;
+  command: string;
+  reason?: string | null;
+}
+
+export interface ExportDispatchResponse {
+  manifest_path: string;
+  manifest: ExportManifest;
+  validation: ValidationReport;
+  results: ExportDispatchResult[];
+}
+
+export async function exportDispatch(params: {
+  workspaceRoot: string;
+  manifestPath: string;
+  formats?: ExportFormat[];
+}): Promise<ExportDispatchResponse> {
+  return invoke<ExportDispatchResponse>("export_dispatch", {
+    req: {
+      workspace_root: params.workspaceRoot,
+      manifest_path: params.manifestPath,
+      formats: params.formats ?? [],
+    },
+  });
+}
+
 /**
  * Summary string for a ValidationReport (palette/status surfaces).
  */

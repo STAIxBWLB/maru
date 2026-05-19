@@ -104,7 +104,13 @@ import {
   updateFrontmatterField,
   type LegacyLaunchdService,
 } from "./lib/api";
-import { exportPlan, exportValidate, summarizeValidation, type ExportFormat } from "./lib/export";
+import {
+  exportDispatch,
+  exportPlan,
+  exportValidate,
+  summarizeValidation,
+  type ExportFormat,
+} from "./lib/export";
 import {
   readAnchorSettings,
   readWorkspaceConfig,
@@ -4918,10 +4924,16 @@ function MainApp() {
         formats,
       });
       setLastExportManifestPath(resp.manifest_path);
+      const dispatched = await exportDispatch({
+        workspaceRoot,
+        manifestPath: resp.manifest_path,
+        formats,
+      });
       setError(
         t("export.success", {
-          count: String(resp.manifest.outputs.length),
+          count: String(dispatched.manifest.outputs.length),
           manifest: resp.manifest_path,
+          summary: summarizeValidation(dispatched.validation),
         }),
       );
     } catch (err) {

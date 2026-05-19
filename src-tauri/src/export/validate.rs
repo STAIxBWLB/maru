@@ -59,16 +59,22 @@ pub fn validate_manifest(manifest_path: &Path) -> io::Result<ValidationReport> {
     for out in manifest.outputs.iter() {
         let abs = workspace_root.join(&out.path);
         let (status, reason) = match out.status {
-            ExportOutputStatus::Planned | ExportOutputStatus::Pending => {
-                (ValidationStatus::Skipped, Some(format!("status: {:?}", out.status)))
-            }
+            ExportOutputStatus::Planned | ExportOutputStatus::Pending => (
+                ValidationStatus::Skipped,
+                Some(format!("status: {:?}", out.status)),
+            ),
             ExportOutputStatus::Failed => (
                 ValidationStatus::Skipped,
-                out.reason.clone().or_else(|| Some("conversion failed".to_string())),
+                out.reason
+                    .clone()
+                    .or_else(|| Some("conversion failed".to_string())),
             ),
             ExportOutputStatus::Ready => {
                 if !abs.exists() {
-                    (ValidationStatus::Missing, Some(format!("missing: {}", out.path)))
+                    (
+                        ValidationStatus::Missing,
+                        Some(format!("missing: {}", out.path)),
+                    )
                 } else if let Some(expected) = &out.sha256 {
                     match compute_source_sha256(&abs) {
                         Ok((actual, _)) if &actual == expected => (ValidationStatus::Pass, None),
@@ -109,13 +115,19 @@ pub fn validate_manifest(manifest_path: &Path) -> io::Result<ValidationReport> {
 ///
 /// Callers can also pass an absolute path that already resolves correctly.
 fn workspace_root_from_manifest(manifest_path: &Path) -> io::Result<PathBuf> {
-    let bundle_dir = manifest_path
+    let manifest = load_manifest(manifest_path)?;
+    let bundle_dir = manifest_path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "manifest path has no parent")
+    })?;
+    for ancestor in bundle_dir.ancestors().skip(1) {
+        if ancestor.join(&manifest.source).exists() {
+            return Ok(ancestor.to_path_buf());
+        }
+    }
+    bundle_dir
         .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "manifest path has no parent"))?;
-    let parent = bundle_dir
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bundle dir has no parent"))?;
-    Ok(parent.to_path_buf())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bundle dir has no parent"))
 }
 
 #[cfg(test)]
@@ -145,6 +157,25 @@ mod tests {
         let report = validate_manifest(&manifest_path).unwrap();
         assert_eq!(report.source_status, ValidationStatus::Pass);
         assert_eq!(report.entries[0].status, ValidationStatus::Skipped);
+    }
+
+    #[test]
+    fn validate_recovers_workspace_root_for_nested_bundle() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("projects/x/draft.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Title\n\nbody\n").unwrap();
+        let (manifest_path, _) = plan_bundle(
+            tmp.path(),
+            "projects/x/draft.md",
+            &[ExportFormat::Docx],
+            None,
+        )
+        .unwrap();
+
+        let report = validate_manifest(&manifest_path).unwrap();
+        assert_eq!(report.source_status, ValidationStatus::Pass);
+        assert_eq!(report.source_path, "projects/x/draft.md");
     }
 
     #[test]

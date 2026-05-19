@@ -55,8 +55,8 @@ use document::{
 };
 use e2e_flow::{anchor_e2e_read, anchor_e2e_run};
 use export::{
-    export_manifest_load, export_plan, export_record_failure, export_record_pending,
-    export_record_success, export_validate,
+    export_dispatch, export_manifest_load, export_plan, export_record_failure,
+    export_record_pending, export_record_success, export_validate,
 };
 use file_manager::reveal_in_file_manager;
 use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
@@ -305,6 +305,7 @@ pub fn run() {
             export_record_pending,
             export_record_success,
             export_record_failure,
+            export_dispatch,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")
