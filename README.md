@@ -44,12 +44,25 @@ ANCHOR_HUB_DATABASE_URL=sqlite:///tmp/anchor-hub.db uv run uvicorn anchor_hub.ma
 
 Then in Anchor: open Catalog mode → footer "마지막 스캔" populates; ⌘ ⇧ N → toggle "Hub 템플릿에서 시작" → templates load from Hub; pick `business-plan-default` → body prefills with slot hints.
 
+After Phase 6 W21 ships, the same operator procedure will also exercise the `POST /api/v1/documents/{id}/finalize` round-trip — Anchor pushes the approved markdown body + rendered artifacts + linked evidence binaries to Hub, and the document then appears under the Hub Finalized tab inside Catalog mode.
+
 ## Next up (Phase 4 W10–W12)
 
 1. **Skill auto-dispatch (M4 finisher)** — drive `record_output_pending` → external skill (hwpx / docx / hwp-toolkit / LibreOffice) → `record_output_success` automatically from a single palette command, so users never touch the manifest manually.
 2. **Document Studio (M2)** — promote NewDocumentDialog into a multi-step Studio: source → template → guideline → sections → HWP fields → export → package, persisting per-doc state under `<workspace>/.anchor/studio/<doc-id>/state.json`.
 3. **HWP field map (M3)** — surface hwpx skill's slot scan in the Studio for both `.hwpx` placeholder fill and `.hwp → .hwpx` auto-conversion with manual-fallback state.
 4. **개조식 inline lint (M2 Step 4)** — wire the gaejosik skill as a CodeMirror decoration / BlockNote mark so guideline violations underline live in the editor.
+
+## Hub as published-document SSOT (Phase 4 W11 + Phase 6 W21)
+
+Anchor stays the **author SSOT** — drafting and editing always happen under `~/workspace/work/`. Anchor Hub becomes the **published SSOT** the moment an approval route closes.
+
+Two write paths land on Hub from Anchor:
+
+1. **`POST /api/v1/documents/sync`** (Phase 4 W11) — drafting metadata only. Anchor sends `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and to surface "이미 동기화된 초안" hints.
+2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Anchor auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>` and any subsequent edit creates a new draft that, once re-approved, becomes version `N+1` on Hub.
+
+The `hub_client/safety.rs` pre-flight enforces this split: only `/documents/{id}/finalize` may carry body/binary, and only when the corresponding submission gate is in an `approved` state. All other Hub calls reject body fields outright.
 
 ## Architecture
 
@@ -209,13 +222,13 @@ Five skills:
 
 **Verification gate**: in one day all five run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
 
-**Anchor Hub connector POC**:
-- `anchor-hub` is a separate public web/API service, not part of the desktop app. It owns shared program data, evidence reuse, KPI status, submission gates, RBAC-shaped access checks, and audit trails.
+**Anchor Hub connector**:
+- `anchor-hub` is a separate private web/API service, not part of the desktop app. Anchor remains the **author SSOT** for drafting; Hub is the **published SSOT** that owns shared catalog + draft metadata index + (post-approval) the canonical markdown body, rendered artifacts, and evidence binaries.
 - Anchor remains local-first. It stores global connector defaults in `~/.anchor/settings.json` and workspace connector overrides in `.anchor/workspace-state.json` or `.anchor/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
-- V1 connector calls are read-first: search shared context, find reusable evidence, fetch KPI status, and create a pending submission gate. Direct remote writes wait for an explicit approval flow.
-- Public POC sample data must be synthetic. Do not include real organization names, domains, people, internal project names, or private documents in fixtures, screenshots, logs, or README examples.
+- Two write paths from Anchor: `POST /documents/sync` (drafting metadata, Phase 4 W11) and `POST /documents/{id}/finalize` (approval-gated body + rendered artifacts + evidence binaries, Phase 6 W21).
+- Deployment is private only. Demo fixtures stay synthetic and live under the Hub repo's `tests/fixtures/demo/`; production seed is separate.
 
-**Hub connector verification gate**: a synthetic proposal note in Anchor -> query hub context -> pick reusable evidence -> create a pending submission gate -> hub returns an auditable pending state; Anchor never writes unapproved shared data directly.
+**Hub connector verification gate**: a synthetic proposal note in Anchor → query hub context → pick reusable evidence → create a pending submission gate → on approval, Anchor calls finalize and the document appears in Hub's `finalized_documents` with rendered artifacts and evidence binaries attached.
 
 ### Phase 4 — Document Edit Mode (week 15–18)
 
