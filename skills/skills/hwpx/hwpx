@@ -24,8 +24,10 @@ find_env_python() {
     while [ "$dir" != "/" ]; do
         for candidate in \
             "$dir/env/.venv/bin/python3" \
+            "$dir/envs/default/.venv/bin/python3" \
             "$dir/_sys/skills/env/.venv/bin/python3" \
-            "$dir/skills/env/.venv/bin/python3"; do
+            "$dir/skills/env/.venv/bin/python3" \
+            "$dir/skills/envs/default/.venv/bin/python3"; do
             [ -x "$candidate" ] && printf '%s\n' "$candidate" && return 0
         done
         dir="$(dirname "$dir")"
@@ -66,8 +68,8 @@ Commands:
   edit       find/replace 편집
   create     markdown/JSON으로 신규 HWPX 생성 (단순형)
   styled     보기 좋은 HWPX 생성 (폰트·여백·줄간격·헤더/푸터·페이지번호)
-  write-java 번들 JRE+hwpxlib로 HWPX 생성 (저수준, Apache-2.0)
-  export-html HTML → HWPX (bundled-JRE → python-hwpx-template → pypandoc cascade)
+  write-java 번들 Java+hwpxlib로 HWPX 생성 (저수준, Apache-2.0)
+  export-html HTML → HWPX (bundled Java → pypandoc cascade)
   validate   mimetype·manifest·XML 검증
   to-pdf     LibreOffice(+H2Orestart)로 PDF 변환
 
@@ -98,7 +100,7 @@ Examples:
 References (references/):
   hwpx-structure.md        zip/OWPML 구조
   korean-official-format.md 공문서 작성 규정 (기안문 10-part 구조)
-  python-hwpx-cheatsheet.md API 레시피
+  raw-zip-fallback.md      ZIP/XML 직접 처리 레시피
 USAGE
     exit 0
 fi

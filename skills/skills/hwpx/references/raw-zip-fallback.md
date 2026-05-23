@@ -1,13 +1,12 @@
-# 원시 zipfile + lxml 폴백
+# 원시 zipfile + lxml 처리
 
-python-hwpx 없이, 또는 python-hwpx가 커버하지 않는 연산을 위해 zip과 XML을 직접 다루는 방법.
+HWPX를 zip과 XML로 직접 다루는 방법.
 
 ## 언제 사용?
 
-1. python-hwpx가 파싱 중 오류를 내는 문서
-2. python-hwpx API에 없는 구조 변경 (복잡한 매니페스트 재배치, 암호화 처리)
-3. 라이선스 제약(Non-Commercial)으로 python-hwpx를 쓸 수 없는 상황
-4. 이해·학습용 (실제 구조 확인)
+1. 단순 CLI가 커버하지 않는 구조 변경 (복잡한 매니페스트 재배치, 암호화 처리)
+2. 런 경계를 넘는 치환처럼 텍스트 치환만으로 부족한 문서
+3. 이해·학습용 (실제 구조 확인)
 
 대부분의 경우 `./hwpx unpack` → `Edit` 도구 → `./hwpx repack` 흐름이 더 안전하고 짧다.
 

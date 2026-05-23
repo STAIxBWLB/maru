@@ -2,11 +2,11 @@
 """Seed the six skill templates.
 
 These are MVP placeholder templates: structurally valid HWPX with
-{{anchor}} placeholders in the right positions, using python-hwpx's
-blank document as the starting point. Style/font fine-tuning (font
-table, margins, 160% line spacing, 함초롬바탕/맑은고딕 registration) is
-defer-able — they render correctly with default Hancom fonts and can be
-refined by opening in Hancom Office and saving.
+{{anchor}} placeholders in the right positions, generated through the
+bundled Java writer. Style/font fine-tuning (font table, margins, 160%
+line spacing, 함초롬바탕/맑은고딕 registration) is defer-able. The output
+renders with default Hancom fonts and can be refined by opening in
+Hancom Office and saving.
 
 Run: python3 scripts/seed_templates.py
 Outputs: templates/*.hwpx (overwrites).
@@ -17,33 +17,27 @@ working).
 """
 from __future__ import annotations
 
-import logging
-import os
 import sys
 from pathlib import Path
 
-if not os.environ.get("HWPX_VERBOSE"):
-    logging.getLogger("hwpx").setLevel(logging.ERROR)
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
 
-from hwpx import HwpxDocument  # noqa: E402
+from write_java import write_java  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _save(doc: HwpxDocument, name: str) -> None:
+def _save(paragraphs: list[str], name: str) -> None:
     out = TEMPLATES_DIR / name
-    doc.save_to_path(out)
+    lines = [f"P:{line}" if line else "P:" for line in paragraphs]
+    write_java(out, lines)
     print(f"  wrote {out.relative_to(TEMPLATES_DIR.parent)} ({out.stat().st_size} bytes)")
 
 
-def _doc_with(paragraphs: list[str]) -> HwpxDocument:
-    doc = HwpxDocument.new()
-    # Drop the default blank paragraph by inserting ours then letting
-    # python-hwpx keep the structure. We simply append.
-    for text in paragraphs:
-        doc.add_paragraph(text)
-    return doc
+def _doc_with(paragraphs: list[str]) -> list[str]:
+    return paragraphs
 
 
 def seed_gongmunseo_basic() -> None:

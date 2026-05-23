@@ -1,10 +1,10 @@
-"""Path resolution for the hwpx skill's bundled-JRE runtime.
+"""Path resolution for the hwpx skill's bundled Java runtime.
 
 Layout (relative to this file):
   scripts/runtime_paths.py        ← __file__
   scripts/                        ← parent
   /                               ← SKILL_ROOT (skills/hwpx/)
-  ancestor _sys/skills/env/       ← ENV_ROOT (jre + .venv)
+  ancestor skills/envs/default/   ← ENV_ROOT (jre + .venv)
   runtime/                        ← bundled Java assets (in skill, committed)
 """
 from __future__ import annotations
@@ -20,27 +20,27 @@ def _find_env_root(start: Path) -> Path:
     for base in (start, *start.parents):
         for candidate in (
             base / "env",
+            base / "envs" / "default",
             base / "_sys" / "skills" / "env",
             base / "skills" / "env",
+            base / "skills" / "envs" / "default",
         ):
             if (candidate / "pyproject.toml").exists() or (candidate / ".venv").exists():
                 return candidate
-    return SKILL_ROOT.parents[2] / "skills" / "env"
+    return SKILL_ROOT.parents[2] / "skills" / "envs" / "default"
 
 
 ENV_ROOT = _find_env_root(SKILL_ROOT)
 
 JAVA_BIN = ENV_ROOT / "jre" / "bin" / "java"
 HWPXLIB_JAR = RUNTIME / "hwpxlib-1.0.5.jar"
-WRITER_CLASS_DIR = RUNTIME                                    # contains HwpxWriter.class
+WRITER_CLASS_DIR = RUNTIME
 WRITER_CLASS = RUNTIME / "HwpxWriter.class"
-TEMPLATE_HELPER = RUNTIME / "hwpx_template_export.py"
-TIDY_TEMPLATES = RUNTIME / "templates"
-
+WRITER_SOURCE = RUNTIME / "HwpxWriter.java"
 VENV_PY = ENV_ROOT / ".venv" / "bin" / "python3"
 
 SETUP_HINT = (
-    "JRE 미설치. 다음을 실행:\n"
+    "bundled Java runtime 미설치. 다음을 실행:\n"
     f"  bash {ENV_ROOT}/scripts/setup-jre.sh"
 )
 
@@ -50,17 +50,11 @@ def classpath() -> str:
 
 
 def assert_jre() -> None:
-    """Fail fast with a helpful message if the bundled JRE/jar/class are missing."""
-    missing = [str(p) for p in (JAVA_BIN, HWPXLIB_JAR, WRITER_CLASS) if not p.exists()]
+    """Fail fast with a helpful message if bundled Java assets are missing."""
+    missing = [str(p) for p in (JAVA_BIN, HWPXLIB_JAR, WRITER_SOURCE) if not p.exists()]
     if missing:
         raise RuntimeError(
-            "bundled-JRE writer 자산 누락:\n  - "
+            "bundled Java writer 자산 누락:\n  - "
             + "\n  - ".join(missing)
             + f"\n\n{SETUP_HINT}"
         )
-
-
-def tidy_template(template_id: str) -> Path:
-    """Resolve a tidy-style template file (report/gongmun/minutes/proposal/notice)."""
-    safe = "".join(c for c in template_id if c.isalnum() or c in "_-").lower() or "report"
-    return TIDY_TEMPLATES / f"{safe}.hwpx"

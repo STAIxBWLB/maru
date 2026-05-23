@@ -224,7 +224,7 @@ odd/even/first 변형이 가능. 상세는 header.xml의 `<hh:masterPage>`.
 
 ## 참고 구현
 
-python-hwpx의 실제 출력 XML을 보려면:
+실제 출력 XML을 보려면:
 
 ```bash
 ./hwpx unpack templates/공문서_기본.hwpx /tmp/view

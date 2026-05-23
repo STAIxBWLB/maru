@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# setup-jre.sh — install Temurin JRE 21 into _sys/skills/env/jre/
+# setup-jre.sh — install Temurin JDK 21 into skills/envs/default/jre/
 #
-# Used by the hwpx skill (and any other skill that needs a known-good JRE).
+# Used by the hwpx skill (and any other skill that needs a known-good Java runtime).
 # Strategy:
-#   1. If _sys/skills/env/jre/bin/java already runs → exit 0 (idempotent).
-#   2. Else download Temurin 21 from api.adoptium.net for the current OS/arch.
+#   1. If skills/envs/default/jre/bin/java has the jdk.compiler module → exit 0.
+#   2. Else download Temurin 21 JDK from api.adoptium.net for the current OS/arch.
 #
-# Output: _sys/skills/env/jre/bin/java
+# Output: skills/envs/default/jre/bin/java
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"          # _sys/skills/env
+ENV_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"          # skills/envs/default
 JRE_DIR="$ENV_ROOT/jre"
 
-# 1. idempotency
+# 1. idempotency. The hwpx writer uses Java source-file launch when
+# HwpxWriter.class is absent, so the bundled runtime must include jdk.compiler.
 if [[ -x "$JRE_DIR/bin/java" ]]; then
-  echo "[setup-jre] already installed: $JRE_DIR"
-  "$JRE_DIR/bin/java" -version
-  exit 0
+  if "$JRE_DIR/bin/java" --list-modules 2>/dev/null | grep -q '^jdk.compiler@'; then
+    echo "[setup-jre] already installed: $JRE_DIR"
+    "$JRE_DIR/bin/java" -version
+    exit 0
+  fi
+  echo "[setup-jre] existing runtime lacks jdk.compiler; reinstalling JDK"
 fi
 
 mkdir -p "$ENV_ROOT"
@@ -34,18 +38,18 @@ case "$(uname -m)" in
   *) echo "[setup-jre] unsupported arch: $(uname -m)" >&2; exit 1 ;;
 esac
 
-URL="https://api.adoptium.net/v3/binary/latest/21/ga/${ADOPT_OS}/${ADOPT_ARCH}/jre/hotspot/normal/eclipse"
+URL="https://api.adoptium.net/v3/binary/latest/21/ga/${ADOPT_OS}/${ADOPT_ARCH}/jdk/hotspot/normal/eclipse"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-TARBALL="$TMP/temurin-jre.tar.gz"
+TARBALL="$TMP/temurin-jdk.tar.gz"
 
-echo "[setup-jre] downloading Temurin 21 JRE: $ADOPT_OS/$ADOPT_ARCH"
+echo "[setup-jre] downloading Temurin 21 JDK: $ADOPT_OS/$ADOPT_ARCH"
 curl -fsSL -o "$TARBALL" "$URL"
 mkdir -p "$TMP/extract"
 tar -xzf "$TARBALL" -C "$TMP/extract"
 
-# Temurin macOS layout: jdk-21.x.y+z-jre/Contents/Home/{bin,lib,...}
-# Linux layout:         jdk-21.x.y+z-jre/{bin,lib,...}
+# Temurin macOS layout: jdk-21.x.y+z/Contents/Home/{bin,lib,...}
+# Linux layout:         jdk-21.x.y+z/{bin,lib,...}
 EXTRACTED="$(find "$TMP/extract" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 if [[ "$ADOPT_OS" == "mac" && -d "$EXTRACTED/Contents/Home" ]]; then
   EXTRACTED="$EXTRACTED/Contents/Home"

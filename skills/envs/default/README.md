@@ -36,7 +36,7 @@ env/
 
 | 카테고리 | 패키지 | 용도 |
 |---------|--------|------|
-| HWP | libhwp, pyhwp(hwp5), python-hwpx, olefile | HWP v5/HWPX 텍스트 추출 |
+| HWP | libhwp, pyhwp(hwp5), olefile, lxml | HWP v5 텍스트 추출, HWPX ZIP/XML 처리 |
 | PDF | pymupdf, pymupdf4llm, pdfplumber, pdfminer-six | PDF 텍스트/표 추출 |
 | OCR | pytesseract, pdf2image, ocrmypdf, pillow | 스캔 PDF OCR |
 | 유틸 | click, tqdm, python-magic, chardet, beautifulsoup4, lxml, six | 파일 처리 보조 |

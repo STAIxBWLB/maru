@@ -1,17 +1,16 @@
-"""hwpx export-html — cascade fallback HTML→HWPX exporter.
+"""hwpx export-html - cascade fallback HTML -> HWPX exporter.
 
 Direct port of tidy's `document:export-hwp` IPC handler
 (<workspace-root>/dev/tidy/app/electron/ipc-handlers.js:2756–2807).
 
 Stages (each tried in order; first success returns):
-  1. bundled JRE writer (Java) — flat HTML→text-block → HwpxWriter
-  2. python-hwpx + tidy template helper (hwpx_template_export.py)
-  3. pypandoc-hwpx CLI / module (if installed)
+  1. bundled Java writer - flat HTML -> text-block -> HwpxWriter
+  2. pypandoc-hwpx CLI / module (if installed)
 
 Stage 1 in this MVP is a simple flattener (block tags → H1:/H2:/P: lines).
 The richer table/style preservation logic (htmlToHwpxBlocks +
 rewriteHwpxWithBlocks, ~1500 LOC of JS in tidy) is intentionally NOT ported in
-this pass — users needing table fidelity rely on Stage 2.
+this pass.
 """
 from __future__ import annotations
 
@@ -24,16 +23,11 @@ import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
-from runtime_paths import (
-    TEMPLATE_HELPER,
-    VENV_PY,
-    assert_jre,
-    tidy_template,
-)
+from runtime_paths import VENV_PY, assert_jre
 from write_java import write_java
 
 
-# ─── Stage 1: HTML → flat text blocks ────────────────────────────────────
+# ─── Stage 1: HTML -> flat text blocks ───────────────────────────────────
 
 _HEADING_TAGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 _BLOCK_TAGS = {"p", "li", "blockquote", "div", "section", "article"}
@@ -105,31 +99,6 @@ def _try_bundled(html: str, out: Path) -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
-def _try_template(html_path: Path, out: Path, template_id: str) -> tuple[bool, str]:
-    template = tidy_template(template_id)
-    if not template.exists():
-        return False, f"template not found: {template}"
-    if not TEMPLATE_HELPER.exists():
-        return False, f"helper not found: {TEMPLATE_HELPER}"
-    if not VENV_PY.exists():
-        return False, f"venv python not found: {VENV_PY}"
-    proc = subprocess.run(
-        [
-            str(VENV_PY),
-            str(TEMPLATE_HELPER),
-            "--input-html", str(html_path),
-            "--output", str(out),
-            "--template-path", str(template),
-            "--template-id", template_id,
-        ],
-        capture_output=True,
-    )
-    if proc.returncode == 0 and out.exists() and out.stat().st_size > 0:
-        return True, ""
-    err = proc.stderr.decode("utf-8", "replace") or proc.stdout.decode("utf-8", "replace")
-    return False, err.strip() or f"exit {proc.returncode}"
-
-
 def _try_pypandoc(html_path: Path, out: Path) -> tuple[bool, str]:
     cli = shutil.which("pypandoc-hwpx")
     if cli:
@@ -152,30 +121,20 @@ def export_html(html_path: Path, out: Path, template_id: str = "report") -> dict
 
     ok, err1 = _try_bundled(html, out)
     if ok:
-        return {"engine": "bundled-hwpx-jre", "output": str(out)}
+        return {"engine": "bundled-hwpx-java", "output": str(out)}
 
-    ok, err2 = _try_template(html_path, out, template_id)
-    if ok:
-        return {
-            "engine": "python-hwpx-template",
-            "output": str(out),
-            "bundled_error": err1,
-        }
-
-    ok, err3 = _try_pypandoc(html_path, out)
+    ok, err2 = _try_pypandoc(html_path, out)
     if ok:
         return {
             "engine": "pypandoc-hwpx",
             "output": str(out),
             "bundled_error": err1,
-            "template_error": err2,
         }
 
     raise RuntimeError(
         "all engines failed:\n"
-        f"  bundled-jre : {err1}\n"
-        f"  template    : {err2}\n"
-        f"  pypandoc    : {err3}"
+        f"  bundled-java : {err1}\n"
+        f"  pypandoc    : {err2}"
     )
 
 
@@ -197,7 +156,7 @@ def cli_export_html(args: argparse.Namespace) -> int:
 def add_subparser(sub) -> None:
     s = sub.add_parser(
         "export-html",
-        help="HTML → HWPX (bundled-JRE → python-hwpx-template → pypandoc cascade)",
+        help="HTML -> HWPX (bundled Java -> pypandoc cascade)",
     )
     s.add_argument("input", help="입력 .html 파일")
     s.add_argument("output", help="출력 .hwpx 파일")
@@ -205,6 +164,6 @@ def add_subparser(sub) -> None:
         "--template-id",
         default="report",
         choices=("report", "gongmun", "minutes", "proposal", "notice"),
-        help="Stage 2 템플릿 ID (runtime/templates/{id}.hwpx)",
+        help="호환 옵션. 현재 bundled Java/pypandoc 경로에서는 사용하지 않음",
     )
     s.set_defaults(func=cli_export_html)
