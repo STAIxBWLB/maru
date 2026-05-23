@@ -4,6 +4,7 @@ import {
   nextStudioStep,
   previousStudioStep,
   sanitizeStudioDocId,
+  studioApplyBody,
   studioDocIdFromDocument,
 } from "./studio";
 import type { DocumentPayload } from "./types";
@@ -69,5 +70,11 @@ describe("studio helpers", () => {
     expect(nextStudioStep("package")).toBe("package");
     expect(previousStudioStep("sections")).toBe("guidelines");
     expect(previousStudioStep("source")).toBe("source");
+  });
+
+  it("fails clearly when applying body outside Tauri", async () => {
+    await expect(studioApplyBody("/work", "/work/reports/plan.md", "# Body")).rejects.toThrow(
+      "studio_apply_body_requires_tauri",
+    );
   });
 });

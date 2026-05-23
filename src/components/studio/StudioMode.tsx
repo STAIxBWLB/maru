@@ -105,6 +105,8 @@ export function StudioMode({
   const [editorMode, setEditorMode] = useState<EditorMode>("rich");
   const saveTimerRef = useRef<number | null>(null);
   const loadingRef = useRef(false);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveRevisionRef = useRef(0);
 
   const activeDocId = useMemo(
     () => (activeDocument ? studioDocIdFromDocument(activeDocument) : null),
@@ -150,6 +152,36 @@ export function StudioMode({
     }
   }, [onError, workspaceRoot]);
 
+  const enqueueStudioSave = useCallback(
+    (nextState: StudioState): Promise<void> => {
+      if (!workspaceRoot) return Promise.resolve();
+      const revision = saveRevisionRef.current + 1;
+      saveRevisionRef.current = revision;
+      setSaving(true);
+      const run = saveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await studioStateSave(workspaceRoot, nextState);
+          if (revision === saveRevisionRef.current) {
+            await loadSummaries();
+          }
+        })
+        .catch((err) => {
+          if (revision === saveRevisionRef.current) {
+            onError(err instanceof Error ? err.message : String(err));
+          }
+        })
+        .finally(() => {
+          if (revision === saveRevisionRef.current) {
+            setSaving(false);
+          }
+        });
+      saveQueueRef.current = run;
+      return run;
+    },
+    [loadSummaries, onError, workspaceRoot],
+  );
+
   useEffect(() => {
     if (!workspaceRoot) {
       setState(null);
@@ -188,18 +220,12 @@ export function StudioMode({
     if (!workspaceRoot || !state || loadingRef.current) return;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      setSaving(true);
-      void studioStateSave(workspaceRoot, state)
-        .then(() => {
-          void loadSummaries();
-        })
-        .catch((err) => onError(err instanceof Error ? err.message : String(err)))
-        .finally(() => setSaving(false));
+      void enqueueStudioSave(state);
     }, 600);
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
-  }, [loadSummaries, onError, state, workspaceRoot]);
+  }, [enqueueStudioSave, state, workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot || !state) return;
@@ -240,16 +266,7 @@ export function StudioMode({
   async function saveNow(): Promise<void> {
     if (!workspaceRoot || !state) return;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    setSaving(true);
-    try {
-      const saved = await studioStateSave(workspaceRoot, state);
-      setState(saved);
-      await loadSummaries();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
+    await enqueueStudioSave(state);
   }
 
   async function loadState(docId: string): Promise<void> {

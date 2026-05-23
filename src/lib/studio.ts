@@ -115,7 +115,6 @@ export function sanitizeStudioDocId(input: string | null | undefined, fallback =
     .replace(/\.md$/i, "")
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/\.+/g, ".")
-    .replace(/^-+|-+$/g, "")
     .replace(/^\.+/, "")
     .replace(/^-+|-+$/g, "")
     .slice(0, 120);
@@ -192,6 +191,7 @@ export async function studioApplyBody(
   documentPath: string,
   bodyMarkdown: string,
 ): Promise<DocumentPayload> {
+  if (!isTauri()) throw new Error("studio_apply_body_requires_tauri");
   return invoke<DocumentPayload>("studio_apply_body", {
     workPath,
     documentPath,

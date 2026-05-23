@@ -111,12 +111,16 @@ pub fn studio_state_list(work_path: String) -> Result<Vec<StudioStateSummary>, S
 
     let mut states = Vec::new();
     for entry in fs::read_dir(&root).map_err(|err| format!("Cannot read Studio state: {err}"))? {
-        let entry = entry.map_err(|err| format!("Cannot read Studio state: {err}"))?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let path = entry.path().join("state.json");
         if !path.is_file() {
             continue;
         }
-        let state = read_state_file(&path)?;
+        let Ok(state) = read_state_file(&path) else {
+            continue;
+        };
         states.push(StudioStateSummary {
             doc_id: state.doc_id,
             current_step: state.current_step,
@@ -143,12 +147,17 @@ pub fn studio_state_read(
 
 #[tauri::command]
 pub fn studio_state_save(work_path: String, mut state: StudioState) -> Result<StudioState, String> {
-    assert_anchor_can_write(&work_path, WorkspaceWriteAction::Create)?;
     validate_doc_id(&state.doc_id)?;
     state.schema_version = STUDIO_SCHEMA_VERSION;
     state.updated_at = Utc::now().to_rfc3339();
 
     let path = state_path(&work_path, &state.doc_id)?;
+    let write_action = if path.is_file() {
+        WorkspaceWriteAction::Modify
+    } else {
+        WorkspaceWriteAction::Create
+    };
+    assert_anchor_can_write(&work_path, write_action)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create Studio state directory: {err}"))?;
@@ -364,6 +373,20 @@ mod tests {
         assert!(studio_state_read(root, "doc-123".to_string())
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn state_list_skips_invalid_entries() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        studio_state_save(root.clone(), sample_state("good")).unwrap();
+        let bad_dir = dir.path().join(".anchor").join("studio").join("bad");
+        fs::create_dir_all(&bad_dir).unwrap();
+        fs::write(bad_dir.join("state.json"), "{not valid json").unwrap();
+
+        let listed = studio_state_list(root).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].doc_id, "good");
     }
 
     #[test]
