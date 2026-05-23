@@ -13,7 +13,7 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 2 — Inbox + AI | ✅ write loop live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with Configured Entries / Processing / Processed Items / Files / Gmail sections, classify/accept/reject/process) all shipped. The primary local inbox flow now reads `workspace.config.yaml` `inbox:` settings, stages dropped files into the configured `inbox.file_drop` channel/path, scans `inbox/drop/<channel>/` plus `items/pending/*/manifest.yaml`, and reads processed history from `items/{done,failed,duplicate}` using configured artifact filenames; legacy `inbox/downloads/<source>` remains compatible. Accept/reject runs through an approval gate, Gmail decisions apply Anchor labels, keyboard `a`/`r`/`p`, multi-select, bulk actions, dot folders are hidden unless allowlisted in Settings, and mission state/log/stop hooks are in place. |
 | 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.anchor/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.anchor/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
 | 3 — Unified document operations (7 modules) | ✅ W1-W6 done | 사업단/대학본부조직 document operations 7-module 로드맵 (M1 Operations Catalog · M2 Document Studio · M3 Template/Form Filling · M4 Export Pipeline · M5 Evidence Binder · M6 Deck Studio · M7 Hub Connector). **W1**: rule SSOTs (frontmatter-schema, bu-lifecycle, hub-sync, evidence-policy) + Rust `ops_catalog` + `hub_client` scaffolds + 4 BU seeds. **W2 (anchor-hub)**: 9 catalog REST endpoints + Alembic 0001_core schema (13 tables) + 21-template synthetic seed + 12 pytest. **W3**: real `ops_catalog::scan` indexing across BU configs / inbox manifests / tasks frontmatter / document frontmatter / evidence sidecars; `Catalog` mode + 3-column UI. **W4**: notify-based fs watcher with debounced `catalog://refresh`, real Hub HTTP read path (reqwest blocking + ETag + offline fallback), Catalog drilldown dialog + Reveal-in-Finder, verification gate (110 entries / 4 BUs / 986 ms on `~/workspace/work`). **W5**: `hubLibrary` typed fetchers + NewDocumentDialog Hub template/guideline pickers + CommandPalette "Hub 템플릿으로 새 문서" + Catalog open. **W6**: WritingGuidelineSidebar (right-pane tab, resolves frontmatter `guideline_ids` and `anchor:guidelines` provenance trailer, multi-tab body viewer). Test totals: cargo 324 / 2 ignored (catalog 6 + watcher 6 + http 1 + safety 5 new) + vitest 198 / 33 files (writingGuideline 7 new) + anchor-hub 15. |
-| 4 — Document Edit Mode (Studio + Templates) | 🚧 W7-W9 done | Folds anchor-editor into a 7-step Document Studio (source → template → guideline → sections → HWP fields → export → package) backed by M3 + M4. **W7**: `create_document` accepts `CreateDocumentExtras` (template_id / template_slug / template_version / guideline_ids / business_unit / program_id) and emits them as proper frontmatter in a deterministic order after the core type/status/timestamp/id block, replacing the W5 `<!-- anchor:template … -->` provenance trailer. `WritingGuidelineSidebar` prioritizes frontmatter ids over legacy comment ids. **W8 (M4 scaffold)**: `src-tauri/src/export/` plans an output bundle next to the source markdown — `manifest.yaml` records source sha256 + per-format entries with `planned | pending | ready | failed` status. **W9 (M4 transitions)**: `record_output_{pending,success,failure}` plus matching `export_record_*` Tauri commands move manifest entries through the lifecycle, hashing successful artifacts on-disk and storing reason strings on failure. `CommandPalette` gains "Validate last export bundle" which calls `export_validate` and surfaces a `pass/missing/hash-mismatch/skipped` summary via `summarizeValidation`. Tests: 340 cargo / 199 vitest. |
+| 4 — Document Edit Mode (Studio + Templates) | 🚧 W7-W10 done | Folds anchor-editor into a 7-step Document Studio (source → template → guideline → sections → HWP fields → export → package) backed by M3 + M4. **W7**: `create_document` accepts `CreateDocumentExtras` (template_id / template_slug / template_version / guideline_ids / business_unit / program_id) and emits them as proper frontmatter in a deterministic order after the core type/status/timestamp/id block, replacing the W5 `<!-- anchor:template … -->` provenance trailer. `WritingGuidelineSidebar` prioritizes frontmatter ids over legacy comment ids. **W8 (M4 scaffold)**: `src-tauri/src/export/` plans an output bundle next to the source markdown — `manifest.yaml` records source sha256 + per-format entries with `planned | pending | ready | failed` status. **W9 (M4 transitions)**: `record_output_{pending,success,failure}` plus matching `export_record_*` Tauri commands move manifest entries through the lifecycle, hashing successful artifacts on-disk and storing reason strings on failure. `CommandPalette` gains "Validate last export bundle" which calls `export_validate` and surfaces a `pass/missing/hash-mismatch/skipped` summary via `summarizeValidation`. **W10 (M4 dispatch)**: `export_dispatch` runs the planned docx/hwpx/pdf bundle from one palette command, records ready/failed states back into the manifest, and surfaces partial failures such as missing converters or source hash drift. Tests: 343 cargo / 199 vitest. |
 
 Plan reference (work repo internal): `~/.claude/plans/flickering-seeking-engelbart.md`. Rule SSOTs at `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`.
 
@@ -33,7 +33,7 @@ The above gates run fully offline (cache fallback). To exercise the live Hub rea
 ```bash
 # anchor-hub: start FastAPI + sqlite (or run docker compose up -d db for Postgres)
 cd dev/anchor-hub
-uv run python -m scripts.seed_catalog --scope public
+uv run python -m scripts.seed_catalog
 ANCHOR_HUB_DATABASE_URL=sqlite:///tmp/anchor-hub.db uv run uvicorn anchor_hub.main:app --port 8017
 
 # anchor: flip workspace.config.yaml
@@ -44,12 +44,25 @@ ANCHOR_HUB_DATABASE_URL=sqlite:///tmp/anchor-hub.db uv run uvicorn anchor_hub.ma
 
 Then in Anchor: open Catalog mode → footer "마지막 스캔" populates; ⌘ ⇧ N → toggle "Hub 템플릿에서 시작" → templates load from Hub; pick `business-plan-default` → body prefills with slot hints.
 
-## Next up (Phase 4 W10–W12)
+After Phase 6 W21 ships, the same operator procedure will also exercise the `POST /api/v1/documents/{id}/finalize` round-trip — Anchor pushes the approved markdown body + rendered artifacts + linked evidence binaries to Hub, and the document then appears under the Hub Finalized tab inside Catalog mode.
 
-1. **Skill auto-dispatch (M4 finisher)** — drive `record_output_pending` → external skill (hwpx / docx / hwp-toolkit / LibreOffice) → `record_output_success` automatically from a single palette command, so users never touch the manifest manually.
-2. **Document Studio (M2)** — promote NewDocumentDialog into a multi-step Studio: source → template → guideline → sections → HWP fields → export → package, persisting per-doc state under `<workspace>/.anchor/studio/<doc-id>/state.json`.
-3. **HWP field map (M3)** — surface hwpx skill's slot scan in the Studio for both `.hwpx` placeholder fill and `.hwp → .hwpx` auto-conversion with manual-fallback state.
-4. **개조식 inline lint (M2 Step 4)** — wire the gaejosik skill as a CodeMirror decoration / BlockNote mark so guideline violations underline live in the editor.
+## Next up (Phase 4 W11–W12)
+
+1. **Document Studio (M2)** — promote NewDocumentDialog into a multi-step Studio: source → template → guideline → sections → HWP fields → export → package, persisting per-doc state under `<workspace>/.anchor/studio/<doc-id>/state.json`.
+2. **HWP field map (M3)** — surface hwpx skill's slot scan in the Studio for both `.hwpx` placeholder fill and `.hwp → .hwpx` auto-conversion with manual-fallback state.
+3. **개조식 inline lint (M2 Step 4)** — wire the gaejosik skill as a CodeMirror decoration / BlockNote mark so guideline violations underline live in the editor.
+4. **Export dispatch hardening** — optional: move long-running converters behind background mission state and add format-specific validators, without changing the manifest lifecycle.
+
+## Hub as published-document SSOT (Phase 4 W11 + Phase 6 W21)
+
+Anchor stays the **author SSOT** — drafting and editing always happen under `~/workspace/work/`. Anchor Hub becomes the **published SSOT** the moment an approval route closes.
+
+Two write paths land on Hub from Anchor:
+
+1. **`POST /api/v1/documents/sync`** (Phase 4 W11) — drafting metadata only. Anchor sends `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and to surface "이미 동기화된 초안" hints.
+2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Anchor auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>` and any subsequent edit creates a new draft that, once re-approved, becomes version `N+1` on Hub.
+
+W11 implements the metadata-only sync side first. Phase 6 W21 must add the matching `hub_client/safety.rs` pre-flight so `/documents/{id}/finalize` is the only Anchor client path allowed to carry body/binary payloads, and only after the corresponding submission gate is approved.
 
 ## Architecture
 
@@ -209,13 +222,13 @@ Five skills:
 
 **Verification gate**: in one day all five run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
 
-**Anchor Hub connector POC**:
-- `anchor-hub` is a separate public web/API service, not part of the desktop app. It owns shared program data, evidence reuse, KPI status, submission gates, RBAC-shaped access checks, and audit trails.
+**Anchor Hub connector**:
+- `anchor-hub` is a separate private web/API service, not part of the desktop app. Anchor remains the **author SSOT** for drafting; Hub is the **published SSOT** that owns shared catalog + draft metadata index + (post-approval) the canonical markdown body, rendered artifacts, and evidence binaries.
 - Anchor remains local-first. It stores global connector defaults in `~/.anchor/settings.json` and workspace connector overrides in `.anchor/workspace-state.json` or `.anchor/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
-- V1 connector calls are read-first: search shared context, find reusable evidence, fetch KPI status, and create a pending submission gate. Direct remote writes wait for an explicit approval flow.
-- Public POC sample data must be synthetic. Do not include real organization names, domains, people, internal project names, or private documents in fixtures, screenshots, logs, or README examples.
+- Two write paths from Anchor: `POST /documents/sync` (drafting metadata, Phase 4 W11) and `POST /documents/{id}/finalize` (approval-gated body + rendered artifacts + evidence binaries, Phase 6 W21).
+- Deployment is private only. Demo fixtures stay synthetic and live under the Hub repo's `tests/fixtures/demo/`; production seed is separate.
 
-**Hub connector verification gate**: a synthetic proposal note in Anchor -> query hub context -> pick reusable evidence -> create a pending submission gate -> hub returns an auditable pending state; Anchor never writes unapproved shared data directly.
+**Hub connector verification gate**: a synthetic proposal note in Anchor → query hub context → pick reusable evidence → create a pending submission gate → on approval, Anchor calls finalize and the document appears in Hub's `finalized_documents` with rendered artifacts and evidence binaries attached.
 
 ### Phase 4 — Document Edit Mode (week 15–18)
 

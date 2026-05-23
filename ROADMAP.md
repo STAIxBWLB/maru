@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Anchor desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status anchor** — Updated through Phase 4 W9 (export pipeline transitions + validate). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
+> **Status anchor** — Updated through Phase 4 W10 (export pipeline dispatch). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`. The 26-week plan itself lives at `~/.claude/plans/flickering-seeking-engelbart.md` (work-repo internal) and is mirrored here from Anchor's perspective.
 
@@ -13,12 +13,12 @@ Each module is owned by Anchor desktop. Hub backs them where shared catalog data
 | # | Module | Purpose | Surface | Owners |
 |---|--------|---------|---------|--------|
 | M1 | Operations Catalog | "What needs my attention right now" — deadlines, in-flight approvals, unlinked evidence, inbox pending | Activity-rail `LayoutGrid` mode → 3-column pane | ✅ shipped |
-| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | New `Studio` mode (W11) | 🚧 in progress |
+| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | New `Studio` mode (W11) | 📋 planned |
 | M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 partial (W5 picker shipped) |
-| M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + format-specific validators | `export_*` Tauri commands + palette (W12 finisher: auto-dispatch) | 🚧 scaffold + transitions shipped |
+| M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · validators planned |
 | M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane tab (W14+) | 📋 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
-| M7 | Hub Connector | Read shared context (templates / guidelines / glossary / evidence index / KPI status) + create pending submission gates only | Background + `Hub` commands | ✅ read shipped (W4) · ⏳ write (P6 W19) |
+| M7 | Hub Connector | Read shared context (templates / guidelines / glossary / evidence index / KPI status / **finalized documents**) + create submission gates + **finalize approved documents to Hub** (markdown body + rendered artifacts + evidence binaries) | Background + `Hub` commands | ✅ read shipped (W4) · Hub sync API shipped · ⏳ Anchor sync caller (P4 W11) · ⏳ finalize write (P6 W21) |
 
 ## 2. Week-by-week deliverables
 
@@ -42,7 +42,7 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W7 | ✅ | `create_document` `CreateDocumentExtras` frontmatter prefill (template_id / template_slug / template_version / business_unit / program_id / guideline_ids) replacing W5 HTML trailer | `src-tauri/src/document.rs` · `src/lib/api.ts` |
 | W8 | ✅ | M4 Export Pipeline scaffold — `export/{manifest,validate}.rs` + `export_plan / _manifest_load / _validate` + manifest.yaml schema with sha256 round-trip | `src-tauri/src/export/*` · `src/lib/export.ts` |
 | W9 | ✅ | M4 transitions — `record_output_{pending,success,failure}` + `export_record_*` Tauri commands + `Validate last export bundle` palette + `summarizeValidation` | same module as W8 |
-| W10 | 📋 | **Skill auto-dispatch** — single "Export bundle" command drives `pending → ready/failed` via `skill_host::dispatch_background`. Three skill mappings: `docx → pandoc-or-docx-skill`, `hwpx → hwpx skill`, `pdf → hwpx-via-libreoffice` (fallback `pandoc → pdf`). Each conversion runs in a background mission with the existing skill subsystem; success calls `export_record_success`, failure calls `export_record_failure`. | `src-tauri/src/export/dispatch.rs` (new) · `src-tauri/src/skill_host/dispatch.rs` · `src/components/export/ExportPanel.tsx` (new) |
+| W10 | ✅ | **Export bundle dispatch** — single "Export bundle" command drives `pending → ready/failed` from the manifest. Current implementation uses deterministic local converter commands (`pandoc`, `hwpx`, LibreOffice-backed PDF fallback) and records success/failure through the W9 manifest transitions. Missing converters, missing outputs, and source hash drift surface as partial failures instead of silent success. Background mission wrapping remains optional hardening. | `src-tauri/src/export/dispatch.rs` · `src/lib/export.ts` · `src/App.tsx` |
 | W11 | 📋 | **Document Studio multi-step wizard (M2)** — new `Studio` activity-rail mode. 7 steps under `src/components/studio/StudioMode.tsx`: source picker, template picker (reuse `lib/hubLibrary`), guideline picker, section editor (BlockNote pinned per slot), HWP field map (Step 5 placeholder for now), export (Step 6 wraps `export_plan` + dispatch), package (Step 7 freezes versions). State persisted at `<workspace>/.anchor/studio/<doc-id>/state.json` via new `src-tauri/src/studio/{mod,steps,packaging}.rs`. | `src-tauri/src/studio/*` · `src/components/studio/*` · `src/App.tsx` activity-rail wiring |
 | W12 | 📋 | **HWP field map (M3) + 개조식 inline lint (M2 Step 4)** — `hwpx` skill slot scan exposed as `template_get_fields(template_id)` + Studio Step 5 form. `gaejosik` skill wired as a debounced subprocess + CodeMirror decoration / BlockNote mark for live lint underline. Lint dismissals persisted under `composer.lintDismissals` in workspace-state. | `src-tauri/src/template_fill/{hwpx,hwp_convert}.rs` (new) · `src-tauri/src/linter/gaejosik.rs` (new) · `src/components/composer/SlotPanel.tsx` |
 
@@ -57,14 +57,14 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W17 | M6 | Generate step matrix — `imageMode` radio (codex-native / provider / html-css) × `productionMode` checkboxes (image-folder / html-deck / pptx-from-images / pdf-export). Job artifact directory `projects/.../05-decks/<slug>/`. |
 | W18 | M6 | Per-page regenerate, drag-and-drop reorder, manifest.yaml hashing of every emitted page + final PPTX / PDF. |
 
-### Phase 6 — Approval workflow + Hub write (W19–W22)
+### Phase 6 — Approval workflow + Finalize to Hub (W19–W22)
 
 | W | Module | Deliverable |
 |---|--------|-------------|
 | W19 | M7 + M2 | Anchor Studio Step 7 emits `hub_submit_gate` (the existing W4 stub) with all safety pre-flights. `submission_gate_id` and `status: submitted` written back to the source markdown's frontmatter. |
 | W20 | M7 | Hub polling for gate state changes; `frontmatter.status` auto-advances `submitted → received → approved/rejected` as Hub state matures. |
-| W21 | M2 + Hub | Approval drawer in Anchor — right pane shows `approval` block from frontmatter; per-step sign-off button posts to Hub `approval_routes/<id>/actions`. |
-| W22 | M2 | Status board mode (Kanban-style: draft / review / approval / archived) over the Catalog index, filtered by active BU. |
+| W21 | M2 + M7 + M4 + M5 | Approval drawer in Anchor — right pane shows `approval` block from frontmatter; per-step sign-off button posts to Hub `approval_routes/<id>/actions`. **Finalize step**: the moment a route transitions to `approved`, Anchor auto-calls `POST /api/v1/documents/{id}/finalize` carrying the markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201` response, frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>` and future edits create a new local file that, when re-approved, will become version N+1 on Hub. |
+| W22 | M2 + M7 | Status board mode (Kanban-style: draft / review / approval / archived) over the Catalog index, filtered by active BU. **New**: Hub Finalized tab inside `Catalog` mode — published version timeline + per-artifact download (via `GET /finalized-documents/{id}/artifacts/{format}`) + audit chain viewer. |
 
 ### Phase 7 — Certification & KPI bundle (W23–W26)
 
@@ -73,13 +73,13 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W23 | M5 + Hub | Certification Vault mode reads Hub `certifications` + `certification_requirements`; checklists auto-bound to existing doc / evidence by document_type + business_unit. |
 | W24 | M5 | `Cert: Bind evidence to item` + missing-requirement detection in Anchor UI. |
 | W25 | M5 | KPI Composer pulls Hub `kpi_snapshots` + generates a 개조식 narrative md with evidence references. |
-| W26 | M5 + Hub | `certification.bundle.create` proposal → Anchor downloads + presents the PDF bundle (cover + per-requirement section + KPI charts + evidence pages). Phase 3-7 verification gate. |
+| W26 | M5 + Hub | `certification.bundle.create` proposal → Anchor downloads + presents the PDF bundle (cover + per-requirement section + KPI charts + evidence pages). The bundle is assembled by Hub directly from `finalized_documents` + `finalized_document_artifact` + `evidence_blobs` — **no Anchor binary push is needed at bundle time** (everything was pushed at Phase 6 W21 finalize). Phase 3-7 verification gate. |
 
 ## 3. Test matrix (target growth)
 
 | Surface | W9 baseline | Phase 4 target | Phase 5 target | Phase 7 target |
 |---------|-------------|----------------|----------------|----------------|
-| Rust unit (`cargo test --lib`) | 340 | 360+ (dispatch, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) |
+| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) |
 | Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ |
 | Hub pytest | 15 | 25 (sync endpoint + workflow seeds) | 40 | 60 |
 | E2E playwright | smoke only | + Studio flow | + binder + decks | + full bundle |
@@ -89,35 +89,26 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 1. **Frontmatter byte-identity** — every Anchor write that mutates a YAML field must preserve unrelated fields, comments, ordering, and quoting. `src-tauri/src/frontmatter/ops.rs` is the only allowed code path.
 2. **Skill dispatch is proposal-only** — every Hub-write MCP tool and every multi-step automation passes through the `proposal_queue` table (Hub) or the `approval.rs` gate (Anchor). No silent destructive operations.
 3. **Cache surfaces are disposable** — `<workspace>/.anchor/cache/*`, `.anchor/runs/*`, `.anchor/queue/*`, `.anchor/studio/*`, `.anchor/certification/*` are gitignored runtime data; never write canonical state there.
-4. **Hub never holds bodies** — only sha256 + metadata + status. Binary originals + document body stay under `~/workspace/work/`. The `hub-sync.md` `do_not_upload` list is enforced both client-side (`hub_client/safety.rs`) and server-side (`evidence_index` schema deliberately lacks a blob FK).
-5. **Public vs private deployment** — public Hub seed must scrub real org/program/person names. CI gates this regex sweep in the Hub repo. The Anchor side never sends real names to a `deployment_mode=public` instance.
+4. **Hub holds bodies only for approved documents.** Drafts stay under `~/workspace/work/` (Anchor = author SSOT). The Anchor → Hub write path is two-stage: `POST /documents/sync` (metadata snapshot, Phase 4 W11) for any draft and `POST /documents/{id}/finalize` (markdown body + rendered artifacts + linked evidence binaries, Phase 6 W21) after the approval route closes. W21 must add the matching `hub_client/safety.rs` pre-flight so finalize is the only Anchor client path that may carry bodies/binaries, and only when the corresponding `submission_gate` state is `approved`.
+5. **Private deployment is the product path.** Public/demo compatibility may remain in config and synthetic fixtures, but glossary scrubbing and real-name CI regex gates are not deployment logic.
 6. **Korean filenames** — workspace path components stay in ASCII to avoid macOS NFD breakage. Templates handle Korean content; the file name doesn't.
 
 ## 5. Continuing work — concrete next steps
 
-### Immediate (W10 entry)
+### Immediate (W11 entry)
 
 ```
-# branch: feat/anchor-e2e-flow (or a fresh feat/export-dispatch off main)
-src-tauri/src/export/dispatch.rs        # new module
-src-tauri/src/lib.rs                    # register export_dispatch command
-src/lib/export.ts                       # exportDispatch wrapper
-src/components/export/ExportPanel.tsx   # right-pane progress UI (optional)
-src/App.tsx                             # "Export bundle (run)" palette
+# branch: fresh feat/studio-mode off main
+src-tauri/src/studio/*                  # new state + packaging module
+src/components/studio/*                 # 7-step Studio mode
+src/lib/settings.ts                     # add studio app mode
+src/App.tsx                             # activity-rail wiring + export step reuse
 ```
 
-Suggested skill mapping for W10:
-| Format | Primary skill | Fallback |
-|--------|---------------|----------|
-| docx | `docx` skill (`~/.anchor/skills/docx`) | `pandoc --from markdown --to docx` |
-| hwpx | `hwpx` skill (Python venv at `~/.anchor/env/.venv`) | manual: `<file>.md` → `hwpx-skill compile` |
-| pdf | `hwpx → pdf` via `hwpx to-pdf` (LibreOffice + H2Orestart) | `pandoc --pdf-engine=lualatex` |
-
-Hand-off pattern (mirrors W4 hub_client retry + offline queue):
-1. `export_dispatch(workspace_root, manifest_path, format)` → spawn the skill via `skill_host::dispatch_background` with `format` as input arg.
-2. Skill output convention — write the artifact to the path the manifest already recorded (`bundle_dir/<stem>.<ext>`).
-3. On skill exit code 0 + file present → call `record_output_success`. Non-zero or missing file → `record_output_failure(reason)`.
-4. The palette command then re-runs `export_validate` to surface the new state in one toast.
+W10 follow-up hardening, if needed before Studio:
+- Wrap converter runs in mission state when conversion duration becomes user-visible.
+- Add format-specific validators (`hwpx` validator, OOXML schema check, PDF font/embed check) after the generic manifest hash validation.
+- Add an optional right-pane export progress surface; keep the palette command as the primary entrypoint.
 
 ### W11 (Studio) starter
 
@@ -144,3 +135,4 @@ Hand-off pattern (mirrors W4 hub_client retry + offline queue):
 - **Manifest** — `manifest.yaml` next to the bundle. Anchor SSOT for export state; the file is the only place sha256s of generated outputs live.
 - **Provenance trailer (deprecated W5→W7)** — `<!-- anchor:template ... -->` HTML comments. Replaced by proper frontmatter from Phase 4 W7 onward.
 - **Studio** — The new Phase 4 W11+ multi-step authoring surface. Distinct from "Composer" view mode in the editor (W12+ work).
+- **Finalize** — Phase 6 W21 action that pushes an approved document's markdown body + rendered artifacts (docx/hwpx/pdf) + linked evidence binaries to Hub via `POST /api/v1/documents/{id}/finalize`. After a successful finalize, the local markdown's frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`; subsequent edits create a new draft that, on re-approval, becomes version `N+1` on Hub.

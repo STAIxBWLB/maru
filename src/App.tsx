@@ -108,6 +108,7 @@ import {
   exportDispatch,
   exportPlan,
   exportValidate,
+  summarizeDispatch,
   summarizeValidation,
   type ExportFormat,
 } from "./lib/export";
@@ -4931,9 +4932,9 @@ function MainApp() {
       });
       setError(
         t("export.success", {
-          count: String(dispatched.manifest.outputs.length),
+          count: String(dispatched.results.length),
           manifest: resp.manifest_path,
-          summary: summarizeValidation(dispatched.validation),
+          summary: summarizeDispatch(dispatched),
         }),
       );
     } catch (err) {

@@ -1,11 +1,11 @@
-// M4 Export Pipeline (Phase 4 W8 scaffold).
+// M4 Export Pipeline (Phase 4 W8-W10).
 //
 // Markdown/structured source = SSOT. Anchor plans a deterministic output
 // bundle (`source.md` + `output.{docx,hwpx,pdf}` + `manifest.yaml`) under
-// a sibling directory of the source document. The actual docx/hwpx/pdf
-// conversion is performed by the existing skills (hwpx / docx /
-// hwp-toolkit / pptx-toolkit); this module owns the layout, manifest
-// writing, and post-conversion validation.
+// a sibling directory of the source document. W10 dispatch runs deterministic
+// local converter commands from that manifest; later Studio/skill integrations
+// can provide richer format-specific preparation before this module records and
+// validates the outputs.
 //
 // Spec: plan §M4, _sys/rules/frontmatter-schema.md.
 //
@@ -18,8 +18,9 @@
 //   - `export_validate`: cross-check a manifest against on-disk outputs
 //     (file present + sha256 still matches the recorded value).
 //
-// Future weeks layer the actual skill dispatch + hwpx-validate + OOXML
-// validate + PDF font-embed checks on top of this manifest.
+// W10 adds deterministic local converter dispatch from the manifest. Later
+// weeks can layer Studio state, hwpx field mapping, OOXML validation, and PDF
+// font checks on top of the same manifest lifecycle.
 
 pub mod dispatch;
 pub mod manifest;
@@ -30,10 +31,10 @@ use std::path::PathBuf;
 
 pub use dispatch::export_dispatch;
 pub use manifest::{
-    compute_source_sha256, plan_bundle, record_output_failure, record_output_pending,
-    record_output_success, ExportFormat, ExportManifest, ExportOutputEntry, ExportOutputStatus,
+    plan_bundle, record_output_failure, record_output_pending, record_output_success, ExportFormat,
+    ExportManifest,
 };
-pub use validate::{validate_manifest, ValidationReport, ValidationStatus};
+pub use validate::{validate_manifest, ValidationReport};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportPlanRequest {
