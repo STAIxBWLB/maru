@@ -17,18 +17,23 @@ Before writing ANY vault note, verify the source summary.md frontmatter has **al
 
 1. **`description`** — string, ≥10 chars, not equal to title
 2. **`domain`** — ∈ `{research | projects | teaching | operations | people | ai-practice}`
-3. **`topics`** — array containing ≥1 `[[wiki-link]]`
+3. **`topics`** — array containing ≥1 `[[wiki-link]]` **AND every `[[target]]` must exist as a real note in `vault/notes/<target>.md`** (MOC enforcement — topics carry hub navigation only, not keyword tags)
+   - Verify existence via `mcp__obsidian__get_notes_info(paths: [notes/<target>.md, ...])` for the full list of topic targets, or by listing `vault/notes/` and checking each
+   - If any `[[target]]` is missing: **ABORT** (do NOT auto-create the MOC) — the caller (or user) must either fix the summary's topics or create the MOC note first
+   - Concept/keyword tags (e.g., `credit-recognition`, `partnership-mapping`) belong in body text, NOT in `topics`. Schema is "topics = MOC only" per `vault/CLAUDE.md §Schema`.
 
 **Read the summary's frontmatter via `mcp__obsidian__get_frontmatter` (or equivalent YAML parse) BEFORE building the vault note body.**
 
 If any check fails:
 - **ABORT** the extract for this summary
-- Emit failed event to `log.md`: `YYYY-MM-DD HH:MM  EXTRACT  <proj>  <summary> → -  — failed: missing required fields: <field list>`
+- Emit failed event to `log.md`: `YYYY-MM-DD HH:MM  EXTRACT  <proj>  <summary> → -  — failed: <reason>` (reasons include: `missing required fields: <field list>`, `dead topic: [[<target>]] not in vault/notes/`)
 - Return error to caller (`inbox-process`, /vault-sync, /vault-pipeline) — caller decides whether to continue with other items
 - **Do NOT synthesize empty values. Do NOT guess. Do NOT proceed to write.**
 - User must fix summary.md and re-run. `inbox-process` must re-emit summary with correct fields when the summary came from an inbox item.
 
-**Why strict**: 2026-04-11 L02 incident — 2 notes created via automated EXTRACT without these fields, caught only by later `/vault-lint`. This precondition prevents recurrence at the write site.
+**Why strict**:
+- 2026-04-11 L02 incident — 2 notes created via automated EXTRACT without these fields, caught only by later `/vault-lint`.
+- 2026-05-22 L01 incident — 21 notes accumulated 26 unique dead `topics` wiki-links (e.g., `[[credit-recognition]]`, `[[partnership-mapping]]`) because `topics` was copied verbatim from summary.md without MOC existence check. The MOC check above prevents recurrence at the write site.
 
 ## Process
 

@@ -68,11 +68,13 @@ When promoting a source summary into a vault note, copy source-derived fields in
 |---|---|---|
 | `description` | `description` | Required, non-empty, concise |
 | `domain` | `domain` | Required, workspace-defined domain enum |
-| `topics` | `topics` | Required, at least one wiki link |
+| `topics` | `topics` | Required, at least one wiki link, **and every `[[target]]` must already exist as a MOC note in vault** (MOC = note where `type: moc` or a domain hub like `projects.md`, `research.md`, `operations.md`, `teaching.md`, `people.md`, `ai-practice.md`). |
 | `source` | `source` | Preserve source identity |
 | `project` | `project` | Map via project registry when available |
 
 If required fields are missing, fail before writing. Do not synthesize blank or guessed values.
+
+**MOC enforcement on `topics`**: `topics` carries hub navigation only. Concept/keyword tags (e.g., `credit-recognition`, `partnership-mapping`, `duty-model`) belong in body text, not in `topics`. Skills must verify that each `[[target]]` in `topics` resolves to an existing note before promoting a summary to a vault note. If a needed MOC does not exist, create it first as a thin hub (`type: moc` + `description` + anchor wiki-link), or replace the offending entry with an existing MOC. Never silently copy unknown wiki-links from summary.md into vault notes.
 
 ## Project Registry Pattern
 

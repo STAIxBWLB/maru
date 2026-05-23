@@ -221,6 +221,22 @@ export interface ResetOutcome {
   skills: number;
 }
 
+export interface SkillDoctorIssue {
+  severity: "error" | "warn" | "info" | string;
+  code: string;
+  skillName?: string | null;
+  sourceIds: string[];
+  message: string;
+}
+
+export interface SkillDoctorReport {
+  ok: boolean;
+  sources: number;
+  skills: number;
+  installs: number;
+  issues: SkillDoctorIssue[];
+}
+
 export interface SkillProgressEvent {
   progressId: string;
   level: "info" | "success" | "warn" | "error" | string;
@@ -350,6 +366,11 @@ export async function skillsResetRegistry(
 ): Promise<ResetOutcome> {
   if (!isTauri()) return { sources: 0, skills: 0 };
   return invoke<ResetOutcome>("skills_reset_registry", { workPath, progressId });
+}
+
+export async function skillsDoctor(workPath: string | null): Promise<SkillDoctorReport> {
+  if (!isTauri()) return { ok: true, sources: 0, skills: 0, installs: 0, issues: [] };
+  return invoke<SkillDoctorReport>("skills_doctor", { workPath });
 }
 
 export async function skillsEnvStatus(workPath: string | null): Promise<SkillsEnvStatus | null> {

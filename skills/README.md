@@ -1,19 +1,22 @@
-# STAI x BWLB Skills
+# Anchor Bundled Skills
 
-Public skills catalog for Codex and Claude Code. This repo contains reusable skill packages plus the shared runtime/helpers they use.
+Skills bundle embedded by Anchor. This directory is the T1 core source for
+skills that must ship with the desktop app. Public/private extension skills
+belong in the Anchor source checkouts under `~/.anchor/skills/_sources/`.
 
 ## Layout
 
 ```
-skills/<name>/SKILL.md     public skill packages
-env/                       shared Python/Node runtime scaffold
+skills/<name>/SKILL.md     Anchor-bundled T1 skill packages
+envs/default/              shared Python/Node runtime scaffold
 lib/build-graph.py         shared graph builder
 lib/vault_adapter.md       Obsidian MCP vault access rules
 docs/                      shared reference catalogs
 manifest.json              Anchor-compatible skills manifest
 ```
 
-There is no category subdirectory split or legacy helper directory split in this repo.
+There is no category subdirectory split or legacy helper directory split in
+this bundle.
 
 ## Catalog
 
@@ -27,34 +30,25 @@ There is no category subdirectory split or legacy helper directory split in this
 - Vault workflows: `vault-extract`, `vault-connect`, `vault-sync`, `vault-learn`, `vault-lint`, `vault-graph`, `vault-pipeline`, `vault-refactor`, `vault-rename`, `vault-update`, `vault-next`, `vault-remember`, `vault-rethink`, `vault-stats`
 - Skill analysis: `skill-mine`
 
-## Install
+## Runtime Federation
 
-```bash
-# Claude Code
-./install.sh
-./install.sh -n
+Anchor materializes this bundle into `~/.anchor/skills/_builtin`, records it in
+`~/.anchor/skills/registry.json`, and installs user-facing skill entrypoints as
+symlinks:
 
-# Codex
-./install-codex.sh
-./install-codex.sh -n
-
-# Anchor internal target
-./install-anchor.sh -n
-
-# Specific skills
-./install.sh vault-lint vault-graph
-./install-codex.sh task-management skill-mine
+```text
+~/.anchor/skills/<name> -> ~/.anchor/skills/_builtin/skills/<name>
+~/.claude/skills/<name> -> ~/.anchor/skills/<name>
 ```
 
-Both installers symlink only directories containing `SKILL.md` from `skills/`.
-Anchor normally owns `~/.anchor/skills/registry.json`; `install-anchor.sh`
-only creates optional symlinks under `~/.anchor/skills/installed/`.
+Do not install these packages by copying files manually. Use Anchor's Skills UI
+or `skill_host` commands so registry state and symlinks stay consistent.
 
-Anchor can bootstrap this repo's shared runtime into its runtime root:
+Anchor can bootstrap this bundle's shared runtime into its runtime root:
 
 ```bash
-env/setup.sh --target ~/.anchor/env --dry-run
-env/setup.sh --target ~/.anchor/env
+envs/default/setup.sh --target ~/.anchor/env --dry-run
+envs/default/setup.sh --target ~/.anchor/env
 ```
 
 ## Runtime Values
@@ -65,6 +59,8 @@ Vault-facing skills discover vault paths, project registry paths, and log paths 
 
 ## Contributing
 
-Keep skills self-contained and reusable. Do not add private identities, real credentials, institution-specific internal details, or local absolute paths to public skill packages.
+Keep bundled skills self-contained and reusable. Do not add private identities,
+real credentials, institution-specific internal details, or local absolute paths
+to T1 packages.
 
 MIT — see `LICENSE`.

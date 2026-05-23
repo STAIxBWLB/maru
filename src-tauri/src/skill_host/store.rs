@@ -135,6 +135,28 @@ pub struct ResetOutcome {
     pub skills: usize,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDoctorIssue {
+    pub severity: String,
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_name: Option<String>,
+    #[serde(default)]
+    pub source_ids: Vec<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDoctorReport {
+    pub ok: bool,
+    pub sources: usize,
+    pub skills: usize,
+    pub installs: usize,
+    pub issues: Vec<SkillDoctorIssue>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillProgressEvent {
@@ -870,6 +892,42 @@ fn skills_reset_registry_impl(
     Ok(outcome)
 }
 
+#[tauri::command]
+pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, String> {
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    let source_ids: Vec<String> = registry
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect();
+    let mut scan_issues = Vec::new();
+    for source_id in source_ids {
+        if let Err(err) = rescan_source_in_registry_with_progress(
+            &mut registry,
+            &source_id,
+            ProgressReporter::noop(),
+        ) {
+            scan_issues.push(doctor_issue(
+                "error",
+                "source_scan_failed",
+                None,
+                vec![source_id],
+                err,
+            ));
+        }
+    }
+    apply_duplicate_validation(&mut registry);
+    let mut report = build_doctor_report(&registry);
+    if !scan_issues.is_empty() {
+        report.issues.splice(0..0, scan_issues);
+        report.ok = !report.issues.iter().any(|issue| issue.severity == "error");
+    }
+    save_registry_unlocked(&registry)?;
+    Ok(report)
+}
+
 fn preserved_installs_from_registry(registry: SkillsRegistry) -> Vec<SkillInstall> {
     registry
         .installs
@@ -1015,6 +1073,7 @@ fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
         .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
     registry.version = REGISTRY_VERSION;
     normalize_removed_source_ids(&mut registry);
+    apply_duplicate_validation(&mut registry);
     Ok(registry)
 }
 
@@ -1051,8 +1110,10 @@ pub fn env_vars_for_runs() -> Result<BTreeMap<String, String>, String> {
         merged_path.to_string_lossy().to_string(),
     );
     let existing_node_path = std::env::var_os("NODE_PATH");
-    let merged_node_path =
-        merge_path_env(Some(node_modules.as_os_str()), existing_node_path.as_deref());
+    let merged_node_path = merge_path_env(
+        Some(node_modules.as_os_str()),
+        existing_node_path.as_deref(),
+    );
     vars.insert(
         "NODE_PATH".to_string(),
         merged_node_path.to_string_lossy().to_string(),
@@ -1574,7 +1635,8 @@ fn rescan_source_in_registry_with_progress(
         .collect();
     let scanned = scan_source_with_progress(&source, progress, &saved_hashes)?;
     registry.skills.retain(|skill| skill.source_id != source_id);
-    registry.skills.extend(scanned.clone());
+    registry.skills.extend(scanned);
+    apply_duplicate_validation(registry);
     if let Some(existing) = registry
         .sources
         .iter_mut()
@@ -1582,11 +1644,155 @@ fn rescan_source_in_registry_with_progress(
     {
         existing.last_synced_at = Some(Utc::now().to_rfc3339());
     }
+    let updated: Vec<SkillRecord> = registry
+        .skills
+        .iter()
+        .filter(|skill| skill.source_id == source_id)
+        .cloned()
+        .collect();
     progress.success(format!(
         "Updated registry for {source_id}: {} skill(s)",
-        scanned.len()
+        updated.len()
     ));
-    Ok(scanned)
+    Ok(updated)
+}
+
+fn apply_duplicate_validation(registry: &mut SkillsRegistry) {
+    for skill in &mut registry.skills {
+        skill
+            .validation_errors
+            .retain(|error| !error.starts_with("duplicate_source"));
+        skill.valid = skill.validation_errors.is_empty();
+    }
+
+    let mut by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for skill in &registry.skills {
+        if skill.name.trim().is_empty() {
+            continue;
+        }
+        by_name
+            .entry(skill.name.clone())
+            .or_default()
+            .insert(skill.source_id.clone());
+    }
+
+    for (name, source_ids) in by_name {
+        if source_ids.len() < 2 {
+            continue;
+        }
+        let all_sources: Vec<String> = source_ids.into_iter().collect();
+        for skill in registry
+            .skills
+            .iter_mut()
+            .filter(|skill| skill.name == name)
+        {
+            let others: Vec<String> = all_sources
+                .iter()
+                .filter(|source_id| *source_id != &skill.source_id)
+                .cloned()
+                .collect();
+            skill.validation_errors.push(format!(
+                "duplicate_source: {name} also found in {}",
+                others.join(", ")
+            ));
+            skill.valid = false;
+        }
+    }
+}
+
+fn build_doctor_report(registry: &SkillsRegistry) -> SkillDoctorReport {
+    let mut issues = Vec::new();
+    for source in &registry.sources {
+        if let Err(err) = source_path(source) {
+            issues.push(doctor_issue(
+                "error",
+                "source_invalid",
+                None,
+                vec![source.id.clone()],
+                err,
+            ));
+        }
+    }
+    for skill in &registry.skills {
+        if !Path::new(&skill.abs_path).join("SKILL.md").is_file() {
+            issues.push(doctor_issue(
+                "error",
+                "skill_missing",
+                Some(skill.name.clone()),
+                vec![skill.source_id.clone()],
+                format!("SKILL.md missing at {}", skill.abs_path),
+            ));
+        }
+        if !skill.valid {
+            issues.push(doctor_issue(
+                "error",
+                "skill_invalid",
+                Some(skill.name.clone()),
+                vec![skill.source_id.clone()],
+                skill.validation_errors.join("; "),
+            ));
+        }
+        if skill.dirty {
+            issues.push(doctor_issue(
+                "warn",
+                "skill_dirty",
+                Some(skill.name.clone()),
+                vec![skill.source_id.clone()],
+                format!("{} differs from its saved content hash", skill.name),
+            ));
+        }
+    }
+    for install in &registry.installs {
+        if !registry
+            .skills
+            .iter()
+            .any(|skill| skill.id == install.skill_id)
+        {
+            issues.push(doctor_issue(
+                "error",
+                "install_skill_missing",
+                Some(install.installed_as.clone()),
+                Vec::new(),
+                format!("install references unknown skill {}", install.skill_id),
+            ));
+        }
+        if !install_links_are_intact(install) {
+            issues.push(doctor_issue(
+                "error",
+                "install_link_broken",
+                Some(install.installed_as.clone()),
+                Vec::new(),
+                format!(
+                    "{} install link does not point to {}",
+                    install.target_path, install.entrypoint_path
+                ),
+            ));
+        }
+    }
+    let ok = !issues.iter().any(|issue| issue.severity == "error");
+    SkillDoctorReport {
+        ok,
+        sources: registry.sources.len(),
+        skills: registry.skills.len(),
+        installs: registry.installs.len(),
+        issues,
+    }
+}
+
+fn doctor_issue(
+    severity: &str,
+    code: &str,
+    skill_name: Option<String>,
+    source_ids: Vec<String>,
+    message: impl Into<String>,
+) -> SkillDoctorIssue {
+    SkillDoctorIssue {
+        severity: severity.to_string(),
+        code: code.to_string(),
+        skill_name,
+        source_ids,
+        message: message.into(),
+    }
 }
 
 fn scan_source_with_progress(
@@ -2134,7 +2340,10 @@ mod tests {
             &path_string(&env_root.join(".venv"))
         );
         let path_entries: Vec<_> = std::env::split_paths(vars.get("PATH").unwrap()).collect();
-        assert_eq!(path_entries.first(), Some(&env_root.join(".venv").join("bin")));
+        assert_eq!(
+            path_entries.first(),
+            Some(&env_root.join(".venv").join("bin"))
+        );
         let node_path_entries: Vec<_> =
             std::env::split_paths(vars.get("NODE_PATH").unwrap()).collect();
         assert_eq!(
@@ -2224,6 +2433,106 @@ mod tests {
         assert!(safe_relative_path("SKILL.md").is_ok());
         assert!(safe_relative_path("../SKILL.md").is_err());
         assert!(safe_relative_path("/tmp/SKILL.md").is_err());
+    }
+
+    #[test]
+    fn skill_host_store_does_not_target_dotfiles_owned_claude_files() {
+        let source = include_str!("store.rs");
+        let forbidden_paths = [
+            format!("{}{}", ".claude/", "CLAUDE.md"),
+            format!("{}{}", ".claude/", "settings.json"),
+            format!("{}{}", ".claude/", "settings.local.json"),
+            format!("{}{}", ".claude/", "hooks"),
+        ];
+        for forbidden in forbidden_paths {
+            assert!(
+                !source.contains(&forbidden),
+                "skill_host store must not manage {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_skill_names_across_sources_are_invalid() {
+        let _home = test_home();
+        let alpha = TempDir::new().unwrap();
+        let beta = TempDir::new().unwrap();
+        write_skill(alpha.path(), "shared");
+        write_skill(beta.path(), "shared");
+
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: "alpha".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(alpha.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        registry.sources.push(SkillSource {
+            id: "beta".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(beta.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+
+        rescan_source_in_registry(&mut registry, "alpha").unwrap();
+        rescan_source_in_registry(&mut registry, "beta").unwrap();
+
+        let duplicates: Vec<_> = registry
+            .skills
+            .iter()
+            .filter(|skill| skill.name == "shared")
+            .collect();
+        assert_eq!(duplicates.len(), 2);
+        assert!(duplicates.iter().all(|skill| !skill.valid));
+        assert!(duplicates.iter().all(|skill| skill
+            .validation_errors
+            .iter()
+            .any(|error| error.starts_with("duplicate_source"))));
+    }
+
+    #[test]
+    fn doctor_reports_duplicate_sources() {
+        let _home = test_home();
+        let alpha = TempDir::new().unwrap();
+        let beta = TempDir::new().unwrap();
+        write_skill(alpha.path(), "shared");
+        write_skill(beta.path(), "shared");
+
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: "alpha".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(alpha.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        registry.sources.push(SkillSource {
+            id: "beta".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(beta.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        save_registry_unlocked(&registry).unwrap();
+
+        let report = skills_doctor(None).unwrap();
+
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "skill_invalid"
+                && issue.skill_name.as_deref() == Some("shared")
+                && issue.message.contains("duplicate_source")
+        }));
     }
 
     #[test]
