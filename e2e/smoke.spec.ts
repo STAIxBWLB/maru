@@ -96,6 +96,10 @@ test("boots the sample workspace and opens multiple editor tabs", async ({ page 
 
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await expect(page.locator(".preview-surface")).toContainText("Anchor 용어집");
+
+  await page.getByRole("tab", { name: "증빙" }).click();
+  await expect(page.locator(".evidence-binder")).toContainText("Evidence Binder");
+  await expect(page.locator(".evidence-card")).toContainText("receipt.pdf");
 });
 
 test("switches explorer between private and optional public workspace tabs", async ({

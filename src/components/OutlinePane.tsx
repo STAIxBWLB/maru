@@ -1,6 +1,7 @@
 import {
   BookOpen,
   CircleX,
+  ClipboardCheck,
   Copy,
   File,
   FileArchive,
@@ -98,6 +99,7 @@ interface OutlinePaneProps {
   paneRef?: React.RefObject<HTMLElement | null>;
   skillsNode?: React.ReactNode;
   guidelineNode?: React.ReactNode;
+  evidenceNode?: React.ReactNode;
 }
 
 const STANDARD_TYPES = [
@@ -185,6 +187,7 @@ export function OutlinePane({
   paneRef,
   skillsNode,
   guidelineNode,
+  evidenceNode,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
   const tab = activeTab;
@@ -240,7 +243,7 @@ export function OutlinePane({
       </div>
       <div className="right-pane-workspace">
         <div className="right-pane-tabs" role="tablist" aria-label={t("rightPane.tabs")}>
-          {(["outline", "files", "memo", "skills", "guideline", "info"] as const).map((id) => (
+          {(["outline", "files", "memo", "skills", "guideline", "evidence", "info"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -282,6 +285,8 @@ export function OutlinePane({
                 <FileCode2 size={20} />
               ) : id === "guideline" ? (
                 <BookOpen size={20} />
+              ) : id === "evidence" ? (
+                <ClipboardCheck size={20} />
               ) : (
                 <Info size={20} />
               )}
@@ -359,6 +364,8 @@ export function OutlinePane({
           {tab === "skills" ? skillsNode ?? null : null}
 
           {tab === "guideline" ? guidelineNode ?? null : null}
+
+          {tab === "evidence" ? evidenceNode ?? null : null}
 
           {tab === "info" && document ? (
             <section className="inspector">

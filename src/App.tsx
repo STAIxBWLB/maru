@@ -28,6 +28,7 @@ import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { CatalogPane } from "./components/catalog/CatalogPane";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
+import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { InboxPane } from "./components/InboxPane";
 import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
@@ -116,6 +117,7 @@ import {
 } from "./lib/export";
 import {
   studioApplyBody,
+  studioDocIdFromDocument,
   type StudioCreateDocumentInput,
   type StudioPackageResult,
 } from "./lib/studio";
@@ -1037,6 +1039,10 @@ function MainApp() {
   );
   const selectedEntry = activeTab?.entry ?? null;
   const document = activeTab?.document ?? null;
+  const evidenceBinderDocId = useMemo(
+    () => (document ? studioDocIdFromDocument(document) : null),
+    [document],
+  );
   const selectedPath = pendingSelectedPath ?? selectedEntry?.path ?? null;
   const activeDocumentWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath;
   const activeDocumentWorkspace = useMemo(
@@ -6253,6 +6259,14 @@ function MainApp() {
                     workspaceRoot={activeDocumentWorkspacePath}
                     documentBody={draftContent || document?.content || ""}
                     frontmatter={document?.meta ?? null}
+                  />
+                }
+                evidenceNode={
+                  <EvidenceBinderPane
+                    workspaceRoot={activeDocumentWorkspacePath}
+                    docId={evidenceBinderDocId}
+                    documentPath={document?.path ?? null}
+                    onError={setError}
                   />
                 }
               />

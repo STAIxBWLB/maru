@@ -410,6 +410,11 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.terminal.autoLaunch).toBe("shell");
   });
 
+  it("accepts the evidence binder right-pane tab", () => {
+    const settings = normalizeAnchorSettings({ ui: { rightPaneTab: "evidence" } });
+    expect(settings.ui.rightPaneTab).toBe("evidence");
+  });
+
   it("uses persisted layout over legacy terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {

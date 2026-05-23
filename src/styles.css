@@ -6240,6 +6240,129 @@ button.git-badge:hover {
   color: var(--danger, #ef4444);
 }
 
+.evidence-binder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: auto;
+}
+.evidence-binder--empty {
+  align-items: flex-start;
+  color: var(--muted, #888);
+  font-size: 12px;
+}
+.evidence-binder__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.evidence-binder__header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.evidence-binder__kicker {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted, #888);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.evidence-binder__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted, #888);
+  font-size: 11px;
+}
+.evidence-binder__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.evidence-card {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--surface, #161616);
+  padding: 8px;
+}
+.evidence-card.linked {
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 55%, var(--border, #2a2a2a));
+}
+.evidence-card__main {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.evidence-card__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent, #2563eb);
+}
+.evidence-card__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.evidence-card__copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evidence-card__copy small,
+.evidence-card__meta,
+.evidence-card__linked {
+  color: var(--muted, #888);
+  font-size: 10px;
+}
+.evidence-card__copy small {
+  overflow-wrap: anywhere;
+}
+.evidence-card__meta,
+.evidence-card__fields,
+.evidence-card__linked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.evidence-card__meta span,
+.evidence-card__fields span {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.evidence-card p {
+  margin: 8px 0 0;
+  color: var(--muted, #888);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.evidence-card__warning {
+  margin-top: 8px;
+  color: var(--danger, #ef4444);
+  font-size: 11px;
+}
+.evidence-card__linked {
+  align-items: center;
+  color: var(--accent, #2563eb);
+}
+
 @keyframes overlay-in {
   from {
     opacity: 0;

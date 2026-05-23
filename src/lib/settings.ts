@@ -16,7 +16,14 @@ export type AnchorAppMode =
   | "e2e";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
-export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills" | "guideline";
+export type RightPaneTab =
+  | "outline"
+  | "files"
+  | "memo"
+  | "info"
+  | "skills"
+  | "guideline"
+  | "evidence";
 export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
 
@@ -975,7 +982,7 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
   return value === "outline" || value === "files" || value === "memo" || value === "info"
-    || value === "skills" || value === "guideline"
+    || value === "skills" || value === "guideline" || value === "evidence"
     ? value
     : null;
 }
