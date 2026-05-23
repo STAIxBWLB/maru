@@ -448,7 +448,7 @@ def cmd_slots(args) -> int:
             "required": True,
             "occurrences": occurrences,
         }
-        for key, occurrences in sorted(counts.items(), key=lambda item: item[0])
+        for key, occurrences in counts.items()
     ]
     payload = {"template": str(input_path), "fields": fields}
 

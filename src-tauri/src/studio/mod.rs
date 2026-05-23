@@ -1,4 +1,5 @@
 use crate::document::{read_document, DocumentPayload};
+use crate::kordoc_lite::KordocLiteCheck;
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use chrono::Utc;
@@ -58,6 +59,12 @@ pub struct StudioHwpTemplateFieldState {
     pub label: String,
     pub required: bool,
     pub occurrences: u32,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub confidence: Option<f32>,
+    #[serde(default)]
+    pub matched_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +79,12 @@ pub struct StudioHwpFieldsState {
     pub values: BTreeMap<String, String>,
     #[serde(default)]
     pub last_output_path: Option<String>,
+    #[serde(default)]
+    pub form_filled_count: u32,
+    #[serde(default)]
+    pub unmatched_fields: Vec<String>,
+    #[serde(default)]
+    pub validation_checks: Vec<KordocLiteCheck>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -362,6 +375,9 @@ mod tests {
                 fields: Vec::new(),
                 values: BTreeMap::new(),
                 last_output_path: None,
+                form_filled_count: 0,
+                unmatched_fields: Vec::new(),
+                validation_checks: Vec::new(),
                 warnings: Vec::new(),
             },
             export: StudioExportState {

@@ -340,10 +340,23 @@ fn read_zip_package<R: Read + Seek>(reader: R) -> Result<HwpxPackage, String> {
 fn write_hwpx_package(path: &Path, package: &HwpxPackage) -> Result<(), String> {
     let file = File::create(path).map_err(|err| format!("Cannot write HWPX: {err}"))?;
     let mut writer = ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for (name, bytes) in &package.entries {
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let deflated =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    if let Some(bytes) = package.entries.get("mimetype") {
         writer
-            .start_file(name, options)
+            .start_file("mimetype", stored)
+            .map_err(|err| format!("Cannot start ZIP entry mimetype: {err}"))?;
+        writer
+            .write_all(bytes)
+            .map_err(|err| format!("Cannot write ZIP entry mimetype: {err}"))?;
+    }
+    for (name, bytes) in &package.entries {
+        if name == "mimetype" {
+            continue;
+        }
+        writer
+            .start_file(name, deflated)
             .map_err(|err| format!("Cannot start ZIP entry {name}: {err}"))?;
         writer
             .write_all(bytes)
@@ -1075,6 +1088,11 @@ mod tests {
         assert!(xml.contains("사업계획"));
         assert!(xml.contains("홍길동"));
         assert!(xml.contains("담당자: 이영준"));
+        let file = File::open(&output).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mimetype = archive.by_index(0).unwrap();
+        assert_eq!(mimetype.name(), "mimetype");
+        assert_eq!(mimetype.compression(), zip::CompressionMethod::Stored);
     }
 
     #[test]
@@ -1115,7 +1133,9 @@ mod tests {
         write_hwpx_fixture(&hwpx, "<hp:sec><hp:p><hp:t>x</hp:t></hp:p></hp:sec>");
         let checks = validate_export_artifact(&hwpx, "hwpx");
         assert!(checks.iter().any(|c| c.name == "zip-safety"));
-        assert!(checks.iter().any(|c| c.name == "hwpx-sections" && c.status == "pass"));
+        assert!(checks
+            .iter()
+            .any(|c| c.name == "hwpx-sections" && c.status == "pass"));
 
         let unknown = validate_export_artifact(&hwpx, "xyz");
         assert_eq!(unknown.len(), 1);

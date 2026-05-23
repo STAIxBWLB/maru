@@ -91,7 +91,7 @@ pub fn template_get_fields(
 ) -> Result<TemplateFieldResponse, String> {
     let (template_path, source) =
         resolve_template_path(&work_path, request.template_key, request.template_path)?;
-    if template_path.extension().and_then(|ext| ext.to_str()) != Some("hwpx") {
+    if !has_extension(&template_path, "hwpx") {
         return Err("Template field extraction requires a .hwpx template".to_string());
     }
 
@@ -208,7 +208,7 @@ pub fn template_fill_hwpx(
     }
     let (template_path, _) =
         resolve_template_path(&work_path, request.template_key, request.template_path)?;
-    if template_path.extension().and_then(|ext| ext.to_str()) != Some("hwpx") {
+    if !has_extension(&template_path, "hwpx") {
         return Err("Template fill requires a .hwpx template".to_string());
     }
     let output_path = resolve_output_path(&work_path, &template_path, request.output_path)?;
@@ -240,14 +240,6 @@ pub fn template_fill_hwpx(
     let fill_output = fill_run?;
     let replaced_count = parse_replaced_count(&fill_output.stderr);
 
-    let hwpx_validation_ok = run_command(
-        &hwpx,
-        &[
-            OsString::from("validate"),
-            output_path.as_os_str().to_os_string(),
-        ],
-    )
-    .is_ok();
     let mut form_filled_count = 0;
     let mut unmatched_fields = Vec::new();
     let mut validation_checks = Vec::new();
@@ -270,6 +262,14 @@ pub fn template_fill_hwpx(
         }
     }
 
+    let hwpx_validation_ok = run_command(
+        &hwpx,
+        &[
+            OsString::from("validate"),
+            output_path.as_os_str().to_os_string(),
+        ],
+    )
+    .is_ok();
     let kordoc_validation_ok = validation_checks.iter().all(|check| check.status == "pass");
     let validation_ok = hwpx_validation_ok && kordoc_validation_ok;
 
@@ -379,7 +379,7 @@ fn resolve_output_path(
         .filter(|path| !path.is_empty())
     {
         let resolved = resolve_inside_vault(work_path, path)?;
-        if resolved.extension().and_then(|ext| ext.to_str()) != Some("hwpx") {
+        if !has_extension(&resolved, "hwpx") {
             return Err("Output path must end with .hwpx".to_string());
         }
         return Ok(resolved);
@@ -402,6 +402,13 @@ fn validate_template_key(key: &str) -> Result<(), String> {
         return Err("Invalid HWPX template key".to_string());
     }
     Ok(())
+}
+
+fn has_extension(path: &Path, expected: &str) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case(expected))
+        .unwrap_or(false)
 }
 
 fn bundled_templates_root() -> PathBuf {
@@ -530,8 +537,15 @@ mod tests {
 
     #[test]
     fn sanitizes_default_output_stem() {
-        assert_eq!(sanitize_filename("보고서 일반.hwpx"), "보고서-일반-hwpx");
+        assert_eq!(sanitize_filename("보고서 일반"), "보고서-일반");
         assert_eq!(sanitize_filename("template_v1"), "template_v1");
+    }
+
+    #[test]
+    fn accepts_case_insensitive_hwpx_extensions() {
+        assert!(has_extension(Path::new("Template.HWPX"), "hwpx"));
+        assert!(has_extension(Path::new("Template.HwPx"), "hwpx"));
+        assert!(!has_extension(Path::new("Template.hwp"), "hwpx"));
     }
 
     #[test]

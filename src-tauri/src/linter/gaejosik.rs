@@ -74,9 +74,7 @@ fn lint_markdown(markdown: &str, dismissed_ids: &[String]) -> GaejosikLintRespon
         let Some(rule_match) = match_line(line) else {
             continue;
         };
-        let line_char_count = line.chars().count() as u32;
-        let suffix_len = rule_match.suffix.chars().count() as u32;
-        let column = line_char_count.saturating_sub(suffix_len).saturating_add(1);
+        let (column, end_column) = matched_span(line, &rule_match.suffix);
         let id = issue_id(rule_match.rule, line_number, column, line);
         if dismissed.contains(id.as_str()) {
             dismissed_count += 1;
@@ -88,7 +86,7 @@ fn lint_markdown(markdown: &str, dismissed_ids: &[String]) -> GaejosikLintRespon
             severity: "warning".to_string(),
             line: line_number,
             column,
-            end_column: line_char_count.saturating_add(1),
+            end_column,
             text: rule_match.suffix,
             message: rule_match.message.to_string(),
             suggestion: rule_match.suggestion.to_string(),
@@ -157,6 +155,21 @@ fn match_line(line: &str) -> Option<RuleMatch> {
     None
 }
 
+fn matched_span(line: &str, suffix: &str) -> (u32, u32) {
+    let stripped = strip_markdown_prefix(line).trim_end();
+    let core = stripped
+        .trim_end_matches(|ch: char| matches!(ch, '.' | '。' | '!' | '?' | ')' | ']' | '"' | '\''));
+    let start_byte = line.find(stripped).unwrap_or(0);
+    let prefix_len = line[..start_byte].chars().count() as u32;
+    let core_len = core.chars().count() as u32;
+    let suffix_len = suffix.chars().count() as u32;
+    let column = prefix_len
+        .saturating_add(core_len.saturating_sub(suffix_len))
+        .saturating_add(1);
+    let end_column = prefix_len.saturating_add(core_len).saturating_add(1);
+    (column, end_column)
+}
+
 fn strip_markdown_prefix(line: &str) -> &str {
     let trimmed = line.trim_start();
     let without_checkbox = trimmed
@@ -218,5 +231,13 @@ mod tests {
         let dismissed = lint_markdown("추진합니다", &[first.issues[0].id.clone()]);
         assert!(dismissed.issues.is_empty());
         assert_eq!(dismissed.dismissed_count, 1);
+    }
+
+    #[test]
+    fn reports_suffix_span_before_trailing_punctuation() {
+        let report = lint_markdown("- 추진합니다.", &[]);
+        assert_eq!(report.issues.len(), 1);
+        assert_eq!(report.issues[0].column, 5);
+        assert_eq!(report.issues[0].end_column, 8);
     }
 }

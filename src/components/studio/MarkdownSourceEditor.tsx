@@ -1,6 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState, RangeSetBuilder } from "@codemirror/state";
+import { Compartment, EditorState, RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -28,8 +28,12 @@ export function MarkdownSourceEditor({
 }: MarkdownSourceEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const readOnlyCompartment = useMemo(() => new Compartment(), []);
+  const editableCompartment = useMemo(() => new Compartment(), []);
+  const lintCompartment = useMemo(() => new Compartment(), []);
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const lintIssuesRef = useRef(lintIssues);
   const lintSignature = useMemo(
     () => lintIssues.map((issue) => `${issue.id}:${issue.line}:${issue.column}`).join("|"),
     [lintIssues],
@@ -42,6 +46,10 @@ export function MarkdownSourceEditor({
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    lintIssuesRef.current = lintIssues;
+  }, [lintIssues]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -58,10 +66,14 @@ export function MarkdownSourceEditor({
           history(),
           markdown(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
-          EditorState.readOnly.of(readOnly),
-          EditorView.editable.of(!readOnly),
+          readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
+          editableCompartment.of(EditorView.editable.of(!readOnly)),
           EditorView.lineWrapping,
-          EditorView.decorations.compute([], (state) => buildLintDecorations(state, lintIssues)),
+          lintCompartment.of(
+            EditorView.decorations.compute([], (state) =>
+              buildLintDecorations(state, lintIssuesRef.current),
+            ),
+          ),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
             const next = update.state.doc.toString();
@@ -77,7 +89,30 @@ export function MarkdownSourceEditor({
       view.destroy();
       if (viewRef.current === view) viewRef.current = null;
     };
-  }, [lintIssues, lintSignature, readOnly]);
+  }, [editableCompartment, lintCompartment, readOnlyCompartment]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: [
+        readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
+        editableCompartment.reconfigure(EditorView.editable.of(!readOnly)),
+      ],
+    });
+  }, [editableCompartment, readOnly, readOnlyCompartment]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: lintCompartment.reconfigure(
+        EditorView.decorations.compute([], (state) =>
+          buildLintDecorations(state, lintIssuesRef.current),
+        ),
+      ),
+    });
+  }, [lintCompartment, lintSignature]);
 
   useEffect(() => {
     const view = viewRef.current;

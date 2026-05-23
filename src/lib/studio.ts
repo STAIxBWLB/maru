@@ -392,7 +392,7 @@ function lintGaejosikBrowser(
     const match = matchGaejosikLine(line);
     if (!match) return;
     const lineNumber = index + 1;
-    const column = Math.max(1, Array.from(line).length - Array.from(match.text).length + 1);
+    const { column, endColumn } = matchedLintSpan(line, match.text);
     const id = browserIssueId(match.rule, lineNumber, column, line);
     if (dismissed.has(id)) {
       dismissedCount += 1;
@@ -404,7 +404,7 @@ function lintGaejosikBrowser(
       severity: "warning",
       line: lineNumber,
       column,
-      endColumn: Array.from(line).length + 1,
+      endColumn,
       text: match.text,
       message: match.message,
       suggestion: match.suggestion,
@@ -464,6 +464,19 @@ function matchGaejosikLine(line: string):
     };
   }
   return null;
+}
+
+function matchedLintSpan(line: string, suffix: string): { column: number; endColumn: number } {
+  const stripped = stripMarkdownPrefix(line).trimEnd();
+  const core = stripped.replace(/[.。!?)\]"']+$/u, "");
+  const startIndex = Math.max(0, line.indexOf(stripped));
+  const prefixLength = Array.from(line.slice(0, startIndex)).length;
+  const coreLength = Array.from(core).length;
+  const suffixLength = Array.from(suffix).length;
+  return {
+    column: Math.max(1, prefixLength + coreLength - suffixLength + 1),
+    endColumn: Math.max(1, prefixLength + coreLength + 1),
+  };
 }
 
 function stripMarkdownPrefix(line: string): string {
