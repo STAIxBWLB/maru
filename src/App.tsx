@@ -5885,6 +5885,19 @@ function MainApp() {
             onCreateDocument={createDocumentAndOpen}
             onApplyBody={applyStudioBody}
             onFreezePackage={freezeStudioPackage}
+            lintDismissalsByDoc={anchorSettings.composer.lintDismissals}
+            onLintDismissalsChange={(docId, dismissedIds) => {
+              updateSettings((current) => ({
+                ...current,
+                composer: {
+                  ...current.composer,
+                  lintDismissals: {
+                    ...current.composer.lintDismissals,
+                    [docId]: dismissedIds,
+                  },
+                },
+              }));
+            }}
             onRevealPath={(path) => {
               const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);

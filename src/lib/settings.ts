@@ -131,6 +131,7 @@ export interface AnchorSettings {
   meetings: MeetingsSettings;
   tasks: TasksSettings;
   inboxChannels: Record<string, unknown>;
+  composer: ComposerSettings;
   connectors: Record<string, unknown>;
 }
 
@@ -188,6 +189,10 @@ export interface TasksSettings {
     autoVaultExtract: boolean;
     appendVaultLog: boolean;
   };
+}
+
+export interface ComposerSettings {
+  lintDismissals: Record<string, string[]>;
 }
 
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
@@ -316,6 +321,9 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     },
   },
   inboxChannels: {},
+  composer: {
+    lintDismissals: {},
+  },
   connectors: {},
 };
 
@@ -385,6 +393,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
     meetings: normalizeMeetingsSettings(value.meetings),
     tasks: normalizeTasksSettings(value.tasks),
     inboxChannels: isRecord(value.inboxChannels) ? value.inboxChannels : {},
+    composer: normalizeComposerSettings(value.composer),
     connectors: isRecord(value.connectors) ? value.connectors : {},
   };
 }
@@ -693,8 +702,22 @@ function cloneDefaultSettings(): AnchorSettings {
       hooks: { ...DEFAULT_ANCHOR_SETTINGS.tasks.hooks },
     },
     inboxChannels: {},
+    composer: {
+      lintDismissals: {},
+    },
     connectors: {},
   };
+}
+
+function normalizeComposerSettings(value: unknown): ComposerSettings {
+  const composer = isRecord(value) ? value : {};
+  const rawDismissals = isRecord(composer.lintDismissals) ? composer.lintDismissals : {};
+  const lintDismissals: Record<string, string[]> = {};
+  for (const [docId, ids] of Object.entries(rawDismissals)) {
+    const cleanIds = parseStringArray(ids);
+    if (cleanIds.length > 0) lintDismissals[docId] = cleanIds;
+  }
+  return { lintDismissals };
 }
 
 function normalizeCommsSettings(value: unknown): CommsSettings {

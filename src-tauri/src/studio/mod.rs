@@ -1,4 +1,5 @@
 use crate::document::{read_document, DocumentPayload};
+use crate::kordoc_lite::KordocLiteCheck;
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use chrono::Utc;
@@ -47,6 +48,23 @@ pub struct StudioTemplateState {
     pub title: String,
     pub business_unit: Option<String>,
     pub document_type_code: Option<String>,
+    #[serde(default)]
+    pub hwpx_template_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioHwpTemplateFieldState {
+    pub key: String,
+    pub label: String,
+    pub required: bool,
+    pub occurrences: u32,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub confidence: Option<f32>,
+    #[serde(default)]
+    pub matched_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +72,21 @@ pub struct StudioTemplateState {
 pub struct StudioHwpFieldsState {
     pub status: String,
     #[serde(default)]
+    pub template_path: Option<String>,
+    #[serde(default)]
+    pub fields: Vec<StudioHwpTemplateFieldState>,
+    #[serde(default)]
     pub values: BTreeMap<String, String>,
+    #[serde(default)]
+    pub last_output_path: Option<String>,
+    #[serde(default)]
+    pub form_filled_count: u32,
+    #[serde(default)]
+    pub unmatched_fields: Vec<String>,
+    #[serde(default)]
+    pub validation_checks: Vec<KordocLiteCheck>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +118,8 @@ pub struct StudioState {
     #[serde(default)]
     pub guideline_ids: Vec<String>,
     pub body_draft: String,
+    #[serde(default)]
+    pub lint_dismissals: Vec<String>,
     pub hwp_fields: StudioHwpFieldsState,
     pub export: StudioExportState,
     pub package: StudioPackageState,
@@ -330,12 +364,21 @@ mod tests {
                 title: "Business Plan".to_string(),
                 business_unit: Some("koica-tiu".to_string()),
                 document_type_code: Some("business-plan".to_string()),
+                hwpx_template_key: Some("사업계획서_기본".to_string()),
             }),
             guideline_ids: vec!["guideline-1".to_string()],
             body_draft: "# Report\n\nBody".to_string(),
+            lint_dismissals: Vec::new(),
             hwp_fields: StudioHwpFieldsState {
                 status: "placeholder".to_string(),
+                template_path: None,
+                fields: Vec::new(),
                 values: BTreeMap::new(),
+                last_output_path: None,
+                form_filled_count: 0,
+                unmatched_fields: Vec::new(),
+                validation_checks: Vec::new(),
+                warnings: Vec::new(),
             },
             export: StudioExportState {
                 formats: vec!["docx".to_string(), "hwpx".to_string(), "pdf".to_string()],

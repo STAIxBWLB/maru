@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Anchor desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status anchor** — Updated through Phase 4 W11 (Document Studio mode). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
+> **Status anchor** — Updated through Phase 4 W12 (HWP field map + 개조식 inline lint). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`. The 26-week plan itself lives at `~/.claude/plans/flickering-seeking-engelbart.md` (work-repo internal) and is mirrored here from Anchor's perspective.
 
@@ -13,8 +13,8 @@ Each module is owned by Anchor desktop. Hub backs them where shared catalog data
 | # | Module | Purpose | Surface | Owners |
 |---|--------|---------|---------|--------|
 | M1 | Operations Catalog | "What needs my attention right now" — deadlines, in-flight approvals, unlinked evidence, inbox pending | Activity-rail `LayoutGrid` mode → 3-column pane | ✅ shipped |
-| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W11 shipped |
-| M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 partial (W5 picker shipped) |
+| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W12 shipped |
+| M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
 | M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · validators planned |
 | M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane tab (W14+) | 📋 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
@@ -44,15 +44,15 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W9 | ✅ | M4 transitions — `record_output_{pending,success,failure}` + `export_record_*` Tauri commands + `Validate last export bundle` palette + `summarizeValidation` | same module as W8 |
 | W10 | ✅ | **Export bundle dispatch** — single "Export bundle" command drives `pending → ready/failed` from the manifest. Current implementation uses deterministic local converter commands (`pandoc`, `hwpx`, LibreOffice-backed PDF fallback) and records success/failure through the W9 manifest transitions. Missing converters, missing outputs, and source hash drift surface as partial failures instead of silent success. Background mission wrapping remains optional hardening. | `src-tauri/src/export/dispatch.rs` · `src/lib/export.ts` · `src/App.tsx` |
 | W11 | ✅ | **Document Studio multi-step wizard (M2)** — new `Studio` activity-rail mode. 7 steps under `src/components/studio/StudioMode.tsx`: source picker, template picker (reuse `lib/hubLibrary`), guideline picker, section editor (Rich/Source modes), HWP field map placeholder state, export (wraps `export_plan` + dispatch), package (local body apply + version snapshot freeze). State persists at `<workspace>/.anchor/studio/<doc-id>/state.json` via `src-tauri/src/studio/mod.rs`, and `studio_apply_body` preserves frontmatter bytes while replacing only the markdown body. | `src-tauri/src/studio/*` · `src/components/studio/*` · `src/App.tsx` activity-rail wiring |
-| W12 | 📋 | **HWP field map (M3) + 개조식 inline lint (M2 Step 4)** — `hwpx` skill slot scan exposed as `template_get_fields(template_id)` + Studio Step 5 form. `gaejosik` skill wired as a debounced subprocess + CodeMirror decoration / BlockNote mark for live lint underline. Lint dismissals persisted under `composer.lintDismissals` in workspace-state. | `src-tauri/src/template_fill/{hwpx,hwp_convert}.rs` (new) · `src-tauri/src/linter/gaejosik.rs` (new) · `src/components/composer/SlotPanel.tsx` |
+| W12 | ✅ | **HWP field map (M3) + 개조식 inline lint (M2 Step 4)** — `hwpx slots` extracts `{{field}}` placeholders from bundled/workspace HWPX templates; `kordoc_lite` adds HWPX structure checks, Korean public-form label/inline-label detection, preserved XML fill for label-value fields, and docx/hwpx/pdf export structure checks. Step 4 runs debounced `gaejosik_lint`, underlines violations via CodeMirror decorations and BlockNote custom marks, and stores dismissals under workspace-state `composer.lintDismissals` with per-document Studio fallback. | `src-tauri/src/{template_fill,kordoc_lite}.rs` · `src-tauri/src/export/validate.rs` · `src-tauri/src/linter/gaejosik.rs` · `src/components/studio/*` |
 
 ### Phase 5 — Evidence Binder + Deck Studio (W13–W18)
 
 | W | Module | Deliverable |
 |---|--------|-------------|
-| W13 | M5 | Right-pane Evidence Binder tab + `<workspace>/.anchor/binder/<doc-id>.json` state. Auto-pulls inbox-processed attachments + `<binary>.evidence.yaml` sidecars under the active doc's BU. |
-| W14 | M5 | Section / KPI / submission-checklist bindings — frontmatter `evidence_links[].section_bindings` (`"§ 2.1"`-style slugs), `kpi_bindings`, `submission_checklist_bindings`. Per-evidence Verify / Mark-as-submitted controls. |
-| W15 | M5 | Hub `evidence_index` integration — sha256 lookup ("이미 검증됨" hint), `evidence_index.suggest_reuse` palette command. Anchor still owns the binary; only sha256 + metadata flow to Hub. |
+| W13 | M5 | Right-pane Evidence Binder tab + `<workspace>/.anchor/binder/<doc-id>.json` state. Auto-pulls inbox-processed attachments + `<binary>.evidence.yaml` sidecars under the active doc's BU, then uses `kordoc_lite` for local format detection and HWPX/form preview metadata. |
+| W14 | M5 | Section / KPI / submission-checklist bindings — frontmatter `evidence_links[].section_bindings` (`"§ 2.1"`-style slugs), `kpi_bindings`, `submission_checklist_bindings`. Per-evidence Verify / Mark-as-submitted controls; reuse `kordoc_lite` HWPX fields as candidate binding labels. |
+| W15 | M5 | Hub `evidence_index` integration — sha256 lookup ("이미 검증됨" hint), `evidence_index.suggest_reuse` palette command, and metadata-only kordoc_lite detection fields. Anchor still owns the binary; only sha256 + metadata flow to Hub. |
 | W16 | M6 | Deck Studio mode + Plan step (Claude proposal → `slide_plan.json`) + 14-style catalog browser reading `dev/anchor/skills/docs/slide-decks/*.md`. |
 | W17 | M6 | Generate step matrix — `imageMode` radio (codex-native / provider / html-css) × `productionMode` checkboxes (image-folder / html-deck / pptx-from-images / pdf-export). Job artifact directory `projects/.../05-decks/<slug>/`. |
 | W18 | M6 | Per-page regenerate, drag-and-drop reorder, manifest.yaml hashing of every emitted page + final PPTX / PDF. |
@@ -95,25 +95,34 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 ## 5. Continuing work — concrete next steps
 
-### Immediate (W12 entry)
+### Immediate (W13 entry)
 
 ```
-# branch: fresh feat/studio-w12-fields-lint off main
-src-tauri/src/template_fill/*           # hwpx slot scan + hwp conversion wrapper
-src-tauri/src/linter/gaejosik.rs        # debounced lint subprocess seam
-src/components/composer/SlotPanel.tsx   # Studio Step 5 field map surface
-src/components/studio/*                 # Step 4 lint marks + Step 5 field values
+# branch: fresh feat/evidence-binder-w13 off main
+src-tauri/src/evidence_binder/*          # binder state + evidence discovery helpers
+src/components/evidence/*                # right-pane binder tab surface
+src/lib/evidenceBinder.ts                # typed Tauri wrappers + UI model
+src/App.tsx                              # right utility rail tab wiring
 ```
 
 W10 follow-up hardening, if needed before Studio:
 - Wrap converter runs in mission state when conversion duration becomes user-visible.
-- Add format-specific validators (`hwpx` validator, OOXML schema check, PDF font/embed check) after the generic manifest hash validation.
+- Extend the W12 lightweight structure checks toward richer PDF font/embed checks if submission gates require it.
 - Add an optional right-pane export progress surface; keep the palette command as the primary entrypoint.
 
-### W12 (HWP field map + lint)
+### W12 shipped notes
 
-- `template_get_fields` command stubs out to `hwpx` skill subprocess (`hwpx slots <template_path>`).
-- `gaejosik` lint: incremental check on save / 1.5s debounce. Surface as CodeMirror decoration (raw view) and BlockNote mark (rich view). Cache violations in `<workspace>/.anchor/composer/lint-cache.json` to avoid re-running on identical paragraphs.
+- `template_get_fields` calls the bundled/user `hwpx` skill subprocess (`hwpx slots <template_path> --format json`) and normalizes slot keys for Studio field values.
+- `template_get_fields` merges `hwpx slots` placeholders with `kordoc_lite` HWPX label/inline-label detection; field metadata includes source and confidence.
+- `template_fill_hwpx` writes filled artifacts to `.anchor/studio/filled/` by default, preserves form-label fills through `kordoc_lite`, and validates the result with both `hwpx validate` and lightweight structure checks.
+- `gaejosik_lint` is deterministic and dismissal-aware; the UI uses a 350 ms debounce, CodeMirror decorations for source mode, and a BlockNote `gaejosikLint` mark for rich mode.
+
+### W13 (Evidence Binder tab)
+
+- Add a right-pane Evidence Binder tab keyed by active document id.
+- Persist binder state at `<workspace>/.anchor/binder/<doc-id>.json`.
+- Seed candidate evidence from inbox-processed manifests and existing `<binary>.evidence.yaml` sidecars.
+- Show local `kordoc_lite` detection/form-preview metadata for HWPX evidence without moving binaries to Hub.
 
 ## 6. Cross-cutting hand-off notes
 

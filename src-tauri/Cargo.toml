@@ -20,6 +20,7 @@ dirs = "5"
 include_dir = "0.7"
 notify = "6"
 portable-pty = "0.8"
+quick-xml = "0.39.2"
 rayon = "1"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -34,6 +35,7 @@ tauri-plugin-updater = "2"
 trash = "=4.1.1"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
+zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3"

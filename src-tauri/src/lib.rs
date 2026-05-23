@@ -18,8 +18,10 @@ mod inbox;
 mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
+mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
+mod linter;
 mod meetings;
 mod mission_state;
 mod ops_catalog;
@@ -30,6 +32,7 @@ mod studio;
 mod sys_import;
 mod tasks;
 mod telegram_io;
+mod template_fill;
 mod terminal;
 mod vault;
 mod vault_list;
@@ -75,6 +78,7 @@ use inbox_settings::{
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
+use linter::gaejosik_lint;
 use meetings::{
     append_meetings_log, read_meeting_guides, read_meeting_metadata, read_meetings_log,
     scan_meeting_notes,
@@ -111,6 +115,7 @@ use telegram_io::{
     accept_telegram_item, fetch_telegram_recent, reject_telegram_item, start_telegram_polling,
     stop_poller_on_exit, stop_telegram_polling, telegram_polling_status, TelegramIoState,
 };
+use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
 use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
 use vault_list::{
@@ -316,6 +321,11 @@ pub fn run() {
             studio_state_save,
             studio_state_delete,
             studio_apply_body,
+            // M2 Document Studio (Phase 4 W12)
+            template_get_fields,
+            template_prepare_hwpx_template,
+            template_fill_hwpx,
+            gaejosik_lint,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")

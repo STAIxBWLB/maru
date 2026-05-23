@@ -57,6 +57,13 @@ export interface ValidationEntry {
   path: string;
   status: ValidationStatus;
   reason: string | null;
+  checks: ValidationCheck[];
+}
+
+export interface ValidationCheck {
+  name: string;
+  status: "pass" | "fail" | "skipped" | string;
+  reason?: string | null;
 }
 
 export interface ValidationReport {
@@ -168,11 +175,13 @@ export function summarizeValidation(report: ValidationReport): string {
     skipped: 0,
   };
   for (const entry of report.entries) counts[entry.status]++;
+  const failedChecks = report.entries.flatMap((entry) => entry.checks ?? []).filter((check) => check.status === "fail").length;
   return [
     `source: ${report.source_status}`,
     `pass: ${counts.pass}`,
     `missing: ${counts.missing}`,
     `hash-mismatch: ${counts["hash-mismatch"]}`,
     `skipped: ${counts.skipped}`,
+    `checks failed: ${failedChecks}`,
   ].join(" · ");
 }

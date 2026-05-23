@@ -754,8 +754,51 @@ a {
 .studio-editor-toolbar {
   justify-content: space-between;
 }
+.studio-lint-strip {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-lint-strip.active {
+  color: var(--ink);
+}
+.studio-lint-strip > span {
+  font-weight: 700;
+}
+.studio-lint-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 360px);
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-lint-strip button span {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+}
 .studio-rich-editor,
-.studio-source-editor {
+.studio-source-editor,
+.studio-codemirror-editor {
   flex: 1;
   min-height: 420px;
   border: 1px solid var(--line);
@@ -766,6 +809,10 @@ a {
 .studio-rich-editor .rich-editor-surface {
   min-height: 420px;
 }
+.rich-editor-lint-mark {
+  border-bottom: 2px dotted var(--danger);
+  background: var(--danger-soft);
+}
 .studio-source-editor {
   width: 100%;
   resize: vertical;
@@ -773,6 +820,81 @@ a {
   color: var(--ink);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   line-height: 1.55;
+}
+.studio-codemirror-editor .cm-editor {
+  min-height: 420px;
+  height: 100%;
+  color: var(--ink);
+  background: transparent;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.studio-codemirror-editor .cm-scroller {
+  min-height: 420px;
+}
+.studio-codemirror-editor .cm-gutters {
+  border-right: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.studio-codemirror-editor .cm-activeLine,
+.studio-codemirror-editor .cm-activeLineGutter {
+  background: var(--panel-2);
+}
+.studio-codemirror-editor .cm-content {
+  padding: 14px 0;
+}
+.studio-codemirror-editor .cm-line {
+  padding: 0 14px;
+}
+.cm-gaejosik-violation {
+  border-bottom: 2px dotted var(--danger);
+  background: var(--danger-soft);
+}
+.studio-hwp-source,
+.studio-hwp-fields {
+  width: min(100%, 860px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+}
+.studio-hwp-source .field:last-child,
+.studio-hwp-fields .field {
+  grid-column: 1 / -1;
+}
+.studio-hwp-fields textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+.studio-hwp-status {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.studio-hwp-status span {
+  color: var(--muted);
+}
+.studio-hwp-checks {
+  width: min(100%, 760px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-hwp-checks span {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
 }
 .studio-placeholder-block,
 .studio-result-block,
