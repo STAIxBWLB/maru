@@ -26,6 +26,7 @@ mod ops_catalog;
 mod outlook_mso;
 mod shelf;
 mod skill_host;
+mod studio;
 mod sys_import;
 mod tasks;
 mod telegram_io;
@@ -96,6 +97,9 @@ use skill_host::{
     skills_read_skill_file, skills_remove_source, skills_rescan_source, skills_reset_registry,
     skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_source,
     skills_uninstall_skill,
+};
+use studio::{
+    studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
 use sys_import::{apply_sys_import, plan_sys_import};
 use tasks::{
@@ -306,6 +310,12 @@ pub fn run() {
             export_record_success,
             export_record_failure,
             export_dispatch,
+            // M2 Document Studio (Phase 4 W11)
+            studio_state_list,
+            studio_state_read,
+            studio_state_save,
+            studio_state_delete,
+            studio_apply_body,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")

@@ -239,6 +239,23 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.activeAppMode).toBe("e2e");
   });
 
+  it("parses catalog and studio modes for document operations", () => {
+    expect(
+      normalizeAnchorSettings({
+        ui: {
+          activeAppMode: "catalog",
+        },
+      }).ui.activeAppMode,
+    ).toBe("catalog");
+    expect(
+      normalizeAnchorSettings({
+        ui: {
+          activeAppMode: "studio",
+        },
+      }).ui.activeAppMode,
+    ).toBe("studio");
+  });
+
   it("applies workspace io provider overrides without rewriting base comms defaults", () => {
     const base = normalizeAnchorSettings({
       comms: {

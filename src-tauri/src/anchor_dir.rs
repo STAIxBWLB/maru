@@ -75,6 +75,7 @@ const ANCHORIGNORE_DEFAULTS: &[&str] = &[
     ".cache",
     ".secrets",
     ".anchor/cache",
+    ".anchor/studio",
     "_sys/env",
 ];
 

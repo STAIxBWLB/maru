@@ -193,6 +193,7 @@ fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
     if rel.starts_with(".anchor/cache/")
         || rel.starts_with(".anchor/runs/")
         || rel.starts_with(".anchor/queue/")
+        || rel.starts_with(".anchor/studio/")
     {
         return false;
     }

@@ -300,8 +300,8 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await expect(page.locator(".meetings-detail-pane")).toContainText("Skills 관리");
 
   await meetingsPane.getByRole("button", { name: "캘린더" }).click();
-  await expect(page.locator(".meetings-calendar .rbc-calendar")).toBeVisible();
-  await expect(page.locator(".meetings-calendar")).toContainText("Skills 관리");
+  await expect(page.locator(".unified-calendar")).toBeVisible();
+  await expect(page.locator(".unified-calendar")).toContainText("Skills 관리");
 
   await meetingsPane.getByRole("button", { name: "녹취록 처리" }).click();
   await expect(page.locator(".meetings-workbench")).toBeVisible();
@@ -328,6 +328,20 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await meetingsPane.getByRole("button", { name: "정제 실행" }).click();
   await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
+});
+
+test("opens document studio with the seven-step shell", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".activity-rail").getByRole("button", { name: "스튜디오" }).click();
+  await expect(page.locator(".studio-pane")).toBeVisible();
+  await expect(page.locator(".studio-header")).toContainText("Document Studio");
+  await expect(page.locator(".studio-step-button")).toHaveCount(7);
+  await expect(page.locator(".studio-step-rail")).toContainText("Source");
+  await expect(page.locator(".studio-step-rail")).toContainText("Package");
+  await expect(page.locator(".studio-active-document")).toContainText(
+    "Anchor 사업 주간 점검 회의",
+  );
 });
 
 test("shows the meetings settings tab in the settings window shell", async ({ page }) => {

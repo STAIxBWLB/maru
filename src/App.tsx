@@ -16,6 +16,7 @@ import {
   Settings2,
   UsersRound,
   WandSparkles,
+  Workflow,
   X,
 } from "lucide-react";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
@@ -47,6 +48,7 @@ import {
 import { SkillEditorWindowRoot } from "./components/skills/SkillEditorWindow";
 import { SkillRunsPanel } from "./components/skills/SkillRunsPanel";
 import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
+import { StudioMode } from "./components/studio/StudioMode";
 import {
   applyFileQueue,
   addWorkspaceRoot,
@@ -112,6 +114,11 @@ import {
   summarizeValidation,
   type ExportFormat,
 } from "./lib/export";
+import {
+  studioApplyBody,
+  type StudioCreateDocumentInput,
+  type StudioPackageResult,
+} from "./lib/studio";
 import {
   readAnchorSettings,
   readWorkspaceConfig,
@@ -3866,16 +3873,16 @@ function MainApp() {
     await snapshotTab(resolvedActiveTabId);
   }, [resolvedActiveTabId, snapshotTab]);
 
-  const createNew = useCallback(
-    async (
-      title: string,
-      docType: string,
-      body: string,
-      targetRelPath: string | null,
-      extras?: import("./components/NewDocumentDialog").NewDocumentExtras,
-    ) => {
-      if (!activeDocumentWorkspacePath) return;
-      if (blockWorkspaceWrite("create")) return;
+  const createDocumentAndOpen = useCallback(
+    async ({
+      title,
+      docType,
+      body,
+      targetRelPath,
+      extras,
+    }: StudioCreateDocumentInput): Promise<DocumentPayload | null> => {
+      if (!activeDocumentWorkspacePath) return null;
+      if (blockWorkspaceWrite("create")) return null;
       // Phase 4 W7: Hub template/guideline metadata flows into proper
       // frontmatter via `extras`, not an HTML comment trailer. Rust core
       // preserves byte-identity for any unrelated fields downstream.
@@ -3909,7 +3916,7 @@ function MainApp() {
           wordCount: 0,
           snippet: "",
           fileKind: "md",
-            versionCount: 0,
+          versionCount: 0,
         } satisfies VaultEntry);
       const payload = await readDocument(activeDocumentWorkspacePath, created.path);
       const newTab: EditorTab = {
@@ -3929,6 +3936,7 @@ function MainApp() {
       activateEditorTab(newTab.id, "left");
       setPendingSelectedPath(null);
       pushRecent(entry.path);
+      return payload;
     },
     [
       activeDocumentWorkspace,
@@ -3940,6 +3948,98 @@ function MainApp() {
       scanOptions,
       updateWorkspaceState,
     ],
+  );
+
+  const createNew = useCallback(
+    async (
+      title: string,
+      docType: string,
+      body: string,
+      targetRelPath: string | null,
+      extras?: import("./components/NewDocumentDialog").NewDocumentExtras,
+    ) => {
+      await createDocumentAndOpen({ title, docType, body, targetRelPath, extras });
+    },
+    [createDocumentAndOpen],
+  );
+
+  const refreshStudioDocumentMutation = useCallback(
+    async (workspacePath: string, payload: DocumentPayload): Promise<DocumentPayload> => {
+      const fresh = await scanVault(workspacePath, scanOptions);
+      updateWorkspaceState(workspacePath, { entries: fresh });
+      void refreshWorkspaceFiles(workspacePath);
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.document.path !== payload.path) return tab;
+          const entry = fresh.find((item) => item.path === payload.path) ?? tab.entry;
+          return {
+            ...tab,
+            entry,
+            document: payload,
+            draftContent: payload.content,
+          };
+        }),
+      );
+      return payload;
+    },
+    [refreshWorkspaceFiles, scanOptions, updateWorkspaceState],
+  );
+
+  const applyStudioBody = useCallback(
+    async (documentPath: string, bodyMarkdown: string): Promise<DocumentPayload | null> => {
+      if (!activeDocumentWorkspacePath) return null;
+      if (blockWorkspaceWrite("modify")) return null;
+      try {
+        const payload = await studioApplyBody(
+          activeDocumentWorkspacePath,
+          documentPath,
+          bodyMarkdown,
+        );
+        await refreshStudioDocumentMutation(activeDocumentWorkspacePath, payload);
+        setError(t("studio.sections.apply.success"));
+        return payload;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return null;
+      }
+    },
+    [activeDocumentWorkspacePath, blockWorkspaceWrite, refreshStudioDocumentMutation, t],
+  );
+
+  const freezeStudioPackage = useCallback(
+    async (
+      documentPath: string,
+      bodyMarkdown: string,
+      title: string,
+    ): Promise<StudioPackageResult | null> => {
+      if (!activeDocumentWorkspacePath) return null;
+      if (blockWorkspaceWrite("modify")) return null;
+      try {
+        const payload = await studioApplyBody(
+          activeDocumentWorkspacePath,
+          documentPath,
+          bodyMarkdown,
+        );
+        await refreshStudioDocumentMutation(activeDocumentWorkspacePath, payload);
+        const snapshot = await createVersion(
+          activeDocumentWorkspacePath,
+          payload.path,
+          title,
+          payload.content,
+          t("studio.package.snapshotSummary"),
+        );
+        setError(t("studio.package.freeze.success", { path: snapshot.relPath }));
+        return {
+          document: payload,
+          snapshotPath: snapshot.path,
+          snapshotRelPath: snapshot.relPath,
+        };
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return null;
+      }
+    },
+    [activeDocumentWorkspacePath, blockWorkspaceWrite, refreshStudioDocumentMutation, t],
   );
 
   const handleWikilinkClick = useCallback(
@@ -4976,6 +5076,9 @@ function MainApp() {
         case "open-catalog":
           setPersistedAppMode("catalog");
           break;
+        case "open-studio":
+          setPersistedAppMode("studio");
+          break;
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -5274,6 +5377,7 @@ function MainApp() {
     meetings: " meetings-mode",
     tasks: " tasks-mode",
     catalog: " catalog-mode",
+    studio: " studio-mode",
     e2e: " e2e-mode",
   };
   const visibleAppMode: AppMode = appMode === "e2e" && !e2eFlowEnabled ? "pkm" : appMode;
@@ -5671,6 +5775,15 @@ function MainApp() {
           >
             <LayoutGrid size={20} strokeWidth={1.9} />
           </button>
+          <button
+            type="button"
+            className={visibleAppMode === "studio" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("studio")}
+            title={t("mode.studio")}
+            aria-label={t("mode.studio")}
+          >
+            <Workflow size={20} strokeWidth={1.9} />
+          </button>
           {e2eFlowEnabled ? (
             <button
               type="button"
@@ -5760,6 +5873,21 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
+          />
+        ) : visibleAppMode === "studio" ? (
+          <StudioMode
+            workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
+            activeDocument={document}
+            canCreateDocument={activeWorkspaceCanCreate}
+            canModifyDocument={activeWorkspaceCanModify}
+            onCreateDocument={createDocumentAndOpen}
+            onApplyBody={applyStudioBody}
+            onFreezePackage={freezeStudioPackage}
+            onRevealPath={(path) => {
+              const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
+              if (root) void revealInFileManager(root, path);
             }}
             onError={setError}
           />

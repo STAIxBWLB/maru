@@ -5,7 +5,15 @@ export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
-export type AnchorAppMode = "pkm" | "inbox" | "comms" | "meetings" | "tasks" | "catalog" | "e2e";
+export type AnchorAppMode =
+  | "pkm"
+  | "inbox"
+  | "comms"
+  | "meetings"
+  | "tasks"
+  | "catalog"
+  | "studio"
+  | "e2e";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab = "outline" | "files" | "memo" | "info" | "skills" | "guideline";
@@ -917,7 +925,7 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 
 function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
   return value === "pkm" || value === "inbox" || value === "comms" || value === "meetings"
-    || value === "tasks" || value === "e2e"
+    || value === "tasks" || value === "catalog" || value === "studio" || value === "e2e"
     ? value
     : null;
 }

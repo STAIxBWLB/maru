@@ -327,6 +327,13 @@ a {
     "activity sidebar terminal terminal terminal";
 }
 
+.app-shell.studio-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar studio studio studio"
+    "activity sidebar terminal terminal terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -377,6 +384,13 @@ a {
     "activity sidebar terminal terminal terminal";
 }
 
+.app-shell.terminal-maximized.studio-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sidebar terminal terminal terminal"
+    "activity sidebar terminal terminal terminal";
+}
+
 .app-shell.terminal-maximized .document-list,
 .app-shell.terminal-maximized .pane-resize-handle,
 .app-shell.terminal-maximized .editor-split-shell,
@@ -385,6 +399,8 @@ a {
 .app-shell.terminal-maximized .comms-pane,
 .app-shell.terminal-maximized .meetings-pane,
 .app-shell.terminal-maximized .tasks-pane,
+.app-shell.terminal-maximized .catalog-pane,
+.app-shell.terminal-maximized .studio-pane,
 .app-shell.terminal-maximized .e2e-pane {
   display: none;
 }
@@ -436,6 +452,395 @@ a {
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
+}
+.studio-pane {
+  grid-area: studio;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+}
+.studio-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.studio-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.studio-header h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.studio-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.studio-header-actions,
+.studio-action-row,
+.studio-nav,
+.studio-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.studio-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+.studio-step-rail {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+}
+.studio-step-button {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: left;
+  font-size: 13px;
+}
+.studio-step-button:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.studio-step-button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.studio-step-button.complete .studio-step-index {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.studio-step-index {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.studio-state-list {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+.studio-state-list h2 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.studio-state-list button {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: left;
+}
+.studio-state-list button.active,
+.studio-state-list button:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.studio-state-list span,
+.studio-state-list small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-state-list small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.studio-workbench {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.studio-step-panel {
+  flex: 1;
+  min-height: 0;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.studio-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.studio-step-head h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+.studio-step-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.studio-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  max-width: 860px;
+}
+.studio-form-grid .field:last-child {
+  grid-column: 1 / -1;
+}
+.studio-active-document {
+  width: min(100%, 760px);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+}
+.studio-active-document:hover {
+  border-color: var(--accent-line);
+  background: var(--panel-2);
+}
+.studio-active-document span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.studio-active-document small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-active-document span:last-child {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.studio-inline-note,
+.studio-inline-error,
+.studio-count-strip {
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-inline-error {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.studio-segmented {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.studio-segmented button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-segmented button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.studio-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.studio-template-grid button {
+  min-height: 108px;
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+}
+.studio-template-grid button:hover,
+.studio-template-grid button.active {
+  border-color: var(--accent-line);
+  background: var(--panel-2);
+}
+.studio-template-grid span,
+.studio-template-grid small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-guideline-list {
+  display: grid;
+  gap: 8px;
+}
+.studio-guideline-list label,
+.studio-format-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.studio-guideline-list label.active,
+.studio-format-list label.active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.studio-guideline-list span {
+  display: grid;
+  gap: 3px;
+}
+.studio-guideline-list small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-sections-panel {
+  padding-bottom: 0;
+}
+.studio-editor-toolbar {
+  justify-content: space-between;
+}
+.studio-rich-editor,
+.studio-source-editor {
+  flex: 1;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: auto;
+}
+.studio-rich-editor .rich-editor-surface {
+  min-height: 420px;
+}
+.studio-source-editor {
+  width: 100%;
+  resize: vertical;
+  padding: 14px;
+  color: var(--ink);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  line-height: 1.55;
+}
+.studio-placeholder-block,
+.studio-result-block,
+.studio-package-summary {
+  width: min(100%, 760px);
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.studio-placeholder-block span,
+.studio-placeholder-block small,
+.studio-result-block span,
+.studio-package-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-format-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.studio-format-list label {
+  width: 120px;
+  align-items: center;
+}
+.studio-result-block button {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--accent);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.studio-package-summary {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.studio-package-summary div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.studio-package-summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.studio-nav {
+  justify-content: flex-end;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+}
+.studio-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+  padding: 32px;
+}
+.studio-empty strong {
+  color: var(--ink);
+  font-size: 15px;
 }
 .catalog-pane--empty {
   padding: 32px;
@@ -7900,6 +8305,24 @@ button.git-badge:hover {
       "terminal";
   }
 
+  .app-shell.catalog-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "catalog"
+      "terminal";
+  }
+
+  .app-shell.studio-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "studio"
+      "terminal";
+  }
+
   .app-shell.e2e-mode {
     grid-template-areas:
       "topbar"
@@ -7933,6 +8356,35 @@ button.git-badge:hover {
 
   .activity-spacer {
     display: none;
+  }
+
+  .studio-header {
+    flex-direction: column;
+  }
+
+  .studio-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-step-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .studio-step-button {
+    width: max-content;
+    min-width: 132px;
+  }
+
+  .studio-state-list {
+    display: none;
+  }
+
+  .studio-form-grid,
+  .studio-package-summary {
+    grid-template-columns: 1fr;
   }
 
   .document-list {
@@ -8574,6 +9026,24 @@ button.git-badge:hover {
       "activity"
       "sidebar"
       "tasks"
+      "terminal";
+  }
+
+  .app-shell.catalog-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "catalog"
+      "terminal";
+  }
+
+  .app-shell.studio-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sidebar"
+      "studio"
       "terminal";
   }
 
