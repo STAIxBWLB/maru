@@ -882,6 +882,20 @@ a {
 .studio-hwp-status span {
   color: var(--muted);
 }
+.studio-hwp-checks {
+  width: min(100%, 760px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-hwp-checks span {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
 .studio-placeholder-block,
 .studio-result-block,
 .studio-package-summary {

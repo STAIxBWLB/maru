@@ -18,6 +18,7 @@ mod inbox;
 mod inbox_classifier;
 mod inbox_settings;
 mod inbox_watcher;
+mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
 mod linter;

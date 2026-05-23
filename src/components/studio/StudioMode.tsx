@@ -55,6 +55,7 @@ import {
   type StudioCreateDocumentInput,
   type StudioPackageResult,
   type StudioState,
+  type StudioHwpTemplateFieldState,
   type StudioStateSummary,
   type StudioStep,
 } from "../../lib/studio";
@@ -487,6 +488,9 @@ export function StudioMode({
             hwpFields: {
               ...prev.hwpFields,
               status: "manualFallback",
+              formFilledCount: 0,
+              unmatchedFields: [],
+              validationChecks: [],
               warnings: [prepared.reason ?? t("studio.hwp.manualFallback")],
             },
           }));
@@ -512,6 +516,9 @@ export function StudioMode({
             templatePath: configuredPath,
             fields: response.fields,
             values,
+            formFilledCount: 0,
+            unmatchedFields: [],
+            validationChecks: [],
             warnings:
               response.fields.length === 0
                 ? [t("studio.hwp.warning.noFields"), ...response.warnings]
@@ -525,6 +532,9 @@ export function StudioMode({
         hwpFields: {
           ...prev.hwpFields,
           status: "error",
+          formFilledCount: 0,
+          unmatchedFields: [],
+          validationChecks: [],
           warnings: [err instanceof Error ? err.message : String(err)],
         },
       }));
@@ -563,6 +573,9 @@ export function StudioMode({
           ...prev.hwpFields,
           status: "filled",
           lastOutputPath: response.outputPath,
+          formFilledCount: response.formFilledCount,
+          unmatchedFields: response.unmatchedFields,
+          validationChecks: response.validationChecks,
           warnings: response.warnings,
         },
       }));
@@ -572,6 +585,9 @@ export function StudioMode({
         hwpFields: {
           ...prev.hwpFields,
           status: "error",
+          formFilledCount: 0,
+          unmatchedFields: [],
+          validationChecks: [],
           warnings: [err instanceof Error ? err.message : String(err)],
         },
       }));
@@ -1249,12 +1265,29 @@ function HwpStep({
       <div className="studio-hwp-status">
         <strong>{t("studio.hwp.status", { status: state.hwpFields.status })}</strong>
         <span>{t("studio.hwp.fields", { count: fieldCount })}</span>
+        {state.hwpFields.formFilledCount > 0 ? (
+          <span>{t("studio.hwp.formFilled", { count: state.hwpFields.formFilledCount })}</span>
+        ) : null}
       </div>
 
-      {state.hwpFields.warnings.length > 0 ? (
+      {state.hwpFields.warnings.length > 0 || state.hwpFields.unmatchedFields.length > 0 ? (
         <div className="studio-inline-error">
           {state.hwpFields.warnings.map((warning) => (
             <span key={warning}>{warning}</span>
+          ))}
+          {state.hwpFields.unmatchedFields.length > 0 ? (
+            <span>{t("studio.hwp.unmatched", { fields: state.hwpFields.unmatchedFields.join(", ") })}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {state.hwpFields.validationChecks.length > 0 ? (
+        <div className="studio-hwp-checks">
+          {state.hwpFields.validationChecks.map((check) => (
+            <span key={`${check.name}-${check.status}`}>
+              {check.name}: {check.status}
+              {check.reason ? ` (${check.reason})` : ""}
+            </span>
           ))}
         </div>
       ) : null}
@@ -1265,7 +1298,7 @@ function HwpStep({
             <Field
               key={field.key}
               label={`${field.label} (${field.occurrences})`}
-              helper={field.required ? t("studio.hwp.field.required") : undefined}
+              helper={fieldHelper(field, t)}
             >
               <TextArea
                 value={state.hwpFields.values[field.key] ?? ""}
@@ -1302,6 +1335,20 @@ function HwpStep({
       ) : null}
       </div>
   );
+}
+
+function fieldHelper(
+  field: StudioHwpTemplateFieldState,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string | undefined {
+  const parts = [
+    field.required ? t("studio.hwp.field.required") : null,
+    field.source ? t("studio.hwp.field.source", { source: field.source }) : null,
+    typeof field.confidence === "number"
+      ? t("studio.hwp.field.confidence", { confidence: Math.round(field.confidence * 100) })
+      : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function ExportStep({

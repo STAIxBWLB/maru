@@ -49,6 +49,9 @@ export interface StudioHwpTemplateFieldState {
   label: string;
   required: boolean;
   occurrences: number;
+  source?: "placeholder" | "formLabel" | "inlineLabel" | string;
+  confidence?: number;
+  matchedKey?: string | null;
 }
 
 export type StudioHwpFieldsStatus =
@@ -64,6 +67,9 @@ export interface StudioHwpFieldsState {
   fields: StudioHwpTemplateFieldState[];
   values: Record<string, string>;
   lastOutputPath: string | null;
+  formFilledCount: number;
+  unmatchedFields: string[];
+  validationChecks: TemplateValidationCheck[];
   warnings: string[];
 }
 
@@ -143,11 +149,20 @@ export interface TemplateFillRequest {
   outputPath?: string | null;
 }
 
+export interface TemplateValidationCheck {
+  name: string;
+  status: "pass" | "fail" | "skipped" | string;
+  reason?: string | null;
+}
+
 export interface TemplateFillResponse {
   outputPath: string;
   replacedCount: number;
   validationOk: boolean;
   command: string;
+  formFilledCount: number;
+  unmatchedFields: string[];
+  validationChecks: TemplateValidationCheck[];
   warnings: string[];
 }
 
@@ -222,6 +237,9 @@ export function createInitialStudioState(document: DocumentPayload | null): Stud
       fields: [],
       values: {},
       lastOutputPath: null,
+      formFilledCount: 0,
+      unmatchedFields: [],
+      validationChecks: [],
       warnings: [],
     },
     export: {
@@ -256,6 +274,9 @@ export function normalizeStudioState(state: StudioState): StudioState {
       fields: state.hwpFields?.fields ?? [],
       values: state.hwpFields?.values ?? {},
       lastOutputPath: state.hwpFields?.lastOutputPath ?? null,
+      formFilledCount: state.hwpFields?.formFilledCount ?? 0,
+      unmatchedFields: state.hwpFields?.unmatchedFields ?? [],
+      validationChecks: state.hwpFields?.validationChecks ?? [],
       warnings: state.hwpFields?.warnings ?? [],
     },
   };

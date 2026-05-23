@@ -1,3 +1,4 @@
+use crate::kordoc_lite::{self, KordocLiteCheck, LiteField};
 use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use regex::Regex;
@@ -15,6 +16,12 @@ pub struct TemplateField {
     pub label: String,
     pub required: bool,
     pub occurrences: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +69,12 @@ pub struct TemplateFillResponse {
     pub validation_ok: bool,
     pub command: String,
     #[serde(default)]
+    pub form_filled_count: u32,
+    #[serde(default)]
+    pub unmatched_fields: Vec<String>,
+    #[serde(default)]
+    pub validation_checks: Vec<KordocLiteCheck>,
+    #[serde(default)]
     pub warnings: Vec<String>,
 }
 
@@ -82,23 +95,71 @@ pub fn template_get_fields(
         return Err("Template field extraction requires a .hwpx template".to_string());
     }
 
-    let hwpx = find_hwpx_tool().ok_or_else(|| "hwpx tool is not available".to_string())?;
-    let run = run_command(
-        &hwpx,
-        &[
-            OsString::from("slots"),
-            template_path.as_os_str().to_os_string(),
-            OsString::from("--format"),
-            OsString::from("json"),
-        ],
-    )?;
-    let parsed: HwpxSlotsResponse = serde_json::from_slice(&run.stdout)
-        .map_err(|err| format!("Cannot parse hwpx slots output: {err}"))?;
+    let mut fields: BTreeMap<String, TemplateField> = BTreeMap::new();
+    let mut warnings = Vec::new();
+
+    match find_hwpx_tool() {
+        Some(hwpx) => {
+            match run_command(
+                &hwpx,
+                &[
+                    OsString::from("slots"),
+                    template_path.as_os_str().to_os_string(),
+                    OsString::from("--format"),
+                    OsString::from("json"),
+                ],
+            )
+            .and_then(|run| {
+                serde_json::from_slice::<HwpxSlotsResponse>(&run.stdout)
+                    .map_err(|err| format!("Cannot parse hwpx slots output: {err}"))
+            }) {
+                Ok(parsed) => {
+                    for mut field in parsed.fields {
+                        field
+                            .source
+                            .get_or_insert_with(|| "placeholder".to_string());
+                        field.confidence.get_or_insert(1.0);
+                        merge_template_field(&mut fields, field);
+                    }
+                }
+                Err(err) => warnings.push(format!("hwpx slots unavailable: {err}")),
+            }
+        }
+        None => {
+            warnings.push("hwpx tool is not available; using kordoc_lite scan only".to_string())
+        }
+    }
+
+    match kordoc_lite::scan_hwpx_fields(&template_path) {
+        Ok(scan) => {
+            for field in scan.fields {
+                merge_template_field(&mut fields, template_field_from_lite(field));
+            }
+            warnings.extend(scan.warnings);
+            warnings.extend(
+                scan.validation_checks
+                    .into_iter()
+                    .filter(|check| check.status != "pass")
+                    .filter_map(|check| {
+                        check
+                            .reason
+                            .map(|reason| format!("{}: {reason}", check.name))
+                    }),
+            );
+        }
+        Err(err) => {
+            if fields.is_empty() {
+                return Err(format!("Cannot scan HWPX template fields: {err}"));
+            }
+            warnings.push(format!("kordoc_lite scan skipped: {err}"));
+        }
+    }
+
     Ok(TemplateFieldResponse {
         template_path: template_path.to_string_lossy().to_string(),
         source,
-        fields: parsed.fields,
-        warnings: Vec::new(),
+        fields: fields.into_values().collect(),
+        warnings,
     })
 }
 
@@ -179,7 +240,7 @@ pub fn template_fill_hwpx(
     let fill_output = fill_run?;
     let replaced_count = parse_replaced_count(&fill_output.stderr);
 
-    let validation_ok = run_command(
+    let hwpx_validation_ok = run_command(
         &hwpx,
         &[
             OsString::from("validate"),
@@ -187,6 +248,30 @@ pub fn template_fill_hwpx(
         ],
     )
     .is_ok();
+    let mut form_filled_count = 0;
+    let mut unmatched_fields = Vec::new();
+    let mut validation_checks = Vec::new();
+    let mut warnings = Vec::new();
+
+    match kordoc_lite::fill_hwpx_form_fields(&output_path, &output_path, &request.values) {
+        Ok(outcome) => {
+            form_filled_count = outcome.filled_count;
+            unmatched_fields = outcome.unmatched_fields;
+            validation_checks = outcome.validation_checks;
+            warnings.extend(outcome.warnings);
+        }
+        Err(err) => {
+            validation_checks.push(KordocLiteCheck {
+                name: "kordoc-lite-fill".to_string(),
+                status: "fail".to_string(),
+                reason: Some(err.clone()),
+            });
+            warnings.push(format!("kordoc_lite form fill skipped: {err}"));
+        }
+    }
+
+    let kordoc_validation_ok = validation_checks.iter().all(|check| check.status == "pass");
+    let validation_ok = hwpx_validation_ok && kordoc_validation_ok;
 
     Ok(TemplateFillResponse {
         output_path: output_path.to_string_lossy().to_string(),
@@ -203,12 +288,49 @@ pub fn template_fill_hwpx(
                 output_path.as_os_str().to_os_string(),
             ],
         ),
-        warnings: if validation_ok {
-            Vec::new()
-        } else {
-            vec!["Filled HWPX was written but validation did not pass".to_string()]
+        form_filled_count,
+        unmatched_fields,
+        validation_checks,
+        warnings: {
+            if !hwpx_validation_ok {
+                warnings
+                    .push("Filled HWPX was written but hwpx validation did not pass".to_string());
+            }
+            if !kordoc_validation_ok {
+                warnings.push(
+                    "Filled HWPX was written but kordoc_lite validation did not pass".to_string(),
+                );
+            }
+            warnings
         },
     })
+}
+
+fn merge_template_field(fields: &mut BTreeMap<String, TemplateField>, field: TemplateField) {
+    fields
+        .entry(field.key.clone())
+        .and_modify(|existing| {
+            existing.occurrences += field.occurrences;
+            if existing.source.as_deref() != Some("placeholder")
+                && field.source.as_deref() == Some("placeholder")
+            {
+                existing.source = field.source.clone();
+                existing.confidence = field.confidence;
+            }
+        })
+        .or_insert(field);
+}
+
+fn template_field_from_lite(field: LiteField) -> TemplateField {
+    TemplateField {
+        key: field.key,
+        label: field.label,
+        required: field.required,
+        occurrences: field.occurrences,
+        source: Some(field.source),
+        confidence: Some(field.confidence),
+        matched_key: field.matched_key,
+    }
 }
 
 fn resolve_template_path(

@@ -5,6 +5,7 @@
 // W9+ adds the format-specific checks (hwpx-validate, OOXML schema,
 // font-embed for PDFs).
 
+use crate::kordoc_lite::{self, KordocLiteCheck};
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,8 @@ pub struct ValidationEntry {
     pub status: ValidationStatus,
     #[serde(default)]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub checks: Vec<KordocLiteCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +61,7 @@ pub fn validate_manifest(manifest_path: &Path) -> io::Result<ValidationReport> {
     let mut entries: Vec<ValidationEntry> = Vec::with_capacity(manifest.outputs.len());
     for out in manifest.outputs.iter() {
         let abs = workspace_root.join(&out.path);
-        let (status, reason) = match out.status {
+        let (status, mut reason) = match out.status {
             ExportOutputStatus::Planned | ExportOutputStatus::Pending => (
                 ValidationStatus::Skipped,
                 Some(format!("status: {:?}", out.status)),
@@ -92,11 +95,20 @@ pub fn validate_manifest(manifest_path: &Path) -> io::Result<ValidationReport> {
                 }
             }
         };
+        let checks = if status == ValidationStatus::Pass && abs.exists() {
+            kordoc_lite::validate_export_artifact(&abs, out.format.extension())
+        } else {
+            Vec::new()
+        };
+        if checks.iter().any(|check| check.status == "fail") && reason.is_none() {
+            reason = Some("format-specific validation failed".to_string());
+        }
         entries.push(ValidationEntry {
             format: out.format,
             path: out.path.clone(),
             status,
             reason,
+            checks,
         });
     }
 
@@ -157,6 +169,7 @@ mod tests {
         let report = validate_manifest(&manifest_path).unwrap();
         assert_eq!(report.source_status, ValidationStatus::Pass);
         assert_eq!(report.entries[0].status, ValidationStatus::Skipped);
+        assert!(report.entries[0].checks.is_empty());
     }
 
     #[test]
@@ -206,6 +219,14 @@ mod tests {
         let _ = bundle_dir;
         let report = validate_manifest(&manifest_path).unwrap();
         assert_eq!(report.entries[0].status, ValidationStatus::Pass);
+        assert_eq!(
+            report.entries[0].reason.as_deref(),
+            Some("format-specific validation failed")
+        );
+        assert!(report.entries[0]
+            .checks
+            .iter()
+            .any(|check| check.name == "docx-structure" && check.status == "fail"));
     }
 
     #[test]
