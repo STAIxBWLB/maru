@@ -751,6 +751,7 @@ export function StudioMode({
                   key={summary.docId}
                   className={summary.docId === state.docId ? "active" : ""}
                   onClick={() => void loadState(summary.docId)}
+                  title={summary.title || summary.docId}
                 >
                   <span>{summary.title || summary.docId}</span>
                   <small>{t(`studio.step.${summary.currentStep}`)}</small>
