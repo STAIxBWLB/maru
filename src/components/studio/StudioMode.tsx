@@ -9,13 +9,17 @@ import {
   PackageCheck,
   RefreshCcw,
   Save,
+  Search,
   Send,
   Trash2,
+  Wand2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Field, TextArea, TextInput } from "../ui/Field";
 import { RichMarkdownEditor } from "../RichMarkdownEditor";
+import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
 import { useTranslation } from "../../lib/i18n";
 import {
   defaultAnchorDocType,
@@ -36,6 +40,7 @@ import {
 import {
   STUDIO_STEPS,
   createInitialStudioState,
+  gaejosikLint,
   nextStudioStep,
   previousStudioStep,
   studioDocIdFromDocument,
@@ -43,6 +48,10 @@ import {
   studioStateList,
   studioStateRead,
   studioStateSave,
+  templateFillHwpx,
+  templateGetFields,
+  templatePrepareHwpxTemplate,
+  type GaejosikLintIssue,
   type StudioCreateDocumentInput,
   type StudioPackageResult,
   type StudioState,
@@ -64,6 +73,8 @@ interface StudioModeProps {
     bodyMarkdown: string,
     title: string,
   ) => Promise<StudioPackageResult | null>;
+  lintDismissalsByDoc?: Record<string, string[]>;
+  onLintDismissalsChange?: (docId: string, dismissedIds: string[]) => void;
   onRevealPath?: (path: string) => void;
   onError: (message: string) => void;
 }
@@ -88,6 +99,8 @@ export function StudioMode({
   onCreateDocument,
   onApplyBody,
   onFreezePackage,
+  lintDismissalsByDoc,
+  onLintDismissalsChange,
   onRevealPath,
   onError,
 }: StudioModeProps) {
@@ -103,6 +116,8 @@ export function StudioMode({
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("rich");
+  const [lintIssues, setLintIssues] = useState<GaejosikLintIssue[]>([]);
+  const [lintLoading, setLintLoading] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
   const loadingRef = useRef(false);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -114,6 +129,9 @@ export function StudioMode({
   );
 
   const activeTemplateSlug = state?.template?.slug ?? null;
+  const currentLintDismissals = state
+    ? (lintDismissalsByDoc?.[state.docId] ?? state.lintDismissals)
+    : [];
 
   const filteredTemplates = useMemo(
     () =>
@@ -256,6 +274,31 @@ export function StudioMode({
     };
   }, [category, state?.currentStep, workspaceRoot]);
 
+  useEffect(() => {
+    if (!workspaceRoot || !state || state.currentStep !== "sections") {
+      setLintLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLintLoading(true);
+    const timer = window.setTimeout(() => {
+      void gaejosikLint(workspaceRoot, state.bodyDraft, currentLintDismissals)
+        .then((report) => {
+          if (!cancelled) setLintIssues(report.issues);
+        })
+        .catch((err) => {
+          if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          if (!cancelled) setLintLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [currentLintDismissals, onError, state?.bodyDraft, state?.currentStep, workspaceRoot]);
+
   const patchState = useCallback((updater: (prev: StudioState) => StudioState) => {
     setState((prev) => {
       if (!prev) return prev;
@@ -356,6 +399,7 @@ export function StudioMode({
           title: template.title,
           businessUnit: template.business_unit_slug ?? null,
           documentTypeCode: template.document_type_code ?? null,
+          hwpxTemplateKey: template.hwpx_template_key ?? null,
         },
         source: {
           ...prev.source,
@@ -405,6 +449,133 @@ export function StudioMode({
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
       return null;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function dismissLintIssue(issueId: string): void {
+    if (!state) return;
+    const base = lintDismissalsByDoc?.[state.docId] ?? state.lintDismissals;
+    if (base.includes(issueId)) return;
+    const nextDismissals = [...base, issueId];
+    setLintIssues((prev) => prev.filter((issue) => issue.id !== issueId));
+    onLintDismissalsChange?.(state.docId, nextDismissals);
+    patchState((prev) => {
+      if (prev.docId !== state.docId) return prev;
+      return { ...prev, lintDismissals: nextDismissals };
+    });
+  }
+
+  async function scanHwpFields(): Promise<void> {
+    if (!workspaceRoot || !state) return;
+    const templateKey = state.template?.hwpxTemplateKey ?? null;
+    const configuredPath = state.hwpFields.templatePath?.trim() || null;
+    if (!templateKey && !configuredPath) {
+      onError(t("studio.hwp.error.noTemplate"));
+      return;
+    }
+
+    setBusyAction("hwp-scan");
+    try {
+      let scanPath = configuredPath;
+      if (scanPath?.toLowerCase().endsWith(".hwp")) {
+        const prepared = await templatePrepareHwpxTemplate(workspaceRoot, scanPath);
+        if (!prepared.preparedPath) {
+          patchState((prev) => ({
+            ...prev,
+            hwpFields: {
+              ...prev.hwpFields,
+              status: "manualFallback",
+              warnings: [prepared.reason ?? t("studio.hwp.manualFallback")],
+            },
+          }));
+          return;
+        }
+        scanPath = prepared.preparedPath;
+      }
+
+      const response = await templateGetFields(workspaceRoot, {
+        templateKey,
+        templatePath: scanPath,
+      });
+      patchState((prev) => {
+        const values = { ...prev.hwpFields.values };
+        for (const field of response.fields) {
+          if (values[field.key] === undefined) values[field.key] = "";
+        }
+        return {
+          ...prev,
+          hwpFields: {
+            ...prev.hwpFields,
+            status: "ready",
+            templatePath: configuredPath,
+            fields: response.fields,
+            values,
+            warnings:
+              response.fields.length === 0
+                ? [t("studio.hwp.warning.noFields"), ...response.warnings]
+                : response.warnings,
+          },
+        };
+      });
+    } catch (err) {
+      patchState((prev) => ({
+        ...prev,
+        hwpFields: {
+          ...prev.hwpFields,
+          status: "error",
+          warnings: [err instanceof Error ? err.message : String(err)],
+        },
+      }));
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function fillHwpTemplate(): Promise<void> {
+    if (!workspaceRoot || !state) return;
+    const templateKey = state.template?.hwpxTemplateKey ?? null;
+    const templatePath = state.hwpFields.templatePath?.trim() || null;
+    if (!templateKey && !templatePath) {
+      onError(t("studio.hwp.error.noTemplate"));
+      return;
+    }
+    if (state.hwpFields.fields.length === 0) {
+      onError(t("studio.hwp.error.noFields"));
+      return;
+    }
+
+    setBusyAction("hwp-fill");
+    try {
+      const values = Object.fromEntries(
+        state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
+      );
+      const response = await templateFillHwpx(workspaceRoot, {
+        templateKey,
+        templatePath,
+        values,
+      });
+      patchState((prev) => ({
+        ...prev,
+        hwpFields: {
+          ...prev.hwpFields,
+          status: "filled",
+          lastOutputPath: response.outputPath,
+          warnings: response.warnings,
+        },
+      }));
+    } catch (err) {
+      patchState((prev) => ({
+        ...prev,
+        hwpFields: {
+          ...prev.hwpFields,
+          status: "error",
+          warnings: [err instanceof Error ? err.message : String(err)],
+        },
+      }));
+      onError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -613,15 +784,27 @@ export function StudioMode({
             <SectionsStep
               value={state.bodyDraft}
               editorMode={editorMode}
+              lintIssues={lintIssues}
+              lintLoading={lintLoading}
               canModifyDocument={canModifyDocument}
               busy={busyAction === "apply"}
               onEditorMode={setEditorMode}
               onChange={(bodyDraft) => patchState((prev) => ({ ...prev, bodyDraft }))}
+              onDismissLint={dismissLintIssue}
               onApply={() => void applyBody()}
             />
           ) : null}
 
-          {state.currentStep === "hwp" ? <HwpStep state={state} /> : null}
+          {state.currentStep === "hwp" ? (
+            <HwpStep
+              state={state}
+              busyAction={busyAction}
+              onPatch={patchState}
+              onScan={() => void scanHwpFields()}
+              onFill={() => void fillHwpTemplate()}
+              onRevealPath={onRevealPath}
+            />
+          ) : null}
 
           {state.currentStep === "export" ? (
             <ExportStep
@@ -899,18 +1082,24 @@ function GuidelinesStep({
 function SectionsStep({
   value,
   editorMode,
+  lintIssues,
+  lintLoading,
   canModifyDocument,
   busy,
   onEditorMode,
   onChange,
+  onDismissLint,
   onApply,
 }: {
   value: string;
   editorMode: EditorMode;
+  lintIssues: GaejosikLintIssue[];
+  lintLoading: boolean;
   canModifyDocument: boolean;
   busy: boolean;
   onEditorMode: (mode: EditorMode) => void;
   onChange: (value: string) => void;
+  onDismissLint: (issueId: string) => void;
   onApply: () => void;
 }) {
   const { t } = useTranslation();
@@ -950,25 +1139,60 @@ function SectionsStep({
           {busy ? t("studio.sections.applying") : t("studio.sections.apply")}
         </Button>
       </div>
+      <div className={lintIssues.length > 0 ? "studio-lint-strip active" : "studio-lint-strip"}>
+        <span>
+          {lintLoading
+            ? t("studio.sections.lint.checking")
+            : t("studio.sections.lint.count", { count: lintIssues.length })}
+        </span>
+        {lintIssues.slice(0, 4).map((issue) => (
+          <button key={issue.id} type="button" onClick={() => onDismissLint(issue.id)}>
+            <span>{issue.line}</span>
+            {issue.suggestion}
+            <X size={12} />
+          </button>
+        ))}
+      </div>
       {editorMode === "rich" ? (
         <div className="studio-rich-editor">
-          <RichMarkdownEditor value={value} onChange={onChange} readOnly={!canModifyDocument} />
+          <RichMarkdownEditor
+            value={value}
+            onChange={onChange}
+            readOnly={!canModifyDocument}
+            lintIssues={lintIssues}
+          />
         </div>
       ) : (
-        <TextArea
-          className="studio-source-editor"
+        <MarkdownSourceEditor
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={onChange}
           readOnly={!canModifyDocument}
+          lintIssues={lintIssues}
         />
       )}
     </div>
   );
 }
 
-function HwpStep({ state }: { state: StudioState }) {
+function HwpStep({
+  state,
+  busyAction,
+  onPatch,
+  onScan,
+  onFill,
+  onRevealPath,
+}: {
+  state: StudioState;
+  busyAction: string | null;
+  onPatch: (updater: (prev: StudioState) => StudioState) => void;
+  onScan: () => void;
+  onFill: () => void;
+  onRevealPath?: (path: string) => void;
+}) {
   const { t } = useTranslation();
-  const fieldCount = Object.keys(state.hwpFields.values).length;
+  const fieldCount = state.hwpFields.fields.length;
+  const templateKey = state.template?.hwpxTemplateKey ?? "";
+  const canFill = fieldCount > 0 && state.hwpFields.status !== "manualFallback";
   return (
     <div className="studio-step-panel">
       <div className="studio-step-head">
@@ -978,12 +1202,105 @@ function HwpStep({ state }: { state: StudioState }) {
           <p>{t("studio.hwp.description")}</p>
         </div>
       </div>
-      <div className="studio-placeholder-block">
-        <strong>{t("studio.hwp.placeholder.title")}</strong>
-        <span>{t("studio.hwp.placeholder.description")}</span>
-        <small>{t("studio.hwp.fields", { count: fieldCount })}</small>
+
+      <div className="studio-hwp-source">
+        <Field label={t("studio.hwp.templateKey")}>
+          <TextInput value={templateKey || t("studio.hwp.noTemplateKey")} readOnly />
+        </Field>
+        <Field
+          label={t("studio.hwp.templatePath")}
+          helper={t("studio.hwp.templatePath.helper")}
+        >
+          <TextInput
+            value={state.hwpFields.templatePath ?? ""}
+            onChange={(event) =>
+              onPatch((prev) => ({
+                ...prev,
+                hwpFields: {
+                  ...prev.hwpFields,
+                  templatePath: event.target.value || null,
+                },
+              }))
+            }
+            placeholder={t("studio.hwp.templatePath.placeholder")}
+          />
+        </Field>
       </div>
-    </div>
+
+      <div className="studio-action-row">
+        <Button
+          variant="secondary"
+          icon={<Search size={14} />}
+          onClick={onScan}
+          disabled={busyAction === "hwp-scan"}
+        >
+          {busyAction === "hwp-scan" ? t("studio.hwp.scanning") : t("studio.hwp.scan")}
+        </Button>
+        <Button
+          variant="primary"
+          icon={<Wand2 size={14} />}
+          onClick={onFill}
+          disabled={!canFill || busyAction === "hwp-fill"}
+        >
+          {busyAction === "hwp-fill" ? t("studio.hwp.filling") : t("studio.hwp.fill")}
+        </Button>
+      </div>
+
+      <div className="studio-hwp-status">
+        <strong>{t("studio.hwp.status", { status: state.hwpFields.status })}</strong>
+        <span>{t("studio.hwp.fields", { count: fieldCount })}</span>
+      </div>
+
+      {state.hwpFields.warnings.length > 0 ? (
+        <div className="studio-inline-error">
+          {state.hwpFields.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+
+      {fieldCount > 0 ? (
+        <div className="studio-hwp-fields">
+          {state.hwpFields.fields.map((field) => (
+            <Field
+              key={field.key}
+              label={`${field.label} (${field.occurrences})`}
+              helper={field.required ? t("studio.hwp.field.required") : undefined}
+            >
+              <TextArea
+                value={state.hwpFields.values[field.key] ?? ""}
+                onChange={(event) =>
+                  onPatch((prev) => ({
+                    ...prev,
+                    hwpFields: {
+                      ...prev.hwpFields,
+                      values: {
+                        ...prev.hwpFields.values,
+                        [field.key]: event.target.value,
+                      },
+                    },
+                  }))
+                }
+              />
+            </Field>
+          ))}
+        </div>
+      ) : (
+        <div className="studio-placeholder-block">
+          <strong>{t("studio.hwp.placeholder.title")}</strong>
+          <span>{t("studio.hwp.placeholder.description")}</span>
+        </div>
+      )}
+
+      {state.hwpFields.lastOutputPath ? (
+        <div className="studio-result-block">
+          <strong>{t("studio.hwp.lastOutput")}</strong>
+          <button type="button" onClick={() => onRevealPath?.(state.hwpFields.lastOutputPath!)}>
+            {state.hwpFields.lastOutputPath}
+          </button>
+        </div>
+      ) : null}
+      </div>
   );
 }
 

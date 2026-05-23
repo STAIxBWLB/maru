@@ -8,6 +8,7 @@
 #   ./hwpx unpack <file.hwpx> <out_dir> [-f]
 #   ./hwpx repack <dir> <out.hwpx>
 #   ./hwpx fill <template.hwpx> [--data file.json] [--kv k=v ...] [-o out.hwpx]
+#   ./hwpx slots <template.hwpx> [--format text|json]
 #   ./hwpx edit <in.hwpx> <out.hwpx> --replace OLD NEW
 #   ./hwpx create <out.hwpx> [--markdown md | --title T --body B | --json j]
 #   ./hwpx validate <file.hwpx>
@@ -61,6 +62,7 @@ Commands:
   unpack     HWPX → 디렉토리 (XML 직접 편집용)
   repack     디렉토리 → HWPX (mimetype-first STORED 자동)
   fill       템플릿의 {{anchor}} 치환
+  slots      템플릿의 {{field}} 슬롯 목록 추출
   edit       find/replace 편집
   create     markdown/JSON으로 신규 HWPX 생성 (단순형)
   styled     보기 좋은 HWPX 생성 (폰트·여백·줄간격·헤더/푸터·페이지번호)

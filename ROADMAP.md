@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Anchor desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status anchor** — Updated through Phase 4 W11 (Document Studio mode). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
+> **Status anchor** — Updated through Phase 4 W12 (HWP field map + 개조식 inline lint). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`. The 26-week plan itself lives at `~/.claude/plans/flickering-seeking-engelbart.md` (work-repo internal) and is mirrored here from Anchor's perspective.
 
@@ -13,8 +13,8 @@ Each module is owned by Anchor desktop. Hub backs them where shared catalog data
 | # | Module | Purpose | Surface | Owners |
 |---|--------|---------|---------|--------|
 | M1 | Operations Catalog | "What needs my attention right now" — deadlines, in-flight approvals, unlinked evidence, inbox pending | Activity-rail `LayoutGrid` mode → 3-column pane | ✅ shipped |
-| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W11 shipped |
-| M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 partial (W5 picker shipped) |
+| M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W12 shipped |
+| M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
 | M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · validators planned |
 | M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane tab (W14+) | 📋 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
@@ -44,7 +44,7 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W9 | ✅ | M4 transitions — `record_output_{pending,success,failure}` + `export_record_*` Tauri commands + `Validate last export bundle` palette + `summarizeValidation` | same module as W8 |
 | W10 | ✅ | **Export bundle dispatch** — single "Export bundle" command drives `pending → ready/failed` from the manifest. Current implementation uses deterministic local converter commands (`pandoc`, `hwpx`, LibreOffice-backed PDF fallback) and records success/failure through the W9 manifest transitions. Missing converters, missing outputs, and source hash drift surface as partial failures instead of silent success. Background mission wrapping remains optional hardening. | `src-tauri/src/export/dispatch.rs` · `src/lib/export.ts` · `src/App.tsx` |
 | W11 | ✅ | **Document Studio multi-step wizard (M2)** — new `Studio` activity-rail mode. 7 steps under `src/components/studio/StudioMode.tsx`: source picker, template picker (reuse `lib/hubLibrary`), guideline picker, section editor (Rich/Source modes), HWP field map placeholder state, export (wraps `export_plan` + dispatch), package (local body apply + version snapshot freeze). State persists at `<workspace>/.anchor/studio/<doc-id>/state.json` via `src-tauri/src/studio/mod.rs`, and `studio_apply_body` preserves frontmatter bytes while replacing only the markdown body. | `src-tauri/src/studio/*` · `src/components/studio/*` · `src/App.tsx` activity-rail wiring |
-| W12 | 📋 | **HWP field map (M3) + 개조식 inline lint (M2 Step 4)** — `hwpx` skill slot scan exposed as `template_get_fields(template_id)` + Studio Step 5 form. `gaejosik` skill wired as a debounced subprocess + CodeMirror decoration / BlockNote mark for live lint underline. Lint dismissals persisted under `composer.lintDismissals` in workspace-state. | `src-tauri/src/template_fill/{hwpx,hwp_convert}.rs` (new) · `src-tauri/src/linter/gaejosik.rs` (new) · `src/components/composer/SlotPanel.tsx` |
+| W12 | ✅ | **HWP field map (M3) + 개조식 inline lint (M2 Step 4)** — `hwpx slots` extracts `{{field}}` placeholders from bundled/workspace HWPX templates; `template_get_fields`, `template_prepare_hwpx_template`, and `template_fill_hwpx` expose scan/fill/manual-fallback flows to Studio Step 5. Step 4 runs debounced `gaejosik_lint`, underlines violations via CodeMirror decorations and BlockNote custom marks, and stores dismissals under workspace-state `composer.lintDismissals` with per-document Studio fallback. | `skills/skills/hwpx/scripts/hwpx_cli.py` · `src-tauri/src/template_fill.rs` · `src-tauri/src/linter/gaejosik.rs` · `src/components/studio/*` |
 
 ### Phase 5 — Evidence Binder + Deck Studio (W13–W18)
 
@@ -95,14 +95,14 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 ## 5. Continuing work — concrete next steps
 
-### Immediate (W12 entry)
+### Immediate (W13 entry)
 
 ```
-# branch: fresh feat/studio-w12-fields-lint off main
-src-tauri/src/template_fill/*           # hwpx slot scan + hwp conversion wrapper
-src-tauri/src/linter/gaejosik.rs        # debounced lint subprocess seam
-src/components/composer/SlotPanel.tsx   # Studio Step 5 field map surface
-src/components/studio/*                 # Step 4 lint marks + Step 5 field values
+# branch: fresh feat/evidence-binder-w13 off main
+src-tauri/src/evidence_binder/*          # binder state + evidence discovery helpers
+src/components/evidence/*                # right-pane binder tab surface
+src/lib/evidenceBinder.ts                # typed Tauri wrappers + UI model
+src/App.tsx                              # right utility rail tab wiring
 ```
 
 W10 follow-up hardening, if needed before Studio:
@@ -110,10 +110,17 @@ W10 follow-up hardening, if needed before Studio:
 - Add format-specific validators (`hwpx` validator, OOXML schema check, PDF font/embed check) after the generic manifest hash validation.
 - Add an optional right-pane export progress surface; keep the palette command as the primary entrypoint.
 
-### W12 (HWP field map + lint)
+### W12 shipped notes
 
-- `template_get_fields` command stubs out to `hwpx` skill subprocess (`hwpx slots <template_path>`).
-- `gaejosik` lint: incremental check on save / 1.5s debounce. Surface as CodeMirror decoration (raw view) and BlockNote mark (rich view). Cache violations in `<workspace>/.anchor/composer/lint-cache.json` to avoid re-running on identical paragraphs.
+- `template_get_fields` calls the bundled/user `hwpx` skill subprocess (`hwpx slots <template_path> --format json`) and normalizes slot keys for Studio field values.
+- `template_fill_hwpx` writes filled artifacts to `.anchor/studio/filled/` by default and validates the result with `hwpx validate`.
+- `gaejosik_lint` is deterministic and dismissal-aware; the UI uses a 350 ms debounce, CodeMirror decorations for source mode, and a BlockNote `gaejosikLint` mark for rich mode.
+
+### W13 (Evidence Binder tab)
+
+- Add a right-pane Evidence Binder tab keyed by active document id.
+- Persist binder state at `<workspace>/.anchor/binder/<doc-id>.json`.
+- Seed candidate evidence from inbox-processed manifests and existing `<binary>.evidence.yaml` sidecars.
 
 ## 6. Cross-cutting hand-off notes
 

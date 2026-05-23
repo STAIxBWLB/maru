@@ -62,6 +62,7 @@ const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["ui", "fileTreeStateInitialized"],
     &["scan"],
     &["inboxChannels"],
+    &["composer"],
 ];
 
 const ANCHORIGNORE_DEFAULTS: &[&str] = &[
@@ -432,6 +433,9 @@ fn default_settings_json() -> JsonValue {
             "calendarStartHour": 8
         },
         "inboxChannels": {},
+        "composer": {
+            "lintDismissals": {}
+        },
         "connectors": {}
     })
 }

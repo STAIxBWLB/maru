@@ -8,6 +8,7 @@ Subcommands:
   unpack <file.hwpx> <out_dir>
   repack <dir> <out.hwpx>
   fill <template.hwpx> [--data json_file] [--kv key=value ...] [-o out.hwpx] [--stdin-json]
+  slots <template.hwpx> [--format text|json]
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file]
   validate <file.hwpx>
@@ -21,6 +22,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -201,6 +203,54 @@ def cmd_fill(args) -> int:
     out = args.output or _derive_output(args.template, suffix="-filled.hwpx")
     doc.save_to_path(out)
     print(f"[hwpx] {total}건 치환 → {out}", file=sys.stderr)
+    return 0
+
+
+def cmd_slots(args) -> int:
+    input_path = Path(args.template)
+    if not input_path.exists():
+        _die(1, f"파일 없음: {input_path}")
+    if input_path.suffix.lower() != ".hwpx":
+        _die(1, f"slots는 .hwpx 파일만 지원: {input_path}")
+
+    pattern = re.compile(r"\{\{\s*([^{}\r\n]+?)\s*\}\}")
+    counts: dict[str, int] = {}
+    try:
+        with zipfile.ZipFile(input_path, "r") as zf:
+            for info in zf.infolist():
+                lower_name = info.filename.lower()
+                if not lower_name.endswith((".xml", ".hpf")):
+                    continue
+                try:
+                    text = zf.read(info).decode("utf-8")
+                except UnicodeDecodeError:
+                    text = zf.read(info).decode("utf-8", errors="ignore")
+                for match in pattern.finditer(text):
+                    key = match.group(1).strip()
+                    if key:
+                        counts[key] = counts.get(key, 0) + 1
+    except zipfile.BadZipFile as e:
+        _die(2, f"HWPX(zip) 파싱 실패: {e}")
+
+    fields = [
+        {
+            "key": key,
+            "label": key,
+            "required": True,
+            "occurrences": occurrences,
+        }
+        for key, occurrences in sorted(counts.items(), key=lambda item: item[0])
+    ]
+    payload = {"template": str(input_path), "fields": fields}
+
+    if args.format == "json":
+        json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+    else:
+        if not fields:
+            print("No {{field}} slots found.")
+        for field in fields:
+            print(f"{field['key']}\t{field['occurrences']}")
     return 0
 
 
@@ -432,6 +482,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--stdin-json", action="store_true", help="stdin에서 JSON 입력")
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_fill)
+
+    s = sub.add_parser("slots", help="{{field}} 슬롯 목록 추출")
+    s.add_argument("template")
+    s.add_argument("--format", choices=["text", "json"], default="text")
+    s.set_defaults(func=cmd_slots)
 
     s = sub.add_parser("edit", help="find/replace 편집")
     s.add_argument("in_file")
