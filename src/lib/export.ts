@@ -147,12 +147,12 @@ export async function exportDispatch(params: {
 export function summarizeDispatch(response: ExportDispatchResponse): string {
   const ready = response.results.filter((result) => result.success).length;
   const failed = response.results.length - ready;
-  const firstFailure = response.results.find(
-    (result) => !result.success && result.reason?.trim(),
-  );
+  const firstFailureReason = response.results
+    .find((result) => !result.success && result.reason?.trim())
+    ?.reason?.trim();
   const parts = [`ready: ${ready}`, `failed: ${failed}`, summarizeValidation(response.validation)];
-  if (firstFailure?.reason) {
-    parts.push(`first failure: ${firstFailure.reason}`);
+  if (firstFailureReason) {
+    parts.push(`first failure: ${firstFailureReason}`);
   }
   return parts.join(" · ");
 }

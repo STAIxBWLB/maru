@@ -2,10 +2,10 @@
 //
 // Markdown/structured source = SSOT. Anchor plans a deterministic output
 // bundle (`source.md` + `output.{docx,hwpx,pdf}` + `manifest.yaml`) under
-// a sibling directory of the source document. The actual docx/hwpx/pdf
-// conversion is performed by the existing skills (hwpx / docx /
-// hwp-toolkit / pptx-toolkit); this module owns the layout, manifest
-// writing, and post-conversion validation.
+// a sibling directory of the source document. W10 dispatch runs deterministic
+// local converter commands from that manifest; later Studio/skill integrations
+// can provide richer format-specific preparation before this module records and
+// validates the outputs.
 //
 // Spec: plan §M4, _sys/rules/frontmatter-schema.md.
 //

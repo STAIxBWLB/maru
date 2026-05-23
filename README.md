@@ -33,7 +33,7 @@ The above gates run fully offline (cache fallback). To exercise the live Hub rea
 ```bash
 # anchor-hub: start FastAPI + sqlite (or run docker compose up -d db for Postgres)
 cd dev/anchor-hub
-uv run python -m scripts.seed_catalog --scope public
+uv run python -m scripts.seed_catalog
 ANCHOR_HUB_DATABASE_URL=sqlite:///tmp/anchor-hub.db uv run uvicorn anchor_hub.main:app --port 8017
 
 # anchor: flip workspace.config.yaml
@@ -62,7 +62,7 @@ Two write paths land on Hub from Anchor:
 1. **`POST /api/v1/documents/sync`** (Phase 4 W11) — drafting metadata only. Anchor sends `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and to surface "이미 동기화된 초안" hints.
 2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Anchor auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>` and any subsequent edit creates a new draft that, once re-approved, becomes version `N+1` on Hub.
 
-The `hub_client/safety.rs` pre-flight enforces this split: only `/documents/{id}/finalize` may carry body/binary, and only when the corresponding submission gate is in an `approved` state. All other Hub calls reject body fields outright.
+W11 implements the metadata-only sync side first. Phase 6 W21 must add the matching `hub_client/safety.rs` pre-flight so `/documents/{id}/finalize` is the only Anchor client path allowed to carry body/binary payloads, and only after the corresponding submission gate is approved.
 
 ## Architecture
 
