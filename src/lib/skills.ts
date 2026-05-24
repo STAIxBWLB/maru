@@ -27,6 +27,7 @@ const MOCK_BUILTIN_SKILLS = [
   description: null,
   runtime: null,
   category: null,
+  tier: "core",
   valid: true,
   validationErrors: [],
   editable: false,
@@ -38,6 +39,7 @@ const MOCK_BUILTIN_SKILLS = [
 export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
 export type SkillDispatchRuntime = "claude" | "codex";
+export type SkillTier = "core" | "public" | "private" | "imported" | "managed";
 
 export interface SkillSource {
   id: string;
@@ -59,6 +61,7 @@ export interface SkillRecord {
   description?: string | null;
   runtime?: string | null;
   category?: string | null;
+  tier: SkillTier | string;
   valid?: boolean;
   validationErrors?: string[];
   editable: boolean;
@@ -221,6 +224,48 @@ export interface ResetOutcome {
   skills: number;
 }
 
+export interface DirtyRecord {
+  skillId: string;
+  name: string;
+  sourceId: string;
+  sourceKind: SkillSourceKind | string;
+  tier: SkillTier | string;
+  relPath: string;
+  absPath: string;
+  gitAvailable: boolean;
+  gitRepoRoot?: string | null;
+  contentHash?: string | null;
+  savedHash?: string | null;
+}
+
+export interface ReconcileOutcome {
+  skillId: string;
+  name: string;
+  action: "accept" | "discard" | string;
+  dryRun: boolean;
+  committed: boolean;
+  pushed: boolean;
+  hashUpdated: boolean;
+  gitRepoRoot?: string | null;
+  commands: string[];
+  commandsShell?: "posix" | string | null;
+  message: string;
+}
+
+export interface ImportOutcome {
+  skill: SkillRecord;
+  mode: "copy" | "link" | string;
+  importedPath: string;
+  anchorEntrypoint: string;
+}
+
+export interface ImportUnmanageOutcome {
+  name: string;
+  removedInstalls: number;
+  removedEntrypoint: boolean;
+  deletedFiles: boolean;
+}
+
 export interface SkillDoctorIssue {
   severity: "error" | "warn" | "info" | string;
   code: string;
@@ -371,6 +416,41 @@ export async function skillsResetRegistry(
 export async function skillsDoctor(workPath: string | null): Promise<SkillDoctorReport> {
   if (!isTauri()) return { ok: true, sources: 0, skills: 0, installs: 0, issues: [] };
   return invoke<SkillDoctorReport>("skills_doctor", { workPath });
+}
+
+export async function skillsListDirty(workPath: string | null): Promise<DirtyRecord[]> {
+  if (!isTauri()) return [];
+  return invoke<DirtyRecord[]>("skills_list_dirty", { workPath });
+}
+
+export async function skillsReconcileSkill(params: {
+  workPath: string | null;
+  skill: string;
+  action: "accept" | "discard";
+  message?: string | null;
+  dryRun?: boolean | null;
+}): Promise<ReconcileOutcome> {
+  if (!isTauri()) throw new Error("Skill reconcile requires the Tauri shell.");
+  return invoke<ReconcileOutcome>("skills_reconcile_skill", params);
+}
+
+export async function skillsImportExternal(params: {
+  workPath: string | null;
+  sourcePath: string;
+  name?: string | null;
+  mode?: "copy" | "link" | null;
+}): Promise<ImportOutcome> {
+  if (!isTauri()) throw new Error("Skill import requires the Tauri shell.");
+  return invoke<ImportOutcome>("skills_import_external", params);
+}
+
+export async function skillsImportUnmanage(params: {
+  workPath: string | null;
+  name: string;
+  deleteFiles?: boolean | null;
+}): Promise<ImportUnmanageOutcome> {
+  if (!isTauri()) throw new Error("Skill import management requires the Tauri shell.");
+  return invoke<ImportUnmanageOutcome>("skills_import_unmanage", params);
 }
 
 export async function skillsEnvStatus(workPath: string | null): Promise<SkillsEnvStatus | null> {

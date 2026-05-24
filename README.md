@@ -2,7 +2,7 @@
 
 AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 
-## Status (2026-05-23)
+## Status (2026-05-24)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -12,11 +12,42 @@ AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | ✅ write loop live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with Configured Entries / Processing / Processed Items / Files / Gmail sections, classify/accept/reject/process) all shipped. The primary local inbox flow now reads `workspace.config.yaml` `inbox:` settings, stages dropped files into the configured `inbox.file_drop` channel/path, scans `inbox/drop/<channel>/` plus `items/pending/*/manifest.yaml`, and reads processed history from `items/{done,failed,duplicate}` using configured artifact filenames; legacy `inbox/downloads/<source>` remains compatible. Accept/reject runs through an approval gate, Gmail decisions apply Anchor labels, keyboard `a`/`r`/`p`, multi-select, bulk actions, dot folders are hidden unless allowlisted in Settings, and mission state/log/stop hooks are in place. |
 | 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.anchor/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.anchor/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs from the active workspace; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
-| 3 — Unified document operations (7 modules) | ✅ W1-W6 done | 사업단/대학본부조직 document operations 7-module 로드맵 (M1 Operations Catalog · M2 Document Studio · M3 Template/Form Filling · M4 Export Pipeline · M5 Evidence Binder · M6 Deck Studio · M7 Hub Connector). **W1**: rule SSOTs (frontmatter-schema, bu-lifecycle, hub-sync, evidence-policy) + Rust `ops_catalog` + `hub_client` scaffolds + 4 BU seeds. **W2 (anchor-hub)**: 9 catalog REST endpoints + Alembic 0001_core schema (13 tables) + 21-template synthetic seed + 12 pytest. **W3**: real `ops_catalog::scan` indexing across BU configs / inbox manifests / tasks frontmatter / document frontmatter / evidence sidecars; `Catalog` mode + 3-column UI. **W4**: notify-based fs watcher with debounced `catalog://refresh`, real Hub HTTP read path (reqwest blocking + ETag + offline fallback), Catalog drilldown dialog + Reveal-in-Finder, verification gate (110 entries / 4 BUs / 986 ms on `~/workspace/work`). **W5**: `hubLibrary` typed fetchers + NewDocumentDialog Hub template/guideline pickers + CommandPalette "Hub 템플릿으로 새 문서" + Catalog open. **W6**: WritingGuidelineSidebar (right-pane tab, resolves frontmatter `guideline_ids` and `anchor:guidelines` provenance trailer, multi-tab body viewer). Test totals: cargo 324 / 2 ignored (catalog 6 + watcher 6 + http 1 + safety 5 new) + vitest 198 / 33 files (writingGuideline 7 new) + anchor-hub 15. |
+| 3 — Unified document operations (7 modules) | ✅ W1-W6 + skills SSOT hardening | 사업단/대학본부조직 document operations 7-module 로드맵 (M1 Operations Catalog · M2 Document Studio · M3 Template/Form Filling · M4 Export Pipeline · M5 Evidence Binder · M6 Deck Studio · M7 Hub Connector). **W1**: rule SSOTs (frontmatter-schema, bu-lifecycle, hub-sync, evidence-policy) + Rust `ops_catalog` + `hub_client` scaffolds + 4 BU seeds. **W2 (anchor-hub)**: 9 catalog REST endpoints + Alembic 0001_core schema (13 tables) + 21-template synthetic seed + 12 pytest. **W3**: real `ops_catalog::scan` indexing across BU configs / inbox manifests / tasks frontmatter / document frontmatter / evidence sidecars; `Catalog` mode + 3-column UI. **W4**: notify-based fs watcher with debounced `catalog://refresh`, real Hub HTTP read path (reqwest blocking + ETag + offline fallback), Catalog drilldown dialog + Reveal-in-Finder, verification gate (110 entries / 4 BUs / 986 ms on `~/workspace/work`). **W5**: `hubLibrary` typed fetchers + NewDocumentDialog Hub template/guideline pickers + CommandPalette "Hub 템플릿으로 새 문서" + Catalog open. **W6**: WritingGuidelineSidebar (right-pane tab, resolves frontmatter `guideline_ids` and `anchor:guidelines` provenance trailer, multi-tab body viewer). **Skills SSOT**: Rust `skill_host` owns tiers (`core/public/private/imported/managed`), doctor validation, dirty/reconcile, and explicit external import/unmanage; bundled skills are normalized to `core`; invalid duplicate/misplaced records cannot install or dispatch. Test totals: cargo 381 / 2 ignored + vitest/typecheck path green on the current branch. |
 | 4 — Document Edit Mode (Studio + Templates) | ✅ W7-W12 done | Folds anchor-editor into a 7-step Document Studio (source → template → guideline → sections → HWP fields → export → package) backed by M3 + M4. **W7**: `create_document` accepts `CreateDocumentExtras` and emits template/guideline/BU metadata as proper frontmatter. **W8-W10**: `src-tauri/src/export/` plans, validates, records transitions, and dispatches docx/hwpx/pdf bundles through the manifest lifecycle. **W11 (M2 Studio)**: new `Studio` activity-rail mode persists per-document state under `<workspace>/.anchor/studio/<doc-id>/state.json`, reuses Hub template/guideline pickers, edits section drafts, dispatches exports, and freezes local version snapshots. **W12 (M3 + M2 lint)**: `hwpx slots` + `template_get_fields/template_fill_hwpx` expose real HWPX field maps in Studio Step 5; `kordoc_lite` adds HWPX structure checks, Korean public-form label detection, preserved form fill, and format-specific export checks; Step 4 runs debounced 개조식 lint with CodeMirror decorations, BlockNote marks, and workspace-state `composer.lintDismissals`. Latest verification: `pnpm typecheck`, targeted `cargo test --lib` filters (`kordoc_lite`, `template_fill`, `validate`), `hwpx slots` against bundled `사업계획서_기본.hwpx`. |
 | 5 — Evidence Binder + Deck Studio | 🚧 W13 shipped | Evidence Binder is now a right-pane tab keyed by the active document id. It persists state under `<workspace>/.anchor/binder/<doc-id>.json`, seeds candidates from inbox-processed raw files and `<binary>.evidence.yaml` sidecars, scopes sidecar discovery to the active BU when possible, and uses `kordoc_lite` for local format detection, lightweight structure checks, and HWPX field previews. W14-W18 remain planned for section/KPI/checklist bindings and Deck Studio. |
 
 Plan reference (work repo internal): `~/.claude/plans/flickering-seeking-engelbart.md`. Rule SSOTs at `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`.
+
+## Install
+
+Anchor ships the desktop app and CLI as separate artifacts. On macOS, both are
+distributed through the `STAIxBWLB/homebrew-cask` tap:
+
+```bash
+brew tap STAIxBWLB/homebrew-cask
+
+# Desktop app only:
+brew install --cask anchor
+
+# Standalone CLI only. Installs the executable as `anchor`:
+brew install anchor-cli
+
+anchor --version
+```
+
+The app cask installs `Anchor.app` and does not create a CLI symlink. The CLI
+formula installs only the standalone `anchor` executable. The desktop app keeps
+using signed Tauri updater metadata from GitHub Releases; Homebrew users can
+also upgrade via `brew upgrade --cask anchor` and `brew upgrade anchor-cli`.
+
+For repo-local management shortcuts:
+
+```bash
+make cli-install
+make cli-smoke
+make release-preflight
+make homebrew-update RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+```
 
 ## Phase 3 verification gates (passed)
 
@@ -89,7 +120,7 @@ W12 leaves Studio package freeze local-only. Phase 6 W21 must add the matching `
 │   inbox.rs / inbox_watcher.rs / korean_date.rs               │
 │   inbox_classifier.rs / gmail_gws.rs / ai_router.rs / terminal.rs │
 │   anchor_dir.rs  — layered settings + .anchor rules/templates/catalogs │
-│   Phase 3+: + skill_host.rs                                  │
+│   Phase 3+: + skill_host/ registry + standalone CLI dispatch │
 │   Phase 4+: + whisper bridge / mcp lifecycle                 │
 └──────┬─────────────────────────────────────────────────────┘
        │ stdio bridge + future WS/MCP bridges
@@ -170,15 +201,23 @@ Each phase is defined in **outcomes the user actually exercises**. No phase exis
 
 ### Phase 3 — Built-in Skills + Hub Connector (week 11–14)
 
-**Outcome**: five daily ops move out of the terminal into the command palette, and Anchor can query a separate hub service for shared context without becoming a multi-user server.
+**Outcome**: daily skill-backed ops move out of the terminal into Anchor, and Anchor can query a separate hub service for shared context without becoming a multi-user server.
 
 **Agent OS-lite implementation track**:
 - Anchor-owned run contracts now wrap the imported Agent OS ideas instead of copying external contracts verbatim: `AgentRunRequest`, `AgentRunEvent`, `SkillProposal`, `ProviderAdapter`, and `ProtectedWriteClaim`.
 - Background skill dispatch creates an `AgentRunRequest`, uses a provider adapter seam for Claude/Codex CLI, and writes append-only events to `<workspace>/.anchor/runs/skills/<invocationId>/events.jsonl`.
 - Background execution remains proposal-first. If provider output contains an `anchor_skill_proposal_v1` JSON proposal, Anchor records `proposal.created`; applying that proposal is a separate approval-gated `agent.proposal.apply` action.
-- Skill frontmatter is validated during registry scans. Invalid skills stay visible in the catalog but dispatch fails closed until the frontmatter is fixed.
+- Skill manifests/frontmatter are validated during registry scans. Invalid skills stay visible in the catalog but install and dispatch fail closed until the registry is clean.
 - Protected writes require operation, actor, reason, schema version, and current-hash matching. Autonomous writes are not default behavior.
 - The first 5-role loop contract is bounded: `lead -> planner -> worker -> reviewer`, optional `advisor` for ambiguity/high-risk, and one rework attempt before user-visible failure.
+
+**Skills SSOT control-plane track**:
+- Rust `src-tauri/src/skill_host/` is the canonical skills implementation. The standalone CLI (`anchor doctor`, `anchor skills ...`) reuses the same Rust command functions that Tauri calls; Node MCP remains focused on MCP tools.
+- `SkillRecord.tier` is one of `core`, `public`, `private`, `imported`, or `managed`. Bundled repo skills are placement-compatible `core`; `public` and `private` become valid only under `~/.anchor/skills/_sources/skills-public` and `~/.anchor/skills/_sources/skills-private`.
+- Doctor validation emits explicit `duplicate_source` and `tier_misplaced` issues, marks affected records invalid, and blocks install/dispatch for invalid records.
+- Dirty/reconcile flows are tier-aware: git-backed sources can accept by add/commit/push or discard by restoring the skill path; bundled skills refuse accept and discard by rematerializing the embedded bundle; managed/imported skills accept by updating the saved hash.
+- External skills become Anchor-managed only through `anchor skills import`, which writes `anchor-imported` state at `~/.anchor/skills/_imported/skills/<name>` and creates the runtime entrypoint at `~/.anchor/skills/<name>`. `anchor skills import-unmanage` removes registry/link state and can optionally delete imported files.
+- Operator docs: `docs/SSOT-TIERS.md` defines tier ownership, and `docs/anchor-doctor.md` defines doctor issue codes and reconcile behavior.
 
 **Provider abstraction track**:
 - `ProviderAdapter` is now the internal boundary. V1 adapters are Claude CLI and Codex CLI wrappers; both are proposal-only and use the tools' native auth.
@@ -214,14 +253,14 @@ at runtime; `skills/envs/default/setup.sh` is the bootstrap source for
 - The future feature should reuse the catalog rather than duplicating prompts
   into individual skills or workspace documents.
 
-Five skills:
-1. **inbox-processor** — pick an inbox item → palette → run skill → show diff → stage.
-2. **meeting-notes** — palette → emit `meetings/YYMMDD-*.md` template (Phase 4 adds voice).
-3. **task-management** — analyze `_inbox/` → sync `TASKS.md`.
-4. **lint** — run `/lint` → inline report (read-only; no auto-fix).
-5. **hwpx-fill** — pick template → fill fields → emit `.hwpx`.
+Bundled core skill groups:
+1. **Inbox / IO** — `inbox-intake`, `inbox-process`, `io-gws`, `io-kakao`, `io-mso`, `io-telegram`.
+2. **Documents / decks** — `hwpx`, `pptx-toolkit`, `xlsx-toolkit`, `gpt-images-deck`, `canva-deck`, `notebooklm-deck`.
+3. **Vault operations** — `vault-connect`, `vault-extract`, `vault-graph`, `vault-learn`, `vault-lint`, `vault-next`, `vault-pipeline`, `vault-refactor`, `vault-remember`, `vault-rename`, `vault-rethink`, `vault-stats`, `vault-sync`, `vault-update`.
+4. **Workspace ops** — `business-unit-lifecycle`, `git-sync`, `meeting-notes`, `share-outbox`, `task-management`.
+5. **Writing / analysis** — `gaejosik`, `skill-mine`.
 
-**Verification gate**: in one day all five run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
+**Verification gate**: in one day representative bundled skills run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
 
 **Anchor Hub connector**:
 - `anchor-hub` is a separate private web/API service, not part of the desktop app. Anchor remains the **author SSOT** for drafting; Hub is the **published SSOT** that owns shared catalog + draft metadata index + (post-approval) the canonical markdown body, rendered artifacts, and evidence binaries.
@@ -322,6 +361,17 @@ cd src-tauri && cargo test
 # Local Anchor MCP sidecar smoke:
 ANCHOR_MCP_WORKSPACE="$PWD" node sidecars/anchor-mcp/index.mjs
 
+# Skills registry doctor / reconcile:
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- --version
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- doctor --quiet
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- doctor --json
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills dirty --json
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills reconcile <name-or-id> --accept --dry-run
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills reconcile <name-or-id> --discard
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills import /path/to/skill --copy
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills import /path/to/skill --link
+cargo run --manifest-path src-tauri/Cargo.toml --bin anchor-cli -- skills import-unmanage <name> --delete-files
+
 # Bench workspace scan on a real workspace:
 cd src-tauri && cargo test --release bench_scan_real_workspace \
     -- --ignored --nocapture --test-threads=1
@@ -342,7 +392,10 @@ The workflow builds native Tauri bundles on macOS, Ubuntu, and Windows, then
 uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` / `.AppImage`, `.exe`,
 and `.msi` assets to that same release. It also uploads signed updater
 metadata consumed by the startup auto-updater and native `Check for Updates...`
-menu action.
+menu action. A separate macOS CLI job builds `anchor-cli`, packages it as a
+tarball containing an `anchor` executable, and uploads
+`anchor-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files to the
+same release.
 
 macOS bundles must be code signed before publishing. Until Apple Developer ID
 secrets are configured, Anchor uses explicit ad-hoc bundle signing
@@ -365,7 +418,14 @@ to import or notarize with blank credentials.
 
 Release asset versions come from the app metadata in `package.json`,
 `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync
-before tagging or publishing a release.
+before tagging or publishing a release. After release assets exist, update the
+Homebrew tap with:
+
+```bash
+make homebrew-update-commit RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
+```
 
 ## Workspace Layout
 

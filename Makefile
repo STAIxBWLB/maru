@@ -15,9 +15,18 @@ SHELL := /bin/bash
 
 PNPM       ?= pnpm
 CARGO      ?= cargo
+NODE       ?= node
 TAURI_DIR  := src-tauri
 ICON_PATH  := $(TAURI_DIR)/icons/icon.png
-BENCH_VAULT ?= $(HOME)/workspace/work
+BENCH_WORKSPACE ?= $(HOME)/workspace/work
+CLI_INSTALL_DIR ?= $(HOME)/.local/bin
+CLI_BIN_NAME ?= anchor
+CLI_RELEASE_BIN := $(TAURI_DIR)/target/release/anchor-cli
+CLI_INSTALL_BIN := $(CLI_INSTALL_DIR)/$(CLI_BIN_NAME)
+CLI_SMOKE_HOME ?= .context/cli-smoke-home
+HOMEBREW_TAP_DIR ?= ../homebrew-cask
+VERSION ?= $(shell $(NODE) -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+RELEASE_TAG ?= v$(VERSION)
 TAURI_SIGNING_PRIVATE_KEY_FILE ?= $(HOME)/.tauri/anchor-updater.key
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE ?= $(HOME)/.tauri/anchor-updater.key.password
 
@@ -28,9 +37,9 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE ?= $(HOME)/.tauri/anchor-updater.key.pas
 .PHONY: help
 help: ## Show this help
 	@printf "anchor — make targets\n\n"
-	@awk 'BEGIN {FS = ":.*##"; printf "  \033[36m%-18s\033[0m %s\n", "target", "description"; \
-	             printf "  %-18s %s\n", "------", "-----------"} \
-	     /^[a-zA-Z0-9_-]+:.*##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "  \033[36m%-24s\033[0m %s\n", "target", "description"; \
+	             printf "  %-24s %s\n", "------", "-----------"} \
+	     /^[a-zA-Z0-9_-]+:.*##/ { printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -88,6 +97,41 @@ tauri-build: install ## Native Tauri production build (cargo + bundle)
 	fi; \
 	$(PNPM) tauri:build
 
+.PHONY: cli-build
+cli-build: $(ICON_PATH) ## Build standalone Anchor CLI
+	cd $(TAURI_DIR) && $(CARGO) build --release --bin anchor-cli
+
+.PHONY: cli-install
+cli-install: cli-build ## Install standalone Anchor CLI to CLI_INSTALL_DIR (default: ~/.local/bin)
+	mkdir -p "$(CLI_INSTALL_DIR)"
+	install -m 0755 "$(CLI_RELEASE_BIN)" "$(CLI_INSTALL_BIN)"
+	"$(CLI_INSTALL_BIN)" --version
+
+.PHONY: cli-uninstall
+cli-uninstall: ## Remove standalone Anchor CLI from CLI_INSTALL_DIR
+	rm -f "$(CLI_INSTALL_BIN)"
+
+.PHONY: cli-version
+cli-version: ## Show installed Anchor CLI path and version
+	@set -euo pipefail; \
+	bin="$$(command -v "$(CLI_BIN_NAME)" || true)"; \
+	if [ -z "$$bin" ]; then \
+		printf "error: %s not found in PATH\n" "$(CLI_BIN_NAME)" >&2; \
+		exit 1; \
+	fi; \
+	printf "%s\n" "$$bin"; \
+	"$$bin" --version
+
+.PHONY: cli-smoke
+cli-smoke: cli-build ## Smoke test standalone Anchor CLI with an isolated HOME under .context/
+	@set -euo pipefail; \
+	rm -rf "$(CLI_SMOKE_HOME)"; \
+	mkdir -p "$(CLI_SMOKE_HOME)"; \
+	smoke_home="$$(cd "$(CLI_SMOKE_HOME)" && pwd)"; \
+	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" --version; \
+	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" doctor --quiet; \
+	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" skills dirty --json
+
 # ---------------------------------------------------------------------------
 # Test / quality
 # ---------------------------------------------------------------------------
@@ -107,6 +151,10 @@ test-ts: node_modules ## TypeScript / React unit tests (vitest)
 test-rust: $(ICON_PATH) ## Rust unit + integration tests (cargo test --lib)
 	cd $(TAURI_DIR) && $(CARGO) test --lib
 
+.PHONY: test-cli
+test-cli: $(ICON_PATH) ## Compile and test standalone Anchor CLI binary
+	cd $(TAURI_DIR) && $(CARGO) test --bin anchor-cli
+
 .PHONY: test-e2e
 test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwright install` first)
 	$(PNPM) test:e2e
@@ -115,6 +163,57 @@ test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwrigh
 bench-scan: $(ICON_PATH) ## Bench workspace scan (default: ~/workspace/work; override BENCH_WORKSPACE=/path)
 	cd $(TAURI_DIR) && ANCHOR_BENCH_WORKSPACE=$(BENCH_WORKSPACE) \
 		$(CARGO) test --release bench_scan_real_workspace -- --ignored --nocapture --test-threads=1
+
+# ---------------------------------------------------------------------------
+# Skills / release management
+# ---------------------------------------------------------------------------
+
+.PHONY: skills-doctor
+skills-doctor: ## Run Anchor skills doctor in quiet mode
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin anchor-cli -- doctor --quiet
+
+.PHONY: skills-doctor-json
+skills-doctor-json: ## Run Anchor skills doctor and print JSON
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin anchor-cli -- doctor --json
+
+.PHONY: skills-dirty
+skills-dirty: ## List dirty Anchor skills as JSON
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin anchor-cli -- skills dirty --json
+
+.PHONY: diff-check
+diff-check: ## Check working tree diff for whitespace errors
+	git diff --check
+
+.PHONY: release-preflight
+release-preflight: ## Release preflight: diff, verify, CLI smoke, e2e, and debug no-bundle Tauri build
+	$(MAKE) diff-check
+	$(MAKE) verify
+	$(MAKE) test-cli
+	$(MAKE) cli-smoke
+	$(MAKE) test-e2e
+	$(PNPM) tauri build --debug --no-bundle
+
+.PHONY: homebrew-update
+homebrew-update: ## Render Homebrew cask/formula for RELEASE_TAG into HOMEBREW_TAP_DIR
+	$(NODE) scripts/update-homebrew-tap.mjs "$(RELEASE_TAG)" "$(HOMEBREW_TAP_DIR)"
+
+.PHONY: homebrew-update-commit
+homebrew-update-commit: ## Render and commit Homebrew cask/formula update
+	$(NODE) scripts/update-homebrew-tap.mjs "$(RELEASE_TAG)" "$(HOMEBREW_TAP_DIR)" --commit
+
+.PHONY: homebrew-update-push
+homebrew-update-push: ## Render, commit, and push Homebrew cask/formula update
+	$(NODE) scripts/update-homebrew-tap.mjs "$(RELEASE_TAG)" "$(HOMEBREW_TAP_DIR)" --commit --push
+
+.PHONY: homebrew-audit
+homebrew-audit: ## Audit Anchor Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
+	cd "$(HOMEBREW_TAP_DIR)" && brew audit --cask anchor
+	cd "$(HOMEBREW_TAP_DIR)" && brew audit --formula anchor-cli
+
+.PHONY: homebrew-fetch
+homebrew-fetch: ## Fetch Anchor Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
+	cd "$(HOMEBREW_TAP_DIR)" && brew fetch --cask anchor
+	cd "$(HOMEBREW_TAP_DIR)" && brew fetch anchor-cli
 
 # ---------------------------------------------------------------------------
 # Verify (the full pre-merge / pre-PR check)

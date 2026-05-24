@@ -8,7 +8,7 @@
     {
       "name": "canva-deck",
       "path": "skills/canva-deck",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "slides",
         "design"
@@ -17,7 +17,7 @@
     {
       "name": "gaejosik",
       "path": "skills/gaejosik",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "korean",
         "writing"
@@ -44,7 +44,7 @@
     {
       "name": "gpt-images-deck",
       "path": "skills/gpt-images-deck",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "slides",
         "image"
@@ -53,7 +53,7 @@
     {
       "name": "hwpx",
       "path": "skills/hwpx",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "document",
         "hwp"
@@ -80,7 +80,7 @@
     {
       "name": "io-gws",
       "path": "skills/io-gws",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "io",
         "google-workspace"
@@ -89,7 +89,7 @@
     {
       "name": "io-kakao",
       "path": "skills/io-kakao",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "io",
         "kakao"
@@ -98,7 +98,7 @@
     {
       "name": "io-mso",
       "path": "skills/io-mso",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "io",
         "microsoft-365"
@@ -107,7 +107,7 @@
     {
       "name": "io-telegram",
       "path": "skills/io-telegram",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "io",
         "telegram"
@@ -116,7 +116,7 @@
     {
       "name": "meeting-notes",
       "path": "skills/meeting-notes",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "meeting",
         "notes"
@@ -125,7 +125,7 @@
     {
       "name": "notebooklm-deck",
       "path": "skills/notebooklm-deck",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "slides",
         "notebooklm"
@@ -134,7 +134,7 @@
     {
       "name": "pptx-toolkit",
       "path": "skills/pptx-toolkit",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "document",
         "pptx"
@@ -152,7 +152,7 @@
     {
       "name": "skill-mine",
       "path": "skills/skill-mine",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "skills",
         "analysis"
@@ -188,7 +188,7 @@
     {
       "name": "vault-graph",
       "path": "skills/vault-graph",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "graph"
@@ -197,7 +197,7 @@
     {
       "name": "vault-learn",
       "path": "skills/vault-learn",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "learning"
@@ -215,7 +215,7 @@
     {
       "name": "vault-next",
       "path": "skills/vault-next",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "planning"
@@ -224,7 +224,7 @@
     {
       "name": "vault-pipeline",
       "path": "skills/vault-pipeline",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "pipeline"
@@ -233,7 +233,7 @@
     {
       "name": "vault-refactor",
       "path": "skills/vault-refactor",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "refactor"
@@ -242,7 +242,7 @@
     {
       "name": "vault-remember",
       "path": "skills/vault-remember",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "memory"
@@ -251,7 +251,7 @@
     {
       "name": "vault-rename",
       "path": "skills/vault-rename",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "rename"
@@ -260,7 +260,7 @@
     {
       "name": "vault-rethink",
       "path": "skills/vault-rethink",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "review"
@@ -269,7 +269,7 @@
     {
       "name": "vault-stats",
       "path": "skills/vault-stats",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "stats"
@@ -287,7 +287,7 @@
     {
       "name": "vault-update",
       "path": "skills/vault-update",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "vault",
         "update"
@@ -296,7 +296,7 @@
     {
       "name": "xlsx-toolkit",
       "path": "skills/xlsx-toolkit",
-      "tier": "public",
+      "tier": "core",
       "tags": [
         "document",
         "xlsx"

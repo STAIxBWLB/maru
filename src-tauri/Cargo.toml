@@ -6,10 +6,19 @@ authors = ["Anchor Contributors"]
 license = "UNLICENSED"
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "anchor"
 
 [lib]
 name = "anchor_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "anchor"
+path = "src/main.rs"
+
+[[bin]]
+name = "anchor-cli"
+path = "src/bin/anchor-cli.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }

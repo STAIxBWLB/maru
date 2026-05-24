@@ -1,0 +1,21 @@
+cask "anchor" do
+  arch arm: "aarch64", intel: "x64"
+
+  version "{{VERSION}}"
+  sha256 arm: "{{APP_ARM_SHA256}}",
+         intel: "{{APP_INTEL_SHA256}}"
+
+  url "https://github.com/STAIxBWLB/anchor/releases/download/v#{version}/Anchor_#{version}_darwin_#{arch}_app.app.tar.gz",
+      verified: "github.com/STAIxBWLB/anchor/"
+  name "Anchor"
+  desc "Local-first AI workspace desktop app"
+  homepage "https://github.com/STAIxBWLB/anchor"
+
+  app "Anchor.app"
+
+  zap trash: [
+    "~/Library/Application Support/kr.anchor.desktop",
+    "~/Library/Caches/kr.anchor.desktop",
+    "~/Library/Preferences/kr.anchor.desktop.plist",
+  ]
+end

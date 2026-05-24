@@ -140,3 +140,49 @@ jobs:
           args: ${{ matrix.args }}
           includeUpdaterJson: true
           assetNamePattern: Anchor_[version]_[platform]_[arch]_[bundle][ext]
+
+  cli-macos:
+    name: Build CLI macOS ${{ matrix.asset_arch }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            asset_arch: aarch64
+          - target: x86_64-apple-darwin
+            asset_arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build CLI
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          cargo build --manifest-path src-tauri/Cargo.toml --release --bin anchor-cli --target "$TARGET"
+          rm -rf dist-cli
+          mkdir -p dist-cli
+          install -m 0755 "src-tauri/target/$TARGET/release/anchor-cli" dist-cli/anchor
+          asset="anchor-cli_${version}_darwin_${ASSET_ARCH}.tar.gz"
+          tar -czf "$asset" -C dist-cli anchor
+          shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Upload CLI release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" "$ASSET" "$ASSET.sha256" --clobber

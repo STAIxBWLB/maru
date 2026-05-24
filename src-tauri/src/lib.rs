@@ -4,6 +4,7 @@ mod anchor_dir;
 mod app_menu;
 mod approval;
 mod calendar_search;
+mod cli;
 mod cli_path;
 mod document;
 mod e2e_flow;
@@ -98,9 +99,10 @@ use shelf::{
 use skill_host::{
     skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
     skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal, skills_doctor,
-    skills_env_bootstrap, skills_env_repair, skills_env_status, skills_install_skill,
-    skills_list_installs, skills_list_skills, skills_list_sources, skills_read_skill,
-    skills_read_skill_file, skills_remove_source, skills_rescan_source, skills_reset_registry,
+    skills_env_bootstrap, skills_env_repair, skills_env_status, skills_import_external,
+    skills_import_unmanage, skills_install_skill, skills_list_dirty, skills_list_installs,
+    skills_list_skills, skills_list_sources, skills_read_skill, skills_read_skill_file,
+    skills_reconcile_skill, skills_remove_source, skills_rescan_source, skills_reset_registry,
     skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_source,
     skills_uninstall_skill,
 };
@@ -284,6 +286,10 @@ pub fn run() {
             skills_adopt_external_links,
             skills_reset_registry,
             skills_doctor,
+            skills_list_dirty,
+            skills_reconcile_skill,
+            skills_import_external,
+            skills_import_unmanage,
             skills_env_status,
             skills_env_bootstrap,
             skills_env_repair,
@@ -343,4 +349,8 @@ pub fn run() {
                 stop_poller_on_exit(state.inner());
             }
         });
+}
+
+pub fn run_cli(args: Vec<String>) -> i32 {
+    cli::run_cli(args)
 }

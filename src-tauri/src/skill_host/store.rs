@@ -18,12 +18,13 @@ use crate::cli_path::merge_path_env;
 use crate::skill_host::fs as host_fs;
 use crate::vault::{parse_frontmatter, title_from_content};
 
-const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_VERSION: u32 = 2;
 const REGISTRY_FILE: &str = "registry.json";
 const BUILTIN_SOURCE_ID: &str = "anchor-builtin";
 const BUILTIN_DIR_NAME: &str = "_builtin";
 const BUILTIN_HASHES_FILE: &str = ".anchor-builtin-hashes.json";
 const MANAGED_SOURCE_ID: &str = "anchor-managed";
+const IMPORTED_SOURCE_ID: &str = "anchor-imported";
 const STAI_PUBLIC_SOURCE_ID: &str = "stai-public";
 
 static BUILTIN_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../skills");
@@ -63,6 +64,8 @@ pub struct SkillRecord {
     pub runtime: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    #[serde(default = "default_skill_tier")]
+    pub tier: String,
     #[serde(default = "default_true")]
     pub valid: bool,
     #[serde(default)]
@@ -135,6 +138,62 @@ pub struct ResetOutcome {
     pub skills: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirtyRecord {
+    pub skill_id: String,
+    pub name: String,
+    pub source_id: String,
+    pub source_kind: String,
+    pub tier: String,
+    pub rel_path: String,
+    pub abs_path: String,
+    pub git_available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_repo_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileOutcome {
+    pub skill_id: String,
+    pub name: String,
+    pub action: String,
+    pub dry_run: bool,
+    pub committed: bool,
+    pub pushed: bool,
+    pub hash_updated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_repo_root: Option<String>,
+    #[serde(default)]
+    pub commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands_shell: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOutcome {
+    pub skill: SkillRecord,
+    pub mode: String,
+    pub imported_path: String,
+    pub anchor_entrypoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportUnmanageOutcome {
+    pub name: String,
+    pub removed_installs: usize,
+    pub removed_entrypoint: bool,
+    pub deleted_files: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillDoctorIssue {
@@ -169,6 +228,12 @@ struct SkillProgressEvent {
     total: Option<usize>,
 }
 
+#[derive(Debug, Clone)]
+struct ManifestSkillRoot {
+    path: PathBuf,
+    tier: Option<String>,
+}
+
 #[derive(Clone, Copy)]
 struct ProgressReporter<'a> {
     app: Option<&'a AppHandle>,
@@ -181,6 +246,10 @@ fn default_skills_subdir() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_skill_tier() -> String {
+    "managed".to_string()
 }
 
 impl Default for SkillsRegistry {
@@ -266,9 +335,12 @@ pub fn skills_add_source(
     let kind = normalize_source_kind(&kind)?;
     if matches!(
         id.as_str(),
-        BUILTIN_SOURCE_ID | MANAGED_SOURCE_ID | STAI_PUBLIC_SOURCE_ID
+        BUILTIN_SOURCE_ID | MANAGED_SOURCE_ID | IMPORTED_SOURCE_ID | STAI_PUBLIC_SOURCE_ID
     ) {
         return Err(format!("source_id_reserved: {id}"));
+    }
+    if kind == "managed" {
+        return Err("source_kind_reserved: managed".to_string());
     }
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -606,6 +678,12 @@ pub fn skills_install_skill(
         .find(|skill| skill.id == skill_id)
         .cloned()
         .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    if !skill.valid {
+        return Err(format!(
+            "skill_invalid: {}",
+            skill.validation_errors.join("; ")
+        ));
+    }
     let target = normalize_install_target(&target)?;
     let installed_as = host_fs::safe_entry_name(installed_as.as_deref().unwrap_or(&skill.name))?;
     let anchor_entry = host_fs::skills_root()?.join(&installed_as);
@@ -897,13 +975,8 @@ pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, Str
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
     ensure_default_sources(&mut registry, work_path.as_deref())?;
-    let source_ids: Vec<String> = registry
-        .sources
-        .iter()
-        .map(|source| source.id.clone())
-        .collect();
     let mut scan_issues = Vec::new();
-    for source_id in source_ids {
+    for source_id in source_ids(&registry) {
         if let Err(err) = rescan_source_in_registry_with_progress(
             &mut registry,
             &source_id,
@@ -918,7 +991,7 @@ pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, Str
             ));
         }
     }
-    apply_duplicate_validation(&mut registry);
+    apply_registry_validation(&mut registry);
     let mut report = build_doctor_report(&registry);
     if !scan_issues.is_empty() {
         report.issues.splice(0..0, scan_issues);
@@ -926,6 +999,559 @@ pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, Str
     }
     save_registry_unlocked(&registry)?;
     Ok(report)
+}
+
+#[tauri::command]
+pub fn skills_list_dirty(work_path: Option<String>) -> Result<Vec<DirtyRecord>, String> {
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    rescan_registry_sources(&mut registry, work_path.as_deref())?;
+    let dirty = dirty_records_from_registry(&registry)?;
+    save_registry_unlocked(&registry)?;
+    Ok(dirty)
+}
+
+#[tauri::command]
+pub fn skills_reconcile_skill(
+    work_path: Option<String>,
+    skill: String,
+    action: String,
+    message: Option<String>,
+    dry_run: Option<bool>,
+) -> Result<ReconcileOutcome, String> {
+    let action = normalize_reconcile_action(&action)?;
+    let dry_run = dry_run.unwrap_or(false);
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    rescan_registry_sources(&mut registry, work_path.as_deref())?;
+    let skill_record = resolve_skill_selector(&registry, &skill)?;
+    let source = registry
+        .sources
+        .iter()
+        .find(|source| source.id == skill_record.source_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_source: {}", skill_record.source_id))?;
+    let mut commands = Vec::new();
+    let mut outcome = ReconcileOutcome {
+        skill_id: skill_record.id.clone(),
+        name: skill_record.name.clone(),
+        action: action.clone(),
+        dry_run,
+        committed: false,
+        pushed: false,
+        hash_updated: false,
+        git_repo_root: None,
+        commands: Vec::new(),
+        commands_shell: None,
+        message: String::new(),
+    };
+
+    if let Some(repo_root) = source_git_repo_root(&source)? {
+        outcome.git_repo_root = Some(host_fs::display_path(&repo_root));
+        outcome.commands_shell = Some("posix".to_string());
+        let skill_path = PathBuf::from(&skill_record.abs_path);
+        let rel = skill_path
+            .strip_prefix(&repo_root)
+            .map_err(|_| "skill_not_inside_git_repo".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let repo_root_display = host_fs::display_path(&repo_root);
+        let repo_root_quoted = shell_quote(&repo_root_display);
+        let rel_quoted = shell_quote(&rel);
+        if action == "accept" {
+            let commit_message = message
+                .clone()
+                .unwrap_or_else(|| default_reconcile_message(&skill_record.name));
+            commands.push(format!("git -C {} add -- {}", repo_root_quoted, rel_quoted));
+            commands.push(format!(
+                "git -C {} commit -m {} -- {}",
+                repo_root_quoted,
+                shell_quote(&commit_message),
+                rel_quoted
+            ));
+            commands.push(format!("git -C {} push", repo_root_quoted));
+            if !dry_run {
+                run_git(&repo_root, &["add", "--", &rel])?;
+                if !git_staged_changes_for_path(&repo_root, &rel)? {
+                    outcome.message = "nothing_to_commit".to_string();
+                } else {
+                    run_git(&repo_root, &["commit", "-m", &commit_message, "--", &rel])?;
+                    outcome.committed = true;
+                    match run_git_capture(&repo_root, &["push"]) {
+                        Ok(_) => {
+                            outcome.pushed = true;
+                            outcome.message = "committed_and_pushed".to_string();
+                        }
+                        Err(err) => {
+                            outcome.message = format!("committed_push_failed: {err}");
+                        }
+                    }
+                }
+                mark_skill_saved(&mut registry, &skill_record.id)?;
+                outcome.hash_updated = true;
+            } else {
+                outcome.message = "dry_run".to_string();
+            }
+        } else {
+            commands.push(format!(
+                "git -C {} checkout -- {}",
+                repo_root_quoted, rel_quoted
+            ));
+            if !dry_run {
+                run_git(&repo_root, &["checkout", "--", &rel])?;
+                rescan_source_in_registry(&mut registry, &source.id)?;
+                mark_skill_saved(&mut registry, &skill_record.id)?;
+                outcome.hash_updated = true;
+                outcome.message = "discarded".to_string();
+            } else {
+                outcome.message = "dry_run".to_string();
+            }
+        }
+        outcome.commands = commands;
+        save_registry_unlocked(&registry)?;
+        return Ok(outcome);
+    }
+
+    match (source.kind.as_str(), action.as_str()) {
+        ("builtin", "accept") => Err("builtin_accept_unsupported".to_string()),
+        ("builtin", "discard") => {
+            commands.push(format!("restore builtin skill {}", skill_record.name));
+            if !dry_run {
+                restore_builtin_skill(&skill_record.name)?;
+                rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID)?;
+                mark_skill_saved(&mut registry, &skill_record.id)?;
+                outcome.hash_updated = true;
+                outcome.message = "builtin_restored".to_string();
+            } else {
+                outcome.message = "dry_run".to_string();
+            }
+            outcome.commands = commands;
+            save_registry_unlocked(&registry)?;
+            Ok(outcome)
+        }
+        ("managed" | "imported", "accept") => {
+            commands.push("update saved hash".to_string());
+            if !dry_run {
+                mark_skill_saved(&mut registry, &skill_record.id)?;
+                outcome.hash_updated = true;
+                outcome.message = "hash_updated".to_string();
+            } else {
+                outcome.message = "dry_run".to_string();
+            }
+            outcome.commands = commands;
+            save_registry_unlocked(&registry)?;
+            Ok(outcome)
+        }
+        (_, "discard") => Err("discard_requires_git_or_builtin_source".to_string()),
+        (_, "accept") => Err("accept_requires_git_or_managed_source".to_string()),
+        _ => Err("unsupported_reconcile_action".to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn skills_import_external(
+    work_path: Option<String>,
+    source_path: String,
+    name: Option<String>,
+    mode: Option<String>,
+) -> Result<ImportOutcome, String> {
+    let mode = normalize_import_mode(mode.as_deref())?;
+    let source_path = host_fs::expand_tilde(&source_path);
+    if !source_path.join("SKILL.md").is_file() {
+        return Err(format!(
+            "source_skill_missing: {}",
+            host_fs::display_path(&source_path.join("SKILL.md"))
+        ));
+    }
+    let content = fs::read_to_string(source_path.join("SKILL.md"))
+        .map_err(|err| format!("Cannot read source skill: {err}"))?;
+    let parts = parse_frontmatter(&content);
+    let name = name
+        .or_else(|| yaml_meta_string(&parts.meta, "name"))
+        .or_else(|| {
+            source_path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(ToString::to_string)
+        })
+        .ok_or_else(|| "skill_name_required".to_string())
+        .and_then(|value| host_fs::safe_entry_name(&value))?;
+
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    rescan_registry_sources(&mut registry, work_path.as_deref())?;
+    if registry
+        .skills
+        .iter()
+        .any(|skill| skill.name == name && skill.source_id != IMPORTED_SOURCE_ID)
+    {
+        return Err(format!("skill_name_exists: {name}"));
+    }
+    ensure_imported_source(&mut registry)?;
+    let imported_skill = imported_root()?.join("skills").join(&name);
+    if imported_skill.exists() || fs::symlink_metadata(&imported_skill).is_ok() {
+        return Err(format!("imported_skill_exists: {name}"));
+    }
+    if mode == "copy" {
+        copy_dir_all(&source_path, &imported_skill)?;
+    } else {
+        host_fs::create_symlink_no_clobber(&imported_skill, &canonicalize_or_self(&source_path))?;
+    }
+    upsert_imported_manifest_entry(&name, &source_path, &mode)?;
+    let scanned = rescan_source_in_registry(&mut registry, IMPORTED_SOURCE_ID)?;
+    let skill = scanned
+        .into_iter()
+        .find(|skill| skill.name == name)
+        .ok_or_else(|| "imported_skill_scan_failed".to_string())?;
+    let anchor_entry = host_fs::skills_root()?.join(&name);
+    create_anchor_entry_symlink(&anchor_entry, Path::new(&skill.abs_path), &name)?;
+    save_registry_unlocked(&registry)?;
+    Ok(ImportOutcome {
+        skill,
+        mode,
+        imported_path: host_fs::display_path(&imported_skill),
+        anchor_entrypoint: host_fs::display_path(&anchor_entry),
+    })
+}
+
+#[tauri::command]
+pub fn skills_import_unmanage(
+    work_path: Option<String>,
+    name: String,
+    delete_files: Option<bool>,
+) -> Result<ImportUnmanageOutcome, String> {
+    let name = host_fs::safe_entry_name(&name)?;
+    let delete_files = delete_files.unwrap_or(false);
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    rescan_registry_sources(&mut registry, work_path.as_deref())?;
+    let skill = registry
+        .skills
+        .iter()
+        .find(|skill| skill.source_id == IMPORTED_SOURCE_ID && skill.name == name)
+        .cloned()
+        .ok_or_else(|| format!("unknown_imported_skill: {name}"))?;
+    let anchor_entry = host_fs::skills_root()?.join(&name);
+    let removed_entrypoint =
+        host_fs::remove_if_matching_symlink(&anchor_entry, Path::new(&skill.abs_path))?;
+    let mut removed_installs = 0;
+    let installs = std::mem::take(&mut registry.installs);
+    registry.installs = installs
+        .into_iter()
+        .filter(|install| {
+            if install.skill_id != skill.id {
+                return true;
+            }
+            removed_installs += 1;
+            if install.managed_by == "anchor" {
+                let _ = host_fs::remove_if_matching_symlink(
+                    Path::new(&install.target_path),
+                    &anchor_entry,
+                );
+            }
+            false
+        })
+        .collect();
+    remove_imported_manifest_entry(&name)?;
+    let imported_skill = imported_root()?.join("skills").join(&name);
+    let mut deleted = false;
+    if delete_files && (imported_skill.exists() || fs::symlink_metadata(&imported_skill).is_ok()) {
+        let meta = fs::symlink_metadata(&imported_skill)
+            .map_err(|err| format!("Cannot stat imported skill {name}: {err}"))?;
+        if meta.file_type().is_symlink() || meta.is_file() {
+            fs::remove_file(&imported_skill)
+                .map_err(|err| format!("Cannot remove imported skill {name}: {err}"))?;
+        } else {
+            fs::remove_dir_all(&imported_skill)
+                .map_err(|err| format!("Cannot remove imported skill {name}: {err}"))?;
+        }
+        deleted = true;
+    }
+    registry
+        .skills
+        .retain(|skill| !(skill.source_id == IMPORTED_SOURCE_ID && skill.name == name));
+    let _ = rescan_source_in_registry(&mut registry, IMPORTED_SOURCE_ID);
+    save_registry_unlocked(&registry)?;
+    Ok(ImportUnmanageOutcome {
+        name,
+        removed_installs,
+        removed_entrypoint,
+        deleted_files: deleted,
+    })
+}
+
+fn source_ids(registry: &SkillsRegistry) -> Vec<String> {
+    registry
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect()
+}
+
+fn rescan_registry_sources(
+    registry: &mut SkillsRegistry,
+    work_path: Option<&str>,
+) -> Result<(), String> {
+    ensure_default_sources(registry, work_path)?;
+    for source_id in source_ids(registry) {
+        let _ = rescan_source_in_registry(registry, &source_id);
+    }
+    apply_registry_validation(registry);
+    Ok(())
+}
+
+fn dirty_records_from_registry(registry: &SkillsRegistry) -> Result<Vec<DirtyRecord>, String> {
+    let sources: BTreeMap<String, SkillSource> = registry
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.clone()))
+        .collect();
+    registry
+        .skills
+        .iter()
+        .filter(|skill| skill.dirty || skill.content_hash != skill.saved_hash)
+        .map(|skill| {
+            let source = sources
+                .get(&skill.source_id)
+                .ok_or_else(|| format!("unknown_source: {}", skill.source_id))?;
+            let git_repo_root = source_git_repo_root(source)?;
+            Ok(DirtyRecord {
+                skill_id: skill.id.clone(),
+                name: skill.name.clone(),
+                source_id: skill.source_id.clone(),
+                source_kind: source.kind.clone(),
+                tier: skill.tier.clone(),
+                rel_path: skill.rel_path.clone(),
+                abs_path: skill.abs_path.clone(),
+                git_available: git_repo_root.is_some(),
+                git_repo_root: git_repo_root.map(|path| host_fs::display_path(&path)),
+                content_hash: skill.content_hash.clone(),
+                saved_hash: skill.saved_hash.clone(),
+            })
+        })
+        .collect()
+}
+
+fn normalize_reconcile_action(action: &str) -> Result<String, String> {
+    match action.trim().to_lowercase().as_str() {
+        "accept" | "discard" => Ok(action.trim().to_lowercase()),
+        other => Err(format!("unsupported_reconcile_action: {other}")),
+    }
+}
+
+fn resolve_skill_selector(
+    registry: &SkillsRegistry,
+    selector: &str,
+) -> Result<SkillRecord, String> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return Err("skill_required".to_string());
+    }
+    if let Some(skill) = registry.skills.iter().find(|skill| skill.id == selector) {
+        return Ok(skill.clone());
+    }
+    let matches: Vec<SkillRecord> = registry
+        .skills
+        .iter()
+        .filter(|skill| skill.name == selector)
+        .cloned()
+        .collect();
+    match matches.len() {
+        0 => Err(format!("unknown_skill: {selector}")),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => Err(format!("ambiguous_skill: {selector}")),
+    }
+}
+
+fn source_git_repo_root(source: &SkillSource) -> Result<Option<PathBuf>, String> {
+    let Some(path) = source.path.as_deref() else {
+        return Ok(None);
+    };
+    let path = host_fs::expand_tilde(path);
+    let sources_root = host_fs::skills_root()?.join("_sources");
+    if !canonicalize_or_self(&path).starts_with(canonicalize_or_self(&sources_root)) {
+        return Ok(None);
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .output();
+    let Ok(output) = output else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if root.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(root)))
+}
+
+fn mark_skill_saved(registry: &mut SkillsRegistry, skill_id: &str) -> Result<(), String> {
+    let source_id = registry
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .map(|skill| skill.source_id.clone())
+        .ok_or_else(|| format!("unknown_skill: {skill_id}"))?;
+    let _ = rescan_source_in_registry(registry, &source_id)?;
+    let Some(skill) = registry
+        .skills
+        .iter_mut()
+        .find(|skill| skill.id == skill_id)
+    else {
+        return Err(format!("unknown_skill: {skill_id}"));
+    };
+    skill.saved_hash = skill.content_hash.clone();
+    skill.dirty = false;
+    Ok(())
+}
+
+fn default_reconcile_message(name: &str) -> String {
+    format!("anchor: reconcile {name}")
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn run_git(repo_root: &Path, args: &[&str]) -> Result<(), String> {
+    run_git_capture(repo_root, args).map(|_| ())
+}
+
+fn run_git_capture(repo_root: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .map_err(|err| format!("command_failed_to_start: {err}"))?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(stderr.trim().if_empty("unknown git error"))
+}
+
+fn git_staged_changes_for_path(repo_root: &Path, rel: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("diff")
+        .arg("--cached")
+        .arg("--quiet")
+        .arg("--")
+        .arg(rel)
+        .output()
+        .map_err(|err| format!("command_failed_to_start: {err}"))?;
+    match output.status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .if_empty("git diff failed")),
+    }
+}
+
+fn restore_builtin_skill(name: &str) -> Result<(), String> {
+    let name = host_fs::safe_entry_name(name)?;
+    let source = BUILTIN_DIR
+        .get_dir(format!("skills/{name}"))
+        .ok_or_else(|| format!("unknown_builtin_skill: {name}"))?;
+    let target = builtin_materialized_root()?.join("skills").join(&name);
+    if target.exists() {
+        fs::remove_dir_all(&target)
+            .map_err(|err| format!("Cannot remove builtin skill {name}: {err}"))?;
+    }
+    host_fs::ensure_dir(&target)?;
+    copy_include_dir_unconditional(source, &target, source.path())
+}
+
+fn copy_include_dir_unconditional(dir: &Dir<'_>, target: &Path, base: &Path) -> Result<(), String> {
+    for child in dir.dirs() {
+        let rel = child.path().strip_prefix(base).unwrap_or(child.path());
+        let child_target = target.join(rel);
+        host_fs::ensure_dir(&child_target)?;
+        copy_include_dir_unconditional(child, target, base)?;
+    }
+    for file in dir.files() {
+        let rel = file.path().strip_prefix(base).unwrap_or(file.path());
+        let file_target = target.join(rel);
+        if let Some(parent) = file_target.parent() {
+            host_fs::ensure_dir(parent)?;
+        }
+        fs::write(&file_target, file.contents()).map_err(|err| {
+            format!(
+                "Cannot write builtin file {}: {err}",
+                host_fs::display_path(&file_target)
+            )
+        })?;
+        set_builtin_file_mode(&file_target, file.contents())?;
+    }
+    Ok(())
+}
+
+fn normalize_import_mode(mode: Option<&str>) -> Result<String, String> {
+    match mode.unwrap_or("copy").trim().to_lowercase().as_str() {
+        "copy" => Ok("copy".to_string()),
+        "link" => Ok("link".to_string()),
+        other => Err(format!("unsupported_import_mode: {other}")),
+    }
+}
+
+fn imported_manifest_path() -> Result<PathBuf, String> {
+    Ok(imported_root()?.join("manifest.json"))
+}
+
+fn read_imported_manifest() -> Result<serde_json::Value, String> {
+    let path = imported_manifest_path()?;
+    if !path.is_file() {
+        return Ok(serde_json::json!({ "version": 1, "skills": [] }));
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))?;
+    serde_json::from_str(&content)
+        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))
+}
+
+fn upsert_imported_manifest_entry(
+    name: &str,
+    source_path: &Path,
+    mode: &str,
+) -> Result<(), String> {
+    let mut manifest = read_imported_manifest()?;
+    if !manifest
+        .get("skills")
+        .is_some_and(serde_json::Value::is_array)
+    {
+        manifest["skills"] = serde_json::json!([]);
+    }
+    let skills = manifest["skills"].as_array_mut().unwrap();
+    skills.retain(|item| item.get("name").and_then(serde_json::Value::as_str) != Some(name));
+    skills.push(serde_json::json!({
+        "name": name,
+        "path": format!("skills/{name}"),
+        "tier": "imported",
+        "sourceOrigin": host_fs::display_path(source_path),
+        "importedAt": Utc::now().to_rfc3339(),
+        "mode": mode,
+    }));
+    host_fs::write_json_pretty(&imported_manifest_path()?, &manifest)
+}
+
+fn remove_imported_manifest_entry(name: &str) -> Result<(), String> {
+    let mut manifest = read_imported_manifest()?;
+    if let Some(skills) = manifest
+        .get_mut("skills")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        skills.retain(|item| item.get("name").and_then(serde_json::Value::as_str) != Some(name));
+    }
+    host_fs::write_json_pretty(&imported_manifest_path()?, &manifest)
 }
 
 fn preserved_installs_from_registry(registry: SkillsRegistry) -> Vec<SkillInstall> {
@@ -1071,10 +1697,34 @@ fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
     }
     let mut registry: SkillsRegistry = serde_json::from_str(&content)
         .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
-    registry.version = REGISTRY_VERSION;
+    let loaded_version = registry.version;
+    migrate_loaded_registry(&mut registry, loaded_version);
     normalize_removed_source_ids(&mut registry);
-    apply_duplicate_validation(&mut registry);
+    apply_registry_validation(&mut registry);
     Ok(registry)
+}
+
+fn migrate_loaded_registry(registry: &mut SkillsRegistry, loaded_version: u32) {
+    if loaded_version < 2 {
+        migrate_legacy_skill_tiers(registry);
+    }
+    registry.version = REGISTRY_VERSION;
+}
+
+fn migrate_legacy_skill_tiers(registry: &mut SkillsRegistry) {
+    let sources: BTreeMap<String, SkillSource> = registry
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.clone()))
+        .collect();
+    for skill in &mut registry.skills {
+        if normalize_skill_tier(&skill.tier).is_none() || skill.tier == default_skill_tier() {
+            skill.tier = sources
+                .get(&skill.source_id)
+                .map(infer_skill_tier)
+                .unwrap_or_else(|| infer_skill_tier_from_source_id(&skill.source_id));
+        }
+    }
 }
 
 fn save_registry_unlocked(registry: &SkillsRegistry) -> Result<(), String> {
@@ -1139,6 +1789,7 @@ fn ensure_default_sources(
 ) -> Result<(), String> {
     ensure_builtin_source(registry)?;
     ensure_managed_source(registry)?;
+    ensure_imported_source(registry)?;
     migrate_stai_public_source(registry)?;
     let Some(work_path) = work_path else {
         return Ok(());
@@ -1216,6 +1867,32 @@ fn ensure_managed_source(registry: &mut SkillsRegistry) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+fn ensure_imported_source(registry: &mut SkillsRegistry) -> Result<(), String> {
+    clear_removed_source(registry, IMPORTED_SOURCE_ID);
+    let imported = imported_root()?;
+    host_fs::ensure_dir(&imported.join("skills"))?;
+    if !registry
+        .sources
+        .iter()
+        .any(|source| source.id == IMPORTED_SOURCE_ID)
+    {
+        registry.sources.push(SkillSource {
+            id: IMPORTED_SOURCE_ID.to_string(),
+            kind: "imported".to_string(),
+            path: Some(host_fs::display_path(&imported)),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+    }
+    Ok(())
+}
+
+fn imported_root() -> Result<PathBuf, String> {
+    Ok(host_fs::skills_root()?.join("_imported"))
 }
 
 fn builtin_materialized_root() -> Result<PathBuf, String> {
@@ -1523,7 +2200,10 @@ fn remove_source_from_registry(
     registry: &mut SkillsRegistry,
     source_id: &str,
 ) -> Result<(), String> {
-    if source_id == MANAGED_SOURCE_ID || source_id == BUILTIN_SOURCE_ID {
+    if matches!(
+        source_id,
+        MANAGED_SOURCE_ID | BUILTIN_SOURCE_ID | IMPORTED_SOURCE_ID
+    ) {
         return Err("source_not_removable".to_string());
     }
     let skill_ids: BTreeSet<String> = registry
@@ -1636,7 +2316,7 @@ fn rescan_source_in_registry_with_progress(
     let scanned = scan_source_with_progress(&source, progress, &saved_hashes)?;
     registry.skills.retain(|skill| skill.source_id != source_id);
     registry.skills.extend(scanned);
-    apply_duplicate_validation(registry);
+    apply_registry_validation(registry);
     if let Some(existing) = registry
         .sources
         .iter_mut()
@@ -1657,11 +2337,11 @@ fn rescan_source_in_registry_with_progress(
     Ok(updated)
 }
 
-fn apply_duplicate_validation(registry: &mut SkillsRegistry) {
+fn apply_registry_validation(registry: &mut SkillsRegistry) {
     for skill in &mut registry.skills {
-        skill
-            .validation_errors
-            .retain(|error| !error.starts_with("duplicate_source"));
+        skill.validation_errors.retain(|error| {
+            !error.starts_with("duplicate_source") && !error.starts_with("tier_misplaced")
+        });
         skill.valid = skill.validation_errors.is_empty();
     }
 
@@ -1698,6 +2378,93 @@ fn apply_duplicate_validation(registry: &mut SkillsRegistry) {
             skill.valid = false;
         }
     }
+
+    let sources: BTreeMap<String, SkillSource> = registry
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.clone()))
+        .collect();
+    for skill in &mut registry.skills {
+        let Some(source) = sources.get(&skill.source_id) else {
+            continue;
+        };
+        if let Some(message) = validate_tier_placement(skill, source) {
+            skill
+                .validation_errors
+                .push(format!("tier_misplaced: {message}"));
+            skill.valid = false;
+        }
+    }
+}
+
+fn validate_tier_placement(skill: &SkillRecord, source: &SkillSource) -> Option<String> {
+    if source.kind == "adopted" {
+        return None;
+    }
+    let source_path = source.path.as_deref().map(host_fs::expand_tilde);
+    let expected = match skill.tier.as_str() {
+        "core" => {
+            if skill.source_id == BUILTIN_SOURCE_ID {
+                return None;
+            }
+            "_builtin"
+        }
+        "public" => {
+            if source_path
+                .as_deref()
+                .is_some_and(|path| path_ends_with_components(path, &["_sources", "skills-public"]))
+            {
+                return None;
+            }
+            "_sources/skills-public"
+        }
+        "private" => {
+            if source_path.as_deref().is_some_and(|path| {
+                path_ends_with_components(path, &["_sources", "skills-private"])
+            }) {
+                return None;
+            }
+            "_sources/skills-private"
+        }
+        "imported" => {
+            if skill.source_id == IMPORTED_SOURCE_ID
+                || source_path
+                    .as_deref()
+                    .is_some_and(|path| path_ends_with_components(path, &["_imported"]))
+            {
+                return None;
+            }
+            "_imported"
+        }
+        "managed" => {
+            if skill.source_id == MANAGED_SOURCE_ID {
+                return None;
+            }
+            "_managed"
+        }
+        other => return Some(format!("unsupported tier {other}")),
+    };
+    Some(format!(
+        "{} has tier {} but source {} is not under {}",
+        skill.name, skill.tier, skill.source_id, expected
+    ))
+}
+
+fn path_ends_with_components(path: &Path, suffix: &[&str]) -> bool {
+    let components: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+    if components.len() < suffix.len() {
+        return false;
+    }
+    components[components.len() - suffix.len()..]
+        .iter()
+        .map(String::as_str)
+        .eq(suffix.iter().copied())
 }
 
 fn build_doctor_report(registry: &SkillsRegistry) -> SkillDoctorReport {
@@ -1723,13 +2490,20 @@ fn build_doctor_report(registry: &SkillsRegistry) -> SkillDoctorReport {
                 format!("SKILL.md missing at {}", skill.abs_path),
             ));
         }
-        if !skill.valid {
+        for error in &skill.validation_errors {
+            let code = if error.starts_with("duplicate_source") {
+                "duplicate_source"
+            } else if error.starts_with("tier_misplaced") {
+                "tier_misplaced"
+            } else {
+                "skill_invalid"
+            };
             issues.push(doctor_issue(
                 "error",
-                "skill_invalid",
+                code,
                 Some(skill.name.clone()),
                 vec![skill.source_id.clone()],
-                skill.validation_errors.join("; "),
+                error.clone(),
             ));
         }
         if skill.dirty {
@@ -1802,8 +2576,12 @@ fn scan_source_with_progress(
 ) -> Result<Vec<SkillRecord>, String> {
     let base = source_path(source)?;
     progress.info(format!("Source base {}", host_fs::display_path(&base)));
-    let skill_roots =
-        manifest_skill_roots(&base, source)?.unwrap_or_else(|| discover_skill_roots(&base, source));
+    let skill_roots = manifest_skill_roots(&base, source)?.unwrap_or_else(|| {
+        discover_skill_roots(&base, source)
+            .into_iter()
+            .map(|path| ManifestSkillRoot { path, tier: None })
+            .collect()
+    });
     let total = skill_roots.len();
     progress.progress(
         "info",
@@ -1812,7 +2590,8 @@ fn scan_source_with_progress(
         total,
     );
     let mut skills = Vec::new();
-    for (index, skill_root) in skill_roots.into_iter().enumerate() {
+    for (index, manifest_root) in skill_roots.into_iter().enumerate() {
+        let skill_root = manifest_root.path;
         let skill_md = skill_root.join("SKILL.md");
         if !skill_md.is_file() {
             progress.progress(
@@ -1850,23 +2629,36 @@ fn scan_source_with_progress(
             .cloned()
             .unwrap_or_else(|| current_hash.clone());
         let dirty = match source.kind.as_str() {
-            "linked" | "cloned" => dirty,
+            "linked" | "cloned" => dirty || saved_hash != current_hash,
             "builtin" => builtin_skill_hash(&name)
                 .map(|baseline| baseline != current_hash)
                 .unwrap_or(false),
             _ => saved_hash != current_hash,
         };
+        let frontmatter_tier = yaml_meta_string(&parts.meta, "tier");
+        let tier = manifest_root
+            .tier
+            .as_deref()
+            .or(frontmatter_tier.as_deref())
+            .and_then(normalize_skill_tier)
+            .unwrap_or_else(|| infer_skill_tier(source));
         let validation_errors = validate_skill_frontmatter(&content, &parts.meta);
+        let abs_path = if source.kind == "imported" {
+            skill_root.clone()
+        } else {
+            canonicalize_or_self(&skill_root)
+        };
         skills.push(SkillRecord {
             id,
             source_id: source.id.clone(),
             name: name.clone(),
             rel_path,
-            abs_path: host_fs::display_path(&canonicalize_or_self(&skill_root)),
+            abs_path: host_fs::display_path(&abs_path),
             title,
             description: yaml_meta_string(&parts.meta, "description"),
             runtime: yaml_meta_string(&parts.meta, "runtime"),
             category: yaml_meta_string(&parts.meta, "category"),
+            tier,
             valid: validation_errors.is_empty(),
             validation_errors,
             editable: true,
@@ -1943,7 +2735,68 @@ fn validate_skill_frontmatter(content: &str, meta: &BTreeMap<String, YamlValue>)
     errors
 }
 
-fn manifest_skill_roots(base: &Path, source: &SkillSource) -> Result<Option<Vec<PathBuf>>, String> {
+fn normalize_skill_tier(value: &str) -> Option<String> {
+    match value.trim().to_lowercase().as_str() {
+        "core" | "public" | "private" | "imported" | "managed" => Some(value.trim().to_lowercase()),
+        _ => None,
+    }
+}
+
+fn infer_skill_tier(source: &SkillSource) -> String {
+    if source.id == BUILTIN_SOURCE_ID {
+        return "core".to_string();
+    }
+    if source.id == IMPORTED_SOURCE_ID || source.kind == "imported" {
+        return "imported".to_string();
+    }
+    if source.id == MANAGED_SOURCE_ID || source.kind == "managed" || source.kind == "adopted" {
+        return "managed".to_string();
+    }
+    if source_path_hint_ends_with(source, &["_sources", "skills-private"])
+        || source.id.contains("private")
+    {
+        return "private".to_string();
+    }
+    if source_path_hint_ends_with(source, &["_sources", "skills-public"])
+        || source.id.contains("public")
+    {
+        return "public".to_string();
+    }
+    "managed".to_string()
+}
+
+fn infer_skill_tier_from_source_id(source_id: &str) -> String {
+    if source_id == BUILTIN_SOURCE_ID {
+        return "core".to_string();
+    }
+    if source_id == IMPORTED_SOURCE_ID {
+        return "imported".to_string();
+    }
+    if source_id == MANAGED_SOURCE_ID || source_id.contains("managed") {
+        return "managed".to_string();
+    }
+    if source_id.contains("private") {
+        return "private".to_string();
+    }
+    if source_id.contains("public") {
+        return "public".to_string();
+    }
+    "managed".to_string()
+}
+
+fn source_path_hint_ends_with(source: &SkillSource, suffix: &[&str]) -> bool {
+    source
+        .path
+        .as_deref()
+        .map(host_fs::expand_tilde)
+        .as_deref()
+        .is_some_and(|path| path_ends_with_components(path, suffix))
+}
+
+fn manifest_skill_roots(
+    base: &Path,
+    source: &SkillSource,
+) -> Result<Option<Vec<ManifestSkillRoot>>, String> {
     let path = base.join("manifest.json");
     if !path.is_file() {
         return Ok(None);
@@ -1957,20 +2810,24 @@ fn manifest_skill_roots(base: &Path, source: &SkillSource) -> Result<Option<Vec<
     };
     let mut roots = Vec::new();
     for item in items {
-        let rel = match item {
-            serde_json::Value::String(name) => source_skill_base(base, source).join(name),
+        let (rel, tier) = match item {
+            serde_json::Value::String(name) => (source_skill_base(base, source).join(name), None),
             serde_json::Value::Object(map) => {
+                let tier = map
+                    .get("tier")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(normalize_skill_tier);
                 if let Some(path) = map.get("path").and_then(serde_json::Value::as_str) {
-                    base.join(path)
+                    (base.join(path), tier)
                 } else if let Some(name) = map.get("name").and_then(serde_json::Value::as_str) {
-                    source_skill_base(base, source).join(name)
+                    (source_skill_base(base, source).join(name), tier)
                 } else {
                     continue;
                 }
             }
             _ => continue,
         };
-        roots.push(rel);
+        roots.push(ManifestSkillRoot { path: rel, tier });
     }
     Ok(Some(roots))
 }
@@ -2529,10 +3386,261 @@ mod tests {
 
         assert!(!report.ok);
         assert!(report.issues.iter().any(|issue| {
-            issue.code == "skill_invalid"
+            issue.code == "duplicate_source"
                 && issue.skill_name.as_deref() == Some("shared")
                 && issue.message.contains("duplicate_source")
         }));
+    }
+
+    #[test]
+    fn tier_misplaced_from_manifest_is_invalid() {
+        let _home = test_home();
+        let root = TempDir::new().unwrap();
+        write_skill(root.path(), "misplaced");
+        fs::write(
+            root.path().join("manifest.json"),
+            r#"{"version":1,"skills":[{"name":"misplaced","path":"skills/misplaced","tier":"core"}]}"#,
+        )
+        .unwrap();
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: "team-public".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(root.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+
+        rescan_source_in_registry(&mut registry, "team-public").unwrap();
+
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.name == "misplaced")
+            .unwrap();
+        assert_eq!(skill.tier, "core");
+        assert!(!skill.valid);
+        assert!(skill
+            .validation_errors
+            .iter()
+            .any(|error| error.starts_with("tier_misplaced")));
+    }
+
+    #[test]
+    fn legacy_registry_infers_missing_tiers_before_validation() {
+        let home = test_home();
+        let private_root = home
+            ._dir
+            .path()
+            .join(".anchor")
+            .join("skills")
+            .join("_sources")
+            .join("skills-private");
+        let private_skill = write_skill(&private_root, "legacy-private");
+        host_fs::write_json_pretty(
+            &registry_path().unwrap(),
+            &serde_json::json!({
+                "version": 1,
+                "sources": [{
+                    "id": "team-private",
+                    "kind": "linked",
+                    "path": path_string(&private_root),
+                    "skillsSubdir": "skills"
+                }],
+                "skills": [{
+                    "id": "team-private::legacy-private",
+                    "sourceId": "team-private",
+                    "name": "legacy-private",
+                    "relPath": "skills/legacy-private",
+                    "absPath": path_string(&private_skill)
+                }],
+                "installs": [],
+                "removedSourceIds": []
+            }),
+        )
+        .unwrap();
+
+        let registry = load_registry_unlocked().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.name == "legacy-private")
+            .unwrap();
+
+        assert_eq!(registry.version, REGISTRY_VERSION);
+        assert_eq!(skill.tier, "private");
+        assert!(skill.valid);
+        assert!(!skill
+            .validation_errors
+            .iter()
+            .any(|error| error.starts_with("tier_misplaced")));
+    }
+
+    #[test]
+    fn invalid_skill_install_is_rejected() {
+        let _home = test_home();
+        let alpha = TempDir::new().unwrap();
+        let beta = TempDir::new().unwrap();
+        write_skill(alpha.path(), "shared");
+        write_skill(beta.path(), "shared");
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: "alpha".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(alpha.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        registry.sources.push(SkillSource {
+            id: "beta".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(beta.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        rescan_source_in_registry(&mut registry, "alpha").unwrap();
+        rescan_source_in_registry(&mut registry, "beta").unwrap();
+        save_registry_unlocked(&registry).unwrap();
+
+        let err = skills_install_skill("alpha::shared".to_string(), "claude".to_string(), None)
+            .unwrap_err();
+
+        assert!(err.contains("skill_invalid"));
+    }
+
+    #[test]
+    fn dirty_list_and_managed_accept_update_saved_hash() {
+        let _home = test_home();
+        let created = skills_create_skill("managed-dirty".to_string(), None).unwrap();
+        let skill_path = Path::new(&created.abs_path).join("SKILL.md");
+        fs::write(
+            &skill_path,
+            "---\nname: managed-dirty\ndescription: changed\n---\n\n# Changed\n",
+        )
+        .unwrap();
+
+        let dirty = skills_list_dirty(None).unwrap();
+        assert!(dirty.iter().any(|record| record.name == "managed-dirty"));
+
+        let outcome = skills_reconcile_skill(
+            None,
+            "managed-dirty".to_string(),
+            "accept".to_string(),
+            None,
+            Some(false),
+        )
+        .unwrap();
+
+        assert!(outcome.hash_updated);
+        assert!(skills_list_dirty(None)
+            .unwrap()
+            .iter()
+            .all(|record| record.name != "managed-dirty"));
+    }
+
+    #[test]
+    fn git_backed_reconcile_accepts_and_discards_skill_changes() {
+        let home = test_home();
+        let repo = home
+            ._dir
+            .path()
+            .join(".anchor")
+            .join("skills")
+            .join("_sources")
+            .join("skills-public");
+        let skill = write_skill(&repo, "git-skill");
+        run_git(&repo, &["init"]).unwrap();
+        run_git(&repo, &["config", "user.email", "anchor@example.invalid"]).unwrap();
+        run_git(&repo, &["config", "user.name", "Anchor Test"]).unwrap();
+        run_git(&repo, &["add", "."]).unwrap();
+        run_git(&repo, &["commit", "-m", "initial"]).unwrap();
+        skills_add_source(
+            "skills-public".to_string(),
+            "linked".to_string(),
+            Some(path_string(&repo)),
+            None,
+            Some("skills".to_string()),
+        )
+        .unwrap();
+        fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: git-skill\ndescription: changed\n---\n\n# Changed\n",
+        )
+        .unwrap();
+
+        let accepted = skills_reconcile_skill(
+            None,
+            "git-skill".to_string(),
+            "accept".to_string(),
+            Some("test: reconcile git-skill".to_string()),
+            Some(false),
+        )
+        .unwrap();
+
+        assert!(accepted.committed);
+        assert!(accepted.hash_updated);
+        assert_eq!(accepted.commands_shell.as_deref(), Some("posix"));
+        fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: git-skill\ndescription: discard\n---\n\n# Discard\n",
+        )
+        .unwrap();
+
+        let discarded = skills_reconcile_skill(
+            None,
+            "git-skill".to_string(),
+            "discard".to_string(),
+            None,
+            Some(false),
+        )
+        .unwrap();
+
+        assert!(discarded.hash_updated);
+        let content = fs::read_to_string(skill.join("SKILL.md")).unwrap();
+        assert!(content.contains("description: changed"));
+    }
+
+    #[test]
+    fn imported_copy_link_and_unmanage_work() {
+        let _home = test_home();
+        let copy_root = TempDir::new().unwrap();
+        let link_root = TempDir::new().unwrap();
+        let copy_source = write_skill(copy_root.path(), "copy-skill");
+        let link_source = write_skill(link_root.path(), "link-skill");
+
+        let copied = skills_import_external(
+            None,
+            path_string(&copy_source),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        assert_eq!(copied.skill.tier, "imported");
+        assert!(Path::new(&copied.imported_path).join("SKILL.md").is_file());
+
+        let linked = skills_import_external(
+            None,
+            path_string(&link_source),
+            None,
+            Some("link".to_string()),
+        )
+        .unwrap();
+        assert_eq!(linked.skill.tier, "imported");
+        assert!(fs::symlink_metadata(&linked.imported_path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        let removed = skills_import_unmanage(None, "copy-skill".to_string(), Some(true)).unwrap();
+        assert!(removed.removed_entrypoint);
+        assert!(removed.deleted_files);
+        assert!(!Path::new(&copied.imported_path).exists());
     }
 
     #[test]
@@ -2769,6 +3877,22 @@ mod tests {
     }
 
     #[test]
+    fn managed_source_kind_cannot_be_added_manually() {
+        let _home = test_home();
+
+        let error = skills_add_source(
+            "team-managed".to_string(),
+            "managed".to_string(),
+            None,
+            None,
+            Some("skills".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "source_kind_reserved: managed");
+    }
+
+    #[test]
     fn adding_source_clears_removed_source_tombstone() {
         let _home = test_home();
         let work = TempDir::new().unwrap();
@@ -2853,6 +3977,7 @@ mod tests {
             description: None,
             runtime: None,
             category: None,
+            tier: "public".to_string(),
             valid: true,
             validation_errors: Vec::new(),
             editable: true,
@@ -2915,6 +4040,7 @@ mod tests {
             description: None,
             runtime: None,
             category: None,
+            tier: "public".to_string(),
             valid: true,
             validation_errors: Vec::new(),
             editable: true,
