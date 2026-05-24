@@ -55,6 +55,12 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.platform }}-${{ matrix.args }}
+
       - name: Install Linux bundle dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -77,9 +83,9 @@ jobs:
           HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
           HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
           HAS_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' }}
-          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
-          HAS_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
-          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+          HAS_APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID != '' }}
+          HAS_APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID != '' }}
+          HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' }}
         run: |
           set -euo pipefail
           present=0
@@ -97,9 +103,9 @@ jobs:
           check_secret APPLE_CERTIFICATE "$HAS_APPLE_CERTIFICATE"
           check_secret APPLE_CERTIFICATE_PASSWORD "$HAS_APPLE_CERTIFICATE_PASSWORD"
           check_secret KEYCHAIN_PASSWORD "$HAS_KEYCHAIN_PASSWORD"
-          check_secret APPLE_ID "$HAS_APPLE_ID"
-          check_secret APPLE_PASSWORD "$HAS_APPLE_PASSWORD"
-          check_secret APPLE_TEAM_ID "$HAS_APPLE_TEAM_ID"
+          check_secret APPLE_API_ISSUER_ID "$HAS_APPLE_API_ISSUER_ID"
+          check_secret APPLE_API_KEY_ID "$HAS_APPLE_API_KEY_ID"
+          check_secret APPLE_API_KEY "$HAS_APPLE_API_KEY"
 
           if [ "$present" -eq 1 ] && [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Partial Apple signing configuration. Missing: %s\n' "${missing[*]}"
@@ -109,7 +115,7 @@ jobs:
           if [ "$present" -eq 0 ]; then
             echo "Apple Developer ID secrets are not configured; macOS bundles will use ad-hoc signing."
           else
-            echo "Apple Developer ID secrets are complete; macOS bundles will be signed and notarized."
+            echo "Apple Developer ID secrets are complete; macOS bundles will be signed and notarized via App Store Connect API key."
           fi
 
       - name: Prepare macOS signing
@@ -117,9 +123,9 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           if [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || [ -z "$KEYCHAIN_PASSWORD" ]; then
@@ -127,8 +133,8 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            echo "::error::APPLE_CERTIFICATE requires APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID for notarization."
+          if [ -z "$APPLE_API_ISSUER_ID" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_KEY" ]; then
+            echo "::error::APPLE_CERTIFICATE requires APPLE_API_ISSUER_ID, APPLE_API_KEY_ID, and APPLE_API_KEY (base64 .p8) for notarization."
             exit 1
           fi
 
@@ -148,6 +154,13 @@ jobs:
             exit 1
           fi
           echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+
+          api_key_dir="$RUNNER_TEMP/appstoreconnect"
+          mkdir -p "$api_key_dir"
+          api_key_path="$api_key_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo "$APPLE_API_KEY" | base64 --decode > "$api_key_path"
+          chmod 600 "$api_key_path"
+          echo "APPLE_API_KEY_PATH=$api_key_path" >> "$GITHUB_ENV"
 
       - name: Build and upload Tauri bundles
         if: matrix.platform != 'macos-latest' || env.HAS_APPLE_CERTIFICATE != 'true'
@@ -169,9 +182,9 @@ jobs:
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -204,6 +217,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: cli-${{ matrix.target }}
 
       - name: Build CLI
         env:
