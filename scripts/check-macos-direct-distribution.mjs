@@ -133,6 +133,7 @@ for (const needle of [
   "Build and upload notarized Tauri bundles",
   "APPLE_SIGNING_IDENTITY",
   "APPLE_TEAM_ID",
+  "sign-macos-app-binaries",
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow contains ${needle}`);
