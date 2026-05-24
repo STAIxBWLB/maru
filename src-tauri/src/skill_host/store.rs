@@ -18,7 +18,7 @@ use crate::cli_path::merge_path_env;
 use crate::skill_host::fs as host_fs;
 use crate::vault::{parse_frontmatter, title_from_content};
 
-const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_VERSION: u32 = 2;
 const REGISTRY_FILE: &str = "registry.json";
 const BUILTIN_SOURCE_ID: &str = "anchor-builtin";
 const BUILTIN_DIR_NAME: &str = "_builtin";
@@ -171,6 +171,8 @@ pub struct ReconcileOutcome {
     pub git_repo_root: Option<String>,
     #[serde(default)]
     pub commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands_shell: Option<String>,
     pub message: String,
 }
 
@@ -1040,11 +1042,13 @@ pub fn skills_reconcile_skill(
         hash_updated: false,
         git_repo_root: None,
         commands: Vec::new(),
+        commands_shell: None,
         message: String::new(),
     };
 
     if let Some(repo_root) = source_git_repo_root(&source)? {
         outcome.git_repo_root = Some(host_fs::display_path(&repo_root));
+        outcome.commands_shell = Some("posix".to_string());
         let skill_path = PathBuf::from(&skill_record.abs_path);
         let rel = skill_path
             .strip_prefix(&repo_root)
@@ -1693,10 +1697,34 @@ fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
     }
     let mut registry: SkillsRegistry = serde_json::from_str(&content)
         .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
-    registry.version = REGISTRY_VERSION;
+    let loaded_version = registry.version;
+    migrate_loaded_registry(&mut registry, loaded_version);
     normalize_removed_source_ids(&mut registry);
     apply_registry_validation(&mut registry);
     Ok(registry)
+}
+
+fn migrate_loaded_registry(registry: &mut SkillsRegistry, loaded_version: u32) {
+    if loaded_version < 2 {
+        migrate_legacy_skill_tiers(registry);
+    }
+    registry.version = REGISTRY_VERSION;
+}
+
+fn migrate_legacy_skill_tiers(registry: &mut SkillsRegistry) {
+    let sources: BTreeMap<String, SkillSource> = registry
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.clone()))
+        .collect();
+    for skill in &mut registry.skills {
+        if normalize_skill_tier(&skill.tier).is_none() || skill.tier == default_skill_tier() {
+            skill.tier = sources
+                .get(&skill.source_id)
+                .map(infer_skill_tier)
+                .unwrap_or_else(|| infer_skill_tier_from_source_id(&skill.source_id));
+        }
+    }
 }
 
 fn save_registry_unlocked(registry: &SkillsRegistry) -> Result<(), String> {
@@ -2737,6 +2765,25 @@ fn infer_skill_tier(source: &SkillSource) -> String {
     "managed".to_string()
 }
 
+fn infer_skill_tier_from_source_id(source_id: &str) -> String {
+    if source_id == BUILTIN_SOURCE_ID {
+        return "core".to_string();
+    }
+    if source_id == IMPORTED_SOURCE_ID {
+        return "imported".to_string();
+    }
+    if source_id == MANAGED_SOURCE_ID || source_id.contains("managed") {
+        return "managed".to_string();
+    }
+    if source_id.contains("private") {
+        return "private".to_string();
+    }
+    if source_id.contains("public") {
+        return "public".to_string();
+    }
+    "managed".to_string()
+}
+
 fn source_path_hint_ends_with(source: &SkillSource, suffix: &[&str]) -> bool {
     source
         .path
@@ -3382,6 +3429,56 @@ mod tests {
     }
 
     #[test]
+    fn legacy_registry_infers_missing_tiers_before_validation() {
+        let home = test_home();
+        let private_root = home
+            ._dir
+            .path()
+            .join(".anchor")
+            .join("skills")
+            .join("_sources")
+            .join("skills-private");
+        let private_skill = write_skill(&private_root, "legacy-private");
+        host_fs::write_json_pretty(
+            &registry_path().unwrap(),
+            &serde_json::json!({
+                "version": 1,
+                "sources": [{
+                    "id": "team-private",
+                    "kind": "linked",
+                    "path": path_string(&private_root),
+                    "skillsSubdir": "skills"
+                }],
+                "skills": [{
+                    "id": "team-private::legacy-private",
+                    "sourceId": "team-private",
+                    "name": "legacy-private",
+                    "relPath": "skills/legacy-private",
+                    "absPath": path_string(&private_skill)
+                }],
+                "installs": [],
+                "removedSourceIds": []
+            }),
+        )
+        .unwrap();
+
+        let registry = load_registry_unlocked().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.name == "legacy-private")
+            .unwrap();
+
+        assert_eq!(registry.version, REGISTRY_VERSION);
+        assert_eq!(skill.tier, "private");
+        assert!(skill.valid);
+        assert!(!skill
+            .validation_errors
+            .iter()
+            .any(|error| error.starts_with("tier_misplaced")));
+    }
+
+    #[test]
     fn invalid_skill_install_is_rejected() {
         let _home = test_home();
         let alpha = TempDir::new().unwrap();
@@ -3488,6 +3585,7 @@ mod tests {
 
         assert!(accepted.committed);
         assert!(accepted.hash_updated);
+        assert_eq!(accepted.commands_shell.as_deref(), Some("posix"));
         fs::write(
             skill.join("SKILL.md"),
             "---\nname: git-skill\ndescription: discard\n---\n\n# Discard\n",

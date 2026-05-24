@@ -248,6 +248,7 @@ export interface ReconcileOutcome {
   hashUpdated: boolean;
   gitRepoRoot?: string | null;
   commands: string[];
+  commandsShell?: "posix" | string | null;
   message: string;
 }
 
