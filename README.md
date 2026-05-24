@@ -406,9 +406,9 @@ configure these GitHub Secrets and publish a new release:
 - `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
 - `APPLE_CERTIFICATE_PASSWORD`
 - `KEYCHAIN_PASSWORD`
-- `APPLE_ID`
-- `APPLE_PASSWORD` — Apple app-specific password
-- `APPLE_TEAM_ID`
+- `APPLE_API_ISSUER_ID`
+- `APPLE_API_KEY_ID`
+- `APPLE_API_KEY` — base64 encoded App Store Connect API `.p8`
 
 The release workflow imports `APPLE_CERTIFICATE` only inside the macOS signing
 prep step, and it sends Apple notarization env vars only to the Developer ID
@@ -435,9 +435,9 @@ Minimum Apple Developer setup for direct distribution:
 
    gh secret set APPLE_CERTIFICATE_PASSWORD --repo STAIxBWLB/anchor
    gh secret set KEYCHAIN_PASSWORD --repo STAIxBWLB/anchor
-   gh secret set APPLE_ID --repo STAIxBWLB/anchor
-   gh secret set APPLE_PASSWORD --repo STAIxBWLB/anchor
-   gh secret set APPLE_TEAM_ID --repo STAIxBWLB/anchor
+   gh secret set APPLE_API_ISSUER_ID --repo STAIxBWLB/anchor
+   gh secret set APPLE_API_KEY_ID --repo STAIxBWLB/anchor
+   gh secret set APPLE_API_KEY --repo STAIxBWLB/anchor
    ```
 
 4. Confirm release readiness without printing secret values:
@@ -447,11 +447,27 @@ Minimum Apple Developer setup for direct distribution:
    make macos-distribution-local-check
    ```
 
-`APPLE_PASSWORD` must be an Apple app-specific password. Keep the Tauri updater
-secrets (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) in
-place; they sign updater metadata and are separate from Apple Developer ID
-signing. The workflow now fails on partial Apple signing configuration instead
-of silently producing an unintended ad-hoc macOS release.
+For a local notarization smoke test, keep Apple files under
+`~/workspace/work/.secrets/apple/`:
+
+- `DeveloperIDApplication.p12`
+- `AuthKey_<APPLE_API_KEY_ID>.p8`
+- `certificate-password`
+- `api-issuer-id`
+- optional `api-key-id` (defaults to the `AuthKey_<id>.p8` filename)
+- optional `keychain-password` (generated locally if missing)
+
+Then run:
+
+```bash
+make macos-notarize-local TARGET=aarch64-apple-darwin
+```
+
+Keep the Tauri updater secrets (`TAURI_SIGNING_PRIVATE_KEY`,
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) in place; they sign updater metadata and
+are separate from Apple Developer ID signing. The workflow now fails on partial
+Apple signing configuration instead of silently producing an unintended ad-hoc
+macOS release.
 
 Release asset versions come from the app metadata in `package.json`,
 `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync

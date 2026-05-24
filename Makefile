@@ -199,8 +199,13 @@ macos-distribution-check: ## Check repo config and GitHub secrets for notarized 
 	ANCHOR_RELEASE_REPO="$(MACOS_RELEASE_REPO)" $(NODE) scripts/check-macos-direct-distribution.mjs --github-secrets
 
 .PHONY: macos-distribution-local-check
-macos-distribution-local-check: ## Check repo config and local Developer ID Application identity
-	$(NODE) scripts/check-macos-direct-distribution.mjs --require-local-identity
+macos-distribution-local-check: ## Check repo config and local Apple notarization secret files
+	$(NODE) scripts/check-macos-direct-distribution.mjs
+	$(NODE) scripts/notarize-local-smoke.mjs --check
+
+.PHONY: macos-notarize-local
+macos-notarize-local: ## Build, sign, and notarize locally with secrets from ~/workspace/work/.secrets/apple
+	$(NODE) scripts/notarize-local-smoke.mjs "$(or $(TARGET),aarch64-apple-darwin)"
 
 .PHONY: homebrew-update
 homebrew-update: ## Render Homebrew cask/formula for RELEASE_TAG into HOMEBREW_TAP_DIR

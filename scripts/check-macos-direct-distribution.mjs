@@ -132,14 +132,21 @@ for (const needle of [
   "Developer ID Application",
   "Build and upload notarized Tauri bundles",
   "APPLE_SIGNING_IDENTITY",
-  "APPLE_TEAM_ID",
-  "sign-macos-app-binaries",
+  "APPLE_API_ISSUER_ID",
+  "APPLE_API_KEY_ID",
+  "APPLE_API_KEY",
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow contains ${needle}`);
   } else {
     fail(`release workflow does not contain ${needle}`);
   }
+}
+
+if (tauriConfig?.build?.beforeBundleCommand?.includes("sign-macos-app-binaries")) {
+  ok("Tauri beforeBundleCommand signs bundled macOS helper binaries");
+} else {
+  fail("Tauri beforeBundleCommand does not run sign-macos-app-binaries");
 }
 
 function checkLocalIdentity() {
@@ -201,9 +208,9 @@ function checkGitHubSecrets() {
     "APPLE_CERTIFICATE",
     "APPLE_CERTIFICATE_PASSWORD",
     "KEYCHAIN_PASSWORD",
-    "APPLE_ID",
-    "APPLE_PASSWORD",
-    "APPLE_TEAM_ID",
+    "APPLE_API_ISSUER_ID",
+    "APPLE_API_KEY_ID",
+    "APPLE_API_KEY",
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
   ];
