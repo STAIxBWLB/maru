@@ -337,6 +337,9 @@ pub fn skills_add_source(
     ) {
         return Err(format!("source_id_reserved: {id}"));
     }
+    if kind == "managed" {
+        return Err("source_kind_reserved: managed".to_string());
+    }
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
     if registry.sources.iter().any(|source| source.id == id) {
@@ -1055,10 +1058,7 @@ pub fn skills_reconcile_skill(
             let commit_message = message
                 .clone()
                 .unwrap_or_else(|| default_reconcile_message(&skill_record.name));
-            commands.push(format!(
-                "git -C {} add -- {}",
-                repo_root_quoted, rel_quoted
-            ));
+            commands.push(format!("git -C {} add -- {}", repo_root_quoted, rel_quoted));
             commands.push(format!(
                 "git -C {} commit -m {} -- {}",
                 repo_root_quoted,
@@ -3776,6 +3776,22 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("source_id_reserved"));
+    }
+
+    #[test]
+    fn managed_source_kind_cannot_be_added_manually() {
+        let _home = test_home();
+
+        let error = skills_add_source(
+            "team-managed".to_string(),
+            "managed".to_string(),
+            None,
+            None,
+            Some("skills".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "source_kind_reserved: managed");
     }
 
     #[test]

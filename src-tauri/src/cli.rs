@@ -162,8 +162,26 @@ fn run_skills_reconcile(args: &[String]) -> i32 {
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
-            "--accept" => action = Some("accept".to_string()),
-            "--discard" => action = Some("discard".to_string()),
+            "--accept" => {
+                if action.as_deref().is_some_and(|value| value != "accept") {
+                    eprintln!("conflicting options: --accept and --discard");
+                    eprintln!(
+                        "usage: anchor skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]"
+                    );
+                    return 2;
+                }
+                action = Some("accept".to_string());
+            }
+            "--discard" => {
+                if action.as_deref().is_some_and(|value| value != "discard") {
+                    eprintln!("conflicting options: --accept and --discard");
+                    eprintln!(
+                        "usage: anchor skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]"
+                    );
+                    return 2;
+                }
+                action = Some("discard".to_string());
+            }
             "--message" => {
                 index += 1;
                 let Some(value) = args.get(index) else {
@@ -223,8 +241,26 @@ fn run_skills_import(args: &[String]) -> i32 {
                 };
                 name = Some(value.clone());
             }
-            "--copy" => mode = Some("copy".to_string()),
-            "--link" => mode = Some("link".to_string()),
+            "--copy" => {
+                if mode.as_deref().is_some_and(|value| value != "copy") {
+                    eprintln!("conflicting options: --copy and --link");
+                    eprintln!(
+                        "usage: anchor skills import <source-path> [--name <name>] [--copy|--link]"
+                    );
+                    return 2;
+                }
+                mode = Some("copy".to_string());
+            }
+            "--link" => {
+                if mode.as_deref().is_some_and(|value| value != "link") {
+                    eprintln!("conflicting options: --copy and --link");
+                    eprintln!(
+                        "usage: anchor skills import <source-path> [--name <name>] [--copy|--link]"
+                    );
+                    return 2;
+                }
+                mode = Some("link".to_string());
+            }
             other => {
                 eprintln!("unknown option: {other}");
                 return 2;
@@ -307,5 +343,33 @@ mod tests {
     #[test]
     fn missing_skills_subcommand_is_cli_error() {
         assert_eq!(run_cli(vec!["skills".to_string()]), 2);
+    }
+
+    #[test]
+    fn conflicting_reconcile_actions_are_cli_error() {
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "reconcile".to_string(),
+                "example".to_string(),
+                "--accept".to_string(),
+                "--discard".to_string(),
+            ]),
+            2
+        );
+    }
+
+    #[test]
+    fn conflicting_import_modes_are_cli_error() {
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "import".to_string(),
+                "/tmp/example".to_string(),
+                "--copy".to_string(),
+                "--link".to_string(),
+            ]),
+            2
+        );
     }
 }
