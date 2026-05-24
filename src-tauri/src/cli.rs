@@ -15,8 +15,19 @@ pub fn run_cli(args: Vec<String>) -> Option<i32> {
 }
 
 fn run_doctor(args: &[String]) -> i32 {
-    let json = args.iter().any(|arg| arg == "--json");
-    let quiet = args.iter().any(|arg| arg == "--quiet");
+    let mut json = false;
+    let mut quiet = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--quiet" => quiet = true,
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("usage: anchor doctor [--json] [--quiet]");
+                return 2;
+            }
+        }
+    }
     match skills_doctor(current_work_path()) {
         Ok(report) => {
             if json {
@@ -90,7 +101,17 @@ fn run_skills(args: &[String]) -> i32 {
 }
 
 fn run_skills_dirty(args: &[String]) -> i32 {
-    let json = args.iter().any(|arg| arg == "--json");
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("usage: anchor skills dirty [--json]");
+                return 2;
+            }
+        }
+    }
     match skills_list_dirty(current_work_path()) {
         Ok(records) => {
             if json {

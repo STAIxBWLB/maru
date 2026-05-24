@@ -27,7 +27,7 @@ const MOCK_BUILTIN_SKILLS = [
   description: null,
   runtime: null,
   category: null,
-  tier: "managed",
+  tier: "core",
   valid: true,
   validationErrors: [],
   editable: false,

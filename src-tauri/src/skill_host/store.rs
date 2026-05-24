@@ -1048,22 +1048,24 @@ pub fn skills_reconcile_skill(
             .map_err(|_| "skill_not_inside_git_repo".to_string())?
             .to_string_lossy()
             .to_string();
+        let repo_root_display = host_fs::display_path(&repo_root);
+        let repo_root_quoted = shell_quote(&repo_root_display);
+        let rel_quoted = shell_quote(&rel);
         if action == "accept" {
             let commit_message = message
                 .clone()
                 .unwrap_or_else(|| default_reconcile_message(&skill_record.name));
             commands.push(format!(
                 "git -C {} add -- {}",
-                host_fs::display_path(&repo_root),
-                rel
+                repo_root_quoted, rel_quoted
             ));
             commands.push(format!(
                 "git -C {} commit -m {} -- {}",
-                host_fs::display_path(&repo_root),
+                repo_root_quoted,
                 shell_quote(&commit_message),
-                rel
+                rel_quoted
             ));
-            commands.push(format!("git -C {} push", host_fs::display_path(&repo_root)));
+            commands.push(format!("git -C {} push", repo_root_quoted));
             if !dry_run {
                 run_git(&repo_root, &["add", "--", &rel])?;
                 if !git_staged_changes_for_path(&repo_root, &rel)? {
@@ -1089,8 +1091,7 @@ pub fn skills_reconcile_skill(
         } else {
             commands.push(format!(
                 "git -C {} checkout -- {}",
-                host_fs::display_path(&repo_root),
-                rel
+                repo_root_quoted, rel_quoted
             ));
             if !dry_run {
                 run_git(&repo_root, &["checkout", "--", &rel])?;
