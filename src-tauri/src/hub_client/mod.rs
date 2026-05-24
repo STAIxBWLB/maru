@@ -13,7 +13,7 @@ pub mod safety;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub use catalog::{HubCatalog, HubTemplate, HubGuideline, HubGlossaryTerm};
+pub use catalog::{HubCatalog, HubGlossaryTerm, HubGuideline, HubTemplate};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubConfig {
@@ -182,9 +182,30 @@ pub fn hub_submit_gate(req: HubSubmitGateRequest) -> Result<HubSubmitGateRespons
 }
 
 #[tauri::command]
-pub fn hub_poll_gate(_workspace_root: String, _gate_id: String) -> Result<HubFetchResponse, String> {
-    // Phase 6 W20에 구현
-    Err("hub_poll_gate: not implemented in Phase 3 scaffold".to_string())
+pub fn hub_poll_gate(workspace_root: String, gate_id: String) -> Result<HubFetchResponse, String> {
+    let root = PathBuf::from(&workspace_root);
+    let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
+    let gate_id = sanitize_path_segment(&gate_id)?;
+    let params = std::collections::HashMap::new();
+    let resource = format!("submission-gates/{gate_id}");
+
+    if !cfg.enabled {
+        return cache::load_cached_resource(&cfg.cache_root, &resource, &params)
+            .map_err(|e| e.to_string());
+    }
+
+    match http::fetch_with_cache(&cfg, &resource, &params, true) {
+        Ok(resp) => Ok(resp),
+        Err(err) => {
+            eprintln!("[hub_client] poll gate error ({}): {}", gate_id, err);
+            cache::load_cached_resource(&cfg.cache_root, &resource, &params).map_err(|e| {
+                format!(
+                    "hub poll gate failed and cache empty: hub={} cache={}",
+                    err, e
+                )
+            })
+        }
+    }
 }
 
 /// workspace.config.yaml의 hub: 블록을 읽어 HubConfig 생성.
@@ -228,13 +249,12 @@ fn load_hub_config(workspace_root: &std::path::Path) -> std::io::Result<HubConfi
         .and_then(|v| v.as_str());
     let api_token = api_token_ref.and_then(|p| {
         let p = expand_tilde(p);
-        std::fs::read_to_string(p).ok().map(|s| s.trim().to_string())
+        std::fs::read_to_string(p)
+            .ok()
+            .map(|s| s.trim().to_string())
     });
 
-    let cache_root = workspace_root
-        .join(".anchor")
-        .join("cache")
-        .join("hub");
+    let cache_root = workspace_root.join(".anchor").join("cache").join("hub");
 
     Ok(HubConfig {
         endpoint,
@@ -247,6 +267,18 @@ fn load_hub_config(workspace_root: &std::path::Path) -> std::io::Result<HubConfi
     })
 }
 
+fn sanitize_path_segment(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err("hub_path_segment_invalid".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn expand_tilde(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -254,4 +286,23 @@ fn expand_tilde(p: &str) -> PathBuf {
         }
     }
     PathBuf::from(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_segment_rejects_unsafe_gate_ids() {
+        assert!(sanitize_path_segment("gate_123").is_ok());
+        assert!(sanitize_path_segment("gate-123").is_ok());
+        assert!(sanitize_path_segment("../gate").is_err());
+        assert!(sanitize_path_segment("a/b").is_err());
+        assert!(sanitize_path_segment("a?b").is_err());
+        assert!(sanitize_path_segment("a#b").is_err());
+        assert!(sanitize_path_segment("a%b").is_err());
+        assert!(sanitize_path_segment("a:b").is_err());
+        assert!(sanitize_path_segment(".gate").is_err());
+        assert!(sanitize_path_segment("").is_err());
+    }
 }

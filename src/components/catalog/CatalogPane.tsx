@@ -209,7 +209,9 @@ function CatalogColumn({ title, entries, kind: _kind, onSelect }: CatalogColumnP
                 onClick={() => onSelect(e)}
                 aria-label={`${e.title || e.path} 상세 보기`}
               >
-                <div className="catalog-entry__title">{e.title || e.path}</div>
+                <div className="catalog-entry__title" title={e.title || e.path}>
+                  {e.title || e.path}
+                </div>
                 <div className="catalog-entry__meta">
                   {e.business_unit && (
                     <span className="catalog-entry__bu">{e.business_unit}</span>
@@ -222,7 +224,9 @@ function CatalogColumn({ title, entries, kind: _kind, onSelect }: CatalogColumnP
                     <span className="catalog-entry__evidence">{e.evidence_kind}</span>
                   )}
                 </div>
-                <div className="catalog-entry__path">{e.path}</div>
+                <div className="catalog-entry__path" title={e.path}>
+                  {e.path}
+                </div>
               </button>
             </li>
           ))}

@@ -7,6 +7,7 @@ mod calendar_search;
 mod cli_path;
 mod document;
 mod e2e_flow;
+mod evidence_binder;
 mod export;
 mod file_manager;
 mod filename_rules;
@@ -58,6 +59,7 @@ use document::{
     save_document, trash_document, update_frontmatter_field,
 };
 use e2e_flow::{anchor_e2e_read, anchor_e2e_run};
+use evidence_binder::{evidence_binder_read, evidence_binder_save};
 use export::{
     export_dispatch, export_manifest_load, export_plan, export_record_failure,
     export_record_pending, export_record_success, export_validate,
@@ -297,6 +299,8 @@ pub fn run() {
             agent_validate_marketplace_manifest,
             anchor_e2e_run,
             anchor_e2e_read,
+            evidence_binder_read,
+            evidence_binder_save,
             // M1 Operations Catalog (Phase 3)
             catalog_scan,
             catalog_query,

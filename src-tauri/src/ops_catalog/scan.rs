@@ -587,7 +587,12 @@ fn extract_bu(fm: &Option<YamlValue>) -> Option<String> {
 }
 
 fn parse_iso_date(s: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(&s[..s.len().min(10)], "%Y-%m-%d").ok()
+    let date_prefix = if s.len() >= 10 {
+        s.get(..10)?
+    } else {
+        s
+    };
+    NaiveDate::parse_from_str(date_prefix, "%Y-%m-%d").ok()
 }
 
 fn relative_to(p: &Path, root: &Path) -> String {
@@ -830,6 +835,13 @@ mod tests {
         for (path, expected) in cases {
             assert_eq!(guess_evidence_kind(path), expected, "path={}", path);
         }
+    }
+
+    #[test]
+    fn parse_iso_date_rejects_non_date_korean_text_without_panic() {
+        let value = "TBD (진영준 담당자 후속 안내 — \"빠른시일에 공지\")";
+
+        assert_eq!(parse_iso_date(value), None);
     }
 
     #[test]

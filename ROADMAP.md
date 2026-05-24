@@ -15,8 +15,8 @@ Each module is owned by Anchor desktop. Hub backs them where shared catalog data
 | M1 | Operations Catalog | "What needs my attention right now" — deadlines, in-flight approvals, unlinked evidence, inbox pending | Activity-rail `LayoutGrid` mode → 3-column pane | ✅ shipped |
 | M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W12 shipped |
 | M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
-| M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · validators planned |
-| M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane tab (W14+) | 📋 planned |
+| M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · lightweight validators shipped · richer validators planned |
+| M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane Evidence tab | 🚧 W13 shipped · W14-W15 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
 | M7 | Hub Connector | Read shared context (templates / guidelines / glossary / evidence index / KPI status / **finalized documents**) + create submission gates + **finalize approved documents to Hub** (markdown body + rendered artifacts + evidence binaries) | Background + `Hub` commands | ✅ read shipped (W4) · Hub sync API shipped · ⏳ Anchor sync caller · ⏳ finalize write (P6 W21) |
 
@@ -50,7 +50,7 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 | W | Module | Deliverable |
 |---|--------|-------------|
-| W13 | M5 | Right-pane Evidence Binder tab + `<workspace>/.anchor/binder/<doc-id>.json` state. Auto-pulls inbox-processed attachments + `<binary>.evidence.yaml` sidecars under the active doc's BU, then uses `kordoc_lite` for local format detection and HWPX/form preview metadata. |
+| W13 | ✅ M5 | Right-pane Evidence Binder tab + `<workspace>/.anchor/binder/<doc-id>.json` state. Auto-pulls inbox-processed attachments + `<binary>.evidence.yaml` sidecars under the active doc's BU, then uses `kordoc_lite` for local format detection and HWPX/form preview metadata. |
 | W14 | M5 | Section / KPI / submission-checklist bindings — frontmatter `evidence_links[].section_bindings` (`"§ 2.1"`-style slugs), `kpi_bindings`, `submission_checklist_bindings`. Per-evidence Verify / Mark-as-submitted controls; reuse `kordoc_lite` HWPX fields as candidate binding labels. |
 | W15 | M5 | Hub `evidence_index` integration — sha256 lookup ("이미 검증됨" hint), `evidence_index.suggest_reuse` palette command, and metadata-only kordoc_lite detection fields. Anchor still owns the binary; only sha256 + metadata flow to Hub. |
 | W16 | M6 | Deck Studio mode + Plan step (Claude proposal → `slide_plan.json`) + 14-style catalog browser reading `dev/anchor/skills/docs/slide-decks/*.md`. |
@@ -95,14 +95,14 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 ## 5. Continuing work — concrete next steps
 
-### Immediate (W13 entry)
+### Immediate (W14 entry)
 
 ```
 # branch: fresh feat/evidence-binder-w13 off main
-src-tauri/src/evidence_binder/*          # binder state + evidence discovery helpers
-src/components/evidence/*                # right-pane binder tab surface
-src/lib/evidenceBinder.ts                # typed Tauri wrappers + UI model
-src/App.tsx                              # right utility rail tab wiring
+src-tauri/src/evidence_binder.rs         # extend binder binding model
+src/components/evidence/*                # section/KPI/checklist controls
+src/lib/evidenceBinder.ts                # binding shape + UI model
+src/App.tsx                              # preserve right utility rail tab wiring
 ```
 
 W10 follow-up hardening, if needed before Studio:
@@ -117,12 +117,17 @@ W10 follow-up hardening, if needed before Studio:
 - `template_fill_hwpx` writes filled artifacts to `.anchor/studio/filled/` by default, preserves form-label fills through `kordoc_lite`, and validates the result with both `hwpx validate` and lightweight structure checks.
 - `gaejosik_lint` is deterministic and dismissal-aware; the UI uses a 350 ms debounce, CodeMirror decorations for source mode, and a BlockNote `gaejosikLint` mark for rich mode.
 
-### W13 (Evidence Binder tab)
+### W13 shipped notes
 
-- Add a right-pane Evidence Binder tab keyed by active document id.
-- Persist binder state at `<workspace>/.anchor/binder/<doc-id>.json`.
-- Seed candidate evidence from inbox-processed manifests and existing `<binary>.evidence.yaml` sidecars.
-- Show local `kordoc_lite` detection/form-preview metadata for HWPX evidence without moving binaries to Hub.
+- `evidence_binder_read/evidence_binder_save` persist document-scoped state at `<workspace>/.anchor/binder/<doc-id>.json`.
+- Evidence candidates are seeded from processed inbox raw files and `<binary>.evidence.yaml` sidecars, with sidecar scanning scoped to the active document's BU root when available.
+- Candidate metadata includes `kordoc_lite` format detection, lightweight structure checks, and HWPX field preview labels.
+
+### W14 (Evidence binding model)
+
+- Add section / KPI / submission-checklist binding controls on top of the W13 candidate list.
+- Persist binding metadata in the binder state first; only promote to frontmatter after the W14 shape is final.
+- Keep binaries local; Hub receives only sha256 + metadata in the W15 evidence-index integration.
 
 ## 6. Cross-cutting hand-off notes
 
