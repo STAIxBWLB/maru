@@ -40,6 +40,15 @@ formula installs only the standalone `anchor` executable. The desktop app keeps
 using signed Tauri updater metadata from GitHub Releases; Homebrew users can
 also upgrade via `brew upgrade --cask anchor` and `brew upgrade anchor-cli`.
 
+For repo-local management shortcuts:
+
+```bash
+make cli-install
+make cli-smoke
+make release-preflight
+make homebrew-update RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+```
+
 ## Phase 3 verification gates (passed)
 
 1. **Catalog watcher + auto-refresh** — notify recursively watches `inbox/items/`, `tasks/{active,calendar}`, every BU's `02-admin-approvals/` + `03-evidence-cert/` + `.anchor/bu-config.yaml`; bursts are debounced 500 ms and the React pane re-queries in another 300 ms.
@@ -413,10 +422,9 @@ before tagging or publishing a release. After release assets exist, update the
 Homebrew tap with:
 
 ```bash
-node scripts/update-homebrew-tap.mjs v0.2.12 ../homebrew-cask --commit
-cd ../homebrew-cask
-brew audit --cask anchor
-brew audit --formula anchor-cli
+make homebrew-update-commit RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
 
 ## Workspace Layout
