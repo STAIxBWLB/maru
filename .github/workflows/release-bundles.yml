@@ -271,3 +271,60 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: gh release upload "$RELEASE_TAG" "$ASSET" "$ASSET.sha256" --clobber
+
+  homebrew-tap:
+    name: Update Homebrew tap
+    needs: [build, cli-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Resolve release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          EVENT_ID: ${{ github.event.release.id }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EVENT_ID" ]; then
+            tag="$EVENT_TAG"
+            id="$EVENT_ID"
+          else
+            tag="$INPUT_TAG"
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "Resolved release: tag=$tag id=$id"
+
+      - name: Checkout anchor
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: STAIxBWLB/homebrew-cask
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+
+      - name: Configure git identity
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Render and push tap update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node scripts/update-homebrew-tap.mjs "$TAG" tap --commit --push

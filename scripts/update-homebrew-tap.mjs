@@ -40,8 +40,8 @@ function sha256For(name) {
 
 const replacements = {
   VERSION: version,
-  APP_ARM_SHA256: sha256For(`Anchor_${version}_darwin_aarch64_app.app.tar.gz`),
-  APP_INTEL_SHA256: sha256For(`Anchor_${version}_darwin_x64_app.app.tar.gz`),
+  APP_ARM_SHA256: sha256For(`Anchor_${version}_darwin_aarch64_dmg.dmg`),
+  APP_INTEL_SHA256: sha256For(`Anchor_${version}_darwin_x64_dmg.dmg`),
   CLI_ARM_SHA256: sha256For(`anchor-cli_${version}_darwin_aarch64.tar.gz`),
   CLI_INTEL_SHA256: sha256For(`anchor-cli_${version}_darwin_x86_64.tar.gz`),
 };

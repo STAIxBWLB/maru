@@ -5,12 +5,15 @@ cask "anchor" do
   sha256 arm: "{{APP_ARM_SHA256}}",
          intel: "{{APP_INTEL_SHA256}}"
 
-  url "https://github.com/STAIxBWLB/anchor/releases/download/v#{version}/Anchor_#{version}_darwin_#{arch}_app.app.tar.gz",
+  url "https://github.com/STAIxBWLB/anchor/releases/download/v#{version}/Anchor_#{version}_darwin_#{arch}_dmg.dmg",
       verified: "github.com/STAIxBWLB/anchor/"
   name "Anchor"
   desc "Local-first AI workspace desktop app"
   homepage "https://github.com/STAIxBWLB/anchor"
 
+  # Bundles are Developer ID signed but not currently notarized. Homebrew
+  # Cask strips com.apple.quarantine on install, so brew users skip the
+  # Gatekeeper prompt that direct .dmg downloaders see.
   app "Anchor.app"
 
   zap trash: [
