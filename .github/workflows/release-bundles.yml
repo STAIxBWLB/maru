@@ -44,6 +44,7 @@ jobs:
     steps:
       - name: Resolve release
         id: release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
@@ -209,6 +210,7 @@ jobs:
     steps:
       - name: Resolve release
         id: release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
