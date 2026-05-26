@@ -1,0 +1,88 @@
+/*
+ * Anchor diagram mode — Phase 0 scaffold styles.
+ *
+ * All rules are scoped under `.anchor-diagram` so the diagram subsystem can
+ * grow without leaking into Anchor's global stylesheet. Phase 1+ will add
+ * canvas / ribbon / panel rules here.
+ */
+
+.anchor-diagram {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--anchor-bg, #fafafa);
+  color: var(--anchor-fg, #1f2937);
+  overflow: auto;
+}
+
+.anchor-diagram-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 28px 16px;
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+  background: var(--anchor-surface, #ffffff);
+}
+
+.anchor-diagram-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.anchor-diagram-title h1 {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.anchor-diagram-title p {
+  font-size: 12px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 2px 0 0;
+}
+
+.anchor-diagram-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-meta code {
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-meta-label {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.anchor-diagram-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 32px;
+  text-align: center;
+  gap: 8px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-flag-hint {
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  background: var(--anchor-soft, #f3f4f6);
+  padding: 6px 10px;
+  border-radius: 6px;
+}

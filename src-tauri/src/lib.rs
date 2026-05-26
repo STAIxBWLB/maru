@@ -6,6 +6,7 @@ mod approval;
 mod calendar_search;
 mod cli;
 mod cli_path;
+mod diagram;
 mod document;
 mod e2e_flow;
 mod evidence_binder;
@@ -105,6 +106,10 @@ use skill_host::{
     skills_reconcile_skill, skills_remove_source, skills_rescan_source, skills_reset_registry,
     skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_source,
     skills_uninstall_skill,
+};
+use diagram::{
+    diagram_delete_document, diagram_export_blob, diagram_list_documents, diagram_load_document,
+    diagram_save_document,
 };
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
@@ -337,6 +342,12 @@ pub fn run() {
             template_prepare_hwpx_template,
             template_fill_hwpx,
             gaejosik_lint,
+            // Diagram mode (Phase 0 — stub commands)
+            diagram_save_document,
+            diagram_load_document,
+            diagram_list_documents,
+            diagram_delete_document,
+            diagram_export_blob,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")

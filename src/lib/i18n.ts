@@ -35,6 +35,7 @@ const ko: Record<string, string> = {
   "mode.catalog": "카탈로그",
   "mode.studio": "스튜디오",
   "mode.e2e": "E2E 플로우",
+  "mode.diagram": "다이어그램",
   "mode.system": "설정",
   "activity.label": "앱 영역",
   "layout.hideDocuments": "문서 패널 숨기기",
@@ -1231,6 +1232,12 @@ const ko: Record<string, string> = {
   "terminal.empty.detail": "Claude, Codex, Shell 버튼으로 새 터미널을 시작하세요.",
   "terminal.cwd.none": "실행 폴더 없음",
   "terminal.tauriRequired": "통합 터미널은 Tauri 앱에서만 사용할 수 있습니다.",
+
+  "diagram.scaffold.title": "다이어그램",
+  "diagram.scaffold.subtitle": "컨셉맵 · 마인드맵 · 도식 편집기",
+  "diagram.scaffold.empty": "이 모드는 준비 중입니다. 곧 캔버스가 이 자리에 그려집니다.",
+  "diagram.scaffold.flagHint": "VITE_ANCHOR_DIAGRAM=1 또는 ?anchor-diagram=1 로 활성화합니다.",
+  "diagram.scaffold.workspace": "워크스페이스",
 };
 
 const en: Record<string, string> = {
@@ -1252,6 +1259,7 @@ const en: Record<string, string> = {
   "mode.catalog": "Catalog",
   "mode.studio": "Studio",
   "mode.e2e": "E2E Flow",
+  "mode.diagram": "Diagram",
   "mode.system": "Settings",
   "e2e.kicker": "README-driven verification console",
   "e2e.title": "Anchor E2E Flow",
@@ -2451,6 +2459,12 @@ const en: Record<string, string> = {
   "terminal.empty.detail": "Start a terminal with the Claude, Codex, or Shell button.",
   "terminal.cwd.none": "No working folder",
   "terminal.tauriRequired": "Integrated terminal is only available in the Tauri app.",
+
+  "diagram.scaffold.title": "Diagram",
+  "diagram.scaffold.subtitle": "Concept-map / mind-map / schematic editor",
+  "diagram.scaffold.empty": "This mode is being scaffolded. The canvas will land here soon.",
+  "diagram.scaffold.flagHint": "Enable with VITE_ANCHOR_DIAGRAM=1 or ?anchor-diagram=1.",
+  "diagram.scaffold.workspace": "Workspace",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { ko, en };
