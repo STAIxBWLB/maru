@@ -70,6 +70,7 @@ import {
   SETTINGS_WINDOW_OPEN_TAB_EVENT,
   type SettingsWindowOpenTabPayload,
 } from "../lib/settingsWindowEvents";
+import { DIAGRAM_ENABLE_STORAGE_KEY } from "../lib/diagramFlag";
 import type {
   ImportItem,
   ImportPlan,
@@ -947,8 +948,45 @@ function PreferencesTab({
             <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
           </select>
         </label>
+        <DiagramPreviewToggle />
       </div>
     </div>
+  );
+}
+
+function DiagramPreviewToggle() {
+  const { t } = useTranslation();
+  const isOptOut = (value: string | null) => value === "0" || value === "false";
+  const [enabled, setEnabled] = useState<boolean>(() => {
+    try {
+      return !isOptOut(window.localStorage.getItem(DIAGRAM_ENABLE_STORAGE_KEY));
+    } catch {
+      return true;
+    }
+  });
+  const toggle = (next: boolean) => {
+    setEnabled(next);
+    try {
+      if (next) window.localStorage.removeItem(DIAGRAM_ENABLE_STORAGE_KEY);
+      else window.localStorage.setItem(DIAGRAM_ENABLE_STORAGE_KEY, "0");
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <label className="field">
+      <span>{t("diagram.system.preview.label")}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => toggle(event.target.checked)}
+        />
+        <small style={{ color: "var(--anchor-muted, #6b7280)" }}>
+          {t("diagram.system.preview.hint")}
+        </small>
+      </div>
+    </label>
   );
 }
 

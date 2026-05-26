@@ -1,0 +1,1375 @@
+/*
+ * Anchor diagram mode — Phase 1 layout + canvas styles.
+ *
+ * All rules are scoped under `.anchor-diagram` so the diagram subsystem can
+ * grow without leaking into Anchor's global stylesheet.
+ */
+
+.anchor-diagram {
+  grid-area: diagram;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--anchor-bg, #fafafa);
+  color: var(--anchor-fg, #1f2937);
+  overflow: hidden;
+  position: relative;
+}
+
+.anchor-diagram-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+  background: var(--anchor-surface, #ffffff);
+  flex-shrink: 0;
+}
+
+.anchor-diagram-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.anchor-diagram-title-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: inherit;
+  outline: none;
+  transition: border-color 120ms;
+}
+
+.anchor-diagram-title-input:hover,
+.anchor-diagram-title-input:focus {
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.anchor-diagram-status-saved {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.anchor-diagram-status-dirty {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.anchor-diagram-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-meta code {
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-meta-label {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.anchor-diagram-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+  background: var(--anchor-surface, #ffffff);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.anchor-diagram-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  transition: background 100ms, border-color 100ms;
+}
+
+.anchor-diagram-toolbar button:hover:not(:disabled) {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-toolbar-primary {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
+  font-weight: 600;
+}
+
+.anchor-diagram-toolbar-primary:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+}
+
+.anchor-diagram-toolbar-primary:disabled {
+  background: #93c5fd !important;
+  border-color: #93c5fd !important;
+}
+
+.anchor-diagram-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--anchor-border, #e5e7eb);
+  margin: 0 4px;
+}
+
+.anchor-diagram-spacer {
+  flex: 1;
+}
+
+.anchor-diagram-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--anchor-soft, #f9fafb);
+}
+
+.anchor-diagram-toolbar-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--anchor-muted, #6b7280);
+  padding: 0 4px;
+}
+
+.anchor-diagram-toolbar button.is-toggle-on {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.anchor-diagram-snap-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-snap-input input {
+  width: 48px;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  text-align: center;
+}
+
+.anchor-diagram-ribbon-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-ribbon-field select,
+.anchor-diagram-ribbon-field input {
+  height: 24px;
+  max-width: 96px;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+}
+
+.anchor-diagram-ribbon-field input[type="color"] {
+  width: 34px;
+  padding: 1px;
+}
+
+.anchor-diagram-ribbon-hint {
+  max-width: 220px;
+  color: var(--anchor-muted, #6b7280);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.anchor-diagram-zoom-label {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: center;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--anchor-bg, #fafafa);
+}
+
+.anchor-diagram-side-panel {
+  width: 100%;
+  height: 100%;
+  flex-shrink: 0;
+  background: var(--anchor-surface, #ffffff);
+  padding: 12px 14px;
+  overflow-y: auto;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.anchor-diagram-workspace > div:has(> .anchor-diagram-side-panel):first-child {
+  border-right: 1px solid var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-workspace > div:has(> .anchor-diagram-side-panel):last-child {
+  border-left: 1px solid var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-panel-resizer {
+  flex-shrink: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  transition: background 120ms;
+  touch-action: none;
+}
+
+.anchor-diagram-panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+
+.anchor-diagram-panel-resizer:hover::after,
+.anchor-diagram-panel-resizer.is-dragging::after {
+  background: #2563eb;
+}
+
+.anchor-diagram-side-panel h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 0 0 8px;
+}
+
+.anchor-diagram-side-panel h3 {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 12px 0 4px;
+}
+
+.anchor-diagram-side-panel-empty {
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+  text-align: center;
+  padding: 12px 0;
+}
+
+.anchor-diagram-layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.anchor-diagram-layer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.anchor-diagram-layer:hover {
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-layer.is-selected {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.anchor-diagram-layer.is-dragging {
+  opacity: 0.5;
+}
+
+.anchor-diagram-layer.is-drop-above {
+  box-shadow: inset 0 2px 0 0 #4f46e5;
+}
+
+.anchor-diagram-layer.is-drop-below {
+  box-shadow: inset 0 -2px 0 0 #4f46e5;
+}
+
+.anchor-diagram-layer-grip {
+  color: var(--anchor-muted, #6b7280);
+  cursor: grab;
+  display: inline-flex;
+}
+
+.anchor-diagram-layer-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: inherit;
+}
+
+.anchor-diagram-layer-name:focus {
+  outline: none;
+  border-color: var(--anchor-border, #e5e7eb);
+  background: var(--anchor-surface, #ffffff);
+}
+
+.anchor-diagram-layer-button {
+  background: transparent;
+  border: none;
+  color: var(--anchor-muted, #6b7280);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+.anchor-diagram-layer-button:hover {
+  background: var(--anchor-soft, #f3f4f6);
+  color: var(--anchor-fg, #1f2937);
+}
+
+.anchor-diagram-prop-sections section {
+  margin-bottom: 10px;
+}
+
+.anchor-diagram-prop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.anchor-diagram-prop > span {
+  flex-shrink: 0;
+  width: 64px;
+  color: var(--anchor-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.anchor-diagram-prop input,
+.anchor-diagram-prop select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+}
+
+.anchor-diagram-prop-row {
+  display: flex;
+  gap: 4px;
+}
+
+.anchor-diagram-prop-row .anchor-diagram-prop {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.anchor-diagram-prop-row .anchor-diagram-prop > span {
+  width: auto;
+  min-width: 18px;
+}
+
+.anchor-diagram-prop-color input[type="color"] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  flex: 0 0 28px;
+  cursor: pointer;
+}
+
+.anchor-diagram-ribbon {
+  display: flex;
+  flex-direction: column;
+  background: var(--anchor-surface, #ffffff);
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.anchor-diagram-ribbon-tabs {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 0;
+  gap: 2px;
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-ribbon-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--anchor-muted, #6b7280);
+  cursor: pointer;
+}
+
+.anchor-diagram-ribbon-tab:hover {
+  color: var(--anchor-fg, #1f2937);
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-ribbon-tab.is-active {
+  color: #1d4ed8;
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+  position: relative;
+}
+
+.anchor-diagram-ribbon-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-ribbon-panel {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 12px 8px;
+  overflow-x: auto;
+}
+
+.anchor-diagram-ribbon-group {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--anchor-border, #e5e7eb);
+  padding-right: 8px;
+  margin-right: 2px;
+}
+
+.anchor-diagram-ribbon-group:last-child {
+  border-right: none;
+}
+
+.anchor-diagram-ribbon-group-body {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  flex-wrap: wrap;
+  max-width: 360px;
+}
+
+.anchor-diagram-ribbon-group-label {
+  font-size: 9.5px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  color: var(--anchor-muted, #9ca3af);
+  margin-top: 4px;
+}
+
+.anchor-diagram-ribbon-sep {
+  width: 1px;
+  background: var(--anchor-border, #e5e7eb);
+  margin: 4px 4px 18px;
+}
+
+.anchor-diagram-ribbon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-ribbon-button:hover:not(:disabled) {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-ribbon-button.is-active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.anchor-diagram-ribbon-button.is-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  font-weight: 600;
+}
+
+.anchor-diagram-ribbon-button.is-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.anchor-diagram-ribbon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-ribbon-empty {
+  padding: 12px 16px;
+  font-size: 11px;
+  color: var(--anchor-muted, #9ca3af);
+  font-style: italic;
+}
+
+.anchor-diagram-color-preset {
+  width: 36px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.anchor-diagram-color-preset:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.anchor-diagram-save-dialog {
+  max-width: 460px;
+}
+
+.anchor-diagram-save-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.anchor-diagram-save-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.anchor-diagram-save-field input {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  color: inherit;
+  background: var(--anchor-surface, #ffffff);
+}
+
+.anchor-diagram-save-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-save-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.anchor-diagram-save-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-template-dialog {
+  max-width: 760px;
+  width: 92vw;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+.anchor-diagram-template-search input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  margin: 8px 0;
+}
+
+.anchor-diagram-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.anchor-diagram-template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1.5px solid var(--anchor-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--anchor-surface, #ffffff);
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.anchor-diagram-template-card:hover {
+  border-color: #93c5fd;
+}
+
+.anchor-diagram-template-card.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.anchor-diagram-template-preview {
+  width: 100%;
+  aspect-ratio: 1.6 / 1;
+  background: var(--anchor-soft, #f3f4f6);
+  border-radius: 4px;
+}
+
+.anchor-diagram-template-preview.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--anchor-muted, #9ca3af);
+  font-size: 18px;
+}
+
+.anchor-diagram-template-meta h3 {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.anchor-diagram-template-meta p {
+  font-size: 10.5px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 2px 0 0;
+  line-height: 1.35;
+}
+
+.anchor-diagram-template-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-template-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-export-dialog {
+  max-width: 480px;
+}
+
+.anchor-diagram-export-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.anchor-diagram-export-grid button {
+  font-size: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.anchor-diagram-export-grid button:hover:not(:disabled) {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: #93c5fd;
+}
+
+.anchor-diagram-export-status {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--anchor-soft, #f3f4f6);
+}
+
+.anchor-diagram-export-status.is-ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.anchor-diagram-export-status.is-err {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.anchor-diagram-history-dialog {
+  max-width: 520px;
+}
+
+.anchor-diagram-history-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.anchor-diagram-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.anchor-diagram-history-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+}
+
+.anchor-diagram-history-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+}
+
+.anchor-diagram-history-size {
+  font-size: 10px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-history-list button {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-soft, #f3f4f6);
+  cursor: pointer;
+}
+
+.anchor-diagram-history-empty {
+  font-size: 12px;
+  color: var(--anchor-muted, #6b7280);
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ── Phase 5: focus mode + dark mode chrome ─────────────────────────────── */
+
+.anchor-diagram.is-focus-mode .anchor-diagram-header,
+.anchor-diagram.is-focus-mode .anchor-diagram-ribbon,
+.anchor-diagram.is-focus-mode .anchor-diagram-side-panel {
+  display: none;
+}
+
+.anchor-diagram-focus-exit {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.anchor-diagram-focus-exit:hover {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.anchor-diagram-focus-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-focus-btn:hover,
+.anchor-diagram-focus-btn[aria-pressed="true"] {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram.is-dark {
+  --anchor-bg: #0f172a;
+  --anchor-fg: #e2e8f0;
+  --anchor-surface: #1e293b;
+  --anchor-border: #334155;
+  --anchor-soft: #1f2937;
+  --anchor-muted: #94a3b8;
+}
+
+/* Canvas surface always stays light per the source rule, regardless of theme. */
+.anchor-diagram .anchor-diagram-viewport {
+  background:
+    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-color: #fafafa;
+}
+
+/* ── Phase 5: find bar ──────────────────────────────────────────────────── */
+
+.anchor-diagram-find-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--anchor-surface, #ffffff);
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: var(--anchor-fg, #1f2937);
+}
+
+.anchor-diagram-find-bar input {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  min-width: 200px;
+}
+
+.anchor-diagram-find-bar input[type="text"] {
+  min-width: 140px;
+}
+
+.anchor-diagram-find-bar button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.anchor-diagram-find-bar button:hover:not(:disabled) {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-find-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-find-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+  min-width: 64px;
+  text-align: center;
+}
+
+.anchor-diagram-find-close {
+  color: var(--anchor-muted, #6b7280);
+}
+
+/* ── Phase 5: memo dialog + textareas ──────────────────────────────────── */
+
+.anchor-diagram-memo-dialog {
+  max-width: 520px;
+}
+
+.anchor-diagram-memo-target {
+  font-weight: 400;
+  color: var(--anchor-muted, #6b7280);
+  font-size: 11px;
+}
+
+.anchor-diagram-memo-text {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 140px;
+}
+
+.anchor-diagram-memo-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.anchor-diagram-memo-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.anchor-diagram-memo-actions .anchor-diagram-memo-delete {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.anchor-diagram-memo-actions .anchor-diagram-memo-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-memo-badge {
+  cursor: pointer;
+}
+
+.anchor-diagram-memo-badge:hover circle {
+  filter: brightness(1.08);
+}
+
+/* Right panel textarea + range input fit the existing property field shell */
+.anchor-diagram-prop textarea {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.anchor-diagram-prop input[type="range"] {
+  flex: 1;
+}
+
+/* ── Phase 5: special chars picker ─────────────────────────────────────── */
+
+.anchor-diagram-specialchars-dialog {
+  max-width: 560px;
+}
+
+.anchor-diagram-specialchars-hint {
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 4px 0 8px;
+}
+
+.anchor-diagram-specialchars-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.anchor-diagram-specialchars-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.anchor-diagram-specialchars-grid button {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-specialchars-grid button:hover {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: #93c5fd;
+}
+
+/* ── Phase 5: a11y focus rings ─────────────────────────────────────────── */
+
+.anchor-diagram-ribbon-button:focus-visible,
+.anchor-diagram-layer-button:focus-visible,
+.anchor-diagram-layer-name:focus-visible,
+.anchor-diagram-find-bar input:focus-visible,
+.anchor-diagram-find-bar button:focus-visible,
+.anchor-diagram-prop input:focus-visible,
+.anchor-diagram-prop select:focus-visible,
+.anchor-diagram-prop textarea:focus-visible,
+.anchor-diagram-template-card:focus-visible,
+.anchor-diagram-color-preset:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.anchor-diagram-port:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* ── Phase 6: Mermaid import dialog ────────────────────────────────────── */
+
+.anchor-diagram-import-dialog {
+  max-width: 600px;
+}
+
+.anchor-diagram-import-dialog textarea {
+  width: 100%;
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  margin-top: 8px;
+  resize: vertical;
+}
+
+.anchor-diagram-import-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.anchor-diagram-import-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.anchor-diagram-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  cursor: default;
+}
+
+.anchor-diagram-node {
+  cursor: grab;
+}
+
+.anchor-diagram-node:active {
+  cursor: grabbing;
+}
+
+.anchor-diagram-node-label {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  line-height: 1.35;
+  word-break: break-word;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.anchor-diagram-node-header {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  line-height: 1.2;
+  word-break: break-word;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.anchor-diagram-port {
+  cursor: crosshair;
+  transition: r 80ms;
+}
+
+.anchor-diagram-port:hover {
+  r: 8;
+  fill: #2563eb;
+}
+
+.anchor-diagram-edge {
+  cursor: pointer;
+}
+
+.anchor-diagram-edge.is-selected {
+  filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.4));
+}
+
+.anchor-diagram-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 32px;
+  text-align: center;
+  gap: 8px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-flag-hint {
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  background: var(--anchor-soft, #f3f4f6);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.anchor-diagram-list {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 320px;
+  max-height: calc(100% - 24px);
+  background: var(--anchor-surface, #ffffff);
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.anchor-diagram-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-list-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.anchor-diagram-list-head button {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.anchor-diagram-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.anchor-diagram-list li {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.anchor-diagram-list li > button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.anchor-diagram-list li > button:hover {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-list-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.anchor-diagram-list-meta {
+  font-size: 10px;
+  color: var(--anchor-muted, #6b7280);
+  margin-top: 2px;
+}
+
+.anchor-diagram-list-delete {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-list-delete:hover {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.anchor-diagram-list-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--anchor-muted, #6b7280);
+}

@@ -63,6 +63,7 @@ const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["scan"],
     &["inboxChannels"],
     &["composer"],
+    &["diagram"],
 ];
 
 const ANCHORIGNORE_DEFAULTS: &[&str] = &[

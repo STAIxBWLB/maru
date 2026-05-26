@@ -20,7 +20,13 @@ const gaejosikLintStyle = createReactStyleSpec(
     propSchema: "string",
   },
   {
-    render: ({ value, contentRef }) => (
+    render: ({
+      value,
+      contentRef,
+    }: {
+      value: string;
+      contentRef: (el: HTMLElement | null) => void;
+    }) => (
       <span ref={contentRef} className="rich-editor-lint-mark" data-rule={value} />
     ),
   },

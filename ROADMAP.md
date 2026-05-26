@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Anchor desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status anchor** — Updated through Phase 4 W12 (HWP field map + 개조식 inline lint). See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
+> **Status anchor** — Updated through Phase 4 W12 (HWP field map + 개조식 inline lint) plus the 2026-05-27 Diagram hardening pass. See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`. The 26-week plan itself lives at `~/.claude/plans/flickering-seeking-engelbart.md` (work-repo internal) and is mirrored here from Anchor's perspective.
 
@@ -135,6 +135,23 @@ W10 follow-up hardening, if needed before Studio:
 - **`workspace.config.yaml`** carries the `hub:` block (endpoint / token ref / scope / do_not_upload) and `bu_lifecycle:` block. New runtime knobs go there, not into `~/.anchor/settings.json`.
 - **Skill registry** lives at `~/.anchor/skills/registry.json`; Anchor reads via `skill_host::list_skills`. New built-in skills get embedded under `skills/` and materialized into `~/.anchor/skills/_builtin/` at runtime.
 - **Real-workspace verification** — every milestone repeats the W4 gate (`ANCHOR_CATALOG_BENCH_WORKSPACE=~/workspace/work cargo test --lib -- --ignored catalog_real_workspace_smoke`) plus the live-Hub procedure in README §"Live-Hub verification".
+
+## 6.5 Concept-map Diagram mode (side track, shipped)
+
+Outside the M1–M7 backbone, a self-contained **Diagram** mode ships alongside Phase 5. It adapts the standalone 14k-line concept-map editor from `~/workspace/work/inbox/drop/kakao/concept-map-diagram.html` into a first-class Anchor mode while fixing the source's tech debt (broken `localhost:5500` autosave, 14 `localStorage` namespaces, native `prompt/confirm/alert`, no a11y, no touch). A 2026-05-27 hardening pass closed the audit gaps: command-palette routing, workspace-keyed state, persisted `diagram.lastDocument`, Radix confirmations, selected-path export, lock/hide enforcement, filled ribbon tabs, and Diagram e2e coverage.
+
+| Phase | State | Outcome |
+|-------|-------|---------|
+| 0 — Scaffold | ✅ | `AnchorAppMode = "diagram"` + feature flag + Zustand-style store + i18n ko/en stubs + stub Rust commands. |
+| 1 — Canvas + persistence | ✅ | Pointer-drag canvas, simple/text nodes, undo/redo with 500 ms coalesce, save/load to `<workspace>/diagrams/<name>.cmd.json` (v:7), saved-list aside, workspace-keyed unsaved store/session, and `diagram.lastDocument` restore. |
+| 2 — Edges + 13 kinds + smart guides | ✅ | 4-port edge connect gesture, auto/straight routing, all 13 node kinds rendered as SVG, image picker, smart-guide snap (left/center/right + top/center/bottom), configurable snap size 1–200px. |
+| 3 — Ribbon + panels + selection ops | ✅ | HWP-style 9-tab ribbon, filled Tools/Infographic/Arrow/Table tabs, Layers panel with drag-reorder + lock/hide + rename, per-selection Property panel, alignment / distribute / equalize ops, z-order ops, style copy/paste, color presets, Save-As Radix dialog, and locked-node protection for move/nudge/resize/delete/edit bulk paths. |
+| 4 — Templates + export + version history | ✅ | 11 localized templates (PDCA cycle/grid, SWOT, fishbone, mind-map, org-chart, roadmap, kanban, keyword grid, process flow, blank), PNG/PNG-transparent/JPG/SVG/JSON/PDF/Mermaid export via selected-path Tauri save dialog, Radix confirmation dialogs for replace/restore, 5-min auto-snapshot ring (cap 20) under `.anchor/diagrams/history/<docId>/`. |
+| 5 — Polish + a11y + ergonomics | ✅ | Cmd+F / `/` find/replace, memos + status chips + progress bars, focus mode, dark-mode chrome (canvas stays light), keyboard nav (F2 rename, Arrow nudge, Cmd+A/D), special-chars picker, axe-ready focus rings + aria-labels, DOMPurify wrapper for future rich text. |
+| 6 — Perf + interop | ✅ | Viewport culling (visibleSubset), edge-route Map cache (5k entries, position-keyed), Mermaid round-trip export/import, 1000-node bench fixture (`pnpm vitest bench src/lib/diagram/perf.bench.ts`). |
+| 7 — Default-on | ✅ | Flag flips to opt-out. Hidden via `VITE_ANCHOR_DIAGRAM=0`, `?anchor-diagram=0`, or unchecking Settings → Preferences → "Diagram mode". Command palette opens Diagram when enabled; e2e covers flag visibility, ko/en labels, save/reload, templates, Mermaid, export dialog, filled tabs, and no `localhost:5500` / Google Fonts requests. |
+
+File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering past its broken `localhost:5500` boundary). Implementation lives under `src/lib/diagram/`, `src/components/diagram/`, and `src-tauri/src/diagram/mod.rs`. Plan reference: `~/.claude/plans/system-instruction-you-are-working-cozy-truffle.md`.
 
 ## 7. Glossary (Anchor-internal)
 

@@ -1,6 +1,7 @@
-import { GitBranch } from "lucide-react";
+import { GitBranch, GitCommit, PencilLine, Plus, Sigma } from "lucide-react";
 import { useEffect, useState } from "react";
-import { gitStatusFast } from "../lib/api";
+import { gitStatus, gitStatusFast } from "../lib/api";
+import { formatGitStatusDisplay } from "../lib/gitStatusDisplay";
 import type { GitStatus } from "../lib/types";
 
 interface Props {
@@ -25,14 +26,31 @@ export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitCli
       return;
     }
     let cancelled = false;
+    let pollSeq = 0;
     function poll() {
       if (!vaultPath) return;
+      const requestSeq = ++pollSeq;
+      let fullApplied = false;
+      let fastApplied = false;
       gitStatusFast(vaultPath)
         .then((next) => {
-          if (!cancelled) setStatus(next);
+          if (!cancelled && requestSeq === pollSeq && !fullApplied) {
+            fastApplied = true;
+            setStatus(next);
+          }
         })
         .catch(() => {
-          if (!cancelled) setStatus(null);
+          if (!cancelled && requestSeq === pollSeq && !fullApplied) setStatus(null);
+        });
+      gitStatus(vaultPath)
+        .then((next) => {
+          if (!cancelled && requestSeq === pollSeq) {
+            fullApplied = true;
+            setStatus(next);
+          }
+        })
+        .catch(() => {
+          if (!cancelled && requestSeq === pollSeq && !fastApplied) setStatus(null);
         });
     }
     poll();
@@ -53,33 +71,58 @@ export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitCli
 
   if (!status || !status.isRepo) return null;
 
-  const total = status.modified + status.staged + status.untracked;
-  const dirty = !status.clean;
-  const untrackedText = status.untrackedKnown
-    ? `${status.untracked} untracked`
-    : "untracked not counted";
-  const tooltip = dirty
-    ? `${status.branch ?? "—"} · ${status.staged} staged · ${status.modified} modified · ${untrackedText} · click to commit`
-    : `${status.branch ?? "—"} · tracked clean · ${untrackedText}`;
+  const display = formatGitStatusDisplay(status);
 
-  const className = dirty ? "git-badge dirty" : "git-badge clean";
+  const className = display.dirty ? "git-badge dirty" : "git-badge clean";
   const content = (
     <>
-      <GitBranch size={11} />
-      <span className="git-badge-branch">{status.branch ?? "—"}</span>
-      {dirty ? <span className="git-badge-count">{total}</span> : null}
-      {!status.untrackedKnown ? <span className="git-badge-count">~</span> : null}
+      <GitBranch size={10} />
+      <span className="git-badge-branch">{display.branch}</span>
+      {display.dirty && !display.pendingUntracked ? (
+        <>
+          <span className="git-badge-metric" title="staged">
+            <GitCommit size={9} />
+            <span>{display.staged}</span>
+          </span>
+          <span className="git-badge-metric" title="modified">
+            <PencilLine size={9} />
+            <span>{display.modified}</span>
+          </span>
+          <span className="git-badge-metric" title="new">
+            <Plus size={10} />
+            <span>{display.untracked}</span>
+          </span>
+          <span className="git-badge-metric total" title="total">
+            <Sigma size={9} />
+            <span>{display.total}</span>
+          </span>
+        </>
+      ) : null}
+      {display.pendingUntracked ? <span className="git-badge-count">~</span> : null}
     </>
   );
 
-  if (dirty && onCommitClick) {
+  if (display.dirty && onCommitClick) {
+    const handleClick = async () => {
+      if (vaultPath && !status.untrackedKnown) {
+        try {
+          const next = await gitStatus(vaultPath);
+          setStatus(next);
+          onCommitClick(next);
+          return;
+        } catch {
+          // Fall back to the last badge status so the click remains useful.
+        }
+      }
+      onCommitClick(status);
+    };
     return (
       <button
         type="button"
         className={className}
-        title={tooltip}
-        aria-label={tooltip}
-        onClick={() => onCommitClick(status)}
+        title={display.tooltip}
+        aria-label={display.tooltip}
+        onClick={handleClick}
       >
         {content}
       </button>
@@ -87,7 +130,7 @@ export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitCli
   }
 
   return (
-    <span className={className} title={tooltip} aria-label={tooltip}>
+    <span className={className} title={display.tooltip} aria-label={display.tooltip}>
       {content}
     </span>
   );

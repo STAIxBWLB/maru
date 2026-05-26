@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   ListTodo,
   MessageSquare,
+  Network,
   PanelRightClose,
   PanelRightOpen,
   RefreshCcw,
@@ -30,6 +31,7 @@ import { CatalogPane } from "./components/catalog/CatalogPane";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { InboxPane } from "./components/InboxPane";
+import { DiagramMode } from "./components/diagram/DiagramMode";
 import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
 import { TasksPane } from "./components/tasks/TasksPane";
@@ -131,6 +133,7 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
   replaceEditorTabIds,
@@ -842,6 +845,7 @@ function MainApp() {
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_ANCHOR_SETTINGS.ui.activeAppMode);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
+  const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -1536,6 +1540,12 @@ function MainApp() {
       setPersistedAppMode("pkm");
     }
   }, [appMode, e2eFlowEnabled, setPersistedAppMode]);
+
+  useEffect(() => {
+    if (!diagramEnabled && appMode === "diagram") {
+      setPersistedAppMode("pkm");
+    }
+  }, [appMode, diagramEnabled, setPersistedAppMode]);
 
   const setPersistedEditorViewMode = useCallback(
     (editorViewMode: EditorViewModeSetting) => {
@@ -5083,6 +5093,9 @@ function MainApp() {
         case "open-studio":
           setPersistedAppMode("studio");
           break;
+        case "open-diagram":
+          if (diagramEnabled) setPersistedAppMode("diagram");
+          break;
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -5166,6 +5179,7 @@ function MainApp() {
       skills,
       exportActiveDocumentBundle,
       validateLastExportBundle,
+      diagramEnabled,
     ],
   );
 
@@ -5379,8 +5393,14 @@ function MainApp() {
     catalog: " catalog-mode",
     studio: " studio-mode",
     e2e: " e2e-mode",
+    diagram: " diagram-mode",
   };
-  const visibleAppMode: AppMode = appMode === "e2e" && !e2eFlowEnabled ? "pkm" : appMode;
+  const visibleAppMode: AppMode =
+    appMode === "e2e" && !e2eFlowEnabled
+      ? "pkm"
+      : appMode === "diagram" && !diagramEnabled
+        ? "pkm"
+        : appMode;
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -5803,6 +5823,19 @@ function MainApp() {
               <Route size={20} strokeWidth={1.9} />
             </button>
           ) : null}
+          {diagramEnabled ? (
+            <button
+              type="button"
+              className={
+                visibleAppMode === "diagram" ? "activity-button active" : "activity-button"
+              }
+              onClick={() => setPersistedAppMode("diagram")}
+              title={t("mode.diagram")}
+              aria-label={t("mode.diagram")}
+            >
+              <Network size={20} strokeWidth={1.9} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="activity-button"
@@ -5854,6 +5887,11 @@ function MainApp() {
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
+            onError={setError}
+          />
+        ) : visibleAppMode === "diagram" ? (
+          <DiagramMode
+            workPath={inboxWorkspacePath ?? settingsWorkPath}
             onError={setError}
           />
         ) : visibleAppMode === "studio" ? (
@@ -6451,6 +6489,7 @@ function MainApp() {
           onRunCommand={runCommand}
           documentLabelMode={anchorSettings.ui.documentLabelMode}
           skillActions={commandPaletteSkillActions}
+          diagramEnabled={diagramEnabled}
         />
         <CommitDialog
           open={commitDialog !== null}
