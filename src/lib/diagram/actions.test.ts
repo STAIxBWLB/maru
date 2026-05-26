@@ -6,6 +6,10 @@ import {
   moveNodes,
   redo,
   removeNodes,
+  setNodeHidden,
+  setNodeLocked,
+  setNodeMeta,
+  setDocTitle,
   setSelection,
   undo,
   updateNode,
@@ -110,9 +114,55 @@ describe("diagram actions", () => {
     expect(store.getState().doc.nodes).toHaveLength(2);
   });
 
+  it("makes document title edits undoable", () => {
+    const store = freshStore();
+    const coal = defaultCoalescer();
+    store.setState(withSnapshot(setDocTitle("Draft title"), coal, { now: () => 1000 }));
+    expect(store.getState().doc.docTitle).toBe("Draft title");
+    store.setState(undo());
+    expect(store.getState().doc.docTitle).toBe("");
+  });
+
   it("setSelection replaces selection sets", () => {
     const store = freshStore();
     store.setState(setSelection(["a", "b"]));
     expect([...store.getState().ephemeral.selection.nodes].sort()).toEqual(["a", "b"]);
+  });
+
+  it("does not move or delete locked nodes", () => {
+    const store = freshStore();
+    store.setState(addNode("simple", 0, 0, { id: "a" }));
+    store.setState(addNode("simple", 100, 0, { id: "b" }));
+    store.setState(setNodeLocked("a", true));
+
+    store.setState(moveNodes(["a", "b"], 10, 5));
+    expect(store.getState().doc.nodes.find((n) => n.id === "a")).toMatchObject({ x: 0, y: 0 });
+    expect(store.getState().doc.nodes.find((n) => n.id === "b")).toMatchObject({ x: 110, y: 5 });
+
+    store.setState(removeNodes(["a", "b"]));
+    expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["a"]);
+  });
+
+  it("blocks locked-node edits while allowing lock and hide toggles", () => {
+    const store = freshStore();
+    store.setState(addNode("simple", 0, 0, { id: "a", title: "Original" }));
+    store.setState(setNodeLocked("a", true));
+
+    store.setState(updateNode("a", { title: "Changed" }));
+    store.setState(setNodeMeta("a", { progress: 50 }));
+    expect(store.getState().doc.nodes[0]).toMatchObject({
+      title: "Original",
+      locked: true,
+    });
+    expect(store.getState().doc.nodes[0]?.meta).toBeUndefined();
+
+    store.setState(setNodeHidden("a", true));
+    store.setState(setNodeLocked("a", false));
+    store.setState(updateNode("a", { title: "Changed" }));
+    expect(store.getState().doc.nodes[0]).toMatchObject({
+      title: "Changed",
+      hidden: true,
+      locked: false,
+    });
   });
 });

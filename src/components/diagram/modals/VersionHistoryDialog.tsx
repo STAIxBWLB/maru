@@ -41,6 +41,7 @@ export function VersionHistoryDialog({
   const { t } = useTranslation();
   const [snapshots, setSnapshots] = useState<DiagramSnapshotMeta[]>([]);
   const [busy, setBusy] = useState(false);
+  const [pendingRestoreTs, setPendingRestoreTs] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!workspace) {
@@ -75,12 +76,19 @@ export function VersionHistoryDialog({
   const handleRestore = useCallback(
     async (ts: string) => {
       if (!workspace) return;
-      if (!window.confirm(t("diagram.dialog.history.confirmRestore"))) return;
+      setPendingRestoreTs(ts);
+    },
+    [workspace],
+  );
+
+  const confirmRestore = useCallback(
+    async () => {
+      if (!workspace || !pendingRestoreTs) return;
       setBusy(true);
       try {
         // Capture current state before restoring.
         await saveSnapshotForDoc(workspace, doc);
-        const body = await restoreSnapshotForDoc(workspace, doc, ts);
+        const body = await restoreSnapshotForDoc(workspace, doc, pendingRestoreTs);
         const next = deserializeDoc(body);
         onRestore(next);
         await refresh();
@@ -88,9 +96,10 @@ export function VersionHistoryDialog({
         onError((err as Error).message ?? "unknown");
       } finally {
         setBusy(false);
+        setPendingRestoreTs(null);
       }
     },
-    [doc, onError, onRestore, refresh, t, workspace],
+    [doc, onError, onRestore, pendingRestoreTs, refresh, workspace],
   );
 
   return (
@@ -151,6 +160,33 @@ export function VersionHistoryDialog({
               })}
             </ul>
           )}
+          <Dialog.Root
+            open={pendingRestoreTs !== null}
+            onOpenChange={(next) => {
+              if (!next) setPendingRestoreTs(null);
+            }}
+          >
+            <Dialog.Portal>
+              <Dialog.Overlay className="dialog-overlay" />
+              <Dialog.Content className="dialog-content anchor-diagram-confirm-dialog">
+                <Dialog.Title>{t("diagram.dialog.history.confirmTitle")}</Dialog.Title>
+                <p>{t("diagram.dialog.history.confirmRestore")}</p>
+                <div className="dialog-actions">
+                  <Dialog.Close asChild>
+                    <button type="button">{t("diagram.dialog.confirm.cancel")}</button>
+                  </Dialog.Close>
+                  <button
+                    type="button"
+                    className="anchor-diagram-toolbar-primary"
+                    disabled={busy}
+                    onClick={() => void confirmRestore()}
+                  >
+                    {t("diagram.dialog.confirm.restore")}
+                  </button>
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

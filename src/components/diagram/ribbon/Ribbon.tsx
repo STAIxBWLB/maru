@@ -18,6 +18,14 @@ export interface RibbonProps {
   fileProps: RibbonFileProps;
   insertProps: RibbonInsertProps;
   viewProps: RibbonViewProps;
+  toolsProps: RibbonToolsProps;
+}
+
+export interface RibbonToolsProps {
+  onFind: () => void;
+  onHistory: () => void;
+  onSpecialChars: () => void;
+  onToggleFocus: () => void;
 }
 
 const TABS: Array<{ id: RibbonTab; labelKey: string }> = [
@@ -37,6 +45,7 @@ function panelFor(
   fileProps: RibbonFileProps,
   insertProps: RibbonInsertProps,
   viewProps: RibbonViewProps,
+  toolsProps: RibbonToolsProps,
 ): ReactNode {
   switch (active) {
     case "file":
@@ -50,7 +59,7 @@ function panelFor(
     case "format":
       return <RibbonFormat />;
     case "tools":
-      return <RibbonTools />;
+      return <RibbonTools {...toolsProps} />;
     case "info":
       return <RibbonInfographic />;
     case "arrow":
@@ -66,6 +75,7 @@ export function Ribbon({
   fileProps,
   insertProps,
   viewProps,
+  toolsProps,
 }: RibbonProps) {
   const { t } = useTranslation();
   return (
@@ -85,7 +95,7 @@ export function Ribbon({
         ))}
       </nav>
       <div className="anchor-diagram-ribbon-panel" role="tabpanel">
-        {panelFor(active, fileProps, insertProps, viewProps)}
+        {panelFor(active, fileProps, insertProps, viewProps, toolsProps)}
       </div>
     </div>
   );

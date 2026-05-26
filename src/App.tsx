@@ -5093,6 +5093,9 @@ function MainApp() {
         case "open-studio":
           setPersistedAppMode("studio");
           break;
+        case "open-diagram":
+          if (diagramEnabled) setPersistedAppMode("diagram");
+          break;
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -5176,6 +5179,7 @@ function MainApp() {
       skills,
       exportActiveDocumentBundle,
       validateLastExportBundle,
+      diagramEnabled,
     ],
   );
 
@@ -6485,6 +6489,7 @@ function MainApp() {
           onRunCommand={runCommand}
           documentLabelMode={anchorSettings.ui.documentLabelMode}
           skillActions={commandPaletteSkillActions}
+          diagramEnabled={diagramEnabled}
         />
         <CommitDialog
           open={commitDialog !== null}

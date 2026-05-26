@@ -14,6 +14,7 @@ interface CommandPaletteProps {
   onRunCommand: (id: string) => void;
   documentLabelMode: DocumentLabelMode;
   skillActions?: CommandAction[];
+  diagramEnabled?: boolean;
 }
 
 interface CommandAction {
@@ -35,6 +36,7 @@ export const CommandPalette = memo(function CommandPalette({
   onRunCommand,
   documentLabelMode,
   skillActions = [],
+  diagramEnabled = false,
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -53,6 +55,7 @@ export const CommandPalette = memo(function CommandPalette({
       },
       { id: "open-catalog", label: t("cmdk.action.openCatalog") },
       { id: "open-studio", label: t("cmdk.action.openStudio") },
+      ...(diagramEnabled ? [{ id: "open-diagram", label: t("cmdk.action.openDiagram") }] : []),
       { id: "export-bundle", label: t("cmdk.action.exportBundle") },
       { id: "export-validate", label: t("cmdk.action.exportValidate") },
       { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },
@@ -74,7 +77,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "open-skill-compose", label: t("cmdk.action.skillCompose"), shortcut: "⌘ ⇧ K" },
       ...skillActions,
     ],
-    [skillActions, t],
+    [diagramEnabled, skillActions, t],
   );
 
   const filteredDocs = useMemo(

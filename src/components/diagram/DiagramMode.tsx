@@ -29,11 +29,13 @@ import {
 } from "../../lib/diagram/actions";
 import { isInEditable, matchesShortcut } from "../../lib/diagram/shortcuts";
 import { fitView } from "../../lib/diagram/geometry";
+import { readAnchorSettings, saveAnchorSettings } from "../../lib/anchorDir";
 import type { MkNodeOpts } from "../../lib/diagram/nodeKinds";
 import {
   deleteDiagram,
   listDiagrams,
   readDiagram,
+  serializeDoc,
   type DiagramFile,
   writeDiagram,
 } from "../../lib/diagram/persistence";
@@ -80,6 +82,7 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const SNAP_STORAGE_KEY = "anchor:diagram:snap-size";
 const PANEL_STORAGE_KEY = "anchor:diagram:panels-v1";
+const LAST_DOCUMENT_STORAGE_KEY = "anchor:diagram:last-document";
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 interface PersistedPanelState {
@@ -132,10 +135,33 @@ function writePanelState(state: PersistedPanelState): void {
   }
 }
 
+function lastDocumentStorageKey(workPath: string): string {
+  return `${LAST_DOCUMENT_STORAGE_KEY}:${workPath}`;
+}
+
+function readLastDocumentFallback(workPath: string): string | null {
+  try {
+    return window.localStorage.getItem(lastDocumentStorageKey(workPath)) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastDocumentFallback(workPath: string, lastDocument: string | null): void {
+  try {
+    const key = lastDocumentStorageKey(workPath);
+    if (lastDocument) window.localStorage.setItem(key, lastDocument);
+    else window.localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function DiagramMode({ workPath, onError }: DiagramModeProps) {
+  const storeKey = workPath ?? "__no-workspace__";
   return (
-    <DiagramStoreProvider>
-      <DiagramShell workPath={workPath} onError={onError} />
+    <DiagramStoreProvider storeKey={storeKey}>
+      <DiagramShell key={storeKey} workPath={workPath} onError={onError} />
     </DiagramStoreProvider>
   );
 }
@@ -143,27 +169,29 @@ export function DiagramMode({ workPath, onError }: DiagramModeProps) {
 function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const { t } = useTranslation();
   const store = useDiagramStore();
-  const nodes = useDiagram((s) => s.doc.nodes);
-  const edges = useDiagram((s) => s.doc.edges);
-  const docTitle = useDiagram((s) => s.doc.docTitle);
+  const sessionKey = workPath ?? "__no-workspace__";
+  const doc = useDiagram((s) => s.doc);
+  const nodes = doc.nodes;
+  const edges = doc.edges;
+  const docTitle = doc.docTitle;
   const selection = useDiagram((s) => s.ephemeral.selection);
   const viewport = useDiagram((s) => s.ephemeral.viewport);
 
   // Read once on mount from the session singleton so switching activity-rail
   // tabs and coming back resumes the in-progress work without losing the
   // active filename or dirty/saved status.
-  const [activeName, setActiveNameState] = useState<string | null>(() => getDiagramSession().activeName);
+  const [activeName, setActiveNameState] = useState<string | null>(() => getDiagramSession(sessionKey).activeName);
   const [lastSavedBody, setLastSavedBodyState] = useState<string | null>(
-    () => getDiagramSession().lastSavedBody,
+    () => getDiagramSession(sessionKey).lastSavedBody,
   );
   const setActiveName = useCallback((value: string | null) => {
     setActiveNameState(value);
-    setDiagramSession({ activeName: value });
-  }, []);
+    setDiagramSession({ activeName: value }, sessionKey);
+  }, [sessionKey]);
   const setLastSavedBody = useCallback((value: string | null) => {
     setLastSavedBodyState(value);
-    setDiagramSession({ lastSavedBody: value });
-  }, []);
+    setDiagramSession({ lastSavedBody: value }, sessionKey);
+  }, [sessionKey]);
   const [saving, setSaving] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const [files, setFiles] = useState<DiagramFile[]>([]);
@@ -184,6 +212,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const insertOffsetRef = useRef(0);
+  const titleCoalescerRef = useRef(defaultCoalescer());
 
   // Hydrate persisted snap-size once.
   useEffect(() => {
@@ -215,11 +244,11 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     return () => observer.disconnect();
   }, []);
 
-  const docBody = useMemo(
-    () => JSON.stringify(store.getState().doc),
-    [nodes, edges, docTitle],
-  );
-  const dirty = lastSavedBody !== null ? docBody !== lastSavedBody : nodes.length > 0;
+  const docBody = useMemo(() => serializeDoc(doc), [doc]);
+  const dirty =
+    lastSavedBody !== null
+      ? docBody !== lastSavedBody
+      : nodes.length > 0 || edges.length > 0 || docTitle.trim().length > 0;
   const hasSelection = selection.nodes.size + selection.edges.size > 0;
 
   // Auto-snapshot scheduler — runs whenever the doc is dirty and a workspace
@@ -243,6 +272,52 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   }, [dirty, store, workPath]);
 
   const reportError = useCallback((message: string | null) => onError?.(message), [onError]);
+
+  const persistLastDocument = useCallback(
+    async (lastDocument: string | null) => {
+      if (!workPath) return;
+      try {
+        const base = await readAnchorSettings(workPath);
+        const next = {
+          ...base,
+          diagram: {
+            ...base.diagram,
+            lastDocument,
+          },
+        };
+        await saveAnchorSettings(workPath, next, base);
+      } catch {
+        /* Last-document restore is helpful state, not a save blocker. */
+      }
+      writeLastDocumentFallback(workPath, lastDocument);
+    },
+    [workPath],
+  );
+
+  useEffect(() => {
+    if (!workPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await readAnchorSettings(workPath);
+        const lastDocument = settings.diagram.lastDocument ?? readLastDocumentFallback(workPath);
+        if (!lastDocument || cancelled) return;
+        if (getDiagramSession(sessionKey).activeName) return;
+        const current = store.getState().doc;
+        if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
+        const restored = await readDiagram(workPath, lastDocument);
+        if (cancelled) return;
+        store.setState(replaceDoc(restored));
+        setActiveName(lastDocument);
+        setLastSavedBody(serializeDoc(restored));
+      } catch {
+        /* Best-effort restore only: a missing/deleted last diagram should not block Diagram mode. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionKey, setActiveName, setLastSavedBody, store, workPath]);
 
   const refreshList = useCallback(async () => {
     if (!workPath) return;
@@ -315,14 +390,15 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         const written = await writeDiagram(workPath, name, current);
         store.setState((s) => ({ ...s, doc: written }));
         setActiveName(name);
-        setLastSavedBody(JSON.stringify(written));
+        setLastSavedBody(serializeDoc(written));
+        await persistLastDocument(name);
       } catch (err) {
         reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
       } finally {
         setSaving(false);
       }
     },
-    [reportError, store, t, workPath],
+    [persistLastDocument, reportError, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleSave = useCallback(() => {
@@ -350,8 +426,9 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
+    void persistLastDocument(null);
     reportError(null);
-  }, [reportError, store]);
+  }, [persistLastDocument, reportError, setActiveName, setLastSavedBody, store]);
 
   const handleOpen = useCallback(
     async (name: string) => {
@@ -360,14 +437,15 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         const doc = await readDiagram(workPath, name);
         store.setState(replaceDoc(doc));
         setActiveName(name);
-        setLastSavedBody(JSON.stringify(doc));
+        setLastSavedBody(serializeDoc(doc));
         setListOpen(false);
+        await persistLastDocument(name);
         reportError(null);
       } catch (err) {
         reportError(t("diagram.error.load", { message: (err as Error).message ?? "unknown" }));
       }
     },
-    [reportError, store, t, workPath],
+    [persistLastDocument, reportError, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleDeleteFile = useCallback(
@@ -621,7 +699,13 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
             className="anchor-diagram-title-input"
             value={docTitle}
             placeholder={t("diagram.title.placeholder")}
-            onChange={(e) => store.setState(setDocTitle(e.target.value))}
+            onChange={(e) =>
+              store.setState(
+                withSnapshot(setDocTitle(e.target.value), titleCoalescerRef.current, {
+                  coalesce: true,
+                }),
+              )
+            }
             aria-label={t("diagram.title.placeholder")}
           />
           <button
@@ -673,6 +757,12 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           onToggleLeft: toggleLeftPanel,
           onToggleRight: toggleRightPanel,
           onSnapSizePersist: persistSnapSize,
+        }}
+        toolsProps={{
+          onFind: () => setFindOpen(true),
+          onHistory: () => setHistoryOpen(true),
+          onSpecialChars: () => setSpecialOpen(true),
+          onToggleFocus: () => store.setState(toggleFocusMode()),
         }}
       />
       <div className="anchor-diagram-workspace">
@@ -768,6 +858,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           store.setState(replaceDoc(next));
           setActiveName(null);
           setLastSavedBody(null);
+          void persistLastDocument(null);
           setTemplateOpen(false);
         }}
         onCancel={() => setTemplateOpen(false)}
@@ -819,6 +910,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           store.setState(replaceDoc(doc));
           setActiveName(null);
           setLastSavedBody(null);
+          void persistLastDocument(null);
           setImportMermaidOpen(false);
           reportError(null);
         }}
@@ -839,7 +931,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
                   doc: {
                     ...state.doc,
                     nodes: state.doc.nodes.map((n) =>
-                      n.id === id ? { ...n, title: (n.title ?? "") + char } : n,
+                      n.id === id && !n.locked ? { ...n, title: (n.title ?? "") + char } : n,
                     ),
                   },
                 }),

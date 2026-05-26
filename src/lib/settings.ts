@@ -138,6 +138,7 @@ export interface AnchorSettings {
   comms: CommsSettings;
   meetings: MeetingsSettings;
   tasks: TasksSettings;
+  diagram: DiagramSettings;
   inboxChannels: Record<string, unknown>;
   composer: ComposerSettings;
   connectors: Record<string, unknown>;
@@ -201,6 +202,10 @@ export interface TasksSettings {
 
 export interface ComposerSettings {
   lintDismissals: Record<string, string[]>;
+}
+
+export interface DiagramSettings {
+  lastDocument: string | null;
 }
 
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
@@ -327,6 +332,9 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       appendVaultLog: true,
     },
   },
+  diagram: {
+    lastDocument: null,
+  },
   inboxChannels: {},
   composer: {
     lintDismissals: {},
@@ -399,6 +407,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
     comms: normalizeCommsSettings(value.comms),
     meetings: normalizeMeetingsSettings(value.meetings),
     tasks: normalizeTasksSettings(value.tasks),
+    diagram: normalizeDiagramSettings(value.diagram),
     inboxChannels: isRecord(value.inboxChannels) ? value.inboxChannels : {},
     composer: normalizeComposerSettings(value.composer),
     connectors: isRecord(value.connectors) ? value.connectors : {},
@@ -708,6 +717,9 @@ function cloneDefaultSettings(): AnchorSettings {
       ...DEFAULT_ANCHOR_SETTINGS.tasks,
       hooks: { ...DEFAULT_ANCHOR_SETTINGS.tasks.hooks },
     },
+    diagram: {
+      ...DEFAULT_ANCHOR_SETTINGS.diagram,
+    },
     inboxChannels: {},
     composer: {
       lintDismissals: {},
@@ -725,6 +737,17 @@ function normalizeComposerSettings(value: unknown): ComposerSettings {
     if (cleanIds.length > 0) lintDismissals[docId] = cleanIds;
   }
   return { lintDismissals };
+}
+
+function normalizeDiagramSettings(value: unknown): DiagramSettings {
+  const diagram = isRecord(value) ? value : {};
+  return {
+    lastDocument: readOptionalString(
+      diagram,
+      ["lastDocument", "last_document", "activeName", "active_name"],
+      DEFAULT_ANCHOR_SETTINGS.diagram.lastDocument,
+    ),
+  };
 }
 
 function normalizeCommsSettings(value: unknown): CommsSettings {

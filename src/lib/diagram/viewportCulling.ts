@@ -58,7 +58,7 @@ export function visibleSubset(input: CullInput): CullResult {
   }
   const visibleEdges: DiagramEdge[] = [];
   for (const edge of input.edges) {
-    if (visibleNodeIds.has(edge.fromNode) || visibleNodeIds.has(edge.toNode)) {
+    if (visibleNodeIds.has(edge.fromNode) && visibleNodeIds.has(edge.toNode)) {
       visibleEdges.push(edge);
     }
   }

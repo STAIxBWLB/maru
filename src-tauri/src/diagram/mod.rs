@@ -4,9 +4,6 @@
 //! rejects path traversal (`..`, `/`, `\\`, NUL) and leading-dot entries, mirroring
 //! the safety rules in `studio/mod.rs` and the workspace write-allow guard.
 //!
-//! `diagram_export_blob` remains a Phase 4 stub — it is wired here so the
-//! invoke handler list stays stable across phases.
-
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -204,6 +201,38 @@ fn validate_export_kind(kind: &str) -> Result<&'static str, String> {
     }
 }
 
+fn validate_export_target_path(target_path: &str, kind: &str) -> Result<PathBuf, String> {
+    let trimmed = target_path.trim();
+    if trimmed.is_empty() {
+        return Err("Export path is required".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Invalid export path".to_string());
+    }
+    let expected = validate_export_kind(kind)?;
+    let path = PathBuf::from(trimmed);
+    if path.file_name().and_then(|name| name.to_str()).is_none() {
+        return Err("Export path must include a file name".to_string());
+    }
+    if path.is_dir() {
+        return Err("Export path points to a directory".to_string());
+    }
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| "Export path must include an extension".to_string())?;
+    let ext_ok = match expected {
+        "jpg" => ext == "jpg" || ext == "jpeg",
+        "mmd" => ext == "mmd" || ext == "mermaid",
+        _ => ext == expected,
+    };
+    if !ext_ok {
+        return Err(format!("Export path extension .{ext} does not match {expected}"));
+    }
+    Ok(path)
+}
+
 #[tauri::command]
 pub fn diagram_export_blob(
     workspace: String,
@@ -228,6 +257,23 @@ pub fn diagram_export_blob(
     }
     fs::write(&candidate, &bytes).map_err(|err| format!("Cannot write export: {err}"))?;
     Ok(candidate.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn diagram_export_blob_to_path(
+    target_path: String,
+    kind: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let path = validate_export_target_path(&target_path, &kind)?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Cannot create export folder: {err}"))?;
+        }
+    }
+    fs::write(&path, &bytes).map_err(|err| format!("Cannot write export: {err}"))?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +526,42 @@ mod tests {
     fn export_blob_rejects_unknown_kind() {
         let (_tmp, work) = setup_workspace();
         assert!(diagram_export_blob(work, "demo".into(), "exe".into(), vec![]).is_err());
+    }
+
+    #[test]
+    fn export_blob_to_selected_path_writes_file() {
+        let (tmp, _work) = setup_workspace();
+        let target = tmp.path().join("chosen").join("demo.svg");
+        let path = diagram_export_blob_to_path(
+            target.to_string_lossy().to_string(),
+            "svg".into(),
+            b"<svg/>".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "<svg/>");
+    }
+
+    #[test]
+    fn export_blob_to_selected_path_rejects_bad_extension() {
+        let (tmp, _work) = setup_workspace();
+        let target = tmp.path().join("demo.txt");
+        assert!(diagram_export_blob_to_path(
+            target.to_string_lossy().to_string(),
+            "png".into(),
+            vec![]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn export_blob_to_selected_path_rejects_directory() {
+        let (tmp, _work) = setup_workspace();
+        assert!(diagram_export_blob_to_path(
+            tmp.path().to_string_lossy().to_string(),
+            "png".into(),
+            vec![]
+        )
+        .is_err());
     }
 
     #[test]

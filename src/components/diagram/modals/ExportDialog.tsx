@@ -2,7 +2,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { useState } from "react";
 
-import { diagramExportBlob } from "../../../lib/diagram";
+import { chooseSaveFile } from "../../../lib/api";
+import { diagramExportBlobToPath } from "../../../lib/diagram";
 import {
   blobToUint8Array,
   exportJpg,
@@ -56,6 +57,10 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
+function runningInTauri(): boolean {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
 async function runExport(
   id: FormatId,
   doc: DiagramDoc,
@@ -97,11 +102,16 @@ export function ExportDialog({ open, doc, workspace, getSvg, onClose }: ExportDi
         return;
       }
       const fileName = suggestedFileName(doc, result.extension);
-      if (workspace) {
+      if (workspace && runningInTauri()) {
+        const defaultPath = `${workspace.replace(/[/\\]+$/, "")}/diagrams/${fileName}`;
+        const targetPath = await chooseSaveFile(t("diagram.dialog.export.saveTitle"), defaultPath);
+        if (!targetPath) {
+          setStatus({ kind: "idle" });
+          return;
+        }
         const bytes = await blobToUint8Array(result.blob);
-        const path = await diagramExportBlob(
-          workspace,
-          fileName.replace(/\.[^.]+$/, ""),
+        const path = await diagramExportBlobToPath(
+          targetPath,
           result.extension as "png" | "jpg" | "svg" | "json" | "pdf" | "mmd",
           bytes,
         );

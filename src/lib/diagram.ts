@@ -19,8 +19,35 @@ export interface DiagramSnapshotMeta {
   size: number;
 }
 
+const MOCK_DIAGRAM_PREFIX = "anchor:diagram:mock-documents:";
+
 function isTauri(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
+function mockStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function mockDocumentPrefix(workspace: string): string {
+  return `${MOCK_DIAGRAM_PREFIX}${encodeURIComponent(workspace)}:`;
+}
+
+function mockDocumentKey(workspace: string, name: string): string {
+  return `${mockDocumentPrefix(workspace)}${encodeURIComponent(name)}`;
+}
+
+function extractDocTitle(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { docTitle?: unknown };
+    return typeof parsed.docTitle === "string" ? parsed.docTitle : "";
+  } catch {
+    return "";
+  }
 }
 
 export async function diagramSaveDocument(
@@ -28,7 +55,15 @@ export async function diagramSaveDocument(
   name: string,
   body: string,
 ): Promise<void> {
-  if (!isTauri()) throw new Error("diagram_save_document_requires_tauri");
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) throw new Error("diagram_save_document_requires_tauri");
+    storage.setItem(
+      mockDocumentKey(workspace, name),
+      JSON.stringify({ body, modifiedAt: Date.now() }),
+    );
+    return;
+  }
   return invoke<void>("diagram_save_document", { workspace, name, body });
 }
 
@@ -36,12 +71,45 @@ export async function diagramLoadDocument(
   workspace: string,
   name: string,
 ): Promise<string> {
-  if (!isTauri()) throw new Error("diagram_load_document_requires_tauri");
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) throw new Error("diagram_load_document_requires_tauri");
+    const raw = storage.getItem(mockDocumentKey(workspace, name));
+    if (!raw) throw new Error(`Diagram not found: ${name}`);
+    const parsed = JSON.parse(raw) as { body?: unknown };
+    if (typeof parsed.body !== "string") throw new Error(`Diagram not found: ${name}`);
+    return parsed.body;
+  }
   return invoke<string>("diagram_load_document", { workspace, name });
 }
 
 export async function diagramListDocuments(workspace: string): Promise<DiagramFile[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) return [];
+    const prefix = mockDocumentPrefix(workspace);
+    const files: DiagramFile[] = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const raw = storage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as { body?: unknown; modifiedAt?: unknown };
+        const body = typeof parsed.body === "string" ? parsed.body : "";
+        const name = decodeURIComponent(key.slice(prefix.length));
+        files.push({
+          name,
+          size: new Blob([body]).size,
+          modifiedAt: typeof parsed.modifiedAt === "number" ? parsed.modifiedAt : 0,
+          docTitle: extractDocTitle(body),
+        });
+      } catch {
+        /* skip malformed mock entries */
+      }
+    }
+    return files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  }
   return invoke<DiagramFile[]>("diagram_list_documents", { workspace });
 }
 
@@ -49,7 +117,14 @@ export async function diagramDeleteDocument(
   workspace: string,
   name: string,
 ): Promise<boolean> {
-  if (!isTauri()) return false;
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) return false;
+    const key = mockDocumentKey(workspace, name);
+    const existed = storage.getItem(key) !== null;
+    storage.removeItem(key);
+    return existed;
+  }
   return invoke<boolean>("diagram_delete_document", { workspace, name });
 }
 
@@ -63,6 +138,19 @@ export async function diagramExportBlob(
   return invoke<string>("diagram_export_blob", {
     workspace,
     name,
+    kind,
+    bytes: Array.from(bytes),
+  });
+}
+
+export async function diagramExportBlobToPath(
+  targetPath: string,
+  kind: "png" | "jpg" | "svg" | "json" | "pdf" | "mmd",
+  bytes: Uint8Array,
+): Promise<string> {
+  if (!isTauri()) throw new Error("diagram_export_blob_to_path_requires_tauri");
+  return invoke<string>("diagram_export_blob_to_path", {
+    targetPath,
     kind,
     bytes: Array.from(bytes),
   });

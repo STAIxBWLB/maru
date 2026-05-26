@@ -213,13 +213,16 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
       const state = store.getState();
+      const activeNode = state.doc.nodes.find((node) => node.id === nodeId);
+      if (activeNode?.locked) return;
       const currentSelection = state.ephemeral.selection.nodes;
       const ids = currentSelection.has(nodeId)
-        ? [...currentSelection]
+        ? [...currentSelection].filter((id) => !nodeById.get(id)?.locked)
         : (() => {
             store.setState(setSelection([nodeId]));
             return [nodeId];
           })();
+      if (ids.length === 0) return;
       const origins = new Map<NodeId, { x: number; y: number; w: number; h: number }>();
       for (const id of ids) {
         const n = nodeById.get(id);

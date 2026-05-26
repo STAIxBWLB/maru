@@ -104,14 +104,21 @@ export function removeNodes(ids: Iterable<NodeId>): StateTransformer {
   return (state) => {
     const set = new Set(ids);
     if (set.size === 0) return state;
-    const nodes = state.doc.nodes.filter((n) => !set.has(n.id));
-    const edges = state.doc.edges.filter((e) => !set.has(e.fromNode) && !set.has(e.toNode));
+    const removable = new Set(
+      state.doc.nodes.filter((n) => set.has(n.id) && !n.locked).map((n) => n.id),
+    );
+    if (removable.size === 0) return state;
+    const nodes = state.doc.nodes.filter((n) => !removable.has(n.id));
+    const edges = state.doc.edges.filter((e) => !removable.has(e.fromNode) && !removable.has(e.toNode));
     return {
       ...state,
       doc: { ...state.doc, nodes, edges },
       ephemeral: {
         ...state.ephemeral,
-        selection: { nodes: new Set(), edges: new Set() },
+        selection: {
+          nodes: new Set([...state.ephemeral.selection.nodes].filter((id) => !removable.has(id))),
+          edges: new Set(),
+        },
       },
     };
   };
@@ -126,11 +133,19 @@ export function moveNodes(
     if (dx === 0 && dy === 0) return state;
     const set = new Set(ids);
     if (set.size === 0) return state;
+    let changed = false;
     const nodes = state.doc.nodes.map((n) =>
-      set.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n,
+      set.has(n.id) && !n.locked
+        ? (changed = true, { ...n, x: n.x + dx, y: n.y + dy })
+        : n,
     );
+    if (!changed) return state;
     return { ...state, doc: { ...state.doc, nodes } };
   };
+}
+
+function lockedNodePatchAllowed(patch: Partial<DiagramNode>): boolean {
+  return Object.keys(patch).every((key) => key === "locked" || key === "hidden");
 }
 
 export function updateNode(
@@ -138,7 +153,14 @@ export function updateNode(
   patch: Partial<DiagramNode>,
 ): StateTransformer {
   return (state) => {
-    const nodes = state.doc.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n));
+    let changed = false;
+    const nodes = state.doc.nodes.map((n) => {
+      if (n.id !== id) return n;
+      if (n.locked && !lockedNodePatchAllowed(patch)) return n;
+      changed = true;
+      return { ...n, ...patch };
+    });
+    if (!changed) return state;
     return { ...state, doc: { ...state.doc, nodes } };
   };
 }
@@ -231,9 +253,13 @@ export function nudgeSelection(dx: number, dy: number): StateTransformer {
   return (state) => {
     const ids = state.ephemeral.selection.nodes;
     if (ids.size === 0 || (dx === 0 && dy === 0)) return state;
+    let changed = false;
     const nodes = state.doc.nodes.map((n) =>
-      ids.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n,
+      ids.has(n.id) && !n.locked
+        ? (changed = true, { ...n, x: n.x + dx, y: n.y + dy })
+        : n,
     );
+    if (!changed) return state;
     return { ...state, doc: { ...state.doc, nodes } };
   };
 }
@@ -266,6 +292,7 @@ export function duplicateSelection(offsetX = 24, offsetY = 24): StateTransformer
     const cloned: DiagramNode[] = [];
     for (const node of state.doc.nodes) {
       if (!selectedIds.has(node.id)) continue;
+      if (node.locked) continue;
       const nextId = newId("node");
       idMap.set(node.id, nextId);
       cloned.push({ ...node, id: nextId, x: node.x + offsetX, y: node.y + offsetY });
@@ -304,9 +331,13 @@ export function duplicateSelection(offsetX = 24, offsetY = 24): StateTransformer
 
 export function setNodeMeta(id: NodeId, patch: Record<string, unknown>): StateTransformer {
   return (state) => {
-    const nodes = state.doc.nodes.map((n) =>
-      n.id === id ? { ...n, meta: { ...(n.meta ?? {}), ...patch } } : n,
-    );
+    let changed = false;
+    const nodes = state.doc.nodes.map((n) => {
+      if (n.id !== id || n.locked) return n;
+      changed = true;
+      return { ...n, meta: { ...(n.meta ?? {}), ...patch } };
+    });
+    if (!changed) return state;
     return { ...state, doc: { ...state.doc, nodes } };
   };
 }
@@ -376,9 +407,17 @@ export function clearPendingConnect(): StateTransformer {
 // Selection ops (Phase 3)
 // ============================================================================
 
+function unlockedNodeIds(state: DiagramStateRoot): Set<NodeId> {
+  return new Set(
+    state.doc.nodes
+      .filter((node) => state.ephemeral.selection.nodes.has(node.id) && !node.locked)
+      .map((node) => node.id),
+  );
+}
+
 export function alignSelection(mode: AlignMode): StateTransformer {
   return (state) => {
-    const ids = state.ephemeral.selection.nodes;
+    const ids = unlockedNodeIds(state);
     if (ids.size < 2) return state;
     const nodes = alignNodes(state.doc.nodes, ids, mode);
     if (nodes === state.doc.nodes) return state;
@@ -388,7 +427,7 @@ export function alignSelection(mode: AlignMode): StateTransformer {
 
 export function distributeSelection(axis: DistributeAxis): StateTransformer {
   return (state) => {
-    const ids = state.ephemeral.selection.nodes;
+    const ids = unlockedNodeIds(state);
     if (ids.size < 3) return state;
     const nodes = distributeNodes(state.doc.nodes, ids, axis);
     if (nodes === state.doc.nodes) return state;
@@ -398,7 +437,7 @@ export function distributeSelection(axis: DistributeAxis): StateTransformer {
 
 export function equalizeSelection(axis: EqualizeAxis): StateTransformer {
   return (state) => {
-    const ids = state.ephemeral.selection.nodes;
+    const ids = unlockedNodeIds(state);
     if (ids.size < 2) return state;
     const nodes = equalizeSize(state.doc.nodes, ids, axis);
     if (nodes === state.doc.nodes) return state;
@@ -415,15 +454,16 @@ function reorderNodes(
   ids: Set<NodeId>,
   mode: "front" | "back" | "forward" | "backward",
 ): DiagramNode[] {
-  if (ids.size === 0) return nodes;
+  const unlockedIds = new Set(nodes.filter((n) => ids.has(n.id) && !n.locked).map((n) => n.id));
+  if (unlockedIds.size === 0) return nodes;
   if (mode === "front") {
-    const moved = nodes.filter((n) => ids.has(n.id));
-    const rest = nodes.filter((n) => !ids.has(n.id));
+    const moved = nodes.filter((n) => unlockedIds.has(n.id));
+    const rest = nodes.filter((n) => !unlockedIds.has(n.id));
     return [...rest, ...moved];
   }
   if (mode === "back") {
-    const moved = nodes.filter((n) => ids.has(n.id));
-    const rest = nodes.filter((n) => !ids.has(n.id));
+    const moved = nodes.filter((n) => unlockedIds.has(n.id));
+    const rest = nodes.filter((n) => !unlockedIds.has(n.id));
     return [...moved, ...rest];
   }
   // forward / backward = one step
@@ -431,13 +471,13 @@ function reorderNodes(
   if (mode === "forward") {
     // iterate from end to start to avoid stepping on already-moved entries
     for (let i = out.length - 2; i >= 0; i -= 1) {
-      if (ids.has(out[i]!.id) && !ids.has(out[i + 1]!.id)) {
+      if (unlockedIds.has(out[i]!.id) && !unlockedIds.has(out[i + 1]!.id)) {
         [out[i], out[i + 1]] = [out[i + 1]!, out[i]!];
       }
     }
   } else {
     for (let i = 1; i < out.length; i += 1) {
-      if (ids.has(out[i]!.id) && !ids.has(out[i - 1]!.id)) {
+      if (unlockedIds.has(out[i]!.id) && !unlockedIds.has(out[i - 1]!.id)) {
         [out[i], out[i - 1]] = [out[i - 1]!, out[i]!];
       }
     }
@@ -483,6 +523,7 @@ export function moveNodeToIndex(nodeId: NodeId, toIndex: number): StateTransform
     const current = state.doc.nodes;
     const fromIndex = current.findIndex((n) => n.id === nodeId);
     if (fromIndex < 0) return state;
+    if (current[fromIndex]?.locked) return state;
     const clamped = Math.max(0, Math.min(current.length - 1, toIndex));
     if (clamped === fromIndex) return state;
     const next = [...current];
@@ -539,9 +580,13 @@ export function pasteStyleToSelection(style: DiagramNode["style"]): StateTransfo
   return (state) => {
     const ids = state.ephemeral.selection.nodes;
     if (!style || ids.size === 0) return state;
-    const nodes = state.doc.nodes.map((n) =>
-      ids.has(n.id) ? { ...n, style: { ...n.style, ...style } } : n,
-    );
+    let changed = false;
+    const nodes = state.doc.nodes.map((n) => {
+      if (!ids.has(n.id) || n.locked) return n;
+      changed = true;
+      return { ...n, style: { ...n.style, ...style } };
+    });
+    if (!changed) return state;
     return { ...state, doc: { ...state.doc, nodes } };
   };
 }

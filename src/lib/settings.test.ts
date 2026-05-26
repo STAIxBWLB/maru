@@ -239,6 +239,17 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.activeAppMode).toBe("e2e");
   });
 
+  it("normalizes diagram workspace state", () => {
+    const settings = normalizeAnchorSettings({
+      diagram: {
+        lastDocument: "  roadmap  ",
+      },
+    });
+
+    expect(settings.diagram.lastDocument).toBe("roadmap");
+    expect(normalizeAnchorSettings({ diagram: { lastDocument: "" } }).diagram.lastDocument).toBeNull();
+  });
+
   it("parses catalog and studio modes for document operations", () => {
     expect(
       normalizeAnchorSettings({

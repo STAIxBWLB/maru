@@ -20,55 +20,71 @@ interface DiagramStoreContextValue {
 const Ctx = createContext<DiagramStoreContextValue | null>(null);
 
 // ---------------------------------------------------------------------------
-// Module-level singletons.
+// Workspace-keyed module state.
 //
 // `DiagramMode` is mounted and unmounted whenever the user clicks an activity-
-// rail icon. If the store lives in a `useRef` inside the provider, every
-// remount wipes the in-flight document — losing any unsaved work. Hoisting
-// the store + coalescer to module scope keeps them alive for the lifetime
-// of the JS module (i.e. the running app), so switching to Docs/Inbox/etc.
-// and coming back to Diagram restores the previous canvas state exactly.
-// Tests still create their own isolated stores via `createDiagramStore()`.
+// rail icon. Keeping the store at module scope preserves in-flight work across
+// those remounts, but a single global store leaks unsaved diagrams between
+// workspaces. Keying the store/session by workspace path keeps the persistence
+// benefit while making workspace switches isolated.
 // ---------------------------------------------------------------------------
 
-let sharedStore: DiagramStore | null = null;
-let sharedCoalescer: Coalescer | null = null;
-
-function getSharedStore(): DiagramStore {
-  if (!sharedStore) sharedStore = createDiagramStore();
-  return sharedStore;
+interface WorkspaceDiagramContext {
+  store: DiagramStore;
+  coalescer: Coalescer;
+  session: DiagramSession;
 }
 
-function getSharedCoalescer(): Coalescer {
-  if (!sharedCoalescer) sharedCoalescer = defaultCoalescer();
-  return sharedCoalescer;
+const DEFAULT_STORE_KEY = "__anchor-diagram-default__";
+const contexts = new Map<string, WorkspaceDiagramContext>();
+
+function normalizeStoreKey(key?: string | null): string {
+  return key?.trim() || DEFAULT_STORE_KEY;
 }
 
-/** Test-only escape hatch — drop the singleton so each unit test starts fresh. */
+function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
+  const normalized = normalizeStoreKey(key);
+  let ctx = contexts.get(normalized);
+  if (!ctx) {
+    ctx = {
+      store: createDiagramStore(),
+      coalescer: defaultCoalescer(),
+      session: {
+        activeName: null,
+        lastSavedBody: null,
+      },
+    };
+    contexts.set(normalized, ctx);
+  }
+  return ctx;
+}
+
+/** Test-only escape hatch — drop all workspace stores so each unit test starts fresh. */
 export function _resetDiagramSharedStoreForTests(): void {
-  sharedStore = null;
-  sharedCoalescer = null;
+  contexts.clear();
 }
 
 export interface DiagramStoreProviderProps {
   initial?: Partial<DiagramStateRoot>;
+  storeKey?: string | null;
   children: ReactNode;
 }
 
-export function DiagramStoreProvider({ initial, children }: DiagramStoreProviderProps) {
+export function DiagramStoreProvider({ initial, storeKey, children }: DiagramStoreProviderProps) {
   // First-time hydration only — if a caller passes `initial` and the shared
   // store is still pristine (empty doc, untouched ephemeral), apply it.
   // Subsequent mounts ignore `initial` so we don't clobber in-flight work.
   const value = useMemo(() => {
-    const store = getSharedStore();
+    const ctx = getWorkspaceContext(storeKey);
+    const store = ctx.store;
     if (initial && store.getState().doc.nodes.length === 0 && store.getState().doc.edges.length === 0) {
       store.setState((current) => ({
         doc: initial.doc ?? current.doc,
         ephemeral: initial.ephemeral ?? current.ephemeral,
       }));
     }
-    return { store, coalescer: getSharedCoalescer() };
-  }, [initial]);
+    return { store, coalescer: ctx.coalescer };
+  }, [initial, storeKey]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -109,21 +125,22 @@ export interface DiagramSession {
   lastSavedBody: string | null;
 }
 
-const sharedSession: DiagramSession = {
-  activeName: null,
-  lastSavedBody: null,
-};
-
-export function getDiagramSession(): DiagramSession {
-  return sharedSession;
+export function getDiagramSession(storeKey?: string | null): DiagramSession {
+  return getWorkspaceContext(storeKey).session;
 }
 
-export function setDiagramSession(patch: Partial<DiagramSession>): void {
-  if (patch.activeName !== undefined) sharedSession.activeName = patch.activeName;
-  if (patch.lastSavedBody !== undefined) sharedSession.lastSavedBody = patch.lastSavedBody;
+export function setDiagramSession(
+  patch: Partial<DiagramSession>,
+  storeKey?: string | null,
+): void {
+  const session = getWorkspaceContext(storeKey).session;
+  if (patch.activeName !== undefined) session.activeName = patch.activeName;
+  if (patch.lastSavedBody !== undefined) session.lastSavedBody = patch.lastSavedBody;
 }
 
 export function _resetDiagramSessionForTests(): void {
-  sharedSession.activeName = null;
-  sharedSession.lastSavedBody = null;
+  for (const ctx of contexts.values()) {
+    ctx.session.activeName = null;
+    ctx.session.lastSavedBody = null;
+  }
 }

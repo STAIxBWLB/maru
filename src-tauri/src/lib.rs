@@ -108,8 +108,9 @@ use skill_host::{
     skills_uninstall_skill,
 };
 use diagram::{
-    diagram_delete_document, diagram_export_blob, diagram_list_documents, diagram_list_snapshots,
-    diagram_load_document, diagram_restore_snapshot, diagram_save_document, diagram_save_snapshot,
+    diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
+    diagram_list_documents, diagram_list_snapshots, diagram_load_document, diagram_restore_snapshot,
+    diagram_save_document, diagram_save_snapshot,
 };
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
@@ -348,6 +349,7 @@ pub fn run() {
             diagram_list_documents,
             diagram_delete_document,
             diagram_export_blob,
+            diagram_export_blob_to_path,
             diagram_list_snapshots,
             diagram_save_snapshot,
             diagram_restore_snapshot,

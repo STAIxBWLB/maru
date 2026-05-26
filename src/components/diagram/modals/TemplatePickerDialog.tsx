@@ -69,6 +69,7 @@ export function TemplatePickerDialog({ open, dirty, onApply, onCancel }: Templat
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>("blank");
+  const [pendingApply, setPendingApply] = useState<TemplateDefinition | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,12 +83,17 @@ export function TemplatePickerDialog({ open, dirty, onApply, onCancel }: Templat
 
   const selected = TEMPLATE_LIST.find((tpl) => tpl.id === selectedId);
 
+  const requestApply = (template: TemplateDefinition) => {
+    if (dirty && template.id !== "blank") {
+      setPendingApply(template);
+      return;
+    }
+    onApply(template);
+  };
+
   const handleApply = () => {
     if (!selected) return;
-    if (dirty && selected.id !== "blank") {
-      if (!window.confirm(t("diagram.dialog.template.confirmReplace"))) return;
-    }
-    onApply(selected);
+    requestApply(selected);
   };
 
   return (
@@ -125,10 +131,7 @@ export function TemplatePickerDialog({ open, dirty, onApply, onCancel }: Templat
                 onClick={() => setSelectedId(tpl.id)}
                 onDoubleClick={() => {
                   setSelectedId(tpl.id);
-                  if (dirty && tpl.id !== "blank") {
-                    if (!window.confirm(t("diagram.dialog.template.confirmReplace"))) return;
-                  }
-                  onApply(tpl);
+                  requestApply(tpl);
                 }}
               >
                 <TemplatePreview template={tpl} t={t} />
@@ -150,6 +153,36 @@ export function TemplatePickerDialog({ open, dirty, onApply, onCancel }: Templat
               {t("diagram.dialog.template.apply")}
             </button>
           </div>
+          <Dialog.Root
+            open={pendingApply !== null}
+            onOpenChange={(next) => {
+              if (!next) setPendingApply(null);
+            }}
+          >
+            <Dialog.Portal>
+              <Dialog.Overlay className="dialog-overlay" />
+              <Dialog.Content className="dialog-content anchor-diagram-confirm-dialog">
+                <Dialog.Title>{t("diagram.dialog.template.confirmTitle")}</Dialog.Title>
+                <p>{t("diagram.dialog.template.confirmReplace")}</p>
+                <div className="dialog-actions">
+                  <Dialog.Close asChild>
+                    <button type="button">{t("diagram.dialog.confirm.cancel")}</button>
+                  </Dialog.Close>
+                  <button
+                    type="button"
+                    className="anchor-diagram-toolbar-primary"
+                    onClick={() => {
+                      const template = pendingApply;
+                      setPendingApply(null);
+                      if (template) onApply(template);
+                    }}
+                  >
+                    {t("diagram.dialog.confirm.replace")}
+                  </button>
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

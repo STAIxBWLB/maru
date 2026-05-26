@@ -65,7 +65,7 @@ describe("visibleSubset", () => {
     expect(visible.map((n) => n.id)).toEqual(["b"]);
   });
 
-  it("keeps an edge when either endpoint is visible", () => {
+  it("keeps an edge only when both endpoints are visible", () => {
     const nodes = [node("a", 0, 0), node("b", 9999, 9999)];
     const edges = [edge("e1", "a", "b")];
     const { edges: visible } = visibleSubset({
@@ -73,7 +73,18 @@ describe("visibleSubset", () => {
       edges,
       viewport: { x: -50, y: -50, w: 200, h: 200 },
     });
-    expect(visible).toHaveLength(1);
+    expect(visible).toHaveLength(0);
+  });
+
+  it("hides edges connected to hidden endpoints", () => {
+    const nodes = [node("a", 0, 0), { ...node("b", 50, 0), hidden: true }];
+    const edges = [edge("e1", "a", "b")];
+    const { edges: visible } = visibleSubset({
+      nodes,
+      edges,
+      viewport: { x: -50, y: -50, w: 200, h: 200 },
+    });
+    expect(visible).toHaveLength(0);
   });
 
   it("returns full=true when nothing is culled", () => {
