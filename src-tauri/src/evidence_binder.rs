@@ -89,13 +89,37 @@ struct ProcessedManifest {
 }
 
 #[derive(Debug, Deserialize)]
-struct ProcessedManifestFile {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    original_name: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
+#[serde(untagged)]
+enum ProcessedManifestFile {
+    Path(String),
+    Object {
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        original_name: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+}
+
+impl ProcessedManifestFile {
+    fn path(&self) -> Option<&str> {
+        match self {
+            Self::Path(path) => Some(path.as_str()),
+            Self::Object { path, .. } => path.as_deref(),
+        }
+    }
+
+    fn display_name(&self) -> Option<&str> {
+        match self {
+            Self::Path(_) => None,
+            Self::Object {
+                original_name,
+                name,
+                ..
+            } => original_name.as_deref().or(name.as_deref()),
+        }
+    }
 }
 
 #[tauri::command]
@@ -440,7 +464,7 @@ fn processed_manifest_paths(item_dir: &Path, manifest: &ProcessedManifest) -> Ve
     manifest
         .files
         .iter()
-        .filter_map(|file| file.path.as_deref())
+        .filter_map(ProcessedManifestFile::path)
         .filter_map(|path| {
             safe_processed_manifest_path(item_dir, canonical_item_dir.as_deref(), path)
         })
@@ -502,14 +526,13 @@ fn manifest_title_for_path(manifest: &ProcessedManifest, path: &Path) -> String 
         .files
         .iter()
         .find(|file| {
-            file.path
-                .as_deref()
+            file.path()
                 .and_then(|value| Path::new(value).file_name())
                 .and_then(|name| name.to_str())
                 == path_name
         })
-        .and_then(|file| file.original_name.as_ref().or(file.name.as_ref()))
-        .cloned()
+        .and_then(ProcessedManifestFile::display_name)
+        .map(ToString::to_string)
         .or_else(|| path_name.map(ToString::to_string))
         .unwrap_or_else(|| "inbox evidence".to_string())
 }
@@ -657,6 +680,26 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|item| item.source == "inboxProcessed"));
+    }
+
+    #[test]
+    fn discovers_processed_candidate_from_string_manifest_file_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path();
+        let item = work.join("inbox/items/done/item-a");
+        fs::create_dir_all(item.join("source")).unwrap();
+        fs::write(item.join("source/form.hwpx"), b"PK\x03\x04").unwrap();
+        fs::write(
+            item.join("manifest.yaml"),
+            "id: item-a\nchannel: kakao\nfiles:\n  - source/form.hwpx\n",
+        )
+        .unwrap();
+
+        let candidates = discover_candidates(work, None).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].source, "inboxProcessed");
+        assert_eq!(candidates[0].inbox_item_id.as_deref(), Some("item-a"));
+        assert_eq!(candidates[0].title, "form.hwpx");
     }
 
     #[test]
