@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import {
@@ -83,6 +84,17 @@ interface PersistedPanelState {
   left: boolean;
   right: boolean;
   ribbon: RibbonTab;
+  leftWidth: number;
+  rightWidth: number;
+}
+
+const PANEL_MIN_WIDTH = 200;
+const PANEL_MAX_WIDTH = 520;
+const PANEL_DEFAULT_WIDTH = 260;
+
+function clampWidth(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return PANEL_DEFAULT_WIDTH;
+  return Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, Math.round(value)));
 }
 
 function readPanelState(): PersistedPanelState {
@@ -94,12 +106,20 @@ function readPanelState(): PersistedPanelState {
         left: parsed.left !== false,
         right: parsed.right !== false,
         ribbon: (parsed.ribbon ?? "edit") as RibbonTab,
+        leftWidth: clampWidth(parsed.leftWidth),
+        rightWidth: clampWidth(parsed.rightWidth),
       };
     }
   } catch {
     /* ignore */
   }
-  return { left: true, right: true, ribbon: "edit" };
+  return {
+    left: true,
+    right: true,
+    ribbon: "edit",
+    leftWidth: PANEL_DEFAULT_WIDTH,
+    rightWidth: PANEL_DEFAULT_WIDTH,
+  };
 }
 
 function writePanelState(state: PersistedPanelState): void {
@@ -512,6 +532,53 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     [],
   );
 
+  const startPanelResize = useCallback(
+    (side: "left" | "right") => (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const target = event.currentTarget;
+      const startX = event.clientX;
+      const startLeft = panels.leftWidth;
+      const startRight = panels.rightWidth;
+      target.setPointerCapture(event.pointerId);
+      target.classList.add("is-dragging");
+
+      const onMove = (e: PointerEvent) => {
+        const dx = e.clientX - startX;
+        setPanels((prev) => {
+          if (side === "left") {
+            const next = clampWidth(startLeft + dx);
+            return next === prev.leftWidth ? prev : { ...prev, leftWidth: next };
+          }
+          const next = clampWidth(startRight - dx);
+          return next === prev.rightWidth ? prev : { ...prev, rightWidth: next };
+        });
+      };
+      const onUp = (e: PointerEvent) => {
+        target.releasePointerCapture(e.pointerId);
+        target.classList.remove("is-dragging");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [panels.leftWidth, panels.rightWidth],
+  );
+
+  const resetPanelWidth = useCallback(
+    (side: "left" | "right") => () => {
+      setPanels((p) =>
+        side === "left"
+          ? { ...p, leftWidth: PANEL_DEFAULT_WIDTH }
+          : { ...p, rightWidth: PANEL_DEFAULT_WIDTH },
+      );
+    },
+    [],
+  );
+
   const initialSaveName = (docTitle || "").trim() || `diagram-${new Date().toISOString().slice(0, 10)}`;
 
   return (
@@ -594,7 +661,21 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         }}
       />
       <div className="anchor-diagram-workspace">
-        {panels.left ? <LeftPanel /> : null}
+        {panels.left ? (
+          <>
+            <div style={{ width: panels.leftWidth, flexShrink: 0 }}>
+              <LeftPanel />
+            </div>
+            <div
+              className="anchor-diagram-panel-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("diagram.panel.left.hide")}
+              onPointerDown={startPanelResize("left")}
+              onDoubleClick={resetPanelWidth("left")}
+            />
+          </>
+        ) : null}
         <div className="anchor-diagram-viewport" ref={viewportRef}>
           <FindBar open={findOpen} onClose={() => setFindOpen(false)} />
           <CanvasSurface onMemoOpen={(nodeId) => setMemoOpen(nodeId)} />
@@ -634,7 +715,21 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
             </aside>
           ) : null}
         </div>
-        {panels.right ? <RightPanel /> : null}
+        {panels.right ? (
+          <>
+            <div
+              className="anchor-diagram-panel-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("diagram.panel.right.hide")}
+              onPointerDown={startPanelResize("right")}
+              onDoubleClick={resetPanelWidth("right")}
+            />
+            <div style={{ width: panels.rightWidth, flexShrink: 0 }}>
+              <RightPanel />
+            </div>
+          </>
+        ) : null}
       </div>
       <SaveAsDialog
         open={saveDialogOpen}
