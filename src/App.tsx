@@ -5385,10 +5385,10 @@ function MainApp() {
   useEffect(() => {
     const previous = lastAppModeRef.current;
     lastAppModeRef.current = visibleAppMode;
-    if (previous !== visibleAppMode && previous === "pkm" && visibleAppMode !== "pkm") {
+    if (previous !== visibleAppMode && visibleAppMode !== "pkm" && outlineOpen) {
       updateLayoutSettings({ outlineOpen: false });
     }
-  }, [visibleAppMode, updateLayoutSettings]);
+  }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized

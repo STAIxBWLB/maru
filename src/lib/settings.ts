@@ -80,7 +80,6 @@ export interface WindowBoundsSettings {
 }
 
 export interface LayoutSettings {
-  documentTypesPaneOpen: boolean;
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
   outlineOpen: boolean;
@@ -233,7 +232,6 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     themeMode: "system",
     accentColor: "#2f5a3c",
     layout: {
-      documentTypesPaneOpen: true,
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
       outlineOpen: true,
@@ -1149,10 +1147,6 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
     layout.terminalHeight ?? legacyTerminal.lastHeight,
   );
   return {
-    documentTypesPaneOpen:
-      typeof layout.documentTypesPaneOpen === "boolean"
-        ? layout.documentTypesPaneOpen
-        : DEFAULT_ANCHOR_SETTINGS.ui.layout.documentTypesPaneOpen,
     documentsPaneOpen:
       typeof layout.documentsPaneOpen === "boolean"
         ? layout.documentsPaneOpen

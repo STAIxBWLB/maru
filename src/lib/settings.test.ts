@@ -419,7 +419,6 @@ describe("normalizeAnchorSettings", () => {
     const settings = normalizeAnchorSettings({
       ui: {
         layout: {
-          documentTypesPaneOpen: false,
           documentsPaneOpen: false,
           documentsPaneWidth: 420,
           outlineOpen: false,
@@ -442,7 +441,6 @@ describe("normalizeAnchorSettings", () => {
     });
 
     expect(settings.ui.layout).toMatchObject({
-      documentTypesPaneOpen: false,
       documentsPaneOpen: false,
       documentsPaneWidth: 420,
       outlineOpen: false,

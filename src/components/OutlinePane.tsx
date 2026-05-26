@@ -223,7 +223,8 @@ export function OutlinePane({
   onOpenCommandPalette,
 }: OutlinePaneProps) {
   const { t } = useTranslation();
-  const tab = activeTab;
+  const isPkm = appMode === "pkm";
+  const tab: RightPaneTab = isPkm ? activeTab : "workspace";
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
   const meta = document?.meta ?? {};
   const fmType = frontmatterScalar(meta, "type");
@@ -260,12 +261,6 @@ export function OutlinePane({
     [onQueueFileSources],
   );
 
-  const isPkm = appMode === "pkm";
-  useEffect(() => {
-    if (!isPkm && tab !== "workspace") {
-      onTabChange("workspace");
-    }
-  }, [isPkm, tab, onTabChange]);
   const visibleTabs: readonly RightPaneTab[] = isPkm
     ? ["workspace", "outline", "files", "memo", "skills", "guideline", "evidence", "info"]
     : ["workspace"];
@@ -342,7 +337,6 @@ export function OutlinePane({
         <div className="right-pane-content">
           {tab === "workspace" ? (
             <Sidebar
-              embedded
               contentCount={contentCount}
               typeCounts={typeCounts}
               documentViews={documentViews}

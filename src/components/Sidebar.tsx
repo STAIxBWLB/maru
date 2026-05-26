@@ -5,7 +5,6 @@ import {
   FileText,
   Inbox,
   Layers,
-  PanelLeftClose,
   Pencil,
   Plus,
   Trash2,
@@ -38,8 +37,6 @@ interface SidebarProps {
   canCreateDocument: boolean;
   onSelectRecent: (entry: VaultEntry) => void;
   onOpenCommandPalette: () => void;
-  onClose?: () => void;
-  embedded?: boolean;
 }
 
 export const Sidebar = memo(function Sidebar({
@@ -57,8 +54,6 @@ export const Sidebar = memo(function Sidebar({
   canCreateDocument,
   onSelectRecent,
   onOpenCommandPalette,
-  onClose,
-  embedded = false,
 }: SidebarProps) {
   const { t } = useTranslation();
   const activeFilterKey = documentFilterKey(documentFilter);
@@ -142,23 +137,7 @@ export const Sidebar = memo(function Sidebar({
   };
 
   return (
-    <aside className={embedded ? "sidebar embedded" : "sidebar"}>
-      {embedded ? null : (
-        <div className="sidebar-header">
-          <strong>{t("sidebar.types")}</strong>
-          {onClose ? (
-            <button
-              type="button"
-              className="icon-button"
-              onClick={onClose}
-              title={t("layout.hideDocumentTypes")}
-              aria-label={t("layout.hideDocumentTypes")}
-            >
-              <PanelLeftClose size={14} />
-            </button>
-          ) : null}
-        </div>
-      )}
+    <aside className="sidebar embedded">
       <div className="sidebar-section">
         <button
           type="button"
@@ -341,12 +320,6 @@ export const Sidebar = memo(function Sidebar({
         </div>
       </div>
 
-      {embedded ? null : (
-        <div className="sidebar-footer">
-          <span className="dot" />
-          <span>{t("footer.tagline")}</span>
-        </div>
-      )}
       <Dialog.Root open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />

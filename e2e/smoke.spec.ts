@@ -240,7 +240,7 @@ test("restores the previous app state on startup", async ({ page }) => {
   await expect(page.locator(".inbox-pane")).toBeVisible();
   await rail.getByRole("button", { name: "문서", exact: true }).click();
 
-  await rail.getByLabel("오른쪽 패널 숨기기").click();
+  await rail.getByLabel("오른쪽 패널 보이기").click();
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await page.getByLabel("오른쪽으로 분할").first().click();
   await page.getByRole("button", { name: "Files" }).click();
