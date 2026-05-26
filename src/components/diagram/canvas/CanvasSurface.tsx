@@ -87,6 +87,10 @@ interface ConnectState {
 
 type Gesture = DragState | PanState | MarqueeState | ConnectState | null;
 
+export interface CanvasSurfaceProps {
+  onMemoOpen?: (nodeId: NodeId) => void;
+}
+
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const SMART_GUIDE_THRESHOLD_PX = 6;
@@ -127,7 +131,7 @@ function findPortTarget(event: PointerEvent<SVGSVGElement>): {
   return null; // Body-drop without explicit port — skip for Phase 2.
 }
 
-export function CanvasSurface() {
+export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
   const store = useDiagramStore();
   const persistentCoalescer = useDiagramCoalescer();
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -510,6 +514,7 @@ export function CanvasSurface() {
               pendingConnectActive={Boolean(connectGhost)}
               onPointerDown={beginNodeDrag}
               onPortPointerDown={beginConnect}
+              onMemoOpen={onMemoOpen}
             />
           </g>
         ))}

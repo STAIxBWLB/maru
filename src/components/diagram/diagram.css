@@ -800,6 +800,278 @@
   padding: 24px 0;
 }
 
+/* ── Phase 5: focus mode + dark mode chrome ─────────────────────────────── */
+
+.anchor-diagram.is-focus-mode .anchor-diagram-header,
+.anchor-diagram.is-focus-mode .anchor-diagram-ribbon,
+.anchor-diagram.is-focus-mode .anchor-diagram-side-panel {
+  display: none;
+}
+
+.anchor-diagram-focus-exit {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.anchor-diagram-focus-exit:hover {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.anchor-diagram-focus-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-focus-btn:hover,
+.anchor-diagram-focus-btn[aria-pressed="true"] {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram.is-dark {
+  --anchor-bg: #0f172a;
+  --anchor-fg: #e2e8f0;
+  --anchor-surface: #1e293b;
+  --anchor-border: #334155;
+  --anchor-soft: #1f2937;
+  --anchor-muted: #94a3b8;
+}
+
+/* Canvas surface always stays light per the source rule, regardless of theme. */
+.anchor-diagram .anchor-diagram-viewport {
+  background:
+    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-color: #fafafa;
+}
+
+/* ── Phase 5: find bar ──────────────────────────────────────────────────── */
+
+.anchor-diagram-find-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--anchor-surface, #ffffff);
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: var(--anchor-fg, #1f2937);
+}
+
+.anchor-diagram-find-bar input {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  min-width: 200px;
+}
+
+.anchor-diagram-find-bar input[type="text"] {
+  min-width: 140px;
+}
+
+.anchor-diagram-find-bar button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.anchor-diagram-find-bar button:hover:not(:disabled) {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: var(--anchor-border, #e5e7eb);
+}
+
+.anchor-diagram-find-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-find-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+  min-width: 64px;
+  text-align: center;
+}
+
+.anchor-diagram-find-close {
+  color: var(--anchor-muted, #6b7280);
+}
+
+/* ── Phase 5: memo dialog + textareas ──────────────────────────────────── */
+
+.anchor-diagram-memo-dialog {
+  max-width: 520px;
+}
+
+.anchor-diagram-memo-target {
+  font-weight: 400;
+  color: var(--anchor-muted, #6b7280);
+  font-size: 11px;
+}
+
+.anchor-diagram-memo-text {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 140px;
+}
+
+.anchor-diagram-memo-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.anchor-diagram-memo-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.anchor-diagram-memo-actions .anchor-diagram-memo-delete {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.anchor-diagram-memo-actions .anchor-diagram-memo-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anchor-diagram-memo-badge {
+  cursor: pointer;
+}
+
+.anchor-diagram-memo-badge:hover circle {
+  filter: brightness(1.08);
+}
+
+/* Right panel textarea + range input fit the existing property field shell */
+.anchor-diagram-prop textarea {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.anchor-diagram-prop input[type="range"] {
+  flex: 1;
+}
+
+/* ── Phase 5: special chars picker ─────────────────────────────────────── */
+
+.anchor-diagram-specialchars-dialog {
+  max-width: 560px;
+}
+
+.anchor-diagram-specialchars-hint {
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+  margin: 4px 0 8px;
+}
+
+.anchor-diagram-specialchars-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.anchor-diagram-specialchars-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.anchor-diagram-specialchars-grid button {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-diagram-specialchars-grid button:hover {
+  background: var(--anchor-soft, #f3f4f6);
+  border-color: #93c5fd;
+}
+
+/* ── Phase 5: a11y focus rings ─────────────────────────────────────────── */
+
+.anchor-diagram-ribbon-button:focus-visible,
+.anchor-diagram-layer-button:focus-visible,
+.anchor-diagram-layer-name:focus-visible,
+.anchor-diagram-find-bar input:focus-visible,
+.anchor-diagram-find-bar button:focus-visible,
+.anchor-diagram-prop input:focus-visible,
+.anchor-diagram-prop select:focus-visible,
+.anchor-diagram-prop textarea:focus-visible,
+.anchor-diagram-template-card:focus-visible,
+.anchor-diagram-color-preset:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.anchor-diagram-port:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .anchor-diagram-viewport {
   flex: 1;
   position: relative;

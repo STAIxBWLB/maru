@@ -2,6 +2,7 @@ import { useCallback, type ChangeEvent } from "react";
 
 import {
   defaultCoalescer,
+  setNodeMeta,
   updateEdge,
   updateNode,
   withSnapshot,
@@ -136,12 +137,66 @@ function NodeProps({ node }: { node: DiagramNode }) {
       patch({ style: { ...node.style, ...delta } }),
     [node.style, patch],
   );
+  const patchMeta = useCallback(
+    (delta: Record<string, unknown>) =>
+      store.setState(withSnapshot(setNodeMeta(node.id, delta), defaultCoalescer())),
+    [node.id, store],
+  );
+
+  const status = typeof node.meta?.status === "string" ? (node.meta.status as string) : "";
+  const progress = typeof node.meta?.progress === "number" ? (node.meta.progress as number) : -1;
+  const memo = typeof node.meta?.memo === "string" ? (node.meta.memo as string) : "";
 
   return (
     <div className="anchor-diagram-prop-sections">
       <section>
         <h3>{t("diagram.panel.properties.text")}</h3>
-        <TextField labelKey="diagram.properties.title" value={node.title ?? ""} onCommit={(v) => patch({ title: v })} />
+        <TextField
+          labelKey="diagram.properties.title"
+          value={node.title ?? ""}
+          onCommit={(v) => patch({ title: v })}
+        />
+      </section>
+      <section>
+        <h3>{t("diagram.status.label")}</h3>
+        <SelectField
+          labelKey="diagram.status.label"
+          value={status}
+          onCommit={(v) => patchMeta({ status: v || null })}
+          options={[
+            { value: "", labelKey: "diagram.status.none" },
+            { value: "todo", labelKey: "diagram.status.todo" },
+            { value: "doing", labelKey: "diagram.status.doing" },
+            { value: "done", labelKey: "diagram.status.done" },
+            { value: "blocked", labelKey: "diagram.status.blocked" },
+          ]}
+        />
+        <label className="anchor-diagram-prop">
+          <span>{t("diagram.progress.label")}</span>
+          <input
+            type="range"
+            min={-1}
+            max={100}
+            step={5}
+            value={progress}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              patchMeta({ progress: v < 0 ? null : v });
+            }}
+          />
+          <span style={{ width: 38, textAlign: "right", color: "var(--anchor-muted, #6b7280)" }}>
+            {progress < 0 ? t("diagram.status.none") : t("diagram.progress.value", { percent: String(progress) })}
+          </span>
+        </label>
+        <label className="anchor-diagram-prop">
+          <span>{t("diagram.memo.dialog.title")}</span>
+          <textarea
+            value={memo}
+            rows={3}
+            placeholder={t("diagram.memo.placeholder")}
+            onChange={(e) => patchMeta({ memo: e.target.value || null })}
+          />
+        </label>
       </section>
       <section>
         <h3>{t("diagram.panel.properties.position")}</h3>

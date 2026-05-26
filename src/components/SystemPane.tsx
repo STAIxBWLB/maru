@@ -947,8 +947,46 @@ function PreferencesTab({
             <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
           </select>
         </label>
+        <DiagramPreviewToggle />
       </div>
     </div>
+  );
+}
+
+function DiagramPreviewToggle() {
+  const { t } = useTranslation();
+  const STORAGE_KEY = "anchor:diagram:enabled";
+  const [enabled, setEnabled] = useState<boolean>(() => {
+    try {
+      const value = window.localStorage.getItem(STORAGE_KEY);
+      return value === "1" || value === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = (next: boolean) => {
+    setEnabled(next);
+    try {
+      if (next) window.localStorage.setItem(STORAGE_KEY, "1");
+      else window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <label className="field">
+      <span>{t("diagram.system.preview.label")}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => toggle(event.target.checked)}
+        />
+        <small style={{ color: "var(--anchor-muted, #6b7280)" }}>
+          {t("diagram.system.preview.hint")}
+        </small>
+      </div>
+    </label>
   );
 }
 

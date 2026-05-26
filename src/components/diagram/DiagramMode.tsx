@@ -1,4 +1,4 @@
-import { Network } from "lucide-react";
+import { Eye, Network } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -11,14 +11,22 @@ import {
 import {
   addNode,
   defaultCoalescer,
+  duplicateSelection,
+  nudgeSelection,
   redo as redoAction,
+  removeEdges,
+  removeNodes,
   replaceDoc,
+  selectAllNodes,
   setDocTitle,
+  setNodeMeta,
   setSnapSize,
   setViewport,
+  toggleFocusMode,
   undo as undoAction,
   withSnapshot,
 } from "../../lib/diagram/actions";
+import { isInEditable, matchesShortcut } from "../../lib/diagram/shortcuts";
 import { fitView } from "../../lib/diagram/geometry";
 import type { MkNodeOpts } from "../../lib/diagram/nodeKinds";
 import {
@@ -50,9 +58,12 @@ import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
 import { ExportDialog } from "./modals/ExportDialog";
+import { MemoDialog } from "./modals/MemoDialog";
 import { SaveAsDialog } from "./modals/SaveAsDialog";
+import { SpecialCharsPicker } from "./modals/SpecialCharsPicker";
 import { TemplatePickerDialog } from "./modals/TemplatePickerDialog";
 import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
+import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
 
 export interface DiagramModeProps {
@@ -124,8 +135,17 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [memoOpen, setMemoOpen] = useState<string | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [specialOpen, setSpecialOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof document === "undefined") return "light";
+    return (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  });
+  const focusMode = useDiagram((s) => s.ephemeral.ui.focusMode);
   const [panels, setPanels] = useState<PersistedPanelState>(() => readPanelState());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const insertOffsetRef = useRef(0);
 
   // Hydrate persisted snap-size once.
@@ -143,6 +163,20 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   useEffect(() => {
     writePanelState(panels);
   }, [panels]);
+
+  // Mirror Anchor's data-theme onto our root so chrome can opt in to dark mode
+  // while the canvas stays light (source rule: canvas always light).
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const apply = () => {
+      setTheme(root.dataset.theme === "dark" ? "dark" : "light");
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const docBody = useMemo(
     () => JSON.stringify(store.getState().doc),
@@ -357,51 +391,107 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const inField =
-        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "s") {
+      const inField = isInEditable(target);
+
+      if (matchesShortcut(event, { key: "s", mod: true })) {
         event.preventDefault();
         handleSave();
         return;
       }
-      if (mod && event.key.toLowerCase() === "z") {
+      if (matchesShortcut(event, { key: "z", mod: true, shift: false })) {
         event.preventDefault();
-        if (event.shiftKey) store.setState(redoAction());
-        else store.setState(undoAction());
+        store.setState(undoAction());
         return;
       }
-      if (mod && event.key.toLowerCase() === "y") {
+      if (matchesShortcut(event, { key: "z", mod: true, shift: true })) {
         event.preventDefault();
         store.setState(redoAction());
         return;
       }
+      if (matchesShortcut(event, { key: "y", mod: true })) {
+        event.preventDefault();
+        store.setState(redoAction());
+        return;
+      }
+      if (matchesShortcut(event, { key: "f", mod: true, shift: false })) {
+        event.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (!inField && event.key === "/" && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (matchesShortcut(event, { key: "a", mod: true })) {
+        event.preventDefault();
+        store.setState(selectAllNodes());
+        return;
+      }
+      if (matchesShortcut(event, { key: "d", mod: true })) {
+        event.preventDefault();
+        store.setState(withSnapshot(duplicateSelection(), defaultCoalescer()));
+        return;
+      }
+      if (!inField && event.key === "F2") {
+        event.preventDefault();
+        titleInputRef.current?.focus();
+        titleInputRef.current?.select();
+        return;
+      }
+      if (!inField && event.key === "Escape") {
+        if (store.getState().ephemeral.ui.focusMode) {
+          event.preventDefault();
+          store.setState(toggleFocusMode(false));
+          return;
+        }
+        if (findOpen) {
+          event.preventDefault();
+          setFindOpen(false);
+          return;
+        }
+      }
+      if (!inField && !event.metaKey && !event.ctrlKey) {
+        const step = event.shiftKey ? 10 : 1;
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          store.setState(withSnapshot(nudgeSelection(-step, 0), defaultCoalescer()));
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          store.setState(withSnapshot(nudgeSelection(step, 0), defaultCoalescer()));
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          store.setState(withSnapshot(nudgeSelection(0, -step), defaultCoalescer()));
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          store.setState(withSnapshot(nudgeSelection(0, step), defaultCoalescer()));
+          return;
+        }
+      }
       if (!inField && (event.key === "Delete" || event.key === "Backspace")) {
         if (hasSelection) {
           event.preventDefault();
-          // Delegate to the action (re-importing here would create a cycle; use a local lambda).
-          store.setState((state) => {
-            const { nodes, edges } = state.ephemeral.selection;
-            if (nodes.size === 0 && edges.size === 0) return state;
-            const filteredNodes = state.doc.nodes.filter((n) => !nodes.has(n.id));
-            const filteredEdges = state.doc.edges.filter(
-              (e) => !edges.has(e.id) && !nodes.has(e.fromNode) && !nodes.has(e.toNode),
-            );
-            return {
-              ...state,
-              doc: { ...state.doc, nodes: filteredNodes, edges: filteredEdges },
-              ephemeral: {
-                ...state.ephemeral,
-                selection: { nodes: new Set(), edges: new Set() },
-              },
-            };
-          });
+          const state = store.getState();
+          const nodeIds = [...state.ephemeral.selection.nodes];
+          const edgeIds = [...state.ephemeral.selection.edges];
+          if (nodeIds.length > 0) {
+            store.setState(withSnapshot(removeNodes(nodeIds), defaultCoalescer()));
+          }
+          if (edgeIds.length > 0) {
+            store.setState(withSnapshot(removeEdges(edgeIds), defaultCoalescer()));
+          }
         }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSave, hasSelection, store]);
+  }, [findOpen, handleSave, hasSelection, store]);
 
   const statusLabel = saving
     ? t("diagram.status.saving")
@@ -423,17 +513,43 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const initialSaveName = (docTitle || "").trim() || `diagram-${new Date().toISOString().slice(0, 10)}`;
 
   return (
-    <div className="anchor-diagram" data-testid="diagram-mode" role="region" aria-label={t("mode.diagram")}>
+    <div
+      className={`anchor-diagram${theme === "dark" ? " is-dark" : ""}${focusMode ? " is-focus-mode" : ""}`}
+      data-testid="diagram-mode"
+      role="region"
+      aria-label={t("mode.diagram")}
+    >
+      {focusMode ? (
+        <button
+          type="button"
+          className="anchor-diagram-focus-exit"
+          onClick={() => store.setState(toggleFocusMode(false))}
+          title={t("diagram.focusMode.exit")}
+        >
+          {t("diagram.focusMode.exit")}
+        </button>
+      ) : null}
       <header className="anchor-diagram-header">
         <div className="anchor-diagram-title">
           <Network size={20} strokeWidth={1.9} aria-hidden="true" />
           <input
+            ref={titleInputRef}
             className="anchor-diagram-title-input"
             value={docTitle}
             placeholder={t("diagram.title.placeholder")}
             onChange={(e) => store.setState(setDocTitle(e.target.value))}
             aria-label={t("diagram.title.placeholder")}
           />
+          <button
+            type="button"
+            className="anchor-diagram-focus-btn"
+            onClick={() => store.setState(toggleFocusMode())}
+            title={t("diagram.focusMode.toggle")}
+            aria-label={t("diagram.focusMode.toggle")}
+            aria-pressed={focusMode}
+          >
+            <Eye size={14} />
+          </button>
           {statusLabel ? (
             <span className={`anchor-diagram-status anchor-diagram-status-${dirty ? "dirty" : "saved"}`}>
               {statusLabel}
@@ -477,7 +593,8 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       <div className="anchor-diagram-workspace">
         {panels.left ? <LeftPanel /> : null}
         <div className="anchor-diagram-viewport" ref={viewportRef}>
-          <CanvasSurface />
+          <FindBar open={findOpen} onClose={() => setFindOpen(false)} />
+          <CanvasSurface onMemoOpen={(nodeId) => setMemoOpen(nodeId)} />
           {listOpen ? (
             <aside className="anchor-diagram-list" aria-label={t("diagram.list.heading")}>
               <div className="anchor-diagram-list-head">
@@ -562,6 +679,52 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         }}
         onError={(message) => reportError(t("diagram.error.load", { message }))}
         onClose={() => setHistoryOpen(false)}
+      />
+      <MemoDialog
+        open={memoOpen !== null}
+        initial={(memoOpen ? (store.getState().doc.nodes.find((n) => n.id === memoOpen)?.meta?.memo as string | undefined) : "") ?? ""}
+        nodeTitle={
+          memoOpen ? store.getState().doc.nodes.find((n) => n.id === memoOpen)?.title ?? "" : ""
+        }
+        onSave={(memo) => {
+          if (memoOpen) {
+            store.setState(withSnapshot(setNodeMeta(memoOpen, { memo: memo || null }), defaultCoalescer()));
+          }
+          setMemoOpen(null);
+        }}
+        onDelete={() => {
+          if (memoOpen) {
+            store.setState(withSnapshot(setNodeMeta(memoOpen, { memo: null }), defaultCoalescer()));
+          }
+          setMemoOpen(null);
+        }}
+        onClose={() => setMemoOpen(null)}
+      />
+      <SpecialCharsPicker
+        open={specialOpen}
+        onInsert={(char) => {
+          const sel = [...store.getState().ephemeral.selection.nodes];
+          if (sel.length === 0) return;
+          for (const id of sel) {
+            const node = store.getState().doc.nodes.find((n) => n.id === id);
+            if (!node) continue;
+            store.setState(
+              withSnapshot(
+                (state) => ({
+                  ...state,
+                  doc: {
+                    ...state.doc,
+                    nodes: state.doc.nodes.map((n) =>
+                      n.id === id ? { ...n, title: (n.title ?? "") + char } : n,
+                    ),
+                  },
+                }),
+                defaultCoalescer(),
+              ),
+            );
+          }
+        }}
+        onClose={() => setSpecialOpen(false)}
       />
     </div>
   );

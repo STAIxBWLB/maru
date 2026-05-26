@@ -217,6 +217,100 @@ export function toggleSmartGuides(value?: boolean): StateTransformer {
   });
 }
 
+export function toggleFocusMode(value?: boolean): StateTransformer {
+  return (state) => ({
+    ...state,
+    ephemeral: {
+      ...state.ephemeral,
+      ui: { ...state.ephemeral.ui, focusMode: value ?? !state.ephemeral.ui.focusMode },
+    },
+  });
+}
+
+export function nudgeSelection(dx: number, dy: number): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size === 0 || (dx === 0 && dy === 0)) return state;
+    const nodes = state.doc.nodes.map((n) =>
+      ids.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n,
+    );
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+export function selectAllNodes(): StateTransformer {
+  return (state) => ({
+    ...state,
+    ephemeral: {
+      ...state.ephemeral,
+      selection: {
+        nodes: new Set(state.doc.nodes.map((n) => n.id)),
+        edges: new Set(),
+      },
+    },
+  });
+}
+
+function newId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function duplicateSelection(offsetX = 24, offsetY = 24): StateTransformer {
+  return (state) => {
+    const selectedIds = state.ephemeral.selection.nodes;
+    if (selectedIds.size === 0) return state;
+    const idMap = new Map<NodeId, NodeId>();
+    const cloned: DiagramNode[] = [];
+    for (const node of state.doc.nodes) {
+      if (!selectedIds.has(node.id)) continue;
+      const nextId = newId("node");
+      idMap.set(node.id, nextId);
+      cloned.push({ ...node, id: nextId, x: node.x + offsetX, y: node.y + offsetY });
+    }
+    if (cloned.length === 0) return state;
+    const clonedEdges: DiagramEdge[] = [];
+    for (const edge of state.doc.edges) {
+      const fromMapped = idMap.get(edge.fromNode);
+      const toMapped = idMap.get(edge.toNode);
+      if (fromMapped && toMapped) {
+        clonedEdges.push({
+          ...edge,
+          id: newId("edge"),
+          fromNode: fromMapped,
+          toNode: toMapped,
+        });
+      }
+    }
+    return {
+      ...state,
+      doc: {
+        ...state.doc,
+        nodes: [...state.doc.nodes, ...cloned],
+        edges: [...state.doc.edges, ...clonedEdges],
+      },
+      ephemeral: {
+        ...state.ephemeral,
+        selection: {
+          nodes: new Set(cloned.map((n) => n.id)),
+          edges: new Set(),
+        },
+      },
+    };
+  };
+}
+
+export function setNodeMeta(id: NodeId, patch: Record<string, unknown>): StateTransformer {
+  return (state) => {
+    const nodes = state.doc.nodes.map((n) =>
+      n.id === id ? { ...n, meta: { ...(n.meta ?? {}), ...patch } } : n,
+    );
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
 export function setDocTitle(docTitle: string): StateTransformer {
   return (state) => ({
     ...state,

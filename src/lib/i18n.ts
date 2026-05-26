@@ -1504,6 +1504,45 @@ const ko: Record<string, string> = {
   "diagram.template.processFlow.process": "처리",
   "diagram.template.processFlow.decision": "분기?",
   "diagram.template.processFlow.finish": "종료",
+
+  "diagram.findBar.placeholder": "노드/엣지에서 검색…",
+  "diagram.findBar.next": "다음",
+  "diagram.findBar.prev": "이전",
+  "diagram.findBar.close": "닫기",
+  "diagram.findBar.count": "{current}/{total}",
+  "diagram.findBar.none": "검색 결과 없음",
+  "diagram.findBar.replaceAll": "전체 바꾸기",
+  "diagram.findBar.replacePlaceholder": "바꿀 텍스트",
+
+  "diagram.memo.dialog.title": "메모",
+  "diagram.memo.placeholder": "리뷰 의견, 수정 요청, 담당자 메모 등을 입력하세요…",
+  "diagram.memo.save": "저장",
+  "diagram.memo.cancel": "취소",
+  "diagram.memo.delete": "삭제",
+  "diagram.memo.openButton": "메모 열기",
+
+  "diagram.status.label": "상태",
+  "diagram.status.none": "—",
+  "diagram.status.todo": "예정",
+  "diagram.status.doing": "진행",
+  "diagram.status.done": "완료",
+  "diagram.status.blocked": "지연",
+
+  "diagram.progress.label": "진행도",
+  "diagram.progress.value": "{percent}%",
+
+  "diagram.focusMode.toggle": "포커스 모드",
+  "diagram.focusMode.exit": "✕ 포커스 모드 종료",
+
+  "diagram.specialChars.title": "특수 문자",
+  "diagram.specialChars.heading": "특수 문자",
+  "diagram.specialChars.insert": "삽입",
+  "diagram.specialChars.close": "닫기",
+  "diagram.specialChars.hint": "선택된 노드 제목 끝에 추가됩니다.",
+
+  "diagram.system.preview.label": "다이어그램 모드 (프리뷰)",
+  "diagram.system.preview.hint": "활성화 시 좌측 활동 막대에 다이어그램 모드 아이콘이 표시됩니다. 변경은 새로고침 후 적용됩니다.",
+  "diagram.system.preview.reload": "다시 시작 필요",
 };
 
 const en: Record<string, string> = {
@@ -2997,6 +3036,45 @@ const en: Record<string, string> = {
   "diagram.template.processFlow.process": "Process",
   "diagram.template.processFlow.decision": "Branch?",
   "diagram.template.processFlow.finish": "Finish",
+
+  "diagram.findBar.placeholder": "Search nodes / edges…",
+  "diagram.findBar.next": "Next",
+  "diagram.findBar.prev": "Prev",
+  "diagram.findBar.close": "Close",
+  "diagram.findBar.count": "{current}/{total}",
+  "diagram.findBar.none": "No matches",
+  "diagram.findBar.replaceAll": "Replace all",
+  "diagram.findBar.replacePlaceholder": "Replacement",
+
+  "diagram.memo.dialog.title": "Memo",
+  "diagram.memo.placeholder": "Review notes, follow-ups, owner reminders…",
+  "diagram.memo.save": "Save",
+  "diagram.memo.cancel": "Cancel",
+  "diagram.memo.delete": "Delete",
+  "diagram.memo.openButton": "Open memo",
+
+  "diagram.status.label": "Status",
+  "diagram.status.none": "—",
+  "diagram.status.todo": "To do",
+  "diagram.status.doing": "Doing",
+  "diagram.status.done": "Done",
+  "diagram.status.blocked": "Blocked",
+
+  "diagram.progress.label": "Progress",
+  "diagram.progress.value": "{percent}%",
+
+  "diagram.focusMode.toggle": "Focus mode",
+  "diagram.focusMode.exit": "✕ Exit focus mode",
+
+  "diagram.specialChars.title": "Special characters",
+  "diagram.specialChars.heading": "Special characters",
+  "diagram.specialChars.insert": "Insert",
+  "diagram.specialChars.close": "Close",
+  "diagram.specialChars.hint": "Appended to the selected node's title.",
+
+  "diagram.system.preview.label": "Diagram mode (preview)",
+  "diagram.system.preview.hint": "Adds the Diagram icon to the activity rail. A reload is required for the change to take effect.",
+  "diagram.system.preview.reload": "Reload required",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { ko, en };

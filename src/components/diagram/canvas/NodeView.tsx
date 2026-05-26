@@ -10,7 +10,17 @@ export interface NodeViewProps {
   pendingConnectActive: boolean;
   onPointerDown: (event: PointerEvent<SVGGElement>, nodeId: NodeId) => void;
   onPortPointerDown: (event: PointerEvent<SVGCircleElement>, nodeId: NodeId, port: EdgePort) => void;
+  onMemoOpen?: (nodeId: NodeId) => void;
 }
+
+type NodeStatus = "todo" | "doing" | "done" | "blocked";
+
+const STATUS_COLORS: Record<NodeStatus, { bg: string; fg: string; bar: string }> = {
+  todo: { bg: "#e2e8f0", fg: "#1e293b", bar: "#94a3b8" },
+  doing: { bg: "#dbeafe", fg: "#1e40af", bar: "#2563eb" },
+  done: { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a" },
+  blocked: { bg: "#fee2e2", fg: "#7f1d1d", bar: "#dc2626" },
+};
 
 const PORTS: EdgePort[] = ["n", "e", "s", "w"];
 
@@ -242,6 +252,7 @@ function NodeViewBase({
   pendingConnectActive,
   onPointerDown,
   onPortPointerDown,
+  onMemoOpen,
 }: NodeViewProps) {
   const s = shapeFor(node);
   const handlePointerDown = useCallback(
@@ -250,6 +261,17 @@ function NodeViewBase({
   );
 
   const portsVisible = showPorts || pendingConnectActive || selected;
+
+  const memo = typeof node.meta?.memo === "string" ? (node.meta.memo as string) : "";
+  const statusRaw = typeof node.meta?.status === "string" ? (node.meta.status as string) : null;
+  const status: NodeStatus | null =
+    statusRaw === "todo" || statusRaw === "doing" || statusRaw === "done" || statusRaw === "blocked"
+      ? statusRaw
+      : null;
+  const progressRaw = typeof node.meta?.progress === "number" ? (node.meta.progress as number) : null;
+  const progress = progressRaw === null ? null : Math.max(0, Math.min(100, progressRaw));
+  const statusPalette = status ? STATUS_COLORS[status] : null;
+  const progressBarHeight = 6;
 
   return (
     <g
@@ -276,6 +298,71 @@ function NodeViewBase({
           pointerEvents="none"
         />
       ) : null}
+      {statusPalette ? (
+        <g transform={`translate(8, -10)`}>
+          <rect
+            x={0}
+            y={0}
+            rx={9}
+            ry={9}
+            width={Math.max(38, status!.length * 8 + 12)}
+            height={18}
+            fill={statusPalette.bg}
+            stroke={statusPalette.bar}
+            strokeWidth={1}
+          />
+          <text
+            x={Math.max(38, status!.length * 8 + 12) / 2}
+            y={12}
+            textAnchor="middle"
+            fontSize={10}
+            fontWeight={700}
+            fill={statusPalette.fg}
+          >
+            {status}
+          </text>
+        </g>
+      ) : null}
+      {progress !== null ? (
+        <g transform={`translate(4, ${node.h - progressBarHeight - 4})`}>
+          <rect
+            x={0}
+            y={0}
+            width={node.w - 8}
+            height={progressBarHeight}
+            rx={3}
+            ry={3}
+            fill="rgba(0,0,0,0.08)"
+          />
+          <rect
+            x={0}
+            y={0}
+            width={((node.w - 8) * progress) / 100}
+            height={progressBarHeight}
+            rx={3}
+            ry={3}
+            fill={statusPalette?.bar ?? "#16a34a"}
+          />
+        </g>
+      ) : null}
+      {memo ? (
+        <g
+          className="anchor-diagram-memo-badge"
+          transform={`translate(${node.w - 6}, -10)`}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onMemoOpen?.(node.id);
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Open memo"
+        >
+          <circle r={10} fill="#fbbf24" stroke="#92400e" strokeWidth={1.4} />
+          <text x={0} y={4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#78350f">
+            ✎
+          </text>
+        </g>
+      ) : null}
       {portsVisible
         ? PORTS.map((port) => {
             const pt = portPoint(node, port);
@@ -295,6 +382,7 @@ function NodeViewBase({
                   event.stopPropagation();
                   onPortPointerDown(event, node.id, port);
                 }}
+                aria-label={`Port ${port}`}
               />
             );
           })
