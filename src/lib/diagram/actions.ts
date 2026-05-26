@@ -12,6 +12,14 @@
  */
 
 import {
+  alignNodes,
+  distributeNodes,
+  equalizeSize,
+  type AlignMode,
+  type DistributeAxis,
+  type EqualizeAxis,
+} from "./alignment";
+import {
   createCoalescer,
   redo as historyRedo,
   snapshot as historySnapshot,
@@ -23,6 +31,7 @@ import type {
   DiagramEdge,
   DiagramNode,
   DiagramStateRoot,
+  EdgeId,
   EdgePort,
   EphemeralState,
   NodeId,
@@ -267,4 +276,188 @@ export function clearPendingConnect(): StateTransformer {
     ...state,
     ephemeral: { ...state.ephemeral, pendingConnect: null },
   });
+}
+
+// ============================================================================
+// Selection ops (Phase 3)
+// ============================================================================
+
+export function alignSelection(mode: AlignMode): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size < 2) return state;
+    const nodes = alignNodes(state.doc.nodes, ids, mode);
+    if (nodes === state.doc.nodes) return state;
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+export function distributeSelection(axis: DistributeAxis): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size < 3) return state;
+    const nodes = distributeNodes(state.doc.nodes, ids, axis);
+    if (nodes === state.doc.nodes) return state;
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+export function equalizeSelection(axis: EqualizeAxis): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size < 2) return state;
+    const nodes = equalizeSize(state.doc.nodes, ids, axis);
+    if (nodes === state.doc.nodes) return state;
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+// ============================================================================
+// Z-order (Phase 3)
+// ============================================================================
+
+function reorderNodes(
+  nodes: DiagramNode[],
+  ids: Set<NodeId>,
+  mode: "front" | "back" | "forward" | "backward",
+): DiagramNode[] {
+  if (ids.size === 0) return nodes;
+  if (mode === "front") {
+    const moved = nodes.filter((n) => ids.has(n.id));
+    const rest = nodes.filter((n) => !ids.has(n.id));
+    return [...rest, ...moved];
+  }
+  if (mode === "back") {
+    const moved = nodes.filter((n) => ids.has(n.id));
+    const rest = nodes.filter((n) => !ids.has(n.id));
+    return [...moved, ...rest];
+  }
+  // forward / backward = one step
+  const out = [...nodes];
+  if (mode === "forward") {
+    // iterate from end to start to avoid stepping on already-moved entries
+    for (let i = out.length - 2; i >= 0; i -= 1) {
+      if (ids.has(out[i]!.id) && !ids.has(out[i + 1]!.id)) {
+        [out[i], out[i + 1]] = [out[i + 1]!, out[i]!];
+      }
+    }
+  } else {
+    for (let i = 1; i < out.length; i += 1) {
+      if (ids.has(out[i]!.id) && !ids.has(out[i - 1]!.id)) {
+        [out[i], out[i - 1]] = [out[i - 1]!, out[i]!];
+      }
+    }
+  }
+  return out;
+}
+
+export function bringToFront(): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size === 0) return state;
+    return { ...state, doc: { ...state.doc, nodes: reorderNodes(state.doc.nodes, ids, "front") } };
+  };
+}
+
+export function sendToBack(): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size === 0) return state;
+    return { ...state, doc: { ...state.doc, nodes: reorderNodes(state.doc.nodes, ids, "back") } };
+  };
+}
+
+export function bringForward(): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size === 0) return state;
+    return { ...state, doc: { ...state.doc, nodes: reorderNodes(state.doc.nodes, ids, "forward") } };
+  };
+}
+
+export function sendBackward(): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (ids.size === 0) return state;
+    return { ...state, doc: { ...state.doc, nodes: reorderNodes(state.doc.nodes, ids, "backward") } };
+  };
+}
+
+/** Move one node to a specific index (drag-reorder in the layers panel). */
+export function moveNodeToIndex(nodeId: NodeId, toIndex: number): StateTransformer {
+  return (state) => {
+    const current = state.doc.nodes;
+    const fromIndex = current.findIndex((n) => n.id === nodeId);
+    if (fromIndex < 0) return state;
+    const clamped = Math.max(0, Math.min(current.length - 1, toIndex));
+    if (clamped === fromIndex) return state;
+    const next = [...current];
+    const [item] = next.splice(fromIndex, 1);
+    if (!item) return state;
+    next.splice(clamped, 0, item);
+    return { ...state, doc: { ...state.doc, nodes: next } };
+  };
+}
+
+// ============================================================================
+// Lock / hide (Phase 3)
+// ============================================================================
+
+export function setNodeLocked(id: NodeId, locked: boolean): StateTransformer {
+  return updateNode(id, { locked });
+}
+
+export function setNodeHidden(id: NodeId, hidden: boolean): StateTransformer {
+  return updateNode(id, { hidden });
+}
+
+// ============================================================================
+// Style copy / paste (Phase 3)
+// ============================================================================
+
+const STYLE_KEYS: Array<keyof NonNullable<DiagramNode["style"]>> = [
+  "bg",
+  "border",
+  "fc",
+  "bw",
+  "br",
+  "fs",
+  "fw",
+  "align",
+];
+
+/**
+ * Snapshot the style of a single node into a string-keyed object that callers
+ * keep in their own state (we deliberately keep styleClipboard *outside* the
+ * store so it survives undo/redo and doesn't enlarge the history snapshot).
+ */
+export function pickStyle(node: DiagramNode): DiagramNode["style"] {
+  const out: Record<string, unknown> = {};
+  if (!node.style) return undefined;
+  for (const key of STYLE_KEYS) {
+    if (node.style[key] !== undefined) out[key] = node.style[key];
+  }
+  return out as DiagramNode["style"];
+}
+
+/** Paste a style onto every selected node (merging on top of any existing style). */
+export function pasteStyleToSelection(style: DiagramNode["style"]): StateTransformer {
+  return (state) => {
+    const ids = state.ephemeral.selection.nodes;
+    if (!style || ids.size === 0) return state;
+    const nodes = state.doc.nodes.map((n) =>
+      ids.has(n.id) ? { ...n, style: { ...n.style, ...style } } : n,
+    );
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+export function updateEdge(
+  id: EdgeId,
+  patch: Partial<DiagramEdge>,
+): StateTransformer {
+  return (state) => {
+    const edges = state.doc.edges.map((e) => (e.id === id ? { ...e, ...patch } : e));
+    return { ...state, doc: { ...state.doc, edges } };
+  };
 }
