@@ -103,17 +103,71 @@ function straightPath(
   return finalize(`M ${start.x} ${start.y} L ${end.x} ${end.y}`, start, end);
 }
 
+// ---------------------------------------------------------------------------
+// Route cache
+//
+// `routeEdge` is invoked on every render of every edge — Phase 6 caches the
+// result keyed by all the inputs that affect the path, so a 200-edge diagram
+// only recomputes the routes for edges whose endpoints actually moved this
+// frame.
+// ---------------------------------------------------------------------------
+
+const ROUTE_CACHE_CAP = 5_000;
+const routeCache = new Map<string, RoutedEdge>();
+
+function routeKey(
+  edge: DiagramEdge,
+  fromNode: DiagramNode,
+  toNode: DiagramNode,
+): string {
+  return [
+    edge.id,
+    edge.fromPort,
+    edge.toPort,
+    edge.routeMode ?? "auto",
+    edge.midOff ?? 0,
+    fromNode.x, fromNode.y, fromNode.w, fromNode.h,
+    toNode.x, toNode.y, toNode.w, toNode.h,
+  ].join("|");
+}
+
+function rememberRoute(key: string, value: RoutedEdge): RoutedEdge {
+  if (routeCache.size >= ROUTE_CACHE_CAP) {
+    // Evict the oldest insertion — Map preserves insertion order.
+    const oldestKey = routeCache.keys().next().value as string | undefined;
+    if (oldestKey !== undefined) routeCache.delete(oldestKey);
+  }
+  routeCache.set(key, value);
+  return value;
+}
+
+/** Drop every cached entry — useful in tests or on doc replace. */
+export function clearRouteCache(): void {
+  routeCache.clear();
+}
+
+/** Read-only handle for tests. */
+export function _routeCacheSizeForTests(): number {
+  return routeCache.size;
+}
+
 export function routeEdge(
   edge: DiagramEdge,
   fromNode: DiagramNode | undefined,
   toNode: DiagramNode | undefined,
 ): RoutedEdge | null {
   if (!fromNode || !toNode) return null;
+  const key = routeKey(edge, fromNode, toNode);
+  const cached = routeCache.get(key);
+  if (cached) return cached;
   const start = portPoint(fromNode, edge.fromPort);
   const end = portPoint(toNode, edge.toPort);
   const mode = edge.routeMode ?? "auto";
-  if (mode === "straight") return straightPath(start, end);
-  return autoPath(start, end, edge.fromPort, edge.toPort, edge.midOff ?? 0);
+  const routed =
+    mode === "straight"
+      ? straightPath(start, end)
+      : autoPath(start, end, edge.fromPort, edge.toPort, edge.midOff ?? 0);
+  return rememberRoute(key, routed);
 }
 
 export function defaultEdge(

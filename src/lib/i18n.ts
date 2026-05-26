@@ -1543,6 +1543,14 @@ const ko: Record<string, string> = {
   "diagram.system.preview.label": "다이어그램 모드 (프리뷰)",
   "diagram.system.preview.hint": "활성화 시 좌측 활동 막대에 다이어그램 모드 아이콘이 표시됩니다. 변경은 새로고침 후 적용됩니다.",
   "diagram.system.preview.reload": "다시 시작 필요",
+
+  "diagram.dialog.export.mermaid": "Mermaid (.mmd)",
+  "diagram.ribbon.importMermaid": "Mermaid 가져오기",
+  "diagram.dialog.importMermaid.title": "Mermaid 다이어그램 가져오기",
+  "diagram.dialog.importMermaid.placeholder": "flowchart TD…",
+  "diagram.dialog.importMermaid.apply": "가져오기",
+  "diagram.dialog.importMermaid.cancel": "취소",
+  "diagram.dialog.importMermaid.hint": "위치는 자동으로 위→아래 배치됩니다. 가져오기 후 현재 작업은 사라집니다.",
 };
 
 const en: Record<string, string> = {
@@ -3075,6 +3083,14 @@ const en: Record<string, string> = {
   "diagram.system.preview.label": "Diagram mode (preview)",
   "diagram.system.preview.hint": "Adds the Diagram icon to the activity rail. A reload is required for the change to take effect.",
   "diagram.system.preview.reload": "Reload required",
+
+  "diagram.dialog.export.mermaid": "Mermaid (.mmd)",
+  "diagram.ribbon.importMermaid": "Import Mermaid",
+  "diagram.dialog.importMermaid.title": "Import Mermaid diagram",
+  "diagram.dialog.importMermaid.placeholder": "flowchart TD…",
+  "diagram.dialog.importMermaid.apply": "Import",
+  "diagram.dialog.importMermaid.cancel": "Cancel",
+  "diagram.dialog.importMermaid.hint": "Layout will be auto-arranged top-down. Existing work is replaced.",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { ko, en };

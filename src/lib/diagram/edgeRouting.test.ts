@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-import { defaultEdge, routeEdge } from "./edgeRouting";
+import {
+  _routeCacheSizeForTests,
+  clearRouteCache,
+  defaultEdge,
+  routeEdge,
+} from "./edgeRouting";
 import type { DiagramNode } from "./types";
 
 const node = (id: string, x: number, y: number, w = 100, h = 50): DiagramNode => ({
@@ -11,6 +16,8 @@ const node = (id: string, x: number, y: number, w = 100, h = 50): DiagramNode =>
   w,
   h,
 });
+
+beforeEach(() => clearRouteCache());
 
 describe("edgeRouting", () => {
   it("auto routes two same-row nodes with a single horizontal bend", () => {
@@ -51,5 +58,20 @@ describe("edgeRouting", () => {
     const baseline = routeEdge(defaultEdge("e1", "a", "e", "b", "w"), a, b)!;
     const shifted = routeEdge(defaultEdge("e2", "a", "e", "b", "w", { midOff: 30 }), a, b)!;
     expect(baseline.path).not.toEqual(shifted.path);
+  });
+
+  it("caches the same input, recomputes on node move", () => {
+    const a = node("a", 0, 0);
+    const b = node("b", 300, 0);
+    const e = defaultEdge("e1", "a", "e", "b", "w");
+    const first = routeEdge(e, a, b)!;
+    const sizeAfterFirst = _routeCacheSizeForTests();
+    const second = routeEdge(e, a, b)!;
+    expect(second).toBe(first);
+    expect(_routeCacheSizeForTests()).toBe(sizeAfterFirst);
+
+    const moved = routeEdge(e, { ...a, x: 50 }, b)!;
+    expect(moved).not.toBe(first);
+    expect(_routeCacheSizeForTests()).toBe(sizeAfterFirst + 1);
   });
 });

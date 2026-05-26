@@ -1,4 +1,4 @@
-import { Clock, FilePlus2, FolderOpen, LayoutTemplate, Save, Share } from "lucide-react";
+import { Clock, FilePlus2, FolderOpen, ImportIcon, LayoutTemplate, Save, Share } from "lucide-react";
 
 import { RibbonButton, RibbonGroup, RibbonSeparator } from "./ribbonPrimitives";
 
@@ -9,6 +9,7 @@ export interface RibbonFileProps {
   onExport: () => void;
   onTemplates: () => void;
   onHistory: () => void;
+  onImportMermaid: () => void;
   saving: boolean;
   canSave: boolean;
 }
@@ -20,6 +21,7 @@ export function RibbonFile({
   onExport,
   onTemplates,
   onHistory,
+  onImportMermaid,
   saving,
   canSave,
 }: RibbonFileProps) {
@@ -57,6 +59,11 @@ export function RibbonFile({
           labelKey="diagram.ribbon.export"
           onClick={onExport}
           icon={<Share size={14} />}
+        />
+        <RibbonButton
+          labelKey="diagram.ribbon.importMermaid"
+          onClick={onImportMermaid}
+          icon={<ImportIcon size={14} />}
         />
       </RibbonGroup>
       <RibbonGroup labelKey="diagram.ribbon.history">

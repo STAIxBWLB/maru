@@ -58,6 +58,7 @@ import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
 import { ExportDialog } from "./modals/ExportDialog";
+import { ImportMermaidDialog } from "./modals/ImportMermaidDialog";
 import { MemoDialog } from "./modals/MemoDialog";
 import { SaveAsDialog } from "./modals/SaveAsDialog";
 import { SpecialCharsPicker } from "./modals/SpecialCharsPicker";
@@ -138,6 +139,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const [memoOpen, setMemoOpen] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(false);
+  const [importMermaidOpen, setImportMermaidOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
     return (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -571,6 +573,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           onExport: () => setExportOpen(true),
           onTemplates: () => setTemplateOpen(true),
           onHistory: () => setHistoryOpen(true),
+          onImportMermaid: () => setImportMermaidOpen(true),
           saving,
           canSave: Boolean(workPath),
         }}
@@ -699,6 +702,17 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           setMemoOpen(null);
         }}
         onClose={() => setMemoOpen(null)}
+      />
+      <ImportMermaidDialog
+        open={importMermaidOpen}
+        onApply={(doc) => {
+          store.setState(replaceDoc(doc));
+          setActiveName(null);
+          setLastSavedBody(null);
+          setImportMermaidOpen(false);
+          reportError(null);
+        }}
+        onCancel={() => setImportMermaidOpen(false)}
       />
       <SpecialCharsPicker
         open={specialOpen}

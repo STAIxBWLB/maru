@@ -14,6 +14,7 @@ import {
   suggestedFileName,
   type ExportResult,
 } from "../../../lib/diagram/export";
+import { docToMermaid } from "../../../lib/diagram/mermaid";
 import type { DiagramDoc } from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
 
@@ -26,7 +27,7 @@ export interface ExportDialogProps {
   onClose: () => void;
 }
 
-type FormatId = "png" | "pngTransparent" | "jpg" | "svg" | "json" | "pdf";
+type FormatId = "png" | "pngTransparent" | "jpg" | "svg" | "json" | "pdf" | "mermaid";
 
 const FORMATS: Array<{ id: FormatId; labelKey: string }> = [
   { id: "png", labelKey: "diagram.dialog.export.png" },
@@ -35,7 +36,14 @@ const FORMATS: Array<{ id: FormatId; labelKey: string }> = [
   { id: "svg", labelKey: "diagram.dialog.export.svg" },
   { id: "json", labelKey: "diagram.dialog.export.json" },
   { id: "pdf", labelKey: "diagram.dialog.export.pdf" },
+  { id: "mermaid", labelKey: "diagram.dialog.export.mermaid" },
 ];
+
+function exportMermaid(doc: DiagramDoc): ExportResult {
+  const text = docToMermaid(doc);
+  const blob = new Blob([text], { type: "text/markdown" });
+  return { blob, width: 0, height: 0, mimeType: "text/markdown", extension: "mmd" };
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -67,6 +75,8 @@ async function runExport(
     case "pdf":
       await exportPdf(svg, doc);
       return null;
+    case "mermaid":
+      return exportMermaid(doc);
   }
 }
 
@@ -92,7 +102,7 @@ export function ExportDialog({ open, doc, workspace, getSvg, onClose }: ExportDi
         const path = await diagramExportBlob(
           workspace,
           fileName.replace(/\.[^.]+$/, ""),
-          result.extension as "png" | "jpg" | "svg" | "json" | "pdf",
+          result.extension as "png" | "jpg" | "svg" | "json" | "pdf" | "mmd",
           bytes,
         );
         setStatus({ kind: "done", path });

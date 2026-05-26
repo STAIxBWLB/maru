@@ -1072,6 +1072,48 @@
   outline-offset: 2px;
 }
 
+/* ── Phase 6: Mermaid import dialog ────────────────────────────────────── */
+
+.anchor-diagram-import-dialog {
+  max-width: 600px;
+}
+
+.anchor-diagram-import-dialog textarea {
+  width: 100%;
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  margin-top: 8px;
+  resize: vertical;
+}
+
+.anchor-diagram-import-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.anchor-diagram-import-actions button {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+
 .anchor-diagram-viewport {
   flex: 1;
   position: relative;

@@ -25,6 +25,7 @@ import {
   snap,
   type Rect,
 } from "../../../lib/diagram/geometry";
+import { visibleSubset } from "../../../lib/diagram/viewportCulling";
 import type { Coalescer } from "../../../lib/diagram/history";
 import {
   computeSmartGuides,
@@ -156,12 +157,45 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
     y2: number;
   } | null>(null);
   const [hoverNodeId, setHoverNodeId] = useState<NodeId | null>(null);
+  const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
+
+  // Track our own size for culling. `ResizeObserver` avoids re-measuring on
+  // every render and stays accurate when the user toggles side panels.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      setSvgSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const nodeById = useMemo(() => {
     const map = new Map<NodeId, DiagramNode>();
     for (const n of nodes) map.set(n.id, n);
     return map;
   }, [nodes]);
+
+  // Culling: pick only the visible subset of nodes + edges. Selection is
+  // forced-visible so an off-screen drag target doesn't disappear mid-gesture.
+  // Skip when we haven't measured yet (avoid culling everything on first paint).
+  const visible = useMemo(() => {
+    if (svgSize.width === 0 || svgSize.height === 0) {
+      return { nodes, edges, full: true };
+    }
+    const tl = screenToCanvas(0, 0, viewport);
+    const br = screenToCanvas(svgSize.width, svgSize.height, viewport);
+    return visibleSubset({
+      nodes,
+      edges,
+      viewport: { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y },
+      forceVisible: selection.nodes,
+    });
+  }, [edges, nodes, selection.nodes, svgSize.height, svgSize.width, viewport]);
 
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
@@ -491,7 +525,7 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
     >
       <EdgeMarkers />
       <g transform={transform}>
-        {edges.map((edge) => (
+        {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
             edge={edge}
@@ -501,7 +535,7 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
             onSelect={onEdgeSelect}
           />
         ))}
-        {nodes.map((n) => (
+        {visible.nodes.map((n) => (
           <g
             key={n.id}
             onPointerEnter={() => onNodeEnter(n.id)}

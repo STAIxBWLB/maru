@@ -56,7 +56,7 @@ export async function diagramDeleteDocument(
 export async function diagramExportBlob(
   workspace: string,
   name: string,
-  kind: "png" | "jpg" | "svg" | "json" | "pdf",
+  kind: "png" | "jpg" | "svg" | "json" | "pdf" | "mmd",
   bytes: Uint8Array,
 ): Promise<string> {
   if (!isTauri()) throw new Error("diagram_export_blob_requires_tauri");

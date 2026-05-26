@@ -199,6 +199,7 @@ fn validate_export_kind(kind: &str) -> Result<&'static str, String> {
         "svg" => Ok("svg"),
         "json" => Ok("json"),
         "pdf" => Ok("pdf"),
+        "mmd" | "mermaid" => Ok("mmd"),
         _ => Err(format!("Unsupported export kind: {kind}")),
     }
 }
