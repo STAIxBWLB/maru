@@ -7610,8 +7610,10 @@ button.git-badge:hover {
 
 .skills-quick-pane {
   display: flex;
+  flex: 1 0 300px;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--panel-2);
 }
 
@@ -7666,7 +7668,8 @@ button.git-badge:hover {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
-  padding: 2px 8px 14px;
+  overscroll-behavior: contain;
+  padding: 2px 8px 28px;
 }
 
 .skills-quick-group {
@@ -8147,13 +8150,18 @@ button.git-badge:hover {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  padding-bottom: 18px;
   padding-right: 2px;
 }
 
 .skill-runs-panel {
-  display: grid;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
+  max-height: min(420px, 45dvh);
+  overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-raised);
@@ -8197,6 +8205,9 @@ button.git-badge:hover {
   display: grid;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .skill-run-card {
