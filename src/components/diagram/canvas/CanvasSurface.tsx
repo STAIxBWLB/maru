@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent,
@@ -9,12 +10,14 @@ import {
 } from "react";
 
 import {
+  addEdge,
   defaultCoalescer,
   moveNodes,
   setSelection,
   setViewport,
   withSnapshot,
 } from "../../../lib/diagram/actions";
+import { defaultEdge } from "../../../lib/diagram/edgeRouting";
 import {
   clamp,
   rectsIntersect,
@@ -23,10 +26,25 @@ import {
   type Rect,
 } from "../../../lib/diagram/geometry";
 import type { Coalescer } from "../../../lib/diagram/history";
-import type { DiagramNode, NodeId, Viewport } from "../../../lib/diagram/types";
-import { useDiagram, useDiagramCoalescer, useDiagramStore } from "../DiagramStoreContext";
+import {
+  computeSmartGuides,
+  type GuideLine,
+} from "../../../lib/diagram/smartGuides";
+import type {
+  DiagramNode,
+  EdgePort,
+  NodeId,
+} from "../../../lib/diagram/types";
+import {
+  useDiagram,
+  useDiagramCoalescer,
+  useDiagramStore,
+} from "../DiagramStoreContext";
+import { EdgeMarkers } from "./EdgeMarkers";
+import { EdgeView } from "./EdgeView";
 import { Marquee } from "./Marquee";
 import { NodeView } from "./NodeView";
+import { SmartGuides } from "./SmartGuides";
 
 interface DragState {
   kind: "node";
@@ -35,6 +53,8 @@ interface DragState {
   lastDx: number;
   lastDy: number;
   ids: NodeId[];
+  /** Original positions of dragged nodes, keyed by id. */
+  origins: Map<NodeId, { x: number; y: number; w: number; h: number }>;
   coalescer: Coalescer;
 }
 
@@ -55,10 +75,21 @@ interface MarqueeState {
   additive: boolean;
 }
 
-type Gesture = DragState | PanState | MarqueeState | null;
+interface ConnectState {
+  kind: "connect";
+  fromNodeId: NodeId;
+  fromPort: EdgePort;
+  startCanvasX: number;
+  startCanvasY: number;
+  pointerCanvasX: number;
+  pointerCanvasY: number;
+}
+
+type Gesture = DragState | PanState | MarqueeState | ConnectState | null;
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
+const SMART_GUIDE_THRESHOLD_PX = 6;
 
 function marqueeRect(g: MarqueeState): Rect {
   const x = Math.min(g.startCanvasX, g.currentCanvasX);
@@ -81,6 +112,21 @@ function nodesInsideRect(nodes: DiagramNode[], rect: Rect): NodeId[] {
   return out;
 }
 
+function findPortTarget(event: PointerEvent<SVGSVGElement>): {
+  nodeId: NodeId;
+  port: EdgePort;
+} | null {
+  const el = document.elementFromPoint(event.clientX, event.clientY);
+  if (!el) return null;
+  const port = el.getAttribute("data-port") as EdgePort | null;
+  const nodeId = el.getAttribute("data-node-id");
+  if (port && nodeId) return { nodeId, port };
+  // Fall back to nearest ancestor node if dropped on body.
+  const parent = el.closest("[data-node-id]");
+  if (!parent) return null;
+  return null; // Body-drop without explicit port — skip for Phase 2.
+}
+
 export function CanvasSurface() {
   const store = useDiagramStore();
   const persistentCoalescer = useDiagramCoalescer();
@@ -89,19 +135,34 @@ export function CanvasSurface() {
   const [, forceUpdate] = useState(0);
 
   const nodes = useDiagram((s) => s.doc.nodes);
+  const edges = useDiagram((s) => s.doc.edges);
   const viewport = useDiagram((s) => s.ephemeral.viewport);
-  const selection = useDiagram((s) => s.ephemeral.selection.nodes);
+  const selection = useDiagram((s) => s.ephemeral.selection);
   const snapOn = useDiagram((s) => s.ephemeral.ui.snapOn);
   const snapSize = useDiagram((s) => s.ephemeral.ui.snapSize);
+  const smartGuideOn = useDiagram((s) => s.ephemeral.ui.smartGuideOn);
   const tool = useDiagram((s) => s.ephemeral.tool);
 
   const [marquee, setMarquee] = useState<Rect | null>(null);
+  const [guides, setGuides] = useState<GuideLine[]>([]);
+  const [connectGhost, setConnectGhost] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+  const [hoverNodeId, setHoverNodeId] = useState<NodeId | null>(null);
 
-  // Maintain transform string locally for perf (single repaint per pan).
+  const nodeById = useMemo(() => {
+    const map = new Map<NodeId, DiagramNode>();
+    for (const n of nodes) map.set(n.id, n);
+    return map;
+  }, [nodes]);
+
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
   const updateViewport = useCallback(
-    (next: Viewport) => store.setState(setViewport(next)),
+    (next: { zoom: number; px: number; py: number }) => store.setState(setViewport(next)),
     [store],
   );
 
@@ -113,7 +174,6 @@ export function CanvasSurface() {
       svg.setPointerCapture(event.pointerId);
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
-
       const state = store.getState();
       const currentSelection = state.ephemeral.selection.nodes;
       const ids = currentSelection.has(nodeId)
@@ -122,6 +182,11 @@ export function CanvasSurface() {
             store.setState(setSelection([nodeId]));
             return [nodeId];
           })();
+      const origins = new Map<NodeId, { x: number; y: number; w: number; h: number }>();
+      for (const id of ids) {
+        const n = nodeById.get(id);
+        if (n) origins.set(id, { x: n.x, y: n.y, w: n.w, h: n.h });
+      }
       gestureRef.current = {
         kind: "node",
         startCanvasX: canvas.x,
@@ -129,10 +194,66 @@ export function CanvasSurface() {
         lastDx: 0,
         lastDy: 0,
         ids,
+        origins,
         coalescer: defaultCoalescer(),
       };
     },
-    [store, viewport],
+    [nodeById, store, viewport],
+  );
+
+  const beginConnect = useCallback(
+    (event: PointerEvent<SVGCircleElement>, nodeId: NodeId, port: EdgePort) => {
+      const svg = svgRef.current;
+      if (!svg) return;
+      svg.setPointerCapture(event.pointerId);
+      const rect = svg.getBoundingClientRect();
+      const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
+      const node = nodeById.get(nodeId);
+      if (!node) return;
+      const startCanvas = {
+        x: port === "e" ? node.x + node.w : port === "w" ? node.x : node.x + node.w / 2,
+        y: port === "s" ? node.y + node.h : port === "n" ? node.y : node.y + node.h / 2,
+      };
+      gestureRef.current = {
+        kind: "connect",
+        fromNodeId: nodeId,
+        fromPort: port,
+        startCanvasX: startCanvas.x,
+        startCanvasY: startCanvas.y,
+        pointerCanvasX: canvas.x,
+        pointerCanvasY: canvas.y,
+      };
+      setConnectGhost({
+        x1: startCanvas.x,
+        y1: startCanvas.y,
+        x2: canvas.x,
+        y2: canvas.y,
+      });
+    },
+    [nodeById, viewport],
+  );
+
+  const onEdgeSelect = useCallback(
+    (event: PointerEvent<SVGGElement>, edgeId: string) => {
+      event.stopPropagation();
+      const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+      const state = store.getState();
+      if (additive) {
+        const next = new Set(state.ephemeral.selection.edges);
+        if (next.has(edgeId)) next.delete(edgeId);
+        else next.add(edgeId);
+        store.setState((s) => ({
+          ...s,
+          ephemeral: {
+            ...s.ephemeral,
+            selection: { nodes: s.ephemeral.selection.nodes, edges: next },
+          },
+        }));
+      } else {
+        store.setState(setSelection([], [edgeId]));
+      }
+    },
+    [store],
   );
 
   const onSurfacePointerDown = useCallback(
@@ -168,7 +289,7 @@ export function CanvasSurface() {
       setMarquee({ x: canvas.x, y: canvas.y, w: 0, h: 0 });
 
       if (!event.metaKey && !event.ctrlKey) {
-        store.setState(setSelection([]));
+        store.setState(setSelection([], []));
       }
     },
     [store, tool, viewport],
@@ -186,7 +307,7 @@ export function CanvasSurface() {
 
       if (gesture.kind === "pan") {
         updateViewport({
-          ...viewport,
+          zoom: viewport.zoom,
           px: gesture.startPx + (screenX - gesture.startScreenX),
           py: gesture.startPy + (screenY - gesture.startScreenY),
         });
@@ -201,27 +322,71 @@ export function CanvasSurface() {
         return;
       }
 
+      if (gesture.kind === "connect") {
+        const canvas = screenToCanvas(screenX, screenY, viewport);
+        gesture.pointerCanvasX = canvas.x;
+        gesture.pointerCanvasY = canvas.y;
+        setConnectGhost({
+          x1: gesture.startCanvasX,
+          y1: gesture.startCanvasY,
+          x2: canvas.x,
+          y2: canvas.y,
+        });
+        return;
+      }
+
       if (gesture.kind === "node") {
         const canvas = screenToCanvas(screenX, screenY, viewport);
-        let dx = canvas.x - gesture.startCanvasX;
-        let dy = canvas.y - gesture.startCanvasY;
+        let proposedDx = canvas.x - gesture.startCanvasX;
+        let proposedDy = canvas.y - gesture.startCanvasY;
         if (snapOn) {
-          dx = snap(dx, snapSize);
-          dy = snap(dy, snapSize);
+          proposedDx = snap(proposedDx, snapSize);
+          proposedDy = snap(proposedDy, snapSize);
         }
-        const stepDx = dx - gesture.lastDx;
-        const stepDy = dy - gesture.lastDy;
-        if (stepDx === 0 && stepDy === 0) return;
-        gesture.lastDx = dx;
-        gesture.lastDy = dy;
+
+        // Smart-guide snap relative to the first dragged node's origin.
+        let smartGuideOut: GuideLine[] = [];
+        if (smartGuideOn) {
+          const firstId = gesture.ids[0];
+          const origin = firstId ? gesture.origins.get(firstId) : null;
+          if (origin) {
+            const movingRect: Rect = {
+              x: origin.x + proposedDx,
+              y: origin.y + proposedDy,
+              w: origin.w,
+              h: origin.h,
+            };
+            const stationary: Rect[] = nodes
+              .filter((n) => !gesture.ids.includes(n.id))
+              .map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
+            const result = computeSmartGuides({
+              movingRect,
+              stationary,
+              threshold: SMART_GUIDE_THRESHOLD_PX / viewport.zoom,
+            });
+            proposedDx += result.dx;
+            proposedDy += result.dy;
+            smartGuideOut = result.guides;
+          }
+        }
+
+        const stepDx = proposedDx - gesture.lastDx;
+        const stepDy = proposedDy - gesture.lastDy;
+        if (stepDx === 0 && stepDy === 0) {
+          setGuides(smartGuideOut);
+          return;
+        }
+        gesture.lastDx = proposedDx;
+        gesture.lastDy = proposedDy;
         store.setState(
           withSnapshot(moveNodes(gesture.ids, stepDx, stepDy), gesture.coalescer, {
             coalesce: true,
           }),
         );
+        setGuides(smartGuideOut);
       }
     },
-    [snapOn, snapSize, store, updateViewport, viewport],
+    [nodes, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
   );
 
   const onSurfacePointerUp = useCallback(
@@ -246,9 +411,23 @@ export function CanvasSurface() {
         setMarquee(null);
       }
       if (gesture.kind === "node") {
-        // Commit one consolidated history entry by resetting the per-drag coalescer
-        // to "now - windowMs" so the next non-drag mutation snapshots fresh.
         persistentCoalescer.reset(Date.now());
+        setGuides([]);
+      }
+      if (gesture.kind === "connect") {
+        const target = findPortTarget(event);
+        if (target && target.nodeId !== gesture.fromNodeId) {
+          const id = `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+          store.setState(
+            withSnapshot(
+              addEdge(
+                defaultEdge(id, gesture.fromNodeId, gesture.fromPort, target.nodeId, target.port),
+              ),
+              defaultCoalescer(),
+            ),
+          );
+        }
+        setConnectGhost(null);
       }
       gestureRef.current = null;
     },
@@ -274,21 +453,25 @@ export function CanvasSurface() {
     [updateViewport, viewport],
   );
 
-  // Force a redraw of the marquee when gesture state mutates (refs don't trigger React).
   useLayoutEffect(() => {
     forceUpdate((n) => n + 1);
-  }, [marquee]);
+  }, [marquee, guides, connectGhost]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         gestureRef.current = null;
         setMarquee(null);
+        setGuides([]);
+        setConnectGhost(null);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  const onNodeEnter = useCallback((nodeId: NodeId) => setHoverNodeId(nodeId), []);
+  const onNodeLeave = useCallback(() => setHoverNodeId(null), []);
 
   return (
     <svg
@@ -302,15 +485,47 @@ export function CanvasSurface() {
       onPointerCancel={onSurfacePointerUp}
       onWheel={onWheel}
     >
+      <EdgeMarkers />
       <g transform={transform}>
-        {nodes.map((n) => (
-          <NodeView
-            key={n.id}
-            node={n}
-            selected={selection.has(n.id)}
-            onPointerDown={beginNodeDrag}
+        {edges.map((edge) => (
+          <EdgeView
+            key={edge.id}
+            edge={edge}
+            fromNode={nodeById.get(edge.fromNode)}
+            toNode={nodeById.get(edge.toNode)}
+            selected={selection.edges.has(edge.id)}
+            onSelect={onEdgeSelect}
           />
         ))}
+        {nodes.map((n) => (
+          <g
+            key={n.id}
+            onPointerEnter={() => onNodeEnter(n.id)}
+            onPointerLeave={onNodeLeave}
+          >
+            <NodeView
+              node={n}
+              selected={selection.nodes.has(n.id)}
+              showPorts={hoverNodeId === n.id}
+              pendingConnectActive={Boolean(connectGhost)}
+              onPointerDown={beginNodeDrag}
+              onPortPointerDown={beginConnect}
+            />
+          </g>
+        ))}
+        <SmartGuides guides={guides} />
+        {connectGhost ? (
+          <line
+            x1={connectGhost.x1}
+            y1={connectGhost.y1}
+            x2={connectGhost.x2}
+            y2={connectGhost.y2}
+            stroke="#2563eb"
+            strokeWidth={1.5}
+            strokeDasharray="4 4"
+            pointerEvents="none"
+          />
+        ) : null}
         <Marquee rect={marquee} />
       </g>
     </svg>

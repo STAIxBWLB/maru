@@ -35,6 +35,7 @@ export interface MkNodeOpts {
   layerId?: string;
   style?: DiagramNode["style"];
   id?: string;
+  meta?: Record<string, unknown>;
 }
 
 let _autoId = 0;
@@ -65,6 +66,7 @@ export function mkNode(kind: NodeKind, x: number, y: number, opts: MkNodeOpts = 
     h: opts.h ?? size.h,
     layerId: opts.layerId,
     style: opts.style,
+    meta: opts.meta,
     ...defaults,
     body: opts.body,
     bullets: opts.bullets,
@@ -73,3 +75,20 @@ export function mkNode(kind: NodeKind, x: number, y: number, opts: MkNodeOpts = 
 
 /** Phase 1 supported kinds; gates the Add Node toolbar. */
 export const PHASE_1_KINDS: NodeKind[] = ["simple", "text"];
+
+/** All node kinds with a working renderer (Phase 2). */
+export const ALL_KINDS: NodeKind[] = [
+  "simple",
+  "text",
+  "section",
+  "numbered",
+  "titled-box",
+  "split-box",
+  "diamond",
+  "oval",
+  "hexagon",
+  "cylinder",
+  "callout",
+  "table",
+  "image",
+];

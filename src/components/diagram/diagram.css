@@ -157,6 +157,50 @@
   flex: 1;
 }
 
+.anchor-diagram-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--anchor-soft, #f9fafb);
+}
+
+.anchor-diagram-toolbar-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--anchor-muted, #6b7280);
+  padding: 0 4px;
+}
+
+.anchor-diagram-toolbar button.is-toggle-on {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.anchor-diagram-snap-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--anchor-muted, #6b7280);
+}
+
+.anchor-diagram-snap-input input {
+  width: 48px;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--anchor-border, #e5e7eb);
+  border-radius: 4px;
+  background: var(--anchor-surface, #ffffff);
+  color: inherit;
+  text-align: center;
+}
+
 .anchor-diagram-zoom-label {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -203,6 +247,37 @@
   word-break: break-word;
   white-space: pre-wrap;
   pointer-events: none;
+}
+
+.anchor-diagram-node-header {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  line-height: 1.2;
+  word-break: break-word;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.anchor-diagram-port {
+  cursor: crosshair;
+  transition: r 80ms;
+}
+
+.anchor-diagram-port:hover {
+  r: 8;
+  fill: #2563eb;
+}
+
+.anchor-diagram-edge {
+  cursor: pointer;
+}
+
+.anchor-diagram-edge.is-selected {
+  filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.4));
 }
 
 .anchor-diagram-empty {

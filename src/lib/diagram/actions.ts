@@ -177,6 +177,37 @@ export function setTool(tool: Tool): StateTransformer {
   });
 }
 
+export function setSnapSize(size: number): StateTransformer {
+  const clamped = Math.max(1, Math.min(200, Math.round(size)));
+  return (state) => ({
+    ...state,
+    ephemeral: {
+      ...state.ephemeral,
+      ui: { ...state.ephemeral.ui, snapSize: clamped },
+    },
+  });
+}
+
+export function toggleSnap(value?: boolean): StateTransformer {
+  return (state) => ({
+    ...state,
+    ephemeral: {
+      ...state.ephemeral,
+      ui: { ...state.ephemeral.ui, snapOn: value ?? !state.ephemeral.ui.snapOn },
+    },
+  });
+}
+
+export function toggleSmartGuides(value?: boolean): StateTransformer {
+  return (state) => ({
+    ...state,
+    ephemeral: {
+      ...state.ephemeral,
+      ui: { ...state.ephemeral.ui, smartGuideOn: value ?? !state.ephemeral.ui.smartGuideOn },
+    },
+  });
+}
+
 export function setDocTitle(docTitle: string): StateTransformer {
   return (state) => ({
     ...state,
