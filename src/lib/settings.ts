@@ -17,6 +17,7 @@ export type AnchorAppMode =
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab =
+  | "workspace"
   | "outline"
   | "files"
   | "memo"
@@ -79,7 +80,6 @@ export interface WindowBoundsSettings {
 }
 
 export interface LayoutSettings {
-  documentTypesPaneOpen: boolean;
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
   outlineOpen: boolean;
@@ -217,7 +217,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     activeAppMode: "pkm",
     activeWorkspaceVisibility: "private",
     editorViewMode: "source",
-    rightPaneTab: "outline",
+    rightPaneTab: "workspace",
     explorerPaneMode: "documents",
     documentBrowserMode: "tree",
     documentLabelMode: "title",
@@ -232,7 +232,6 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     themeMode: "system",
     accentColor: "#2f5a3c",
     layout: {
-      documentTypesPaneOpen: true,
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
       outlineOpen: true,
@@ -350,7 +349,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       activeWorkspaceVisibility:
         parseWorkspaceVisibilitySetting(ui.activeWorkspaceVisibility) ?? "private",
       editorViewMode: parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
-      rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "outline",
+      rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "workspace",
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
@@ -981,8 +980,8 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
 }
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
-  return value === "outline" || value === "files" || value === "memo" || value === "info"
-    || value === "skills" || value === "guideline" || value === "evidence"
+  return value === "workspace" || value === "outline" || value === "files" || value === "memo"
+    || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
     ? value
     : null;
 }
@@ -1148,10 +1147,6 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
     layout.terminalHeight ?? legacyTerminal.lastHeight,
   );
   return {
-    documentTypesPaneOpen:
-      typeof layout.documentTypesPaneOpen === "boolean"
-        ? layout.documentTypesPaneOpen
-        : DEFAULT_ANCHOR_SETTINGS.ui.layout.documentTypesPaneOpen,
     documentsPaneOpen:
       typeof layout.documentsPaneOpen === "boolean"
         ? layout.documentsPaneOpen

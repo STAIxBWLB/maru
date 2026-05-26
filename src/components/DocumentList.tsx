@@ -54,7 +54,7 @@ import type { DocumentBrowserMode, DocumentLabelMode, DocumentViewDefinition } f
 import type { ExplorerPaneMode } from "../lib/settings";
 
 const GROUP_ROW_HEIGHT = 28;
-const ENTRY_ROW_HEIGHT = 132;
+const ENTRY_ROW_HEIGHT = 156;
 const TREE_ROW_HEIGHT = 30;
 const VIRTUAL_OVERSCAN = 520;
 

@@ -9,8 +9,8 @@ import {
   LayoutGrid,
   ListTodo,
   MessageSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   RefreshCcw,
   Route,
   Settings2,
@@ -36,7 +36,6 @@ import { TasksPane } from "./components/tasks/TasksPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
-import { Sidebar } from "./components/Sidebar";
 import { SystemPane } from "./components/SystemPane";
 import { TerminalPanel, type TerminalLaunchRequest } from "./components/TerminalPanel";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
@@ -1116,7 +1115,6 @@ function MainApp() {
       t(`workspace.writeStatus.${status}`),
     ].join(" · ");
   }, [explorerWorkspace, t]);
-  const documentTypesPaneOpen = layoutSettings.documentTypesPaneOpen;
   const documentsPaneOpen = layoutSettings.documentsPaneOpen;
   const outlineOpen = layoutSettings.outlineOpen;
 
@@ -5276,9 +5274,6 @@ function MainApp() {
         case "view.files":
           setExplorerPaneMode("files");
           break;
-        case "view.toggle_types":
-          updateLayoutSettings({ documentTypesPaneOpen: !documentTypesPaneOpen });
-          break;
         case "view.toggle_documents":
           updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen });
           break;
@@ -5334,7 +5329,6 @@ function MainApp() {
       }
     },
     [
-      documentTypesPaneOpen,
       documentsPaneOpen,
       explorerWorkspacePath,
       navigateBack,
@@ -5387,14 +5381,22 @@ function MainApp() {
     e2e: " e2e-mode",
   };
   const visibleAppMode: AppMode = appMode === "e2e" && !e2eFlowEnabled ? "pkm" : appMode;
+  const lastAppModeRef = useRef<AppMode>(visibleAppMode);
+  useEffect(() => {
+    const previous = lastAppModeRef.current;
+    lastAppModeRef.current = visibleAppMode;
+    if (previous !== visibleAppMode && visibleAppMode !== "pkm" && outlineOpen) {
+      updateLayoutSettings({ outlineOpen: false });
+    }
+  }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
       : "";
   const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
-    documentTypesPaneOpen ? "" : " types-closed"
-  }${documentsPaneOpen ? "" : " documents-closed"}${terminalMaximizedClass}`;
+    documentsPaneOpen ? "" : " documents-closed"
+  }${terminalMaximizedClass}`;
   const themeVars = useMemo(() => buildThemeVars(anchorSettings), [anchorSettings]);
   const shellStyle = useMemo(
     () =>
@@ -5812,22 +5814,14 @@ function MainApp() {
           </button>
           <button
             type="button"
-            className={documentTypesPaneOpen ? "activity-button active" : "activity-button"}
-            onClick={() =>
-              updateLayoutSettings({ documentTypesPaneOpen: !documentTypesPaneOpen })
-            }
-            title={
-              documentTypesPaneOpen
-                ? t("layout.hideDocumentTypes")
-                : t("layout.showDocumentTypes")
-            }
+            className={outlineOpen ? "activity-button active" : "activity-button"}
+            onClick={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
+            title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
             aria-label={
-              documentTypesPaneOpen
-                ? t("layout.hideDocumentTypes")
-                : t("layout.showDocumentTypes")
+              outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")
             }
           >
-            {documentTypesPaneOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
+            {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
           </button>
           <button
             type="button"
@@ -5853,26 +5847,6 @@ function MainApp() {
             </button>
           ) : null}
         </nav>
-
-        {documentTypesPaneOpen ? (
-          <Sidebar
-            contentCount={documentIndex.contentCount}
-            typeCounts={documentIndex.typeCounts}
-            documentViews={anchorSettings.ui.documentViews}
-            viewCounts={builtInDocumentViewCounts}
-            customViewCounts={customDocumentViewCounts}
-            recentEntries={recentEntries}
-            selectedPath={selectedPath}
-            documentFilter={documentFilter}
-            onDocumentFilter={setExplorerDocumentFilter}
-            onDocumentViewsChange={updateDocumentViews}
-            onNewDocument={openNewDocumentDialog}
-            canCreateDocument={activeWorkspaceCanCreate}
-            onSelectRecent={selectEntry}
-            onOpenCommandPalette={openCommandPalette}
-            onClose={() => updateLayoutSettings({ documentTypesPaneOpen: false })}
-          />
-        ) : null}
 
         {visibleAppMode === "e2e" ? (
           <E2EFlowPane
@@ -6190,89 +6164,105 @@ function MainApp() {
                 : null}
             </div>
 
-            {outlineOpen ? (
-              <div
-                className="pane-resize-handle outline-pane-resize"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={t("layout.resizeOutline")}
-                title={t("layout.resizeOutline")}
-                aria-valuemin={MIN_OUTLINE_PANE_WIDTH}
-                aria-valuemax={MAX_OUTLINE_PANE_WIDTH}
-                aria-valuenow={layoutSettings.outlinePaneWidth}
-                data-no-drag="true"
-                onPointerDown={startOutlinePaneResize}
-              />
-            ) : null}
-
-            {outlineOpen ? (
-              <OutlinePane
-                document={document}
-                draftContent={draftContent}
-                entries={activeDocumentEntries}
-                readOnly={!activeWorkspaceCanModify}
-                workspacePath={activeDocumentWorkspacePath}
-                onJumpToLine={jumpToOutlineLine}
-                onClose={() => updateLayoutSettings({ outlineOpen: false })}
-                onError={setError}
-                onRefreshWorkspace={() => void refreshCurrent()}
-                onUpdateField={updateField}
-                onSelectEntry={selectEntry}
-                onMissingWikilink={handleWikilinkClick}
-                fileQueue={fileQueue}
-                canApplyFileQueue={canApplyFileQueue}
-                onUpdateFileQueueItem={updateFileQueueItem}
-                selectedFileQueueItemIds={selectedFileQueueItemIds}
-                onSelectFileQueueItem={selectFileQueueItem}
-                onQueueExternalFiles={queueExternalFiles}
-                onQueueFileSources={addFileQueueSources}
-                onApplyFileQueue={applyQueuedFiles}
-                onClearFileQueue={clearFileQueue}
-                onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
-                activeTab={rightPaneTab}
-                onTabChange={setPersistedRightPaneTab}
-                paneRef={outlinePaneRef}
-                skillsNode={
-                  <div className="skills-pane-stack">
-                    <SkillRunsPanel
-                      workPath={activeDocumentWorkspacePath ?? inboxWorkspacePath}
-                      missions={activeSkillMissions(processingMissions)}
-                      logLines={processingLogLines}
-                      runtimeCommands={skillRuntimeCommands}
-                      onRefresh={refreshProcessingMissions}
-                      onStopMission={(id) => void stopProcessingMission(id)}
-                      onMissionStarted={handleMeetingsMissionStarted}
-                      onConfirmApproval={approvalGate.confirmApproval}
-                      onError={setError}
-                    />
-                    <SkillsQuickPane
-                      skills={skills}
-                      loading={skillsLoading}
-                      appMode={appMode}
-                      onRefresh={refreshSkills}
-                      onRunSkill={(skill) => openSkillCompose(skill)}
-                    />
-                  </div>
-                }
-                guidelineNode={
-                  <WritingGuidelineSidebar
-                    workspaceRoot={activeDocumentWorkspacePath}
-                    documentBody={draftContent || document?.content || ""}
-                    frontmatter={document?.meta ?? null}
-                  />
-                }
-                evidenceNode={
-                  <EvidenceBinderPane
-                    workspaceRoot={activeDocumentWorkspacePath}
-                    docId={evidenceBinderDocId}
-                    documentPath={document?.path ?? null}
-                    onError={setError}
-                  />
-                }
-              />
-            ) : null}
           </>
         )}
+
+        {outlineOpen ? (
+          <div
+            className="pane-resize-handle outline-pane-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("layout.resizeOutline")}
+            title={t("layout.resizeOutline")}
+            aria-valuemin={MIN_OUTLINE_PANE_WIDTH}
+            aria-valuemax={MAX_OUTLINE_PANE_WIDTH}
+            aria-valuenow={layoutSettings.outlinePaneWidth}
+            data-no-drag="true"
+            onPointerDown={startOutlinePaneResize}
+          />
+        ) : null}
+
+        {outlineOpen ? (
+          <OutlinePane
+            document={document}
+            draftContent={draftContent}
+            entries={activeDocumentEntries}
+            readOnly={!activeWorkspaceCanModify}
+            workspacePath={activeDocumentWorkspacePath}
+            onJumpToLine={jumpToOutlineLine}
+            onClose={() => updateLayoutSettings({ outlineOpen: false })}
+            onError={setError}
+            onRefreshWorkspace={() => void refreshCurrent()}
+            onUpdateField={updateField}
+            onSelectEntry={selectEntry}
+            onMissingWikilink={handleWikilinkClick}
+            fileQueue={fileQueue}
+            canApplyFileQueue={canApplyFileQueue}
+            onUpdateFileQueueItem={updateFileQueueItem}
+            selectedFileQueueItemIds={selectedFileQueueItemIds}
+            onSelectFileQueueItem={selectFileQueueItem}
+            onQueueExternalFiles={queueExternalFiles}
+            onQueueFileSources={addFileQueueSources}
+            onApplyFileQueue={applyQueuedFiles}
+            onClearFileQueue={clearFileQueue}
+            onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
+            activeTab={rightPaneTab}
+            onTabChange={setPersistedRightPaneTab}
+            paneRef={outlinePaneRef}
+            appMode={visibleAppMode}
+            contentCount={documentIndex.contentCount}
+            typeCounts={documentIndex.typeCounts}
+            documentViews={anchorSettings.ui.documentViews}
+            viewCounts={builtInDocumentViewCounts}
+            customViewCounts={customDocumentViewCounts}
+            recentEntries={recentEntries}
+            selectedPath={selectedPath}
+            documentFilter={documentFilter}
+            onDocumentFilter={setExplorerDocumentFilter}
+            onDocumentViewsChange={updateDocumentViews}
+            onNewDocument={openNewDocumentDialog}
+            canCreateDocument={activeWorkspaceCanCreate}
+            onSelectRecent={selectEntry}
+            onOpenCommandPalette={openCommandPalette}
+            skillsNode={
+              <div className="skills-pane-stack">
+                <SkillRunsPanel
+                  workPath={activeDocumentWorkspacePath ?? inboxWorkspacePath}
+                  missions={activeSkillMissions(processingMissions)}
+                  logLines={processingLogLines}
+                  runtimeCommands={skillRuntimeCommands}
+                  onRefresh={refreshProcessingMissions}
+                  onStopMission={(id) => void stopProcessingMission(id)}
+                  onMissionStarted={handleMeetingsMissionStarted}
+                  onConfirmApproval={approvalGate.confirmApproval}
+                  onError={setError}
+                />
+                <SkillsQuickPane
+                  skills={skills}
+                  loading={skillsLoading}
+                  appMode={appMode}
+                  onRefresh={refreshSkills}
+                  onRunSkill={(skill) => openSkillCompose(skill)}
+                />
+              </div>
+            }
+            guidelineNode={
+              <WritingGuidelineSidebar
+                workspaceRoot={activeDocumentWorkspacePath}
+                documentBody={draftContent || document?.content || ""}
+                frontmatter={document?.meta ?? null}
+              />
+            }
+            evidenceNode={
+              <EvidenceBinderPane
+                workspaceRoot={activeDocumentWorkspacePath}
+                docId={evidenceBinderDocId}
+                documentPath={document?.path ?? null}
+                onError={setError}
+              />
+            }
+          />
+        ) : null}
 
         <TerminalPanel
           cwd={activeDocumentWorkspacePath}

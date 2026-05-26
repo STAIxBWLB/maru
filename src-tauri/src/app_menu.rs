@@ -75,7 +75,6 @@ fn install_anchor_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri
 
     let view_documents = command_item(app, "view.documents", "Documents", None)?;
     let view_files = command_item(app, "view.files", "Files", None)?;
-    let view_types = command_item(app, "view.toggle_types", "Toggle Type Pane", None)?;
     let view_documents_pane =
         command_item(app, "view.toggle_documents", "Toggle Explorer Pane", None)?;
     let view_right = command_item(
@@ -98,7 +97,6 @@ fn install_anchor_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri
             &view_documents,
             &view_files,
             &PredefinedMenuItem::separator(app)?,
-            &view_types,
             &view_documents_pane,
             &view_right,
             &PredefinedMenuItem::separator(app)?,

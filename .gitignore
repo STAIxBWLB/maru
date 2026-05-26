@@ -56,3 +56,4 @@ test-results/
 .claude/settings.local.json
 .omc/
 .omx/
+.gstack/

@@ -186,14 +186,14 @@ test("restores a dense shell with tabbed explorer and collapsed terminal", async
   await page.goto("/");
 
   await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
-  await expect(page.locator(".sidebar")).toBeVisible();
+  await expect(page.locator(".sidebar.embedded")).toBeVisible();
   await expect(page.locator(".document-list")).toBeVisible();
 
   const rail = page.locator(".activity-rail");
-  await rail.getByLabel("문서 타입 패널 숨기기").click();
+  await rail.getByLabel("오른쪽 패널 숨기기").click();
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await rail.getByLabel("문서 타입 패널 보이기").click();
-  await expect(page.locator(".sidebar")).toBeVisible();
+  await rail.getByLabel("오른쪽 패널 보이기").click();
+  await expect(page.locator(".sidebar.embedded")).toBeVisible();
 
   await rail.getByLabel("문서 패널 숨기기").click();
   await expect(page.locator(".document-list")).toHaveCount(0);
@@ -240,7 +240,7 @@ test("restores the previous app state on startup", async ({ page }) => {
   await expect(page.locator(".inbox-pane")).toBeVisible();
   await rail.getByRole("button", { name: "문서", exact: true }).click();
 
-  await rail.getByLabel("문서 타입 패널 숨기기").click();
+  await rail.getByLabel("오른쪽 패널 보이기").click();
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await page.getByLabel("오른쪽으로 분할").first().click();
   await page.getByRole("button", { name: "Files" }).click();

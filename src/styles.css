@@ -257,28 +257,22 @@ a {
 
 .app-shell {
   --activity-col: 48px;
-  --types-col: 248px;
   --documents-col: minmax(280px, 340px);
   --outline-col: 280px;
   height: 100dvh;
   display: grid;
   grid-template-rows: 44px minmax(0, 1fr) auto;
   grid-template-columns:
-    var(--activity-col) var(--types-col) var(--documents-col) minmax(420px, 1fr)
-    var(--outline-col);
+    var(--activity-col) var(--documents-col) minmax(420px, 1fr) var(--outline-col);
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar list editor outline"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity list editor outline"
+    "activity terminal terminal terminal";
   background: var(--bg);
 }
 
 .app-shell.outline-closed {
   --outline-col: 0px;
-}
-
-.app-shell.types-closed {
-  --types-col: 0px;
 }
 
 .app-shell.documents-closed {
@@ -287,108 +281,72 @@ a {
 
 .app-shell.inbox-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar inbox inbox inbox"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity inbox inbox outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.comms-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar comms comms comms"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity comms comms outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.meetings-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar meetings meetings meetings"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity meetings meetings outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.tasks-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar tasks tasks tasks"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity tasks tasks outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.e2e-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar e2e e2e e2e"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity e2e e2e outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.catalog-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar catalog catalog catalog"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity catalog catalog outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.studio-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar studio studio studio"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity studio studio outline"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity terminal terminal terminal"
+    "activity terminal terminal terminal";
 }
 
-.app-shell.terminal-maximized.inbox-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
-.app-shell.terminal-maximized.comms-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
-.app-shell.terminal-maximized.meetings-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
-.app-shell.terminal-maximized.tasks-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
-.app-shell.terminal-maximized.e2e-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
-.app-shell.terminal-maximized.catalog-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
-}
-
+.app-shell.terminal-maximized.inbox-mode,
+.app-shell.terminal-maximized.comms-mode,
+.app-shell.terminal-maximized.meetings-mode,
+.app-shell.terminal-maximized.tasks-mode,
+.app-shell.terminal-maximized.e2e-mode,
+.app-shell.terminal-maximized.catalog-mode,
 .app-shell.terminal-maximized.studio-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar terminal terminal terminal"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity terminal terminal terminal"
+    "activity terminal terminal terminal";
 }
 
 .app-shell.terminal-maximized .document-list,
@@ -410,9 +368,6 @@ a {
 }
 .activity-rail {
   grid-area: activity;
-}
-.sidebar {
-  grid-area: sidebar;
 }
 .document-list {
   grid-area: list;
@@ -1931,26 +1886,12 @@ a {
   background: var(--panel-2);
 }
 
-.sidebar-header {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px 0 14px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.sidebar-header strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sidebar.embedded {
+  flex: 1;
+  min-height: 0;
+  border-right: none;
+  background: transparent;
+  overflow-y: auto;
 }
 
 .sidebar-section {
@@ -2221,24 +2162,6 @@ a {
   padding: 10px 8px;
   color: var(--faint);
   font-size: 11.5px;
-}
-
-.sidebar-footer {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--faint);
-  font-size: 11px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.sidebar-footer .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex: none;
 }
 
 /* ─── Document list ────────────────────────────────────────────────── */
@@ -7687,8 +7610,10 @@ button.git-badge:hover {
 
 .skills-quick-pane {
   display: flex;
+  flex: 1 0 300px;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--panel-2);
 }
 
@@ -7743,7 +7668,8 @@ button.git-badge:hover {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
-  padding: 2px 8px 14px;
+  overscroll-behavior: contain;
+  padding: 2px 8px 28px;
 }
 
 .skills-quick-group {
@@ -8217,15 +8143,25 @@ button.git-badge:hover {
 }
 
 .skills-pane-stack {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 18px;
+  padding-right: 2px;
 }
 
 .skill-runs-panel {
-  display: grid;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
+  max-height: min(420px, 45dvh);
+  overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-raised);
@@ -8269,6 +8205,9 @@ button.git-badge:hover {
   display: grid;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .skill-run-card {
@@ -8374,6 +8313,12 @@ button.git-badge:hover {
   flex-wrap: wrap;
 }
 
+.skill-run-footer .link-button {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
 .skill-run-footer .secondary-button,
 .skill-run-footer .primary-button {
   min-height: 28px;
@@ -8459,13 +8404,8 @@ button.git-badge:hover {
 
 @media (max-width: 1320px) {
   .app-shell {
-    --types-col: 228px;
     --documents-col: minmax(280px, 320px);
     --outline-col: 240px;
-  }
-
-  .app-shell.types-closed {
-    --types-col: 0px;
   }
 
   .app-shell.documents-closed {
@@ -8479,21 +8419,12 @@ button.git-badge:hover {
 
 @media (max-width: 1100px) {
   .app-shell {
-    --types-col: 220px;
     --documents-col: minmax(260px, 300px);
     --outline-col: 0px;
   }
 
-  .app-shell.types-closed {
-    --types-col: 0px;
-  }
-
   .app-shell.documents-closed {
     --documents-col: 0px;
-  }
-
-  .outline-pane {
-    display: none;
   }
 
   .workspace-switcher .ws-label {
@@ -8577,14 +8508,13 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "list"
       "editor"
+      "outline"
       "terminal";
     overflow: visible;
   }
 
-  .app-shell.types-closed,
   .app-shell.documents-closed {
     grid-template-columns: 1fr;
   }
@@ -8593,8 +8523,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "inbox"
+      "outline"
       "terminal";
   }
 
@@ -8602,8 +8532,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "comms"
+      "outline"
       "terminal";
   }
 
@@ -8611,8 +8541,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "meetings"
+      "outline"
       "terminal";
   }
 
@@ -8620,8 +8550,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "tasks"
+      "outline"
       "terminal";
   }
 
@@ -8629,8 +8559,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "catalog"
+      "outline"
       "terminal";
   }
 
@@ -8638,8 +8568,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "studio"
+      "outline"
       "terminal";
   }
 
@@ -8647,8 +8577,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "e2e"
+      "outline"
       "terminal";
   }
 
@@ -8656,14 +8586,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "system"
       "terminal";
-  }
-
-  .sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
   }
 
   .activity-rail {
@@ -8791,9 +8715,9 @@ button.git-badge:hover {
 
 .app-shell.system-mode {
   grid-template-areas:
-    "topbar topbar topbar topbar topbar"
-    "activity sidebar system system system"
-    "activity sidebar terminal terminal terminal";
+    "topbar topbar topbar topbar"
+    "activity system system system"
+    "activity terminal terminal terminal";
 }
 .system-pane {
   grid-area: system;
@@ -9317,8 +9241,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "inbox"
+      "outline"
       "terminal";
   }
 
@@ -9326,8 +9250,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "comms"
+      "outline"
       "terminal";
   }
 
@@ -9335,8 +9259,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "meetings"
+      "outline"
       "terminal";
   }
 
@@ -9344,8 +9268,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "tasks"
+      "outline"
       "terminal";
   }
 
@@ -9353,8 +9277,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "catalog"
+      "outline"
       "terminal";
   }
 
@@ -9362,8 +9286,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "studio"
+      "outline"
       "terminal";
   }
 
@@ -9371,8 +9295,8 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "e2e"
+      "outline"
       "terminal";
   }
 
@@ -9380,7 +9304,6 @@ button.git-badge:hover {
     grid-template-areas:
       "topbar"
       "activity"
-      "sidebar"
       "system"
       "terminal";
   }

@@ -192,10 +192,23 @@ struct ProcessedManifest {
     metadata: ProcessedManifestMetadata,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct ProcessedManifestFile {
-    #[serde(default, rename = "path")]
-    path: Option<String>,
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ProcessedManifestFile {
+    Path(String),
+    Object {
+        #[serde(default, rename = "path")]
+        path: Option<String>,
+    },
+}
+
+impl ProcessedManifestFile {
+    fn path(&self) -> Option<&str> {
+        match self {
+            Self::Path(path) => Some(path.as_str()),
+            Self::Object { path } => path.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1073,8 +1086,7 @@ fn build_processed_item(
         .files
         .iter()
         .filter(|file| {
-            file.path
-                .as_deref()
+            file.path()
                 .map(str::trim)
                 .is_some_and(|path| !path.is_empty())
         })
@@ -2117,6 +2129,42 @@ files:
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "no-raw");
         assert_eq!(items[0].raw_file_count, 0);
+        assert!(items[0].error.is_none());
+    }
+
+    #[test]
+    fn processed_manifest_accepts_string_file_entries_as_paths() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        let dir = root.join("inbox/items/done/string-file");
+        fs::create_dir_all(dir.join("source")).unwrap();
+        fs::write(dir.join("source/meeting-note.md"), "# meeting\n").unwrap();
+        fs::write(
+            dir.join("manifest.yaml"),
+            r#"
+id: string-file
+status: done
+channel: meeting
+files:
+  - source/meeting-note.md
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("summary.md"),
+            "---\ntitle: string file\n---\n\nsummary\n",
+        )
+        .unwrap();
+
+        let items =
+            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None)
+                .unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "string-file");
+        assert_eq!(items[0].title, "string file");
+        assert_eq!(items[0].raw_file_count, 1);
         assert!(items[0].error.is_none());
     }
 
