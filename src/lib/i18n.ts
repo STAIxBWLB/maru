@@ -1540,8 +1540,8 @@ const ko: Record<string, string> = {
   "diagram.specialChars.close": "닫기",
   "diagram.specialChars.hint": "선택된 노드 제목 끝에 추가됩니다.",
 
-  "diagram.system.preview.label": "다이어그램 모드 (프리뷰)",
-  "diagram.system.preview.hint": "활성화 시 좌측 활동 막대에 다이어그램 모드 아이콘이 표시됩니다. 변경은 새로고침 후 적용됩니다.",
+  "diagram.system.preview.label": "다이어그램 모드",
+  "diagram.system.preview.hint": "기본 활성화. 끄면 좌측 활동 막대에서 다이어그램 아이콘이 숨겨집니다 (새로고침 필요).",
   "diagram.system.preview.reload": "다시 시작 필요",
 
   "diagram.dialog.export.mermaid": "Mermaid (.mmd)",
@@ -3080,8 +3080,8 @@ const en: Record<string, string> = {
   "diagram.specialChars.close": "Close",
   "diagram.specialChars.hint": "Appended to the selected node's title.",
 
-  "diagram.system.preview.label": "Diagram mode (preview)",
-  "diagram.system.preview.hint": "Adds the Diagram icon to the activity rail. A reload is required for the change to take effect.",
+  "diagram.system.preview.label": "Diagram mode",
+  "diagram.system.preview.hint": "Enabled by default. Uncheck to hide the Diagram icon from the activity rail (reload required).",
   "diagram.system.preview.reload": "Reload required",
 
   "diagram.dialog.export.mermaid": "Mermaid (.mmd)",

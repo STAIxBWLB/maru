@@ -6,13 +6,17 @@
  */
 
 .anchor-diagram {
+  grid-area: diagram;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   height: 100%;
   width: 100%;
   background: var(--anchor-bg, #fafafa);
   color: var(--anchor-fg, #1f2937);
   overflow: hidden;
+  position: relative;
 }
 
 .anchor-diagram-header {

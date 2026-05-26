@@ -956,19 +956,19 @@ function PreferencesTab({
 function DiagramPreviewToggle() {
   const { t } = useTranslation();
   const STORAGE_KEY = "anchor:diagram:enabled";
+  const isOptOut = (value: string | null) => value === "0" || value === "false";
   const [enabled, setEnabled] = useState<boolean>(() => {
     try {
-      const value = window.localStorage.getItem(STORAGE_KEY);
-      return value === "1" || value === "true";
+      return !isOptOut(window.localStorage.getItem(STORAGE_KEY));
     } catch {
-      return false;
+      return true;
     }
   });
   const toggle = (next: boolean) => {
     setEnabled(next);
     try {
-      if (next) window.localStorage.setItem(STORAGE_KEY, "1");
-      else window.localStorage.removeItem(STORAGE_KEY);
+      if (next) window.localStorage.removeItem(STORAGE_KEY);
+      else window.localStorage.setItem(STORAGE_KEY, "0");
     } catch {
       /* ignore */
     }

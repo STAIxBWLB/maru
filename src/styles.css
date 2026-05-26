@@ -328,6 +328,15 @@ a {
     "activity terminal terminal terminal";
 }
 
+.app-shell.diagram-mode {
+  --documents-col: 0px;
+  --outline-col: 0px;
+  grid-template-areas:
+    "topbar topbar topbar topbar"
+    "activity diagram diagram diagram"
+    "activity terminal terminal terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -342,7 +351,8 @@ a {
 .app-shell.terminal-maximized.tasks-mode,
 .app-shell.terminal-maximized.e2e-mode,
 .app-shell.terminal-maximized.catalog-mode,
-.app-shell.terminal-maximized.studio-mode {
+.app-shell.terminal-maximized.studio-mode,
+.app-shell.terminal-maximized.diagram-mode {
   grid-template-areas:
     "topbar topbar topbar topbar"
     "activity terminal terminal terminal"
