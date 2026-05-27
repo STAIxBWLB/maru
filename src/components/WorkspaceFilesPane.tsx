@@ -211,6 +211,22 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     () => ({ ...paneFilters, queuedPaths }),
     [paneFilters, queuedPaths],
   );
+  const paneFilterResetKey = useMemo(() => {
+    const queuedSignature = paneFilters.queuedOnly ? queuedPaths.join("\u0000") : "";
+    return [
+      paneFilters.extensions.map((ext) => ext.toLowerCase()).join("\u0000"),
+      paneFilters.modifiedWithinDays ?? "",
+      paneFilters.sizeBucket ?? "",
+      paneFilters.queuedOnly ? "queued" : "all",
+      queuedSignature,
+    ].join("\u0001");
+  }, [
+    paneFilters.extensions,
+    paneFilters.modifiedWithinDays,
+    paneFilters.queuedOnly,
+    paneFilters.sizeBucket,
+    queuedPaths,
+  ]);
   const paneFiltered = useMemo(
     () => applyWorkspaceFilesPaneFilters(filtered, effectivePaneFilters),
     [filtered, effectivePaneFilters],
@@ -273,8 +289,9 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         VIRTUAL_OVERSCAN,
         FILE_LIST_ROW_HEIGHT,
         FILE_LIST_GROUP_HEIGHT,
+        !showListGroups,
       ),
-    [listRows, viewport],
+    [listRows, showListGroups, viewport],
   );
   const queuedPathSet = useMemo(() => new Set(queuedPaths), [queuedPaths]);
   const selectedEntries = useMemo(
@@ -314,7 +331,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     if (!node) return;
     node.scrollTop = 0;
     setViewport({ scrollTop: 0, height: node.clientHeight || 720 });
-  }, [deferredQuery, filter, browserMode, sortKey, effectivePaneFilters]);
+  }, [deferredQuery, filter, browserMode, sortKey, paneFilterResetKey]);
 
   useEffect(() => {
     if (!pendingRevealTargetPath) return;

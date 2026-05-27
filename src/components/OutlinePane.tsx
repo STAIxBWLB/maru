@@ -467,7 +467,7 @@ export function OutlinePane({
             />
           ) : null}
 
-          {tab === "info" && document ? (
+          {tab === "info" && explorerPaneMode !== "files" && document ? (
             <section className="inspector">
               <div className="inspector-header">
                 <h3>{t("inspector.title")}</h3>
@@ -533,8 +533,13 @@ export function OutlinePane({
                 </span>
               </InspectorRow>
             </section>
-          ) : tab === "info" && selectedWorkspaceFileEntries.length === 0 ? (
-            <div className="outline-empty">{t("outline.empty.noDocument")}</div>
+          ) : tab === "info" &&
+            (explorerPaneMode !== "files" || selectedWorkspaceFileEntries.length === 0) ? (
+            <div className="outline-empty">
+              {explorerPaneMode === "files"
+                ? t("rightPane.files.info.empty")
+                : t("outline.empty.noDocument")}
+            </div>
           ) : null}
         </div>
       </div>
@@ -1577,7 +1582,7 @@ function FilesPaneFilterPanel({
         <input
           type="checkbox"
           checked={filters.queuedOnly}
-          disabled={queueSize === 0}
+          disabled={queueSize === 0 && !filters.queuedOnly}
           onChange={(event) => onChange({ ...filters, queuedOnly: event.target.checked })}
         />
         <span>

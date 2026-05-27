@@ -1022,9 +1022,25 @@ function MainApp() {
       return changed ? next : current;
     });
   }, [anchorSettings.ui.documentViews]);
-  const selectedFilePaths = explorerWorkspacePath
-    ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
-    : [];
+  const selectedFilePaths = useMemo(
+    () =>
+      explorerWorkspacePath
+        ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
+        : [],
+    [explorerWorkspacePath, selectedFilePathsByWorkspace],
+  );
+  const selectedFilePathSet = useMemo(
+    () => new Set(selectedFilePaths),
+    [selectedFilePaths],
+  );
+  const queuedSourcePaths = useMemo(
+    () => fileQueue.map((item) => item.sourcePath),
+    [fileQueue],
+  );
+  const selectedWorkspaceFileEntries = useMemo(
+    () => fileEntries.filter((entry) => selectedFilePathSet.has(entry.path)),
+    [fileEntries, selectedFilePathSet],
+  );
   const layoutSettings = anchorSettings.ui.layout;
   const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? tabs[0]?.id ?? null;
@@ -6166,7 +6182,7 @@ function MainApp() {
                 sortKey={anchorSettings.ui.filesSortKey}
                 filesListAttributes={anchorSettings.ui.filesListAttributes}
                 paneFilters={filesPaneFilters}
-                queuedSourcePaths={fileQueue.map((item) => item.sourcePath)}
+                queuedSourcePaths={queuedSourcePaths}
                 binaryIncludePatterns={anchorSettings.ui.binaryFileIncludePatterns}
                 collapsedFileFolders={collapsedFileFolders}
                 workspacePath={explorerWorkspacePath}
@@ -6300,9 +6316,7 @@ function MainApp() {
             onClearFileQueue={clearFileQueue}
             onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
             workspaceFileEntries={fileEntries}
-            selectedWorkspaceFileEntries={fileEntries.filter((entry) =>
-              selectedFilePaths.includes(entry.path),
-            )}
+            selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
             filesPaneFilters={filesPaneFilters}
             onFilesPaneFiltersChange={setFilesPaneFilters}
             explorerPaneMode={anchorSettings.ui.explorerPaneMode}

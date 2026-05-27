@@ -256,4 +256,21 @@ describe("workspace file list view", () => {
     expect(layout.totalHeight).toBe(expectedTotal);
     expect(layout.rows.length).toBeGreaterThan(0);
   });
+
+  it("virtualizes flat file list rows by visible index range", () => {
+    const flatEntries = Array.from({ length: 100 }, (_, index) =>
+      file(`docs/${String(index).padStart(3, "0")}.md`),
+    );
+    const rows = buildWorkspaceFileListRows(flatEntries, {
+      sortKey: "name",
+      grouped: false,
+    });
+    const layout = virtualizeWorkspaceFileListRows(rows, 580, 116, 0, 58, 24, true);
+
+    expect(layout.totalHeight).toBe(100 * 58);
+    expect(layout.rows.map(({ top }) => top)).toEqual([580, 638, 696]);
+    expect(
+      layout.rows.map(({ row }) => (row.kind === "file" ? row.entry.relPath : row.label)),
+    ).toEqual(["docs/010.md", "docs/011.md", "docs/012.md"]);
+  });
 });

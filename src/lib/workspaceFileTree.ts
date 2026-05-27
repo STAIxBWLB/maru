@@ -482,21 +482,34 @@ export function virtualizeWorkspaceFileListRows(
   overscan: number,
   fileRowHeight: number,
   groupRowHeight: number,
+  uniformFileRows: boolean = false,
 ): VirtualWorkspaceFileListLayout {
-  if (fileRowHeight <= 0) return { rows: [], totalHeight: 0 };
+  if (fileRowHeight <= 0 || groupRowHeight <= 0) return { rows: [], totalHeight: 0 };
   const safeHeight = Math.max(0, viewportHeight);
   const safeScrollTop = Math.max(0, scrollTop);
   const min = Math.max(0, safeScrollTop - overscan);
   const max = safeScrollTop + safeHeight + overscan;
-  const positioned: VirtualWorkspaceFileListRow[] = [];
+
+  if (uniformFileRows) {
+    const first = Math.max(0, Math.floor(min / fileRowHeight));
+    const last = Math.min(rows.length - 1, Math.ceil(max / fileRowHeight));
+    const visible: VirtualWorkspaceFileListRow[] = [];
+    for (let index = first; index <= last; index += 1) {
+      const row = rows[index];
+      if (!row) continue;
+      visible.push({ row, top: index * fileRowHeight, height: fileRowHeight });
+    }
+    return { rows: visible, totalHeight: rows.length * fileRowHeight };
+  }
+
+  const visible: VirtualWorkspaceFileListRow[] = [];
   let cursor = 0;
   for (const row of rows) {
     const height = row.kind === "group" ? groupRowHeight : fileRowHeight;
-    positioned.push({ row, top: cursor, height });
+    if (cursor + height >= min && cursor <= max) {
+      visible.push({ row, top: cursor, height });
+    }
     cursor += height;
   }
-  const visible = positioned.filter(
-    ({ top, height }) => top + height >= min && top <= max,
-  );
   return { rows: visible, totalHeight: cursor };
 }
