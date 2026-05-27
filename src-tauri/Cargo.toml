@@ -1,6 +1,6 @@
 [package]
 name = "anchor"
-version = "0.2.17"
+version = "0.2.18"
 description = "Local-first Anchor Workspace and AI editing desktop app"
 authors = ["Anchor Contributors"]
 license = "UNLICENSED"
