@@ -1433,6 +1433,19 @@ export async function binaryViewerClassify(
   });
 }
 
+export async function binaryViewerPrepareAsset(
+  vaultPath: string,
+  targetPath: string,
+): Promise<string> {
+  if (!isTauri()) {
+    return targetPath;
+  }
+  return invoke<string>("binary_viewer_prepare_asset", {
+    vaultPath,
+    targetPath,
+  });
+}
+
 export async function binaryViewerReadText(
   vaultPath: string,
   targetPath: string,

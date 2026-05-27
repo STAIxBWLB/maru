@@ -58,6 +58,7 @@ import {
   acceptInboxItem,
   acceptInboxItems,
   binaryViewerClassify,
+  binaryViewerPrepareAsset,
   createDocument,
   createVersion,
   DEFAULT_INBOX_RUNTIME_CONFIG,
@@ -290,6 +291,7 @@ import {
   isOpenableFile,
   type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
+import { usesAssetProtocol } from "./lib/binaryViewer";
 import {
   emptyHistory,
   goBack,
@@ -3594,6 +3596,9 @@ function MainApp() {
         setError(null);
         try {
           const classification = await binaryViewerClassify(explorerWorkspacePath, entry.path);
+          const assetPath = usesAssetProtocol(classification.category)
+            ? await binaryViewerPrepareAsset(explorerWorkspacePath, entry.path)
+            : entry.path;
           const newTab: BinaryTab = {
             kind: "binary",
             id: tabId,
@@ -3601,6 +3606,7 @@ function MainApp() {
             visibility: explorerVisibility,
             fileEntry: {
               ...entry,
+              path: assetPath,
               extension: classification.extension ?? entry.extension,
               fileKind: classification.extension ?? entry.fileKind,
               sizeBytes: classification.sizeBytes || entry.sizeBytes,
@@ -3625,6 +3631,7 @@ function MainApp() {
       activateEditorTab,
       binaryTabs,
       binaryViewerClassify,
+      binaryViewerPrepareAsset,
       editorSplitOpen,
       entries,
       explorerVisibility,

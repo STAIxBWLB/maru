@@ -131,6 +131,18 @@ export function isViewableInApp(entry: WorkspaceFileEntry): boolean {
   return getViewerCategory(entry) !== "unsupported";
 }
 
+export function usesAssetProtocol(category: ViewerCategory): boolean {
+  return (
+    category === "image" ||
+    category === "svg" ||
+    category === "pdf" ||
+    category === "docx" ||
+    category === "xlsx" ||
+    category === "audio" ||
+    category === "video"
+  );
+}
+
 export function assetUrlForPath(path: string): string {
   if (!hasTauriRuntime()) {
     // Browser-mock mode: hand back a stable string so the viewer can still
@@ -138,33 +150,6 @@ export function assetUrlForPath(path: string): string {
     return `mock-asset://${encodeURI(path)}`;
   }
   return convertFileSrc(path);
-}
-
-export function viewerCategoryLabel(category: ViewerCategory): string {
-  switch (category) {
-    case "image":
-      return "Image";
-    case "svg":
-      return "SVG";
-    case "pdf":
-      return "PDF";
-    case "docx":
-      return "Word";
-    case "xlsx":
-      return "Spreadsheet";
-    case "hwpx":
-      return "HWPX";
-    case "audio":
-      return "Audio";
-    case "video":
-      return "Video";
-    case "text":
-      return "Text";
-    case "archive":
-      return "Archive";
-    default:
-      return "Unsupported";
-  }
 }
 
 export function formatBytes(bytes: number): string {

@@ -1,6 +1,4 @@
-use crate::kordoc_lite::{
-    detect_document_format_path, extract_hwpx_text_html, DocumentFormat, HwpxPreview,
-};
+use crate::kordoc_lite::{extract_hwpx_text_html, DocumentFormat, HwpxPreview};
 use crate::vault::resolve_inside_vault;
 use encoding_rs::EUC_KR;
 use serde::{Deserialize, Serialize};
@@ -9,10 +7,13 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::process::Command;
+use tauri::Manager;
 use zip::ZipArchive;
 
 const DEFAULT_TEXT_LIMIT_BYTES: u64 = 2 * 1024 * 1024; // 2 MiB
 const ARCHIVE_ENTRY_LIMIT: usize = 5000;
+const FORMAT_HEADER_BYTES: u64 = 8 * 1024;
+const FORMAT_ZIP_ENTRY_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +83,7 @@ pub fn binary_viewer_classify(
     let mime = mime_guess::from_path(&target)
         .first()
         .map(|m| m.essence_str().to_string());
-    let detected_format = match detect_document_format_path(&target) {
+    let detected_format = match detect_document_format_bounded(&target) {
         Ok(format) => format_label(format).to_string(),
         Err(_) => "unknown".to_string(),
     };
@@ -94,6 +95,20 @@ pub fn binary_viewer_classify(
         size_bytes: metadata.len(),
         detected_format,
     })
+}
+
+#[tauri::command]
+pub fn binary_viewer_prepare_asset(
+    app: tauri::AppHandle,
+    vault_path: String,
+    target_path: String,
+) -> Result<String, String> {
+    let target = resolve_inside_vault(&vault_path, &target_path)?;
+    require_existing_file(&target)?;
+    app.asset_protocol_scope()
+        .allow_file(&target)
+        .map_err(|err| format!("Cannot allow viewer asset: {err}"))?;
+    Ok(target.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -166,10 +181,7 @@ pub fn binary_viewer_extract_hwpx(
 }
 
 #[tauri::command]
-pub fn binary_viewer_open_external(
-    vault_path: String,
-    target_path: String,
-) -> Result<(), String> {
+pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> Result<(), String> {
     let target = resolve_inside_vault(&vault_path, &target_path)?;
     if !target.exists() {
         return Err(format!("Target does not exist: {}", target.display()));
@@ -218,6 +230,81 @@ fn require_existing_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn detect_document_format_bounded(path: &Path) -> Result<DocumentFormat, String> {
+    let mut file = fs::File::open(path).map_err(|err| format!("Cannot open target: {err}"))?;
+    let mut header = Vec::with_capacity(FORMAT_HEADER_BYTES as usize);
+    file.by_ref()
+        .take(FORMAT_HEADER_BYTES)
+        .read_to_end(&mut header)
+        .map_err(|err| format!("Cannot read target header: {err}"))?;
+
+    if header.starts_with(b"HWP Document File V3.00") {
+        return Ok(DocumentFormat::Hwp3);
+    }
+    if header.starts_with(b"%PDF") {
+        return Ok(DocumentFormat::Pdf);
+    }
+    if header.len() >= 4 && header.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) {
+        return Ok(DocumentFormat::Hwp);
+    }
+    if is_hwpml_header(&header) {
+        return Ok(DocumentFormat::Hwpml);
+    }
+    if is_zip_header(&header) {
+        return Ok(detect_zip_format_path(path));
+    }
+    Ok(DocumentFormat::Unknown)
+}
+
+fn is_zip_header(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"PK\x05\x06")
+        || bytes.starts_with(b"PK\x07\x08")
+}
+
+fn is_hwpml_header(bytes: &[u8]) -> bool {
+    let head_len = bytes.len().min(512);
+    let head = String::from_utf8_lossy(&bytes[..head_len]);
+    head.trim_start_matches('\u{feff}')
+        .trim_start()
+        .starts_with("<?xml")
+        && head.contains("<HWPML")
+}
+
+fn detect_zip_format_path(path: &Path) -> DocumentFormat {
+    let Ok(file) = fs::File::open(path) else {
+        return DocumentFormat::Unknown;
+    };
+    let Ok(mut archive) = ZipArchive::new(file) else {
+        return DocumentFormat::Unknown;
+    };
+    let mut has_xlsx = false;
+    let mut has_docx = false;
+    let mut has_hwpx = false;
+    for index in 0..archive.len().min(FORMAT_ZIP_ENTRY_LIMIT) {
+        let Ok(file) = archive.by_index(index) else {
+            continue;
+        };
+        let name = file.name().to_ascii_lowercase();
+        match name.as_str() {
+            "xl/workbook.xml" => has_xlsx = true,
+            "word/document.xml" => has_docx = true,
+            "contents/content.hpf" | "mimetype" => has_hwpx = true,
+            _ if name.starts_with("contents/section") => has_hwpx = true,
+            _ => {}
+        }
+    }
+    if has_xlsx {
+        DocumentFormat::Xlsx
+    } else if has_docx {
+        DocumentFormat::Docx
+    } else if has_hwpx {
+        DocumentFormat::Hwpx
+    } else {
+        DocumentFormat::Unknown
+    }
+}
+
 fn classify(ext: Option<&str>, detected_format: &str) -> ViewerCategory {
     match ext {
         Some(
@@ -237,8 +324,8 @@ fn classify(ext: Option<&str>, detected_format: &str) -> ViewerCategory {
             "txt" | "log" | "srt" | "csv" | "tsv" | "json" | "xml" | "yaml" | "yml" | "toml"
             | "ini" | "conf" | "cfg" | "env" | "html" | "htm" | "css" | "scss" | "sass" | "less"
             | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx" | "py" | "rs" | "go" | "java" | "kt"
-            | "swift" | "c" | "cc" | "cpp" | "h" | "hpp" | "sql" | "sh" | "bash" | "zsh"
-            | "fish" | "rb" | "php" | "lua" | "vim" | "dockerfile" | "gradle" | "properties",
+            | "swift" | "c" | "cc" | "cpp" | "h" | "hpp" | "sql" | "sh" | "bash" | "zsh" | "fish"
+            | "rb" | "php" | "lua" | "vim" | "dockerfile" | "gradle" | "properties",
         ) => ViewerCategory::Text,
         Some("zip" | "jar" | "war" | "apk" | "epub" | "ipa") => ViewerCategory::Archive,
         _ => match detected_format {
@@ -313,7 +400,10 @@ mod tests {
     fn classify_falls_back_to_detected_format() {
         assert_eq!(classify(None, "pdf"), ViewerCategory::Pdf);
         assert_eq!(classify(Some("bin"), "hwpx"), ViewerCategory::Hwpx);
-        assert_eq!(classify(Some("bin"), "unknown"), ViewerCategory::Unsupported);
+        assert_eq!(
+            classify(Some("bin"), "unknown"),
+            ViewerCategory::Unsupported
+        );
     }
 
     #[test]

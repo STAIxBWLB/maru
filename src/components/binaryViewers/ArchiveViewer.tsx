@@ -67,9 +67,9 @@ export function ArchiveViewer({ entry, workspacePath }: Props) {
         <table className="binary-viewer-archive-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Size</th>
-              <th>Compressed</th>
+              <th>{t("binaryViewer.archiveName")}</th>
+              <th>{t("binaryViewer.archiveSize")}</th>
+              <th>{t("binaryViewer.archiveCompressedSize")}</th>
             </tr>
           </thead>
           <tbody>

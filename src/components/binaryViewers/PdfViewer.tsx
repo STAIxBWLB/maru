@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { assetUrlForPath } from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
@@ -30,12 +31,7 @@ async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
   if (!pdfjsReadyPromise) {
     pdfjsReadyPromise = (async () => {
       const pdfjs = await import("pdfjs-dist");
-      // pdfjs ships its worker as a separate module. Vite resolves `?url` to a
-      // static asset URL we can hand to GlobalWorkerOptions.
-      const workerUrl = (
-        await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
-      ).default;
-      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       return pdfjs;
     })();
   }

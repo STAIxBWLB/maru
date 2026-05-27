@@ -6,7 +6,6 @@ import {
 } from "../lib/api";
 import {
   formatBytes,
-  viewerCategoryLabel,
   type ViewerCategory,
 } from "../lib/binaryViewer";
 import { useTranslation } from "../lib/i18n";
@@ -55,7 +54,7 @@ export function BinaryViewerPane({ entry, workspacePath, classification, onError
         <div className="binary-viewer-header-text">
           <strong title={entry.relPath}>{entry.name}</strong>
           <span className="binary-viewer-header-meta">
-            <span>{viewerCategoryLabel(category)}</span>
+            <span>{t(`binaryViewer.category.${category}`)}</span>
             {classification.detectedFormat !== "unknown" &&
             classification.detectedFormat !== category ? (
               <>

@@ -58,7 +58,7 @@ use anchor_dir::{
 use approval::{prepare_approval, record_approval, ApprovalState};
 use binary_viewer::{
     binary_viewer_classify, binary_viewer_extract_hwpx, binary_viewer_open_external,
-    binary_viewer_read_archive, binary_viewer_read_text,
+    binary_viewer_prepare_asset, binary_viewer_read_archive, binary_viewer_read_text,
 };
 use calendar_search::search_calendar_notes;
 use document::{
@@ -258,6 +258,7 @@ pub fn run() {
             describe_file_queue_sources,
             apply_file_queue,
             binary_viewer_classify,
+            binary_viewer_prepare_asset,
             binary_viewer_read_text,
             binary_viewer_read_archive,
             binary_viewer_extract_hwpx,
