@@ -527,7 +527,9 @@ test("switches between Documents and Files explorer modes", async ({ page }) => 
   await explorer.getByRole("button", { name: "Files" }).click();
 
   await expect(explorer.getByRole("heading", { name: "파일" })).toBeVisible();
-  await expect(explorer.getByRole("button", { name: "목록" })).toHaveCount(0);
+  const filesViewControls = explorer.getByRole("group", { name: "파일 보기 방식" });
+  await expect(filesViewControls.getByRole("button", { name: "목록" })).toBeVisible();
+  await expect(filesViewControls.getByRole("button", { name: "트리" })).toHaveClass(/active/);
   await expect(explorer.getByRole("button", { name: "Git tracked" })).toBeVisible();
   await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
   await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
