@@ -9,10 +9,12 @@ import {
   Files,
   Folder,
   GitBranch,
+  List,
   PanelLeftClose,
   Plus,
   RefreshCcw,
   Search,
+  SlidersHorizontal,
 } from "lucide-react";
 import type React from "react";
 import {
@@ -37,24 +39,39 @@ import {
   writeExplorerDragPayload,
   type ExplorerDragPayload,
 } from "../lib/fileDrag";
-import type { ExplorerPaneMode, WorkspaceFileFilter } from "../lib/settings";
+import type {
+  ExplorerPaneMode,
+  FilesBrowserMode,
+  FilesListAttribute,
+  FilesSortKey,
+  WorkspaceFileFilter,
+} from "../lib/settings";
+import { ALL_FILES_LIST_ATTRIBUTES } from "../lib/settings";
 import type {
   FileStoreOperation,
   WorkspaceFileEntry,
   WorkspaceVisibility,
 } from "../lib/types";
 import {
+  applyWorkspaceFilesPaneFilters,
+  buildWorkspaceFileListRows,
   buildWorkspaceFileTreeRows,
   collectWorkspaceFileFolderPaths,
   filterWorkspaceFiles,
+  hasActiveWorkspaceFilesPaneFilters,
   isOpenableDocumentFile,
   nextCollapsedFileFolders,
+  virtualizeWorkspaceFileListRows,
   virtualizeWorkspaceFileTreeRows,
+  type VirtualWorkspaceFileListRow,
   type VirtualWorkspaceFileTreeRow,
+  type WorkspaceFilesPaneFilters,
   type WorkspaceFileTreeRow,
 } from "../lib/workspaceFileTree";
 
 const FILE_TREE_ROW_HEIGHT = 30;
+const FILE_LIST_ROW_HEIGHT = 58;
+const FILE_LIST_GROUP_HEIGHT = 24;
 const VIRTUAL_OVERSCAN = 520;
 
 type ApplyFileQueueToDestination = (
@@ -75,6 +92,11 @@ interface WorkspaceFilesPaneProps {
   activeWorkspaceLabel: string | null;
   paneMode: ExplorerPaneMode;
   filter: WorkspaceFileFilter;
+  browserMode: FilesBrowserMode;
+  sortKey: FilesSortKey;
+  filesListAttributes: FilesListAttribute[];
+  paneFilters: WorkspaceFilesPaneFilters;
+  queuedSourcePaths: string[];
   binaryIncludePatterns: string[];
   collapsedFileFolders: string[];
   workspacePath?: string | null;
@@ -83,6 +105,9 @@ interface WorkspaceFilesPaneProps {
   onPaneModeChange: (mode: ExplorerPaneMode) => void;
   onQueryChange: (query: string) => void;
   onFilterChange: (filter: WorkspaceFileFilter) => void;
+  onBrowserModeChange: (mode: FilesBrowserMode) => void;
+  onSortKeyChange: (key: FilesSortKey) => void;
+  onFilesListAttributesChange: (attributes: FilesListAttribute[]) => void;
   onCollapsedFileFoldersChange: (paths: string[]) => void;
   onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
   onOpenFile: (entry: WorkspaceFileEntry) => void;
@@ -115,6 +140,11 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   activeWorkspaceLabel,
   paneMode,
   filter,
+  browserMode,
+  sortKey,
+  filesListAttributes,
+  paneFilters,
+  queuedSourcePaths,
   binaryIncludePatterns,
   collapsedFileFolders,
   workspacePath,
@@ -123,6 +153,9 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   onPaneModeChange,
   onQueryChange,
   onFilterChange,
+  onBrowserModeChange,
+  onSortKeyChange,
+  onFilesListAttributesChange,
   onCollapsedFileFoldersChange,
   onSelectFile,
   onOpenFile,
@@ -173,23 +206,94 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     () => filterWorkspaceFiles(entries, deferredQuery, filter, binaryIncludePatterns),
     [entries, deferredQuery, filter, binaryIncludePatterns],
   );
-  const forceExpandTree = Boolean(deferredQuery.trim());
-  const folderPaths = useMemo(() => collectWorkspaceFileFolderPaths(filtered), [filtered]);
-  const rows = useMemo(
-    () => buildWorkspaceFileTreeRows(filtered, collapsedFileFolders, forceExpandTree),
-    [filtered, collapsedFileFolders, forceExpandTree],
+  const queuedPaths = useMemo(() => queuedSourcePaths ?? [], [queuedSourcePaths]);
+  const effectivePaneFilters = useMemo<WorkspaceFilesPaneFilters>(
+    () => ({ ...paneFilters, queuedPaths }),
+    [paneFilters, queuedPaths],
+  );
+  const paneFilterResetKey = useMemo(() => {
+    const queuedSignature = paneFilters.queuedOnly ? queuedPaths.join("\u0000") : "";
+    return [
+      paneFilters.extensions.map((ext) => ext.toLowerCase()).join("\u0000"),
+      paneFilters.modifiedWithinDays ?? "",
+      paneFilters.sizeBucket ?? "",
+      paneFilters.queuedOnly ? "queued" : "all",
+      queuedSignature,
+    ].join("\u0001");
+  }, [
+    paneFilters.extensions,
+    paneFilters.modifiedWithinDays,
+    paneFilters.queuedOnly,
+    paneFilters.sizeBucket,
+    queuedPaths,
+  ]);
+  const paneFiltered = useMemo(
+    () => applyWorkspaceFilesPaneFilters(filtered, effectivePaneFilters),
+    [filtered, effectivePaneFilters],
+  );
+  const hasActivePaneFilters = hasActiveWorkspaceFilesPaneFilters(effectivePaneFilters);
+  const forceExpandTree = Boolean(deferredQuery.trim()) || hasActivePaneFilters;
+  const folderPaths = useMemo(
+    () => collectWorkspaceFileFolderPaths(paneFiltered),
+    [paneFiltered],
+  );
+  const treeRows = useMemo(
+    () =>
+      browserMode === "tree"
+        ? buildWorkspaceFileTreeRows(paneFiltered, collapsedFileFolders, forceExpandTree)
+        : [],
+    [browserMode, paneFiltered, collapsedFileFolders, forceExpandTree],
   );
   const virtualTreeLayout = useMemo(
     () =>
       virtualizeWorkspaceFileTreeRows(
-        rows,
+        treeRows,
         viewport.scrollTop,
         viewport.height,
         VIRTUAL_OVERSCAN,
         FILE_TREE_ROW_HEIGHT,
       ),
-    [rows, viewport],
+    [treeRows, viewport],
   );
+  const bucketLabels = useMemo(
+    () => ({
+      today: t("list.group.today"),
+      thisWeek: t("list.group.thisWeek"),
+      earlier: t("list.group.earlier"),
+    }),
+    [t],
+  );
+  const showListGroups =
+    browserMode === "list" &&
+    !deferredQuery.trim() &&
+    !hasActivePaneFilters &&
+    filter === "all" &&
+    (sortKey === "modifiedDesc" || sortKey === "modifiedAsc");
+  const listRows = useMemo(
+    () =>
+      browserMode === "list"
+        ? buildWorkspaceFileListRows(paneFiltered, {
+            sortKey,
+            grouped: showListGroups,
+            bucketLabels,
+          })
+        : [],
+    [browserMode, paneFiltered, sortKey, showListGroups, bucketLabels],
+  );
+  const virtualListLayout = useMemo(
+    () =>
+      virtualizeWorkspaceFileListRows(
+        listRows,
+        viewport.scrollTop,
+        viewport.height,
+        VIRTUAL_OVERSCAN,
+        FILE_LIST_ROW_HEIGHT,
+        FILE_LIST_GROUP_HEIGHT,
+        !showListGroups,
+      ),
+    [listRows, showListGroups, viewport],
+  );
+  const queuedPathSet = useMemo(() => new Set(queuedPaths), [queuedPaths]);
   const selectedEntries = useMemo(
     () => entries.filter((entry) => selectedSet.has(entry.path)),
     [entries, selectedSet],
@@ -227,11 +331,37 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     if (!node) return;
     node.scrollTop = 0;
     setViewport({ scrollTop: 0, height: node.clientHeight || 720 });
-  }, [deferredQuery, filter]);
+  }, [deferredQuery, filter, browserMode, sortKey, paneFilterResetKey]);
 
   useEffect(() => {
     if (!pendingRevealTargetPath) return;
-    const index = rows.findIndex(
+    if (browserMode === "list") {
+      const index = listRows.findIndex(
+        (row) => row.kind === "file" && row.entry.path === pendingRevealTargetPath,
+      );
+      if (index < 0) {
+        if (!loading) onRevealHandled?.();
+        return;
+      }
+      const node = scrollRef.current;
+      if (!node) return;
+      let top = 0;
+      for (let i = 0; i < index; i += 1) {
+        top += listRows[i].kind === "group" ? FILE_LIST_GROUP_HEIGHT : FILE_LIST_ROW_HEIGHT;
+      }
+      node.scrollTop = Math.max(0, top - FILE_LIST_ROW_HEIGHT);
+      setViewport({ scrollTop: node.scrollTop, height: node.clientHeight || 720 });
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const selector = `[data-tree-target-path="${CSS.escape(pendingRevealTargetPath)}"]`;
+          const target = scrollRef.current?.querySelector<HTMLButtonElement>(selector);
+          target?.focus({ preventScroll: true });
+          onRevealHandled?.();
+        });
+      });
+      return;
+    }
+    const index = treeRows.findIndex(
       (row) => row.kind === "file" && row.entry.path === pendingRevealTargetPath,
     );
     if (index < 0) {
@@ -251,7 +381,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         onRevealHandled?.();
       });
     });
-  }, [loading, onRevealHandled, pendingRevealTargetPath, rows]);
+  }, [browserMode, listRows, loading, onRevealHandled, pendingRevealTargetPath, treeRows]);
 
   const copyText = (value: string) => {
     if (!value) return;
@@ -317,7 +447,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             <span className="workspace-caption">{activeWorkspaceLabel}</span>
           ) : null}
         </div>
-        <span className="meta">{t("list.meta.count", { count: filtered.length })}</span>
+        <span className="meta">{t("list.meta.count", { count: paneFiltered.length })}</span>
         <button
           type="button"
           className="icon-button"
@@ -339,6 +469,29 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             <PanelLeftClose size={14} />
           </button>
         ) : null}
+      </div>
+
+      <div className="list-mode-toggle" role="group" aria-label={t("files.viewMode")}>
+        <button
+          type="button"
+          className={browserMode === "list" ? "active" : ""}
+          onClick={() => onBrowserModeChange("list")}
+          title={t("files.view.list")}
+          aria-label={t("files.view.list")}
+        >
+          <List size={13} />
+          <span>{t("files.view.list")}</span>
+        </button>
+        <button
+          type="button"
+          className={browserMode === "tree" ? "active" : ""}
+          onClick={() => onBrowserModeChange("tree")}
+          title={t("files.view.tree")}
+          aria-label={t("files.view.tree")}
+        >
+          <Folder size={13} />
+          <span>{t("files.view.tree")}</span>
+        </button>
       </div>
 
       <div className="file-filter-toggle" role="group" aria-label={t("files.filter.label")}>
@@ -374,38 +527,81 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         </button>
       </div>
 
-      <div className="tree-bulk-actions" role="group" aria-label={t("files.tree.actions")}>
-        <button
-          type="button"
-          onClick={() => onCollapsedFileFoldersChange([])}
-          disabled={folderPaths.length === 0}
-          title={t("list.tree.collapseAll")}
-          aria-label={t("list.tree.collapseAll")}
+      {browserMode === "list" ? (
+        <div className="files-list-controls" role="group" aria-label={t("files.toolbar.label")}>
+          <label className="file-sort-control" aria-label={t("files.sort.label")}>
+            <span className="file-sort-label">{t("files.sort.label")}</span>
+            <select
+              value={sortKey}
+              onChange={(event) => onSortKeyChange(event.target.value as FilesSortKey)}
+            >
+              <option value="name">{t("files.sort.nameShort")}</option>
+              <option value="modifiedDesc">{t("files.sort.modifiedDescShort")}</option>
+              <option value="modifiedAsc">{t("files.sort.modifiedAscShort")}</option>
+            </select>
+          </label>
+          <FilesListAttributeMenu
+            attributes={filesListAttributes}
+            onChange={onFilesListAttributesChange}
+            t={t}
+          />
+          <button
+            type="button"
+            className="files-list-action-button files-add-selected"
+            onClick={() => onQueueFiles(selectedEntries)}
+            disabled={selectedEntries.length === 0}
+            title={t("files.queueSelected")}
+            aria-label={t("files.queueSelected")}
+          >
+            <Plus size={13} />
+            {selectedEntries.length > 0 ? (
+              <span className="files-add-count">{selectedEntries.length}</span>
+            ) : null}
+          </button>
+        </div>
+      ) : (
+        <div
+          className="tree-bulk-actions files-tree-actions"
+          role="group"
+          aria-label={t("files.tree.actions")}
         >
-          <ChevronsDownUp size={13} />
-          <span>{t("list.tree.collapseAll")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onCollapsedFileFoldersChange(folderPaths)}
-          disabled={folderPaths.length === 0}
-          title={t("list.tree.expandAll")}
-          aria-label={t("list.tree.expandAll")}
-        >
-          <ChevronsUpDown size={13} />
-          <span>{t("list.tree.expandAll")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onQueueFiles(selectedEntries)}
-          disabled={selectedEntries.length === 0}
-          title={t("files.queueSelected")}
-          aria-label={t("files.queueSelected")}
-        >
-          <Plus size={13} />
-          <span>{t("files.queueSelected")}</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            className="files-list-action-button"
+            onClick={() => onCollapsedFileFoldersChange([])}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.collapseAll")}
+            aria-label={t("list.tree.collapseAll")}
+          >
+            <ChevronsDownUp size={13} />
+            <span>{t("list.tree.collapseAll")}</span>
+          </button>
+          <button
+            type="button"
+            className="files-list-action-button"
+            onClick={() => onCollapsedFileFoldersChange(folderPaths)}
+            disabled={folderPaths.length === 0}
+            title={t("list.tree.expandAll")}
+            aria-label={t("list.tree.expandAll")}
+          >
+            <ChevronsUpDown size={13} />
+            <span>{t("list.tree.expandAll")}</span>
+          </button>
+          <button
+            type="button"
+            className="files-list-action-button files-add-selected"
+            onClick={() => onQueueFiles(selectedEntries)}
+            disabled={selectedEntries.length === 0}
+            title={t("files.queueSelected")}
+            aria-label={t("files.queueSelected")}
+          >
+            <Plus size={13} />
+            {selectedEntries.length > 0 ? (
+              <span className="files-add-count">{selectedEntries.length}</span>
+            ) : null}
+          </button>
+        </div>
+      )}
 
       <label className="search-box" title={t("files.searchPlaceholder")}>
         <Search size={14} />
@@ -439,7 +635,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           </div>
         ) : null}
 
-        {!loading && filtered.length === 0 ? (
+        {!loading && paneFiltered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-illus" title={t("files.empty.title")}>
               <Files size={22} />
@@ -449,7 +645,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           </div>
         ) : null}
 
-        {!loading && filtered.length > 0 ? (
+        {!loading && paneFiltered.length > 0 && browserMode === "tree" ? (
           <WorkspaceFileTree
             rows={virtualTreeLayout.rows}
             totalHeight={virtualTreeLayout.totalHeight}
@@ -487,6 +683,40 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
                 title: row.path,
                 entry: null,
                 targetKind: "directory",
+              });
+            }}
+            selectedFileQueueCount={selectedFileQueueCount}
+            onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+            onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+            dragOverTargetPath={dragOverTargetPath}
+            onDragOverTargetChange={setDragOverTargetPath}
+            workspacePath={workspacePath}
+            t={t}
+            locale={locale}
+          />
+        ) : null}
+
+        {!loading && paneFiltered.length > 0 && browserMode === "list" ? (
+          <WorkspaceFileList
+            rows={virtualListLayout.rows}
+            totalHeight={virtualListLayout.totalHeight}
+            selectedSet={selectedSet}
+            selectedEntries={selectedEntries}
+            queuedPathSet={queuedPathSet}
+            attributes={filesListAttributes}
+            onSelectFile={onSelectFile}
+            onOpenFile={onOpenFile}
+            onContextMenu={(event, entry) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({
+                x: event.clientX,
+                y: event.clientY,
+                targetPath: entry.path,
+                relPath: entry.relPath,
+                title: entry.name,
+                entry,
+                targetKind: "file",
               });
             }}
             selectedFileQueueCount={selectedFileQueueCount}
@@ -606,6 +836,46 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     </section>
   );
 });
+
+function FilesListAttributeMenu({
+  attributes,
+  onChange,
+  t,
+}: {
+  attributes: FilesListAttribute[];
+  onChange: (attributes: FilesListAttribute[]) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const selected = new Set(attributes);
+  const toggleAttribute = (attribute: FilesListAttribute, checked: boolean) => {
+    const next = new Set(attributes);
+    if (checked) next.add(attribute);
+    else next.delete(attribute);
+    onChange(ALL_FILES_LIST_ATTRIBUTES.filter((value) => next.has(value)));
+  };
+  return (
+    <details className="files-attribute-menu">
+      <summary title={t("files.attributes.label")} aria-label={t("files.attributes.label")}>
+        <SlidersHorizontal size={13} />
+        <span>{t("files.attributes.short")}</span>
+        <span className="files-attribute-count">{attributes.length}</span>
+      </summary>
+      <div className="files-attribute-popover">
+        <div className="files-attribute-title">{t("files.attributes.label")}</div>
+        {ALL_FILES_LIST_ATTRIBUTES.map((attribute) => (
+          <label key={attribute} className="files-attribute-option">
+            <input
+              type="checkbox"
+              checked={selected.has(attribute)}
+              onChange={(event) => toggleAttribute(attribute, event.target.checked)}
+            />
+            <span>{t(`files.attributes.${attribute}`)}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 interface WorkspaceFileTreeProps {
   rows: VirtualWorkspaceFileTreeRow[];
@@ -989,3 +1259,308 @@ function formatBytes(value: number, locale: string): string {
 function joinWorkspacePath(workspacePath: string, relPath: string): string {
   return `${workspacePath.replace(/\/+$/, "")}/${relPath.replace(/^\/+/, "")}`;
 }
+
+function formatRelativeTime(
+  isoString: string | null | undefined,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  now: number = Date.now(),
+): string {
+  if (!isoString) return "";
+  const ts = Date.parse(isoString);
+  if (!Number.isFinite(ts)) return "";
+  const diff = Math.max(0, now - ts);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+  if (diff < minute) return t("files.row.relTime.now");
+  if (diff < hour) return t("files.row.relTime.minutes", { count: Math.floor(diff / minute) });
+  if (diff < day) return t("files.row.relTime.hours", { count: Math.floor(diff / hour) });
+  if (diff < week) return t("files.row.relTime.days", { count: Math.floor(diff / day) });
+  if (diff < month) return t("files.row.relTime.weeks", { count: Math.floor(diff / week) });
+  if (diff < year) return t("files.row.relTime.months", { count: Math.floor(diff / month) });
+  return t("files.row.relTime.years", { count: Math.floor(diff / year) });
+}
+
+function formatAbsoluteTime(isoString: string | null | undefined, locale: string): string {
+  if (!isoString) return "";
+  const ts = Date.parse(isoString);
+  if (!Number.isFinite(ts)) return "";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(ts));
+}
+
+// ---------------------------------------------------------------------------
+// List-view rendering
+// ---------------------------------------------------------------------------
+
+interface WorkspaceFileListProps {
+  rows: VirtualWorkspaceFileListRow[];
+  totalHeight: number;
+  selectedSet: Set<string>;
+  selectedEntries: WorkspaceFileEntry[];
+  queuedPathSet: Set<string>;
+  attributes: FilesListAttribute[];
+  onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
+  onOpenFile: (entry: WorkspaceFileEntry) => void;
+  onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
+  workspacePath?: string | null;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  locale: string;
+}
+
+const WorkspaceFileList = memo(function WorkspaceFileList({
+  rows,
+  totalHeight,
+  selectedSet,
+  selectedEntries,
+  queuedPathSet,
+  attributes,
+  onSelectFile,
+  onOpenFile,
+  onContextMenu,
+  selectedFileQueueCount,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
+  workspacePath,
+  t,
+  locale,
+}: WorkspaceFileListProps) {
+  return (
+    <div
+      className="tree-virtual-spacer files-list"
+      role="list"
+      aria-label={t("files.view.list")}
+      style={{ height: totalHeight }}
+    >
+      {rows.map(({ row, top, height }) => {
+        if (row.kind === "group") {
+          return (
+            <div
+              key={row.id}
+              className="virtual-list-row files-list-group"
+              style={{ height, transform: `translateY(${top}px)` }}
+            >
+              <span className="files-list-group-label">{row.label}</span>
+              <span className="files-list-group-count">{row.count}</span>
+            </div>
+          );
+        }
+        return (
+          <div
+            key={row.id}
+            className="virtual-list-row"
+            style={{ height, transform: `translateY(${top}px)` }}
+          >
+            <FileListRow
+              entry={row.entry}
+              selected={selectedSet.has(row.entry.path)}
+              queued={queuedPathSet.has(row.entry.path)}
+              attributes={attributes}
+              onSelectFile={onSelectFile}
+              onOpenFile={onOpenFile}
+              onContextMenu={onContextMenu}
+              selectedEntries={selectedEntries}
+              selectedFileQueueCount={selectedFileQueueCount}
+              onApplyFileQueueToDestination={onApplyFileQueueToDestination}
+              onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
+              dragOverTargetPath={dragOverTargetPath}
+              onDragOverTargetChange={onDragOverTargetChange}
+              workspacePath={workspacePath}
+              t={t}
+              locale={locale}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+interface FileListRowProps {
+  entry: WorkspaceFileEntry;
+  selected: boolean;
+  queued: boolean;
+  attributes: FilesListAttribute[];
+  onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
+  onOpenFile: (entry: WorkspaceFileEntry) => void;
+  onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
+  selectedEntries: WorkspaceFileEntry[];
+  selectedFileQueueCount?: number;
+  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
+  onApplyExplorerDragToDestination?: (
+    payload: ExplorerDragPayload,
+    targetPath: string,
+    targetKind: "file" | "directory",
+    operation: FileStoreOperation,
+  ) => void;
+  dragOverTargetPath: string | null;
+  onDragOverTargetChange: (targetPath: string | null) => void;
+  workspacePath?: string | null;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  locale: string;
+}
+
+const FileListRow = memo(function FileListRow({
+  entry,
+  selected,
+  queued,
+  attributes,
+  onSelectFile,
+  onOpenFile,
+  onContextMenu,
+  selectedEntries,
+  selectedFileQueueCount,
+  onApplyFileQueueToDestination,
+  onApplyExplorerDragToDestination,
+  dragOverTargetPath,
+  onDragOverTargetChange,
+  workspacePath,
+  t,
+  locale,
+}: FileListRowProps) {
+  const canDrop = (event: React.DragEvent): boolean =>
+    Boolean(
+      (onApplyExplorerDragToDestination && hasExplorerDragPayload(event.dataTransfer)) ||
+        (onApplyFileQueueToDestination &&
+          (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
+    );
+  const dragEntries = selected && selectedEntries.length > 0 ? selectedEntries : [entry];
+  const parentDir = entry.relPath.includes("/")
+    ? entry.relPath.slice(0, entry.relPath.lastIndexOf("/"))
+    : "";
+  const visibleAttributes = new Set(attributes);
+  const modifiedRelative = formatRelativeTime(entry.updatedAt, t);
+  const modifiedAbsolute = formatAbsoluteTime(entry.updatedAt, locale);
+  const kindLabel = (entry.extension ?? entry.fileKind).toUpperCase();
+  const hasMeta =
+    queued ||
+    (visibleAttributes.has("parent") && parentDir) ||
+    visibleAttributes.has("kind") ||
+    (visibleAttributes.has("modified") && modifiedRelative) ||
+    visibleAttributes.has("size") ||
+    (visibleAttributes.has("git") && entry.gitTracked) ||
+    (visibleAttributes.has("binary") && entry.binary);
+  return (
+    <button
+      type="button"
+      className={[
+        "files-list-row",
+        selected ? "selected" : "",
+        queued ? "queued" : "",
+        dragOverTargetPath === entry.path ? "drag-over" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      draggable={Boolean(workspacePath)}
+      onClick={(event) => onSelectFile(entry, event.metaKey || event.ctrlKey)}
+      onDoubleClick={() => onOpenFile(entry)}
+      onContextMenu={(event) => onContextMenu(event, entry)}
+      onDragStart={(event) => {
+        if (!workspacePath) return;
+        writeExplorerDragPayload(event, {
+          origin: "files",
+          workspacePath,
+          items: dragEntries.map((selectedEntry) => ({
+            path: selectedEntry.path,
+            relPath: selectedEntry.relPath,
+            fileName: selectedEntry.name,
+            sourceKind: "file",
+          })),
+        });
+      }}
+      onDragEnd={clearExplorerDragPayload}
+      onDragOver={(event) => {
+        if (!canDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = dropOperationFromEvent(event);
+        onDragOverTargetChange(entry.path);
+      }}
+      onDragLeave={() => onDragOverTargetChange(null)}
+      onDrop={(event) => {
+        const payload = readExplorerDragPayload(event.dataTransfer);
+        const queuePayload = readFileQueueDragPayload(event.dataTransfer);
+        onDragOverTargetChange(null);
+        if (payload && onApplyExplorerDragToDestination) {
+          event.preventDefault();
+          clearExplorerDragPayload();
+          onApplyExplorerDragToDestination(payload, entry.path, "file", dropOperationFromEvent(event));
+          return;
+        }
+        if (queuePayload && onApplyFileQueueToDestination) {
+          event.preventDefault();
+          clearFileQueueDragPayload();
+          void onApplyFileQueueToDestination(
+            entry.path,
+            "file",
+            dropOperationFromEvent(event),
+            queuePayload.itemIds,
+          );
+          return;
+        }
+        if (!selectedFileQueueCount || !onApplyFileQueueToDestination) return;
+        event.preventDefault();
+        void onApplyFileQueueToDestination(entry.path, "file", dropOperationFromEvent(event));
+      }}
+      title={entry.relPath}
+      aria-selected={selected}
+      data-tree-target-path={entry.path}
+    >
+      {isOpenableDocumentFile(entry) ? <FileText size={13} /> : <File size={13} />}
+      <span className="files-list-main">
+        <span className="files-list-name">{entry.name}</span>
+        {hasMeta ? (
+          <span className="files-list-meta-line">
+            {queued ? (
+              <span className="files-list-badge" data-kind="queued">
+                {t("files.row.queued")}
+              </span>
+            ) : null}
+            {visibleAttributes.has("parent") && parentDir ? (
+              <span className="files-list-parent" title={parentDir}>
+                {parentDir}
+              </span>
+            ) : null}
+            {visibleAttributes.has("kind") ? (
+              <span className="files-list-chip">{kindLabel}</span>
+            ) : null}
+            {visibleAttributes.has("modified") && modifiedRelative ? (
+              <span className="files-list-mtime" title={modifiedAbsolute}>
+                {modifiedRelative}
+              </span>
+            ) : null}
+            {visibleAttributes.has("size") ? (
+              <span className="tree-size">{formatBytes(entry.sizeBytes, locale)}</span>
+            ) : null}
+            {visibleAttributes.has("git") && entry.gitTracked ? (
+              <span className="files-list-chip" data-type="git">
+                git
+              </span>
+            ) : null}
+            {visibleAttributes.has("binary") && entry.binary ? (
+              <span className="files-list-chip" data-type="binary">
+                bin
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
+});

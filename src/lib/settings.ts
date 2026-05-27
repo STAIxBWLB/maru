@@ -3,6 +3,9 @@ export type DocumentLabelMode = "title" | "filename";
 export type ExplorerPaneMode = "documents" | "files";
 export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
+export type FilesBrowserMode = "list" | "tree";
+export type FilesSortKey = "name" | "modifiedDesc" | "modifiedAsc";
+export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git" | "binary";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
 export type AnchorAppMode =
@@ -73,6 +76,22 @@ export const DEFAULT_BINARY_FILE_INCLUDE_PATTERNS = [
   "*.html",
 ] as const;
 
+export const ALL_FILES_LIST_ATTRIBUTES: FilesListAttribute[] = [
+  "parent",
+  "kind",
+  "modified",
+  "size",
+  "git",
+  "binary",
+];
+
+export const DEFAULT_FILES_LIST_ATTRIBUTES: FilesListAttribute[] = [
+  "parent",
+  "kind",
+  "modified",
+  "size",
+];
+
 export interface WindowBoundsSettings {
   x: number;
   y: number;
@@ -114,6 +133,9 @@ export interface AnchorSettings {
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
     workspaceFileFilter: WorkspaceFileFilter;
+    filesBrowserMode: FilesBrowserMode;
+    filesSortKey: FilesSortKey;
+    filesListAttributes: FilesListAttribute[];
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
     collapsedTreeFolders: string[];
@@ -228,6 +250,9 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     documentBrowserMode: "tree",
     documentLabelMode: "title",
     workspaceFileFilter: "all",
+    filesBrowserMode: "tree",
+    filesSortKey: "name",
+    filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
     collapsedTreeFolders: [],
@@ -363,6 +388,9 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
       workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
+      filesBrowserMode: parseFilesBrowserMode(ui.filesBrowserMode) ?? "tree",
+      filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
+      filesListAttributes: normalizeFilesListAttributes(ui.filesListAttributes),
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
         ui.binaryFileIncludePatterns,
       ),
@@ -681,6 +709,7 @@ function cloneDefaultSettings(): AnchorSettings {
       binaryFileIncludePatterns: [
         ...DEFAULT_ANCHOR_SETTINGS.ui.binaryFileIncludePatterns,
       ],
+      filesListAttributes: [...DEFAULT_ANCHOR_SETTINGS.ui.filesListAttributes],
       documentViews: DEFAULT_ANCHOR_SETTINGS.ui.documentViews.map((view) => ({ ...view })),
       collapsedTreeFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_ANCHOR_SETTINGS.ui.collapsedFileFolders],
@@ -1021,6 +1050,27 @@ function parseDocumentLabelMode(value: unknown): DocumentLabelMode | null {
 
 function parseWorkspaceFileFilter(value: unknown): WorkspaceFileFilter | null {
   return value === "all" || value === "tracked" || value === "binary" ? value : null;
+}
+
+function parseFilesBrowserMode(value: unknown): FilesBrowserMode | null {
+  return value === "list" || value === "tree" ? value : null;
+}
+
+function parseFilesSortKey(value: unknown): FilesSortKey | null {
+  return value === "name" || value === "modifiedDesc" || value === "modifiedAsc" ? value : null;
+}
+
+function normalizeFilesListAttributes(value: unknown): FilesListAttribute[] {
+  if (!Array.isArray(value)) return [...DEFAULT_FILES_LIST_ATTRIBUTES];
+  if (value.length === 0) return [];
+  const valid = new Set<FilesListAttribute>(ALL_FILES_LIST_ATTRIBUTES);
+  const attrs: FilesListAttribute[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    if (!valid.has(item as FilesListAttribute)) continue;
+    if (!attrs.includes(item as FilesListAttribute)) attrs.push(item as FilesListAttribute);
+  }
+  return attrs.length > 0 ? attrs : [...DEFAULT_FILES_LIST_ATTRIBUTES];
 }
 
 function parseFileQueueDefaultOperation(value: unknown): FileQueueDefaultOperation | null {

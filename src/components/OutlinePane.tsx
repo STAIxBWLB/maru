@@ -55,7 +55,12 @@ import {
 import { extractOutline } from "../lib/markdown";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
-import type { AnchorAppMode, DocumentViewDefinition, RightPaneTab } from "../lib/settings";
+import type {
+  AnchorAppMode,
+  DocumentViewDefinition,
+  ExplorerPaneMode,
+  RightPaneTab,
+} from "../lib/settings";
 import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
 import type {
   DocumentPayload,
@@ -64,7 +69,12 @@ import type {
   MemoEntry,
   MemoFormat,
   VaultEntry,
+  WorkspaceFileEntry,
 } from "../lib/types";
+import {
+  collectWorkspaceFileExtensionCounts,
+  type WorkspaceFilesPaneFilters,
+} from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
 import { Sidebar } from "./Sidebar";
 
@@ -97,6 +107,12 @@ interface OutlinePaneProps {
   onApplyFileQueue: () => Promise<unknown>;
   onClearFileQueue: () => void;
   onClearSelectedFileQueueItems: () => void;
+  workspaceFileEntries: WorkspaceFileEntry[];
+  selectedWorkspaceFileEntries: WorkspaceFileEntry[];
+  filesPaneFilters: WorkspaceFilesPaneFilters;
+  onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
+  explorerPaneMode: ExplorerPaneMode;
+  onRevealFileInFinder: (targetPath: string) => void;
   activeTab: RightPaneTab;
   onTabChange: (tab: RightPaneTab) => void;
   paneRef?: React.RefObject<HTMLElement | null>;
@@ -200,6 +216,12 @@ export function OutlinePane({
   onApplyFileQueue,
   onClearFileQueue,
   onClearSelectedFileQueueItems,
+  workspaceFileEntries,
+  selectedWorkspaceFileEntries,
+  filesPaneFilters,
+  onFilesPaneFiltersChange,
+  explorerPaneMode,
+  onRevealFileInFinder,
   activeTab,
   onTabChange,
   paneRef,
@@ -395,20 +417,29 @@ export function OutlinePane({
           ) : null}
 
           {tab === "files" ? (
-            <FilesQueuePane
-              queue={fileQueue}
-              canApplyFileQueue={canApplyFileQueue}
-              selectedIds={selectedFileQueueItemIds}
-              onError={onError}
-              onUpdateItem={onUpdateFileQueueItem}
-              onSelectItem={onSelectFileQueueItem}
-              onQueueExternalFiles={onQueueExternalFiles}
-              onQueueFileSources={onQueueFileSources}
-              onApply={onApplyFileQueue}
-              onClear={onClearFileQueue}
-              onClearSelected={onClearSelectedFileQueueItems}
-              t={t}
-            />
+            <>
+              <FilesPaneFilterPanel
+                entries={workspaceFileEntries}
+                filters={filesPaneFilters}
+                onChange={onFilesPaneFiltersChange}
+                queueSize={fileQueue.length}
+                t={t}
+              />
+              <FilesQueuePane
+                queue={fileQueue}
+                canApplyFileQueue={canApplyFileQueue}
+                selectedIds={selectedFileQueueItemIds}
+                onError={onError}
+                onUpdateItem={onUpdateFileQueueItem}
+                onSelectItem={onSelectFileQueueItem}
+                onQueueExternalFiles={onQueueExternalFiles}
+                onQueueFileSources={onQueueFileSources}
+                onApply={onApplyFileQueue}
+                onClear={onClearFileQueue}
+                onClearSelected={onClearSelectedFileQueueItems}
+                t={t}
+              />
+            </>
           ) : null}
 
           {tab === "memo" ? (
@@ -426,7 +457,17 @@ export function OutlinePane({
 
           {tab === "evidence" ? evidenceNode ?? null : null}
 
-          {tab === "info" && document ? (
+          {tab === "info" &&
+          explorerPaneMode === "files" &&
+          selectedWorkspaceFileEntries.length > 0 ? (
+            <FilesInfoPane
+              entries={selectedWorkspaceFileEntries}
+              onRevealInFinder={onRevealFileInFinder}
+              t={t}
+            />
+          ) : null}
+
+          {tab === "info" && explorerPaneMode !== "files" && document ? (
             <section className="inspector">
               <div className="inspector-header">
                 <h3>{t("inspector.title")}</h3>
@@ -492,8 +533,13 @@ export function OutlinePane({
                 </span>
               </InspectorRow>
             </section>
-          ) : tab === "info" ? (
-            <div className="outline-empty">{t("outline.empty.noDocument")}</div>
+          ) : tab === "info" &&
+            (explorerPaneMode !== "files" || selectedWorkspaceFileEntries.length === 0) ? (
+            <div className="outline-empty">
+              {explorerPaneMode === "files"
+                ? t("rightPane.files.info.empty")
+                : t("outline.empty.noDocument")}
+            </div>
           ) : null}
         </div>
       </div>
@@ -1390,4 +1436,268 @@ function TagsInput({ value, onCommit, readOnly = false }: TagsInputProps) {
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Files filter panel (right pane → drives left Files list)
+// ---------------------------------------------------------------------------
+
+const MODIFIED_PRESETS: { value: number | null; key: string }[] = [
+  { value: null, key: "rightPane.files.filters.modifiedAll" },
+  { value: 1, key: "rightPane.files.filters.modified1" },
+  { value: 7, key: "rightPane.files.filters.modified7" },
+  { value: 30, key: "rightPane.files.filters.modified30" },
+  { value: 90, key: "rightPane.files.filters.modified90" },
+];
+
+const SIZE_PRESETS: {
+  value: WorkspaceFilesPaneFilters["sizeBucket"];
+  key: string;
+}[] = [
+  { value: null, key: "rightPane.files.filters.sizeAll" },
+  { value: "lt10k", key: "rightPane.files.filters.sizeLt10k" },
+  { value: "lt1m", key: "rightPane.files.filters.sizeLt1m" },
+  { value: "lt10m", key: "rightPane.files.filters.sizeLt10m" },
+  { value: "gte10m", key: "rightPane.files.filters.sizeGte10m" },
+];
+
+function FilesPaneFilterPanel({
+  entries,
+  filters,
+  onChange,
+  queueSize,
+  t,
+}: {
+  entries: WorkspaceFileEntry[];
+  filters: WorkspaceFilesPaneFilters;
+  onChange: (filters: WorkspaceFilesPaneFilters) => void;
+  queueSize: number;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const extensionCounts = useMemo(
+    () => collectWorkspaceFileExtensionCounts(entries).slice(0, 12),
+    [entries],
+  );
+  const selectedExtSet = useMemo(
+    () => new Set(filters.extensions.map((ext) => ext.toLowerCase())),
+    [filters.extensions],
+  );
+  const hasActive =
+    filters.extensions.length > 0 ||
+    filters.modifiedWithinDays !== null ||
+    filters.sizeBucket !== null ||
+    filters.queuedOnly;
+
+  const toggleExtension = (ext: string) => {
+    const lower = ext.toLowerCase();
+    const next = selectedExtSet.has(lower)
+      ? filters.extensions.filter((value) => value.toLowerCase() !== lower)
+      : [...filters.extensions, lower];
+    onChange({ ...filters, extensions: next });
+  };
+
+  const clearAll = () => {
+    onChange({
+      extensions: [],
+      modifiedWithinDays: null,
+      sizeBucket: null,
+      queuedOnly: false,
+      queuedPaths: filters.queuedPaths,
+    });
+  };
+
+  return (
+    <section className="files-pane-filters" aria-label={t("rightPane.files.filters.title")}>
+      <header className="files-pane-filters-header">
+        <span>{t("rightPane.files.filters.title")}</span>
+        {hasActive ? (
+          <button
+            type="button"
+            className="files-pane-filters-clear"
+            onClick={clearAll}
+            title={t("rightPane.files.filters.clear")}
+          >
+            <CircleX size={12} />
+            <span>{t("rightPane.files.filters.clear")}</span>
+          </button>
+        ) : null}
+      </header>
+
+      {extensionCounts.length > 0 ? (
+        <div className="files-pane-filters-group" role="group" aria-label={t("rightPane.files.filters.extensions")}>
+          <span className="files-pane-filters-label">{t("rightPane.files.filters.extensions")}</span>
+          <div className="files-pane-filters-chips">
+            {extensionCounts.map(({ extension, count }) => {
+              const active = selectedExtSet.has(extension.toLowerCase());
+              return (
+                <button
+                  key={extension}
+                  type="button"
+                  className={active ? "chip active" : "chip"}
+                  onClick={() => toggleExtension(extension)}
+                  title={`${extension} (${count})`}
+                >
+                  <span>{extension}</span>
+                  <span className="chip-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="files-pane-filters-group" role="group" aria-label={t("rightPane.files.filters.modified")}>
+        <span className="files-pane-filters-label">{t("rightPane.files.filters.modified")}</span>
+        <div className="files-pane-filters-chips">
+          {MODIFIED_PRESETS.map(({ value, key }) => (
+            <button
+              key={key}
+              type="button"
+              className={filters.modifiedWithinDays === value ? "chip active" : "chip"}
+              onClick={() => onChange({ ...filters, modifiedWithinDays: value })}
+            >
+              {t(key)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="files-pane-filters-group" role="group" aria-label={t("rightPane.files.filters.size")}>
+        <span className="files-pane-filters-label">{t("rightPane.files.filters.size")}</span>
+        <div className="files-pane-filters-chips">
+          {SIZE_PRESETS.map(({ value, key }) => (
+            <button
+              key={key}
+              type="button"
+              className={filters.sizeBucket === value ? "chip active" : "chip"}
+              onClick={() => onChange({ ...filters, sizeBucket: value })}
+            >
+              {t(key)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className="files-pane-filters-toggle">
+        <input
+          type="checkbox"
+          checked={filters.queuedOnly}
+          disabled={queueSize === 0 && !filters.queuedOnly}
+          onChange={(event) => onChange({ ...filters, queuedOnly: event.target.checked })}
+        />
+        <span>
+          {t("rightPane.files.filters.queuedOnly", { count: queueSize })}
+        </span>
+      </label>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Files Info pane (right Info tab → reflects selected files in Files list)
+// ---------------------------------------------------------------------------
+
+function FilesInfoPane({
+  entries,
+  onRevealInFinder,
+  t,
+}: {
+  entries: WorkspaceFileEntry[];
+  onRevealInFinder: (targetPath: string) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  if (entries.length === 1) {
+    const entry = entries[0];
+    const updated = entry.updatedAt
+      ? formatAbsoluteTimestamp(entry.updatedAt)
+      : t("inspector.empty");
+    return (
+      <section className="inspector files-info">
+        <div className="inspector-header">
+          <h3>{t("rightPane.files.info.title")}</h3>
+        </div>
+        <InspectorRow label={t("rightPane.files.info.name")} muted>
+          <span className="inspector-readonly">{entry.name}</span>
+        </InspectorRow>
+        <InspectorRow label={t("rightPane.files.info.path")} muted>
+          <span className="inspector-readonly" title={entry.path}>
+            {entry.relPath}
+          </span>
+        </InspectorRow>
+        <InspectorRow label={t("rightPane.files.info.size")} muted>
+          <span className="inspector-readonly">{formatFileSize(entry.sizeBytes)}</span>
+        </InspectorRow>
+        <InspectorRow label={t("rightPane.files.info.modified")} muted>
+          <span className="inspector-readonly">{updated}</span>
+        </InspectorRow>
+        <InspectorRow label={t("rightPane.files.info.kind")} muted>
+          <span className="inspector-readonly">
+            {entry.fileKind.toUpperCase()}
+            {entry.binary ? ` · ${t("rightPane.files.info.binary")}` : ""}
+            {entry.gitTracked ? ` · ${t("rightPane.files.info.tracked")}` : ""}
+          </span>
+        </InspectorRow>
+        <div className="files-info-actions">
+          <button
+            type="button"
+            className="files-info-action"
+            onClick={() => onRevealInFinder(entry.path)}
+          >
+            {t("context.revealInFinder")}
+          </button>
+        </div>
+      </section>
+    );
+  }
+  const totalSize = entries.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  const latestTs = entries.reduce<number>((max, entry) => {
+    if (!entry.updatedAt) return max;
+    const ts = Date.parse(entry.updatedAt);
+    return Number.isFinite(ts) && ts > max ? ts : max;
+  }, 0);
+  const kinds = Array.from(new Set(entries.map((entry) => entry.fileKind))).slice(0, 8);
+  return (
+    <section className="inspector files-info">
+      <div className="inspector-header">
+        <h3>{t("rightPane.files.info.title")}</h3>
+      </div>
+      <InspectorRow label={t("rightPane.files.info.selected")} muted>
+        <span className="inspector-readonly">
+          {t("rightPane.files.info.selectedCount", { count: entries.length })}
+        </span>
+      </InspectorRow>
+      <InspectorRow label={t("rightPane.files.info.totalSize")} muted>
+        <span className="inspector-readonly">{formatFileSize(totalSize)}</span>
+      </InspectorRow>
+      {latestTs > 0 ? (
+        <InspectorRow label={t("rightPane.files.info.modified")} muted>
+          <span className="inspector-readonly">
+            {formatAbsoluteTimestamp(new Date(latestTs).toISOString())}
+          </span>
+        </InspectorRow>
+      ) : null}
+      {kinds.length > 0 ? (
+        <InspectorRow label={t("rightPane.files.info.kinds")} muted>
+          <span className="inspector-readonly">
+            {kinds.map((kind) => kind.toUpperCase()).join(", ")}
+          </span>
+        </InspectorRow>
+      ) : null}
+    </section>
+  );
+}
+
+function formatFileSize(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatAbsoluteTimestamp(isoString: string): string {
+  const ts = Date.parse(isoString);
+  if (!Number.isFinite(ts)) return isoString;
+  const date = new Date(ts);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

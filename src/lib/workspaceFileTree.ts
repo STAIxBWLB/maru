@@ -1,6 +1,7 @@
 import type { WorkspaceFileEntry } from "./types";
 import {
   DEFAULT_BINARY_FILE_INCLUDE_PATTERNS,
+  type FilesSortKey,
   type WorkspaceFileFilter,
 } from "./settings";
 
@@ -259,4 +260,256 @@ function globToRegExp(pattern: string): RegExp {
 
 function compareName(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+}
+
+// ---------------------------------------------------------------------------
+// Files List view (flat list with optional mtime grouping)
+// ---------------------------------------------------------------------------
+
+export type WorkspaceFileListRow =
+  | {
+      kind: "group";
+      id: string;
+      label: string;
+      count: number;
+    }
+  | {
+      kind: "file";
+      id: string;
+      entry: WorkspaceFileEntry;
+    };
+
+export interface VirtualWorkspaceFileListRow {
+  row: WorkspaceFileListRow;
+  top: number;
+  height: number;
+}
+
+export interface VirtualWorkspaceFileListLayout {
+  rows: VirtualWorkspaceFileListRow[];
+  totalHeight: number;
+}
+
+export interface WorkspaceFilesPaneFilters {
+  extensions: string[];
+  modifiedWithinDays: number | null;
+  sizeBucket: "lt10k" | "lt1m" | "lt10m" | "gte10m" | null;
+  queuedOnly: boolean;
+  queuedPaths: string[];
+}
+
+export const EMPTY_WORKSPACE_FILES_PANE_FILTERS: WorkspaceFilesPaneFilters = {
+  extensions: [],
+  modifiedWithinDays: null,
+  sizeBucket: null,
+  queuedOnly: false,
+  queuedPaths: [],
+};
+
+export function hasActiveWorkspaceFilesPaneFilters(
+  filters: WorkspaceFilesPaneFilters,
+): boolean {
+  return (
+    filters.extensions.length > 0 ||
+    filters.modifiedWithinDays !== null ||
+    filters.sizeBucket !== null ||
+    filters.queuedOnly
+  );
+}
+
+export function applyWorkspaceFilesPaneFilters(
+  entries: WorkspaceFileEntry[],
+  filters: WorkspaceFilesPaneFilters,
+  now: number = Date.now(),
+): WorkspaceFileEntry[] {
+  if (!hasActiveWorkspaceFilesPaneFilters(filters)) return entries;
+  const extSet = new Set(
+    filters.extensions.map((ext) => ext.trim().toLowerCase()).filter(Boolean),
+  );
+  const queuedSet =
+    filters.queuedOnly && filters.queuedPaths.length > 0
+      ? new Set(filters.queuedPaths)
+      : null;
+  const cutoff =
+    filters.modifiedWithinDays !== null
+      ? now - filters.modifiedWithinDays * 24 * 60 * 60 * 1000
+      : null;
+  return entries.filter((entry) => {
+    if (extSet.size > 0) {
+      const kind = entry.fileKind.toLowerCase();
+      const ext = entry.extension?.toLowerCase() ?? kind;
+      if (!extSet.has(ext) && !extSet.has(kind)) return false;
+    }
+    if (cutoff !== null) {
+      const ts = entry.updatedAt ? Date.parse(entry.updatedAt) : 0;
+      if (!Number.isFinite(ts) || ts < cutoff) return false;
+    }
+    if (filters.sizeBucket) {
+      const size = entry.sizeBytes;
+      if (filters.sizeBucket === "lt10k" && size >= 10 * 1024) return false;
+      if (
+        filters.sizeBucket === "lt1m" &&
+        (size < 10 * 1024 || size >= 1024 * 1024)
+      )
+        return false;
+      if (
+        filters.sizeBucket === "lt10m" &&
+        (size < 1024 * 1024 || size >= 10 * 1024 * 1024)
+      )
+        return false;
+      if (filters.sizeBucket === "gte10m" && size < 10 * 1024 * 1024) return false;
+    }
+    if (queuedSet && !queuedSet.has(entry.path)) return false;
+    if (filters.queuedOnly && !queuedSet) return false;
+    return true;
+  });
+}
+
+export function collectWorkspaceFileExtensionCounts(
+  entries: WorkspaceFileEntry[],
+): { extension: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const ext =
+      (entry.extension ?? entry.fileKind ?? "").toLowerCase().trim() || "(none)";
+    counts.set(ext, (counts.get(ext) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([extension, count]) => ({ extension, count }))
+    .sort((a, b) => b.count - a.count || compareName(a.extension, b.extension));
+}
+
+function entryMtime(entry: WorkspaceFileEntry): number {
+  if (!entry.updatedAt) return 0;
+  const ts = Date.parse(entry.updatedAt);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+export function sortWorkspaceFiles(
+  entries: WorkspaceFileEntry[],
+  sortKey: FilesSortKey,
+): WorkspaceFileEntry[] {
+  const sorted = entries.slice();
+  if (sortKey === "modifiedDesc") {
+    sorted.sort((a, b) => {
+      const diff = entryMtime(b) - entryMtime(a);
+      return diff !== 0 ? diff : compareName(a.relPath, b.relPath);
+    });
+  } else if (sortKey === "modifiedAsc") {
+    sorted.sort((a, b) => {
+      const diff = entryMtime(a) - entryMtime(b);
+      return diff !== 0 ? diff : compareName(a.relPath, b.relPath);
+    });
+  } else {
+    sorted.sort((a, b) => compareName(a.relPath, b.relPath));
+  }
+  return sorted;
+}
+
+export interface WorkspaceFileMtimeBucket {
+  label: string;
+  items: WorkspaceFileEntry[];
+}
+
+export interface WorkspaceFileMtimeBucketLabels {
+  today: string;
+  thisWeek: string;
+  earlier: string;
+}
+
+export function groupWorkspaceFilesByMtime(
+  entries: WorkspaceFileEntry[],
+  labels: WorkspaceFileMtimeBucketLabels,
+  now: number = Date.now(),
+): WorkspaceFileMtimeBucket[] {
+  const day = 24 * 60 * 60 * 1000;
+  const buckets: WorkspaceFileMtimeBucket[] = [
+    { label: labels.today, items: [] },
+    { label: labels.thisWeek, items: [] },
+    { label: labels.earlier, items: [] },
+  ];
+  for (const entry of entries) {
+    const ts = entryMtime(entry);
+    const age = now - ts;
+    if (age < day) buckets[0].items.push(entry);
+    else if (age < 7 * day) buckets[1].items.push(entry);
+    else buckets[2].items.push(entry);
+  }
+  return buckets.filter((bucket) => bucket.items.length > 0);
+}
+
+export function buildWorkspaceFileListRows(
+  entries: WorkspaceFileEntry[],
+  options: {
+    grouped?: boolean;
+    sortKey: FilesSortKey;
+    bucketLabels?: WorkspaceFileMtimeBucketLabels;
+    now?: number;
+  },
+): WorkspaceFileListRow[] {
+  const sorted = sortWorkspaceFiles(entries, options.sortKey);
+  if (
+    !options.grouped ||
+    !options.bucketLabels ||
+    (options.sortKey !== "modifiedDesc" && options.sortKey !== "modifiedAsc")
+  ) {
+    return sorted.map((entry) => ({
+      kind: "file" as const,
+      id: `file:${entry.path}`,
+      entry,
+    }));
+  }
+  const buckets = groupWorkspaceFilesByMtime(sorted, options.bucketLabels, options.now);
+  const rows: WorkspaceFileListRow[] = [];
+  for (const bucket of buckets) {
+    rows.push({
+      kind: "group",
+      id: `group:${bucket.label}`,
+      label: bucket.label,
+      count: bucket.items.length,
+    });
+    for (const entry of bucket.items) {
+      rows.push({ kind: "file", id: `file:${entry.path}`, entry });
+    }
+  }
+  return rows;
+}
+
+export function virtualizeWorkspaceFileListRows(
+  rows: WorkspaceFileListRow[],
+  scrollTop: number,
+  viewportHeight: number,
+  overscan: number,
+  fileRowHeight: number,
+  groupRowHeight: number,
+  uniformFileRows: boolean = false,
+): VirtualWorkspaceFileListLayout {
+  if (fileRowHeight <= 0 || groupRowHeight <= 0) return { rows: [], totalHeight: 0 };
+  const safeHeight = Math.max(0, viewportHeight);
+  const safeScrollTop = Math.max(0, scrollTop);
+  const min = Math.max(0, safeScrollTop - overscan);
+  const max = safeScrollTop + safeHeight + overscan;
+
+  if (uniformFileRows) {
+    const first = Math.max(0, Math.floor(min / fileRowHeight));
+    const last = Math.min(rows.length - 1, Math.ceil(max / fileRowHeight));
+    const visible: VirtualWorkspaceFileListRow[] = [];
+    for (let index = first; index <= last; index += 1) {
+      const row = rows[index];
+      if (!row) continue;
+      visible.push({ row, top: index * fileRowHeight, height: fileRowHeight });
+    }
+    return { rows: visible, totalHeight: rows.length * fileRowHeight };
+  }
+
+  const visible: VirtualWorkspaceFileListRow[] = [];
+  let cursor = 0;
+  for (const row of rows) {
+    const height = row.kind === "group" ? groupRowHeight : fileRowHeight;
+    if (cursor + height >= min && cursor <= max) {
+      visible.push({ row, top: cursor, height });
+    }
+    cursor += height;
+  }
+  return { rows: visible, totalHeight: cursor };
 }

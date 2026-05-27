@@ -245,6 +245,9 @@ import {
   type DocumentViewDefinition,
   type EditorViewModeSetting,
   type ExplorerPaneMode,
+  type FilesBrowserMode,
+  type FilesListAttribute,
+  type FilesSortKey,
   type RightPaneTab,
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
@@ -276,8 +279,10 @@ import {
   expandDocumentAncestors,
 } from "./lib/documentTree";
 import {
+  EMPTY_WORKSPACE_FILES_PANE_FILTERS,
   expandWorkspaceFileAncestors,
   isOpenableDocumentFile,
+  type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
 import {
   emptyHistory,
@@ -750,6 +755,9 @@ function MainApp() {
   >({});
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const [selectedFileQueueItemIds, setSelectedFileQueueItemIds] = useState<string[]>([]);
+  const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
+    EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  );
   const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
     null,
   );
@@ -1014,9 +1022,25 @@ function MainApp() {
       return changed ? next : current;
     });
   }, [anchorSettings.ui.documentViews]);
-  const selectedFilePaths = explorerWorkspacePath
-    ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
-    : [];
+  const selectedFilePaths = useMemo(
+    () =>
+      explorerWorkspacePath
+        ? selectedFilePathsByWorkspace[explorerWorkspacePath] ?? []
+        : [],
+    [explorerWorkspacePath, selectedFilePathsByWorkspace],
+  );
+  const selectedFilePathSet = useMemo(
+    () => new Set(selectedFilePaths),
+    [selectedFilePaths],
+  );
+  const queuedSourcePaths = useMemo(
+    () => fileQueue.map((item) => item.sourcePath),
+    [fileQueue],
+  );
+  const selectedWorkspaceFileEntries = useMemo(
+    () => fileEntries.filter((entry) => selectedFilePathSet.has(entry.path)),
+    [fileEntries, selectedFilePathSet],
+  );
   const layoutSettings = anchorSettings.ui.layout;
   const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? tabs[0]?.id ?? null;
@@ -1743,6 +1767,45 @@ function MainApp() {
         ui: {
           ...current.ui,
           workspaceFileFilter,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesBrowserMode = useCallback(
+    (filesBrowserMode: FilesBrowserMode) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesBrowserMode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesSortKey = useCallback(
+    (filesSortKey: FilesSortKey) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesSortKey,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesListAttributes = useCallback(
+    (filesListAttributes: FilesListAttribute[]) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesListAttributes,
         },
       }));
     },
@@ -6115,6 +6178,11 @@ function MainApp() {
                 activeWorkspaceLabel={explorerWorkspaceCaption}
                 paneMode={anchorSettings.ui.explorerPaneMode}
                 filter={anchorSettings.ui.workspaceFileFilter}
+                browserMode={anchorSettings.ui.filesBrowserMode}
+                sortKey={anchorSettings.ui.filesSortKey}
+                filesListAttributes={anchorSettings.ui.filesListAttributes}
+                paneFilters={filesPaneFilters}
+                queuedSourcePaths={queuedSourcePaths}
                 binaryIncludePatterns={anchorSettings.ui.binaryFileIncludePatterns}
                 collapsedFileFolders={collapsedFileFolders}
                 workspacePath={explorerWorkspacePath}
@@ -6129,6 +6197,9 @@ function MainApp() {
                 onPaneModeChange={setExplorerPaneMode}
                 onQueryChange={setWorkspaceFileQuery}
                 onFilterChange={setWorkspaceFileFilter}
+                onBrowserModeChange={setFilesBrowserMode}
+                onSortKeyChange={setFilesSortKey}
+                onFilesListAttributesChange={setFilesListAttributes}
                 onCollapsedFileFoldersChange={setCollapsedFileFolders}
                 onSelectFile={selectWorkspaceFile}
                 onOpenFile={openWorkspaceFile}
@@ -6244,6 +6315,12 @@ function MainApp() {
             onApplyFileQueue={applyQueuedFiles}
             onClearFileQueue={clearFileQueue}
             onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
+            workspaceFileEntries={fileEntries}
+            selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
+            filesPaneFilters={filesPaneFilters}
+            onFilesPaneFiltersChange={setFilesPaneFilters}
+            explorerPaneMode={anchorSettings.ui.explorerPaneMode}
+            onRevealFileInFinder={revealTargetInFinder}
             activeTab={rightPaneTab}
             onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
