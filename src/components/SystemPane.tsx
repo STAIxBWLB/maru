@@ -49,12 +49,14 @@ import type {
   ExplorerPaneMode,
   FileQueueDefaultOperation,
   FilesBrowserMode,
+  FilesListAttribute,
   FilesSortKey,
   TerminalLauncherId,
   ThemeMode,
   WorkspaceFileFilter,
 } from "../lib/settings";
 import {
+  ALL_FILES_LIST_ATTRIBUTES,
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
@@ -789,6 +791,26 @@ function PreferencesTab({
     );
   };
 
+  const updateFilesListAttributes = (filesListAttributes: FilesListAttribute[]) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          filesListAttributes,
+        },
+      }),
+    );
+  };
+
+  const toggleFilesListAttribute = (attribute: FilesListAttribute) => {
+    const current = settings.ui.filesListAttributes;
+    const next = current.includes(attribute)
+      ? current.filter((value) => value !== attribute)
+      : [...current, attribute];
+    updateFilesListAttributes(next);
+  };
+
   const commitBinaryFileIncludePatterns = (text: string) => {
     onSettingsChange(
       normalizeAnchorSettings({
@@ -920,6 +942,22 @@ function PreferencesTab({
             <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
           </select>
         </label>
+        <div className="field">
+          <span>{t("system.preferences.filesListAttributes")}</span>
+          <div className="settings-checkbox-grid">
+            {ALL_FILES_LIST_ATTRIBUTES.map((attribute) => (
+              <label key={attribute} className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={settings.ui.filesListAttributes.includes(attribute)}
+                  onChange={() => toggleFilesListAttribute(attribute)}
+                />
+                <span>{t(`files.attributes.${attribute}`)}</span>
+              </label>
+            ))}
+          </div>
+          <small>{t("system.preferences.filesListAttributes.help")}</small>
+        </div>
         <label className="field">
           <span>{t("system.preferences.binaryIncludePatterns")}</span>
           <textarea

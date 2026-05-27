@@ -25,6 +25,9 @@ describe("normalizeAnchorSettings", () => {
         documentBrowserMode: "tree",
         documentLabelMode: "filename",
         workspaceFileFilter: "tracked",
+        filesBrowserMode: "list",
+        filesSortKey: "modifiedDesc",
+        filesListAttributes: ["size", "bad", "parent", "size", "git"],
         binaryFileIncludePatterns: ["*.pdf", "*.HWP*", "*.pdf"],
         documentViews: [
           {
@@ -79,6 +82,9 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.documentBrowserMode).toBe("tree");
     expect(settings.ui.documentLabelMode).toBe("filename");
     expect(settings.ui.workspaceFileFilter).toBe("tracked");
+    expect(settings.ui.filesBrowserMode).toBe("list");
+    expect(settings.ui.filesSortKey).toBe("modifiedDesc");
+    expect(settings.ui.filesListAttributes).toEqual(["size", "parent", "git"]);
     expect(settings.ui.binaryFileIncludePatterns).toEqual(["*.pdf", "*.HWP*"]);
     expect(settings.ui.documentViews).toEqual([
       {
@@ -405,6 +411,9 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.editorViewMode).toBe("source");
     expect(settings.ui.rightPaneTab).toBe("workspace");
     expect(settings.ui.workspaceFileFilter).toBe("all");
+    expect(settings.ui.filesListAttributes).toEqual(
+      DEFAULT_ANCHOR_SETTINGS.ui.filesListAttributes,
+    );
     expect(settings.meetings.root).toBe("meetings");
     expect(settings.tasks.root).toBe("tasks");
     expect(settings.tasks.defaultView).toBe("week");
@@ -419,6 +428,19 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
     expect(settings.terminal.autoLaunch).toBe("shell");
+  });
+
+  it("normalizes Files list attributes and preserves explicit all-off state", () => {
+    expect(
+      normalizeAnchorSettings({ ui: { filesListAttributes: ["binary", "size", "binary"] } })
+        .ui.filesListAttributes,
+    ).toEqual(["binary", "size"]);
+    expect(
+      normalizeAnchorSettings({ ui: { filesListAttributes: ["unknown"] } }).ui
+        .filesListAttributes,
+    ).toEqual(DEFAULT_ANCHOR_SETTINGS.ui.filesListAttributes);
+    expect(normalizeAnchorSettings({ ui: { filesListAttributes: [] } }).ui.filesListAttributes)
+      .toEqual([]);
   });
 
   it("accepts the evidence binder right-pane tab", () => {

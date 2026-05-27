@@ -246,6 +246,7 @@ import {
   type EditorViewModeSetting,
   type ExplorerPaneMode,
   type FilesBrowserMode,
+  type FilesListAttribute,
   type FilesSortKey,
   type RightPaneTab,
   type WorkspaceFileFilter,
@@ -1776,6 +1777,19 @@ function MainApp() {
         ui: {
           ...current.ui,
           filesSortKey,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesListAttributes = useCallback(
+    (filesListAttributes: FilesListAttribute[]) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesListAttributes,
         },
       }));
     },
@@ -6150,6 +6164,7 @@ function MainApp() {
                 filter={anchorSettings.ui.workspaceFileFilter}
                 browserMode={anchorSettings.ui.filesBrowserMode}
                 sortKey={anchorSettings.ui.filesSortKey}
+                filesListAttributes={anchorSettings.ui.filesListAttributes}
                 paneFilters={filesPaneFilters}
                 queuedSourcePaths={fileQueue.map((item) => item.sourcePath)}
                 binaryIncludePatterns={anchorSettings.ui.binaryFileIncludePatterns}
@@ -6168,6 +6183,7 @@ function MainApp() {
                 onFilterChange={setWorkspaceFileFilter}
                 onBrowserModeChange={setFilesBrowserMode}
                 onSortKeyChange={setFilesSortKey}
+                onFilesListAttributesChange={setFilesListAttributes}
                 onCollapsedFileFoldersChange={setCollapsedFileFolders}
                 onSelectFile={selectWorkspaceFile}
                 onOpenFile={openWorkspaceFile}

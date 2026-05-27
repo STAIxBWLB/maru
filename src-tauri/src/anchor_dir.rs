@@ -44,6 +44,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["ui", "workspaceFileFilter"],
     &["ui", "filesBrowserMode"],
     &["ui", "filesSortKey"],
+    &["ui", "filesListAttributes"],
     &["ui", "fileQueueDefaultOperation"],
     &["ui", "themeMode"],
     &["ui", "accentColor"],
@@ -334,6 +335,9 @@ fn default_settings_json() -> JsonValue {
             "documentBrowserMode": "tree",
             "documentLabelMode": "title",
             "workspaceFileFilter": "all",
+            "filesBrowserMode": "tree",
+            "filesSortKey": "name",
+            "filesListAttributes": ["parent", "kind", "modified", "size"],
             "binaryFileIncludePatterns": [
                 "*.tgz",
                 "*.gz",
