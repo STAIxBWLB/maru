@@ -3,6 +3,8 @@ export type DocumentLabelMode = "title" | "filename";
 export type ExplorerPaneMode = "documents" | "files";
 export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
+export type FilesBrowserMode = "list" | "tree";
+export type FilesSortKey = "name" | "modifiedDesc" | "modifiedAsc";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type ThemeMode = "system" | "light" | "dark";
 export type AnchorAppMode =
@@ -114,6 +116,8 @@ export interface AnchorSettings {
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
     workspaceFileFilter: WorkspaceFileFilter;
+    filesBrowserMode: FilesBrowserMode;
+    filesSortKey: FilesSortKey;
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
     collapsedTreeFolders: string[];
@@ -228,6 +232,8 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     documentBrowserMode: "tree",
     documentLabelMode: "title",
     workspaceFileFilter: "all",
+    filesBrowserMode: "tree",
+    filesSortKey: "name",
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
     collapsedTreeFolders: [],
@@ -363,6 +369,8 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
       workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
+      filesBrowserMode: parseFilesBrowserMode(ui.filesBrowserMode) ?? "tree",
+      filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
         ui.binaryFileIncludePatterns,
       ),
@@ -1021,6 +1029,14 @@ function parseDocumentLabelMode(value: unknown): DocumentLabelMode | null {
 
 function parseWorkspaceFileFilter(value: unknown): WorkspaceFileFilter | null {
   return value === "all" || value === "tracked" || value === "binary" ? value : null;
+}
+
+function parseFilesBrowserMode(value: unknown): FilesBrowserMode | null {
+  return value === "list" || value === "tree" ? value : null;
+}
+
+function parseFilesSortKey(value: unknown): FilesSortKey | null {
+  return value === "name" || value === "modifiedDesc" || value === "modifiedAsc" ? value : null;
 }
 
 function parseFileQueueDefaultOperation(value: unknown): FileQueueDefaultOperation | null {

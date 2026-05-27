@@ -42,6 +42,8 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["ui", "documentBrowserMode"],
     &["ui", "documentLabelMode"],
     &["ui", "workspaceFileFilter"],
+    &["ui", "filesBrowserMode"],
+    &["ui", "filesSortKey"],
     &["ui", "fileQueueDefaultOperation"],
     &["ui", "themeMode"],
     &["ui", "accentColor"],

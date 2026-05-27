@@ -48,6 +48,8 @@ import type {
   DocumentLabelMode,
   ExplorerPaneMode,
   FileQueueDefaultOperation,
+  FilesBrowserMode,
+  FilesSortKey,
   TerminalLauncherId,
   ThemeMode,
   WorkspaceFileFilter,
@@ -763,6 +765,30 @@ function PreferencesTab({
     );
   };
 
+  const updateFilesBrowserMode = (filesBrowserMode: FilesBrowserMode) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          filesBrowserMode,
+        },
+      }),
+    );
+  };
+
+  const updateFilesSortKey = (filesSortKey: FilesSortKey) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          filesSortKey,
+        },
+      }),
+    );
+  };
+
   const commitBinaryFileIncludePatterns = (text: string) => {
     onSettingsChange(
       normalizeAnchorSettings({
@@ -871,6 +897,27 @@ function PreferencesTab({
             <option value="all">{t("files.filter.all")}</option>
             <option value="tracked">{t("files.filter.tracked")}</option>
             <option value="binary">{t("files.filter.binary")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.filesBrowser")}</span>
+          <select
+            value={settings.ui.filesBrowserMode}
+            onChange={(event) => updateFilesBrowserMode(event.target.value as FilesBrowserMode)}
+          >
+            <option value="list">{t("files.view.list")}</option>
+            <option value="tree">{t("files.view.tree")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.filesSort")}</span>
+          <select
+            value={settings.ui.filesSortKey}
+            onChange={(event) => updateFilesSortKey(event.target.value as FilesSortKey)}
+          >
+            <option value="name">{t("files.sort.name")}</option>
+            <option value="modifiedDesc">{t("files.sort.modifiedDesc")}</option>
+            <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
           </select>
         </label>
         <label className="field">

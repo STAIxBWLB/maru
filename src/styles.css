@@ -2747,6 +2747,245 @@ a {
   min-height: 100%;
 }
 
+.tree-virtual-spacer.files-list {
+  padding: 0 4px;
+}
+
+.files-list-group {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  padding: 4px 8px 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+
+.files-list-group-count {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.files-list-row {
+  position: relative;
+  width: 100%;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, auto) auto auto auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  border: 1px solid transparent;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.files-list-row:hover {
+  background: var(--panel);
+  border-color: var(--line-soft);
+  color: var(--ink);
+}
+
+.files-list-row.selected {
+  background: var(--active-surface);
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--ink);
+}
+
+.files-list-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  width: 2px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.files-list-row.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.files-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-list-parent {
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-list-mtime {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.files-list-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.file-sort-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.file-sort-control select {
+  flex: 1;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.file-sort-label {
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.files-pane-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+}
+
+.files-pane-filters-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.files-pane-filters-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.files-pane-filters-clear:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.files-pane-filters-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.files-pane-filters-label {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.files-pane-filters-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.files-pane-filters-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.files-pane-filters-chips .chip:hover {
+  border-color: var(--line-soft);
+  color: var(--ink);
+}
+
+.files-pane-filters-chips .chip.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--ink);
+}
+
+.files-pane-filters-chips .chip-count {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.files-pane-filters-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.files-pane-filters-toggle input[disabled] + span {
+  color: var(--faint);
+}
+
+.files-info-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0 0;
+}
+
+.files-info-action {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.files-info-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
 .tree-row {
   position: relative;
   width: 100%;

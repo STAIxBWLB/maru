@@ -245,6 +245,8 @@ import {
   type DocumentViewDefinition,
   type EditorViewModeSetting,
   type ExplorerPaneMode,
+  type FilesBrowserMode,
+  type FilesSortKey,
   type RightPaneTab,
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
@@ -276,8 +278,10 @@ import {
   expandDocumentAncestors,
 } from "./lib/documentTree";
 import {
+  EMPTY_WORKSPACE_FILES_PANE_FILTERS,
   expandWorkspaceFileAncestors,
   isOpenableDocumentFile,
+  type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
 import {
   emptyHistory,
@@ -750,6 +754,9 @@ function MainApp() {
   >({});
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const [selectedFileQueueItemIds, setSelectedFileQueueItemIds] = useState<string[]>([]);
+  const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
+    EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  );
   const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
     null,
   );
@@ -1743,6 +1750,32 @@ function MainApp() {
         ui: {
           ...current.ui,
           workspaceFileFilter,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesBrowserMode = useCallback(
+    (filesBrowserMode: FilesBrowserMode) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesBrowserMode,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesSortKey = useCallback(
+    (filesSortKey: FilesSortKey) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          filesSortKey,
         },
       }));
     },
@@ -6115,6 +6148,10 @@ function MainApp() {
                 activeWorkspaceLabel={explorerWorkspaceCaption}
                 paneMode={anchorSettings.ui.explorerPaneMode}
                 filter={anchorSettings.ui.workspaceFileFilter}
+                browserMode={anchorSettings.ui.filesBrowserMode}
+                sortKey={anchorSettings.ui.filesSortKey}
+                paneFilters={filesPaneFilters}
+                queuedSourcePaths={fileQueue.map((item) => item.sourcePath)}
                 binaryIncludePatterns={anchorSettings.ui.binaryFileIncludePatterns}
                 collapsedFileFolders={collapsedFileFolders}
                 workspacePath={explorerWorkspacePath}
@@ -6129,6 +6166,8 @@ function MainApp() {
                 onPaneModeChange={setExplorerPaneMode}
                 onQueryChange={setWorkspaceFileQuery}
                 onFilterChange={setWorkspaceFileFilter}
+                onBrowserModeChange={setFilesBrowserMode}
+                onSortKeyChange={setFilesSortKey}
                 onCollapsedFileFoldersChange={setCollapsedFileFolders}
                 onSelectFile={selectWorkspaceFile}
                 onOpenFile={openWorkspaceFile}
@@ -6244,6 +6283,14 @@ function MainApp() {
             onApplyFileQueue={applyQueuedFiles}
             onClearFileQueue={clearFileQueue}
             onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
+            workspaceFileEntries={fileEntries}
+            selectedWorkspaceFileEntries={fileEntries.filter((entry) =>
+              selectedFilePaths.includes(entry.path),
+            )}
+            filesPaneFilters={filesPaneFilters}
+            onFilesPaneFiltersChange={setFilesPaneFilters}
+            explorerPaneMode={anchorSettings.ui.explorerPaneMode}
+            onRevealFileInFinder={revealTargetInFinder}
             activeTab={rightPaneTab}
             onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
