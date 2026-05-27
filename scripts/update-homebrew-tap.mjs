@@ -58,12 +58,13 @@ function renderTemplate(templatePath, outputPath) {
 
 const appCaskPath = resolve(tapDir, "Casks/anchor-workspace.rb");
 const legacyAppCaskPath = resolve(tapDir, "Casks/anchor.rb");
+const hadLegacyAppCask = existsSync(legacyAppCaskPath);
 
 renderTemplate(
   resolve(repoRoot, "packaging/homebrew/Casks/anchor-workspace.rb.template"),
   appCaskPath,
 );
-if (existsSync(legacyAppCaskPath)) {
+if (hadLegacyAppCask) {
   unlinkSync(legacyAppCaskPath);
   console.log(`removed ${legacyAppCaskPath}`);
 }
@@ -73,21 +74,13 @@ renderTemplate(
 );
 
 if (shouldCommit || shouldPush) {
-  execFileSync(
-    "git",
-    [
-      "-C",
-      tapDir,
-      "add",
-      "--all",
-      "Casks/anchor.rb",
-      "Casks/anchor-workspace.rb",
-      "Formula/anchor-cli.rb",
-    ],
-    {
-      stdio: "inherit",
-    },
-  );
+  const pathsToStage = ["Casks/anchor-workspace.rb", "Formula/anchor-cli.rb"];
+  if (hadLegacyAppCask) {
+    pathsToStage.unshift("Casks/anchor.rb");
+  }
+  execFileSync("git", ["-C", tapDir, "add", "--all", ...pathsToStage], {
+    stdio: "inherit",
+  });
 }
 
 if (shouldCommit) {
@@ -107,8 +100,11 @@ console.log(`  cd ${tapDir}`);
 console.log("  brew audit --cask anchor-workspace");
 console.log("  brew audit --formula anchor-cli");
 if (!shouldCommit) {
-  console.log("  git diff -- Casks/anchor.rb Casks/anchor-workspace.rb Formula/anchor-cli.rb");
+  const pathsForNextSteps = hadLegacyAppCask
+    ? "Casks/anchor.rb Casks/anchor-workspace.rb Formula/anchor-cli.rb"
+    : "Casks/anchor-workspace.rb Formula/anchor-cli.rb";
+  console.log(`  git diff -- ${pathsForNextSteps}`);
   console.log(
-    `  git add --all Casks/anchor.rb Casks/anchor-workspace.rb Formula/anchor-cli.rb && git commit -m "anchor: update to ${tag}"`,
+    `  git add --all ${pathsForNextSteps} && git commit -m "anchor: update to ${tag}"`,
   );
 }
