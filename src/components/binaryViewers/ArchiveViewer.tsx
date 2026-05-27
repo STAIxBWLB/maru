@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { binaryViewerReadArchive, type BinaryViewerArchiveEntry } from "../../lib/api";
+import { binaryViewerReadArchive, type BinaryViewerArchivePreview } from "../../lib/api";
 import { formatBytes } from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
-
-const LIMIT = 5000;
 
 interface Props {
   entry: WorkspaceFileEntry;
@@ -15,7 +13,7 @@ export function ArchiveViewer({ entry, workspacePath }: Props) {
   const { t } = useTranslation();
   const [state, setState] = useState<{
     status: "loading" | "ready" | "error";
-    entries?: BinaryViewerArchiveEntry[];
+    preview?: BinaryViewerArchivePreview;
     error?: string;
   }>({ status: "loading" });
 
@@ -23,8 +21,8 @@ export function ArchiveViewer({ entry, workspacePath }: Props) {
     let cancelled = false;
     setState({ status: "loading" });
     binaryViewerReadArchive(workspacePath, entry.path)
-      .then((entries) => {
-        if (!cancelled) setState({ status: "ready", entries });
+      .then((preview) => {
+        if (!cancelled) setState({ status: "ready", preview });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -37,9 +35,9 @@ export function ArchiveViewer({ entry, workspacePath }: Props) {
   }, [entry.path, workspacePath]);
 
   const sorted = useMemo(() => {
-    if (!state.entries) return [];
-    return [...state.entries].sort((a, b) => a.name.localeCompare(b.name));
-  }, [state.entries]);
+    if (!state.preview) return [];
+    return [...state.preview.entries].sort((a, b) => a.name.localeCompare(b.name));
+  }, [state.preview]);
 
   if (state.status === "loading") {
     return <div className="binary-viewer-loading">{t("binaryViewer.loading")}</div>;
@@ -54,14 +52,15 @@ export function ArchiveViewer({ entry, workspacePath }: Props) {
   if (!sorted.length) {
     return <div className="binary-viewer-empty">{t("binaryViewer.empty")}</div>;
   }
-  const truncated = sorted.length >= LIMIT;
+  const truncated = Boolean(state.preview?.truncated);
+  const count = state.preview?.totalEntries ?? sorted.length;
   return (
     <div className="binary-viewer binary-viewer--archive">
       <div className="binary-viewer-toolbar binary-viewer-toolbar--meta">
         <span>
           {truncated
-            ? t("binaryViewer.archiveEntriesTruncated", { count: sorted.length })
-            : t("binaryViewer.archiveEntries", { count: sorted.length })}
+            ? t("binaryViewer.archiveEntriesTruncated", { count })
+            : t("binaryViewer.archiveEntries", { count })}
         </span>
       </div>
       <div className="binary-viewer-canvas binary-viewer-canvas--archive">

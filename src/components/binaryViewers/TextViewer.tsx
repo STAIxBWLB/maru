@@ -57,7 +57,7 @@ export function TextViewer({ entry, workspacePath }: Props) {
           <span className="binary-viewer-truncated">
             {t("binaryViewer.truncatedNotice", {
               bytes: formatBytes(preview.byteCount),
-              shown: formatBytes(preview.content.length),
+              shown: formatBytes(preview.shownBytes),
             })}
           </span>
         ) : null}

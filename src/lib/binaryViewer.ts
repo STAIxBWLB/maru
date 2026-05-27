@@ -113,6 +113,12 @@ const EXT_MAP: Record<string, ViewerCategory> = {
 
 const OPENABLE_DOCUMENT_EXT = new Set(["md", "markdown"]);
 
+export const INLINE_DOCX_MAX_BYTES = 20 * 1024 * 1024;
+export const INLINE_XLSX_MAX_BYTES = 10 * 1024 * 1024;
+export const XLSX_MAX_SHEETS = 20;
+export const XLSX_MAX_ROWS = 200;
+export const XLSX_MAX_COLS = 50;
+
 export function getViewerCategory(entry: WorkspaceFileEntry): ViewerCategory {
   const ext = (entry.fileKind ?? "").toLowerCase();
   if (OPENABLE_DOCUMENT_EXT.has(ext)) {

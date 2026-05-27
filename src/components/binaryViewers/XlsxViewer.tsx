@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
-import { assetUrlForPath } from "../../lib/binaryViewer";
+import {
+  assetUrlForPath,
+  formatBytes,
+  INLINE_XLSX_MAX_BYTES,
+  XLSX_MAX_COLS,
+  XLSX_MAX_ROWS,
+  XLSX_MAX_SHEETS,
+} from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
 
@@ -11,19 +18,25 @@ interface Props {
 interface SheetPreview {
   name: string;
   html: string;
+  truncated: boolean;
 }
 
 export function XlsxViewer({ entry }: Props) {
   const { t } = useTranslation();
   const [sheets, setSheets] = useState<SheetPreview[] | null>(null);
   const [active, setActive] = useState(0);
+  const [sheetLimitReached, setSheetLimitReached] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setSheets(null);
     setActive(0);
+    setSheetLimitReached(false);
     setError(null);
+    if (entry.sizeBytes > INLINE_XLSX_MAX_BYTES) return () => {
+      cancelled = true;
+    };
 
     (async () => {
       try {
@@ -36,16 +49,32 @@ export function XlsxViewer({ entry }: Props) {
         const xlsx = await import("xlsx");
         if (cancelled) return;
         const workbook = xlsx.read(arrayBuffer, { type: "array" });
-        const previews: SheetPreview[] = workbook.SheetNames.map((name) => {
+        const sheetLimit = workbook.SheetNames.length > XLSX_MAX_SHEETS;
+        const previews: SheetPreview[] = workbook.SheetNames.slice(0, XLSX_MAX_SHEETS).map((name) => {
           const sheet = workbook.Sheets[name];
-          if (!sheet) return { name, html: "" };
-          const raw = xlsx.utils.sheet_to_html(sheet, { id: name });
+          if (!sheet) return { name, html: "", truncated: false };
+          const range = xlsx.utils.decode_range(sheet["!ref"] ?? "A1:A1");
+          const cappedRange = {
+            s: range.s,
+            e: {
+              r: Math.min(range.e.r, range.s.r + XLSX_MAX_ROWS - 1),
+              c: Math.min(range.e.c, range.s.c + XLSX_MAX_COLS - 1),
+            },
+          };
+          const truncated = range.e.r > cappedRange.e.r || range.e.c > cappedRange.e.c;
+          const raw = xlsx.utils.sheet_to_html(sheet, {
+            id: name,
+            range: xlsx.utils.encode_range(cappedRange),
+          } as Parameters<typeof xlsx.utils.sheet_to_html>[1] & { range: string });
           const sanitized = DOMPurify.sanitize(raw, {
             USE_PROFILES: { html: true },
           });
-          return { name, html: sanitized };
+          return { name, html: sanitized, truncated };
         });
-        if (!cancelled) setSheets(previews);
+        if (!cancelled) {
+          setSheetLimitReached(sheetLimit);
+          setSheets(previews);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
@@ -54,7 +83,20 @@ export function XlsxViewer({ entry }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [entry.path]);
+  }, [entry.path, entry.sizeBytes]);
+
+  if (entry.sizeBytes > INLINE_XLSX_MAX_BYTES) {
+    return (
+      <div className="binary-viewer binary-viewer--xlsx">
+        <div className="binary-viewer-error">
+          {t("binaryViewer.largeFileInline", {
+            size: formatBytes(entry.sizeBytes),
+            limit: formatBytes(INLINE_XLSX_MAX_BYTES),
+          })}
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -86,6 +128,15 @@ export function XlsxViewer({ entry }: Props) {
             {sheet.name}
           </button>
         ))}
+        {sheetLimitReached || sheets.some((sheet) => sheet.truncated) ? (
+          <span className="binary-viewer-toolbar-note">
+            {t("binaryViewer.spreadsheetTruncated", {
+              sheets: XLSX_MAX_SHEETS,
+              rows: XLSX_MAX_ROWS,
+              cols: XLSX_MAX_COLS,
+            })}
+          </span>
+        ) : null}
       </div>
       <div
         key={current.name + active}

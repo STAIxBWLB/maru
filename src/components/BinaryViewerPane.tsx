@@ -1,9 +1,11 @@
-import { useMemo } from "react";
 import { ExternalLink, FolderOpen } from "lucide-react";
-import { binaryViewerOpenExternal, revealInFileManager } from "../lib/api";
+import {
+  binaryViewerOpenExternal,
+  revealInFileManager,
+  type BinaryViewerClassification,
+} from "../lib/api";
 import {
   formatBytes,
-  getViewerCategory,
   viewerCategoryLabel,
   type ViewerCategory,
 } from "../lib/binaryViewer";
@@ -22,12 +24,13 @@ import { UnsupportedViewer } from "./binaryViewers/UnsupportedViewer";
 interface Props {
   entry: WorkspaceFileEntry;
   workspacePath: string;
+  classification: BinaryViewerClassification;
   onError?: (message: string) => void;
 }
 
-export function BinaryViewerPane({ entry, workspacePath, onError }: Props) {
+export function BinaryViewerPane({ entry, workspacePath, classification, onError }: Props) {
   const { t } = useTranslation();
-  const category: ViewerCategory = useMemo(() => getViewerCategory(entry), [entry]);
+  const category: ViewerCategory = classification.category;
 
   const reportError = (label: string, err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -53,8 +56,15 @@ export function BinaryViewerPane({ entry, workspacePath, onError }: Props) {
           <strong title={entry.relPath}>{entry.name}</strong>
           <span className="binary-viewer-header-meta">
             <span>{viewerCategoryLabel(category)}</span>
+            {classification.detectedFormat !== "unknown" &&
+            classification.detectedFormat !== category ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>{classification.detectedFormat.toUpperCase()}</span>
+              </>
+            ) : null}
             <span aria-hidden>·</span>
-            <span>{formatBytes(entry.sizeBytes)}</span>
+            <span>{formatBytes(classification.sizeBytes || entry.sizeBytes)}</span>
             {entry.updatedAt ? (
               <>
                 <span aria-hidden>·</span>
@@ -79,6 +89,7 @@ export function BinaryViewerPane({ entry, workspacePath, onError }: Props) {
           category={category}
           entry={entry}
           workspacePath={workspacePath}
+          classification={classification}
           onOpenExternal={handleOpenExternal}
           onRevealInFinder={handleRevealInFinder}
         />
@@ -91,12 +102,14 @@ function ViewerBody({
   category,
   entry,
   workspacePath,
+  classification,
   onOpenExternal,
   onRevealInFinder,
 }: {
   category: ViewerCategory;
   entry: WorkspaceFileEntry;
   workspacePath: string;
+  classification: BinaryViewerClassification;
   onOpenExternal: () => void;
   onRevealInFinder: () => void;
 }) {
@@ -124,6 +137,7 @@ function ViewerBody({
       return (
         <UnsupportedViewer
           entry={entry}
+          classification={classification}
           onOpenExternal={onOpenExternal}
           onRevealInFinder={onRevealInFinder}
         />

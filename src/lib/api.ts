@@ -19,6 +19,7 @@ import {
   mockWorkspaceRegistry,
   readMockDocument,
 } from "./fixtures";
+import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
 import type {
   CreatedDocument,
   DeletedDocument,
@@ -1385,18 +1386,7 @@ function mockClassification(raw: string): InboxClassification {
 }
 
 export interface BinaryViewerClassification {
-  category:
-    | "image"
-    | "svg"
-    | "pdf"
-    | "docx"
-    | "xlsx"
-    | "hwpx"
-    | "audio"
-    | "video"
-    | "text"
-    | "archive"
-    | "unsupported";
+  category: ViewerCategory;
   mime: string | null;
   extension: string | null;
   sizeBytes: number;
@@ -1408,6 +1398,7 @@ export interface BinaryViewerTextPreview {
   truncated: boolean;
   encoding: string;
   byteCount: number;
+  shownBytes: number;
 }
 
 export interface BinaryViewerArchiveEntry {
@@ -1415,6 +1406,12 @@ export interface BinaryViewerArchiveEntry {
   size: number;
   compressedSize: number;
   isDir: boolean;
+}
+
+export interface BinaryViewerArchivePreview {
+  entries: BinaryViewerArchiveEntry[];
+  totalEntries: number;
+  truncated: boolean;
 }
 
 export interface BinaryViewerHwpxPreview {
@@ -1428,7 +1425,7 @@ export async function binaryViewerClassify(
   targetPath: string,
 ): Promise<BinaryViewerClassification> {
   if (!isTauri()) {
-    throw new Error("binaryViewerClassify requires the Tauri app.");
+    return mockBinaryViewerClassify(vaultPath, targetPath);
   }
   return invoke<BinaryViewerClassification>("binary_viewer_classify", {
     vaultPath,
@@ -1454,11 +1451,11 @@ export async function binaryViewerReadText(
 export async function binaryViewerReadArchive(
   vaultPath: string,
   targetPath: string,
-): Promise<BinaryViewerArchiveEntry[]> {
+): Promise<BinaryViewerArchivePreview> {
   if (!isTauri()) {
     throw new Error("binaryViewerReadArchive requires the Tauri app.");
   }
-  return invoke<BinaryViewerArchiveEntry[]>("binary_viewer_read_archive", {
+  return invoke<BinaryViewerArchivePreview>("binary_viewer_read_archive", {
     vaultPath,
     targetPath,
   });
@@ -1485,4 +1482,31 @@ export async function binaryViewerOpenExternal(
     throw new Error("binaryViewerOpenExternal requires the Tauri app.");
   }
   await invoke("binary_viewer_open_external", { vaultPath, targetPath });
+}
+
+function mockBinaryViewerClassify(
+  vaultPath: string,
+  targetPath: string,
+): BinaryViewerClassification {
+  const entry =
+    mockWorkspaceFiles(vaultPath).find(
+      (item) => item.path === targetPath || item.relPath === targetPath,
+    ) ?? null;
+  const extension =
+    entry?.extension ??
+    targetPath
+      .split("/")
+      .pop()
+      ?.split(".")
+      .pop()
+      ?.toLowerCase() ??
+    null;
+  const category = entry ? getViewerCategory(entry) : "unsupported";
+  return {
+    category,
+    mime: null,
+    extension,
+    sizeBytes: entry?.sizeBytes ?? 0,
+    detectedFormat: category === "unsupported" ? "unknown" : category,
+  };
 }

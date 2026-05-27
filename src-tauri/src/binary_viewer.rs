@@ -47,6 +47,7 @@ pub struct TextPreview {
     pub truncated: bool,
     pub encoding: String,
     pub byte_count: u64,
+    pub shown_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +57,14 @@ pub struct ArchiveEntry {
     pub size: u64,
     pub compressed_size: u64,
     pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivePreview {
+    pub entries: Vec<ArchiveEntry>,
+    pub total_entries: usize,
+    pub truncated: bool,
 }
 
 #[tauri::command]
@@ -112,6 +121,7 @@ pub fn binary_viewer_read_text(
         truncated,
         encoding,
         byte_count: total_bytes,
+        shown_bytes: read_limit,
     })
 }
 
@@ -119,12 +129,13 @@ pub fn binary_viewer_read_text(
 pub fn binary_viewer_read_archive(
     vault_path: String,
     target_path: String,
-) -> Result<Vec<ArchiveEntry>, String> {
+) -> Result<ArchivePreview, String> {
     let target = resolve_inside_vault(&vault_path, &target_path)?;
     require_existing_file(&target)?;
     let file = fs::File::open(&target).map_err(|err| format!("Cannot open target: {err}"))?;
     let mut archive = ZipArchive::new(file).map_err(|err| format!("Invalid ZIP file: {err}"))?;
-    let count = archive.len().min(ARCHIVE_ENTRY_LIMIT);
+    let total_entries = archive.len();
+    let count = total_entries.min(ARCHIVE_ENTRY_LIMIT);
     let mut entries = Vec::with_capacity(count);
     for index in 0..count {
         let entry = archive
@@ -137,7 +148,11 @@ pub fn binary_viewer_read_archive(
             is_dir: entry.is_dir(),
         });
     }
-    Ok(entries)
+    Ok(ArchivePreview {
+        entries,
+        total_entries,
+        truncated: total_entries > count,
+    })
 }
 
 #[tauri::command]
@@ -331,6 +346,7 @@ mod tests {
         assert!(preview.truncated);
         assert_eq!(preview.content.len(), 100);
         assert_eq!(preview.byte_count, 1000);
+        assert_eq!(preview.shown_bytes, 100);
     }
 
     #[test]
@@ -379,5 +395,68 @@ mod tests {
         assert_eq!(report.category, ViewerCategory::Text);
         assert_eq!(report.extension.as_deref(), Some("txt"));
         assert_eq!(report.size_bytes, 5);
+    }
+
+    fn write_zip_fixture(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zip.start_file(name, options).unwrap();
+            std::io::Write::write_all(&mut zip, bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn classify_uses_magic_detection_for_renamed_documents() {
+        let tmp = TempDir::new().unwrap();
+        let pdf = tmp.path().join("pdf-renamed.bin");
+        fs::write(&pdf, b"%PDF-1.4\n%%EOF").unwrap();
+        let docx = tmp.path().join("docx-renamed.bin");
+        write_zip_fixture(&docx, &[("word/document.xml", b"<w:document />")]);
+        let xlsx = tmp.path().join("xlsx-renamed.bin");
+        write_zip_fixture(&xlsx, &[("xl/workbook.xml", b"<workbook />")]);
+        let hwpx = tmp.path().join("hwpx-renamed.bin");
+        write_zip_fixture(
+            &hwpx,
+            &[
+                ("mimetype", b"application/hwp+zip"),
+                ("Contents/content.hpf", b"<package />"),
+            ],
+        );
+
+        let cases = [
+            (pdf, ViewerCategory::Pdf, "pdf"),
+            (docx, ViewerCategory::Docx, "docx"),
+            (xlsx, ViewerCategory::Xlsx, "xlsx"),
+            (hwpx, ViewerCategory::Hwpx, "hwpx"),
+        ];
+        for (path, category, detected_format) in cases {
+            let report = binary_viewer_classify(
+                tmp.path().to_str().unwrap().to_string(),
+                path.to_str().unwrap().to_string(),
+            )
+            .unwrap();
+            assert_eq!(report.category, category);
+            assert_eq!(report.extension.as_deref(), Some("bin"));
+            assert_eq!(report.detected_format, detected_format);
+        }
+    }
+
+    #[test]
+    fn read_archive_reports_total_and_truncation() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("archive.zip");
+        write_zip_fixture(&path, &[("a.txt", b"a"), ("b.txt", b"b")]);
+        let preview = binary_viewer_read_archive(
+            tmp.path().to_str().unwrap().to_string(),
+            path.to_str().unwrap().to_string(),
+        )
+        .unwrap();
+        assert_eq!(preview.total_entries, 2);
+        assert_eq!(preview.entries.len(), 2);
+        assert!(!preview.truncated);
     }
 }

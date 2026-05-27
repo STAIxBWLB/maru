@@ -120,6 +120,17 @@ export function mockWorkspaceFiles(rootPath = MOCK_VAULT_PATH): WorkspaceFileEnt
       binary: true,
     },
     {
+      path: `${rootPath}/attachments/raw-dump.bin`,
+      relPath: "attachments/raw-dump.bin",
+      name: "raw-dump.bin",
+      extension: "bin",
+      fileKind: "bin",
+      sizeBytes: 4_096,
+      updatedAt: "2026-04-26T14:35:00+09:00",
+      gitTracked: false,
+      binary: true,
+    },
+    {
       path: `${rootPath}/templates/minutes-template.md`,
       relPath: "templates/minutes-template.md",
       name: "minutes-template.md",

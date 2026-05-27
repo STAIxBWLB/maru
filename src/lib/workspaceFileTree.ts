@@ -206,29 +206,8 @@ export function isOpenableDocumentFile(entry: WorkspaceFileEntry): boolean {
 }
 
 export function isOpenableFile(entry: WorkspaceFileEntry): boolean {
-  if (isOpenableDocumentFile(entry)) return true;
-  // Avoid circular import — duplicate the openable extension set here, not the
-  // whole classifier. Categories that need rendering live in lib/binaryViewer.ts.
-  const ext = entry.fileKind.toLowerCase();
-  return BINARY_VIEWABLE_EXT.has(ext);
+  return Boolean(entry.path);
 }
-
-const BINARY_VIEWABLE_EXT: ReadonlySet<string> = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tif", "heic", "heif", "avif",
-  "svg",
-  "pdf",
-  "docx",
-  "xlsx", "xls", "xlsm",
-  "hwpx",
-  "mp3", "wav", "ogg", "oga", "flac", "m4a", "aac", "opus",
-  "mp4", "mov", "mkv", "avi", "webm", "m4v",
-  "txt", "log", "srt", "csv", "tsv", "json", "xml", "yaml", "yml", "toml",
-  "ini", "conf", "cfg", "env", "css", "scss", "sass", "less",
-  "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "rs", "go", "java", "kt", "swift",
-  "c", "cc", "cpp", "h", "hpp", "sql", "sh", "bash", "zsh", "fish", "rb", "php",
-  "lua", "vim", "dockerfile", "gradle", "properties",
-  "zip", "jar", "war", "apk", "epub", "ipa",
-]);
 
 function flattenNode(
   node: TreeNode,

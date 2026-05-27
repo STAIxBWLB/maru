@@ -1,16 +1,29 @@
 import { FileQuestion, ExternalLink, FolderOpen } from "lucide-react";
+import type { BinaryViewerClassification } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
 import { formatBytes } from "../../lib/binaryViewer";
 import type { WorkspaceFileEntry } from "../../lib/types";
 
 interface Props {
   entry: WorkspaceFileEntry;
+  classification: BinaryViewerClassification;
   onOpenExternal: () => void;
   onRevealInFinder: () => void;
 }
 
-export function UnsupportedViewer({ entry, onOpenExternal, onRevealInFinder }: Props) {
+export function UnsupportedViewer({
+  entry,
+  classification,
+  onOpenExternal,
+  onRevealInFinder,
+}: Props) {
   const { t } = useTranslation();
+  const format =
+    classification.extension ??
+    classification.mime ??
+    entry.extension ??
+    entry.fileKind ??
+    "unknown";
   return (
     <div className="binary-viewer binary-viewer--unsupported">
       <div className="binary-viewer-unsupported-card">
@@ -22,11 +35,11 @@ export function UnsupportedViewer({ entry, onOpenExternal, onRevealInFinder }: P
         <dl className="binary-viewer-meta">
           <div>
             <dt>{t("binaryViewer.format")}</dt>
-            <dd>{entry.extension ?? entry.fileKind}</dd>
+            <dd>{format}</dd>
           </div>
           <div>
             <dt>{t("binaryViewer.size")}</dt>
-            <dd>{formatBytes(entry.sizeBytes)}</dd>
+            <dd>{formatBytes(classification.sizeBytes || entry.sizeBytes)}</dd>
           </div>
         </dl>
         <div className="binary-viewer-actions">

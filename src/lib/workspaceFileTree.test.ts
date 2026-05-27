@@ -9,6 +9,8 @@ import {
   expandWorkspaceFileAncestors,
   filterWorkspaceFiles,
   groupWorkspaceFilesByMtime,
+  isOpenableDocumentFile,
+  isOpenableFile,
   sortWorkspaceFiles,
   virtualizeWorkspaceFileListRows,
   virtualizeWorkspaceFileTreeRows,
@@ -59,6 +61,13 @@ describe("workspace file tree", () => {
     expect(
       filterWorkspaceFiles(entries, "", "binary", ["tmp/*.bin"]).map((entry) => entry.relPath),
     ).toEqual(["tmp/raw.bin"]);
+  });
+
+  it("keeps binary include filtering separate from file openability", () => {
+    const unsupportedBinary = file("attachments/raw-dump.bin", { binary: true });
+    expect(filterWorkspaceFiles([unsupportedBinary], "", "binary")).toEqual([]);
+    expect(isOpenableDocumentFile(unsupportedBinary)).toBe(false);
+    expect(isOpenableFile(unsupportedBinary)).toBe(true);
   });
 
   it("collapses folders by default", () => {

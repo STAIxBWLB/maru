@@ -13667,6 +13667,12 @@ button.git-badge:hover {
   flex: 1;
 }
 
+.binary-viewer-toolbar-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
 .binary-viewer-page-label {
   font-variant-numeric: tabular-nums;
   font-size: 12px;

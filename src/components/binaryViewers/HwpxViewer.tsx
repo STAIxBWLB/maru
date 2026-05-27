@@ -58,6 +58,14 @@ export function HwpxViewer({ entry, workspacePath }: Props) {
     <div className="binary-viewer binary-viewer--hwpx">
       <div className="binary-viewer-toolbar binary-viewer-toolbar--meta">
         <span>{t("binaryViewer.hwpxWarning")}</span>
+        <span>
+          {t("binaryViewer.hwpxSections", { count: preview.sections })}
+        </span>
+        {preview.warnings.length > 0 ? (
+          <span className="binary-viewer-meta-warning">
+            {t("binaryViewer.hwpxWarnings", { count: preview.warnings.length })}
+          </span>
+        ) : null}
       </div>
       <div
         className="binary-viewer-canvas binary-viewer-canvas--hwpx markdown-body"

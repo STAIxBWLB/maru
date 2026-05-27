@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
-import { assetUrlForPath } from "../../lib/binaryViewer";
+import { assetUrlForPath, formatBytes, INLINE_DOCX_MAX_BYTES } from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
 
@@ -19,6 +19,9 @@ export function DocxViewer({ entry }: Props) {
     setHtml(null);
     setWarnings([]);
     setError(null);
+    if (entry.sizeBytes > INLINE_DOCX_MAX_BYTES) return () => {
+      cancelled = true;
+    };
 
     (async () => {
       try {
@@ -55,7 +58,20 @@ export function DocxViewer({ entry }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [entry.path]);
+  }, [entry.path, entry.sizeBytes]);
+
+  if (entry.sizeBytes > INLINE_DOCX_MAX_BYTES) {
+    return (
+      <div className="binary-viewer binary-viewer--docx">
+        <div className="binary-viewer-error">
+          {t("binaryViewer.largeFileInline", {
+            size: formatBytes(entry.sizeBytes),
+            limit: formatBytes(INLINE_DOCX_MAX_BYTES),
+          })}
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
