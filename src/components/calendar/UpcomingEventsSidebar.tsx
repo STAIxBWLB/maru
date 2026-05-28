@@ -1,14 +1,18 @@
-import { format } from "date-fns";
+import { addDays, format, startOfWeek } from "date-fns";
 import { ko } from "date-fns/locale/ko";
 import { enUS } from "date-fns/locale/en-US";
-import { groupUpcomingEvents } from "../../lib/calendar/groupUpcoming";
+import { groupCalendarRangeEvents } from "../../lib/calendar/groupUpcoming";
 import type {
   CalendarLocale,
+  CalendarView,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
 
 interface UpcomingEventsSidebarProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
+  view: CalendarView;
+  viewDate: Date;
+  weekStartsOn: 0 | 1;
   today: Date;
   locale: CalendarLocale;
   onSelectEvent?: (event: UnifiedCalendarEvent<T>) => void;
@@ -17,16 +21,31 @@ interface UpcomingEventsSidebarProps<T> {
 
 export function UpcomingEventsSidebar<T>({
   events,
+  view,
+  viewDate,
+  weekStartsOn,
   today,
   locale,
   onSelectEvent,
   emptyLabel,
 }: UpcomingEventsSidebarProps<T>) {
-  const groups = groupUpcomingEvents(events, { today, locale });
+  const groups = groupCalendarRangeEvents(events, {
+    view,
+    viewDate,
+    weekStartsOn,
+    today,
+    locale,
+  });
   const localeObj = locale === "ko" ? ko : enUS;
+  const heading = sidebarHeading(view, locale);
+  const rangeLabel = sidebarRangeLabel(view, viewDate, weekStartsOn, locale);
   if (groups.length === 0) {
     return (
-      <aside className="cal-sidebar">
+      <aside className="cal-sidebar" aria-label={heading}>
+        <header className="cal-sidebar-header">
+          <strong>{heading}</strong>
+          <span>{rangeLabel}</span>
+        </header>
         <p className="cal-sidebar-empty">
           {emptyLabel ?? (locale === "ko" ? "다가오는 일정 없음" : "Nothing upcoming")}
         </p>
@@ -34,7 +53,11 @@ export function UpcomingEventsSidebar<T>({
     );
   }
   return (
-    <aside className="cal-sidebar">
+    <aside className="cal-sidebar" aria-label={heading}>
+      <header className="cal-sidebar-header">
+        <strong>{heading}</strong>
+        <span>{rangeLabel}</span>
+      </header>
       <ul className="cal-sidebar-list">
         {groups.map((group) => (
           <li key={group.dateISO} className="cal-sidebar-group">
@@ -72,4 +95,43 @@ export function UpcomingEventsSidebar<T>({
       </ul>
     </aside>
   );
+}
+
+function sidebarHeading(view: CalendarView, locale: CalendarLocale): string {
+  if (locale === "ko") {
+    if (view === "day") return "일별 목록";
+    if (view === "week") return "주간 목록";
+    return "월간 목록";
+  }
+  if (view === "day") return "Day agenda";
+  if (view === "week") return "Week agenda";
+  return "Month agenda";
+}
+
+function sidebarRangeLabel(
+  view: CalendarView,
+  viewDate: Date,
+  weekStartsOn: 0 | 1,
+  locale: CalendarLocale,
+): string {
+  const localeObj = locale === "ko" ? ko : enUS;
+  if (view === "day") {
+    return format(viewDate, locale === "ko" ? "yyyy년 M월 d일" : "MMM d, yyyy", {
+      locale: localeObj,
+    });
+  }
+  if (view === "week") {
+    const start = startOfWeek(viewDate, { weekStartsOn });
+    const end = addDays(start, 6);
+    if (locale === "ko") {
+      return `${format(start, "yyyy년 M월 d일", { locale: localeObj })} - ${format(end, "M월 d일", { locale: localeObj })}`;
+    }
+    if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+      return `${format(start, "MMM d", { locale: localeObj })}-${format(end, "d, yyyy", { locale: localeObj })}`;
+    }
+    return `${format(start, "MMM d, yyyy", { locale: localeObj })} - ${format(end, "MMM d, yyyy", { locale: localeObj })}`;
+  }
+  return format(viewDate, locale === "ko" ? "yyyy년 M월" : "MMMM yyyy", {
+    locale: localeObj,
+  });
 }

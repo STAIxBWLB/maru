@@ -27,6 +27,7 @@ import {
   EMPTY_TERMINAL_STATE,
   TERMINAL_LAUNCHERS,
   terminalCommandPreview,
+  terminalShiftEnterData,
   terminalTabsReducer,
   selectTerminalSplitLeftTabId,
   shouldCloseTerminalSplitAfterTabClose,
@@ -333,6 +334,12 @@ export const TerminalPanel = memo(function TerminalPanel({
       terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, suppressMouseTracking);
       terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, suppressMouseTracking);
       terminal.attachCustomKeyEventHandler((event) => {
+        const shiftedEnter = terminalShiftEnterData(kind, event);
+        if (shiftedEnter) {
+          event.preventDefault();
+          void terminalWrite(sessionId, shiftedEnter);
+          return false;
+        }
         const isMac = navigator.platform.toLowerCase().includes("mac");
         const mod = isMac ? event.metaKey : event.ctrlKey;
         if (mod && event.key.toLowerCase() === "d") {

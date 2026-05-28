@@ -7,9 +7,29 @@ import {
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
   terminalCommandPreview,
+  TERMINAL_SHIFT_ENTER_DATA,
+  terminalShiftEnterData,
   terminalTabsReducer,
 } from "./terminal";
 import { DEFAULT_ANCHOR_SETTINGS, normalizeAnchorSettings } from "./settings";
+
+function key(opts: {
+  type?: string;
+  key?: string;
+  shift?: boolean;
+  meta?: boolean;
+  ctrl?: boolean;
+  alt?: boolean;
+} = {}): KeyboardEvent {
+  return {
+    type: opts.type ?? "keydown",
+    key: opts.key ?? "Enter",
+    shiftKey: opts.shift ?? false,
+    metaKey: opts.meta ?? false,
+    ctrlKey: opts.ctrl ?? false,
+    altKey: opts.alt ?? false,
+  } as KeyboardEvent;
+}
 
 describe("terminal tab reducer", () => {
   it("creates, switches, attaches, exits, and closes tabs", () => {
@@ -136,5 +156,21 @@ describe("terminal tab reducer", () => {
       },
     });
     expect(shouldAutoLaunchTerminal(disabled, true, 0)).toBeNull();
+  });
+
+  it("maps Shift+Enter to modified-key data for AI terminal tabs only", () => {
+    const event = key({ shift: true });
+    expect(terminalShiftEnterData("claude", event)).toBe(TERMINAL_SHIFT_ENTER_DATA);
+    expect(terminalShiftEnterData("codex", event)).toBe(TERMINAL_SHIFT_ENTER_DATA);
+    expect(terminalShiftEnterData("shell", event)).toBeNull();
+  });
+
+  it("does not map plain Enter, other modifiers, or non-keydown events", () => {
+    expect(terminalShiftEnterData("claude", key())).toBeNull();
+    expect(terminalShiftEnterData("claude", key({ key: "a", shift: true }))).toBeNull();
+    expect(terminalShiftEnterData("claude", key({ shift: true, meta: true }))).toBeNull();
+    expect(terminalShiftEnterData("claude", key({ shift: true, ctrl: true }))).toBeNull();
+    expect(terminalShiftEnterData("claude", key({ shift: true, alt: true }))).toBeNull();
+    expect(terminalShiftEnterData("claude", key({ type: "keyup", shift: true }))).toBeNull();
   });
 });

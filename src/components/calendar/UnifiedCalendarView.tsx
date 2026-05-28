@@ -57,6 +57,9 @@ export function UnifiedCalendarView<T>({
     <section className="unified-calendar">
       <UpcomingEventsSidebar
         events={events}
+        view={view}
+        viewDate={viewDate}
+        weekStartsOn={weekStartsOn}
         today={todayDate}
         locale={locale}
         onSelectEvent={onSelectEvent}

@@ -12860,7 +12860,7 @@ button.git-badge:hover {
 
 .unified-calendar {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   min-height: 0;
   height: 100%;
   background: var(--cal-bg);
@@ -12872,13 +12872,37 @@ button.git-badge:hover {
   background: var(--cal-sidebar-bg);
   border-right: 1px solid var(--cal-line);
   overflow-y: auto;
-  padding: 16px 14px 24px;
+  padding: 12px 10px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cal-sidebar-header {
+  display: grid;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.cal-sidebar-header strong {
+  color: var(--cal-ink);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.cal-sidebar-header span {
+  color: var(--cal-muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .cal-sidebar-empty {
   color: var(--cal-muted);
   font-size: 12.5px;
-  padding: 8px 6px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 6px 4px;
 }
 
 .cal-sidebar-list {
@@ -12887,7 +12911,7 @@ button.git-badge:hover {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .cal-sidebar-group {
