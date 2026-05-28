@@ -57,6 +57,8 @@ describe("normalizeAnchorSettings", () => {
           outlinePaneWidth: 100,
           editorSplitOpen: true,
           editorSplitRatio: 0.9,
+          terminalDock: "right",
+          terminalWidth: 2048,
           terminalSplitOpen: true,
           terminalSplitRatio: 0.1,
         },
@@ -108,6 +110,8 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
+    expect(settings.ui.layout.terminalDock).toBe("right");
+    expect(settings.ui.layout.terminalWidth).toBe(2048);
     expect(settings.ui.layout.terminalSplitOpen).toBe(true);
     expect(settings.ui.layout.terminalSplitRatio).toBe(0.3);
     expect(settings.ui.layout.terminalOpen).toBe(false);
@@ -426,6 +430,8 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.documentViews).toEqual([]);
     expect(settings.ui.fileQueueDefaultOperation).toBe("copy");
     expect(settings.ui.layout.terminalOpen).toBe(false);
+    expect(settings.ui.layout.terminalDock).toBe("bottom");
+    expect(settings.ui.layout.terminalWidth).toBe(640);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
     expect(settings.terminal.autoLaunch).toBe("shell");
   });
@@ -458,6 +464,8 @@ describe("normalizeAnchorSettings", () => {
           outlinePaneWidth: 360,
           terminalOpen: true,
           terminalHeight: 300,
+          terminalDock: "right",
+          terminalWidth: 1800,
           terminalMaximized: true,
           editorSplitOpen: true,
           editorSplitRatio: 0.4,
@@ -480,6 +488,8 @@ describe("normalizeAnchorSettings", () => {
       outlinePaneWidth: 360,
       terminalOpen: true,
       terminalHeight: 300,
+      terminalDock: "right",
+      terminalWidth: 1800,
       terminalMaximized: true,
       editorSplitOpen: true,
       editorSplitRatio: 0.4,
@@ -490,6 +500,15 @@ describe("normalizeAnchorSettings", () => {
     });
     expect(settings.terminal.defaultPanelOpen).toBe(true);
     expect(settings.terminal.lastHeight).toBe(300);
+  });
+
+  it("normalizes terminal dock while preserving uncapped right-dock widths", () => {
+    expect(normalizeAnchorSettings({ ui: { layout: { terminalDock: "side" } } }).ui.layout
+      .terminalDock).toBe("bottom");
+    expect(normalizeAnchorSettings({ ui: { layout: { terminalWidth: 12 } } }).ui.layout
+      .terminalWidth).toBe(320);
+    expect(normalizeAnchorSettings({ ui: { layout: { terminalWidth: 4096 } } }).ui.layout
+      .terminalWidth).toBe(4096);
   });
 
   it("migrates legacy AI runtime labels into terminal launcher settings", () => {

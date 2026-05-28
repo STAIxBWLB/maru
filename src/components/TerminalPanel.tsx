@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minimize2,
   PanelBottom,
+  PanelRight,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -20,7 +21,7 @@ import {
   terminalWrite,
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
-import type { AnchorSettings } from "../lib/settings";
+import type { AnchorSettings, TerminalDock } from "../lib/settings";
 import {
   createTerminalTab,
   EMPTY_TERMINAL_STATE,
@@ -39,11 +40,15 @@ interface TerminalPanelProps {
   launchRequest?: TerminalLaunchRequest | null;
   open: boolean;
   height: number;
+  dock: TerminalDock;
+  width: number;
   splitOpen: boolean;
   splitRatio: number;
   maximized: boolean;
   onOpenChange: (open: boolean) => void;
   onHeightChange: (height: number) => void;
+  onDockChange: (dock: TerminalDock) => void;
+  onWidthChange: (width: number) => void;
   onSplitOpenChange: (open: boolean) => void;
   onSplitRatioChange: (ratio: number) => void;
   onMaximizedChange: (maximized: boolean) => void;
@@ -76,6 +81,33 @@ interface TerminalHandle {
 
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
+const MIN_WIDTH = 320;
+const MIN_MAIN_WIDTH = 360;
+
+// DEC private modes that enable mouse tracking. When a TUI (e.g. Claude Code,
+// Codex) enables any of these the embedded xterm forwards mouse events to the
+// pty, which (a) disables xterm's own text selection and (b) lets the CLI
+// repaint its UI with hover effects whenever the cursor moves. We want the
+// embedded terminal to behave like a plain scroll/select buffer.
+//   9    — X10 mouse reporting (button press only)
+//   1000 — VT200 normal tracking
+//   1001 — VT200 highlight tracking
+//   1002 — button-event (drag) tracking
+//   1003 — any-event tracking (every motion)
+const SUPPRESSED_MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003]);
+
+const suppressMouseTracking = (params: (number | number[])[]): boolean => {
+  for (const param of params) {
+    if (Array.isArray(param)) {
+      for (const sub of param) {
+        if (SUPPRESSED_MOUSE_MODES.has(sub)) return true;
+      }
+    } else if (SUPPRESSED_MOUSE_MODES.has(param)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 export const TerminalPanel = memo(function TerminalPanel({
   cwd,
@@ -83,11 +115,15 @@ export const TerminalPanel = memo(function TerminalPanel({
   launchRequest,
   open,
   height,
+  dock,
+  width,
   splitOpen,
   splitRatio,
   maximized,
   onOpenChange,
   onHeightChange,
+  onDockChange,
+  onWidthChange,
   onSplitOpenChange,
   onSplitRatioChange,
   onMaximizedChange,
@@ -95,6 +131,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(terminalTabsReducer, EMPTY_TERMINAL_STATE);
   const [draftHeight, setDraftHeight] = useState(height);
+  const [draftWidth, setDraftWidth] = useState(width);
   const [rightTabId, setRightTabId] = useState<string | null>(null);
   const [focusedGroup, setFocusedGroup] = useState<"left" | "right">("left");
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +159,10 @@ export const TerminalPanel = memo(function TerminalPanel({
   useEffect(() => {
     setDraftHeight(height);
   }, [height]);
+
+  useEffect(() => {
+    setDraftWidth(width);
+  }, [width]);
 
   const fitTab = useCallback((tabId: string) => {
     const handle = handlesRef.current.get(tabId);
@@ -212,6 +253,8 @@ export const TerminalPanel = memo(function TerminalPanel({
     splitLeftTab,
     splitOpen,
     splitRatio,
+    dock,
+    draftWidth,
   ]);
 
   useEffect(() => {
@@ -287,6 +330,8 @@ export const TerminalPanel = memo(function TerminalPanel({
       });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
+      terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, suppressMouseTracking);
+      terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, suppressMouseTracking);
       terminal.attachCustomKeyEventHandler((event) => {
         const isMac = navigator.platform.toLowerCase().includes("mac");
         const mod = isMac ? event.metaKey : event.ctrlKey;
@@ -454,6 +499,40 @@ export const TerminalPanel = memo(function TerminalPanel({
       event.preventDefault();
       const handle = event.currentTarget;
       const pointerId = event.pointerId;
+      if (dock === "right") {
+        const startX = event.clientX;
+        const startWidth = draftWidth;
+        let latest = startWidth;
+        handle.setPointerCapture(pointerId);
+
+        const onMove = (move: PointerEvent) => {
+          if (move.pointerId !== pointerId) return;
+          const viewportMax = Math.max(MIN_WIDTH, window.innerWidth - MIN_MAIN_WIDTH);
+          const next = Math.min(
+            viewportMax,
+            Math.max(MIN_WIDTH, startWidth + startX - move.clientX),
+          );
+          latest = next;
+          setDraftWidth(next);
+          onWidthChange(next);
+        };
+        const cleanup = () => {
+          handle.removeEventListener("pointermove", onMove);
+          handle.removeEventListener("pointerup", onEnd);
+          handle.removeEventListener("pointercancel", onEnd);
+          if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+        };
+        const onEnd = (end: PointerEvent) => {
+          if (end.pointerId !== pointerId) return;
+          cleanup();
+          onWidthChange(latest);
+        };
+        handle.addEventListener("pointermove", onMove);
+        handle.addEventListener("pointerup", onEnd);
+        handle.addEventListener("pointercancel", onEnd);
+        return;
+      }
+
       const startY = event.clientY;
       const startHeight = draftHeight;
       let latest = startHeight;
@@ -483,7 +562,7 @@ export const TerminalPanel = memo(function TerminalPanel({
       handle.addEventListener("pointerup", onEnd);
       handle.addEventListener("pointercancel", onEnd);
     },
-    [draftHeight, onHeightChange],
+    [dock, draftHeight, draftWidth, onHeightChange, onWidthChange],
   );
 
   const startSplitResize = useCallback(
@@ -525,7 +604,15 @@ export const TerminalPanel = memo(function TerminalPanel({
     [onSplitRatioChange],
   );
 
-  const panelStyle = open && !maximized ? { height: draftHeight } : undefined;
+  const panelStyle =
+    open && !maximized
+      ? dock === "right"
+        ? undefined
+        : { height: draftHeight }
+      : undefined;
+  const dockTarget = dock === "right" ? "bottom" : "right";
+  const dockTitle =
+    dockTarget === "right" ? t("terminal.dockRight") : t("terminal.dockBottom");
   const splitMode = splitOpen && Boolean(rightTab);
   // Use a CSS variable instead of grid columns so terminal-instance divs stay
   // direct children of terminal-body. If we wrapped each side in its own
@@ -602,9 +689,9 @@ export const TerminalPanel = memo(function TerminalPanel({
       className={
         open
           ? maximized
-            ? "terminal-panel maximized"
-            : "terminal-panel"
-          : "terminal-panel collapsed"
+            ? `terminal-panel dock-${dock} maximized`
+            : `terminal-panel dock-${dock}`
+          : `terminal-panel dock-${dock} collapsed`
       }
       style={panelStyle}
       onKeyDownCapture={handleTerminalKeyDownCapture}
@@ -619,7 +706,7 @@ export const TerminalPanel = memo(function TerminalPanel({
           title={open ? t("terminal.collapse") : t("terminal.expand")}
           aria-label={open ? t("terminal.collapse") : t("terminal.expand")}
         >
-          <PanelBottom size={14} />
+          {dock === "right" ? <PanelRight size={14} /> : <PanelBottom size={14} />}
           <span>{t("terminal.title")}</span>
           {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
@@ -648,6 +735,15 @@ export const TerminalPanel = memo(function TerminalPanel({
         <div className="terminal-cwd" title={cwd ?? t("terminal.cwd.none")}>
           {cwd ?? t("terminal.cwd.none")}
         </div>
+        <button
+          type="button"
+          className="terminal-icon-button"
+          onClick={() => onDockChange(dockTarget)}
+          aria-label={dockTitle}
+          title={dockTitle}
+        >
+          {dockTarget === "right" ? <PanelRight size={14} /> : <PanelBottom size={14} />}
+        </button>
         <button
           type="button"
           className="terminal-icon-button"

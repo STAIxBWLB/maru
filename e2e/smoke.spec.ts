@@ -76,6 +76,14 @@ async function dispatchDrag(
   );
 }
 
+async function runCommandPaletteAction(page: Page, label: string) {
+  await page.locator(".topbar-command-action").click();
+  const input = page.locator(".cmdk-input input");
+  await expect(input).toBeVisible();
+  await input.fill(label);
+  await page.locator(".cmdk-item", { hasText: label }).click();
+}
+
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
 
@@ -185,6 +193,7 @@ test("restores a dense shell with tabbed explorer and collapsed terminal", async
 }) => {
   await page.goto("/");
 
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-bottom/);
   await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
   await expect(page.locator(".sidebar.embedded")).toBeVisible();
   await expect(page.locator(".document-list")).toBeVisible();
@@ -218,6 +227,52 @@ test("keeps close shortcut scoped to the focused terminal panel", async ({ page 
 
   await expect(documentTabs).toHaveCount(tabCount);
   await expect(page.locator(".document-tab.active")).toBeVisible();
+});
+
+test("docks the terminal to a resizable uncapped right column", async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await page.goto("/");
+
+  const shell = page.locator(".app-shell");
+  const terminalPanel = page.locator(".terminal-panel");
+  await expect(shell).toHaveClass(/terminal-dock-bottom/);
+  await expect(terminalPanel).toHaveClass(/collapsed/);
+
+  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+
+  await expect(shell).toHaveClass(/terminal-dock-right/);
+  await expect(terminalPanel).not.toHaveClass(/collapsed/);
+  const rightPaneBox = await page.locator(".outline-pane").boundingBox();
+  const terminalBox = await terminalPanel.boundingBox();
+  expect(rightPaneBox).not.toBeNull();
+  expect(terminalBox).not.toBeNull();
+  if (!rightPaneBox || !terminalBox) return;
+  expect(terminalBox.x).toBeGreaterThanOrEqual(rightPaneBox.x + rightPaneBox.width - 1);
+  expect(terminalBox.width).toBeGreaterThan(520);
+
+  const handleBox = await terminalPanel.locator(".terminal-resize-handle").boundingBox();
+  expect(handleBox).not.toBeNull();
+  if (!handleBox) return;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 - 140, handleBox.y + handleBox.height / 2);
+  await page.mouse.up();
+
+  const resizedBox = await terminalPanel.boundingBox();
+  expect(resizedBox).not.toBeNull();
+  if (!resizedBox) return;
+  expect(resizedBox.width).toBeGreaterThan(terminalBox.width + 80);
+
+  await page.setViewportSize({ width: 820, height: 720 });
+  await expect
+    .poll(() =>
+      terminalPanel.evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+    )
+    .toBeGreaterThan(150);
+
+  await runCommandPaletteAction(page, "터미널을 하단에 배치");
+  await expect(shell).toHaveClass(/terminal-dock-bottom/);
+  await expect(terminalPanel).not.toHaveClass(/collapsed/);
 });
 
 test("restores the previous app state on startup", async ({ page }) => {
@@ -326,10 +381,83 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
   await expect(page.locator(".meetings-review-card")).toContainText("결과 대기");
 
+  await meetingsPane.getByRole("button", { name: "전체" }).click();
+  const progressDock = page.locator(".meetings-progress-dock");
+  await expect(progressDock).toContainText("진행 중인 회의록 작업");
+  await expect(progressDock.locator(".meetings-progress-list")).toBeVisible();
+  await expect(progressDock.getByRole("button", { name: "진행 패널 접기" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+
+  await progressDock.getByRole("button", { name: "진행 패널 접기" }).click();
+  await expect(progressDock).toHaveClass(/collapsed/);
+  await expect(progressDock.locator(".meetings-progress-list")).toBeHidden();
+  await expect(progressDock.getByRole("button", { name: "진행 패널 펼치기" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+
+  await progressDock.getByRole("button", { name: "진행 패널 펼치기" }).click();
+  await expect(progressDock.locator(".meetings-progress-list")).toBeVisible();
+  const initialDockHeight = await progressDock.evaluate((element) =>
+    Math.round(element.getBoundingClientRect().height),
+  );
+  const resizeHandle = progressDock.locator(".meetings-progress-resize-handle");
+  await expect(resizeHandle).toBeVisible();
+  const resizeHandleBox = await resizeHandle.boundingBox();
+  expect(resizeHandleBox).not.toBeNull();
+  if (!resizeHandleBox) throw new Error("Missing meetings progress resize handle box.");
+  await page.mouse.move(
+    resizeHandleBox.x + resizeHandleBox.width / 2,
+    resizeHandleBox.y + resizeHandleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    resizeHandleBox.x + resizeHandleBox.width / 2,
+    resizeHandleBox.y + resizeHandleBox.height / 2 - 56,
+  );
+  await page.mouse.up();
+  await expect
+    .poll(() =>
+      progressDock.evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+    )
+    .toBeGreaterThan(initialDockHeight + 32);
+
+  const storedDockHeight = await page.evaluate(() => {
+    let raw: string | null = null;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith("anchor:meetings:progress-dock:")) {
+        raw = window.localStorage.getItem(key);
+        break;
+      }
+    }
+    if (!raw) return 0;
+    return Math.round(JSON.parse(raw).height);
+  });
+  expect(storedDockHeight).toBeGreaterThan(initialDockHeight + 32);
+
+  await page.reload();
+  const reloadedMeetingsPane = page.locator(".meetings-pane");
+  await page.locator(".activity-rail").getByRole("button", { name: "회의록" }).click();
+  await reloadedMeetingsPane.getByRole("button", { name: "녹취록 처리" }).click();
+  await page.locator(".meetings-source-card textarea").fill("새 회의록 작업으로 저장된 패널 높이를 확인한다.");
+  await reloadedMeetingsPane.getByRole("button", { name: "회의록 생성" }).click();
+  await page.getByRole("button", { name: "Codex로 실행" }).click();
+  await reloadedMeetingsPane.getByRole("button", { name: "전체" }).click();
+  const restoredDock = page.locator(".meetings-progress-dock");
+  await expect(restoredDock).toBeVisible();
+  await expect
+    .poll(() =>
+      restoredDock.evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+    )
+    .toBe(storedDockHeight);
+
   await meetingsPane.getByRole("button", { name: "외부 노트 정제" }).click();
   await expect(page.locator(".meetings-source-card textarea")).toBeVisible();
   await page.locator(".meetings-source-card textarea").fill("외부 노트 초안을 회의록 형식으로 정리한다.");
-  await meetingsPane.getByRole("button", { name: "정제 실행" }).click();
+  await reloadedMeetingsPane.getByRole("button", { name: "정제 실행" }).click();
   await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
 });

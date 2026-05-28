@@ -255,6 +255,7 @@ import {
   type FilesListAttribute,
   type FilesSortKey,
   type RightPaneTab,
+  type TerminalDock,
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
@@ -303,6 +304,7 @@ import {
 const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
 const OPEN_TABS_KEY = "anchor:openTabs:v1";
 const RECENT_KEY = "anchor:recent:v1";
+const APP_ICON_URL = new URL("./assets/app-icon-dark.png", import.meta.url).href;
 const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
@@ -5237,6 +5239,16 @@ function MainApp() {
     updateLayoutSettings({ terminalOpen: true, terminalSplitOpen: true });
   }, [updateLayoutSettings]);
 
+  const dockTerminal = useCallback(
+    (terminalDock: TerminalDock) => {
+      updateLayoutSettings(
+        { terminalDock, terminalOpen: true, terminalMaximized: false },
+        { flush: true },
+      );
+    },
+    [updateLayoutSettings],
+  );
+
   const splitActiveSurfaceRight = useCallback(() => {
     const active = window.document.activeElement as HTMLElement | null;
     if (active?.closest(".terminal-panel")) {
@@ -5374,6 +5386,12 @@ function MainApp() {
         case "split-right":
           splitEditorRight();
           break;
+        case "dock-terminal-right":
+          dockTerminal("right");
+          break;
+        case "dock-terminal-bottom":
+          dockTerminal("bottom");
+          break;
         case "close-all-tabs":
           closeAllCleanTabs();
           break;
@@ -5432,6 +5450,7 @@ function MainApp() {
       openTasks,
       checkForUpdates,
       splitEditorRight,
+      dockTerminal,
       closeAllCleanTabs,
       editorViewMode,
       setPersistedAppMode,
@@ -5594,6 +5613,12 @@ function MainApp() {
         case "terminal.split":
           splitTerminalRight();
           break;
+        case "terminal.dock_right":
+          dockTerminal("right");
+          break;
+        case "terminal.dock_bottom":
+          dockTerminal("bottom");
+          break;
         case "workspace.refresh":
           refreshActiveSurface();
           break;
@@ -5622,6 +5647,7 @@ function MainApp() {
       setExplorerPaneMode,
       snapshotCurrent,
       splitTerminalRight,
+      dockTerminal,
       switchActiveWorkspace,
       updateLayoutSettings,
       workspaceRegistry.activeByVisibility.private,
@@ -5677,9 +5703,11 @@ function MainApp() {
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
       : "";
+  const terminalDockClass =
+    layoutSettings.terminalDock === "right" ? " terminal-dock-right" : " terminal-dock-bottom";
   const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
     documentsPaneOpen ? "" : " documents-closed"
-  }${terminalMaximizedClass}`;
+  }${terminalMaximizedClass}${terminalDockClass}`;
   const themeVars = useMemo(() => buildThemeVars(anchorSettings), [anchorSettings]);
   const shellStyle = useMemo(
     () =>
@@ -5689,11 +5717,18 @@ function MainApp() {
           ? `${layoutSettings.documentsPaneWidth}px`
           : "0px",
         "--outline-col": outlineOpen ? `${layoutSettings.outlinePaneWidth}px` : "0px",
+        "--terminal-col":
+          layoutSettings.terminalDock === "right"
+            ? `${layoutSettings.terminalOpen ? layoutSettings.terminalWidth : 40}px`
+            : "0px",
       }) as React.CSSProperties & Record<`--${string}`, string>,
     [
       documentsPaneOpen,
       layoutSettings.documentsPaneWidth,
       layoutSettings.outlinePaneWidth,
+      layoutSettings.terminalDock,
+      layoutSettings.terminalOpen,
+      layoutSettings.terminalWidth,
       outlineOpen,
       themeVars,
     ],
@@ -5949,7 +5984,7 @@ function MainApp() {
         >
           <div className="topbar-window-controls-guard" data-no-drag="true" aria-hidden="true" />
           <div className="brand-mark" aria-hidden="true">
-            A
+            <img className="brand-mark-icon" src={APP_ICON_URL} alt="" draggable={false} />
           </div>
           <div className="brand-name">
             {t("app.title")} <span>{t("app.subtitle.work")}</span>
@@ -6598,6 +6633,8 @@ function MainApp() {
           launchRequest={terminalLaunchRequest}
           open={anchorSettings.ui.layout.terminalOpen}
           height={anchorSettings.ui.layout.terminalHeight}
+          dock={anchorSettings.ui.layout.terminalDock}
+          width={anchorSettings.ui.layout.terminalWidth}
           splitOpen={anchorSettings.ui.layout.terminalSplitOpen}
           splitRatio={anchorSettings.ui.layout.terminalSplitRatio}
           maximized={anchorSettings.ui.layout.terminalMaximized}
@@ -6605,6 +6642,8 @@ function MainApp() {
             updateLayoutSettings({ terminalOpen }, { flush: true })
           }
           onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
+          onDockChange={dockTerminal}
+          onWidthChange={(terminalWidth) => updateLayoutSettings({ terminalWidth })}
           onSplitOpenChange={(terminalSplitOpen) =>
             updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
           }

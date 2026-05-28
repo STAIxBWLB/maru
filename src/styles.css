@@ -337,6 +337,64 @@ a {
     "activity terminal terminal terminal";
 }
 
+.app-shell.terminal-dock-right {
+  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-columns:
+    var(--activity-col) var(--documents-col) minmax(0, 1fr) var(--outline-col)
+    minmax(40px, var(--terminal-col));
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity list editor outline terminal";
+}
+
+.app-shell.terminal-dock-right.inbox-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity inbox inbox outline terminal";
+}
+
+.app-shell.terminal-dock-right.comms-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity comms comms outline terminal";
+}
+
+.app-shell.terminal-dock-right.meetings-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity meetings meetings outline terminal";
+}
+
+.app-shell.terminal-dock-right.tasks-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity tasks tasks outline terminal";
+}
+
+.app-shell.terminal-dock-right.e2e-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity e2e e2e outline terminal";
+}
+
+.app-shell.terminal-dock-right.catalog-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity catalog catalog outline terminal";
+}
+
+.app-shell.terminal-dock-right.studio-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity studio studio outline terminal";
+}
+
+.app-shell.terminal-dock-right.diagram-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity diagram diagram diagram terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -357,6 +415,13 @@ a {
     "topbar topbar topbar topbar"
     "activity terminal terminal terminal"
     "activity terminal terminal terminal";
+}
+
+.app-shell.terminal-maximized.terminal-dock-right {
+  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity terminal terminal terminal terminal";
 }
 
 .app-shell.terminal-maximized .document-list,
@@ -1446,17 +1511,23 @@ a {
 }
 
 .brand-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
-  background: var(--ink);
-  color: var(--panel);
-  font-weight: 750;
-  font-size: 13px;
-  letter-spacing: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
   margin-left: 70px;
+}
+
+.brand-mark-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .brand-name {
@@ -7305,6 +7376,18 @@ button.git-badge:hover {
   min-height: 0;
 }
 
+.terminal-panel.dock-right {
+  height: auto;
+  border-top: 0;
+  border-left: 1px solid #2e2e2e;
+}
+
+.terminal-panel.dock-right.collapsed {
+  width: 40px;
+  height: auto;
+  grid-template-rows: 36px;
+}
+
 /* Tabs and body stay mounted across collapse/expand to preserve xterm DOM,
    so [hidden] must beat the class selectors that set display:flex / block. */
 .terminal-tabs[hidden],
@@ -7322,6 +7405,16 @@ button.git-badge:hover {
   z-index: 2;
 }
 
+.terminal-panel.dock-right .terminal-resize-handle {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: auto;
+  width: 8px;
+  height: auto;
+  cursor: ew-resize;
+}
+
 .terminal-header {
   display: flex;
   align-items: center;
@@ -7330,6 +7423,11 @@ button.git-badge:hover {
   padding: 0 10px;
   border-bottom: 1px solid #2a2a2a;
   background: #181818;
+}
+
+.terminal-panel.dock-right.collapsed .terminal-header {
+  justify-content: center;
+  padding: 0 6px;
 }
 
 .terminal-title {
@@ -7346,6 +7444,20 @@ button.git-badge:hover {
 
 .terminal-title:hover {
   background: #252525;
+}
+
+.terminal-panel.dock-right.collapsed .terminal-title {
+  width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.terminal-panel.dock-right.collapsed .terminal-title span,
+.terminal-panel.dock-right.collapsed .terminal-title svg:last-child,
+.terminal-panel.dock-right.collapsed .terminal-launchers,
+.terminal-panel.dock-right.collapsed .terminal-cwd,
+.terminal-panel.dock-right.collapsed .terminal-icon-button {
+  display: none;
 }
 
 .terminal-launchers {
@@ -7540,6 +7652,13 @@ button.git-badge:hover {
   background: #111111;
   visibility: hidden;
   pointer-events: none;
+  /* xterm renders its own selection via a custom renderer, so native
+     browser selection is never wanted inside the terminal pane. Without
+     this, a drag that starts on the padding around xterm (or that crosses
+     a re-render) starts a native selection that visually mimics xterm
+     selection but xterm cannot clear. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .terminal-instance.active {
@@ -9764,6 +9883,112 @@ button.git-badge:hover {
 }
 
 @media (max-width: 880px) {
+  .app-shell.terminal-dock-right {
+    grid-template-rows: 44px auto auto auto auto;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "list"
+      "editor"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.inbox-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "inbox"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.comms-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "comms"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.meetings-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "meetings"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.tasks-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "tasks"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.catalog-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "catalog"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.studio-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "studio"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.e2e-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "e2e"
+      "outline"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.diagram-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "diagram"
+      "terminal";
+  }
+
+  .terminal-panel.dock-right {
+    width: auto;
+    height: min(320px, 45dvh);
+    min-height: 180px;
+    border-top: 1px solid #2e2e2e;
+    border-left: 0;
+  }
+
+  .terminal-panel.dock-right.collapsed {
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .terminal-panel.dock-right .terminal-resize-handle {
+    top: -3px;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    width: auto;
+    height: 6px;
+    cursor: ns-resize;
+  }
+
   .app-shell.inbox-mode {
     grid-template-areas:
       "topbar"
@@ -12257,17 +12482,108 @@ button.git-badge:hover {
 }
 
 .meetings-progress-dock {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 96px;
+  max-height: 55dvh;
   border-top: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--panel) 88%, var(--bg));
   padding: 10px 22px;
+  overflow: hidden;
+}
+
+.meetings-progress-dock.collapsed {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  grid-template-rows: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .meetings-progress-dock header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 10px;
   color: var(--muted);
   font-size: 12px;
-  margin-bottom: 8px;
+}
+
+.meetings-progress-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px 0 0;
+  font: inherit;
+  font-weight: 700;
+}
+
+.meetings-progress-title:hover {
+  color: var(--ink);
+}
+
+.meetings-progress-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meetings-progress-title svg {
+  flex: 0 0 auto;
+}
+
+.meetings-progress-dock header > span {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.meetings-progress-resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: ns-resize;
+  z-index: 1;
+}
+
+.meetings-progress-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 22px;
+  right: 22px;
+  height: 1px;
+  background: transparent;
+  transition: background 140ms ease;
+}
+
+.meetings-progress-resize-handle:hover::after,
+.meetings-progress-resize-handle:focus-visible::after,
+.meetings-progress-resize-handle:active::after {
+  background: color-mix(in srgb, var(--accent) 44%, var(--line-soft));
+}
+
+.meetings-progress-list {
+  min-height: 0;
+  align-content: start;
+  overflow: auto;
+}
+
+.meetings-progress-list[hidden] {
+  display: none;
 }
 
 .meetings-mission-card {

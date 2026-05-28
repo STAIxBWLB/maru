@@ -61,6 +61,8 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },
       { id: "snapshot", label: t("cmdk.action.snapshot"), shortcut: "⌘ ⇧ S" },
       { id: "split-right", label: t("cmdk.action.splitRight"), shortcut: "⌘ D" },
+      { id: "dock-terminal-right", label: t("cmdk.action.dockTerminalRight") },
+      { id: "dock-terminal-bottom", label: t("cmdk.action.dockTerminalBottom") },
       { id: "close-all-tabs", label: t("cmdk.action.closeAllTabs") },
       { id: "toggle-preview", label: t("cmdk.action.togglePreview"), shortcut: "⌘ P" },
       { id: "toggle-outline", label: t("cmdk.action.toggleOutline"), shortcut: "⌘ \\" },

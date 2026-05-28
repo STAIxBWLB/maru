@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
   Calendar as CalendarIcon,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   ClipboardCheck,
   FilePlus2,
@@ -25,7 +27,15 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import {
   appendMeetingsLog,
   chooseFiles,
@@ -98,6 +108,15 @@ import type {
 type MeetingsView = "all" | "month" | "transcript" | "external" | "date" | "activity";
 type DisplayMode = "list" | "calendar";
 
+const MEETINGS_PROGRESS_DOCK_DEFAULT_HEIGHT = 220;
+const MEETINGS_PROGRESS_DOCK_MIN_HEIGHT = 96;
+const MEETINGS_PROGRESS_DOCK_MAX_VIEWPORT_RATIO = 0.55;
+
+interface MeetingsProgressDockLayout {
+  collapsed: boolean;
+  height: number;
+}
+
 interface MeetingsPaneProps {
   workPath: string | null;
   settings: MeetingsSettings;
@@ -161,10 +180,18 @@ export function MeetingsPane({
     () => `anchor:meetings:cleared-runs:${workPath ?? "no-workspace"}`,
     [workPath],
   );
+  const progressDockStorageKey = useMemo(
+    () => `anchor:meetings:progress-dock:${workPath ?? "no-workspace"}`,
+    [workPath],
+  );
   const [clearedRunIds, setClearedRunIds] = useState<Set<string>>(() =>
     readClearedMeetingRunIds(clearedRunStorageKey),
   );
   const [lastClearedMissionId, setLastClearedMissionId] = useState<string | null>(null);
+  const [optimisticMeetingsMissions, setOptimisticMeetingsMissions] = useState<MissionRecord[]>([]);
+  const [progressDockLayout, setProgressDockLayout] = useState<MeetingsProgressDockLayout>(() =>
+    readMeetingsProgressDockLayout(progressDockStorageKey),
+  );
 
   const entries = useMemo(() => rowsToMeetingEntries(rows), [rows]);
   const availableTypes = useMemo(
@@ -202,8 +229,8 @@ export function MeetingsPane({
   const calendarEvents = useMemo(() => toUnifiedMeetingEvents(viewEntries), [viewEntries]);
   const todayDate = useMemo(() => new Date(), []);
   const meetingsMissions = useMemo(
-    () => activeMeetingsMissions(processingMissions),
-    [processingMissions],
+    () => mergeMeetingsMissions(activeMeetingsMissions(processingMissions), optimisticMeetingsMissions),
+    [optimisticMeetingsMissions, processingMissions],
   );
   const visibleMeetingsMissions = useMemo(
     () => meetingsMissions.filter((mission) => !clearedRunIds.has(mission.id)),
@@ -213,7 +240,33 @@ export function MeetingsPane({
   useEffect(() => {
     setClearedRunIds(readClearedMeetingRunIds(clearedRunStorageKey));
     setLastClearedMissionId(null);
+    setOptimisticMeetingsMissions([]);
   }, [clearedRunStorageKey]);
+
+  useEffect(() => {
+    setProgressDockLayout(readMeetingsProgressDockLayout(progressDockStorageKey));
+  }, [progressDockStorageKey]);
+
+  const updateProgressDockLayout = useCallback(
+    (patch: Partial<MeetingsProgressDockLayout>) => {
+      setProgressDockLayout((current) => {
+        const next = {
+          ...current,
+          ...patch,
+          height: clampMeetingsProgressDockHeight(patch.height ?? current.height),
+        };
+        writeMeetingsProgressDockLayout(progressDockStorageKey, next);
+        return next;
+      });
+    },
+    [progressDockStorageKey],
+  );
+
+  const recordOptimisticMeetingMission = useCallback((mission: MissionRecord) => {
+    setOptimisticMeetingsMissions((current) =>
+      mergeMeetingsMissions([mission], current).slice(0, 20),
+    );
+  }, []);
 
   useEffect(() => {
     if (!workPath) {
@@ -389,6 +442,7 @@ export function MeetingsPane({
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
+            onLocalMissionStarted={recordOptimisticMeetingMission}
             onStopMission={onStopMission}
             onClearMission={clearMeetingMission}
             lastClearedMissionId={lastClearedMissionId}
@@ -407,6 +461,7 @@ export function MeetingsPane({
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
+            onLocalMissionStarted={recordOptimisticMeetingMission}
             onStopMission={onStopMission}
             onClearMission={clearMeetingMission}
             lastClearedMissionId={lastClearedMissionId}
@@ -501,6 +556,10 @@ export function MeetingsPane({
           <MeetingsProgressDock
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
+            collapsed={progressDockLayout.collapsed}
+            height={progressDockLayout.height}
+            onCollapsedChange={(collapsed) => updateProgressDockLayout({ collapsed })}
+            onHeightChange={(height) => updateProgressDockLayout({ height })}
             onStopMission={onStopMission}
           />
         )}
@@ -1038,6 +1097,7 @@ function MeetingsTranscriptFlow(props: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
+  onLocalMissionStarted: (mission: MissionRecord) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
   lastClearedMissionId: string | null;
@@ -1058,6 +1118,7 @@ function MeetingsExternalFlow({
   missions,
   logLines,
   onMissionStarted,
+  onLocalMissionStarted,
   onStopMission,
   onClearMission,
   lastClearedMissionId,
@@ -1074,6 +1135,7 @@ function MeetingsExternalFlow({
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
+  onLocalMissionStarted: (mission: MissionRecord) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
   lastClearedMissionId: string | null;
@@ -1093,6 +1155,7 @@ function MeetingsExternalFlow({
       missions={missions}
       logLines={logLines}
       onMissionStarted={onMissionStarted}
+      onLocalMissionStarted={onLocalMissionStarted}
       onStopMission={onStopMission}
       onClearMission={onClearMission}
       lastClearedMissionId={lastClearedMissionId}
@@ -1135,6 +1198,7 @@ function MeetingsSkillWorkbench({
   missions,
   logLines,
   onMissionStarted,
+  onLocalMissionStarted,
   onStopMission,
   onClearMission,
   lastClearedMissionId,
@@ -1152,6 +1216,7 @@ function MeetingsSkillWorkbench({
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
+  onLocalMissionStarted: (mission: MissionRecord) => void;
   onStopMission: (id: string) => void;
   onClearMission: (id: string) => void;
   lastClearedMissionId: string | null;
@@ -1290,16 +1355,18 @@ function MeetingsSkillWorkbench({
         },
       });
       setRuntimeChooserOpen(false);
+      const optimisticMission = createOptimisticMeetingMission({
+        id: invocationId,
+        runtime,
+        sourceKind,
+        inputPaths: paths,
+        workPath,
+      });
       setLocalRuns((current) => [
-        createOptimisticMeetingMission({
-          id: invocationId,
-          runtime,
-          sourceKind,
-          inputPaths: paths,
-          workPath,
-        }),
+        optimisticMission,
         ...current.filter((mission) => mission.id !== invocationId),
       ]);
+      onLocalMissionStarted(optimisticMission);
       setApplyResult(null);
       onMissionStarted(invocationId);
       onRefreshMissions();
@@ -2248,21 +2315,121 @@ function MeetingsRunPanel({
 function MeetingsProgressDock({
   missions,
   logLines,
+  collapsed,
+  height,
+  onCollapsedChange,
+  onHeightChange,
   onStopMission,
 }: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
+  collapsed: boolean;
+  height: number;
+  onCollapsedChange: (collapsed: boolean) => void;
+  onHeightChange: (height: number) => void;
   onStopMission: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const [draftHeight, setDraftHeight] = useState(() =>
+    clampMeetingsProgressDockHeight(height),
+  );
+
+  useEffect(() => {
+    setDraftHeight(clampMeetingsProgressDockHeight(height));
+  }, [height]);
+
+  const commitHeight = useCallback(
+    (nextHeight: number) => {
+      const clamped = clampMeetingsProgressDockHeight(nextHeight);
+      setDraftHeight(clamped);
+      onHeightChange(clamped);
+    },
+    [onHeightChange],
+  );
+
+  const startResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (collapsed) return;
+      event.preventDefault();
+      const handle = event.currentTarget;
+      const pointerId = event.pointerId;
+      const startY = event.clientY;
+      const startHeight = draftHeight;
+      let latest = startHeight;
+      handle.setPointerCapture(pointerId);
+
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId !== pointerId) return;
+        const next = clampMeetingsProgressDockHeight(startHeight + startY - move.clientY);
+        latest = next;
+        setDraftHeight(next);
+      };
+      const cleanup = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      };
+      const onEnd = (end: PointerEvent) => {
+        if (end.pointerId !== pointerId) return;
+        cleanup();
+        onHeightChange(latest);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    },
+    [collapsed, draftHeight, onHeightChange],
+  );
+
+  const handleResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (collapsed) return;
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        commitHeight(draftHeight + 16);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        commitHeight(draftHeight - 16);
+      }
+    },
+    [collapsed, commitHeight, draftHeight],
+  );
+
   if (missions.length === 0) return null;
   return (
-    <section className="meetings-progress-dock">
+    <section
+      className={collapsed ? "meetings-progress-dock collapsed" : "meetings-progress-dock"}
+      style={collapsed ? undefined : { height: draftHeight }}
+    >
+      <div
+        className="meetings-progress-resize-handle"
+        role="separator"
+        aria-label={t("meetings.progress.resize")}
+        aria-orientation="horizontal"
+        aria-valuemin={MEETINGS_PROGRESS_DOCK_MIN_HEIGHT}
+        aria-valuemax={Math.round(meetingsProgressDockMaxHeight())}
+        aria-valuenow={Math.round(draftHeight)}
+        tabIndex={collapsed ? -1 : 0}
+        onPointerDown={startResize}
+        onKeyDown={handleResizeKeyDown}
+        hidden={collapsed}
+      />
       <header>
-        <strong>{t("meetings.progress.title")}</strong>
+        <button
+          type="button"
+          className="meetings-progress-title"
+          aria-expanded={!collapsed}
+          title={collapsed ? t("meetings.progress.expandPanel") : t("meetings.progress.collapsePanel")}
+          aria-label={collapsed ? t("meetings.progress.expandPanel") : t("meetings.progress.collapsePanel")}
+          onClick={() => onCollapsedChange(!collapsed)}
+        >
+          <strong>{t("meetings.progress.title")}</strong>
+          {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
         <span>{t("meetings.progress.count", { count: missions.length })}</span>
       </header>
-      <div className="meetings-progress-list">
+      <div className="meetings-progress-list" hidden={collapsed}>
         {missions.map((mission) => (
           <article key={mission.id} className="meetings-mission-card">
             <div>
@@ -2299,6 +2466,66 @@ function writeClearedMeetingRunIds(key: string, ids: Set<string>) {
   try {
     window.localStorage.setItem(key, JSON.stringify(Array.from(ids).slice(-200)));
     window.sessionStorage.removeItem(key);
+  } catch {
+    // Non-critical UI state; ignore storage failures such as private-mode quota errors.
+  }
+}
+
+function meetingsProgressDockMaxHeight(): number {
+  const viewportHeight = typeof window === "undefined" ? 900 : window.innerHeight;
+  return Math.max(
+    MEETINGS_PROGRESS_DOCK_MIN_HEIGHT,
+    viewportHeight * MEETINGS_PROGRESS_DOCK_MAX_VIEWPORT_RATIO,
+  );
+}
+
+function clampMeetingsProgressDockHeight(value: number): number {
+  const safeValue = Number.isFinite(value) ? value : MEETINGS_PROGRESS_DOCK_DEFAULT_HEIGHT;
+  return Math.round(
+    Math.min(
+      meetingsProgressDockMaxHeight(),
+      Math.max(MEETINGS_PROGRESS_DOCK_MIN_HEIGHT, safeValue),
+    ),
+  );
+}
+
+function readMeetingsProgressDockLayout(key: string): MeetingsProgressDockLayout {
+  const defaults = {
+    collapsed: false,
+    height: clampMeetingsProgressDockHeight(MEETINGS_PROGRESS_DOCK_DEFAULT_HEIGHT),
+  };
+  if (typeof window === "undefined") {
+    return defaults;
+  }
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return defaults;
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      collapsed: typeof record.collapsed === "boolean" ? record.collapsed : false,
+      height: clampMeetingsProgressDockHeight(
+        typeof record.height === "number" ? record.height : MEETINGS_PROGRESS_DOCK_DEFAULT_HEIGHT,
+      ),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function writeMeetingsProgressDockLayout(key: string, layout: MeetingsProgressDockLayout) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        collapsed: layout.collapsed,
+        height: clampMeetingsProgressDockHeight(layout.height),
+      }),
+    );
   } catch {
     // Non-critical UI state; ignore storage failures such as private-mode quota errors.
   }
