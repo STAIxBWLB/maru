@@ -13713,18 +13713,6 @@ button.git-badge:hover {
   background: white;
 }
 
-.binary-viewer-system-fallback {
-  height: 100%;
-  min-height: 260px;
-  display: grid;
-  place-items: center;
-  gap: 10px;
-  padding: 24px;
-  color: var(--muted);
-  text-align: center;
-  background: var(--panel-2);
-}
-
 .binary-viewer-canvas--media {
   align-items: center;
   justify-content: center;

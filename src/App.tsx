@@ -5143,9 +5143,12 @@ function MainApp() {
       const workspacePath = docTab?.workspacePath ?? binaryTab!.workspacePath;
       const relPath = docTab?.entry.relPath ?? binaryTab!.fileEntry.relPath;
       const targetPath = docTab?.document.path ?? binaryTab!.fileEntry.path;
-      const activePane = anchorSettings.ui.explorerPaneMode;
+      const activePane = binaryTab ? "files" : anchorSettings.ui.explorerPaneMode;
       setPersistedAppMode("pkm");
       if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
+      if (binaryTab && anchorSettings.ui.explorerPaneMode !== "files") {
+        setExplorerPaneMode("files");
+      }
       setExplorerVisibility(visibility);
       if (activePane === "documents") {
         setDocumentBrowserMode("tree");
@@ -5184,6 +5187,7 @@ function MainApp() {
       refreshWorkspaceFiles,
       selectTab,
       setDocumentBrowserMode,
+      setExplorerPaneMode,
       setExplorerQuery,
       setExplorerDocumentFilter,
       setWorkspaceFileFilter,

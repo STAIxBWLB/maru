@@ -21,21 +21,12 @@ export function PdfViewer({ entry, onPreviewExternal }: Props) {
           {t("binaryViewer.systemPreview")}
         </button>
       </div>
-      <object
+      <iframe
         className="binary-viewer-native-pdf"
-        data={url}
-        type="application/pdf"
+        src={url}
         title={entry.name}
         aria-label={entry.name}
-      >
-        <div className="binary-viewer-system-fallback">
-          <p>{t("binaryViewer.pdfNativeFallback")}</p>
-          <button type="button" onClick={onPreviewExternal}>
-            <Eye size={14} />
-            {t("binaryViewer.systemPreview")}
-          </button>
-        </div>
-      </object>
+      />
     </div>
   );
 }

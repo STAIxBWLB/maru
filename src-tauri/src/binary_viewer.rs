@@ -419,6 +419,14 @@ fn decode_text(bytes: &[u8]) -> (String, String) {
     if let Ok(s) = std::str::from_utf8(bytes) {
         return (s.to_string(), "utf-8".to_string());
     }
+    if let Err(err) = std::str::from_utf8(bytes) {
+        if err.error_len().is_none() && err.valid_up_to() > 0 {
+            let valid = &bytes[..err.valid_up_to()];
+            if let Ok(s) = std::str::from_utf8(valid) {
+                return (s.to_string(), "utf-8".to_string());
+            }
+        }
+    }
     let (decoded, _used, had_errors) = EUC_KR.decode(bytes);
     if !had_errors {
         return (decoded.into_owned(), "euc-kr".to_string());
@@ -501,6 +509,23 @@ mod tests {
         assert_eq!(preview.content.len(), 100);
         assert_eq!(preview.byte_count, 1000);
         assert_eq!(preview.shown_bytes, 100);
+    }
+
+    #[test]
+    fn read_text_trims_incomplete_utf8_suffix() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("truncated.txt");
+        fs::write(&path, "a한".as_bytes()).unwrap();
+        let preview = binary_viewer_read_text(
+            tmp.path().to_str().unwrap().to_string(),
+            path.to_str().unwrap().to_string(),
+            Some(2),
+        )
+        .unwrap();
+        assert!(preview.truncated);
+        assert_eq!(preview.content, "a");
+        assert_eq!(preview.encoding, "utf-8");
+        assert_eq!(preview.shown_bytes, 2);
     }
 
     #[test]
