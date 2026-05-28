@@ -21,10 +21,6 @@ env:
   CARGO_TERM_COLOR: always
   APPLE_SIGNING_IDENTITY: "-"
   HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
-  # Opt all JavaScript actions into Node.js 24. Node.js 20 is deprecated
-  # on GitHub-hosted runners (forced to Node 24 on 2026-06-02, removed
-  # 2026-09-16). See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build:
@@ -42,6 +38,9 @@ jobs:
             args: --target x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
+          # Intentionally tracks latest. The Visual Studio 2026 migration of
+          # windows-latest (rollout 2026-06-08 → 2026-06-15) is accepted; the
+          # runner migration notice is informational and clears after migration.
           - platform: windows-latest
             args: ""
 
@@ -68,19 +67,19 @@ jobs:
           echo "Resolved release: tag=$tag id=$id"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.release.outputs.tag }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9.15.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20.19.0
+          node-version: 22.22.3
           cache: pnpm
 
       - name: Setup Rust
@@ -234,7 +233,7 @@ jobs:
           echo "Resolved release: tag=$tag id=$id"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.release.outputs.tag }}
 
@@ -301,21 +300,21 @@ jobs:
           echo "Resolved release: tag=$tag id=$id"
 
       - name: Checkout anchor
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.release.outputs.tag }}
 
       - name: Checkout tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: STAIxBWLB/homebrew-cask
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20.19.0
+          node-version: 22.22.3
 
       - name: Configure git identity
         working-directory: tap

@@ -6,7 +6,7 @@
   "description": "Local-first Anchor Workspace and AI editing desktop app.",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5307",
