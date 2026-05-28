@@ -6,6 +6,8 @@ import {
   selectTerminalSplitLeftTabId,
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
+  shouldSuppressTerminalHoverMouseEvent,
+  shouldSuppressTerminalMouseTracking,
   terminalCommandPreview,
   TERMINAL_SHIFT_ENTER_DATA,
   terminalShiftEnterData,
@@ -29,6 +31,13 @@ function key(opts: {
     ctrlKey: opts.ctrl ?? false,
     altKey: opts.alt ?? false,
   } as KeyboardEvent;
+}
+
+function mouseMove(buttons: number): MouseEvent {
+  return {
+    type: "mousemove",
+    buttons,
+  } as MouseEvent;
 }
 
 describe("terminal tab reducer", () => {
@@ -172,5 +181,29 @@ describe("terminal tab reducer", () => {
     expect(terminalShiftEnterData("claude", key({ shift: true, ctrl: true }))).toBeNull();
     expect(terminalShiftEnterData("claude", key({ shift: true, alt: true }))).toBeNull();
     expect(terminalShiftEnterData("claude", key({ type: "keyup", shift: true }))).toBeNull();
+  });
+
+  it("suppresses terminal mouse tracking modes without blocking non-mouse modes", () => {
+    expect(shouldSuppressTerminalMouseTracking([9])).toBe(true);
+    expect(shouldSuppressTerminalMouseTracking([1003])).toBe(true);
+    expect(shouldSuppressTerminalMouseTracking([1006])).toBe(true);
+    expect(shouldSuppressTerminalMouseTracking([[1000, 1006]])).toBe(true);
+
+    expect(shouldSuppressTerminalMouseTracking([1004])).toBe(false);
+    expect(shouldSuppressTerminalMouseTracking([1007])).toBe(false);
+    expect(shouldSuppressTerminalMouseTracking([1049])).toBe(false);
+    expect(shouldSuppressTerminalMouseTracking([2004])).toBe(false);
+    expect(shouldSuppressTerminalMouseTracking([[1004, 1049, 2004]])).toBe(false);
+  });
+
+  it("suppresses hover mousemove while preserving drag selection", () => {
+    expect(shouldSuppressTerminalHoverMouseEvent(mouseMove(0))).toBe(true);
+    expect(shouldSuppressTerminalHoverMouseEvent(mouseMove(1))).toBe(false);
+    expect(
+      shouldSuppressTerminalHoverMouseEvent({
+        type: "mousedown",
+        buttons: 0,
+      } as MouseEvent),
+    ).toBe(false);
   });
 });

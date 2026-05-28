@@ -30,6 +30,8 @@ import {
   terminalShiftEnterData,
   terminalTabsReducer,
   selectTerminalSplitLeftTabId,
+  shouldSuppressTerminalHoverMouseEvent,
+  shouldSuppressTerminalMouseTracking,
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
   type TerminalKind,
@@ -84,31 +86,6 @@ const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
 const MIN_WIDTH = 320;
 const MIN_MAIN_WIDTH = 360;
-
-// DEC private modes that enable mouse tracking. When a TUI (e.g. Claude Code,
-// Codex) enables any of these the embedded xterm forwards mouse events to the
-// pty, which (a) disables xterm's own text selection and (b) lets the CLI
-// repaint its UI with hover effects whenever the cursor moves. We want the
-// embedded terminal to behave like a plain scroll/select buffer.
-//   9    — X10 mouse reporting (button press only)
-//   1000 — VT200 normal tracking
-//   1001 — VT200 highlight tracking
-//   1002 — button-event (drag) tracking
-//   1003 — any-event tracking (every motion)
-const SUPPRESSED_MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003]);
-
-const suppressMouseTracking = (params: (number | number[])[]): boolean => {
-  for (const param of params) {
-    if (Array.isArray(param)) {
-      for (const sub of param) {
-        if (SUPPRESSED_MOUSE_MODES.has(sub)) return true;
-      }
-    } else if (SUPPRESSED_MOUSE_MODES.has(param)) {
-      return true;
-    }
-  }
-  return false;
-};
 
 export const TerminalPanel = memo(function TerminalPanel({
   cwd,
@@ -331,8 +308,14 @@ export const TerminalPanel = memo(function TerminalPanel({
       });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
-      terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, suppressMouseTracking);
-      terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, suppressMouseTracking);
+      terminal.parser.registerCsiHandler(
+        { prefix: "?", final: "h" },
+        shouldSuppressTerminalMouseTracking,
+      );
+      terminal.parser.registerCsiHandler(
+        { prefix: "?", final: "l" },
+        shouldSuppressTerminalMouseTracking,
+      );
       terminal.attachCustomKeyEventHandler((event) => {
         const shiftedEnter = terminalShiftEnterData(kind, event);
         if (shiftedEnter) {
@@ -653,6 +636,15 @@ export const TerminalPanel = memo(function TerminalPanel({
     [closeTab, focusedTabId],
   );
 
+  const handleTerminalMouseMoveCapture = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!shouldSuppressTerminalHoverMouseEvent(event.nativeEvent)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [],
+  );
+
   const renderTerminalTab = (tab: (typeof state.tabs)[number]) => {
     const className = tab.id === focusedTabId ? "terminal-tab active" : "terminal-tab";
     return (
@@ -813,6 +805,7 @@ export const TerminalPanel = memo(function TerminalPanel({
                 <div
                   key={tab.id}
                   className={className}
+                  onMouseMoveCapture={handleTerminalMouseMoveCapture}
                   onPointerDown={() => setFocusedGroup(isRight ? "right" : "left")}
                 >
                   {isVisible ? (
