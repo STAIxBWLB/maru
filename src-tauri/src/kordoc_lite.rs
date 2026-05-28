@@ -68,6 +68,14 @@ pub struct HwpxFillOutcome {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HwpxPreview {
+    pub html: String,
+    pub sections: usize,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct HwpxPackage {
     entries: BTreeMap<String, Vec<u8>>,
@@ -129,6 +137,209 @@ pub fn detect_document_format(bytes: &[u8]) -> DocumentFormat {
         return detect_zip_format(bytes);
     }
     DocumentFormat::Unknown
+}
+
+pub fn extract_hwpx_text_html(path: &Path) -> Result<HwpxPreview, String> {
+    let package = read_hwpx_package(path)?;
+    let mut html = String::new();
+    let mut warnings = Vec::new();
+    let mut sections = 0usize;
+
+    for section_name in &package.section_names {
+        let Some(bytes) = package.entries.get(section_name) else {
+            continue;
+        };
+        let xml = match String::from_utf8(bytes.clone()) {
+            Ok(value) => value,
+            Err(err) => {
+                warnings.push(format!("Section {section_name} is not UTF-8: {err}"));
+                continue;
+            }
+        };
+        match section_xml_to_html(&strip_dtd(&xml)) {
+            Ok(section_html) => {
+                if !section_html.is_empty() {
+                    if sections > 0 {
+                        html.push_str("<hr class=\"hwpx-section-break\" />");
+                    }
+                    html.push_str(&section_html);
+                    sections += 1;
+                }
+            }
+            Err(err) => warnings.push(format!("Section {section_name} render failed: {err}")),
+        }
+    }
+
+    if html.is_empty() {
+        warnings.push("HWPX has no renderable text content".to_string());
+    }
+
+    Ok(HwpxPreview {
+        html,
+        sections,
+        warnings,
+    })
+}
+
+fn section_xml_to_html(xml: &str) -> Result<String, String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+
+    let mut out = String::new();
+    let mut depth_t: u32 = 0;
+    let mut in_para = false;
+    let mut row_open = false;
+    let mut cell_open = false;
+    let mut para_has_text = false;
+
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|err| format!("XML parse failed: {err}"))?;
+        match &event {
+            Event::Eof => break,
+            Event::Start(start) => match local_name(start.name().as_ref()).as_str() {
+                "p" => {
+                    if in_para {
+                        if !para_has_text {
+                            out.push_str("&nbsp;");
+                        }
+                        out.push_str("</p>");
+                    }
+                    out.push_str("<p>");
+                    in_para = true;
+                    para_has_text = false;
+                }
+                "tbl" => {
+                    if in_para {
+                        if !para_has_text {
+                            out.push_str("&nbsp;");
+                        }
+                        out.push_str("</p>");
+                        in_para = false;
+                    }
+                    out.push_str("<table>");
+                }
+                "tr" => {
+                    out.push_str("<tr>");
+                    row_open = true;
+                }
+                "tc" => {
+                    out.push_str("<td>");
+                    cell_open = true;
+                }
+                "t" => depth_t += 1,
+                "linebreak" | "lineBreak" => {
+                    if in_para || cell_open {
+                        out.push_str("<br/>");
+                    }
+                }
+                _ => {}
+            },
+            Event::Empty(start) => match local_name(start.name().as_ref()).as_str() {
+                "linebreak" | "lineBreak" | "br" => {
+                    if in_para || cell_open {
+                        out.push_str("<br/>");
+                    }
+                }
+                _ => {}
+            },
+            Event::End(end) => match local_name(end.name().as_ref()).as_str() {
+                "p" => {
+                    if in_para {
+                        if !para_has_text {
+                            out.push_str("&nbsp;");
+                        }
+                        out.push_str("</p>");
+                        in_para = false;
+                        para_has_text = false;
+                    }
+                }
+                "tbl" => out.push_str("</table>"),
+                "tr" => {
+                    if row_open {
+                        out.push_str("</tr>");
+                        row_open = false;
+                    }
+                }
+                "tc" => {
+                    if cell_open {
+                        out.push_str("</td>");
+                        cell_open = false;
+                    }
+                }
+                "t" => depth_t = depth_t.saturating_sub(1),
+                _ => {}
+            },
+            Event::Text(text) if depth_t > 0 => {
+                if let Ok(decoded) = text.xml_content() {
+                    let escaped = html_escape_text(decoded.as_ref());
+                    if !escaped.is_empty() {
+                        out.push_str(&escaped);
+                        para_has_text = true;
+                    }
+                }
+            }
+            Event::CData(cdata) if depth_t > 0 => {
+                if let Ok(s) = cdata.decode() {
+                    // CDATA content is taken literally — no entity decoding.
+                    let escaped = html_escape_text(s.as_ref());
+                    if !escaped.is_empty() {
+                        out.push_str(&escaped);
+                        para_has_text = true;
+                    }
+                }
+            }
+            Event::GeneralRef(reference) if depth_t > 0 => {
+                let ch = resolve_general_ref(reference);
+                if let Some(ch) = ch {
+                    let mut tmp = String::new();
+                    tmp.push(ch);
+                    out.push_str(&html_escape_text(&tmp));
+                    para_has_text = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if in_para {
+        if !para_has_text {
+            out.push_str("&nbsp;");
+        }
+        out.push_str("</p>");
+    }
+    Ok(out)
+}
+
+fn resolve_general_ref(reference: &quick_xml::events::BytesRef<'_>) -> Option<char> {
+    if let Ok(Some(ch)) = reference.resolve_char_ref() {
+        return Some(ch);
+    }
+    let name = reference.decode().ok()?;
+    match name.as_ref() {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        _ => None,
+    }
+}
+
+fn html_escape_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 pub fn scan_hwpx_fields(path: &Path) -> Result<HwpxScanResult, String> {
@@ -1093,6 +1304,46 @@ mod tests {
             .unwrap();
         assert_eq!(field.occurrences, 2);
         assert_eq!(field.source, "formLabel");
+    }
+
+    #[test]
+    fn extracts_hwpx_text_html_with_paragraphs_and_tables() {
+        let tmp = TempDir::new().unwrap();
+        let hwpx = tmp.path().join("text.hwpx");
+        write_hwpx_fixture(
+            &hwpx,
+            r#"<hp:sec><hp:p><hp:t>제목입니다</hp:t></hp:p><hp:p><hp:t>본문 라인 &amp; HTML 이스케이프 &lt;b&gt;</hp:t></hp:p><hp:tbl><hp:tr><hp:tc><hp:p><hp:t>이름</hp:t></hp:p></hp:tc><hp:tc><hp:p><hp:t>홍길동</hp:t></hp:p></hp:tc></hp:tr></hp:tbl></hp:sec>"#,
+        );
+        let preview = extract_hwpx_text_html(&hwpx).unwrap();
+        assert_eq!(preview.sections, 1);
+        assert!(preview.html.contains("<p>제목입니다</p>"), "{}", preview.html);
+        assert!(
+            preview.html.contains("&amp; HTML 이스케이프 &lt;b&gt;"),
+            "{}",
+            preview.html
+        );
+        assert!(preview.html.contains("<table>"), "{}", preview.html);
+        assert!(preview.html.contains("<td>"), "{}", preview.html);
+        assert!(preview.html.contains("홍길동"), "{}", preview.html);
+    }
+
+    #[test]
+    fn extracts_hwpx_text_html_on_bundled_template() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("skills/skills/hwpx/templates/사업계획서_기본.hwpx");
+        if !path.exists() {
+            eprintln!("skip: bundled HWPX template missing at {}", path.display());
+            return;
+        }
+        let preview = extract_hwpx_text_html(&path).unwrap();
+        assert!(preview.sections >= 1, "expected at least one section");
+        assert!(
+            preview.html.contains("<p>") || preview.html.contains("<td>"),
+            "expected paragraphs or table cells in output (got {} bytes)",
+            preview.html.len()
+        );
     }
 
     #[test]

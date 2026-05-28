@@ -50,6 +50,7 @@ interface EditorPaneProps {
   tabs: EditorTabSummary[];
   activeTabId: string | null;
   entries: VaultEntry[];
+  bodyOverride?: React.ReactNode;
   onChange: (content: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
@@ -94,6 +95,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     tabs,
     activeTabId,
     entries,
+    bodyOverride,
     onChange,
     onSelectTab,
     onCloseTab,
@@ -189,7 +191,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   const mutationDisabledTitle = contextMenu?.tab.writeBlockedReason ?? undefined;
 
-  if (openingEntry && openingEntry.path !== document?.path) {
+  if (!bodyOverride && openingEntry && openingEntry.path !== document?.path) {
     return (
       <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
@@ -203,7 +205,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     );
   }
 
-  if (!document) {
+  if (!document && !bodyOverride) {
     return (
       <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
         <div className="empty-document-plate">
@@ -217,8 +219,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     );
   }
 
-  const pathSegments = document.relPath.split("/").filter(Boolean);
+  const pathSegments = document ? document.relPath.split("/").filter(Boolean) : [];
   const folder = pathSegments.length > 1 ? pathSegments.slice(0, -1).join(" / ") : null;
+  const breadcrumbTitle = document?.relPath ?? documentLabel ?? "";
+  const headerTitle = documentLabel ?? document?.title ?? "";
 
   return (
     <main className="editor-pane" ref={ref} onPointerDown={onFocusPane}>
@@ -368,7 +372,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
         </div>
       ) : null}
       <header className="editor-topbar">
-        <div className="breadcrumb" title={document.relPath}>
+        <div className="breadcrumb" title={breadcrumbTitle}>
           {activeWorkspaceLabel ? (
             <>
               <span className="crumb">{activeWorkspaceLabel}</span>
@@ -381,7 +385,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
               <ChevronRight size={12} className="sep" />
             </>
           ) : null}
-          <strong>{documentLabel ?? document.title}</strong>
+          <strong>{headerTitle}</strong>
         </div>
         <div className="editor-actions">
           <span
@@ -428,56 +432,66 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
         </div>
       </header>
 
-      <Tabs.Root
-        className="editor-tabs"
-        value={viewMode}
-        onValueChange={(value) => onViewModeChange(value as EditorViewMode)}
-      >
-        <Tabs.List className="editor-tabs-row" aria-label="document view">
-          <Tabs.Trigger className="tab-trigger" value="rich">
-            {t("editor.tab.rich")}
-          </Tabs.Trigger>
-          <Tabs.Trigger className="tab-trigger" value="source">
-            {t("editor.tab.source")}
-          </Tabs.Trigger>
-          <Tabs.Trigger className="tab-trigger" value="preview">
-            {t("editor.tab.preview")}
-          </Tabs.Trigger>
-        </Tabs.List>
-        <Tabs.Content className="tab-panel" value="rich">
-          <RichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
-        </Tabs.Content>
-        <Tabs.Content className="tab-panel" value="source">
-          <textarea
-            ref={taRef}
-            className="source-editor"
-            value={draftContent}
-            onChange={(event) => onChange(event.target.value)}
-            readOnly={readOnly}
-            onKeyDown={autocompleteHandlers.onKeyDown}
-            onKeyUp={autocompleteHandlers.onKeyUp}
-            onClick={autocompleteHandlers.onClick}
-            onCompositionStart={autocompleteHandlers.onCompositionStart}
-            onCompositionEnd={autocompleteHandlers.onCompositionEnd}
-            spellCheck={false}
-          />
-          {autocompletePopup}
-        </Tabs.Content>
-        <Tabs.Content className="tab-panel" value="preview">
-          <article
-            className="preview-surface"
-            onClick={handlePreviewClick}
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-          />
-        </Tabs.Content>
-      </Tabs.Root>
+      {bodyOverride ? (
+        <div className="editor-body editor-body--override">{bodyOverride}</div>
+      ) : (
+        <Tabs.Root
+          className="editor-tabs"
+          value={viewMode}
+          onValueChange={(value) => onViewModeChange(value as EditorViewMode)}
+        >
+          <Tabs.List className="editor-tabs-row" aria-label="document view">
+            <Tabs.Trigger className="tab-trigger" value="rich">
+              {t("editor.tab.rich")}
+            </Tabs.Trigger>
+            <Tabs.Trigger className="tab-trigger" value="source">
+              {t("editor.tab.source")}
+            </Tabs.Trigger>
+            <Tabs.Trigger className="tab-trigger" value="preview">
+              {t("editor.tab.preview")}
+            </Tabs.Trigger>
+          </Tabs.List>
+          <Tabs.Content className="tab-panel" value="rich">
+            <RichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
+          </Tabs.Content>
+          <Tabs.Content className="tab-panel" value="source">
+            <textarea
+              ref={taRef}
+              className="source-editor"
+              value={draftContent}
+              onChange={(event) => onChange(event.target.value)}
+              readOnly={readOnly}
+              onKeyDown={autocompleteHandlers.onKeyDown}
+              onKeyUp={autocompleteHandlers.onKeyUp}
+              onClick={autocompleteHandlers.onClick}
+              onCompositionStart={autocompleteHandlers.onCompositionStart}
+              onCompositionEnd={autocompleteHandlers.onCompositionEnd}
+              spellCheck={false}
+            />
+            {autocompletePopup}
+          </Tabs.Content>
+          <Tabs.Content className="tab-panel" value="preview">
+            <article
+              className="preview-surface"
+              onClick={handlePreviewClick}
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </Tabs.Content>
+        </Tabs.Root>
+      )}
 
       <footer className="editor-status">
-        <span>{t("editor.status.lines", { count: stats.lines.toLocaleString(locale) })}</span>
-        <span>{t("editor.status.words", { count: stats.words.toLocaleString(locale) })}</span>
-        <span>{t("editor.status.chars", { count: stats.chars.toLocaleString(locale) })}</span>
-        <span className="spacer" />
-        <span>{document.fileKind.toUpperCase()}</span>
+        {document ? (
+          <>
+            <span>{t("editor.status.lines", { count: stats.lines.toLocaleString(locale) })}</span>
+            <span>{t("editor.status.words", { count: stats.words.toLocaleString(locale) })}</span>
+            <span>{t("editor.status.chars", { count: stats.chars.toLocaleString(locale) })}</span>
+            <span className="spacer" />
+            <span>{document.fileKind.toUpperCase()}</span>
+          </>
+        ) : (
+          <span className="spacer" />
+        )}
       </footer>
     </main>
   );

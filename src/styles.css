@@ -13534,3 +13534,332 @@ button.git-badge:hover {
     grid-row: auto;
   }
 }
+
+/* ─── Binary viewer (Files explorer → preview tabs) ────────────────────── */
+
+.editor-body--override {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.binary-viewer-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  background: var(--panel-2);
+}
+
+.binary-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.binary-viewer-header-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.binary-viewer-header-text strong {
+  font-size: 13.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.binary-viewer-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.binary-viewer-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.binary-viewer-header-actions button,
+.binary-viewer-toolbar button,
+.binary-viewer-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.binary-viewer-header-actions button:hover,
+.binary-viewer-toolbar button:hover,
+.binary-viewer-actions button:hover {
+  background: var(--panel-4, var(--panel-3));
+}
+
+.binary-viewer-header-actions button:disabled,
+.binary-viewer-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.binary-viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.binary-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.binary-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.binary-viewer-toolbar--meta {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.binary-viewer-truncated {
+  color: var(--danger);
+}
+
+.binary-viewer-meta-warning {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: var(--danger);
+  color: white;
+  border-radius: 9px;
+  font-size: 10px;
+  padding: 0 5px;
+}
+
+.binary-viewer-toolbar-spacer {
+  flex: 1;
+}
+
+.binary-viewer-toolbar-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.binary-viewer-page-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.binary-viewer-zoom-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.binary-viewer-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  background: var(--panel-2);
+}
+
+.binary-viewer-canvas--image {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.binary-viewer-canvas--image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.binary-viewer-native-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: white;
+}
+
+.binary-viewer-canvas--media {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.binary-viewer-canvas--media audio,
+.binary-viewer-canvas--media video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.binary-viewer-canvas--text,
+.binary-viewer-canvas--archive {
+  padding: 12px 16px;
+}
+
+.binary-viewer-canvas--text {
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  color: var(--ink);
+}
+
+.binary-viewer-canvas--hwpx {
+  padding: 16px 24px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  display: block;
+}
+
+.binary-viewer-canvas--hwpx table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+
+.binary-viewer-canvas--hwpx td,
+.binary-viewer-canvas--hwpx th {
+  border: 1px solid var(--rule);
+  padding: 4px 8px;
+  white-space: pre-wrap;
+}
+
+.binary-viewer-archive-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.binary-viewer-archive-table th,
+.binary-viewer-archive-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rule);
+  font-variant-numeric: tabular-nums;
+}
+
+.binary-viewer-archive-table tr.is-dir td {
+  color: var(--muted);
+}
+
+.binary-viewer-tabs {
+  border-bottom: 1px solid var(--rule);
+  gap: 2px;
+}
+
+.binary-viewer-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.binary-viewer-tabs button.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent, var(--ink));
+}
+
+.binary-viewer-loading,
+.binary-viewer-error,
+.binary-viewer-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.binary-viewer-error {
+  color: var(--danger);
+}
+
+.binary-viewer-system-card,
+.binary-viewer-unsupported-card {
+  margin: auto;
+  padding: 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  max-width: 360px;
+}
+
+.binary-viewer-unsupported-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius);
+  background: var(--panel-3);
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+.binary-viewer-system-card strong,
+.binary-viewer-unsupported-card strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.binary-viewer-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.binary-viewer-meta dt {
+  color: var(--muted);
+}
+
+.binary-viewer-meta dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.binary-viewer-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

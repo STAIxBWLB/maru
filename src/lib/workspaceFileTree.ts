@@ -205,6 +205,10 @@ export function isOpenableDocumentFile(entry: WorkspaceFileEntry): boolean {
   return ["md", "markdown", "html", "htm"].includes(entry.fileKind.toLowerCase());
 }
 
+export function isOpenableFile(entry: WorkspaceFileEntry): boolean {
+  return Boolean(entry.path);
+}
+
 function flattenNode(
   node: TreeNode,
   expanded: Set<string>,

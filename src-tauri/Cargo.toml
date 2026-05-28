@@ -26,7 +26,9 @@ tauri-build = { version = "2.5.4", features = [] }
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+encoding_rs = "0.8"
 include_dir = "0.7"
+mime_guess = "2"
 notify = "6"
 portable-pty = "0.8"
 quick-xml = "0.39.2"
@@ -37,7 +39,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 sha2 = "0.10"
-tauri = { version = "2.10.0", features = [] }
+tauri = { version = "2.10.0", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"

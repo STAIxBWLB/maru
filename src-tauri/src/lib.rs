@@ -3,6 +3,7 @@ mod ai_router;
 mod anchor_dir;
 mod app_menu;
 mod approval;
+mod binary_viewer;
 mod calendar_search;
 mod cli;
 mod cli_path;
@@ -55,6 +56,11 @@ use anchor_dir::{
     save_anchor_settings, save_anchor_skills, save_anchor_template, update_anchor_workspace,
 };
 use approval::{prepare_approval, record_approval, ApprovalState};
+use binary_viewer::{
+    binary_viewer_classify, binary_viewer_extract_hwpx, binary_viewer_open_external,
+    binary_viewer_prepare_asset, binary_viewer_preview_external, binary_viewer_read_archive,
+    binary_viewer_read_text,
+};
 use calendar_search::search_calendar_notes;
 use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
@@ -252,6 +258,13 @@ pub fn run() {
             scan_workspace_files,
             describe_file_queue_sources,
             apply_file_queue,
+            binary_viewer_classify,
+            binary_viewer_prepare_asset,
+            binary_viewer_read_text,
+            binary_viewer_read_archive,
+            binary_viewer_extract_hwpx,
+            binary_viewer_open_external,
+            binary_viewer_preview_external,
             bootstrap_anchor_dir,
             read_anchor_workspace,
             update_anchor_workspace,

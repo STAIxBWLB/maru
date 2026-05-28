@@ -19,6 +19,7 @@ import {
   mockWorkspaceRegistry,
   readMockDocument,
 } from "./fixtures";
+import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
 import type {
   CreatedDocument,
   DeletedDocument,
@@ -1381,5 +1382,154 @@ function mockClassification(raw: string): InboxClassification {
     summary: "분류기 모의 응답.",
     suggestedFolder: null,
     extractedDate: null,
+  };
+}
+
+export interface BinaryViewerClassification {
+  category: ViewerCategory;
+  mime: string | null;
+  extension: string | null;
+  sizeBytes: number;
+  detectedFormat: string;
+}
+
+export interface BinaryViewerTextPreview {
+  content: string;
+  truncated: boolean;
+  encoding: string;
+  byteCount: number;
+  shownBytes: number;
+}
+
+export interface BinaryViewerArchiveEntry {
+  name: string;
+  size: number;
+  compressedSize: number;
+  isDir: boolean;
+}
+
+export interface BinaryViewerArchivePreview {
+  entries: BinaryViewerArchiveEntry[];
+  totalEntries: number;
+  truncated: boolean;
+}
+
+export interface BinaryViewerHwpxPreview {
+  html: string;
+  sections: number;
+  warnings: string[];
+}
+
+export async function binaryViewerClassify(
+  vaultPath: string,
+  targetPath: string,
+): Promise<BinaryViewerClassification> {
+  if (!isTauri()) {
+    return mockBinaryViewerClassify(vaultPath, targetPath);
+  }
+  return invoke<BinaryViewerClassification>("binary_viewer_classify", {
+    vaultPath,
+    targetPath,
+  });
+}
+
+export async function binaryViewerPrepareAsset(
+  vaultPath: string,
+  targetPath: string,
+): Promise<string> {
+  if (!isTauri()) {
+    return targetPath;
+  }
+  return invoke<string>("binary_viewer_prepare_asset", {
+    vaultPath,
+    targetPath,
+  });
+}
+
+export async function binaryViewerReadText(
+  vaultPath: string,
+  targetPath: string,
+  maxBytes?: number,
+): Promise<BinaryViewerTextPreview> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerReadText requires the Tauri app.");
+  }
+  return invoke<BinaryViewerTextPreview>("binary_viewer_read_text", {
+    vaultPath,
+    targetPath,
+    maxBytes: maxBytes ?? null,
+  });
+}
+
+export async function binaryViewerReadArchive(
+  vaultPath: string,
+  targetPath: string,
+): Promise<BinaryViewerArchivePreview> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerReadArchive requires the Tauri app.");
+  }
+  return invoke<BinaryViewerArchivePreview>("binary_viewer_read_archive", {
+    vaultPath,
+    targetPath,
+  });
+}
+
+export async function binaryViewerExtractHwpx(
+  vaultPath: string,
+  targetPath: string,
+): Promise<BinaryViewerHwpxPreview> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerExtractHwpx requires the Tauri app.");
+  }
+  return invoke<BinaryViewerHwpxPreview>("binary_viewer_extract_hwpx", {
+    vaultPath,
+    targetPath,
+  });
+}
+
+export async function binaryViewerOpenExternal(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerOpenExternal requires the Tauri app.");
+  }
+  await invoke("binary_viewer_open_external", { vaultPath, targetPath });
+}
+
+export async function binaryViewerPreviewExternal(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerPreviewExternal requires the Tauri app.");
+  }
+  await invoke("binary_viewer_preview_external", { vaultPath, targetPath });
+}
+
+function mockBinaryViewerClassify(
+  vaultPath: string,
+  targetPath: string,
+): BinaryViewerClassification {
+  const entry =
+    mockWorkspaceFiles(vaultPath).find(
+      (item) => item.path === targetPath || item.relPath === targetPath,
+    ) ?? null;
+  const extension =
+    entry?.extension ??
+    targetPath
+      .split("/")
+      .pop()
+      ?.split(".")
+      .pop()
+      ?.toLowerCase() ??
+    null;
+  const category = entry ? getViewerCategory(entry) : "unsupported";
+  return {
+    category,
+    mime: null,
+    extension,
+    sizeBytes: entry?.sizeBytes ?? 0,
+    detectedFormat: category === "unsupported" ? "unknown" : category,
   };
 }

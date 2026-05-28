@@ -60,6 +60,7 @@ import {
   filterWorkspaceFiles,
   hasActiveWorkspaceFilesPaneFilters,
   isOpenableDocumentFile,
+  isOpenableFile,
   nextCollapsedFileFolders,
   virtualizeWorkspaceFileListRows,
   virtualizeWorkspaceFileTreeRows,
@@ -744,7 +745,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
           <div className="context-menu-title" title={contextMenu.relPath}>
             {contextMenu.title}
           </div>
-          {contextMenu.entry && isOpenableDocumentFile(contextMenu.entry) ? (
+          {contextMenu.entry && isOpenableFile(contextMenu.entry) ? (
             <button
               type="button"
               role="menuitem"

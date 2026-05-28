@@ -26,6 +26,7 @@ import { CommitDialog } from "./components/CommitDialog";
 import { CommsPane } from "./components/CommsPane";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
+import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { CatalogPane } from "./components/catalog/CatalogPane";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
@@ -56,6 +57,8 @@ import {
   addWorkspaceRoot,
   acceptInboxItem,
   acceptInboxItems,
+  binaryViewerClassify,
+  binaryViewerPrepareAsset,
   createDocument,
   createVersion,
   DEFAULT_INBOX_RUNTIME_CONFIG,
@@ -106,6 +109,7 @@ import {
   trashDocument,
   trashInboxItems,
   updateFrontmatterField,
+  type BinaryViewerClassification,
   type LegacyLaunchdService,
 } from "./lib/api";
 import {
@@ -136,6 +140,8 @@ import { documentDisplayName } from "./lib/document";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
+  nextFallbackTabIdAfterClose,
+  orderTabsById,
   replaceEditorTabIds,
   tabIdsToCloseOthers,
   tabIdsToCloseRight,
@@ -282,8 +288,10 @@ import {
   EMPTY_WORKSPACE_FILES_PANE_FILTERS,
   expandWorkspaceFileAncestors,
   isOpenableDocumentFile,
+  isOpenableFile,
   type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
+import { usesAssetProtocol } from "./lib/binaryViewer";
 import {
   emptyHistory,
   goBack,
@@ -337,6 +345,27 @@ interface EditorTab {
   entry: VaultEntry;
   document: DocumentPayload;
   draftContent: string;
+}
+
+interface BinaryTab {
+  kind: "binary";
+  id: string;
+  workspacePath: string;
+  visibility: WorkspaceVisibility;
+  fileEntry: WorkspaceFileEntry;
+  classification: BinaryViewerClassification;
+  status: "ready" | "error";
+  error: string | null;
+}
+
+type AnyTab = EditorTab | BinaryTab;
+
+function isBinaryTab(tab: AnyTab | null | undefined): tab is BinaryTab {
+  return Boolean(tab && (tab as BinaryTab).kind === "binary");
+}
+
+function tabIdForWorkspaceFile(entry: WorkspaceFileEntry): string {
+  return `binary:${entry.path}`;
 }
 
 interface StoredTabs {
@@ -718,6 +747,8 @@ function MainApp() {
   const [explorerVisibility, setExplorerVisibility] =
     useState<WorkspaceVisibility>("private");
   const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [binaryTabs, setBinaryTabs] = useState<BinaryTab[]>([]);
+  const [tabOrder, setTabOrder] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
   const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
@@ -1041,9 +1072,15 @@ function MainApp() {
     () => fileEntries.filter((entry) => selectedFilePathSet.has(entry.path)),
     [fileEntries, selectedFilePathSet],
   );
+  const unorderedAnyTabs = useMemo<AnyTab[]>(() => [...tabs, ...binaryTabs], [tabs, binaryTabs]);
+  const orderedAnyTabs = useMemo(
+    () => orderTabsById(unorderedAnyTabs, tabOrder),
+    [tabOrder, unorderedAnyTabs],
+  );
   const layoutSettings = anchorSettings.ui.layout;
   const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
-  const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? tabs[0]?.id ?? null;
+  const firstTabId = orderedAnyTabs[0]?.id ?? null;
+  const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
   const rightResolvedTabId =
     editorSplitOpen && rightActiveTabId
       ? rightActiveTabId
@@ -1052,20 +1089,32 @@ function MainApp() {
     focusedEditorGroup === "right" && rightResolvedTabId
       ? rightResolvedTabId
       : leftResolvedTabId;
-  const activeTab = useMemo(
-    () => tabs.find((tab) => tab.id === resolvedActiveTabId) ?? null,
-    [tabs, resolvedActiveTabId],
+  const findAnyTabById = useCallback(
+    (tabId: string | null): AnyTab | null => {
+      if (!tabId) return null;
+      return (
+        tabs.find((tab) => tab.id === tabId) ??
+        binaryTabs.find((tab) => tab.id === tabId) ??
+        null
+      );
+    },
+    [tabs, binaryTabs],
   );
-  const leftTab = useMemo(
-    () => tabs.find((tab) => tab.id === leftResolvedTabId) ?? null,
-    [tabs, leftResolvedTabId],
+  const activeTab = useMemo<AnyTab | null>(
+    () => findAnyTabById(resolvedActiveTabId),
+    [findAnyTabById, resolvedActiveTabId],
   );
-  const rightTab = useMemo(
-    () => tabs.find((tab) => tab.id === rightResolvedTabId) ?? null,
-    [tabs, rightResolvedTabId],
+  const leftTab = useMemo<AnyTab | null>(
+    () => findAnyTabById(leftResolvedTabId),
+    [findAnyTabById, leftResolvedTabId],
   );
-  const selectedEntry = activeTab?.entry ?? null;
-  const document = activeTab?.document ?? null;
+  const rightTab = useMemo<AnyTab | null>(
+    () => findAnyTabById(rightResolvedTabId),
+    [findAnyTabById, rightResolvedTabId],
+  );
+  const activeDocTab = isBinaryTab(activeTab) ? null : (activeTab as EditorTab | null);
+  const selectedEntry = activeDocTab?.entry ?? null;
+  const document = activeDocTab?.document ?? null;
   const evidenceBinderDocId = useMemo(
     () => (document ? studioDocIdFromDocument(document) : null),
     [document],
@@ -1104,7 +1153,7 @@ function MainApp() {
     pendingSelectedPath && pendingSelectedPath !== document?.path
       ? activeDocumentEntries.find((entry) => entry.path === pendingSelectedPath) ?? null
       : null;
-  const draftContent = activeTab?.draftContent ?? "";
+  const draftContent = activeDocTab?.draftContent ?? "";
   const activeWorkspaceCaps = useMemo(
     () => workspaceCapabilities(activeDocumentWorkspace),
     [activeDocumentWorkspace],
@@ -1217,7 +1266,20 @@ function MainApp() {
   );
   const editorTabSummaries = useMemo(
     () =>
-      tabs.map((tab) => {
+      orderedAnyTabs.map((tab) => {
+        if (isBinaryTab(tab)) {
+          return {
+            id: tab.id,
+            title: tab.fileEntry.name,
+            path: tab.fileEntry.path,
+            relPath: tab.fileEntry.relPath,
+            dirty: false,
+            canRenameMove: false,
+            canCreate: false,
+            canDelete: false,
+            writeBlockedReason: null,
+          };
+        }
         const workspace =
           workspaceRegistry.workspaces.find((item) => item.path === tab.workspacePath) ??
           null;
@@ -1233,7 +1295,7 @@ function MainApp() {
           writeBlockedReason: workspaceWriteReason(workspace, "renameMove"),
         };
       }),
-    [anchorSettings.ui.documentLabelMode, tabs, workspaceRegistry.workspaces],
+    [anchorSettings.ui.documentLabelMode, orderedAnyTabs, workspaceRegistry.workspaces],
   );
   const commandPaletteSkillActions = useMemo(
     () =>
@@ -1334,6 +1396,23 @@ function MainApp() {
     }
     setActiveTabId(tabId);
   }, [focusedEditorGroup]);
+
+  useEffect(() => {
+    const liveIds = unorderedAnyTabs.map((tab) => tab.id);
+    const liveIdSet = new Set(liveIds);
+    setTabOrder((current) => {
+      const next = current.filter((id) => liveIdSet.has(id));
+      const seen = new Set(next);
+      for (const id of liveIds) {
+        if (seen.has(id)) continue;
+        next.push(id);
+        seen.add(id);
+      }
+      return next.length === current.length && next.every((id, index) => id === current[index])
+        ? current
+        : next;
+    });
+  }, [unorderedAnyTabs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1921,11 +2000,15 @@ function MainApp() {
         tabId
           ? workspaceTabs.find((tab) => tab.id === tabId)?.entry.relPath ?? null
           : null;
+      const activeDocForStorage =
+        activeTab && !isBinaryTab(activeTab) ? (activeTab as EditorTab) : null;
       window.localStorage.setItem(
         openTabsKeyForWorkspace(workspacePath),
         JSON.stringify({
           activeRelPath:
-            activeTab?.workspacePath === workspacePath ? activeTab.entry.relPath : null,
+            activeDocForStorage?.workspacePath === workspacePath
+              ? activeDocForStorage.entry.relPath
+              : null,
           leftRelPath: relPathForTabId(leftActiveTabId),
           rightRelPath: relPathForTabId(rightActiveTabId),
           focusedGroup: focusedEditorGroup,
@@ -1933,10 +2016,11 @@ function MainApp() {
         } satisfies StoredTabs),
       );
     }
-    if (activeTab) {
+    if (activeTab && !isBinaryTab(activeTab)) {
+      const docTab = activeTab as EditorTab;
       window.localStorage.setItem(
-        lastOpenKeyForWorkspace(activeTab.workspacePath),
-        activeTab.entry.relPath,
+        lastOpenKeyForWorkspace(docTab.workspacePath),
+        docTab.entry.relPath,
       );
     }
   }, [
@@ -3486,20 +3570,76 @@ function MainApp() {
 
   const openWorkspaceFile = useCallback(
     (entry: WorkspaceFileEntry) => {
-      if (!isOpenableDocumentFile(entry)) {
-        setError(t("files.openUnsupported"));
+      if (isOpenableDocumentFile(entry)) {
+        const docEntry =
+          entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
+          null;
+        if (!docEntry) {
+          setError(t("files.openUnavailable"));
+          return;
+        }
+        void selectEntry(docEntry);
         return;
       }
-      const docEntry =
-        entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
-        null;
-      if (!docEntry) {
+      if (!explorerWorkspacePath) {
         setError(t("files.openUnavailable"));
         return;
       }
-      void selectEntry(docEntry);
+      const tabId = tabIdForWorkspaceFile(entry);
+      const existing = binaryTabs.find((tab) => tab.id === tabId);
+      const targetGroup = editorSplitOpen ? focusedEditorGroup : "left";
+      if (existing) {
+        activateEditorTab(existing.id, targetGroup);
+        return;
+      }
+      void (async () => {
+        setError(null);
+        try {
+          const classification = await binaryViewerClassify(explorerWorkspacePath, entry.path);
+          const assetPath = usesAssetProtocol(classification.category)
+            ? await binaryViewerPrepareAsset(explorerWorkspacePath, entry.path)
+            : entry.path;
+          const newTab: BinaryTab = {
+            kind: "binary",
+            id: tabId,
+            workspacePath: explorerWorkspacePath,
+            visibility: explorerVisibility,
+            fileEntry: {
+              ...entry,
+              path: assetPath,
+              extension: classification.extension ?? entry.extension,
+              fileKind: classification.extension ?? entry.fileKind,
+              sizeBytes: classification.sizeBytes || entry.sizeBytes,
+            },
+            classification,
+            status: "ready",
+            error: null,
+          };
+          setBinaryTabs((prev) => {
+            const exists = prev.some((tab) => tab.id === newTab.id);
+            return exists
+              ? prev.map((tab) => (tab.id === newTab.id ? newTab : tab))
+              : [...prev, newTab];
+          });
+          activateEditorTab(newTab.id, targetGroup);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
     },
-    [entries, selectEntry, t],
+    [
+      activateEditorTab,
+      binaryTabs,
+      binaryViewerClassify,
+      binaryViewerPrepareAsset,
+      editorSplitOpen,
+      entries,
+      explorerVisibility,
+      explorerWorkspacePath,
+      focusedEditorGroup,
+      selectEntry,
+      t,
+    ],
   );
 
   const openSkillCompose = useCallback(
@@ -4467,13 +4607,19 @@ function MainApp() {
 
   const selectTab = useCallback(
     (tabId: string, group: EditorGroupId = focusedEditorGroup) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (!tab) return;
+      const docTab = tabs.find((item) => item.id === tabId);
+      if (docTab) {
+        activateEditorTab(tabId, group);
+        setExplorerVisibility(docTab.visibility);
+        pushRecent(docTab.entry.path);
+        return;
+      }
+      const binaryTab = binaryTabs.find((item) => item.id === tabId);
+      if (!binaryTab) return;
       activateEditorTab(tabId, group);
-      setExplorerVisibility(tab.visibility);
-      pushRecent(tab.entry.path);
+      setExplorerVisibility(binaryTab.visibility);
     },
-    [activateEditorTab, focusedEditorGroup, tabs, pushRecent],
+    [activateEditorTab, binaryTabs, focusedEditorGroup, tabs, pushRecent],
   );
 
   const copyTextToClipboard = useCallback((value: string) => {
@@ -4532,6 +4678,7 @@ function MainApp() {
             : tab,
         ),
       );
+      setTabOrder((prev) => prev.map((id) => (id === oldTab.id ? nextId : id)));
       const replaced = replaceEditorTabIds(
         { activeTabId, leftActiveTabId, rightActiveTabId },
         oldTab.id,
@@ -4674,6 +4821,7 @@ function MainApp() {
         Array.from(movedByTabId.entries()).map(([tabId, moved]) => [tabId, moved.nextId]),
       );
       const replaceId = (id: string | null) => (id ? replacements.get(id) ?? id : id);
+      setTabOrder((prev) => prev.map((id) => replacements.get(id) ?? id));
       setActiveTabId((id) => replaceId(id));
       setLeftActiveTabId((id) => replaceId(id));
       setRightActiveTabId((id) => replaceId(id));
@@ -4700,6 +4848,8 @@ function MainApp() {
 
   const closeTab = useCallback(
     (tabId: string) => {
+      if (!orderedAnyTabs.some((tab) => tab.id === tabId)) return;
+      const fallbackId = nextFallbackTabIdAfterClose(orderedAnyTabs, [tabId], tabId);
       const closing = tabs.find((tab) => tab.id === tabId);
       if (closing && closing.draftContent !== closing.document.content) {
         setDiscardedEdit({
@@ -4709,18 +4859,20 @@ function MainApp() {
           draft: closing.draftContent,
         });
       }
-      setTabs((prev) => {
-        const closingIndex = prev.findIndex((tab) => tab.id === tabId);
-        if (closingIndex === -1) return prev;
-        const next = prev.filter((tab) => tab.id !== tabId);
-        const fallback = next[Math.min(closingIndex, next.length - 1)] ?? null;
-        if (leftResolvedTabId === tabId) setLeftActiveTabId(fallback?.id ?? null);
-        if (rightResolvedTabId === tabId) setRightActiveTabId(null);
-        if (resolvedActiveTabId === tabId) setActiveTabId(fallback?.id ?? null);
-        return next;
-      });
+      setTabs((prev) => prev.filter((tab) => tab.id !== tabId));
+      setBinaryTabs((prev) => prev.filter((tab) => tab.id !== tabId));
+      setTabOrder((prev) => prev.filter((id) => id !== tabId));
+      if (leftResolvedTabId === tabId) setLeftActiveTabId(fallbackId);
+      if (rightResolvedTabId === tabId) setRightActiveTabId(null);
+      if (resolvedActiveTabId === tabId) setActiveTabId(fallbackId);
     },
-    [leftResolvedTabId, resolvedActiveTabId, rightResolvedTabId, tabs],
+    [
+      leftResolvedTabId,
+      orderedAnyTabs,
+      resolvedActiveTabId,
+      rightResolvedTabId,
+      tabs,
+    ],
   );
 
   const closeTabsByIds = useCallback(
@@ -4738,25 +4890,28 @@ function MainApp() {
           draft: dirtyClosing.draftContent,
         });
       }
-      setTabs((prev) => {
-        const closingIndex = prev.findIndex((tab) => closeSet.has(tab.id));
-        const next = prev.filter((tab) => !closeSet.has(tab.id));
-        const fallback = next[Math.min(Math.max(closingIndex, 0), next.length - 1)] ?? null;
-        if (leftResolvedTabId && closeSet.has(leftResolvedTabId)) {
-          setLeftActiveTabId(fallback?.id ?? null);
-        }
-        if (rightResolvedTabId && closeSet.has(rightResolvedTabId)) {
-          setRightActiveTabId(null);
-          updateLayoutSettings({ editorSplitOpen: false });
-        }
-        if (resolvedActiveTabId && closeSet.has(resolvedActiveTabId)) {
-          setActiveTabId(fallback?.id ?? null);
-        }
-        return next;
-      });
+      const anchorId =
+        resolvedActiveTabId && closeSet.has(resolvedActiveTabId)
+          ? resolvedActiveTabId
+          : tabIds[0];
+      const fallbackId = nextFallbackTabIdAfterClose(orderedAnyTabs, closeSet, anchorId);
+      setTabs((prev) => prev.filter((tab) => !closeSet.has(tab.id)));
+      setBinaryTabs((prev) => prev.filter((tab) => !closeSet.has(tab.id)));
+      setTabOrder((prev) => prev.filter((id) => !closeSet.has(id)));
+      if (leftResolvedTabId && closeSet.has(leftResolvedTabId)) {
+        setLeftActiveTabId(fallbackId);
+      }
+      if (rightResolvedTabId && closeSet.has(rightResolvedTabId)) {
+        setRightActiveTabId(null);
+        updateLayoutSettings({ editorSplitOpen: false });
+      }
+      if (resolvedActiveTabId && closeSet.has(resolvedActiveTabId)) {
+        setActiveTabId(fallbackId);
+      }
     },
     [
       leftResolvedTabId,
+      orderedAnyTabs,
       resolvedActiveTabId,
       rightResolvedTabId,
       tabs,
@@ -4766,54 +4921,79 @@ function MainApp() {
 
   const closeOtherTabs = useCallback(
     (tabId: string) => {
-      if (!tabs.some((tab) => tab.id === tabId)) return;
-      closeTabsByIds(tabIdsToCloseOthers(tabs, tabId));
+      if (!orderedAnyTabs.some((tab) => tab.id === tabId)) return;
+      closeTabsByIds(tabIdsToCloseOthers(orderedAnyTabs, tabId));
       setLeftActiveTabId(tabId);
       setRightActiveTabId(null);
       setActiveTabId(tabId);
       setFocusedEditorGroup("left");
       updateLayoutSettings({ editorSplitOpen: false });
     },
-    [closeTabsByIds, tabs, updateLayoutSettings],
+    [closeTabsByIds, orderedAnyTabs, updateLayoutSettings],
   );
 
   const closeTabsToRight = useCallback(
     (tabId: string) => {
-      closeTabsByIds(tabIdsToCloseRight(tabs, tabId));
+      closeTabsByIds(tabIdsToCloseRight(orderedAnyTabs, tabId));
     },
-    [closeTabsByIds, tabs],
+    [closeTabsByIds, orderedAnyTabs],
   );
 
   const closeSavedTabs = useCallback(() => {
-    const summaries = tabs.map((tab) => ({
-      id: tab.id,
-      dirty: tab.draftContent !== tab.document.content,
-    }));
+    const summaries = orderedAnyTabs.map((tab) => {
+      if (isBinaryTab(tab)) return { id: tab.id, dirty: false };
+      return {
+        id: tab.id,
+        dirty: tab.draftContent !== tab.document.content,
+      };
+    });
     closeTabsByIds(tabIdsToCloseSaved(summaries));
-  }, [closeTabsByIds, tabs]);
+  }, [closeTabsByIds, orderedAnyTabs]);
 
   const copyTabName = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (tab) copyTextToClipboard(documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode));
+      const docTab = tabs.find((item) => item.id === tabId);
+      if (docTab) {
+        copyTextToClipboard(
+          documentDisplayName(docTab.document, anchorSettings.ui.documentLabelMode),
+        );
+        return;
+      }
+      const binaryTab = binaryTabs.find((item) => item.id === tabId);
+      if (binaryTab) copyTextToClipboard(binaryTab.fileEntry.name);
     },
-    [anchorSettings.ui.documentLabelMode, copyTextToClipboard, tabs],
+    [
+      anchorSettings.ui.documentLabelMode,
+      binaryTabs,
+      copyTextToClipboard,
+      tabs,
+    ],
   );
 
   const copyTabPath = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (tab) copyTextToClipboard(tab.document.path);
+      const docTab = tabs.find((item) => item.id === tabId);
+      if (docTab) {
+        copyTextToClipboard(docTab.document.path);
+        return;
+      }
+      const binaryTab = binaryTabs.find((item) => item.id === tabId);
+      if (binaryTab) copyTextToClipboard(binaryTab.fileEntry.path);
     },
-    [copyTextToClipboard, tabs],
+    [binaryTabs, copyTextToClipboard, tabs],
   );
 
   const copyTabRelativePath = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (tab) copyTextToClipboard(tab.document.relPath);
+      const docTab = tabs.find((item) => item.id === tabId);
+      if (docTab) {
+        copyTextToClipboard(docTab.document.relPath);
+        return;
+      }
+      const binaryTab = binaryTabs.find((item) => item.id === tabId);
+      if (binaryTab) copyTextToClipboard(binaryTab.fileEntry.relPath);
     },
-    [copyTextToClipboard, tabs],
+    [binaryTabs, copyTextToClipboard, tabs],
   );
 
   const renameTabDocument = useCallback(
@@ -4943,56 +5123,71 @@ function MainApp() {
 
   const revealTabInFinder = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (tab) revealTargetInFinder(tab.document.path);
+      const docTab = tabs.find((item) => item.id === tabId);
+      if (docTab) {
+        revealTargetInFinder(docTab.document.path);
+        return;
+      }
+      const binaryTab = binaryTabs.find((item) => item.id === tabId);
+      if (binaryTab) revealTargetInFinder(binaryTab.fileEntry.path);
     },
-    [revealTargetInFinder, tabs],
+    [binaryTabs, revealTargetInFinder, tabs],
   );
 
   const revealTabInExplorer = useCallback(
     (tabId: string, group: EditorGroupId) => {
-      const tab = tabs.find((item) => item.id === tabId);
-      if (!tab) return;
-      const activePane = anchorSettings.ui.explorerPaneMode;
+      const docTab = tabs.find((item) => item.id === tabId) ?? null;
+      const binaryTab = docTab ? null : binaryTabs.find((item) => item.id === tabId) ?? null;
+      if (!docTab && !binaryTab) return;
+      const visibility = docTab?.visibility ?? binaryTab!.visibility;
+      const workspacePath = docTab?.workspacePath ?? binaryTab!.workspacePath;
+      const relPath = docTab?.entry.relPath ?? binaryTab!.fileEntry.relPath;
+      const targetPath = docTab?.document.path ?? binaryTab!.fileEntry.path;
+      const activePane = binaryTab ? "files" : anchorSettings.ui.explorerPaneMode;
       setPersistedAppMode("pkm");
       if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
-      setExplorerVisibility(tab.visibility);
+      if (binaryTab && anchorSettings.ui.explorerPaneMode !== "files") {
+        setExplorerPaneMode("files");
+      }
+      setExplorerVisibility(visibility);
       if (activePane === "documents") {
         setDocumentBrowserMode("tree");
         setExplorerQuery("");
         setExplorerDocumentFilter({ kind: "all" });
         setCollapsedTreeFoldersByVisibility((current) => {
-          const existing = current[tab.visibility] ?? [];
+          const existing = current[visibility] ?? [];
           return {
             ...current,
-            [tab.visibility]: expandDocumentAncestors(existing, tab.entry.relPath),
+            [visibility]: expandDocumentAncestors(existing, relPath),
           };
         });
       } else {
         setWorkspaceFileFilter("all");
         setWorkspaceFileQuery("");
         setCollapsedFileFoldersByVisibility((current) => {
-          const existing = current[tab.visibility] ?? [];
+          const existing = current[visibility] ?? [];
           return {
             ...current,
-            [tab.visibility]: expandWorkspaceFileAncestors(existing, tab.entry.relPath),
+            [visibility]: expandWorkspaceFileAncestors(existing, relPath),
           };
         });
         setSelectedFilePathsByWorkspace((current) => ({
           ...current,
-          [tab.workspacePath]: [tab.document.path],
+          [workspacePath]: [targetPath],
         }));
-        void refreshWorkspaceFiles(tab.workspacePath);
+        void refreshWorkspaceFiles(workspacePath);
       }
-      selectTab(tab.id, group);
-      setPendingExplorerReveal({ pane: activePane, targetPath: tab.document.path });
+      selectTab(tabId, group);
+      setPendingExplorerReveal({ pane: activePane, targetPath });
     },
     [
       anchorSettings.ui.explorerPaneMode,
+      binaryTabs,
       documentsPaneOpen,
       refreshWorkspaceFiles,
       selectTab,
       setDocumentBrowserMode,
+      setExplorerPaneMode,
       setExplorerQuery,
       setExplorerDocumentFilter,
       setWorkspaceFileFilter,
@@ -5011,8 +5206,13 @@ function MainApp() {
   }, [leftResolvedTabId, updateLayoutSettings]);
 
   const closeAllCleanTabs = useCallback(() => {
-    const dirtyTabs = tabs.filter((tab) => tab.draftContent !== tab.document.content);
+    const dirtyTabs = orderedAnyTabs.filter(
+      (tab): tab is EditorTab =>
+        !isBinaryTab(tab) && tab.draftContent !== tab.document.content,
+    );
     setTabs(dirtyTabs);
+    setBinaryTabs([]);
+    setTabOrder(dirtyTabs.map((tab) => tab.id));
     const fallback = dirtyTabs[0]?.id ?? null;
     setLeftActiveTabId(fallback);
     setRightActiveTabId(null);
@@ -5022,16 +5222,16 @@ function MainApp() {
     if (dirtyTabs.length > 0) {
       setError(t("editor.tabs.closeAll.dirtyKept", { count: dirtyTabs.length }));
     }
-  }, [tabs, t, updateLayoutSettings]);
+  }, [orderedAnyTabs, t, updateLayoutSettings]);
 
   const splitEditorRight = useCallback(() => {
-    const target = activeTab ?? leftTab ?? tabs[0] ?? null;
+    const target = activeTab ?? leftTab ?? orderedAnyTabs[0] ?? null;
     if (!target) return;
     setRightActiveTabId(target.id);
     setActiveTabId(target.id);
     setFocusedEditorGroup("right");
     updateLayoutSettings({ editorSplitOpen: true });
-  }, [activeTab, leftTab, tabs, updateLayoutSettings]);
+  }, [activeTab, leftTab, orderedAnyTabs, updateLayoutSettings]);
 
   const splitTerminalRight = useCallback(() => {
     updateLayoutSettings({ terminalOpen: true, terminalSplitOpen: true });
@@ -5048,10 +5248,10 @@ function MainApp() {
 
   const selectTabByIndex = useCallback(
     (index: number) => {
-      const tab = tabs[index];
+      const tab = orderedAnyTabs[index];
       if (tab) selectTab(tab.id);
     },
-    [tabs, selectTab],
+    [orderedAnyTabs, selectTab],
   );
 
   const handleCommitClick = useCallback(
@@ -5634,7 +5834,7 @@ function MainApp() {
 
   const renderEditorPane = (
     group: EditorGroupId,
-    tab: EditorTab | null,
+    tab: AnyTab | null,
     tabId: string | null,
   ) => {
     const workspace = tab
@@ -5646,24 +5846,37 @@ function MainApp() {
       group === "right" && tab
         ? editorTabSummaries.filter((summary) => summary.id === tab.id)
         : editorTabSummaries;
+    const docTab = isBinaryTab(tab) ? null : (tab as EditorTab | null);
+    const binaryTab = isBinaryTab(tab) ? (tab as BinaryTab) : null;
+    const binaryBody = binaryTab ? (
+      <BinaryViewerPane
+        entry={binaryTab.fileEntry}
+        workspacePath={binaryTab.workspacePath}
+        classification={binaryTab.classification}
+        onError={(message) => setError(message)}
+      />
+    ) : null;
     return (
       <EditorPane
-        document={tab?.document ?? null}
+        document={docTab?.document ?? null}
         openingEntry={group === "left" ? openingEntry : null}
-        draftContent={tab?.draftContent ?? ""}
-        saving={saving && resolvedActiveTabId === tabId}
-        dirty={Boolean(tab && tab.draftContent !== tab.document.content)}
+        draftContent={docTab?.draftContent ?? ""}
+        saving={saving && resolvedActiveTabId === tabId && !binaryTab}
+        dirty={Boolean(docTab && docTab.draftContent !== docTab.document.content)}
         outlineOpen={outlineOpen}
         activeWorkspaceLabel={workspace?.label ?? null}
         documentLabel={
-          tab ? documentDisplayName(tab.document, anchorSettings.ui.documentLabelMode) : null
+          docTab
+            ? documentDisplayName(docTab.document, anchorSettings.ui.documentLabelMode)
+            : binaryTab?.fileEntry.name ?? null
         }
-        readOnly={!caps.canModify}
-        canSnapshot={caps.canCreate}
+        readOnly={!caps.canModify || Boolean(binaryTab)}
+        canSnapshot={caps.canCreate && !binaryTab}
         readOnlyReason={readOnlyReason}
         viewMode={editorViewMode}
         tabs={groupTabs}
         activeTabId={tabId}
+        bodyOverride={binaryBody}
         entries={tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries}
         onChange={(content) => {
           if (!tabId) return;
