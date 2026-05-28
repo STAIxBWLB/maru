@@ -77,6 +77,26 @@ interface TerminalHandle {
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
 
+// DEC private modes that enable mouse tracking. When a TUI (e.g. Claude Code,
+// Codex) enables 1003 the embedded xterm forwards every cursor motion to the
+// pty, the CLI repaints its UI with hover effects, and the user sees a "blue
+// rectangle that follows the cursor". Suppressing the enable sequence keeps
+// xterm in normal text-selection mode.
+const SUPPRESSED_MOUSE_MODES = new Set([1000, 1001, 1002, 1003]);
+
+const suppressMouseTracking = (params: (number | number[])[]): boolean => {
+  for (const param of params) {
+    if (Array.isArray(param)) {
+      for (const sub of param) {
+        if (SUPPRESSED_MOUSE_MODES.has(sub)) return true;
+      }
+    } else if (SUPPRESSED_MOUSE_MODES.has(param)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const TerminalPanel = memo(function TerminalPanel({
   cwd,
   settings,
@@ -287,6 +307,8 @@ export const TerminalPanel = memo(function TerminalPanel({
       });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
+      terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, suppressMouseTracking);
+      terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, suppressMouseTracking);
       terminal.attachCustomKeyEventHandler((event) => {
         const isMac = navigator.platform.toLowerCase().includes("mac");
         const mod = isMac ? event.metaKey : event.ctrlKey;
