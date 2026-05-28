@@ -40,6 +40,24 @@ export const TERMINAL_LAUNCHERS: Array<{
   { id: "shell", titleKey: "terminal.launcher.shell" },
 ];
 
+export const TERMINAL_SHIFT_ENTER_DATA = "\x1b[13;2u";
+
+type TerminalKeyboardEvent = Pick<
+  KeyboardEvent,
+  "type" | "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
+>;
+
+export function terminalShiftEnterData(
+  kind: TerminalKind,
+  event: TerminalKeyboardEvent,
+): string | null {
+  if (kind !== "claude" && kind !== "codex") return null;
+  if (event.type !== "keydown") return null;
+  if (event.key !== "Enter") return null;
+  if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return null;
+  return TERMINAL_SHIFT_ENTER_DATA;
+}
+
 export const EMPTY_TERMINAL_STATE: TerminalTabsState = {
   tabs: [],
   activeTabId: null,
