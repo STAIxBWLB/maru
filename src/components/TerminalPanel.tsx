@@ -85,11 +85,16 @@ const MIN_WIDTH = 320;
 const MIN_MAIN_WIDTH = 360;
 
 // DEC private modes that enable mouse tracking. When a TUI (e.g. Claude Code,
-// Codex) enables 1003 the embedded xterm forwards every cursor motion to the
-// pty, the CLI repaints its UI with hover effects, and the user sees a "blue
-// rectangle that follows the cursor". Suppressing the enable sequence keeps
-// xterm in normal text-selection mode.
-const SUPPRESSED_MOUSE_MODES = new Set([1000, 1001, 1002, 1003]);
+// Codex) enables any of these the embedded xterm forwards mouse events to the
+// pty, which (a) disables xterm's own text selection and (b) lets the CLI
+// repaint its UI with hover effects whenever the cursor moves. We want the
+// embedded terminal to behave like a plain scroll/select buffer.
+//   9    — X10 mouse reporting (button press only)
+//   1000 — VT200 normal tracking
+//   1001 — VT200 highlight tracking
+//   1002 — button-event (drag) tracking
+//   1003 — any-event tracking (every motion)
+const SUPPRESSED_MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003]);
 
 const suppressMouseTracking = (params: (number | number[])[]): boolean => {
   for (const param of params) {

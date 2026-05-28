@@ -7646,6 +7646,13 @@ button.git-badge:hover {
   background: #111111;
   visibility: hidden;
   pointer-events: none;
+  /* xterm renders its own selection via a custom renderer, so native
+     browser selection is never wanted inside the terminal pane. Without
+     this, a drag that starts on the padding around xterm (or that crosses
+     a re-render) starts a native selection that visually mimics xterm
+     selection but xterm cannot clear. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .terminal-instance.active {
