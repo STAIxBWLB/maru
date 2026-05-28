@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Anchor",
   "mainBinaryName": "anchor",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "identifier": "kr.anchor.desktop",
   "build": {
     "frontendDist": "../dist",
