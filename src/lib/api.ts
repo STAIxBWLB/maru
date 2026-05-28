@@ -1497,6 +1497,16 @@ export async function binaryViewerOpenExternal(
   await invoke("binary_viewer_open_external", { vaultPath, targetPath });
 }
 
+export async function binaryViewerPreviewExternal(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("binaryViewerPreviewExternal requires the Tauri app.");
+  }
+  await invoke("binary_viewer_preview_external", { vaultPath, targetPath });
+}
+
 function mockBinaryViewerClassify(
   vaultPath: string,
   targetPath: string,

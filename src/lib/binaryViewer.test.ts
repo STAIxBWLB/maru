@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { getViewerCategory, isViewableInApp, usesAssetProtocol } from "./binaryViewer";
+import packageJson from "../../package.json";
+import {
+  getViewerCategory,
+  isViewableInApp,
+  previewStrategyForCategory,
+  usesAssetProtocol,
+} from "./binaryViewer";
 import type { WorkspaceFileEntry } from "./types";
 
 function entry(fileKind: string, extension = fileKind): WorkspaceFileEntry {
@@ -27,8 +33,28 @@ describe("binary viewer classification fallback", () => {
   it("prepares only asset-backed inline viewers through the asset protocol", () => {
     expect(usesAssetProtocol("pdf")).toBe(true);
     expect(usesAssetProtocol("image")).toBe(true);
+    expect(usesAssetProtocol("docx")).toBe(false);
+    expect(usesAssetProtocol("xlsx")).toBe(false);
     expect(usesAssetProtocol("text")).toBe(false);
     expect(usesAssetProtocol("archive")).toBe(false);
     expect(usesAssetProtocol("unsupported")).toBe(false);
+  });
+
+  it("keeps preview policy lightweight by category", () => {
+    expect(previewStrategyForCategory("pdf")).toBe("nativeInline");
+    expect(previewStrategyForCategory("image")).toBe("nativeInline");
+    expect(previewStrategyForCategory("audio")).toBe("nativeInline");
+    expect(previewStrategyForCategory("text")).toBe("rustInline");
+    expect(previewStrategyForCategory("archive")).toBe("rustInline");
+    expect(previewStrategyForCategory("hwpx")).toBe("rustInline");
+    expect(previewStrategyForCategory("docx")).toBe("system");
+    expect(previewStrategyForCategory("xlsx")).toBe("system");
+    expect(previewStrategyForCategory("unsupported")).toBe("system");
+  });
+
+  it("does not declare removed inline PDF/DOCX/XLSX renderer dependencies", () => {
+    expect(packageJson.dependencies).not.toHaveProperty("pdfjs-dist");
+    expect(packageJson.dependencies).not.toHaveProperty("mammoth");
+    expect(packageJson.dependencies).not.toHaveProperty("xlsx");
   });
 });

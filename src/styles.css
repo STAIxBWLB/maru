@@ -13705,15 +13705,24 @@ button.git-badge:hover {
   object-fit: contain;
 }
 
-.binary-viewer-canvas--pdf {
-  align-items: flex-start;
-  justify-content: center;
-  padding: 16px;
+.binary-viewer-native-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: white;
 }
 
-.binary-viewer-canvas--pdf canvas {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-  background: white;
+.binary-viewer-system-fallback {
+  height: 100%;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+  background: var(--panel-2);
 }
 
 .binary-viewer-canvas--media {
@@ -13743,8 +13752,6 @@ button.git-badge:hover {
   color: var(--ink);
 }
 
-.binary-viewer-canvas--docx,
-.binary-viewer-canvas--xlsx,
 .binary-viewer-canvas--hwpx {
   padding: 16px 24px;
   font-size: 13.5px;
@@ -13753,18 +13760,12 @@ button.git-badge:hover {
   display: block;
 }
 
-.binary-viewer-canvas--xlsx table,
-.binary-viewer-canvas--docx table,
 .binary-viewer-canvas--hwpx table {
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 12.5px;
 }
 
-.binary-viewer-canvas--xlsx td,
-.binary-viewer-canvas--xlsx th,
-.binary-viewer-canvas--docx td,
-.binary-viewer-canvas--docx th,
 .binary-viewer-canvas--hwpx td,
 .binary-viewer-canvas--hwpx th {
   border: 1px solid var(--rule);
@@ -13823,6 +13824,7 @@ button.git-badge:hover {
   color: var(--danger);
 }
 
+.binary-viewer-system-card,
 .binary-viewer-unsupported-card {
   margin: auto;
   padding: 28px;
@@ -13845,6 +13847,7 @@ button.git-badge:hover {
   color: var(--faint);
 }
 
+.binary-viewer-system-card strong,
 .binary-viewer-unsupported-card strong {
   color: var(--ink);
   font-size: 14px;

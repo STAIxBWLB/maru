@@ -22,6 +22,8 @@ export type ViewerCategory =
   | "archive"
   | "unsupported";
 
+export type PreviewStrategy = "nativeInline" | "rustInline" | "system";
+
 const EXT_MAP: Record<string, ViewerCategory> = {
   png: "image",
   jpg: "image",
@@ -113,11 +115,7 @@ const EXT_MAP: Record<string, ViewerCategory> = {
 
 const OPENABLE_DOCUMENT_EXT = new Set(["md", "markdown"]);
 
-export const INLINE_DOCX_MAX_BYTES = 20 * 1024 * 1024;
-export const INLINE_XLSX_MAX_BYTES = 10 * 1024 * 1024;
-export const XLSX_MAX_SHEETS = 20;
-export const XLSX_MAX_ROWS = 200;
-export const XLSX_MAX_COLS = 50;
+export const INLINE_HWPX_MAX_BYTES = 20 * 1024 * 1024;
 
 export function getViewerCategory(entry: WorkspaceFileEntry): ViewerCategory {
   const ext = (entry.fileKind ?? "").toLowerCase();
@@ -136,11 +134,22 @@ export function usesAssetProtocol(category: ViewerCategory): boolean {
     category === "image" ||
     category === "svg" ||
     category === "pdf" ||
-    category === "docx" ||
-    category === "xlsx" ||
     category === "audio" ||
     category === "video"
   );
+}
+
+export function previewStrategyForCategory(category: ViewerCategory): PreviewStrategy {
+  if (category === "image" || category === "svg" || category === "pdf") {
+    return "nativeInline";
+  }
+  if (category === "audio" || category === "video") {
+    return "nativeInline";
+  }
+  if (category === "text" || category === "archive" || category === "hwpx") {
+    return "rustInline";
+  }
+  return "system";
 }
 
 export function assetUrlForPath(path: string): string {

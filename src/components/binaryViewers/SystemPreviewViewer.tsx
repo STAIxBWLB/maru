@@ -1,39 +1,38 @@
-import { Eye, FileQuestion, ExternalLink, FolderOpen } from "lucide-react";
-import type { BinaryViewerClassification } from "../../lib/api";
-import { useTranslation } from "../../lib/i18n";
+import { ExternalLink, Eye, FileText } from "lucide-react";
 import { formatBytes } from "../../lib/binaryViewer";
+import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
 
 interface Props {
   entry: WorkspaceFileEntry;
-  classification: BinaryViewerClassification;
+  titleKey: string;
+  descriptionKey: string;
+  className?: string;
   onPreviewExternal: () => void;
   onOpenExternal: () => void;
-  onRevealInFinder: () => void;
 }
 
-export function UnsupportedViewer({
+export function SystemPreviewViewer({
   entry,
-  classification,
+  titleKey,
+  descriptionKey,
+  className = "",
   onPreviewExternal,
   onOpenExternal,
-  onRevealInFinder,
 }: Props) {
   const { t } = useTranslation();
-  const format =
-    classification.extension ??
-    classification.mime ??
-    entry.extension ??
-    entry.fileKind ??
-    "unknown";
+  const format = entry.extension ?? entry.fileKind ?? "unknown";
+  const classes = ["binary-viewer", "binary-viewer--system-preview", className]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className="binary-viewer binary-viewer--unsupported">
-      <div className="binary-viewer-unsupported-card">
+    <div className={classes}>
+      <div className="binary-viewer-system-card">
         <div className="binary-viewer-unsupported-icon" aria-hidden>
-          <FileQuestion size={32} />
+          <FileText size={32} />
         </div>
-        <strong>{t("binaryViewer.unsupportedTitle")}</strong>
-        <p>{t("binaryViewer.unsupportedDescription")}</p>
+        <strong>{t(titleKey)}</strong>
+        <p>{t(descriptionKey)}</p>
         <dl className="binary-viewer-meta">
           <div>
             <dt>{t("binaryViewer.format")}</dt>
@@ -41,7 +40,7 @@ export function UnsupportedViewer({
           </div>
           <div>
             <dt>{t("binaryViewer.size")}</dt>
-            <dd>{formatBytes(classification.sizeBytes || entry.sizeBytes)}</dd>
+            <dd>{formatBytes(entry.sizeBytes)}</dd>
           </div>
         </dl>
         <div className="binary-viewer-actions">
@@ -52,10 +51,6 @@ export function UnsupportedViewer({
           <button type="button" onClick={onOpenExternal}>
             <ExternalLink size={14} />
             {t("binaryViewer.openExternal")}
-          </button>
-          <button type="button" onClick={onRevealInFinder}>
-            <FolderOpen size={14} />
-            {t("binaryViewer.revealInFinder")}
           </button>
         </div>
       </div>

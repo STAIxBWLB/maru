@@ -20,6 +20,8 @@ test("opens a binary file as a viewer tab", async ({ page }) => {
   await expect(page.locator(".binary-viewer-header strong")).toHaveText(
     "rise-budget-review.pdf",
   );
+  await expect(page.locator(".binary-viewer-native-pdf")).toBeVisible();
+  await expect(page.locator(".binary-viewer--pdf")).toContainText("WebView");
 
   // Closing the binary tab from the strip removes the viewer.
   await page
@@ -60,6 +62,27 @@ test("opens unsupported binaries in a safe fallback viewer", async ({ page }) =>
   await expect(page.locator(".binary-viewer--unsupported")).toContainText(
     "미리보기를 지원하지 않는 파일",
   );
+  await expect(page.locator(".binary-viewer--unsupported")).toContainText("시스템 미리보기");
+});
+
+test("opens Office binaries as system preview shells", async ({ page }) => {
+  await page.goto("/");
+
+  const explorer = page.locator(".document-list");
+  await explorer.getByRole("button", { name: "Files" }).click();
+  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+
+  await explorer.getByRole("button", { name: /sample-report\.docx/ }).dblclick();
+  await expect(page.locator(".document-tab[title='attachments/sample-report.docx']")).toBeVisible();
+  await expect(page.locator(".binary-viewer--docx.binary-viewer--system-preview")).toBeVisible();
+  await expect(page.locator(".binary-viewer--docx")).toContainText("시스템 미리보기");
+  await expect(page.locator(".binary-viewer-canvas--docx")).toHaveCount(0);
+
+  await explorer.getByRole("button", { name: /weekly-kpi\.xlsx/ }).dblclick();
+  await expect(page.locator(".document-tab[title='attachments/weekly-kpi.xlsx']")).toBeVisible();
+  await expect(page.locator(".binary-viewer--xlsx.binary-viewer--system-preview")).toBeVisible();
+  await expect(page.locator(".binary-viewer--xlsx")).toContainText("시스템 미리보기");
+  await expect(page.locator(".binary-viewer-canvas--xlsx")).toHaveCount(0);
 });
 
 test("keeps mixed document and binary tabs in visible order", async ({ page }) => {

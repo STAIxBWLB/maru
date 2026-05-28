@@ -1,6 +1,7 @@
-import { ExternalLink, FolderOpen } from "lucide-react";
+import { ExternalLink, Eye, FolderOpen } from "lucide-react";
 import {
   binaryViewerOpenExternal,
+  binaryViewerPreviewExternal,
   revealInFileManager,
   type BinaryViewerClassification,
 } from "../lib/api";
@@ -42,6 +43,12 @@ export function BinaryViewerPane({ entry, workspacePath, classification, onError
     );
   };
 
+  const handlePreviewExternal = () => {
+    void binaryViewerPreviewExternal(workspacePath, entry.path).catch((err) =>
+      reportError(t("binaryViewer.systemPreview"), err),
+    );
+  };
+
   const handleRevealInFinder = () => {
     void revealInFileManager(workspacePath, entry.path).catch((err) =>
       reportError(t("binaryViewer.revealInFinder"), err),
@@ -73,6 +80,10 @@ export function BinaryViewerPane({ entry, workspacePath, classification, onError
           </span>
         </div>
         <div className="binary-viewer-header-actions">
+          <button type="button" onClick={handlePreviewExternal}>
+            <Eye size={14} />
+            {t("binaryViewer.systemPreview")}
+          </button>
           <button type="button" onClick={handleRevealInFinder}>
             <FolderOpen size={14} />
             {t("binaryViewer.revealInFinder")}
@@ -89,6 +100,7 @@ export function BinaryViewerPane({ entry, workspacePath, classification, onError
           entry={entry}
           workspacePath={workspacePath}
           classification={classification}
+          onPreviewExternal={handlePreviewExternal}
           onOpenExternal={handleOpenExternal}
           onRevealInFinder={handleRevealInFinder}
         />
@@ -102,6 +114,7 @@ function ViewerBody({
   entry,
   workspacePath,
   classification,
+  onPreviewExternal,
   onOpenExternal,
   onRevealInFinder,
 }: {
@@ -109,6 +122,7 @@ function ViewerBody({
   entry: WorkspaceFileEntry;
   workspacePath: string;
   classification: BinaryViewerClassification;
+  onPreviewExternal: () => void;
   onOpenExternal: () => void;
   onRevealInFinder: () => void;
 }) {
@@ -117,13 +131,32 @@ function ViewerBody({
     case "svg":
       return <ImageViewer entry={entry} />;
     case "pdf":
-      return <PdfViewer entry={entry} />;
+      return <PdfViewer entry={entry} onPreviewExternal={onPreviewExternal} />;
     case "docx":
-      return <DocxViewer entry={entry} />;
+      return (
+        <DocxViewer
+          entry={entry}
+          onPreviewExternal={onPreviewExternal}
+          onOpenExternal={onOpenExternal}
+        />
+      );
     case "xlsx":
-      return <XlsxViewer entry={entry} />;
+      return (
+        <XlsxViewer
+          entry={entry}
+          onPreviewExternal={onPreviewExternal}
+          onOpenExternal={onOpenExternal}
+        />
+      );
     case "hwpx":
-      return <HwpxViewer entry={entry} workspacePath={workspacePath} />;
+      return (
+        <HwpxViewer
+          entry={entry}
+          workspacePath={workspacePath}
+          onPreviewExternal={onPreviewExternal}
+          onOpenExternal={onOpenExternal}
+        />
+      );
     case "audio":
       return <MediaViewer entry={entry} kind="audio" />;
     case "video":
@@ -137,6 +170,7 @@ function ViewerBody({
         <UnsupportedViewer
           entry={entry}
           classification={classification}
+          onPreviewExternal={onPreviewExternal}
           onOpenExternal={onOpenExternal}
           onRevealInFinder={onRevealInFinder}
         />

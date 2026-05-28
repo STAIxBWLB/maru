@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { binaryViewerExtractHwpx, type BinaryViewerHwpxPreview } from "../../lib/api";
+import { INLINE_HWPX_MAX_BYTES } from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
+import { SystemPreviewViewer } from "./SystemPreviewViewer";
 
 interface Props {
   entry: WorkspaceFileEntry;
   workspacePath: string;
+  onPreviewExternal: () => void;
+  onOpenExternal: () => void;
 }
 
-export function HwpxViewer({ entry, workspacePath }: Props) {
+export function HwpxViewer({
+  entry,
+  workspacePath,
+  onPreviewExternal,
+  onOpenExternal,
+}: Props) {
   const { t } = useTranslation();
   const [state, setState] = useState<{
     status: "loading" | "ready" | "error";
@@ -19,6 +28,7 @@ export function HwpxViewer({ entry, workspacePath }: Props) {
   }>({ status: "loading" });
 
   useEffect(() => {
+    if (entry.sizeBytes > INLINE_HWPX_MAX_BYTES) return;
     let cancelled = false;
     setState({ status: "loading" });
     binaryViewerExtractHwpx(workspacePath, entry.path)
@@ -37,7 +47,20 @@ export function HwpxViewer({ entry, workspacePath }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [entry.path, workspacePath]);
+  }, [entry.path, entry.sizeBytes, workspacePath]);
+
+  if (entry.sizeBytes > INLINE_HWPX_MAX_BYTES) {
+    return (
+      <SystemPreviewViewer
+        entry={entry}
+        titleKey="binaryViewer.systemPreviewTitle"
+        descriptionKey="binaryViewer.hwpxLargePreviewDescription"
+        className="binary-viewer--hwpx"
+        onPreviewExternal={onPreviewExternal}
+        onOpenExternal={onOpenExternal}
+      />
+    );
+  }
 
   if (state.status === "loading") {
     return <div className="binary-viewer-loading">{t("binaryViewer.loading")}</div>;

@@ -183,9 +183,7 @@ pub fn binary_viewer_extract_hwpx(
 #[tauri::command]
 pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> Result<(), String> {
     let target = resolve_inside_vault(&vault_path, &target_path)?;
-    if !target.exists() {
-        return Err(format!("Target does not exist: {}", target.display()));
-    }
+    require_existing_file(&target)?;
     let target_str = target
         .to_str()
         .ok_or_else(|| "Path is not valid UTF-8".to_string())?
@@ -193,31 +191,97 @@ pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> R
     spawn_external(&target_str)
 }
 
-#[cfg(target_os = "macos")]
-fn spawn_external(target: &str) -> Result<(), String> {
-    Command::new("open")
-        .arg(target)
+#[tauri::command]
+pub fn binary_viewer_preview_external(
+    vault_path: String,
+    target_path: String,
+) -> Result<(), String> {
+    let target = resolve_inside_vault(&vault_path, &target_path)?;
+    require_existing_file(&target)?;
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| "Path is not valid UTF-8".to_string())?
+        .to_string();
+    spawn_preview(&target_str)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopPlatform {
+    Macos,
+    Windows,
+    Unix,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommandSpec {
+    program: String,
+    args: Vec<String>,
+}
+
+fn current_desktop_platform() -> DesktopPlatform {
+    if cfg!(target_os = "macos") {
+        DesktopPlatform::Macos
+    } else if cfg!(target_os = "windows") {
+        DesktopPlatform::Windows
+    } else {
+        DesktopPlatform::Unix
+    }
+}
+
+fn external_command_spec_for(platform: DesktopPlatform, target: &str) -> CommandSpec {
+    match platform {
+        DesktopPlatform::Macos => CommandSpec {
+            program: "open".to_string(),
+            args: vec![target.to_string()],
+        },
+        DesktopPlatform::Windows => CommandSpec {
+            program: "cmd".to_string(),
+            args: vec![
+                "/C".to_string(),
+                "start".to_string(),
+                "".to_string(),
+                target.to_string(),
+            ],
+        },
+        DesktopPlatform::Unix => CommandSpec {
+            program: "xdg-open".to_string(),
+            args: vec![target.to_string()],
+        },
+    }
+}
+
+fn preview_command_spec_for(platform: DesktopPlatform, target: &str) -> CommandSpec {
+    match platform {
+        DesktopPlatform::Macos => CommandSpec {
+            program: "qlmanage".to_string(),
+            args: vec!["-p".to_string(), target.to_string()],
+        },
+        DesktopPlatform::Windows | DesktopPlatform::Unix => {
+            external_command_spec_for(platform, target)
+        }
+    }
+}
+
+fn spawn_command(spec: CommandSpec, label: &str) -> Result<(), String> {
+    Command::new(&spec.program)
+        .args(spec.args)
         .spawn()
-        .map_err(|err| format!("Cannot open externally: {err}"))?;
+        .map_err(|err| format!("{label}: {err}"))?;
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 fn spawn_external(target: &str) -> Result<(), String> {
-    Command::new("cmd")
-        .args(["/C", "start", "", target])
-        .spawn()
-        .map_err(|err| format!("Cannot open externally: {err}"))?;
-    Ok(())
+    spawn_command(
+        external_command_spec_for(current_desktop_platform(), target),
+        "Cannot open externally",
+    )
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn spawn_external(target: &str) -> Result<(), String> {
-    Command::new("xdg-open")
-        .arg(target)
-        .spawn()
-        .map_err(|err| format!("Cannot open externally: {err}"))?;
-    Ok(())
+fn spawn_preview(target: &str) -> Result<(), String> {
+    spawn_command(
+        preview_command_spec_for(current_desktop_platform(), target),
+        "Cannot open system preview",
+    )
 }
 
 fn require_existing_file(path: &Path) -> Result<(), String> {
@@ -462,6 +526,41 @@ mod tests {
         let outside_file = outside.path().join("x.png");
         fs::write(&outside_file, b"\x89PNG\r\n").unwrap();
         let err = binary_viewer_classify(
+            tmp.path().to_str().unwrap().to_string(),
+            outside_file.to_str().unwrap().to_string(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("escapes") || err.contains("outside") || err.contains("does not"),
+            "unexpected err: {err}"
+        );
+    }
+
+    #[test]
+    fn preview_command_uses_quicklook_on_macos() {
+        let spec = preview_command_spec_for(DesktopPlatform::Macos, "/tmp/file.pdf");
+        assert_eq!(spec.program, "qlmanage");
+        assert_eq!(spec.args, vec!["-p", "/tmp/file.pdf"]);
+    }
+
+    #[test]
+    fn preview_command_falls_back_to_external_open_elsewhere() {
+        let windows = preview_command_spec_for(DesktopPlatform::Windows, "C:\\tmp\\file.docx");
+        assert_eq!(windows.program, "cmd");
+        assert_eq!(windows.args, vec!["/C", "start", "", "C:\\tmp\\file.docx"]);
+
+        let unix = preview_command_spec_for(DesktopPlatform::Unix, "/tmp/file.xlsx");
+        assert_eq!(unix.program, "xdg-open");
+        assert_eq!(unix.args, vec!["/tmp/file.xlsx"]);
+    }
+
+    #[test]
+    fn preview_rejects_outside_vault() {
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("x.pdf");
+        fs::write(&outside_file, b"%PDF-1.4\n%%EOF").unwrap();
+        let err = binary_viewer_preview_external(
             tmp.path().to_str().unwrap().to_string(),
             outside_file.to_str().unwrap().to_string(),
         )
