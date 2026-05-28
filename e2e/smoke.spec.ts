@@ -76,6 +76,14 @@ async function dispatchDrag(
   );
 }
 
+async function runCommandPaletteAction(page: Page, label: string) {
+  await page.locator(".topbar-command-action").click();
+  const input = page.locator(".cmdk-input input");
+  await expect(input).toBeVisible();
+  await input.fill(label);
+  await page.locator(".cmdk-item", { hasText: label }).click();
+}
+
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
 
@@ -185,6 +193,7 @@ test("restores a dense shell with tabbed explorer and collapsed terminal", async
 }) => {
   await page.goto("/");
 
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-bottom/);
   await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
   await expect(page.locator(".sidebar.embedded")).toBeVisible();
   await expect(page.locator(".document-list")).toBeVisible();
@@ -218,6 +227,45 @@ test("keeps close shortcut scoped to the focused terminal panel", async ({ page 
 
   await expect(documentTabs).toHaveCount(tabCount);
   await expect(page.locator(".document-tab.active")).toBeVisible();
+});
+
+test("docks the terminal to a resizable uncapped right column", async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await page.goto("/");
+
+  const shell = page.locator(".app-shell");
+  const terminalPanel = page.locator(".terminal-panel");
+  await expect(shell).toHaveClass(/terminal-dock-bottom/);
+  await expect(terminalPanel).toHaveClass(/collapsed/);
+
+  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+
+  await expect(shell).toHaveClass(/terminal-dock-right/);
+  await expect(terminalPanel).not.toHaveClass(/collapsed/);
+  const rightPaneBox = await page.locator(".outline-pane").boundingBox();
+  const terminalBox = await terminalPanel.boundingBox();
+  expect(rightPaneBox).not.toBeNull();
+  expect(terminalBox).not.toBeNull();
+  if (!rightPaneBox || !terminalBox) return;
+  expect(terminalBox.x).toBeGreaterThanOrEqual(rightPaneBox.x + rightPaneBox.width - 1);
+  expect(terminalBox.width).toBeGreaterThan(520);
+
+  const handleBox = await terminalPanel.locator(".terminal-resize-handle").boundingBox();
+  expect(handleBox).not.toBeNull();
+  if (!handleBox) return;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 - 140, handleBox.y + handleBox.height / 2);
+  await page.mouse.up();
+
+  const resizedBox = await terminalPanel.boundingBox();
+  expect(resizedBox).not.toBeNull();
+  if (!resizedBox) return;
+  expect(resizedBox.width).toBeGreaterThan(terminalBox.width + 80);
+
+  await runCommandPaletteAction(page, "터미널을 하단에 배치");
+  await expect(shell).toHaveClass(/terminal-dock-bottom/);
+  await expect(terminalPanel).not.toHaveClass(/collapsed/);
 });
 
 test("restores the previous app state on startup", async ({ page }) => {

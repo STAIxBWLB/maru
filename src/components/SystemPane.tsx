@@ -51,6 +51,7 @@ import type {
   FilesBrowserMode,
   FilesListAttribute,
   FilesSortKey,
+  TerminalDock,
   TerminalLauncherId,
   ThemeMode,
   WorkspaceFileFilter,
@@ -885,6 +886,21 @@ function PreferencesTab({
     );
   };
 
+  const updateTerminalDock = (terminalDock: TerminalDock) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ui: {
+          ...settings.ui,
+          layout: {
+            ...settings.ui.layout,
+            terminalDock,
+          },
+        },
+      }),
+    );
+  };
+
   return (
     <div className="system-detail" style={{ width: "100%" }}>
       <div className="settings-form">
@@ -1031,6 +1047,16 @@ function PreferencesTab({
             <option value="claude">{t("terminal.launcher.claude")}</option>
             <option value="codex">{t("terminal.launcher.codex")}</option>
             <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.terminalDock")}</span>
+          <select
+            value={settings.ui.layout.terminalDock}
+            onChange={(event) => updateTerminalDock(event.target.value as TerminalDock)}
+          >
+            <option value="bottom">{t("terminal.dock.bottom")}</option>
+            <option value="right">{t("terminal.dock.right")}</option>
           </select>
         </label>
         <DiagramPreviewToggle />

@@ -7,6 +7,7 @@ export type FilesBrowserMode = "list" | "tree";
 export type FilesSortKey = "name" | "modifiedDesc" | "modifiedAsc";
 export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git" | "binary";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
+export type TerminalDock = "bottom" | "right";
 export type ThemeMode = "system" | "light" | "dark";
 export type AnchorAppMode =
   | "pkm"
@@ -106,6 +107,8 @@ export interface LayoutSettings {
   outlinePaneWidth: number;
   terminalOpen: boolean;
   terminalHeight: number;
+  terminalDock: TerminalDock;
+  terminalWidth: number;
   terminalMaximized: boolean;
   editorSplitOpen: boolean;
   editorSplitRatio: number;
@@ -269,6 +272,8 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
       outlinePaneWidth: 280,
       terminalOpen: false,
       terminalHeight: 260,
+      terminalDock: "bottom",
+      terminalWidth: 640,
       terminalMaximized: false,
       editorSplitOpen: false,
       editorSplitRatio: 0.5,
@@ -1081,6 +1086,10 @@ function parseThemeMode(value: unknown): ThemeMode | null {
   return value === "system" || value === "light" || value === "dark" ? value : null;
 }
 
+function parseTerminalDock(value: unknown): TerminalDock | null {
+  return value === "bottom" || value === "right" ? value : null;
+}
+
 function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
   if (value === null) return null;
   return value === "claude" || value === "codex" || value === "shell"
@@ -1244,6 +1253,10 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
     ),
     terminalOpen,
     terminalHeight,
+    terminalDock:
+      parseTerminalDock(layout.terminalDock) ??
+      DEFAULT_ANCHOR_SETTINGS.ui.layout.terminalDock,
+    terminalWidth: normalizeTerminalWidth(layout.terminalWidth),
     terminalMaximized:
       typeof layout.terminalMaximized === "boolean"
         ? layout.terminalMaximized
@@ -1312,6 +1325,13 @@ function normalizeTerminalHeight(value: unknown): number {
     return DEFAULT_ANCHOR_SETTINGS.terminal.lastHeight;
   }
   return Math.min(520, Math.max(160, Math.round(value)));
+}
+
+function normalizeTerminalWidth(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ANCHOR_SETTINGS.ui.layout.terminalWidth;
+  }
+  return Math.max(320, Math.round(value));
 }
 
 function normalizeFutureAi(value: unknown): Record<string, unknown> {

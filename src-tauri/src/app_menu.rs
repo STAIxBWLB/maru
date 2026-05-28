@@ -131,6 +131,10 @@ fn install_anchor_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri
     let terminal_codex = command_item(app, "terminal.codex", "New Codex", None)?;
     let terminal_split =
         command_item(app, "terminal.split", "Split Terminal", Some("CmdOrCtrl+D"))?;
+    let terminal_dock_right =
+        command_item(app, "terminal.dock_right", "Dock Terminal Right", None)?;
+    let terminal_dock_bottom =
+        command_item(app, "terminal.dock_bottom", "Dock Terminal Bottom", None)?;
     let terminal_menu = Submenu::with_items(
         app,
         "Terminal",
@@ -141,6 +145,9 @@ fn install_anchor_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri
             &terminal_codex,
             &PredefinedMenuItem::separator(app)?,
             &terminal_split,
+            &PredefinedMenuItem::separator(app)?,
+            &terminal_dock_right,
+            &terminal_dock_bottom,
         ],
     )?;
 
