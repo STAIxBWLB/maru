@@ -514,6 +514,7 @@ export const TerminalPanel = memo(function TerminalPanel({
           );
           latest = next;
           setDraftWidth(next);
+          onWidthChange(next);
         };
         const cleanup = () => {
           handle.removeEventListener("pointermove", onMove);
@@ -606,7 +607,7 @@ export const TerminalPanel = memo(function TerminalPanel({
   const panelStyle =
     open && !maximized
       ? dock === "right"
-        ? { width: draftWidth }
+        ? undefined
         : { height: draftHeight }
       : undefined;
   const dockTarget = dock === "right" ? "bottom" : "right";

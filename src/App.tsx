@@ -304,6 +304,7 @@ import {
 const LAST_OPEN_KEY = "anchor:lastOpenedNote:v1";
 const OPEN_TABS_KEY = "anchor:openTabs:v1";
 const RECENT_KEY = "anchor:recent:v1";
+const APP_ICON_URL = new URL("./assets/app-icon-dark.png", import.meta.url).href;
 const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
@@ -5983,7 +5984,7 @@ function MainApp() {
         >
           <div className="topbar-window-controls-guard" data-no-drag="true" aria-hidden="true" />
           <div className="brand-mark" aria-hidden="true">
-            A
+            <img className="brand-mark-icon" src={APP_ICON_URL} alt="" draggable={false} />
           </div>
           <div className="brand-name">
             {t("app.title")} <span>{t("app.subtitle.work")}</span>

@@ -263,6 +263,13 @@ test("docks the terminal to a resizable uncapped right column", async ({ page })
   if (!resizedBox) return;
   expect(resizedBox.width).toBeGreaterThan(terminalBox.width + 80);
 
+  await page.setViewportSize({ width: 820, height: 720 });
+  await expect
+    .poll(() =>
+      terminalPanel.evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+    )
+    .toBeGreaterThan(150);
+
   await runCommandPaletteAction(page, "터미널을 하단에 배치");
   await expect(shell).toHaveClass(/terminal-dock-bottom/);
   await expect(terminalPanel).not.toHaveClass(/collapsed/);
@@ -417,11 +424,18 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
     )
     .toBeGreaterThan(initialDockHeight + 32);
 
-  const progressDockStorageKey = "anchor:meetings:progress-dock:mock://anchor-sample-workspace";
-  const storedDockHeight = await page.evaluate((key) => {
-    const raw = window.localStorage.getItem(key);
-    return raw ? Math.round(JSON.parse(raw).height) : 0;
-  }, progressDockStorageKey);
+  const storedDockHeight = await page.evaluate(() => {
+    let raw: string | null = null;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith("anchor:meetings:progress-dock:")) {
+        raw = window.localStorage.getItem(key);
+        break;
+      }
+    }
+    if (!raw) return 0;
+    return Math.round(JSON.parse(raw).height);
+  });
   expect(storedDockHeight).toBeGreaterThan(initialDockHeight + 32);
 
   await page.reload();

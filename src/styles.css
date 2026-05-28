@@ -1511,17 +1511,23 @@ a {
 }
 
 .brand-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
-  background: var(--ink);
-  color: var(--panel);
-  font-weight: 750;
-  font-size: 13px;
-  letter-spacing: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
   margin-left: 70px;
+}
+
+.brand-mark-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .brand-name {
@@ -9960,12 +9966,17 @@ button.git-badge:hover {
       "terminal";
   }
 
-  .terminal-panel.dock-right,
-  .terminal-panel.dock-right.collapsed {
+  .terminal-panel.dock-right {
     width: auto;
-    height: 36px;
+    height: min(320px, 45dvh);
+    min-height: 180px;
     border-top: 1px solid #2e2e2e;
     border-left: 0;
+  }
+
+  .terminal-panel.dock-right.collapsed {
+    height: 36px;
+    min-height: 36px;
   }
 
   .terminal-panel.dock-right .terminal-resize-handle {
