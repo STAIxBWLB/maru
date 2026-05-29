@@ -5066,13 +5066,15 @@ button.git-badge:hover {
 
 /* ─── Comms dashboard (per-source processing) ──────────────────────── */
 
-.comms-source-selector {
+/* Compound selector outranks `.inbox-filter-row` (which sets padding-top:0),
+   so the symmetric vertical padding wins and the chips sit at the vertical
+   center between the header border and the selector's bottom border. */
+.comms-source-selector.inbox-filter-row {
   align-items: center;
   justify-content: flex-start;
   padding: 10px 22px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--panel-2);
-  flex-wrap: wrap;
 }
 
 .comms-source-grid {
