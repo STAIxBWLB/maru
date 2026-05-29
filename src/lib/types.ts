@@ -315,6 +315,32 @@ export interface InboxProcessedItemDetail {
   rawFiles: InboxProcessedRawFile[];
 }
 
+/** Latest digest summary for a source channel (from `_state/digests/*.md`). */
+export interface InboxSourceDigest {
+  generatedAt: string | null;
+  itemsTotal: number | null;
+  itemsHigh: number | null;
+  itemsMed: number | null;
+  itemsLow: number | null;
+  threads: number | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  note: string | null;
+}
+
+/** Per-source processing run state (from `_state/sync-cursors.jsonl` + digests). */
+export interface InboxSourceRun {
+  channel: string;
+  provider: string | null;
+  account: string | null;
+  lastRunAt: string | null;
+  lastRunKind: string | null;
+  lastInternalDateIso: string | null;
+  itemsFetched: number | null;
+  itemsNew: number | null;
+  digest: InboxSourceDigest | null;
+}
+
 export interface InboxAcceptRequest {
   id: string;
   targetFolder?: string | null;

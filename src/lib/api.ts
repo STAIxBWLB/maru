@@ -51,6 +51,7 @@ import type {
   InboxProcessedItem,
   InboxProcessedItemDetail,
   InboxProcessedStatus,
+  InboxSourceRun,
   InboxDropStageRequest,
   InboxRuntimeConfig,
   InboxSettings,
@@ -182,9 +183,9 @@ export const DEFAULT_INBOX_RUNTIME_CONFIG: InboxRuntimeConfig = {
   hooks: {},
 };
 
-export async function getSampleVaultPath(): Promise<string> {
+export async function getSampleWorkspacePath(): Promise<string> {
   if (!isTauri()) return MOCK_VAULT_PATH;
-  return invoke<string>("sample_vault_path");
+  return invoke<string>("sample_workspace_path");
 }
 
 export async function chooseVaultDirectory(title: string): Promise<string | null> {
@@ -414,6 +415,11 @@ export async function readInboxProcessedItem(
     throw new Error("Processed inbox item details require the Tauri shell.");
   }
   return invoke<InboxProcessedItemDetail>("read_inbox_processed_item", { workPath, itemDir });
+}
+
+export async function readInboxSourceRuns(workPath: string): Promise<InboxSourceRun[]> {
+  if (!isTauri()) return [];
+  return invoke<InboxSourceRun[]>("read_inbox_source_runs", { workPath });
 }
 
 export async function trashInboxItems(
