@@ -422,6 +422,13 @@ export async function readInboxSourceRuns(workPath: string): Promise<InboxSource
   return invoke<InboxSourceRun[]>("read_inbox_source_runs", { workPath });
 }
 
+export async function countInboxProcessedByChannel(
+  workPath: string,
+): Promise<Record<string, number>> {
+  if (!isTauri()) return {};
+  return invoke<Record<string, number>>("count_inbox_processed_by_channel", { workPath });
+}
+
 export async function trashInboxItems(
   workPath: string,
   targets: InboxTrashTarget[],

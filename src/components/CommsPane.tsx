@@ -26,6 +26,8 @@ import { TelegramControls } from "./comms/TelegramControls";
 interface CommsPaneProps {
   runtimeConfig: InboxRuntimeConfig;
   sourceRuns: InboxSourceRun[];
+  /** Stable per-channel processed totals (unfiltered, uncapped). */
+  processedCounts: Record<string, number>;
   processedItems: InboxProcessedItem[];
   processedLoading: boolean;
   processedError: string | null;
@@ -42,7 +44,6 @@ interface CommsPaneProps {
   onSourceFilter: (channel: string | null) => void;
   onProcessNow: (channel: string) => void;
   onRefresh: () => void;
-  onRefreshSourceRuns: () => void;
   onProcessedStatusFilter: (status: InboxProcessedStatus | "all") => void;
   onProcessedQuery: (query: string) => void;
   onRefreshProcessed: () => void;
@@ -61,6 +62,7 @@ interface CommsPaneProps {
 export function CommsPane({
   runtimeConfig,
   sourceRuns,
+  processedCounts,
   processedItems,
   processedLoading,
   processedError,
@@ -77,7 +79,6 @@ export function CommsPane({
   onSourceFilter,
   onProcessNow,
   onRefresh,
-  onRefreshSourceRuns,
   onProcessedStatusFilter,
   onProcessedQuery,
   onRefreshProcessed,
@@ -95,13 +96,16 @@ export function CommsPane({
   const { t } = useTranslation();
   const channels = useMemo(() => enumerateSourceChannels(runtimeConfig), [runtimeConfig]);
   const runByChannel = useMemo(() => sourceRunByChannel(sourceRuns), [sourceRuns]);
-  const processedByChannel = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of processedItems) {
-      map.set(item.channel, (map.get(item.channel) ?? 0) + 1);
-    }
-    return map;
-  }, [processedItems]);
+  // Stable, unfiltered per-channel totals from the backend — independent of the
+  // processed-items search/status filter and its result cap.
+  const processedByChannel = useMemo(
+    () => new Map(Object.entries(processedCounts)),
+    [processedCounts],
+  );
+  const totalProcessed = useMemo(
+    () => Object.values(processedCounts).reduce((sum, count) => sum + count, 0),
+    [processedCounts],
+  );
   const runningChannels = useMemo(() => {
     const set = new Set<string>();
     for (const mission of processingMissions) {
@@ -118,11 +122,6 @@ export function CommsPane({
     [processingMissions, sourceFilter],
   );
 
-  const refreshAll = () => {
-    onRefresh();
-    onRefreshSourceRuns();
-  };
-
   return (
     <main className="comms-pane" tabIndex={-1}>
       <header className="comms-header">
@@ -134,7 +133,7 @@ export function CommsPane({
           <button
             type="button"
             className="icon-button"
-            onClick={refreshAll}
+            onClick={onRefresh}
             title={t("comms.refresh")}
             aria-label={t("comms.refresh")}
           >
@@ -161,7 +160,7 @@ export function CommsPane({
         channels={channels}
         active={sourceFilter}
         counts={processedByChannel}
-        total={processedItems.length}
+        total={totalProcessed}
         onChange={onSourceFilter}
       />
       <section className="comms-body">

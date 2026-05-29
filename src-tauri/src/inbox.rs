@@ -335,6 +335,19 @@ pub fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, 
     read_source_runs_with_config(&work, &config)
 }
 
+/// Total processed items per channel across done/failed/duplicate, with no
+/// status/query filter and no result cap. The dashboard source badges use this
+/// so the per-source totals stay stable regardless of the search box or status
+/// chip and do not silently cap at the processed-item list limit.
+#[tauri::command]
+pub fn count_inbox_processed_by_channel(
+    work_path: String,
+) -> Result<std::collections::HashMap<String, usize>, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
+    count_processed_by_channel_with_config(&work, &config)
+}
+
 #[tauri::command]
 pub fn trash_inbox_items(
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
@@ -855,7 +868,12 @@ fn read_source_runs_with_config(
                 },
             };
             match digests.iter_mut().find(|existing| existing.channel == channel) {
-                Some(slot) if parsed.digest.generated_at > slot.digest.generated_at => {
+                Some(slot)
+                    if digest_generated_after(
+                        &parsed.digest.generated_at,
+                        &slot.digest.generated_at,
+                    ) =>
+                {
                     *slot = parsed
                 }
                 Some(_) => {}
@@ -910,6 +928,44 @@ fn read_source_runs_with_config(
             .then_with(|| a.channel.cmp(&b.channel))
     });
     Ok(runs)
+}
+
+fn count_processed_by_channel_with_config(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+) -> Result<std::collections::HashMap<String, usize>, String> {
+    let root = inbox_settings::resolve_runtime_root(work, config)?;
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for status in ["done", "failed", "duplicate"] {
+        let status_dir = processed_status_dir(&root, config, status)?;
+        if !status_dir.is_dir() {
+            continue;
+        }
+        let read_dir = fs::read_dir(&status_dir)
+            .map_err(|err| format!("Cannot scan inbox processed items: {err}"))?;
+        for entry in read_dir {
+            let entry = entry.map_err(|err| format!("Cannot scan inbox processed item: {err}"))?;
+            if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let manifest_path = entry.path().join(&config.naming.manifest_file);
+            let channel = read_processed_channel(&manifest_path);
+            *counts.entry(channel).or_insert(0) += 1;
+        }
+    }
+    Ok(counts)
+}
+
+/// Channel for a processed item, matching `build_processed_item`'s resolution
+/// (manifest `channel`, trimmed, falling back to `"unknown"`).
+fn read_processed_channel(manifest_path: &Path) -> String {
+    fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|raw| serde_yaml::from_str::<ProcessedManifest>(&raw).ok())
+        .and_then(|manifest| manifest.channel)
+        .map(|channel| channel.trim().to_string())
+        .filter(|channel| !channel.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn read_processed_item_with_config(
@@ -1411,6 +1467,24 @@ fn yaml_nested_string(value: Option<&YamlValue>, outer: &str, inner: &str) -> Op
     };
     let nested = map.get(YamlValue::String(outer.to_string()))?;
     yaml_string(Some(nested), inner)
+}
+
+/// True when `candidate`'s `generated_at` is chronologically newer than
+/// `current`'s. Parses RFC3339 so digests with different offsets/precision
+/// (e.g. `…+09:00` vs `…Z`) compare by instant, not lexical string order;
+/// falls back to lexical compare only when both timestamps are unparseable.
+fn digest_generated_after(candidate: &Option<String>, current: &Option<String>) -> bool {
+    let parse = |value: &Option<String>| {
+        value
+            .as_deref()
+            .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+    };
+    match (parse(candidate), parse(current)) {
+        (Some(c), Some(cur)) => c > cur,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => candidate > current,
+    }
 }
 
 fn preview_text(body: &str, max_chars: usize) -> String {
@@ -2365,6 +2439,39 @@ inbox:
         let runs = read_inbox_source_runs(root.to_string_lossy().to_string()).unwrap();
 
         assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn count_processed_by_channel_aggregates_all_statuses_unfiltered() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "a", "gws", "P", "summary a");
+        write_processed_item(root, "done", "b", "gws", "P", "summary b");
+        write_processed_item(root, "failed", "c", "mso", "P", "summary c");
+        write_processed_item(root, "duplicate", "d", "kakao", "P", "summary d");
+
+        let counts =
+            count_inbox_processed_by_channel(root.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(counts.get("gws"), Some(&2));
+        assert_eq!(counts.get("mso"), Some(&1));
+        assert_eq!(counts.get("kakao"), Some(&1));
+        assert_eq!(counts.values().sum::<usize>(), 4);
+    }
+
+    #[test]
+    fn digest_generated_after_compares_instants_across_offsets() {
+        // 00:30Z is later than 09:00+09:00 (== 00:00Z) despite smaller wall-clock text.
+        assert!(digest_generated_after(
+            &Some("2026-05-20T00:30:00Z".to_string()),
+            &Some("2026-05-20T09:00:00+09:00".to_string()),
+        ));
+        assert!(!digest_generated_after(
+            &Some("2026-05-20T09:00:00+09:00".to_string()),
+            &Some("2026-05-20T00:30:00Z".to_string()),
+        ));
+        assert!(digest_generated_after(&Some("2026-05-20T00:00:00Z".to_string()), &None));
     }
 
     #[test]

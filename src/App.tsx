@@ -83,6 +83,7 @@ import {
   readAiMissionLog,
   prepareApproval,
   revealInFileManager,
+  countInboxProcessedByChannel,
   readInboxProcessedItem,
   readInboxSourceRuns,
   readInboxRuntimeConfig,
@@ -907,6 +908,7 @@ function MainApp() {
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
   // Per-source processing run state for the Messages dashboard.
   const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
+  const [processedCounts, setProcessedCounts] = useState<Record<string, number>>({});
   const [commsSourceFilter, setCommsSourceFilter] = useState<string | null>(null);
 
   // Gmail surface (gws CLI). List state is memory-only in Comms, while
@@ -2327,10 +2329,16 @@ function MainApp() {
   const refreshSourceRuns = useCallback(async () => {
     if (!inboxWorkspacePath) {
       setSourceRuns([]);
+      setProcessedCounts({});
       return;
     }
     try {
-      setSourceRuns(await readInboxSourceRuns(inboxWorkspacePath));
+      const [runs, counts] = await Promise.all([
+        readInboxSourceRuns(inboxWorkspacePath),
+        countInboxProcessedByChannel(inboxWorkspacePath),
+      ]);
+      setSourceRuns(runs);
+      setProcessedCounts(counts);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -6315,6 +6323,7 @@ function MainApp() {
           <CommsPane
             runtimeConfig={inboxRuntimeConfig}
             sourceRuns={sourceRuns}
+            processedCounts={processedCounts}
             processedItems={processedItems}
             processedLoading={processedLoading}
             processedError={processedError}
@@ -6331,7 +6340,6 @@ function MainApp() {
             onSourceFilter={setCommsSourceFilter}
             onProcessNow={(channel) => void processInboxKeys([], channel)}
             onRefresh={refreshActiveSurface}
-            onRefreshSourceRuns={() => void refreshSourceRuns()}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}
             onRefreshProcessed={() => void refreshProcessedItems()}
