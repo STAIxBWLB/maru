@@ -1,5 +1,5 @@
 export type DocumentBrowserMode = "list" | "tree";
-export type DocumentLabelMode = "title" | "filename";
+export type DocumentLabelMode = "title" | "filename" | "both";
 export type ExplorerPaneMode = "documents" | "files";
 export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
@@ -1050,7 +1050,7 @@ function parseExplorerPaneMode(value: unknown): ExplorerPaneMode | null {
 }
 
 function parseDocumentLabelMode(value: unknown): DocumentLabelMode | null {
-  return value === "title" || value === "filename" ? value : null;
+  return value === "title" || value === "filename" || value === "both" ? value : null;
 }
 
 function parseWorkspaceFileFilter(value: unknown): WorkspaceFileFilter | null {

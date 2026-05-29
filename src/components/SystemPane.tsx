@@ -1010,6 +1010,7 @@ function PreferencesTab({
           >
             <option value="title">{t("system.preferences.documentLabel.title")}</option>
             <option value="filename">{t("system.preferences.documentLabel.filename")}</option>
+            <option value="both">{t("system.preferences.documentLabel.both")}</option>
           </select>
         </label>
         <label className="field">

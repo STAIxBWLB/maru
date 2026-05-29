@@ -1,3 +1,11 @@
+---
+title: {title}
+date: {date}
+type: {type}
+topic: {topic}
+tags: []
+attendees: []
+---
 # {title}
 
 ## Meeting Info

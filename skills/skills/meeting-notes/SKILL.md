@@ -27,7 +27,11 @@ skill is provider-neutral and does not require inbox staging.
 2. Identify meeting date, type, topic, participants, venue, decisions, and action
    items from the provided material.
 3. Normalize terms and people using configured local guides when available.
-4. Draft the note using `templates/meeting-note.md`.
+4. Draft the note using `templates/meeting-note.md`. Fill the frontmatter
+   `title` with a human-readable meeting title so the display name does not
+   depend on the filename alone — Anchor resolves the shown label as
+   `title -> name -> filename` and also reads `date`, `type`, `topic`, `tags`,
+   and `attendees` from frontmatter. Keep the configured filename policy.
 5. Propose filing it under the configured meeting root, usually
    `YYYY/YYYY-MM/`; Anchor applies the write only after user approval.
 6. If configured and explicitly requested, create task candidates with

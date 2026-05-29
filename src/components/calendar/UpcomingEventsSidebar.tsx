@@ -7,6 +7,8 @@ import type {
   CalendarView,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
+import type { DocumentLabelMode } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 
 interface UpcomingEventsSidebarProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
@@ -15,6 +17,7 @@ interface UpcomingEventsSidebarProps<T> {
   weekStartsOn: 0 | 1;
   today: Date;
   locale: CalendarLocale;
+  labelMode?: DocumentLabelMode;
   onSelectEvent?: (event: UnifiedCalendarEvent<T>) => void;
   emptyLabel?: string;
 }
@@ -26,6 +29,7 @@ export function UpcomingEventsSidebar<T>({
   weekStartsOn,
   today,
   locale,
+  labelMode = "title",
   onSelectEvent,
   emptyLabel,
 }: UpcomingEventsSidebarProps<T>) {
@@ -66,7 +70,9 @@ export function UpcomingEventsSidebar<T>({
               <span className="cal-sidebar-date">{group.dateLabel}</span>
             </header>
             <ul className="cal-sidebar-events">
-              {group.events.map((event) => (
+              {group.events.map((event) => {
+                const label = resolveDisplayLabel(event.title, event.fileName, labelMode);
+                return (
                 <li key={event.id}>
                   <button
                     type="button"
@@ -82,13 +88,20 @@ export function UpcomingEventsSidebar<T>({
                           })}
                         </span>
                       ) : null}
-                      <span className="cal-sidebar-title" title={event.title}>
-                        {event.title}
+                      <span
+                        className="cal-sidebar-title"
+                        title={label.secondary ? `${label.primary} · ${label.secondary}` : label.primary}
+                      >
+                        {label.primary}
                       </span>
+                      {label.secondary ? (
+                        <span className="cal-sidebar-subtitle">{label.secondary}</span>
+                      ) : null}
                     </span>
                   </button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </li>
         ))}

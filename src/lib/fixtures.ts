@@ -420,6 +420,7 @@ export function mockMeetingNoteRows(rootPath = MOCK_VAULT_PATH): MeetingNoteRow[
       fileName: "04-20 회의 - Anchor 사업 주간 점검 - KPI.md",
       sizeBytes: sampleContent.length,
       updatedAt: now,
+      frontmatter: { title: "Anchor 사업 주간 점검 (KPI)" },
     },
     {
       path: `${rootPath}/meetings/2026/2026-05/05-04 상담 - Skills 관리 - Codex.md`,
@@ -427,6 +428,7 @@ export function mockMeetingNoteRows(rootPath = MOCK_VAULT_PATH): MeetingNoteRow[
       fileName: "05-04 상담 - Skills 관리 - Codex.md",
       sizeBytes: referenceContent.length,
       updatedAt: "2026-05-04T11:00:00+09:00",
+      frontmatter: {},
     },
   ];
 }

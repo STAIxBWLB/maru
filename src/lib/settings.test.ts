@@ -14,6 +14,15 @@ describe("normalizeAnchorSettings", () => {
     expect(normalizeAnchorSettings("not-json")).toEqual(DEFAULT_ANCHOR_SETTINGS);
   });
 
+  it("accepts the 'both' document label mode and falls back for unknown values", () => {
+    expect(normalizeAnchorSettings({ ui: { documentLabelMode: "both" } }).ui.documentLabelMode).toBe(
+      "both",
+    );
+    expect(
+      normalizeAnchorSettings({ ui: { documentLabelMode: "nonsense" } }).ui.documentLabelMode,
+    ).toBe("title");
+  });
+
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {

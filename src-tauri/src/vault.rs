@@ -9,6 +9,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use walkdir::WalkDir;
 
+use include_dir::{include_dir, Dir};
+
+use crate::skill_host::fs as host_fs;
+
 const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "workspace-index-v1.json"];
 const GENERATED_DIRS: &[&str] = &[
     "node_modules",
@@ -19,6 +23,12 @@ const GENERATED_DIRS: &[&str] = &[
     ".turbo",
     ".cache",
 ];
+
+/// The curated sample workspace, embedded into the binary at compile time so it
+/// ships inside the installer on every platform (same mechanism as the builtin
+/// `skills/` bundle). Materialized to a writable location on first run by
+/// `sample_workspace_path`.
+static SAMPLE_WORKSPACE_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../sample-workspace");
 
 fn h1_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -161,12 +171,37 @@ pub fn default_vault_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn sample_vault_path() -> Result<String, String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or_else(|| "Cannot resolve project root".to_string())?
-        .join("sample-vault");
+pub fn sample_workspace_path() -> Result<String, String> {
+    let root = host_fs::anchor_home()?.join("sample-workspace");
+    host_fs::ensure_dir(&root)?;
+    seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, &root)?;
     Ok(root.to_string_lossy().to_string())
+}
+
+/// Write each embedded sample file into `root`, but only if it does not already
+/// exist. Never overwrites a user's edits and never deletes, so reopening the
+/// sample workspace is idempotent and safe. The old implementation returned an
+/// `env!("CARGO_MANIFEST_DIR")` path that only existed on the build machine, so
+/// shipped installers had no sample at all; embedding + materializing fixes that.
+fn seed_dir_if_missing(dir: &Dir<'_>, root: &Path) -> Result<(), String> {
+    for file in dir.files() {
+        // `file.path()` is the path relative to the embed root, e.g.
+        // `references/anchor-glossary.md`, so it joins straight onto `root`.
+        let target = root.join(file.path());
+        if target.exists() {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Cannot create {}: {err}", parent.display()))?;
+        }
+        fs::write(&target, file.contents())
+            .map_err(|err| format!("Cannot write {}: {err}", target.display()))?;
+    }
+    for child in dir.dirs() {
+        seed_dir_if_missing(child, root)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -811,5 +846,36 @@ mod tests {
             "scan_vault({path}) → {} entries in {dt:?} (snippet bytes: {total_bytes})",
             entries.len()
         );
+    }
+
+    #[test]
+    fn seeds_embedded_sample_workspace_into_empty_dir() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
+        // A top-level note, the dotfile, the nested dot-dir snapshot, and a note
+        // with a Korean + whitespace filename must all materialize.
+        assert!(root.join("2026-anchor-project-report.md").is_file());
+        assert!(root.join(".anchorignore").is_file());
+        assert!(root
+            .join(".anchor/versions/2026-anchor-project-report-20260424-173000.md")
+            .is_file());
+        assert!(root
+            .join("meetings/2026/2026-04/04-20 회의 - Anchor 사업 주간 점검 - KPI.md")
+            .is_file());
+    }
+
+    #[test]
+    fn seeding_is_idempotent_and_preserves_user_edits() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
+
+        let edited = root.join("2026-anchor-project-report.md");
+        fs::write(&edited, "# my own notes\n").unwrap();
+
+        // Re-seeding must not error and must leave the user's edit untouched.
+        seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
+        assert_eq!(fs::read_to_string(&edited).unwrap(), "# my own notes\n");
     }
 }

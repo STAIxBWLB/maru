@@ -80,15 +80,44 @@ export function documentStats(
   return { lines, words, chars };
 }
 
+/** Last path segment with a trailing `.md` stripped (other extensions kept). */
+export function labelFileStem(fileNameOrRelPath: string): string {
+  const base = fileNameOrRelPath.split("/").filter(Boolean).pop() ?? fileNameOrRelPath;
+  return base.replace(/\.md$/i, "");
+}
+
+export interface ResolvedLabel {
+  /** Main text to render. */
+  primary: string;
+  /** Secondary (muted) text for the "both" mode; null when nothing to add. */
+  secondary: string | null;
+}
+
+/** Resolve how an item should be labelled given the workspace-wide label mode.
+ *  Shared by documents, tasks, calendar events, and meetings so the
+ *  `title` / `filename` / `both` setting behaves consistently everywhere. */
+export function resolveDisplayLabel(
+  title: string,
+  fileName: string,
+  mode: DocumentLabelMode,
+): ResolvedLabel {
+  const stem = labelFileStem(fileName);
+  const cleanTitle = title.trim();
+  if (mode === "filename") {
+    return { primary: stem || cleanTitle, secondary: null };
+  }
+  if (mode === "both") {
+    const primary = cleanTitle || stem;
+    return { primary, secondary: stem && stem !== primary ? stem : null };
+  }
+  return { primary: cleanTitle || stem, secondary: null };
+}
+
 export function documentDisplayName(
   item: Pick<DocumentPayload | VaultEntry, "title" | "relPath">,
   mode: DocumentLabelMode,
 ): string {
-  if (mode === "filename") {
-    const fileName = item.relPath.split("/").filter(Boolean).pop();
-    return fileName || item.title;
-  }
-  return item.title;
+  return resolveDisplayLabel(item.title, item.relPath, mode).primary;
 }
 
 /** Minimal markdown-to-HTML preview. Phase 1 swaps in BlockNote so we don't

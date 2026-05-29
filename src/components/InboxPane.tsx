@@ -1,18 +1,13 @@
 import {
-  AlertTriangle,
   Brain,
   Check,
-  Clock3,
   FilePlus2,
-  FileText,
   HelpCircle,
   Inbox,
   Loader2,
   Play,
   RefreshCcw,
-  Search,
   Settings,
-  Square,
   Upload,
   X,
 } from "lucide-react";
@@ -48,6 +43,9 @@ import type {
   MissionRecord,
 } from "../lib/types";
 import { BulkActionBar } from "./BulkActionBar";
+import { ProcessedItemsBrowser } from "./inbox/ProcessedItemsBrowser";
+import { ProcessingMissionsPanel } from "./inbox/ProcessingMissionsPanel";
+import { formatBytes } from "./inbox/processedFormat";
 
 interface InboxPaneProps {
   items: InboxItemState[];
@@ -144,8 +142,6 @@ export function InboxPane({
     !!contextMenu,
     () => setContextMenu(null),
   );
-  const [processedDetailTab, setProcessedDetailTab] =
-    useState<"summary" | "route" | "manifest" | "extracted">("summary");
   const sources = useMemo(() => uniqueSources(items), [items]);
   const sourceCounts = useMemo(() => countInboxSources(items), [items]);
   const visibleItems = useMemo(
@@ -590,127 +586,28 @@ export function InboxPane({
         </InboxSection>
 
         <InboxSection title="PROCESSING">
-          <div className="processing-panel">
-            {processingMissions.length === 0 ? (
-              <div className="processing-empty">
-                <Clock3 size={16} />
-                <span>No active inbox process.</span>
-              </div>
-            ) : null}
-            {processingMissions.map((mission) => {
-              const lines = processingLogLines[mission.id] ?? [];
-              const channel = inboxProcessChannel(mission);
-              return (
-                <article className={`processing-card ${mission.status}`} key={mission.id}>
-                  <div className="processing-card-header">
-                    <div>
-                      <strong>{channel ? `inbox-process ${channel}` : "inbox-process"}</strong>
-                      <span>{mission.status} · {mission.startedAt}</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="button button-ghost button-sm"
-                      onClick={() => void onStopProcessingMission(mission.id)}
-                      title="Stop processing"
-                    >
-                      <Square size={12} />
-                      <span>Stop</span>
-                    </button>
-                  </div>
-                  <pre className="processing-log">
-                    {lines.length > 0 ? lines.join("\n") : "Waiting for output..."}
-                  </pre>
-                </article>
-              );
-            })}
-          </div>
+          <ProcessingMissionsPanel
+            missions={processingMissions}
+            logLines={processingLogLines}
+            onStop={onStopProcessingMission}
+          />
         </InboxSection>
 
         <InboxSection title="PROCESSED ITEMS">
-          <div className="processed-toolbar">
-            <div className="processed-status-chips" role="toolbar" aria-label="Processed status">
-              {(["all", "done", "failed", "duplicate"] as Array<InboxProcessedStatus | "all">).map((status) => (
-                <button
-                  type="button"
-                  key={status}
-                  className={processedStatusFilter === status ? "inbox-filter-chip active" : "inbox-filter-chip"}
-                  onClick={() => onProcessedStatusFilter(status)}
-                >
-                  {statusLabel(status)}
-                </button>
-              ))}
-            </div>
-            <label className="processed-search">
-              <Search size={13} />
-              <input
-                value={processedQuery}
-                onChange={(event) => onProcessedQuery(event.target.value)}
-                placeholder="Search processed items"
-                spellCheck={false}
-              />
-            </label>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={onRefreshProcessed}
-              title="Refresh processed items"
-              aria-label="Refresh processed items"
-            >
-              <RefreshCcw size={14} />
-            </button>
-          </div>
-          <div className="processed-layout">
-            <div className="processed-list">
-              {processedLoading ? <div className="inbox-empty">Loading processed items...</div> : null}
-              {processedError ? <div className="inbox-error gmail-error">{processedError}</div> : null}
-              {!processedLoading && !processedError && processedItems.length === 0 ? (
-                <div className="inbox-empty">
-                  <FileText size={22} />
-                  <strong>No processed items</strong>
-                  <span>Done, failed, and duplicate items from inbox/items will appear here.</span>
-                </div>
-              ) : null}
-              {processedItems.map((item) => (
-                <button
-                  type="button"
-                  key={`${item.status}:${item.id}`}
-                  className={
-                    processedDetail?.item.itemDir === item.itemDir
-                      ? `processed-row active ${item.status}`
-                      : `processed-row ${item.status}`
-                  }
-                  onClick={() => void onSelectProcessedItem(item)}
-                  onContextMenu={(event) => openProcessedContextMenu(event, item)}
-                >
-                  <div className="processed-row-title">
-                    <span className={`status-chip ${item.status}`}>{statusLabel(item.status)}</span>
-                    <strong>{item.title || item.id}</strong>
-                  </div>
-                  <div className="processed-row-meta">
-                    <span>{item.channel}</span>
-                    {item.project ? <span>{item.project}</span> : null}
-                    {item.classification ? <span>{item.classification}</span> : null}
-                    {item.receivedAt ? <time>{formatShortDate(item.receivedAt)}</time> : null}
-                  </div>
-                  {item.summaryPreview ? <p>{item.summaryPreview}</p> : null}
-                  {item.error ? (
-                    <div className="processed-row-error">
-                      <AlertTriangle size={13} />
-                      <span>{item.error}</span>
-                    </div>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-            {processedDetail ? (
-              <ProcessedDetailPanel
-                detail={processedDetail}
-                tab={processedDetailTab}
-                onTab={setProcessedDetailTab}
-                onRevealPath={onRevealPath}
-              />
-            ) : null}
-          </div>
+          <ProcessedItemsBrowser
+            items={processedItems}
+            loading={processedLoading}
+            error={processedError}
+            statusFilter={processedStatusFilter}
+            query={processedQuery}
+            detail={processedDetail}
+            onStatusFilter={onProcessedStatusFilter}
+            onQuery={onProcessedQuery}
+            onRefresh={onRefreshProcessed}
+            onSelect={onSelectProcessedItem}
+            onRevealPath={onRevealPath}
+            onContextMenu={openProcessedContextMenu}
+          />
         </InboxSection>
 
         <InboxSection
@@ -931,119 +828,6 @@ function InboxSection({
   );
 }
 
-function ProcessedDetailPanel({
-  detail,
-  tab,
-  onTab,
-  onRevealPath,
-}: {
-  detail: InboxProcessedItemDetail;
-  tab: "summary" | "route" | "manifest" | "extracted";
-  onTab: (tab: "summary" | "route" | "manifest" | "extracted") => void;
-  onRevealPath: (path: string) => void;
-}) {
-  const tabs = [
-    { key: "summary" as const, label: "Summary", value: detail.summaryText },
-    { key: "route" as const, label: "Route", value: detail.routeText },
-    { key: "manifest" as const, label: "Manifest", value: detail.manifestText },
-    { key: "extracted" as const, label: "Extracted", value: detail.extractedText },
-  ];
-  const active = tabs.find((item) => item.key === tab) ?? tabs[0];
-  const artifactPath =
-    tab === "summary"
-      ? detail.item.summaryPath
-      : tab === "route"
-        ? detail.item.routePath
-        : tab === "manifest"
-          ? detail.item.manifestPath
-          : detail.item.extractedPath;
-
-  return (
-    <aside className="processed-detail">
-      <div className="processed-detail-header">
-        <div>
-          <strong>{detail.item.title || detail.item.id}</strong>
-          <span>{detail.item.channel} · {detail.item.status}</span>
-        </div>
-        <button
-          type="button"
-          className="button button-ghost button-sm"
-          onClick={() => onRevealPath(detail.item.itemDir)}
-        >
-          Reveal
-        </button>
-      </div>
-      <div className="processed-tabs" role="tablist">
-        {tabs.map((item) => (
-          <button
-            type="button"
-            key={item.key}
-            className={tab === item.key ? "active" : ""}
-            onClick={() => onTab(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div className="processed-artifact-path">
-        <span>{artifactPath ?? "Artifact not present"}</span>
-        {artifactPath ? (
-          <button type="button" className="link-button" onClick={() => onRevealPath(artifactPath)}>
-            Reveal
-          </button>
-        ) : null}
-      </div>
-      <pre className="processed-artifact">
-        {active.value ?? "No artifact content."}
-        {tab === "extracted" && detail.extractedTruncated ? "\n\n[truncated]" : ""}
-      </pre>
-      {detail.rawFiles.length > 0 ? (
-        <div className="processed-raw-files">
-          <strong>Raw files</strong>
-          {detail.rawFiles.map((file) => (
-            <button
-              type="button"
-              key={file.path}
-              className="link-button"
-              onClick={() => onRevealPath(file.path)}
-            >
-              {file.relPath} · {formatBytes(file.sizeBytes)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "all":
-      return "All";
-    case "done":
-      return "Done";
-    case "failed":
-      return "Failed";
-    case "duplicate":
-      return "Duplicate";
-    default:
-      return status;
-  }
-}
-
-function inboxProcessChannel(mission: MissionRecord): string | null {
-  const metadata = mission.metadata;
-  if (
-    typeof metadata === "object" &&
-    metadata !== null &&
-    "channel" in metadata &&
-    typeof metadata.channel === "string"
-  ) {
-    return metadata.channel;
-  }
-  return null;
-}
-
 function trashTargetForRow(row: InboxRow): InboxTrashTarget {
   if (row.kind === "entry") {
     return {
@@ -1067,17 +851,6 @@ function pathForRow(row: InboxRow): string {
   return row.kind === "entry" ? row.entry.path : row.entry.item.path;
 }
 
-function formatShortDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function firstPendingKey(rows: InboxRow[]): string | null {
   const row = rows.find((entry) => {
     if (entry.kind === "entry") return entry.entry.status !== "done";
@@ -1085,10 +858,4 @@ function firstPendingKey(rows: InboxRow[]): string | null {
     return false;
   });
   return row?.key ?? null;
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }

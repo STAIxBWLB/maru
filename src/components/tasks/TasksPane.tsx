@@ -22,7 +22,8 @@ import {
   updateTaskStatus,
 } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
-import type { TasksSettings } from "../../lib/settings";
+import type { DocumentLabelMode, TasksSettings } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 import type { SkillContextItem, SkillRecord } from "../../lib/skills";
 import {
   activeTasksMissions,
@@ -55,6 +56,7 @@ import { useDebouncedValue } from "../../lib/useDebouncedValue";
 interface TasksPaneProps {
   workPath: string | null;
   effectiveSettings: TasksSettings;
+  labelMode: DocumentLabelMode;
   skills: SkillRecord[];
   processingMissions: MissionRecord[];
   processingLogLines: Record<string, string[]>;
@@ -78,6 +80,7 @@ const viewButtons: TasksDisplayView[] = ["month", "week", "day", "list"];
 export function TasksPane({
   workPath,
   effectiveSettings,
+  labelMode,
   skills,
   processingMissions,
   processingLogLines,
@@ -397,6 +400,7 @@ export function TasksPane({
           <TaskList
             grouped={grouped}
             selectedRelPath={selectedEntry?.relPath ?? null}
+            labelMode={labelMode}
             onSelect={setSelectedRelPath}
             onDone={(entry) => void setStatus(entry, "done")}
             t={t}
@@ -408,6 +412,7 @@ export function TasksPane({
             viewDate={viewDate}
             weekStartsOn={effectiveSettings.weekStartsOn}
             locale={locale}
+            labelMode={labelMode}
             today={todayDate}
             query={query}
             onQueryChange={setQuery}
@@ -446,6 +451,7 @@ export function TasksPane({
         entry={selectedEntry}
         metadata={metadata}
         loading={metadataLoading}
+        labelMode={labelMode}
         skills={skills}
         collapsed={!detailsOpen}
         onToggleCollapsed={() => setDetailsOpen((value) => !value)}
@@ -466,12 +472,14 @@ export function TasksPane({
 function TaskList({
   grouped,
   selectedRelPath,
+  labelMode,
   onSelect,
   onDone,
   t,
 }: {
   grouped: Map<TaskStatus, TaskEntry[]>;
   selectedRelPath: string | null;
+  labelMode: DocumentLabelMode;
   onSelect: (relPath: string) => void;
   onDone: (entry: TaskEntry) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -510,7 +518,7 @@ function TaskList({
                 {entry.status === "done" ? <CheckCircle2 size={16} /> : null}
               </span>
               <span className="task-row-main">
-                <strong>{entry.title}</strong>
+                <strong>{resolveDisplayLabel(entry.title, entry.fileName, labelMode).primary}</strong>
                 <span>{entry.relPath}</span>
               </span>
               <span className={`task-priority priority-${entry.priority}`}>

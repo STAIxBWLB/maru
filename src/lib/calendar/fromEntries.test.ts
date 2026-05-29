@@ -6,6 +6,7 @@ describe("toUnifiedTaskEvents", () => {
   it("converts due-only tasks to all-day events", () => {
     const [event] = toUnifiedTaskEvents([task({ due: "2026-05-14" })]);
 
+    expect(event.fileName).toBe("sample.md");
     expect(event.allDay).toBe(true);
     expect(event.start.getFullYear()).toBe(2026);
     expect(event.start.getMonth()).toBe(4);

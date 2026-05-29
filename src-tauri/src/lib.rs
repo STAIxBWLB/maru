@@ -77,9 +77,10 @@ use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
 use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
-    accept_inbox_item, accept_inbox_items, read_inbox_processed_item, reject_inbox_item,
-    reject_inbox_items, scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items,
-    stage_inbox_drop_files, trash_inbox_items,
+    accept_inbox_item, accept_inbox_items, count_inbox_processed_by_channel,
+    read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
+    scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items, stage_inbox_drop_files,
+    trash_inbox_items,
 };
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_settings::{
@@ -133,7 +134,7 @@ use telegram_io::{
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
-use vault::{default_vault_path, read_vault_cache, sample_vault_path, scan_vault};
+use vault::{default_vault_path, read_vault_cache, sample_workspace_path, scan_vault};
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
@@ -164,7 +165,7 @@ pub fn run() {
         .manage(CatalogWatcherState::default())
         .invoke_handler(tauri::generate_handler![
             default_vault_path,
-            sample_vault_path,
+            sample_workspace_path,
             scan_vault,
             read_vault_cache,
             read_document,
@@ -190,6 +191,8 @@ pub fn run() {
             scan_inbox_entries,
             scan_inbox_processed_items,
             read_inbox_processed_item,
+            read_inbox_source_runs,
+            count_inbox_processed_by_channel,
             trash_inbox_items,
             stage_inbox_drop_files,
             accept_inbox_item,

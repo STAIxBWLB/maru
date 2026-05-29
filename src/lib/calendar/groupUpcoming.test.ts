@@ -9,6 +9,7 @@ function evt(id: string, start: string, allDay = true): UnifiedCalendarEvent {
   return {
     id,
     title: id,
+    fileName: `${id}.md`,
     start: startDate,
     end: endDate,
     allDay,
@@ -132,6 +133,7 @@ describe("groupCalendarRangeEvents", () => {
     const multi: UnifiedCalendarEvent = {
       id: "mlt",
       title: "Long event",
+      fileName: "mlt.md",
       start,
       end,
       allDay: true,

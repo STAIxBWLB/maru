@@ -10,6 +10,7 @@ import type {
   CalendarView,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
+import type { DocumentLabelMode } from "../../lib/settings";
 
 export interface UnifiedCalendarViewProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
@@ -18,6 +19,7 @@ export interface UnifiedCalendarViewProps<T> {
   viewDate: Date;
   weekStartsOn: 0 | 1;
   locale: CalendarLocale;
+  labelMode?: DocumentLabelMode;
   today?: Date;
   query: string;
   onQueryChange: (next: string) => void;
@@ -39,6 +41,7 @@ export function UnifiedCalendarView<T>({
   viewDate,
   weekStartsOn,
   locale,
+  labelMode = "title",
   today,
   query,
   onQueryChange,
@@ -62,6 +65,7 @@ export function UnifiedCalendarView<T>({
         weekStartsOn={weekStartsOn}
         today={todayDate}
         locale={locale}
+        labelMode={labelMode}
         onSelectEvent={onSelectEvent}
         emptyLabel={emptyLabel}
       />
@@ -88,6 +92,7 @@ export function UnifiedCalendarView<T>({
               events={events}
               weekStartsOn={weekStartsOn}
               locale={locale}
+              labelMode={labelMode}
               today={todayDate}
               onSelectEvent={onSelectEvent}
               onSelectDate={onSelectDate}
@@ -98,6 +103,7 @@ export function UnifiedCalendarView<T>({
               events={events}
               weekStartsOn={weekStartsOn}
               locale={locale}
+              labelMode={labelMode}
               today={todayDate}
               onSelectEvent={onSelectEvent}
               onSelectDate={onSelectDate}
@@ -108,6 +114,7 @@ export function UnifiedCalendarView<T>({
               viewDate={viewDate}
               events={events}
               locale={locale}
+              labelMode={labelMode}
               onSelectEvent={onSelectEvent}
               emptyLabel={emptyLabel}
             />

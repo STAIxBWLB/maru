@@ -7,6 +7,8 @@ import type {
   CalendarLocale,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
+import type { DocumentLabelMode } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 
 const MONTH_BAR_LANES = 2;
 const MONTH_TIMED_ROWS = 2;
@@ -20,6 +22,7 @@ interface MonthGridProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
   weekStartsOn: 0 | 1;
   locale: CalendarLocale;
+  labelMode?: DocumentLabelMode;
   today: Date;
   selectedDate?: Date | null;
   onSelectEvent?: (event: UnifiedCalendarEvent<T>) => void;
@@ -31,6 +34,7 @@ export function MonthGrid<T>({
   events,
   weekStartsOn,
   locale,
+  labelMode = "title",
   today,
   selectedDate,
   onSelectEvent,
@@ -92,7 +96,13 @@ export function MonthGrid<T>({
                 </span>
               ))}
               {week.lanes.flatMap((lane, laneIdx) =>
-                lane.map((seg) => (
+                lane.map((seg) => {
+                  const label = resolveDisplayLabel(
+                    seg.event.title,
+                    seg.event.fileName,
+                    labelMode,
+                  );
+                  return (
                   <button
                     key={`bar-${laneIdx}-${seg.event.id}`}
                     type="button"
@@ -101,22 +111,29 @@ export function MonthGrid<T>({
                       gridColumn: `${seg.startColumn + 1} / span ${seg.endColumn - seg.startColumn + 1}`,
                       gridRow: MONTH_BAR_START_ROW + laneIdx,
                     }}
-                    title={seg.event.title}
+                    title={label.secondary ? `${label.primary} · ${label.secondary}` : label.primary}
                     onClick={(event) => {
                       event.stopPropagation();
                       onSelectEvent?.(seg.event);
                     }}
                   >
                     <span className="cal-bar-label">
-                      {seg.openLeft ? null : seg.event.title}
+                      {seg.openLeft ? null : label.primary}
                     </span>
                   </button>
-                )),
+                  );
+                }),
               )}
               {week.cells.flatMap((cell, col) => {
                 const chips = week.timedByColumn[col];
                 const overflow = week.overflowPerCell[col];
-                const chipButtons = chips.map((chip, chipIdx) => (
+                const chipButtons = chips.map((chip, chipIdx) => {
+                  const label = resolveDisplayLabel(
+                    chip.event.title,
+                    chip.event.fileName,
+                    labelMode,
+                  );
+                  return (
                   <button
                     key={`chip-${col}-${chipIdx}-${chip.event.id}`}
                     type="button"
@@ -125,7 +142,7 @@ export function MonthGrid<T>({
                       gridColumn: col + 1,
                       gridRow: MONTH_TIMED_START_ROW + chipIdx,
                     }}
-                    title={chip.event.title}
+                    title={label.secondary ? `${label.primary} · ${label.secondary}` : label.primary}
                     onClick={(event) => {
                       event.stopPropagation();
                       onSelectEvent?.(chip.event);
@@ -136,9 +153,10 @@ export function MonthGrid<T>({
                         locale: localeObj,
                       })}
                     </span>
-                    <span className="cal-time-chip-title">{chip.event.title}</span>
+                    <span className="cal-time-chip-title">{label.primary}</span>
                   </button>
-                ));
+                  );
+                });
                 if (overflow <= 0) return chipButtons;
                 return [
                   ...chipButtons,

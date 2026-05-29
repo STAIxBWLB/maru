@@ -74,7 +74,7 @@ import {
   fetchGmailUnread,
   fetchOutlookUnread,
   fetchTelegramRecent,
-  getSampleVaultPath,
+  getSampleWorkspacePath,
   gitStatus,
   listAiMissions,
   listWorkspaceRoots,
@@ -83,7 +83,9 @@ import {
   readAiMissionLog,
   prepareApproval,
   revealInFileManager,
+  countInboxProcessedByChannel,
   readInboxProcessedItem,
+  readInboxSourceRuns,
   readInboxRuntimeConfig,
   readVaultCache,
   unloadLegacyTelegramLaunchd,
@@ -222,6 +224,7 @@ import type {
   InboxEntry,
   InboxProcessedItem,
   InboxProcessedItemDetail,
+  InboxSourceRun,
   InboxProcessedStatus,
   InboxRuntimeConfig,
   InboxTrashTarget,
@@ -903,6 +906,10 @@ function MainApp() {
   const [processedDetail, setProcessedDetail] = useState<InboxProcessedItemDetail | null>(null);
   const [processingMissions, setProcessingMissions] = useState<MissionRecord[]>([]);
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
+  // Per-source processing run state for the Messages dashboard.
+  const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
+  const [processedCounts, setProcessedCounts] = useState<Record<string, number>>({});
+  const [commsSourceFilter, setCommsSourceFilter] = useState<string | null>(null);
 
   // Gmail surface (gws CLI). List state is memory-only in Comms, while
   // accept/reject calls write labels/archive through gws.
@@ -2319,6 +2326,24 @@ function MainApp() {
     }
   }, [inboxWorkspacePath, processedQuery, processedStatusFilter]);
 
+  const refreshSourceRuns = useCallback(async () => {
+    if (!inboxWorkspacePath) {
+      setSourceRuns([]);
+      setProcessedCounts({});
+      return;
+    }
+    try {
+      const [runs, counts] = await Promise.all([
+        readInboxSourceRuns(inboxWorkspacePath),
+        countInboxProcessedByChannel(inboxWorkspacePath),
+      ]);
+      setSourceRuns(runs);
+      setProcessedCounts(counts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [inboxWorkspacePath]);
+
   const selectProcessedItem = useCallback(
     async (item: InboxProcessedItem) => {
       if (!inboxWorkspacePath) return;
@@ -2947,11 +2972,18 @@ function MainApp() {
   }, [appMode, inboxWorkspacePath, isMac]);
 
   useEffect(() => {
-    if (appMode === "inbox") void refreshProcessedItems();
-    if (appMode === "inbox" || appMode === "meetings" || appMode === "tasks" || rightPaneTab === "skills") {
+    if (appMode === "inbox" || appMode === "comms") void refreshProcessedItems();
+    if (appMode === "comms") void refreshSourceRuns();
+    if (
+      appMode === "inbox" ||
+      appMode === "comms" ||
+      appMode === "meetings" ||
+      appMode === "tasks" ||
+      rightPaneTab === "skills"
+    ) {
       void refreshProcessingMissions();
     }
-  }, [appMode, refreshProcessedItems, refreshProcessingMissions, rightPaneTab]);
+  }, [appMode, refreshProcessedItems, refreshProcessingMissions, refreshSourceRuns, rightPaneTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2970,6 +3002,7 @@ function MainApp() {
           setProcessingMissions((current) => upsertMission(current, record));
           if (inboxMission && !matchesActiveMission(record)) {
             void refreshProcessedItems();
+            void refreshSourceRuns();
           }
           if (!matchesActiveMission(record)) {
             void readAiMissionLog(record.id, 100)
@@ -3005,7 +3038,7 @@ function MainApp() {
       unlistenMission?.();
       unlistenOutput?.();
     };
-  }, [matchesActiveMission, refreshProcessedItems]);
+  }, [matchesActiveMission, refreshProcessedItems, refreshSourceRuns]);
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.
@@ -3284,7 +3317,7 @@ function MainApp() {
         setBooting(true);
         const registry = await listWorkspaceRoots();
         if (registry.workspaces.length === 0) {
-          const samplePath = await getSampleVaultPath();
+          const samplePath = await getSampleWorkspacePath();
           const seeded = await addWorkspaceRoot({
             label: "Sample Workspace",
             path: samplePath,
@@ -3403,7 +3436,7 @@ function MainApp() {
 
   const useSampleWorkspace = useCallback(async () => {
     try {
-      const samplePath = await getSampleVaultPath();
+      const samplePath = await getSampleWorkspacePath();
       const exists = workspaceRegistry.workspaces.find((workspace) => workspace.path === samplePath);
       if (!exists) {
         await handleAddWorkspace({
@@ -4568,6 +4601,9 @@ function MainApp() {
       void refreshProcessingMissions();
     } else if (appMode === "comms") {
       void refreshCommsProviders({ force: true });
+      void refreshProcessedItems();
+      void refreshSourceRuns();
+      void refreshProcessingMissions();
     } else if (appMode === "meetings") {
       void refreshProcessingMissions();
     } else if (appMode === "tasks") {
@@ -4586,6 +4622,7 @@ function MainApp() {
     refreshInbox,
     refreshProcessedItems,
     refreshProcessingMissions,
+    refreshSourceRuns,
     refreshWorkspaceFiles,
   ]);
 
@@ -6284,23 +6321,34 @@ function MainApp() {
           />
         ) : visibleAppMode === "comms" ? (
           <CommsPane
-            gmailMessages={gmailItems}
-            gmailLoading={gmailLoading}
-            gmailError={gmailError}
-            gmailStatus={gmailStatus}
-            outlookMessages={outlookItems}
-            outlookLoading={outlookLoading}
-            outlookError={outlookError}
-            outlookStatus={outlookStatus}
-            telegramMessages={telegramItems}
-            telegramLoading={telegramLoading}
-            telegramError={telegramError}
+            runtimeConfig={inboxRuntimeConfig}
+            sourceRuns={sourceRuns}
+            processedCounts={processedCounts}
+            processedItems={processedItems}
+            processedLoading={processedLoading}
+            processedError={processedError}
+            processedStatusFilter={processedStatusFilter}
+            processedQuery={processedQuery}
+            processedDetail={processedDetail}
+            processingMissions={activeInboxProcessMissions(processingMissions)}
+            processingLogLines={processingLogLines}
+            sourceFilter={commsSourceFilter}
+            actionBusy={inboxActionBusy}
             telegramPollingStatus={telegramPolling}
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
+            onSourceFilter={setCommsSourceFilter}
+            onProcessNow={(channel) => void processInboxKeys([], channel)}
             onRefresh={refreshActiveSurface}
+            onProcessedStatusFilter={setProcessedStatusFilter}
+            onProcessedQuery={setProcessedQuery}
+            onRefreshProcessed={() => void refreshProcessedItems()}
+            onSelectProcessedItem={(item) => void selectProcessedItem(item)}
+            onStopProcessingMission={(id) => void stopProcessingMission(id)}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
             onRefreshTelegram={() => void refreshTelegram({ force: true })}
-            onDecide={decideCommsItem}
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}
             onTelegramLogin={startTelegramLogin}
@@ -6313,6 +6361,7 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             settings={anchorSettings.meetings}
             effectiveSettings={effectiveMeetingsSettings}
+            labelMode={anchorSettings.ui.documentLabelMode}
             skills={skills}
             runtimeCommands={skillRuntimeCommands}
             processingMissions={activeMeetingsMissions(processingMissions)}
@@ -6334,6 +6383,7 @@ function MainApp() {
           <TasksPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
+            labelMode={anchorSettings.ui.documentLabelMode}
             skills={skills}
             processingMissions={activeTasksMissions(processingMissions)}
             processingLogLines={processingLogLines}

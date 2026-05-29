@@ -26,6 +26,7 @@ export function toUnifiedTaskEvents(
       out.push({
         id: entry.relPath,
         title: entry.title,
+        fileName: entry.fileName,
         start,
         end: safeEnd,
         allDay: false,
@@ -43,6 +44,7 @@ export function toUnifiedTaskEvents(
     out.push({
       id: entry.relPath,
       title: entry.title,
+      fileName: entry.fileName,
       start,
       end,
       allDay: true,
@@ -63,7 +65,8 @@ export function toUnifiedMeetingEvents(
     end.setDate(start.getDate() + 1);
     return {
       id: entry.relPath,
-      title: `${entry.type} · ${entry.topic}`,
+      title: entry.title,
+      fileName: entry.fileName,
       start,
       end,
       allDay: true,
