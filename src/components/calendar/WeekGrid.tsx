@@ -16,12 +16,15 @@ import type {
   LaneSegment,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
+import type { DocumentLabelMode } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 
 interface WeekGridProps<T> {
   viewDate: Date;
   events: Array<UnifiedCalendarEvent<T>>;
   weekStartsOn: 0 | 1;
   locale: CalendarLocale;
+  labelMode?: DocumentLabelMode;
   today: Date;
   onSelectEvent?: (event: UnifiedCalendarEvent<T>) => void;
   onSelectDate?: (date: Date) => void;
@@ -35,6 +38,7 @@ export function WeekGrid<T>({
   events,
   weekStartsOn,
   locale,
+  labelMode = "title",
   today,
   onSelectEvent,
   onSelectDate,
@@ -106,7 +110,13 @@ export function WeekGrid<T>({
             }}
           >
             {allDaySegments.flatMap((lane, laneIdx) =>
-              lane.map((seg) => (
+              lane.map((seg) => {
+                const label = resolveDisplayLabel(
+                  seg.event.title,
+                  seg.event.fileName,
+                  labelMode,
+                );
+                return (
                 <button
                   key={`wbar-${laneIdx}-${seg.event.id}`}
                   type="button"
@@ -117,14 +127,15 @@ export function WeekGrid<T>({
                     gridColumn: `${seg.startColumn + 1} / span ${seg.endColumn - seg.startColumn + 1}`,
                     gridRow: laneIdx + 1,
                   }}
-                  title={seg.event.title}
+                  title={label.secondary ? `${label.primary} · ${label.secondary}` : label.primary}
                   onClick={() => onSelectEvent?.(seg.event)}
                 >
                   <span className="cal-bar-label">
-                    {seg.openLeft ? null : seg.event.title}
+                    {seg.openLeft ? null : label.primary}
                   </span>
                 </button>
-              )),
+                );
+              }),
             )}
           </div>
         </div>
@@ -173,12 +184,14 @@ export function WeekGrid<T>({
                   18,
                   ((endMinutes - Math.max(startMinutes, startHour * 60)) / 60) * HOUR_HEIGHT,
                 );
+                const label = resolveDisplayLabel(event.title, event.fileName, labelMode);
                 return (
                   <button
                     key={event.id}
                     type="button"
                     className={`cal-event-block cat-${event.category}`}
                     style={{ top: `${top}px`, height: `${height}px` }}
+                    title={label.secondary ? `${label.primary} · ${label.secondary}` : label.primary}
                     onClick={(ev) => {
                       ev.stopPropagation();
                       onSelectEvent?.(event);
@@ -189,7 +202,10 @@ export function WeekGrid<T>({
                         locale: localeObj,
                       })}
                     </span>
-                    <span className="cal-event-title">{event.title}</span>
+                    <span className="cal-event-title">{label.primary}</span>
+                    {label.secondary ? (
+                      <span className="cal-event-subtitle">{label.secondary}</span>
+                    ) : null}
                   </button>
                 );
               })}

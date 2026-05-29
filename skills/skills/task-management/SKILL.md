@@ -49,7 +49,11 @@ loaded at runtime.
 
 1. Normalize input into title, status, priority, due/start dates, tags,
    contexts, description, and action items.
-2. Create a markdown file in `active/` using `templates/task.md`.
+2. Create a markdown file in `active/` using `templates/task.md`. Always write a
+   human-readable `title` to frontmatter — Anchor shows the note by
+   `title -> name -> filename`, so a missing `title` makes it appear as the raw
+   filename. The body `# {title}` H1 is for readability only and is not used for
+   display.
 3. If Google Tasks is enabled, create a task in the configured default list and
    write `googleTaskId` and `googleTaskListId` back to frontmatter.
 4. If the task has a scheduled time or calendar-visible deadline, create a
@@ -69,8 +73,9 @@ loaded at runtime.
 ### Calendar-Only Item
 
 Use `calendar/` when the user asks for a schedule item with no actionable task.
-Create a markdown receipt with `taskSourceType: calendarEvent` and the calendar
-extra fields documented in `references/frontmatter-schema.md`.
+Create a markdown receipt with `taskSourceType: calendarEvent`, a human-readable
+`title` in frontmatter (so it does not show as the raw filename), and the
+calendar extra fields documented in `references/frontmatter-schema.md`.
 
 ### Vault-Value Hook
 

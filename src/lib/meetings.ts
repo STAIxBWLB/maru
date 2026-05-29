@@ -4,6 +4,8 @@ export interface MeetingNoteEntry {
   absPath: string;
   relPath: string;
   fileName: string;
+  /** Display title: frontmatter `title`/`name`, else `type · topic`. */
+  title: string;
   date: string;
   year: number;
   month: number;
@@ -63,10 +65,14 @@ export function parseMeetingFilename(
   const [type, topic, ...rest] = parts;
   if (!type || !topic) return null;
   const date = `${year}-${pad2(month)}-${pad2(day)}`;
+  const fm = row?.frontmatter ?? {};
+  const title =
+    scalarString(fm.title) ?? scalarString(fm.name) ?? `${type} · ${topic}`;
   return {
     absPath,
     relPath: row?.relPath ?? normalized,
     fileName,
+    title,
     date,
     year,
     month,
@@ -134,7 +140,7 @@ export function meetingsToCalendarEvents(
     end.setDate(start.getDate() + 1);
     return {
       id: entry.relPath,
-      title: `${entry.type} · ${entry.topic}`,
+      title: entry.title,
       start,
       end,
       allDay: true,
@@ -179,4 +185,10 @@ function isValidDateParts(year: number, month: number, day: number): boolean {
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
+}
+
+function scalarString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
 }

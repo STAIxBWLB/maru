@@ -471,6 +471,7 @@ export interface MeetingNoteRow {
   fileName: string;
   sizeBytes: number;
   updatedAt: string | null;
+  frontmatter: Record<string, unknown>;
 }
 
 export interface MeetingMetadata {

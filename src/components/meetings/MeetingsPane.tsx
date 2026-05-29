@@ -85,7 +85,7 @@ import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedMeetingEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView as UnifiedCalendarViewMode } from "../../lib/calendar/types";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
-import type { MeetingsSettings } from "../../lib/settings";
+import type { DocumentLabelMode, MeetingsSettings } from "../../lib/settings";
 import {
   agentApplySkillProposal,
   agentParseSkillProposal,
@@ -121,6 +121,7 @@ interface MeetingsPaneProps {
   workPath: string | null;
   settings: MeetingsSettings;
   effectiveSettings: MeetingsSettings;
+  labelMode: DocumentLabelMode;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
   processingMissions: MissionRecord[];
@@ -148,6 +149,7 @@ export function MeetingsPane({
   workPath,
   settings,
   effectiveSettings,
+  labelMode,
   skills,
   runtimeCommands,
   processingMissions,
@@ -514,6 +516,7 @@ export function MeetingsPane({
                     viewDate={viewDate}
                     weekStartsOn={1}
                     locale={locale}
+                    labelMode={labelMode}
                     today={todayDate}
                     query={query}
                     onQueryChange={setQuery}

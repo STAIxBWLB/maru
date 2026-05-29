@@ -11,6 +11,7 @@ function evt(
   return {
     id,
     title: id,
+    fileName: `${id}.md`,
     start: new Date(start),
     end: new Date(end),
     allDay: options.allDay ?? true,

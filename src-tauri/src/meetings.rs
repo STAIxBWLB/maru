@@ -22,6 +22,7 @@ pub struct MeetingNoteRow {
     pub file_name: String,
     pub size_bytes: u64,
     pub updated_at: Option<String>,
+    pub frontmatter: JsonValue,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,6 +98,9 @@ pub fn scan_meeting_notes(
             .metadata()
             .map_err(|err| format!("Cannot read meeting note metadata: {err}"))?;
         let rel_path = rel_path_for(&work, path);
+        let frontmatter = fs::read_to_string(path)
+            .map(|raw| yaml_to_json(&parse_frontmatter(&raw).meta))
+            .unwrap_or_else(|_| JsonValue::Object(JsonMap::new()));
         rows.push(MeetingNoteRow {
             path: path.to_string_lossy().to_string(),
             rel_path: rel_path.clone(),
@@ -111,6 +115,7 @@ pub fn scan_meeting_notes(
                 .ok()
                 .map(DateTime::<Utc>::from)
                 .map(|value| value.to_rfc3339()),
+            frontmatter,
         });
     }
     rows.sort_by(|a, b| {
@@ -521,7 +526,11 @@ mod tests {
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("meetings/2026/2026-04");
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("04-20 회의 - Anchor - KPI.md"), "# A").unwrap();
+        fs::write(
+            root.join("04-20 회의 - Anchor - KPI.md"),
+            "---\ntitle: Anchor KPI 점검\n---\n# A",
+        )
+        .unwrap();
         fs::write(root.join("04-20 회의 - Anchor - KPI.txt"), "no").unwrap();
         let excluded = tmp
             .path()
@@ -536,6 +545,7 @@ mod tests {
             rows[0].rel_path,
             "meetings/2026/2026-04/04-20 회의 - Anchor - KPI.md"
         );
+        assert_eq!(rows[0].frontmatter["title"], "Anchor KPI 점검");
     }
 
     #[test]

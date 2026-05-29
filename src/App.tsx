@@ -6313,6 +6313,7 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             settings={anchorSettings.meetings}
             effectiveSettings={effectiveMeetingsSettings}
+            labelMode={anchorSettings.ui.documentLabelMode}
             skills={skills}
             runtimeCommands={skillRuntimeCommands}
             processingMissions={activeMeetingsMissions(processingMissions)}
@@ -6334,6 +6335,7 @@ function MainApp() {
           <TasksPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
+            labelMode={anchorSettings.ui.documentLabelMode}
             skills={skills}
             processingMissions={activeTasksMissions(processingMissions)}
             processingLogLines={processingLogLines}

@@ -16,6 +16,7 @@ const rows: MeetingNoteRow[] = [
     fileName: "04-20 회의 - Anchor 사업 주간 점검 - KPI.md",
     sizeBytes: 100,
     updatedAt: "2026-04-20T10:00:00+09:00",
+    frontmatter: {},
   },
   {
     path: "/work/meetings/2026/2026-05/05-04 상담 - Skills 관리 - Codex.md",
@@ -23,6 +24,7 @@ const rows: MeetingNoteRow[] = [
     fileName: "05-04 상담 - Skills 관리 - Codex.md",
     sizeBytes: 80,
     updatedAt: "2026-05-04T10:00:00+09:00",
+    frontmatter: {},
   },
   {
     path: "/work/meetings/2026/2026-05/not-a-meeting.md",
@@ -30,6 +32,7 @@ const rows: MeetingNoteRow[] = [
     fileName: "not-a-meeting.md",
     sizeBytes: 10,
     updatedAt: null,
+    frontmatter: {},
   },
 ];
 
@@ -48,6 +51,25 @@ describe("parseMeetingFilename", () => {
       detail: "KPI",
       size: 100,
     });
+  });
+
+  it("derives title from type · topic when frontmatter has none", () => {
+    const entry = parseMeetingFilename(rows[0].relPath, rows[0]);
+    expect(entry?.title).toBe("회의 · Anchor 사업 주간 점검");
+  });
+
+  it("prefers frontmatter title (then name) over type · topic", () => {
+    const withTitle = parseMeetingFilename(rows[0].relPath, {
+      ...rows[0],
+      frontmatter: { title: "Anchor 주간 KPI 회의" },
+    });
+    expect(withTitle?.title).toBe("Anchor 주간 KPI 회의");
+
+    const withName = parseMeetingFilename(rows[0].relPath, {
+      ...rows[0],
+      frontmatter: { name: "KPI 점검" },
+    });
+    expect(withName?.title).toBe("KPI 점검");
   });
 
   it("excludes invalid names and mismatched folder months", () => {

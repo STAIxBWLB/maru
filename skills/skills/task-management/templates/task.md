@@ -1,4 +1,5 @@
 ---
+title: {title}
 status: open
 priority: medium
 dateCreated: YYYY-MM-DD

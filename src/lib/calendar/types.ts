@@ -5,6 +5,8 @@ export type CalendarLocale = "ko" | "en";
 export interface UnifiedCalendarEvent<T = unknown> {
   id: string;
   title: string;
+  /** Source filename, used by the label mode to show filename / both. */
+  fileName: string;
   start: Date;
   end: Date;
   allDay: boolean;

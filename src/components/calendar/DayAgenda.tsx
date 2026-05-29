@@ -6,11 +6,14 @@ import type {
   CalendarLocale,
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
+import type { DocumentLabelMode } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 
 interface DayAgendaProps<T> {
   viewDate: Date;
   events: Array<UnifiedCalendarEvent<T>>;
   locale: CalendarLocale;
+  labelMode?: DocumentLabelMode;
   onSelectEvent?: (event: UnifiedCalendarEvent<T>) => void;
   emptyLabel?: string;
 }
@@ -19,6 +22,7 @@ export function DayAgenda<T>({
   viewDate,
   events,
   locale,
+  labelMode = "title",
   onSelectEvent,
   emptyLabel,
 }: DayAgendaProps<T>) {
@@ -50,7 +54,9 @@ export function DayAgenda<T>({
         </span>
       </header>
       <ol className="cal-day-list">
-        {visible.map((event) => (
+        {visible.map((event) => {
+          const label = resolveDisplayLabel(event.title, event.fileName, labelMode);
+          return (
           <li key={event.id}>
             <button
               type="button"
@@ -66,10 +72,16 @@ export function DayAgenda<T>({
                       locale: localeObj,
                     })}
               </span>
-              <span className="cal-day-title">{event.title}</span>
+              <span className="cal-day-titles">
+                <span className="cal-day-title">{label.primary}</span>
+                {label.secondary ? (
+                  <span className="cal-day-subtitle">{label.secondary}</span>
+                ) : null}
+              </span>
             </button>
           </li>
-        ))}
+          );
+        })}
       </ol>
     </div>
   );

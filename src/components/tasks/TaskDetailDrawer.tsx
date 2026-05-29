@@ -11,12 +11,15 @@ import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
 import type { TaskMetadata, TaskSchedulePatch } from "../../lib/types";
 import type { SkillContextItem, SkillRecord } from "../../lib/skills";
+import type { DocumentLabelMode } from "../../lib/settings";
+import { resolveDisplayLabel } from "../../lib/document";
 import { Button } from "../ui/Button";
 
 interface TaskDetailDrawerProps {
   entry: TaskEntry | null;
   metadata: TaskMetadata | null;
   loading: boolean;
+  labelMode: DocumentLabelMode;
   skills: SkillRecord[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -33,6 +36,7 @@ export function TaskDetailDrawer({
   entry,
   metadata,
   loading,
+  labelMode,
   skills,
   collapsed,
   onToggleCollapsed,
@@ -115,7 +119,7 @@ export function TaskDetailDrawer({
       <header className="task-detail-header">
         <div>
           <span>{entry.project ?? t("tasks.project.none")}</span>
-          <h2>{entry.title}</h2>
+          <h2>{resolveDisplayLabel(entry.title, entry.fileName, labelMode).primary}</h2>
           <p>{entry.relPath}</p>
         </div>
         <div className="task-detail-header-actions">

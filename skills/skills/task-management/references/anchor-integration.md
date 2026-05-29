@@ -29,6 +29,10 @@ tasks/
 
 Anchor should display these when present:
 
+- `title` — display name. Anchor resolves the shown label as
+  `title -> name -> filename`, so notes without a `title` fall back to their
+  raw filename. A workspace-wide label mode (`title` / `filename` / both)
+  controls whether the UI shows the title, the filename, or both together.
 - `status`, `priority`, `due`, `start`, `done`
 - `tags`, `contexts`, `projects`, `topics`
 - `googleTaskId`, `googleTaskListId`
