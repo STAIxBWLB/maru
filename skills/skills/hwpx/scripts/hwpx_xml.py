@@ -36,6 +36,8 @@ HS = f"{{{HS_NS}}}"
 NS = {"hp": HP_NS, "hs": HS_NS, "hh": HH_NS}
 
 _SECTION_RE = re.compile(r"contents/section(\d+)\.xml$", re.IGNORECASE)
+XML_SUFFIXES = (".xml", ".hpf")
+SLOT_RE = re.compile(r"\{\{\s*([^{}\r\n]+?)\s*\}\}")
 
 
 # ── low-level helpers ────────────────────────────────────────────────────────
@@ -75,6 +77,12 @@ def body_paragraphs(parent: etree._Element) -> list[etree._Element]:
 def all_paragraphs(root: etree._Element) -> list[etree._Element]:
     """Every <hp:p> at any depth (incl. table cells / subList)."""
     return list(root.iter(f"{HP}p"))
+
+
+def document_xml_entry_names(src: Path) -> list[str]:
+    """XML/HPF entries that can be parsed and inspected structurally."""
+    with zipfile.ZipFile(src) as zin:
+        return [n for n in zin.namelist() if n.lower().endswith(XML_SUFFIXES)]
 
 
 def t_nodes(p: etree._Element) -> list[etree._Element]:
@@ -179,13 +187,8 @@ def edit_text(src: Path, dst: Path, replacements: dict[str, str],
     remaining = limit
     overrides: dict[str, bytes] = {}
 
+    xml_names = document_xml_entry_names(src)
     with zipfile.ZipFile(src) as zin:
-        names = zin.namelist()
-        xml_names = [
-            n for n in names
-            if n.lower().endswith(".xml")
-            and ("section" in n.lower() or n.lower().endswith("header.xml"))
-        ]
         data_map = {n: zin.read(n) for n in xml_names}
 
     for name, data in data_map.items():
@@ -209,6 +212,26 @@ def edit_text(src: Path, dst: Path, replacements: dict[str, str],
     return counts
 
 
+def scan_slots(src: Path) -> dict[str, int]:
+    """Return {{field}} counts from the same paragraph text surface edit_text uses.
+
+    This is run-aware because paragraph_text joins <hp:t> nodes before applying
+    the slot regex; it intentionally ignores raw XML text outside paragraphs.
+    """
+    counts: dict[str, int] = {}
+    xml_names = document_xml_entry_names(src)
+    with zipfile.ZipFile(src) as zin:
+        data_map = {n: zin.read(n) for n in xml_names}
+    for data in data_map.values():
+        tree = parse_xml(data)
+        for p in all_paragraphs(tree.getroot()):
+            for match in SLOT_RE.finditer(paragraph_text(p)):
+                key = match.group(1).strip()
+                if key:
+                    counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 # ── section-body editing (deepcopy + reverse-order) ──────────────────────────
 
 def clone_para(ref_p: etree._Element, run_texts: list[str]) -> etree._Element:
@@ -220,10 +243,11 @@ def clone_para(ref_p: etree._Element, run_texts: list[str]) -> etree._Element:
     runs = [c for c in new_p if localname(c) == "run"]
     for i, txt in enumerate(run_texts):
         if i < len(runs):
+            wrote = False
             for el in runs[i].iter():
                 if localname(el) == "t":
-                    el.text = txt
-                    break
+                    el.text = txt if not wrote else ""
+                    wrote = True
     for r in runs[len(run_texts):]:
         new_p.remove(r)
     return new_p
@@ -400,6 +424,7 @@ def set_cell_text(tc: etree._Element, value: str) -> bool:
     for p in paras[1:]:
         for t in [e for e in p.iter() if localname(e) == "t"]:
             t.text = ""
+        remove_linesegarray(p)
     remove_linesegarray(first_p)
     return done
 

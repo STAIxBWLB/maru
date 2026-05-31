@@ -22,6 +22,7 @@ import zipfile
 from dataclasses import dataclass, asdict
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import List, Tuple
 
 from lxml import etree
@@ -30,6 +31,7 @@ NS = {
     "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
     "hs": "http://www.hancom.co.kr/hwpml/2011/section",
 }
+_SECTION_RE = re.compile(r"contents/section(\d+)\.xml$", re.IGNORECASE)
 
 
 @dataclass
@@ -44,9 +46,10 @@ class Metrics:
     paragraph_text_lengths: List[int]
 
 
-def _read_section_xml_bytes(hwpx_path: Path) -> bytes:
+def _section_entry_names(hwpx_path: Path) -> List[str]:
     with zipfile.ZipFile(hwpx_path, "r") as zf:
-        return zf.read("Contents/section0.xml")
+        names = [n for n in zf.namelist() if _SECTION_RE.search(n)]
+    return sorted(names, key=lambda n: int(_SECTION_RE.search(n).group(1)))
 
 
 def _text_of_t_node(t_node: etree._Element) -> str:
@@ -54,53 +57,65 @@ def _text_of_t_node(t_node: etree._Element) -> str:
 
 
 def collect_metrics(hwpx_path: Path) -> Metrics:
-    section_bytes = _read_section_xml_bytes(hwpx_path)
-    root = etree.parse(BytesIO(section_bytes)).getroot()
+    section_names = _section_entry_names(hwpx_path)
+    if not section_names:
+        raise KeyError("section XML not found")
 
-    paragraphs = root.xpath(".//hs:sec/hp:p", namespaces=NS)
-    if not paragraphs:
-        paragraphs = root.xpath(".//hp:p", namespaces=NS)
-
-    page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
-    column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
-
-    tables = root.xpath(".//hp:tbl", namespaces=NS)
+    paragraph_count = 0
+    page_break_count = 0
+    column_break_count = 0
     table_shapes: List[Tuple[str, str, str, str, str, str]] = []
-    for t in tables:
-        sz = t.find("hp:sz", namespaces=NS)
-        width = sz.get("width", "") if sz is not None else ""
-        height = sz.get("height", "") if sz is not None else ""
-        table_shapes.append(
-            (
-                t.get("rowCnt", ""),
-                t.get("colCnt", ""),
-                width,
-                height,
-                t.get("repeatHeader", ""),
-                t.get("pageBreak", ""),
-            )
-        )
-
-    t_nodes = root.xpath(".//hp:t", namespaces=NS)
     text_char_total = 0
     text_char_total_nospace = 0
-    for t in t_nodes:
-        s = _text_of_t_node(t)
-        text_char_total += len(s)
-        text_char_total_nospace += len("".join(s.split()))
-
     paragraph_text_lengths: List[int] = []
-    for p in paragraphs:
-        plen = 0
-        for t in p.xpath(".//hp:t", namespaces=NS):
-            plen += len(_text_of_t_node(t))
-        paragraph_text_lengths.append(plen)
+
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        section_bytes = [zf.read(name) for name in section_names]
+
+    for data in section_bytes:
+        root = etree.parse(BytesIO(data)).getroot()
+
+        paragraphs = root.xpath(".//hs:sec/hp:p", namespaces=NS)
+        if not paragraphs:
+            paragraphs = root.xpath(".//hp:p", namespaces=NS)
+
+        paragraph_count += len(paragraphs)
+        page_break_count += sum(1 for p in paragraphs if p.get("pageBreak") == "1")
+        column_break_count += sum(1 for p in paragraphs if p.get("columnBreak") == "1")
+
+        tables = root.xpath(".//hp:tbl", namespaces=NS)
+        for t in tables:
+            sz = t.find("hp:sz", namespaces=NS)
+            width = sz.get("width", "") if sz is not None else ""
+            height = sz.get("height", "") if sz is not None else ""
+            table_shapes.append(
+                (
+                    t.get("rowCnt", ""),
+                    t.get("colCnt", ""),
+                    width,
+                    height,
+                    t.get("repeatHeader", ""),
+                    t.get("pageBreak", ""),
+                )
+            )
+
+        t_nodes = root.xpath(".//hp:t", namespaces=NS)
+        for t in t_nodes:
+            s = _text_of_t_node(t)
+            text_char_total += len(s)
+            text_char_total_nospace += len("".join(s.split()))
+
+        for p in paragraphs:
+            plen = 0
+            for t in p.xpath(".//hp:t", namespaces=NS):
+                plen += len(_text_of_t_node(t))
+            paragraph_text_lengths.append(plen)
 
     return Metrics(
-        paragraph_count=len(paragraphs),
+        paragraph_count=paragraph_count,
         page_break_count=page_break_count,
         column_break_count=column_break_count,
-        table_count=len(tables),
+        table_count=len(table_shapes),
         table_shapes=table_shapes,
         text_char_total=text_char_total,
         text_char_total_nospace=text_char_total_nospace,

@@ -204,6 +204,21 @@ def _derive_output(input_path: str, suffix: str) -> str:
     return str(p.with_name(p.stem + suffix))
 
 
+def _resolve_section_entry(requested: str | None, section_names: list[str]) -> str | None:
+    """Resolve either a full zip entry or a basename such as section0.xml."""
+    if not section_names:
+        return None
+    if not requested:
+        return section_names[0]
+    if requested in section_names:
+        return requested
+    req_name = Path(requested).name.lower()
+    for name in section_names:
+        if Path(name).name.lower() == req_name:
+            return name
+    return None
+
+
 def _create_lines_from_args(args) -> list[str]:
     import write_java as write_java_mod
 
@@ -390,24 +405,16 @@ def cmd_fill(args) -> int:
 
 
 def cmd_slots(args) -> int:
+    import hwpx_xml as hx
+
     input_path = _ensure_file(args.template)
     if input_path.suffix.lower() != ".hwpx":
         _die(1, f"slots는 .hwpx 파일만 지원: {input_path}")
 
-    pattern = re.compile(r"\{\{\s*([^{}\r\n]+?)\s*\}\}")
-    counts: dict[str, int] = {}
     try:
-        with zipfile.ZipFile(input_path, "r") as zf:
-            for info in zf.infolist():
-                if not _xml_entry(info.filename):
-                    continue
-                text = zf.read(info).decode("utf-8", errors="ignore")
-                for match in pattern.finditer(text):
-                    key = match.group(1).strip()
-                    if key:
-                        counts[key] = counts.get(key, 0) + 1
-    except zipfile.BadZipFile as e:
-        _die(2, f"HWPX(zip) 파싱 실패: {e}")
+        counts = hx.scan_slots(input_path)
+    except (zipfile.BadZipFile, etree.XMLSyntaxError) as e:
+        _die(2, f"HWPX 슬롯 스캔 실패: {e}")
 
     fields = [
         {
@@ -617,7 +624,9 @@ def cmd_analyze(args) -> int:
     sec_names = hx.section_entry_names(path)
     if not sec_names:
         _die(2, "section XML 없음")
-    target = args.section_file or sec_names[0]
+    target = _resolve_section_entry(args.section_file, sec_names)
+    if target is None:
+        _die(2, f"section XML 없음: {args.section_file}")
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
         data = zf.read(target)
@@ -699,14 +708,12 @@ def cmd_edit_section(args) -> int:
     import hwpx_xml as hx
 
     path = _ensure_file(args.file)
-    target = args.section_file
+    secs = hx.section_entry_names(path)
+    target = _resolve_section_entry(args.section_file, secs)
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
-        if not target:
-            secs = hx.section_entry_names(path)
-            target = secs[0] if secs else None
         if target is None or target not in names:
-            _die(2, f"section XML 없음: {target}")
+            _die(2, f"section XML 없음: {args.section_file or '<default>'}")
         data = zf.read(target)
 
     tree = hx.parse_xml(data)
