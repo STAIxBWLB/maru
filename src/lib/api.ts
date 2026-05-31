@@ -907,6 +907,7 @@ export async function startAgentCliInvocation(
   extraArgs: string[] | null = null,
   extraEnv: Record<string, string> | null = null,
   commandOverride: string | null = null,
+  permissionMode: string | null = null,
 ): Promise<string> {
   if (!isTauri()) {
     throw new Error("Agent CLI invocation is only available inside the Tauri shell.");
@@ -918,6 +919,7 @@ export async function startAgentCliInvocation(
     extraArgs,
     extraEnv,
     commandOverride,
+    permissionMode,
   });
 }
 

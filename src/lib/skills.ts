@@ -520,6 +520,7 @@ export async function skillsDispatchBackground(params: {
   context?: SkillContextItem[] | null;
   metadata?: MissionMetadata | null;
   commandOverride?: string | null;
+  permissionMode?: string | null;
 }): Promise<string> {
   if (!isTauri()) return `mock-skill-run-${params.runtime}-${Date.now()}`;
   return invoke<string>("skills_dispatch_background", params);
@@ -603,6 +604,7 @@ export async function agentRunStructuredLoop(params: {
   ambiguous?: boolean | null;
   maxRework?: number | null;
   commandOverride?: string | null;
+  permissionMode?: string | null;
 }): Promise<string> {
   if (!isTauri()) return `mock-structured-loop-${params.provider}`;
   return invoke<string>("agent_run_structured_loop", {
@@ -613,6 +615,7 @@ export async function agentRunStructuredLoop(params: {
     ambiguous: params.ambiguous ?? null,
     maxRework: params.maxRework ?? null,
     commandOverride: params.commandOverride ?? null,
+    permissionMode: params.permissionMode ?? null,
   });
 }
 

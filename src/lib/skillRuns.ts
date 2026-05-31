@@ -25,6 +25,7 @@ export interface SkillRunRetryRequest {
   cwd: string | null;
   context: SkillContextItem[];
   commandOverride?: string | null;
+  permissionMode?: string | null;
 }
 
 export interface SkillRunView {
@@ -52,8 +53,20 @@ export function isSkillMission(mission: MissionRecord): boolean {
   return mission.kind === "skill";
 }
 
+export function isStructuredMission(mission: MissionRecord): boolean {
+  return stringField(missionMetadata(mission), "origin") === "structuredLoop";
+}
+
+export function isTrackedAgentMission(mission: MissionRecord): boolean {
+  return isSkillMission(mission) || isStructuredMission(mission);
+}
+
 export function activeSkillMissions(missions: MissionRecord[]): MissionRecord[] {
   return missions.filter(isSkillMission).sort(compareMissions);
+}
+
+export function activeTrackedAgentMissions(missions: MissionRecord[]): MissionRecord[] {
+  return missions.filter(isTrackedAgentMission).sort(compareMissions);
 }
 
 export function skillRunView(
@@ -69,6 +82,7 @@ export function skillRunView(
   const metadata = missionMetadata(mission);
   const formatted = logLines.map(formatSkillRunLogLine);
   const latest = formatted.at(-1);
+  const structured = isStructuredMission(mission);
   return {
     id: mission.id,
     skillName: stringField(metadata, "skillName") ?? mission.id,
@@ -81,7 +95,7 @@ export function skillRunView(
     latestLog: latest?.text ?? "",
     latestSeverity: latest?.severity ?? "info",
     elapsedMs: Math.max(0, (options.now ?? Date.now()) - Date.parse(mission.startedAt)),
-    canStop: mission.status === "running" || mission.status === "idle",
+    canStop: !structured && (mission.status === "running" || mission.status === "idle"),
     canReview: mission.status === "done" || options.reviewLoaded === true,
     canRetry: options.retryAvailable === true && mission.status !== "running" && mission.status !== "idle",
   };
@@ -163,6 +177,7 @@ export function extractSkillRunRetryRequest(events: AgentRunEvent[]): SkillRunRe
             .filter((item) => item.path)
         : [],
       commandOverride: stringValue(dispatch.commandOverride),
+      permissionMode: stringValue(dispatch.permissionMode),
     };
   }
   return null;

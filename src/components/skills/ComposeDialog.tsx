@@ -43,6 +43,7 @@ interface ComposeDialogProps {
   onBackgroundDispatch?: (invocationId: string) => void;
   runtimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   defaultRuntime?: SkillDispatchRuntime;
+  permissionMode?: string;
   onError: (message: string | null) => void;
 }
 
@@ -55,6 +56,7 @@ export function ComposeDialog({
   onBackgroundDispatch,
   runtimeCommands = {},
   defaultRuntime,
+  permissionMode,
   onError,
 }: ComposeDialogProps) {
   const { t } = useTranslation();
@@ -182,12 +184,21 @@ export function ComposeDialog({
           setBusy(false);
           return;
         }
-        const directive = `[skill: ${selectedSkill.name}]\n\n${prompt}`;
+        // Compose the full directive (SKILL.md body + selected context + user
+        // prompt) the same way terminal/background dispatch does, so the loop
+        // sees the skill's actual instructions, not just its name.
+        const composition = await skillsDispatchCompose({
+          skillId: selectedSkill.id,
+          prompt,
+          cwd: seed.cwd,
+          context,
+        });
         const runId = await agentRunStructuredLoop({
           provider: runtime,
-          directive,
+          directive: composition.prompt,
           cwd: seed.cwd,
           commandOverride: runtimeCommands[runtime] ?? null,
+          permissionMode: permissionMode ?? null,
         });
         onBackgroundDispatch?.(runId);
         dispatchEvent = { mode: "structured", runtime, invocationId: runId };

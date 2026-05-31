@@ -53,6 +53,8 @@ export async function classifyInboxItem(
   item: InboxDropItem,
   runtime: AgentProvider = "claude",
   cwd: string | null = null,
+  commandOverride: string | null = null,
+  permissionMode: string | null = null,
 ): Promise<InboxClassification> {
   const prompt = await buildInboxClassificationPrompt(item);
 
@@ -65,7 +67,17 @@ export async function classifyInboxItem(
   // Pass the workspace cwd so the agent runs in the right tree. Codex `exec`
   // in particular refuses to run outside a trusted (git) directory, so without
   // a workspace cwd it would fail; the inbox workspace is always a git repo.
-  const invocationId = await startAgentCliInvocation(runtime, prompt, cwd);
+  // The command override + permission mode come from AI settings so a CLI
+  // installed outside PATH (or a non-plan mode) is honored.
+  const invocationId = await startAgentCliInvocation(
+    runtime,
+    prompt,
+    cwd,
+    null,
+    null,
+    commandOverride,
+    permissionMode,
+  );
 
   return await new Promise<InboxClassification>((resolve, reject) => {
     let stdoutBuffer = "";

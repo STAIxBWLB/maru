@@ -64,11 +64,39 @@ impl CliProviderKind {
     }
 }
 
+/// User-facing AI permission modes shared by Claude and Codex command builders.
+/// Unknown/empty input falls back to the safe `plan` default.
+pub fn normalize_permission_mode(value: &str) -> &'static str {
+    match value.trim() {
+        "acceptEdits" => "acceptEdits",
+        "bypassPermissions" => "bypassPermissions",
+        "default" => "default",
+        _ => "plan",
+    }
+}
+
+fn apply_codex_permission_args(cmd: &mut Command, permission_mode: &str) {
+    match normalize_permission_mode(permission_mode) {
+        "plan" => {
+            cmd.arg("--sandbox").arg("read-only");
+        }
+        "acceptEdits" => {
+            cmd.arg("--sandbox").arg("workspace-write");
+        }
+        "default" => {}
+        "bypassPermissions" => {
+            cmd.arg("--dangerously-bypass-approvals-and-sandbox");
+        }
+        _ => unreachable!("normalize_permission_mode only returns known modes"),
+    }
+}
+
 pub fn build_cli_command(
     provider: CliProviderKind,
     request: &CompletionRequest,
     add_dirs: &[String],
     command_override: Option<&str>,
+    permission_mode: &str,
 ) -> Result<(Command, Option<String>), String> {
     request.validate()?;
     match provider {
@@ -80,7 +108,7 @@ pub fn build_cli_command(
             cmd.arg("-p")
                 .arg(&request.prompt)
                 .arg("--permission-mode")
-                .arg("plan")
+                .arg(normalize_permission_mode(permission_mode))
                 .stdin(Stdio::null());
             for dir in add_dirs {
                 cmd.arg("--add-dir").arg(dir);
@@ -92,7 +120,9 @@ pub fn build_cli_command(
                 "cli_missing: codex CLI not found in PATH or common install locations".to_string()
             })?;
             let mut cmd = Command::new(bin);
-            cmd.arg("exec").arg("--cd").arg(&request.cwd);
+            cmd.arg("exec");
+            apply_codex_permission_args(&mut cmd, permission_mode);
+            cmd.arg("--cd").arg(&request.cwd);
             for dir in add_dirs {
                 cmd.arg("--add-dir").arg(dir);
             }
@@ -121,6 +151,7 @@ pub struct CliProviderAdapter {
     provider: CliProviderKind,
     add_dirs: Vec<String>,
     command_override: Option<String>,
+    permission_mode: String,
 }
 
 impl CliProviderAdapter {
@@ -128,11 +159,13 @@ impl CliProviderAdapter {
         provider: CliProviderKind,
         add_dirs: Vec<String>,
         command_override: Option<String>,
+        permission_mode: String,
     ) -> Self {
         Self {
             provider,
             add_dirs,
             command_override,
+            permission_mode,
         }
     }
 }
@@ -152,6 +185,7 @@ impl ProviderAdapter for CliProviderAdapter {
             &request,
             &self.add_dirs,
             self.command_override.as_deref(),
+            &self.permission_mode,
         )?;
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
@@ -360,6 +394,7 @@ mod tests {
             CliProviderKind::Claude,
             vec![dir.path().to_string_lossy().into_owned()],
             Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
         );
         let response = adapter
             .complete(completion_request("do work", dir.path().to_str().unwrap()))
@@ -378,6 +413,7 @@ mod tests {
             CliProviderKind::Codex,
             vec![dir.path().to_string_lossy().into_owned()],
             Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
         );
         let response = adapter
             .complete(completion_request("PROMPT-MARKER", dir.path().to_str().unwrap()))
@@ -398,6 +434,7 @@ mod tests {
             CliProviderKind::Claude,
             vec![dir.path().to_string_lossy().into_owned()],
             Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
         );
         let err = adapter
             .complete(completion_request("do work", dir.path().to_str().unwrap()))
@@ -414,10 +451,109 @@ mod tests {
             CliProviderKind::Claude,
             vec![],
             Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
         );
         let err = adapter
             .complete(completion_request("   ", dir.path().to_str().unwrap()))
             .unwrap_err();
         assert_eq!(err, "completion_prompt_required");
+    }
+
+    #[test]
+    fn permission_mode_normalizes_unknown_to_plan() {
+        assert_eq!(normalize_permission_mode("acceptEdits"), "acceptEdits");
+        assert_eq!(normalize_permission_mode("bypassPermissions"), "bypassPermissions");
+        assert_eq!(normalize_permission_mode("default"), "default");
+        assert_eq!(normalize_permission_mode(""), "plan");
+        assert_eq!(normalize_permission_mode("nonsense"), "plan");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_applies_permission_mode_for_claude() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-claude"), "#!/bin/sh\nexit 0\n");
+        let (cmd, _stdin) = build_cli_command(
+            CliProviderKind::Claude,
+            &completion_request("hi", dir.path().to_str().unwrap()),
+            &[],
+            Some(cli.to_str().unwrap()),
+            "acceptEdits",
+        )
+        .unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let idx = args.iter().position(|a| a == "--permission-mode").unwrap();
+        assert_eq!(args[idx + 1], "acceptEdits");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_applies_permission_mode_for_codex() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-codex"), "#!/bin/sh\nexit 0\n");
+        let request = completion_request("hi", dir.path().to_str().unwrap());
+
+        let (plan_cmd, _stdin) = build_cli_command(
+            CliProviderKind::Codex,
+            &request,
+            &[],
+            Some(cli.to_str().unwrap()),
+            "plan",
+        )
+        .unwrap();
+        let plan_args: Vec<String> = plan_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(plan_args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
+
+        let (write_cmd, _stdin) = build_cli_command(
+            CliProviderKind::Codex,
+            &request,
+            &[],
+            Some(cli.to_str().unwrap()),
+            "acceptEdits",
+        )
+        .unwrap();
+        let write_args: Vec<String> = write_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(write_args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "workspace-write"]));
+
+        let (default_cmd, _stdin) = build_cli_command(
+            CliProviderKind::Codex,
+            &request,
+            &[],
+            Some(cli.to_str().unwrap()),
+            "default",
+        )
+        .unwrap();
+        let default_args: Vec<String> = default_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(!default_args.iter().any(|arg| arg == "--sandbox"));
+
+        let (bypass_cmd, _stdin) = build_cli_command(
+            CliProviderKind::Codex,
+            &request,
+            &[],
+            Some(cli.to_str().unwrap()),
+            "bypassPermissions",
+        )
+        .unwrap();
+        let bypass_args: Vec<String> = bypass_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(bypass_args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
     }
 }

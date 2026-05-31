@@ -48,7 +48,15 @@ describe("classifyInboxItem runtime routing", () => {
     const pending = classifyInboxItem(item, "codex");
     // Wait until the run registered its event listeners (executor has run).
     await vi.waitFor(() => expect(handlers.has("ai://done")).toBe(true));
-    expect(startAgentCliInvocation).toHaveBeenCalledWith("codex", "PROMPT", null);
+    expect(startAgentCliInvocation).toHaveBeenCalledWith(
+      "codex",
+      "PROMPT",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
 
     // Drive the run to completion so the promise settles cleanly.
     handlers.get("ai://output")?.({
@@ -64,7 +72,15 @@ describe("classifyInboxItem runtime routing", () => {
   it("defaults to claude when no runtime is given", async () => {
     const pending = classifyInboxItem(item);
     await vi.waitFor(() => expect(handlers.has("ai://done")).toBe(true));
-    expect(startAgentCliInvocation).toHaveBeenCalledWith("claude", "PROMPT", null);
+    expect(startAgentCliInvocation).toHaveBeenCalledWith(
+      "claude",
+      "PROMPT",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
     handlers.get("ai://done")?.({
       payload: { invocationId: "inv-1", success: true, exitCode: 0 },
     });

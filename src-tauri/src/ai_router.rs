@@ -1,6 +1,6 @@
 // Provider-agnostic CLI subprocess bridge. Frontend calls
 // `start_agent_cli_invocation(provider, prompt, cwd?, extra_args?, extra_env?,
-// command_override?)`; Rust resolves the provider (`claude` / `codex`) via
+// command_override?, permission_mode?)`; Rust resolves the provider (`claude` / `codex`) via
 // `agent_host::provider::build_cli_command` — which already knows each CLI's
 // argv shape and whether the prompt is passed as an arg (Claude `-p`) or piped
 // over stdin (Codex `exec … -`) — then spawns it and streams stdout/stderr
@@ -15,11 +15,14 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use serde::Serialize;
+use serde_json::{json, Value as JsonValue};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
-use crate::agent_host::provider::{build_cli_command, CliProviderKind};
+use crate::agent_host::provider::{
+    build_cli_command, normalize_permission_mode, CliProviderKind,
+};
 use crate::cli_path::{augmented_path, merge_path_env};
 use crate::mission_state;
 
@@ -53,6 +56,7 @@ pub struct AiErrorEvent {
 /// Generic headless invocation: spawn `provider` (claude/codex) with `prompt`,
 /// streaming stdout/stderr as `ai://output` and a terminal `ai://done`/`ai://error`.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_agent_cli_invocation(
     app: AppHandle,
     provider: String,
@@ -61,17 +65,31 @@ pub fn start_agent_cli_invocation(
     extra_args: Option<Vec<String>>,
     extra_env: Option<HashMap<String, String>>,
     command_override: Option<String>,
+    permission_mode: Option<String>,
 ) -> Result<String, String> {
+    let command_override = command_override.filter(|value| !value.trim().is_empty());
+    let permission_mode =
+        normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
     let (provider_kind, resolved_cwd, mut cmd, stdin_payload) = build_agent_command(
         &provider,
         &prompt,
         cwd.as_deref(),
         command_override.as_deref(),
+        &permission_mode,
     )?;
     if let Some(args) = extra_args {
         cmd.args(args);
     }
     let invocation_id = format!("ai-{}", Uuid::new_v4());
+    let mission_cwd = resolved_cwd.clone();
+    let mission_metadata = json!({
+        "origin": "agentCliInvocation",
+        "provider": provider_kind.id(),
+        "runtime": provider_kind.id(),
+        "workspacePath": mission_cwd,
+        "permissionMode": permission_mode,
+        "commandOverride": command_override,
+    });
     spawn_streaming_invocation(
         app,
         invocation_id,
@@ -80,6 +98,7 @@ pub fn start_agent_cli_invocation(
         stdin_payload,
         extra_env.unwrap_or_default(),
         provider_kind.id().to_string(),
+        Some(mission_metadata),
     )
 }
 
@@ -104,6 +123,7 @@ pub fn start_claude_cli_invocation(
         extra_args,
         extra_env,
         None,
+        None,
     )
 }
 
@@ -116,6 +136,7 @@ fn build_agent_command(
     prompt: &str,
     cwd: Option<&str>,
     command_override: Option<&str>,
+    permission_mode: &str,
 ) -> Result<(CliProviderKind, String, Command, Option<String>), String> {
     if prompt.trim().is_empty() {
         return Err("completion_prompt_required".to_string());
@@ -141,8 +162,13 @@ fn build_agent_command(
         metadata: None,
     };
     let add_dirs = vec![request.cwd.clone()];
-    let (cmd, stdin_payload) =
-        build_cli_command(provider_kind, &request, &add_dirs, command_override)?;
+    let (cmd, stdin_payload) = build_cli_command(
+        provider_kind,
+        &request,
+        &add_dirs,
+        command_override,
+        permission_mode,
+    )?;
     Ok((provider_kind, resolved_cwd, cmd, stdin_payload))
 }
 
@@ -158,6 +184,7 @@ fn spawn_streaming_invocation(
     stdin_payload: Option<String>,
     extra_env: HashMap<String, String>,
     mission_kind: String,
+    mission_metadata: Option<JsonValue>,
 ) -> Result<String, String> {
     if let Some(cwd) = cwd.as_ref() {
         cmd.current_dir(cwd);
@@ -218,7 +245,13 @@ fn spawn_streaming_invocation(
         "stderr".to_string(),
         stderr,
     );
-    let _ = mission_state::register_mission(&app, &invocation_id, &mission_kind, child_pid);
+    let _ = mission_state::register_mission_with_metadata(
+        &app,
+        &invocation_id,
+        &mission_kind,
+        child_pid,
+        mission_metadata,
+    );
 
     // Reaper thread: wait for exit, then emit `ai://done` or `ai://error`.
     let app_done = app.clone();
@@ -302,13 +335,13 @@ mod tests {
 
     #[test]
     fn build_agent_command_rejects_empty_prompt() {
-        let err = build_agent_command("claude", "   \n\t  ", Some("/tmp"), None).unwrap_err();
+        let err = build_agent_command("claude", "   \n\t  ", Some("/tmp"), None, "plan").unwrap_err();
         assert_eq!(err, "completion_prompt_required");
     }
 
     #[test]
     fn build_agent_command_rejects_unsupported_provider() {
-        let err = build_agent_command("openai", "hello", Some("/tmp"), None).unwrap_err();
+        let err = build_agent_command("openai", "hello", Some("/tmp"), None, "plan").unwrap_err();
         assert!(err.starts_with("unsupported_provider"), "{err}");
     }
 
@@ -322,6 +355,7 @@ mod tests {
             "classify this",
             Some(dir.path().to_str().unwrap()),
             Some(cli.to_str().unwrap()),
+            "plan",
         )
         .unwrap();
         assert_eq!(kind, CliProviderKind::Claude);
@@ -347,6 +381,7 @@ mod tests {
             "classify this",
             Some(dir.path().to_str().unwrap()),
             Some(cli.to_str().unwrap()),
+            "plan",
         )
         .unwrap();
         assert_eq!(kind, CliProviderKind::Codex);

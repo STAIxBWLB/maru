@@ -15,7 +15,9 @@ use crate::agent_host::contracts::{
 };
 use crate::agent_host::event_store::append_run_event_payload;
 use crate::agent_host::proposal::parse_skill_proposal;
-use crate::agent_host::provider::{build_cli_command, resolve_provider_binary, CliProviderKind};
+use crate::agent_host::provider::{
+    build_cli_command, normalize_permission_mode, resolve_provider_binary, CliProviderKind,
+};
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::mission_state;
 use crate::skill_host::fs as host_fs;
@@ -156,8 +158,11 @@ pub fn skills_dispatch_background(
     context: Option<Vec<SkillContextItem>>,
     metadata: Option<JsonValue>,
     command_override: Option<String>,
+    permission_mode: Option<String>,
 ) -> Result<String, String> {
     let command_override = command_override.filter(|value| !value.trim().is_empty());
+    let permission_mode =
+        normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
     let original_skill_id = skill_id.clone();
     let original_prompt = prompt.clone();
     let composition = compose(skill_id, prompt, cwd, context.unwrap_or_default())?;
@@ -186,6 +191,7 @@ pub fn skills_dispatch_background(
         &completion_request,
         &add_dirs,
         command_override.as_deref(),
+        &permission_mode,
     )?;
     let retry_payload = serde_json::json!({
         "skillId": original_skill_id,
@@ -194,6 +200,7 @@ pub fn skills_dispatch_background(
         "cwd": composition.cwd,
         "context": composition.context,
         "commandOverride": command_override,
+        "permissionMode": permission_mode,
     });
     spawn_background(
         app,

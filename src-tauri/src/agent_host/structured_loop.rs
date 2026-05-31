@@ -19,7 +19,9 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::event_store::{append_run_event_payload, validate_run_id};
-use crate::agent_host::provider::{CliProviderAdapter, CliProviderKind};
+use crate::agent_host::provider::{
+    normalize_permission_mode, CliProviderAdapter, CliProviderKind,
+};
 use crate::agent_host::roles::{run_five_role_loop, FiveRoleLoopInput};
 use crate::ai_router::{AiDoneEvent, AiErrorEvent};
 use crate::mission_state;
@@ -36,6 +38,7 @@ pub fn agent_run_structured_loop(
     max_rework: Option<usize>,
     run_id: Option<String>,
     command_override: Option<String>,
+    permission_mode: Option<String>,
 ) -> Result<String, String> {
     if directive.trim().is_empty() {
         return Err("five_role_directive_required".to_string());
@@ -54,6 +57,9 @@ pub fn agent_run_structured_loop(
     let high_risk = high_risk.unwrap_or(false);
     let ambiguous = ambiguous.unwrap_or(false);
     let max_rework = max_rework.unwrap_or(1);
+    let command_override = command_override.filter(|value| !value.trim().is_empty());
+    let permission_mode =
+        normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
 
     // Write `run.started` up-front so an invalid cwd fails fast (propagated to
     // the caller). The top-level `runtimeProvider` lets the redacted-summary
@@ -69,6 +75,8 @@ pub fn agent_run_structured_loop(
             "highRisk": high_risk,
             "ambiguous": ambiguous,
             "maxRework": max_rework,
+            "permissionMode": permission_mode,
+            "commandOverride": command_override,
         }),
     )?;
 
@@ -84,6 +92,8 @@ pub fn agent_run_structured_loop(
             "runtime": provider_kind.id(),
             "workspacePath": cwd.clone(),
             "skillName": "Structured run",
+            "permissionMode": permission_mode,
+            "commandOverride": command_override,
         })),
     )?;
 
@@ -100,7 +110,8 @@ pub fn agent_run_structured_loop(
     let run_id_thread = run_id.clone();
     let cwd_thread = cwd;
     thread::spawn(move || {
-        let mut adapter = CliProviderAdapter::new(provider_kind, add_dirs, command_override);
+        let mut adapter =
+            CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode);
         match run_five_role_loop(&mut adapter, input) {
             Ok(result) => {
                 for role_output in &result.role_outputs {
@@ -112,16 +123,21 @@ pub fn agent_run_structured_loop(
                         json!({ "role": role_output.role, "content": role_output.content }),
                     );
                 }
-                if let Some(proposal) = &result.proposal {
-                    let _ = append_run_event_payload(
-                        &cwd_thread,
-                        &run_id_thread,
-                        "proposal.created",
-                        "anchor.structured_loop",
-                        json!({ "proposal": proposal }),
-                    );
-                }
                 let success = result.status == "passed";
+                // Only a reviewer-approved ("passed") proposal is applicable. A
+                // proposal that failed the structured review must NOT surface as
+                // `proposal.created`, or SkillRunsPanel would let it be applied.
+                if success {
+                    if let Some(proposal) = &result.proposal {
+                        let _ = append_run_event_payload(
+                            &cwd_thread,
+                            &run_id_thread,
+                            "proposal.created",
+                            "anchor.structured_loop",
+                            json!({ "proposal": proposal }),
+                        );
+                    }
+                }
                 let _ = append_run_event_payload(
                     &cwd_thread,
                     &run_id_thread,
@@ -202,6 +218,7 @@ mod tests {
             CliProviderKind::Claude,
             vec![dir.path().to_string_lossy().into_owned()],
             Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
         );
         let result = run_five_role_loop(
             &mut adapter,

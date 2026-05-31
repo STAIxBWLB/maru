@@ -965,11 +965,22 @@ function MainApp() {
     [anchorSettings.scan.includeDotFolders],
   );
   const skillRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
+    // AI command overrides take precedence over terminal launcher commands so a
+    // CLI configured in AI settings is honored by every skill dispatch path
+    // (terminal / background / structured); fall back to the launcher command.
     () => ({
-      claude: anchorSettings.terminal.launchers.claude.command ?? null,
-      codex: anchorSettings.terminal.launchers.codex.command ?? null,
+      claude:
+        anchorSettings.ai.commandOverrides.claude ??
+        anchorSettings.terminal.launchers.claude.command ??
+        null,
+      codex:
+        anchorSettings.ai.commandOverrides.codex ??
+        anchorSettings.terminal.launchers.codex.command ??
+        null,
     }),
     [
+      anchorSettings.ai.commandOverrides.claude,
+      anchorSettings.ai.commandOverrides.codex,
       anchorSettings.terminal.launchers.claude.command,
       anchorSettings.terminal.launchers.codex.command,
     ],
@@ -2875,7 +2886,13 @@ function MainApp() {
       updateInboxCarry(id, { classifying: true, classifyError: null });
       try {
         const runtime = resolveClassifierRuntime(anchorSettings.ai);
-        const classification = await classifyInboxItem(target, runtime, inboxWorkspacePath);
+        const classification = await classifyInboxItem(
+          target,
+          runtime,
+          inboxWorkspacePath,
+          anchorSettings.ai.commandOverrides[runtime],
+          anchorSettings.ai.permissionMode,
+        );
         updateInboxCarry(id, { classifying: false, classification });
       } catch (err) {
         updateInboxCarry(id, {
@@ -6861,6 +6878,7 @@ function MainApp() {
           }}
           runtimeCommands={skillRuntimeCommands}
           defaultRuntime={anchorSettings.ai.defaultRuntime}
+          permissionMode={anchorSettings.ai.permissionMode}
           onError={setError}
         />
         <CommandPalette
