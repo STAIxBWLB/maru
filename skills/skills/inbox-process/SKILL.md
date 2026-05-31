@@ -18,7 +18,8 @@ skill. The user may scope processing with `inbox-process <channel>`.
 1. Find `workspace.config.yaml`.
 2. Read `inbox`, including `inbox.paths` and `inbox.naming`,
    `ssot.project_registry`, `ssot.registry_scoring`, and optional
-   `inbox.hooks`.
+   `inbox.hooks`. When `inbox.hooks.enrichment` is set, also read
+   `ssot.context_enrichment` for entity resolution and weak-route assist.
 3. Load `inbox-intake/references/manifest-schema.md` before changing item
    state.
 4. Load `references/summary-schema.md` before creating a summary.
@@ -44,8 +45,15 @@ skill. The user may scope processing with `inbox-process <channel>`.
 5. Create `inbox.naming.summary_file` with the required frontmatter and
    exactly three body sections: `## 요약`, `## 핵심`, `## 실행`.
 6. Classify each item as `action`, `schedule`, `info`, `ideation`, or `noise`.
+   If the item is `kind: transcript` — or a record that is clearly a meeting —
+   propose handing it to `meeting-notes` rather than finalizing it here; do not
+   write the meeting note yourself.
 7. Propose a route using `project-registry.yaml` and the configured scoring
-   spec. Write the decision to `inbox.naming.route_file`.
+   spec. When the top score is weak (< 3) and `hooks.enrichment` is set, run the
+   context-enrichment §2 entity resolution and `search_notes` to disambiguate
+   before leaving the item pending, and attach the matched `vault_note` /
+   `relatedMeetings` to the proposal. Write the decision to
+   `inbox.naming.route_file`.
 8. Ask for confirmation before moving originals or summaries outside the inbox.
 9. Move processed items to `done/`, `failed/`, or `duplicate/` and append a
    receipt to `_state/index.jsonl`.
@@ -72,6 +80,9 @@ Hooks are optional and config-driven:
 - `vault_extract_skill` and `vault_connect_skill`: only propose or call explicit
   vault skills. This public skill must not write vault notes by itself.
 - `digest_output`: write a local digest under the configured inbox state path.
+- `enrichment`: when set, consult `ssot.context_enrichment` to resolve entities
+  for weak routes and to enrich route proposals (`vault_note`,
+  `relatedMeetings`), and to hand `kind: transcript` items to `meeting-notes`.
 
 ## Routing Rules
 
@@ -84,3 +95,5 @@ Hooks are optional and config-driven:
 
 - `references/summary-schema.md` - required summary shape
 - `references/workspace-config.md` - processing config keys
+- `ssot.context_enrichment` (`_sys/rules/context-enrichment.md`) - entity
+  resolution for weak routes + transcript handoff (when `hooks.enrichment` set)

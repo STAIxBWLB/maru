@@ -30,6 +30,9 @@ loaded at runtime.
    - `backlog/` for deferred task notes
    - `calendar/` for calendar-only items
    - `_knowledge/pending/` for vault-promotion proposals
+5. If `task_management.context_enrichment` is true, read `ssot.context_enrichment`
+   and the `context.*` lookup paths it names; apply the procedure when creating
+   tasks (entity resolution + context bundle + cross-link backrefs).
 
 ## Core Rules
 
@@ -42,6 +45,10 @@ loaded at runtime.
 - Do not write to a vault directly. If a task has durable knowledge value,
   create or update only a local promotion proposal and tell the user which vault
   skill to run.
+- Operational task logging stays work-local: append timeline lines only to
+  `.anchor/tasks-log.md`. The `vault/log.md` `TASK` event is promoted later by
+  vault-sync or an explicit vault skill — never MCP-append to the vault
+  (context-enrichment §6).
 
 ## Workflows
 
@@ -49,18 +56,33 @@ loaded at runtime.
 
 1. Normalize input into title, status, priority, due/start dates, tags,
    contexts, description, and action items.
-2. Create a markdown file in `active/` using `templates/task.md`. Always write a
+2. **Context enrichment (Vault-First T2).** When `context_enrichment` is true,
+   resolve `projects` and `assignee` per the context-enrichment procedure §2 and
+   assemble the bundle §3 (prior decisions, sibling open tasks, related
+   meetings, matching calendar events). Set the additive cross-link fields **on
+   the CREATE frontmatter only** — `projects`/`topics` from the registry,
+   `source_doc`/`meetingSourcePath` when the task came from a meeting,
+   `relatedMeetings`/`relatedTasks` when resolved — and inject a
+   `## 관련 컨텍스트` block summarizing the bundle. Emit a wiki-link only for
+   resolved entities. **Never add these backref fields to a later
+   schedule-update payload** — Anchor `UpdateTaskScheduleFields` is
+   `deny_unknown_fields` (allows only project/priority/due/calendarStart/
+   calendarEnd/estimateMinutes); they belong to create frontmatter only.
+3. Create a markdown file in `active/` using `templates/task.md`. Always write a
    human-readable `title` to frontmatter — Anchor shows the note by
    `title -> name -> filename`, so a missing `title` makes it appear as the raw
    filename. The body `# {title}` H1 is for readability only and is not used for
    display.
-3. If Google Tasks is enabled, create a task in the configured default list and
+4. If Google Tasks is enabled, create a task in the configured default list and
    write `googleTaskId` and `googleTaskListId` back to frontmatter.
-4. If the task has a scheduled time or calendar-visible deadline, create a
-   calendar event and write `calendarId`, `calendarEventId`, `calendarStart`,
-   `calendarEnd`, and `timezone`.
-5. Append or update the local integration receipt table.
-6. Run the vault-value hook.
+5. If the task has a scheduled time or calendar-visible deadline, first search
+   the configured calendar for conflicts (io-gws `calendar.event.search`) and
+   warn the user about overlaps; then create a calendar event and write
+   `calendarId`, `calendarEventId`, `calendarStart`, `calendarEnd`, and
+   `timezone`.
+6. Append or update the local integration receipt table, and append one `TASK`
+   line to the work-local `.anchor/tasks-log.md` (never the vault).
+7. Run the vault-value hook.
 
 ### Complete a Task
 
@@ -99,3 +121,6 @@ skill.
 - `references/anchor-integration.md` - app-facing contract
 - `references/google-cli-cheatsheet.md` - Google CLI examples
 - `references/integration-ids.template.md` - local receipt template
+- `ssot.context_enrichment` (`_sys/rules/context-enrichment.md`) - entity
+  resolution + context bundle + cross-link contract (applied on create when
+  `task_management.context_enrichment` is true)

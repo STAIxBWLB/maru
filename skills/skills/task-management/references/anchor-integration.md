@@ -38,6 +38,8 @@ Anchor should display these when present:
 - `googleTaskId`, `googleTaskListId`
 - `calendarId`, `calendarEventId`, `calendarStart`, `calendarEnd`, `timezone`
 - `vaultPromotionStatus`, `vaultPromotionReason`
+- `source_doc`, `meetingSourcePath`, `relatedMeetings`, `relatedTasks` — backref
+  links (set on create; preserve as unknown keys, never require)
 
 ## Write Behavior
 

@@ -20,12 +20,20 @@ calendarEnd:
 timezone:
 vaultPromotionStatus: none
 vaultPromotionReason:
+source_doc:            # create-path backref (context-enrichment §4)
+meetingSourcePath:
+relatedMeetings: []
+relatedTasks: []
 ---
 # {title}
 
 ## Details
 
 {description}
+
+## 관련 컨텍스트
+
+{enrichment_bundle}
 
 ## Actions
 

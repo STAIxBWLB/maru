@@ -21,6 +21,7 @@ Find relationships between a note and existing vault notes, create wiki links.
 1. Read the target note completely
 2. Search vault/notes/ for related notes by:
    - **entities_hint first pass** (if provided): for each entity name, search `glossary.md`, `people.md`, and vault/notes/ titles for exact or fuzzy matches. These are highest-priority link candidates since they're pre-identified by summaries or source metadata.
+   - **Backref seeds** (if present in target frontmatter): `relatedMeetings`, `relatedTasks`, `source_doc` / `meetingSourcePath` (context-enrichment §4) are pre-identified origins — treat their resolved `[[targets]]` as high-priority bidirectional link candidates.
    - Title keyword matching
    - Description similarity
    - Shared topics/MOCs

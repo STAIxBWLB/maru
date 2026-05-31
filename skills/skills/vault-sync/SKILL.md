@@ -86,6 +86,8 @@ Converted regular directories (`projects/rise/`, `projects/rise-research/`, `pro
 4. top score >= 3 → attach project name + `vault_note` to proposal
 5. Ambiguous → mark as "project: TBD (user confirm)"
 
+> **Entity resolution**: people/orgs/projects 해소는 `<workspace-root>/_sys/rules/context-enrichment.md` §2 절차 사용 (fast cache → registry → vault MOC, 충돌 시 vault 우선).
+>
 > **Registry fallback**: score < 3 → content-based domain analysis → if still ambiguous, prompt user via disambiguation field. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
 
 **Deduplication** (multi-signal, 2026-04-16 revision):
@@ -172,6 +174,9 @@ Accept: [a]ll, [1-5] select, [s]kip, [q]uit
 ### Step 4: Record
 - Update last-sync timestamp in ops/sessions/last-sync-timestamp
 - Log sync results in ops/sessions/YYYYMMDD-sync.md
+- Promote vault-relevant `TASK` events from the work-local `.anchor/tasks-log.md`
+  to `vault/log.md` (ingest-chain TYPE `TASK`; task-management does not write the
+  vault directly — context-enrichment §6)
 
 ## Scope Details
 
