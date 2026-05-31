@@ -346,6 +346,9 @@ test("restores the previous app state on startup", async ({ page }) => {
 });
 
 test("opens meetings mode with list, detail, and calendar views", async ({ page }) => {
+  // Pin "today" inside the sample meetings' month (2026-05) so the calendar
+  // defaults to a month that has meetings, regardless of the real wall clock.
+  await page.clock.setFixedTime(new Date("2026-05-04T09:00:00"));
   await page.goto("/");
 
   await page.locator(".activity-rail").getByRole("button", { name: "회의록" }).click();
