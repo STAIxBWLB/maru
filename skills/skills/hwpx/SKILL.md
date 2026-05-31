@@ -19,7 +19,16 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 1. **양식 따라가기 (`styled --reference`)** — 주어진 공식 양식 파일의 폰트·여백·스타일을 그대로 사용하여 본문만 채움. 사업 공고 HWP 양식이 있을 때 최우선 경로.
 2. **보기 좋은 신규 생성 (`styled --preset`)** — 양식이 없을 때 공문서 표준에 맞춘 폰트·여백·줄간격·헤더/푸터·페이지번호로 깔끔한 문서를 생성.
 3. **템플릿 채우기 (`fill`)** — 내장 `templates/*.hwpx`의 `{{anchor}}` 치환. 기안문/사업계획서 뼈대 사용.
-4. **편집** (`edit`, `unpack`+`repack`) — 기존 문서 수정.
+4. **편집** (`edit`, `edit-section`, `unpack`+`repack`) — 기존 문서 수정.
+5. **레퍼런스 양식 복원·편집 (`analyze` → `fill`/`edit-section` → `validate` → `guard`)** — 첨부된 임의 공문 양식의 서식·구조를 보존하며 본문만 안전하게 교체하는 권장 경로. 아래 "robust 편집 엔진" 참조.
+
+### robust 편집 엔진 (`scripts/hwpx_xml.py`)
+
+`fill`/`edit`/`edit-section`은 직렬화 문자열 치환이 아니라 **lxml 트리 편집 엔진**을 쓴다. 핵심 보장:
+- **run 경계를 넘나드는 `{{anchor}}`도 매칭** (`<hp:t>` 텍스트를 연결해 치환, 앵커 밖 run·서식은 보존).
+- **`<hp:linesegarray>` 자동 삭제** — 텍스트 수정 후 줄배치 캐시를 지워 글자 겹침 방지(한글이 열 때 재계산).
+- **sec 직계자식 인덱스 기반** 섹션 경계 처리 (텍스트 검색 아님), **deepcopy 참조 단락 복제**, mimetype-first STORED 재패키징.
+- 의존성은 lxml + 번들 hwpxlib(JAR)뿐 (python-hwpx 미사용).
 
 바이너리 `.hwp`(v5 OLE2 포맷)은 별도 `hwp-toolkit` 스킬에서 처리한다. 이 스킬은 HWPX 전용.
 
@@ -32,8 +41,12 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | 구조화 JSON | `./hwpx read <file.hwpx> --format json` |
 | **보기 좋은 생성 (양식 없음)** | `./hwpx styled --preset gongmun --markdown <md> -o <out>` |
 | **양식 따라가기** | `./hwpx styled --reference <양식.hwpx> --markdown <md> -o <out>` |
-| 템플릿 채우기 | `./hwpx fill <template> --kv key=value -o out.hwpx` |
-| find/replace | `./hwpx edit <in> <out> --replace OLD NEW` |
+| 템플릿 채우기 (run-aware) | `./hwpx fill <template> --kv key=value -o out.hwpx` |
+| find/replace (run-aware) | `./hwpx edit <in> <out> --replace OLD NEW` |
+| **편집 청사진 (sec 인덱스 맵)** | `./hwpx analyze <file.hwpx>` |
+| **본문 단락 범위 교체** | `./hwpx edit-section <file> --start N --end M --lines lines.txt -o out` |
+| **라벨-값 양식 채우기** | `./hwpx fill-form <form> --kv 성명=홍길동 --kv 소속=… -o out` |
+| **드리프트 게이트 (레이아웃 보존 검증)** | `./hwpx guard --reference <ref> --output <out>` |
 | unpack → XML 직접 편집 | `./hwpx unpack <file> <dir>` → `./hwpx repack <dir> <out>` |
 | 단순 신규 생성 | `./hwpx create <out> --title T --body "1줄\n2줄"` |
 | **번들 Java 라이터 (Apache-2.0)** | `./hwpx write-java <out> --markdown <md>` |
@@ -254,14 +267,36 @@ echo '{"제목":"테스트","본문":"본문"}' | \
 
 ## 4. 편집
 
-### 단순 find/replace
+### 단순 find/replace (run-aware)
 
 ```bash
 ./hwpx edit input.hwpx output.hwpx --replace "OLD" "NEW"
 ./hwpx edit input.hwpx output.hwpx --replace "구버전" "신버전" --limit 1
 ```
 
-런(run) 경계를 넘나드는 텍스트는 매칭되지 않는 제약이 있음 — 그 경우 unpack 경로 사용.
+lxml 엔진이 `<hp:t>` 텍스트를 연결해 치환하므로 **run 경계를 넘나드는 텍스트도 매칭**되고, 수정 단락의 `linesegarray`는 자동 정리된다(이전의 "한 run으로 저장" 제약 해소).
+
+### 레퍼런스 양식 편집 워크플로우 (권장)
+
+첨부된 임의 공문 양식의 서식·구조를 보존하며 본문만 교체:
+
+```bash
+# 1) 청사진: sec 직계자식 인덱스 + 스타일 ID 확인 (텍스트가 아닌 인덱스로 경계 파악)
+./hwpx analyze 양식.hwpx
+
+# 2a) 앵커가 있으면 fill (run-aware)
+./hwpx fill 양식.hwpx --kv 제목="…" --kv 본문="…" -o 결과.hwpx
+# 2b) 본문 단락 블록을 통째 교체하려면 edit-section (analyze 인덱스 사용, 서식 복제)
+./hwpx edit-section 양식.hwpx --start 12 --end 18 --ref-index 12 --lines body.txt -o 결과.hwpx
+
+# 3) 무결성 검증
+./hwpx validate 결과.hwpx
+
+# 4) 레이아웃 보존 게이트 (필수) — 문단/표/쪽수·텍스트길이 드리프트 검사
+./hwpx guard --reference 양식.hwpx --output 결과.hwpx
+```
+
+`guard`가 FAIL이면(문단 수 변동, 텍스트 길이 과다 등) 완료로 보지 않고 본문을 압축/조정 후 재빌드한다. 여러 본문 블록을 교체할 때는 **마지막 섹션부터 역순**으로 `edit-section`을 호출해 인덱스 어긋남을 방지한다(엔진 `replace_section_body`도 동일 전제). 복잡한 in-place 편집은 `analyze` 결과를 보고 `scripts/hwpx_xml.py`의 `clone_para`/`replace_section_body`/`replace_in_paragraph`를 인라인 Python으로 직접 호출할 수 있다.
 
 ### unpack → XML 직접 편집 → repack
 
@@ -388,10 +423,10 @@ brew install --cask libreoffice
 
 ### 레거시 `.hwp` (바이너리)
 
-이 스킬은 HWPX만 처리한다. `.hwp` 읽기·변환은 `hwp-toolkit` 스킬로 위임:
+이 스킬은 HWPX 작성·편집 전용이나, **`./hwpx read legacy.hwp`는 자동으로 `hwp-toolkit`에 위임**하여 텍스트를 추출한다 (toolkit 탐색 순서: `$HWP_TOOLKIT` → `~/workspace/work/dev/hwp-toolkit/hwp` → PATH의 `hwp`). 변환·생성·편집은 hwp-toolkit을 직접 호출:
 
 ```bash
-~/workspace/work/dev/hwp-toolkit/hwp read legacy.hwp
+./hwpx read legacy.hwp                              # → hwp-toolkit 자동 위임 (텍스트 추출)
 ~/workspace/work/dev/hwp-toolkit/hwp convert legacy.hwp --to pdf
 ```
 
@@ -407,11 +442,12 @@ brew install --cask libreoffice
 | 증상 | 원인 | 해결 |
 |------|------|------|
 | Hancom Office에서 파일 열리지 않음 | mimetype이 zip 첫 엔트리가 아니거나 DEFLATE | `./hwpx repack`으로 다시 묶기 (수동 `zip` 명령 금지) |
-| `{{anchor}}` 치환이 0건 | anchor가 여러 run으로 쪼개짐 | 템플릿을 다시 열어 한 run으로 저장 (Hancom Office에서 전체 선택→단일 서식) |
+| `{{anchor}}` 치환이 0건 | anchor 철자/공백 불일치 (run 분할은 이제 엔진이 처리) | `./hwpx slots`로 실제 앵커명 확인 후 정확히 지정 |
+| 채운 문서가 레퍼런스보다 쪽수 증가 | 본문이 원본 레이아웃 초과 | `./hwpx guard`로 드리프트 확인 → 본문 압축/조정 후 재빌드 |
 | 한글이 깨짐 | 생성 시 인코딩 | 입력 JSON/텍스트 UTF-8 확인 |
 | PDF 변환 실패 | LibreOffice에 H2Orestart 미설치 | 확장 설치 후 `soffice --headless` 1회 실행으로 캐시 빌드 |
 | 관인(직인)이 안 찍힘 | 스킬은 관인 삽입 안 함 | 정상 동작 — e-결재 시스템(온나라/K-Office)이 발송 시 자동 삽입 |
-| `.hwp` 파일에 대해 오류 | 바이너리 HWP는 지원하지 않음 | `hwp-toolkit` 스킬 사용 |
+| `.hwp` 파일 읽기 | 바이너리 HWP | `./hwpx read`가 hwp-toolkit에 자동 위임 (미발견 시 `HWP_TOOLKIT` 지정). 작성·편집은 hwpx 전용 |
 
 ## 10. 의존성
 

@@ -10,7 +10,6 @@ Python HWPX package is imported at runtime.
 from __future__ import annotations
 
 import re
-import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -97,52 +96,19 @@ def _block_text(blocks: list[Block]) -> str:
     return "\n".join(lines).strip()
 
 
-def _is_xml_entry(name: str) -> bool:
-    return name.lower().endswith(XML_SUFFIXES)
-
-
-def _copy_info(src: zipfile.ZipInfo, *, compress_type: int | None = None) -> zipfile.ZipInfo:
-    info = zipfile.ZipInfo(src.filename, date_time=src.date_time)
-    info.compress_type = src.compress_type if compress_type is None else compress_type
-    info.comment = src.comment
-    info.extra = src.extra
-    info.external_attr = src.external_attr
-    info.internal_attr = src.internal_attr
-    return info
-
-
 def _rewrite_template_slots(template: Path, output: Path, replacements: dict[str, str]) -> int:
-    hits = 0
-    with zipfile.ZipFile(template, "r") as zin:
-        entries: list[tuple[zipfile.ZipInfo, bytes]] = []
-        for info in zin.infolist():
-            data = zin.read(info.filename)
-            if _is_xml_entry(info.filename):
-                text = data.decode("utf-8", errors="strict")
-                for key, value in replacements.items():
-                    anchor = "{{" + key + "}}"
-                    count = text.count(anchor)
-                    if count:
-                        hits += count
-                        text = text.replace(anchor, value)
-                data = text.encode("utf-8")
-            entries.append((info, data))
+    """Run-aware {{slot}} substitution via the shared lxml engine.
 
-    if hits == 0:
-        return 0
+    Delegates to hwpx_xml.edit_text so an anchor split across multiple runs still
+    matches and stale linesegarray caches are cleaned — identical robustness to
+    `hwpx fill`. Returns the total number of replacements (0 → the caller falls
+    back to fresh generation).
+    """
+    import hwpx_xml as hx
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output, "w") as zout:
-        mimetype = next((entry for entry in entries if entry[0].filename == "mimetype"), None)
-        if mimetype is not None:
-            info = zipfile.ZipInfo("mimetype")
-            info.compress_type = zipfile.ZIP_STORED
-            zout.writestr(info, mimetype[1])
-        for src_info, data in entries:
-            if src_info.filename == "mimetype":
-                continue
-            zout.writestr(_copy_info(src_info), data)
-    return hits
+    anchored = {"{{" + key + "}}": value for key, value in replacements.items()}
+    counts = hx.edit_text(template, output, anchored)
+    return sum(counts.values())
 
 
 def from_preset(

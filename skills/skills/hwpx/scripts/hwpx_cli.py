@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 
 from lxml import etree
@@ -35,16 +35,6 @@ HP_NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HP = f"{{{HP_NS}}}"
 XML_SUFFIXES = (".xml", ".hpf")
 IMAGE_SUFFIXES = (".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".wmf", ".emf")
-
-
-@dataclass
-class ReplaceResult:
-    output: Path
-    counts: dict[str, int]
-
-    @property
-    def total(self) -> int:
-        return sum(self.counts.values())
 
 
 # helpers
@@ -209,77 +199,24 @@ def _xml_entry(name: str) -> bool:
     return name.lower().endswith(XML_SUFFIXES)
 
 
-def _copy_info(src: zipfile.ZipInfo, *, compress_type: int | None = None) -> zipfile.ZipInfo:
-    info = zipfile.ZipInfo(src.filename, date_time=src.date_time)
-    info.compress_type = src.compress_type if compress_type is None else compress_type
-    info.comment = src.comment
-    info.extra = src.extra
-    info.external_attr = src.external_attr
-    info.internal_attr = src.internal_attr
-    return info
-
-
-def _rewrite_hwpx_text(
-    src: Path,
-    dst: Path,
-    replacements: dict[str, str],
-    *,
-    limit: int | None = None,
-) -> ReplaceResult:
-    if not replacements:
-        _die(1, "치환 데이터 없음")
-
-    counts = {key: 0 for key in replacements}
-    remaining = limit
-    try:
-        with zipfile.ZipFile(src, "r") as zin:
-            entries: list[tuple[zipfile.ZipInfo, bytes]] = []
-            for info in zin.infolist():
-                data = zin.read(info.filename)
-                if _xml_entry(info.filename):
-                    text = data.decode("utf-8", errors="strict")
-                    for old, new in replacements.items():
-                        if remaining == 0:
-                            break
-                        if not old:
-                            continue
-                        available = text.count(old)
-                        if available == 0:
-                            continue
-                        if remaining is None:
-                            used = available
-                            text = text.replace(old, new)
-                        else:
-                            used = min(available, remaining)
-                            text = text.replace(old, new, used)
-                            remaining -= used
-                        counts[old] += used
-                    data = text.encode("utf-8")
-                entries.append((info, data))
-    except UnicodeDecodeError as e:
-        _die(2, f"XML UTF-8 디코딩 실패: {e}")
-    except zipfile.BadZipFile as e:
-        _die(2, f"HWPX(zip) 파싱 실패: {e}")
-
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(dst, "w") as zout:
-        mimetype_entry = next((item for item in entries if item[0].filename == "mimetype"), None)
-        if mimetype_entry is not None:
-            _, data = mimetype_entry
-            info = zipfile.ZipInfo("mimetype")
-            info.compress_type = zipfile.ZIP_STORED
-            zout.writestr(info, data)
-        for src_info, data in entries:
-            if src_info.filename == "mimetype":
-                continue
-            zout.writestr(_copy_info(src_info), data)
-
-    return ReplaceResult(output=dst, counts=counts)
-
-
 def _derive_output(input_path: str, suffix: str) -> str:
     p = Path(input_path)
     return str(p.with_name(p.stem + suffix))
+
+
+def _resolve_section_entry(requested: str | None, section_names: list[str]) -> str | None:
+    """Resolve either a full zip entry or a basename such as section0.xml."""
+    if not section_names:
+        return None
+    if not requested:
+        return section_names[0]
+    if requested in section_names:
+        return requested
+    req_name = Path(requested).name.lower()
+    for name in section_names:
+        if Path(name).name.lower() == req_name:
+            return name
+    return None
 
 
 def _create_lines_from_args(args) -> list[str]:
@@ -324,8 +261,48 @@ def _create_lines_from_args(args) -> list[str]:
 
 # subcommand implementations
 
+def _find_hwp_toolkit() -> str | None:
+    """Locate the hwp-toolkit CLI for legacy .hwp delegation. Order: $HWP_TOOLKIT,
+    workspace dev path, then `hwp` on PATH."""
+    candidates = [
+        os.environ.get("HWP_TOOLKIT"),
+        str(Path.home() / "workspace" / "work" / "dev" / "hwp-toolkit" / "hwp"),
+        shutil.which("hwp"),
+    ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            return c
+    return None
+
+
+def _delegate_hwp_read(path: Path, fmt: str) -> int:
+    """Binary .hwp(v5 OLE2) is not parsed here — delegate read to hwp-toolkit."""
+    tool = _find_hwp_toolkit()
+    if not tool:
+        _die(
+            1,
+            ".hwp(바이너리)는 이 스킬이 직접 처리하지 않음. hwp-toolkit 미발견 — "
+            "Hancom에서 .hwpx로 저장하거나 HWP_TOOLKIT=<.../hwp> 지정",
+        )
+    toolkit_fmt = {"text": "txt", "md": "md", "json": "json"}.get(fmt, "md")
+    try:
+        proc = subprocess.run(
+            [tool, "read", str(path), "--format", toolkit_fmt],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        _die(2, f"hwp-toolkit 위임 실패: {e}")
+    if proc.returncode != 0:
+        _die(2, f"hwp-toolkit read 실패: {(proc.stderr or proc.stdout).strip()}")
+    sys.stdout.write(proc.stdout)
+    print(f"[hwpx] .hwp → hwp-toolkit 위임 ({tool})", file=sys.stderr)
+    return 0
+
+
 def cmd_read(args) -> int:
     path = _ensure_file(args.file)
+    if path.suffix.lower() == ".hwp":
+        return _delegate_hwp_read(path, args.format)
     structure = _extract_structure(path)
     if args.format == "text":
         sys.stdout.write(_text_from_structure(structure, args.section))
@@ -407,6 +384,8 @@ def cmd_repack(args) -> int:
 
 
 def cmd_fill(args) -> int:
+    import hwpx_xml as hx
+
     src = _ensure_file(args.template)
     data = _load_kv_data(args)
     if not data:
@@ -414,32 +393,28 @@ def cmd_fill(args) -> int:
 
     replacements = {"{{" + str(key) + "}}": str(value) for key, value in data.items()}
     out = Path(args.output or _derive_output(args.template, suffix="-filled.hwpx"))
-    result = _rewrite_hwpx_text(src, out, replacements)
-    for old, n in result.counts.items():
-        print(f"[hwpx] {old} -> {n}건", file=sys.stderr)
-    print(f"[hwpx] {result.total}건 치환 -> {result.output}", file=sys.stderr)
+    counts = hx.edit_text(src, out, replacements)
+    total = sum(counts.values())
+    for anchor, n in counts.items():
+        print(f"[hwpx] {anchor} -> {n}건", file=sys.stderr)
+    unfilled = [a for a, n in counts.items() if n == 0]
+    if unfilled:
+        print(f"[hwpx] ⚠️  미치환 anchor {len(unfilled)}건: {', '.join(unfilled)}", file=sys.stderr)
+    print(f"[hwpx] {total}건 치환 -> {out}", file=sys.stderr)
     return 0
 
 
 def cmd_slots(args) -> int:
+    import hwpx_xml as hx
+
     input_path = _ensure_file(args.template)
     if input_path.suffix.lower() != ".hwpx":
         _die(1, f"slots는 .hwpx 파일만 지원: {input_path}")
 
-    pattern = re.compile(r"\{\{\s*([^{}\r\n]+?)\s*\}\}")
-    counts: dict[str, int] = {}
     try:
-        with zipfile.ZipFile(input_path, "r") as zf:
-            for info in zf.infolist():
-                if not _xml_entry(info.filename):
-                    continue
-                text = zf.read(info).decode("utf-8", errors="ignore")
-                for match in pattern.finditer(text):
-                    key = match.group(1).strip()
-                    if key:
-                        counts[key] = counts.get(key, 0) + 1
-    except zipfile.BadZipFile as e:
-        _die(2, f"HWPX(zip) 파싱 실패: {e}")
+        counts = hx.scan_slots(input_path)
+    except (zipfile.BadZipFile, etree.XMLSyntaxError) as e:
+        _die(2, f"HWPX 슬롯 스캔 실패: {e}")
 
     fields = [
         {
@@ -464,14 +439,17 @@ def cmd_slots(args) -> int:
 
 
 def cmd_edit(args) -> int:
+    import hwpx_xml as hx
+
     src = _ensure_file(args.in_file)
-    result = _rewrite_hwpx_text(
+    counts = hx.edit_text(
         src,
         Path(args.out_file),
         {args.replace[0]: args.replace[1]},
         limit=args.limit,
     )
-    print(f"[hwpx] {result.total}건 치환 -> {args.out_file}", file=sys.stderr)
+    total = sum(counts.values())
+    print(f"[hwpx] {total}건 치환 -> {args.out_file}", file=sys.stderr)
     return 0
 
 
@@ -634,6 +612,167 @@ def cmd_to_pdf(args) -> int:
     return 0
 
 
+def cmd_analyze(args) -> int:
+    """편집 청사진 출력: sec 직계자식 인덱스 맵 + 스타일 ID 인벤토리 + 표 shape.
+
+    edit-section 의 start/end 인덱스와 사용할 paraPr/charPr ID를 여기서 확인한다.
+    (텍스트가 아닌 인덱스로 섹션 경계를 잡는다 — new_hwpx_master 2단계.)
+    """
+    import hwpx_xml as hx
+
+    path = _ensure_file(args.file)
+    sec_names = hx.section_entry_names(path)
+    if not sec_names:
+        _die(2, "section XML 없음")
+    target = _resolve_section_entry(args.section_file, sec_names)
+    if target is None:
+        _die(2, f"section XML 없음: {args.section_file}")
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        data = zf.read(target)
+        header = zf.read("Contents/header.xml") if "Contents/header.xml" in names else None
+
+    root = hx.parse_xml(data).getroot()
+    sec = hx.find_sec(root)
+    children = list(sec)
+
+    blueprint: dict = {"file": str(path), "section": target, "sec_children": []}
+    for i, child in enumerate(children):
+        local = hx.localname(child)
+        entry: dict = {"index": i, "kind": local}
+        if local == "p":
+            entry["text"] = hx.paragraph_text(child)[:80]
+            entry["paraPrIDRef"] = child.get("paraPrIDRef")
+            entry["styleIDRef"] = child.get("styleIDRef")
+            tbls = [e for e in child.iter() if hx.localname(e) == "tbl"]
+            if tbls:
+                entry["table"] = {"rowCnt": tbls[0].get("rowCnt"), "colCnt": tbls[0].get("colCnt")}
+        blueprint["sec_children"].append(entry)
+
+    if header is not None:
+        h = hx.parse_xml(header).getroot()
+        inv: dict[str, list] = {"charPr": [], "paraPr": [], "borderFill": []}
+        for el in h.iter():
+            ln = hx.localname(el)
+            if ln in inv and el.get("id") is not None:
+                inv[ln].append(el.get("id"))
+        blueprint["style_ids"] = inv
+
+    if args.format == "json":
+        json.dump(blueprint, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+    else:
+        print(f"# {path} — {target}")
+        print(f"sec 직계 자식: {len(children)}개")
+        for e in blueprint["sec_children"]:
+            if e["kind"] == "p":
+                tbl = f" [table {e['table']['rowCnt']}x{e['table']['colCnt']}]" if e.get("table") else ""
+                preview = (e.get("text") or "").replace("\n", " ")
+                print(f"  [{e['index']:>3}] p  paraPr={e.get('paraPrIDRef')} style={e.get('styleIDRef')}{tbl}  {preview}")
+            else:
+                print(f"  [{e['index']:>3}] {e['kind']}")
+        if "style_ids" in blueprint:
+            s = blueprint["style_ids"]
+            print(f"\nstyle IDs: charPr={s['charPr']}  paraPr={s['paraPr']}  borderFill={s['borderFill']}")
+    return 0
+
+
+def cmd_guard(args) -> int:
+    """레퍼런스 대비 페이지 드리프트 게이트 (validate와 별개, 레이아웃 보존 검증)."""
+    import page_guard as pg
+
+    ref = _ensure_file(args.reference)
+    out = _ensure_file(args.output)
+    ref_m = pg.collect_metrics(ref)
+    out_m = pg.collect_metrics(out)
+    errors = pg.compare_metrics(
+        ref_m, out_m,
+        max_text_delta_ratio=args.max_text_delta_ratio,
+        max_paragraph_delta_ratio=args.max_paragraph_delta_ratio,
+    )
+    if errors:
+        print(f"[hwpx] guard FAIL: 레이아웃 드리프트 위험 ({len(errors)}건)", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[hwpx] guard PASS: {out} (레퍼런스 대비 구조/길이 편차 허용 내)", file=sys.stderr)
+    return 0
+
+
+def cmd_edit_section(args) -> int:
+    """sec 직계자식 [start:end) 본문 단락을 새 내용으로 교체 (서식 보존).
+
+    ref-index 단락을 deepcopy 템플릿으로 삼아 한 줄당 한 단락 생성 → 인덱스
+    범위를 통째 치환. 인덱스는 `analyze`로 확인한다. linesegarray 자동 정리.
+    """
+    import hwpx_xml as hx
+
+    path = _ensure_file(args.file)
+    secs = hx.section_entry_names(path)
+    target = _resolve_section_entry(args.section_file, secs)
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        if target is None or target not in names:
+            _die(2, f"section XML 없음: {args.section_file or '<default>'}")
+        data = zf.read(target)
+
+    tree = hx.parse_xml(data)
+    sec = hx.find_sec(tree.getroot())
+    children = list(sec)
+    start, end = args.start, args.end
+    if not (0 <= start < end <= len(children)):
+        _die(1, f"인덱스 범위 오류: start={start} end={end} (sec children={len(children)})")
+
+    ref_idx = args.ref_index if args.ref_index is not None else start
+    if not (0 <= ref_idx < len(children)) or hx.localname(children[ref_idx]) != "p":
+        _die(1, f"ref-index {ref_idx} 가 <hp:p> 아님")
+    if any(hx.localname(el) == "secPr" for el in children[ref_idx].iter()):
+        _die(1, f"ref-index {ref_idx} 는 section 속성(secPr)을 포함해 복제 불가")
+    if any(
+        hx.localname(el) == "secPr"
+        for child in children[start:end]
+        for el in child.iter()
+    ):
+        _die(1, f"교체 범위 [{start}:{end}) 에 section 속성(secPr) 문단 포함")
+    ref = children[ref_idx]
+
+    if args.lines:
+        lines = Path(args.lines).read_text(encoding="utf-8").splitlines()
+    elif args.stdin:
+        lines = sys.stdin.read().splitlines()
+    else:
+        _die(1, "내용 없음: --lines <file> 또는 --stdin")
+
+    clones = [hx.clone_para(ref, [line]) for line in lines]
+    hx.replace_section_body(sec, start, end, clones)
+    out = Path(args.output or _derive_output(str(path), suffix="-edited.hwpx"))
+    hx.rewrite_entries(path, out, {target: hx.serialize(tree)})
+    print(
+        f"[hwpx] edit-section [{start}:{end}) → {len(clones)}단락 "
+        f"({ref_idx}번 스타일 복제) → {out}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_fill_form(args) -> int:
+    """라벨-값 표 양식 채우기 — 표의 `라벨 | 값` 셀 / 헤더+데이터행 매칭 (서식 보존)."""
+    import hwpx_xml as hx
+
+    src = _ensure_file(args.form)
+    data = _load_kv_data(args)
+    if not data:
+        _die(1, "값 없음 (--data / --kv / --stdin-json) — 라벨=값 형식")
+    out = Path(args.output or _derive_output(args.form, suffix="-filled.hwpx"))
+    filled, unmatched = hx.fill_form(src, out, {str(k): str(v) for k, v in data.items()})
+    for label, val in filled:
+        print(f"[hwpx] {label} → {val}", file=sys.stderr)
+    if unmatched:
+        print(f"[hwpx] ⚠️  미매칭 라벨 {len(unmatched)}건: {', '.join(unmatched)}", file=sys.stderr)
+    print(f"[hwpx] fill-form {len(filled)}건 채움 → {out}", file=sys.stderr)
+    return 0
+
+
 # argparse wiring
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -719,6 +858,38 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("validate", help="mimetype/manifest/XML 검증")
     s.add_argument("file")
     s.set_defaults(func=cmd_validate)
+
+    s = sub.add_parser("analyze", help="편집 청사진 (sec 인덱스 맵 + 스타일 ID)")
+    s.add_argument("file")
+    s.add_argument("--section-file", help="대상 section XML 엔트리 (기본: section0.xml)")
+    s.add_argument("--format", choices=["text", "json"], default="text")
+    s.set_defaults(func=cmd_analyze)
+
+    s = sub.add_parser("guard", help="레퍼런스 대비 페이지 드리프트 게이트")
+    s.add_argument("--reference", "-r", required=True, help="기준 HWPX")
+    s.add_argument("--output", "-o", required=True, help="결과 HWPX")
+    s.add_argument("--max-text-delta-ratio", type=float, default=0.15)
+    s.add_argument("--max-paragraph-delta-ratio", type=float, default=0.25)
+    s.set_defaults(func=cmd_guard)
+
+    s = sub.add_parser("edit-section", help="sec 본문 단락 범위 교체 (서식 보존, 인덱스 기반)")
+    s.add_argument("file")
+    s.add_argument("--start", type=int, required=True, help="교체 시작 sec 자식 인덱스")
+    s.add_argument("--end", type=int, required=True, help="교체 끝 인덱스 (exclusive)")
+    s.add_argument("--ref-index", type=int, default=None, help="스타일 복제용 참조 단락 인덱스 (기본: start)")
+    s.add_argument("--lines", help="줄당 한 단락이 될 텍스트 파일")
+    s.add_argument("--stdin", action="store_true", help="stdin에서 줄 입력")
+    s.add_argument("--section-file", help="대상 section XML (기본: section0.xml)")
+    s.add_argument("-o", "--output")
+    s.set_defaults(func=cmd_edit_section)
+
+    s = sub.add_parser("fill-form", help="라벨-값 표 양식 채우기 (서식 보존)")
+    s.add_argument("form")
+    s.add_argument("--data", help="JSON 파일 (라벨:값)")
+    s.add_argument("--kv", action="append", help="라벨=값 (반복 가능)")
+    s.add_argument("--stdin-json", action="store_true")
+    s.add_argument("-o", "--output")
+    s.set_defaults(func=cmd_fill_form)
 
     s = sub.add_parser("to-pdf", help="LibreOffice(+H2Orestart) 경유 PDF")
     s.add_argument("file")
