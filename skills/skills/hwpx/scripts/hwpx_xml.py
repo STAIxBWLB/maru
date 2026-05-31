@@ -43,6 +43,9 @@ SLOT_RE = re.compile(r"\{\{\s*([^{}\r\n]+?)\s*\}\}")
 # ── low-level helpers ────────────────────────────────────────────────────────
 
 def localname(el: etree._Element) -> str:
+    tag = el.tag
+    if not isinstance(tag, str):  # comment / PI / entity nodes have non-str tags
+        return ""
     return etree.QName(el).localname
 
 
@@ -248,6 +251,8 @@ def clone_para(ref_p: etree._Element, run_texts: list[str]) -> etree._Element:
                 if localname(el) == "t":
                     el.text = txt if not wrote else ""
                     wrote = True
+            if not wrote:  # run had no <hp:t> (e.g. empty cell run) — create one
+                etree.SubElement(runs[i], f"{HP}t").text = txt
     for r in runs[len(run_texts):]:
         new_p.remove(r)
     return new_p

@@ -108,8 +108,9 @@ def write_java(output: Path, lines: list[str], timeout: float = 30.0) -> None:
             import hwpx_xml as hx
 
             hx.apply_heading_styles(output, levels)
-        except Exception:
-            pass
+        except Exception as e:  # styling is best-effort, must not fail the write
+            print(f"[hwpx] ⚠️  heading 스타일 적용 건너뜀: {type(e).__name__}: {e}",
+                  file=sys.stderr)
 
 
 def cli_write_java(args: argparse.Namespace) -> int:
