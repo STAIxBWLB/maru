@@ -45,9 +45,10 @@ mod workspace_files;
 
 use agent_host::{
     agent_apply_skill_proposal, agent_export_redacted_run_summary, agent_parse_skill_proposal,
-    agent_read_run_events, agent_replay_run_summary, agent_validate_marketplace_manifest,
+    agent_read_run_events, agent_replay_run_summary, agent_run_structured_loop,
+    agent_validate_marketplace_manifest, agent_write_redacted_run_summary,
 };
-use ai_router::start_claude_cli_invocation;
+use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
 use anchor_dir::{
     bootstrap_anchor_dir, delete_anchor_rule, delete_anchor_template, list_anchor_rules,
     list_anchor_templates, read_anchor_imports, read_anchor_mcp, read_anchor_projects,
@@ -228,6 +229,7 @@ pub fn run() {
             delete_memo,
             save_memo_as,
             start_claude_cli_invocation,
+            start_agent_cli_invocation,
             list_ai_missions,
             read_ai_mission_log,
             stop_ai_mission,
@@ -322,6 +324,8 @@ pub fn run() {
             agent_read_run_events,
             agent_replay_run_summary,
             agent_export_redacted_run_summary,
+            agent_write_redacted_run_summary,
+            agent_run_structured_loop,
             agent_parse_skill_proposal,
             agent_apply_skill_proposal,
             agent_validate_marketplace_manifest,

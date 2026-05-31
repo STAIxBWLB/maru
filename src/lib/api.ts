@@ -895,6 +895,32 @@ export async function startClaudeCliInvocation(
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs, extraEnv });
 }
 
+export type AgentProvider = "claude" | "codex";
+
+/** Provider-agnostic one-shot CLI invocation (claude/codex). Returns the
+ *  invocation id; caller subscribes to `ai://output` / `ai://done` / `ai://error`
+ *  with that id. Codex is driven via its stdin-piped `exec` form by the backend. */
+export async function startAgentCliInvocation(
+  provider: AgentProvider,
+  prompt: string,
+  cwd: string | null = null,
+  extraArgs: string[] | null = null,
+  extraEnv: Record<string, string> | null = null,
+  commandOverride: string | null = null,
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Agent CLI invocation is only available inside the Tauri shell.");
+  }
+  return invoke<string>("start_agent_cli_invocation", {
+    provider,
+    prompt,
+    cwd,
+    extraArgs,
+    extraEnv,
+    commandOverride,
+  });
+}
+
 export async function listAiMissions(): Promise<MissionRecord[]> {
   if (!isTauri()) return [];
   return invoke<MissionRecord[]>("list_ai_missions");

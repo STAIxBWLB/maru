@@ -571,6 +571,51 @@ export async function agentExportRedactedRunSummary(
   return invoke<RedactedRunSummary>("agent_export_redacted_run_summary", { cwd, runId });
 }
 
+/** Build the redacted summary backend-side and write it to `targetPath`.
+ *  Returns the written path (there is no JS-side file write). */
+export async function agentWriteRedactedRunSummary(
+  cwd: string,
+  runId: string,
+  targetPath: string,
+): Promise<string> {
+  if (!isTauri()) throw new Error("Redacted summary export requires the Tauri shell.");
+  return invoke<string>("agent_write_redacted_run_summary", { cwd, runId, targetPath });
+}
+
+export interface FiveRoleLoopResult {
+  status: string;
+  iterations: number;
+  advisorCalled: boolean;
+  roleOutputs: Array<{ role: string; content: string }>;
+  proposal: SkillProposal | null;
+  review: { passed: boolean; findings: string[] } | null;
+}
+
+/** Run the five-role structured loop against a real CLI provider. Returns the
+ *  run id immediately; the loop runs in the background and emits run events
+ *  (`proposal.created` etc.) + `ai://done`/`ai://error`, so the resulting
+ *  proposal is reviewed/applied through the existing SkillRunsPanel path. */
+export async function agentRunStructuredLoop(params: {
+  provider: SkillDispatchRuntime;
+  directive: string;
+  cwd: string;
+  highRisk?: boolean | null;
+  ambiguous?: boolean | null;
+  maxRework?: number | null;
+  commandOverride?: string | null;
+}): Promise<string> {
+  if (!isTauri()) return `mock-structured-loop-${params.provider}`;
+  return invoke<string>("agent_run_structured_loop", {
+    provider: params.provider,
+    directive: params.directive,
+    cwd: params.cwd,
+    highRisk: params.highRisk ?? null,
+    ambiguous: params.ambiguous ?? null,
+    maxRework: params.maxRework ?? null,
+    commandOverride: params.commandOverride ?? null,
+  });
+}
+
 export async function agentParseSkillProposal(raw: string): Promise<SkillProposal> {
   if (!isTauri()) throw new Error("Proposal parsing requires the Tauri shell.");
   return invoke<SkillProposal>("agent_parse_skill_proposal", { raw });

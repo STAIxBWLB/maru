@@ -43,6 +43,9 @@ import {
 } from "../lib/anchorDir";
 import { useTranslation } from "../lib/i18n";
 import type {
+  AiClassifierRuntime,
+  AiPermissionMode,
+  AiRuntime,
   AnchorSettings,
   DocumentBrowserMode,
   DocumentLabelMode,
@@ -241,18 +244,7 @@ export function SystemPane({
           <PreferencesTab settings={settings} onSettingsChange={onSettingsChange} />
         ) : null}
         {tab === "ai" ? (
-          <SettingsJsonTab
-            title={t("system.ai.title")}
-            value={settings.ai}
-            onSave={(value) =>
-              onSettingsChange(
-                normalizeAnchorSettings({
-                  ...settings,
-                  ai: value,
-                }),
-              )
-            }
-          />
+          <AiSettingsTab settings={settings} onSettingsChange={onSettingsChange} />
         ) : null}
         {tab === "terminal" ? (
           <SettingsJsonTab
@@ -715,6 +707,116 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // ============================ Preferences ============================
+
+function AiSettingsTab({
+  settings,
+  onSettingsChange,
+}: {
+  settings: AnchorSettings;
+  onSettingsChange: (settings: AnchorSettings) => void;
+}) {
+  const { t } = useTranslation();
+  const ai = settings.ai;
+  const [claudeOverride, setClaudeOverride] = useState(() => ai.commandOverrides.claude ?? "");
+  const [codexOverride, setCodexOverride] = useState(() => ai.commandOverrides.codex ?? "");
+
+  useEffect(() => {
+    setClaudeOverride(ai.commandOverrides.claude ?? "");
+    setCodexOverride(ai.commandOverrides.codex ?? "");
+  }, [ai.commandOverrides.claude, ai.commandOverrides.codex]);
+
+  const commitAi = (patch: Partial<AnchorSettings["ai"]>) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        ai: { ...settings.ai, ...patch },
+      }),
+    );
+  };
+
+  const commitOverride = (runtime: AiRuntime, value: string) => {
+    const trimmed = value.trim();
+    commitAi({
+      commandOverrides: {
+        ...ai.commandOverrides,
+        [runtime]: trimmed ? trimmed : null,
+      },
+    });
+  };
+
+  const permissionModes: AiPermissionMode[] = [
+    "plan",
+    "acceptEdits",
+    "default",
+    "bypassPermissions",
+  ];
+
+  return (
+    <div className="system-detail" style={{ width: "100%" }}>
+      <div className="settings-form">
+        <label className="field">
+          <span>{t("system.ai.defaultRuntime")}</span>
+          <select
+            value={ai.defaultRuntime}
+            onChange={(event) => commitAi({ defaultRuntime: event.target.value as AiRuntime })}
+          >
+            <option value="claude">{t("system.ai.runtime.claude")}</option>
+            <option value="codex">{t("system.ai.runtime.codex")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.ai.classifierRuntime")}</span>
+          <select
+            value={ai.classifierRuntime}
+            onChange={(event) =>
+              commitAi({ classifierRuntime: event.target.value as AiClassifierRuntime })
+            }
+          >
+            <option value="inherit">{t("system.ai.classifierRuntime.inherit")}</option>
+            <option value="claude">{t("system.ai.runtime.claude")}</option>
+            <option value="codex">{t("system.ai.runtime.codex")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.ai.permissionMode")}</span>
+          <select
+            value={ai.permissionMode}
+            onChange={(event) =>
+              commitAi({ permissionMode: event.target.value as AiPermissionMode })
+            }
+          >
+            {permissionModes.map((mode) => (
+              <option key={mode} value={mode}>
+                {t(`system.ai.permissionMode.${mode}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.ai.commandClaude")}</span>
+          <input
+            type="text"
+            value={claudeOverride}
+            placeholder={t("system.ai.commandOverride.help")}
+            onChange={(event) => setClaudeOverride(event.target.value)}
+            onBlur={(event) => commitOverride("claude", event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>{t("system.ai.commandCodex")}</span>
+          <input
+            type="text"
+            value={codexOverride}
+            placeholder={t("system.ai.commandOverride.help")}
+            onChange={(event) => setCodexOverride(event.target.value)}
+            onBlur={(event) => commitOverride("codex", event.target.value)}
+          />
+        </label>
+        <p className="settings-hint">{t("system.ai.commandOverride.help")}</p>
+      </div>
+    </div>
+  );
+}
 
 function PreferencesTab({
   settings,

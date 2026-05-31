@@ -100,6 +100,24 @@ pub fn register_mission_with_metadata(
     Ok(())
 }
 
+/// Register a "logical" mission that has no single backing OS pid (e.g. the
+/// structured loop, which spawns many short-lived child processes in sequence).
+/// `stop_ai_mission` returns `mission_not_running` for it instead of signalling
+/// an unrelated process. The mission still appears in the list, accumulates a
+/// log, and advances through finish/fail like any other.
+pub fn register_mission_logical(
+    app: &AppHandle,
+    id: &str,
+    kind: &str,
+    metadata: Option<JsonValue>,
+) -> Result<(), String> {
+    let state = app.state::<MissionState>();
+    let record = state.start_logical(id, kind, metadata)?;
+    emit_update(app, &record);
+    spawn_idle_watch(app.clone(), id.to_string());
+    Ok(())
+}
+
 pub fn touch_output(app: &AppHandle, id: &str, stream: &str, line: &str) {
     let state = app.state::<MissionState>();
     if let Ok(record) = state.touch(id, stream, line) {
@@ -145,6 +163,29 @@ impl MissionState {
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?
             .insert(id.to_string(), pid);
+        self.store_record(record.clone())?;
+        Ok(record)
+    }
+
+    fn start_logical(
+        &self,
+        id: &str,
+        kind: &str,
+        metadata: Option<JsonValue>,
+    ) -> Result<MissionRecord, String> {
+        let now = Utc::now().to_rfc3339();
+        let log_path = mission_log_path(id)?;
+        let record = MissionRecord {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            started_at: now.clone(),
+            last_output_at: now,
+            status: MissionStatus::Running,
+            exit_code: None,
+            output_log_path: Some(log_path.to_string_lossy().to_string()),
+            metadata,
+        };
+        // Intentionally no pid registered — see `register_mission_logical`.
         self.store_record(record.clone())?;
         Ok(record)
     }

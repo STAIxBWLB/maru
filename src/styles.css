@@ -9121,6 +9121,23 @@ button.git-badge:hover {
   line-height: 1.4;
 }
 
+.skill-run-summary {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-2);
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 @media (max-width: 1180px) {
   .skills-overview {
     grid-template-columns: 1fr;

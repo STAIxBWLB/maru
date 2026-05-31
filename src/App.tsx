@@ -248,6 +248,7 @@ import {
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
   normalizeAnchorSettings,
+  resolveClassifierRuntime,
   type AnchorSettings,
   type AnchorAppMode,
   type DocumentBrowserMode,
@@ -2873,7 +2874,8 @@ function MainApp() {
       if (!target) return;
       updateInboxCarry(id, { classifying: true, classifyError: null });
       try {
-        const classification = await classifyInboxItem(target);
+        const runtime = resolveClassifierRuntime(anchorSettings.ai);
+        const classification = await classifyInboxItem(target, runtime, inboxWorkspacePath);
         updateInboxCarry(id, { classifying: false, classification });
       } catch (err) {
         updateInboxCarry(id, {
@@ -2882,7 +2884,7 @@ function MainApp() {
         });
       }
     },
-    [inboxDrops, updateInboxCarry],
+    [anchorSettings.ai, inboxDrops, inboxWorkspacePath, updateInboxCarry],
   );
 
   useEffect(() => {
@@ -6858,6 +6860,7 @@ function MainApp() {
             setPersistedRightPaneTab("skills");
           }}
           runtimeCommands={skillRuntimeCommands}
+          defaultRuntime={anchorSettings.ai.defaultRuntime}
           onError={setError}
         />
         <CommandPalette

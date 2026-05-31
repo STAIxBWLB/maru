@@ -1,4 +1,4 @@
-import { Code2, FileText, Loader2, Play, Search, SquareTerminal, X } from "lucide-react";
+import { Code2, FileText, Loader2, Play, Search, SquareTerminal, Workflow, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   DispatchComposition,
@@ -10,12 +10,15 @@ import type {
 } from "../../lib/skills";
 import { useTranslation } from "../../lib/i18n";
 import {
+  agentRunStructuredLoop,
   skillsDispatchBackground,
   skillsDispatchCompose,
   skillsDispatchTerminal,
   skillsRuntimeStatus,
 } from "../../lib/skills";
 import { Button } from "../ui/Button";
+
+type ComposeMode = "terminal" | "background" | "structured";
 
 export interface ComposeDialogSeed {
   skill?: SkillRecord | null;
@@ -26,7 +29,7 @@ export interface ComposeDialogSeed {
 }
 
 export interface ComposeDialogDispatchEvent {
-  mode: "terminal" | "background";
+  mode: ComposeMode;
   runtime: SkillDispatchRuntime;
   invocationId: string | null;
 }
@@ -39,6 +42,7 @@ interface ComposeDialogProps {
   onTerminalDispatch: (spec: TerminalDispatchSpec) => void;
   onBackgroundDispatch?: (invocationId: string) => void;
   runtimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
+  defaultRuntime?: SkillDispatchRuntime;
   onError: (message: string | null) => void;
 }
 
@@ -50,14 +54,15 @@ export function ComposeDialog({
   onTerminalDispatch,
   onBackgroundDispatch,
   runtimeCommands = {},
+  defaultRuntime,
   onError,
 }: ComposeDialogProps) {
   const { t } = useTranslation();
   const [skillId, setSkillId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [skillQuery, setSkillQuery] = useState("");
-  const [runtime, setRuntime] = useState<SkillDispatchRuntime>("claude");
-  const [mode, setMode] = useState<"terminal" | "background">("background");
+  const [runtime, setRuntime] = useState<SkillDispatchRuntime>(defaultRuntime ?? "claude");
+  const [mode, setMode] = useState<ComposeMode>("background");
   const [preview, setPreview] = useState<DispatchComposition | null>(null);
   const [busy, setBusy] = useState(false);
   const [runtimeStatuses, setRuntimeStatuses] = useState<
@@ -70,10 +75,10 @@ export function ComposeDialog({
     setSkillId(seed?.skill?.id ?? skills[0]?.id ?? "");
     setPrompt(seed?.prompt ?? "");
     setSkillQuery("");
-    setRuntime(readLastSkillRuntime() ?? "claude");
+    setRuntime(readLastSkillRuntime() ?? defaultRuntime ?? "claude");
     setMode("background");
     setPreview(null);
-  }, [open, seed, skills]);
+  }, [open, seed, skills, defaultRuntime]);
 
   useEffect(() => {
     if (!open) return;
@@ -171,7 +176,22 @@ export function ComposeDialog({
     onError(null);
     try {
       let dispatchEvent: ComposeDialogDispatchEvent;
-      if (mode === "terminal") {
+      if (mode === "structured") {
+        if (!seed?.cwd) {
+          onError(t("skills.compose.structuredNeedsCwd"));
+          setBusy(false);
+          return;
+        }
+        const directive = `[skill: ${selectedSkill.name}]\n\n${prompt}`;
+        const runId = await agentRunStructuredLoop({
+          provider: runtime,
+          directive,
+          cwd: seed.cwd,
+          commandOverride: runtimeCommands[runtime] ?? null,
+        });
+        onBackgroundDispatch?.(runId);
+        dispatchEvent = { mode: "structured", runtime, invocationId: runId };
+      } else if (mode === "terminal") {
         const spec = await skillsDispatchTerminal({
           skillId: selectedSkill.id,
           runtime,
@@ -360,10 +380,22 @@ export function ComposeDialog({
                     <Play size={13} />
                     <span>{t("skills.compose.background")}</span>
                   </button>
+                  <button
+                    type="button"
+                    className={mode === "structured" ? "active" : ""}
+                    onClick={() => setMode("structured")}
+                  >
+                    <Workflow size={13} />
+                    <span>{t("skills.compose.structured")}</span>
+                  </button>
                 </div>
                 {mode === "terminal" ? (
                   <p className="compose-mode-note">
                     {t("skills.compose.terminalFreeRun")}
+                  </p>
+                ) : mode === "structured" ? (
+                  <p className="compose-mode-note">
+                    {t("skills.compose.structuredNote")}
                   </p>
                 ) : (
                   <p className="compose-mode-note">

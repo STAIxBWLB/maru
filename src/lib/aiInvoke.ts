@@ -16,7 +16,8 @@
 import {
   buildInboxClassificationPrompt,
   parseInboxClassification,
-  startClaudeCliInvocation,
+  startAgentCliInvocation,
+  type AgentProvider,
 } from "./api";
 import type { InboxClassification, InboxDropItem } from "./types";
 
@@ -48,7 +49,11 @@ interface AiErrorEvent {
 
 const HARD_TIMEOUT_MS = 60_000;
 
-export async function classifyInboxItem(item: InboxDropItem): Promise<InboxClassification> {
+export async function classifyInboxItem(
+  item: InboxDropItem,
+  runtime: AgentProvider = "claude",
+  cwd: string | null = null,
+): Promise<InboxClassification> {
   const prompt = await buildInboxClassificationPrompt(item);
 
   if (!isTauri()) {
@@ -57,7 +62,10 @@ export async function classifyInboxItem(item: InboxDropItem): Promise<InboxClass
   }
 
   const { listen } = await import("@tauri-apps/api/event");
-  const invocationId = await startClaudeCliInvocation(prompt);
+  // Pass the workspace cwd so the agent runs in the right tree. Codex `exec`
+  // in particular refuses to run outside a trusted (git) directory, so without
+  // a workspace cwd it would fail; the inbox workspace is always a git repo.
+  const invocationId = await startAgentCliInvocation(runtime, prompt, cwd);
 
   return await new Promise<InboxClassification>((resolve, reject) => {
     let stdoutBuffer = "";
@@ -110,7 +118,7 @@ export async function classifyInboxItem(item: InboxDropItem): Promise<InboxClass
       if (!evt.payload.success) {
         safeReject(
           new Error(
-            `Claude CLI exited with code ${evt.payload.exitCode ?? "unknown"}`,
+            `${runtime} CLI exited with code ${evt.payload.exitCode ?? "unknown"}`,
           ),
         );
         return;

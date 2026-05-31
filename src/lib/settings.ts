@@ -32,6 +32,9 @@ export type RightPaneTab =
   | "evidence";
 export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
+export type AiRuntime = "claude" | "codex";
+export type AiClassifierRuntime = AiRuntime | "inherit";
+export type AiPermissionMode = "plan" | "acceptEdits" | "default" | "bypassPermissions";
 
 export interface DocumentViewDefinition {
   id: string;
@@ -159,7 +162,7 @@ export interface AnchorSettings {
     autoLaunch: TerminalLauncherId | null;
     launchers: Record<TerminalLauncherId, TerminalLauncherSettings>;
   };
-  ai: Record<string, unknown>;
+  ai: AiSettings;
   comms: CommsSettings;
   meetings: MeetingsSettings;
   tasks: TasksSettings;
@@ -227,6 +230,19 @@ export interface TasksSettings {
 
 export interface ComposerSettings {
   lintDismissals: Record<string, string[]>;
+}
+
+export interface AiSettings {
+  /** Agent runtime used by default for skill dispatch + structured runs. */
+  defaultRuntime: AiRuntime;
+  /** Runtime used for inbox classification; "inherit" resolves to defaultRuntime. */
+  classifierRuntime: AiClassifierRuntime;
+  /** Permission mode passed to the agent CLI (Claude `--permission-mode`). */
+  permissionMode: AiPermissionMode;
+  /** Optional absolute paths overriding PATH-based CLI resolution. */
+  commandOverrides: { claude: string | null; codex: string | null };
+  /** Round-trip-safe carrier for unmodeled/legacy keys (providers, defaults, …). */
+  extra: Record<string, unknown>;
 }
 
 export interface DiagramSettings {
@@ -306,8 +322,11 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
     },
   },
   ai: {
-    providers: {},
-    defaults: {},
+    defaultRuntime: "claude",
+    classifierRuntime: "inherit",
+    permissionMode: "plan",
+    commandOverrides: { claude: null, codex: null },
+    extra: {},
   },
   comms: {
     outlook: {
@@ -436,7 +455,7 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
         ),
       },
     },
-    ai: normalizeFutureAi(value.ai),
+    ai: normalizeAi(value.ai),
     comms: normalizeCommsSettings(value.comms),
     meetings: normalizeMeetingsSettings(value.meetings),
     tasks: normalizeTasksSettings(value.tasks),
@@ -734,8 +753,9 @@ function cloneDefaultSettings(): AnchorSettings {
       },
     },
     ai: {
-      providers: {},
-      defaults: {},
+      ...DEFAULT_ANCHOR_SETTINGS.ai,
+      commandOverrides: { ...DEFAULT_ANCHOR_SETTINGS.ai.commandOverrides },
+      extra: { ...DEFAULT_ANCHOR_SETTINGS.ai.extra },
     },
     comms: {
       outlook: { ...DEFAULT_ANCHOR_SETTINGS.comms.outlook },
@@ -1334,12 +1354,63 @@ function normalizeTerminalWidth(value: unknown): number {
   return Math.max(320, Math.round(value));
 }
 
-function normalizeFutureAi(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) return { ...DEFAULT_ANCHOR_SETTINGS.ai };
-  if (isRecord(value.runtimes) || typeof value.defaultRuntime === "string") {
-    return { ...DEFAULT_ANCHOR_SETTINGS.ai };
+const AI_PERMISSION_MODES: AiPermissionMode[] = [
+  "plan",
+  "acceptEdits",
+  "default",
+  "bypassPermissions",
+];
+const AI_KNOWN_KEYS = new Set([
+  "defaultRuntime",
+  "classifierRuntime",
+  "permissionMode",
+  "commandOverrides",
+  "extra",
+]);
+
+function parseAiRuntime(value: unknown): AiRuntime | null {
+  return value === "claude" || value === "codex" ? value : null;
+}
+
+/**
+ * Round-trip-safe normalizer for `ai`. Known keys are typed/validated; every
+ * other key (legacy `providers`/`defaults`/`runtimes`, future fields) is folded
+ * into `extra` so serialize→normalize never loses data.
+ */
+function normalizeAi(value: unknown): AiSettings {
+  const fallback = DEFAULT_ANCHOR_SETTINGS.ai;
+  if (!isRecord(value)) {
+    return {
+      ...fallback,
+      commandOverrides: { ...fallback.commandOverrides },
+      extra: {},
+    };
   }
-  return value;
+  const overrides = isRecord(value.commandOverrides) ? value.commandOverrides : {};
+  const extra: Record<string, unknown> = isRecord(value.extra) ? { ...value.extra } : {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!AI_KNOWN_KEYS.has(key)) extra[key] = entry;
+  }
+  return {
+    defaultRuntime: parseAiRuntime(value.defaultRuntime) ?? fallback.defaultRuntime,
+    classifierRuntime:
+      value.classifierRuntime === "inherit"
+        ? "inherit"
+        : parseAiRuntime(value.classifierRuntime) ?? fallback.classifierRuntime,
+    permissionMode: AI_PERMISSION_MODES.includes(value.permissionMode as AiPermissionMode)
+      ? (value.permissionMode as AiPermissionMode)
+      : fallback.permissionMode,
+    commandOverrides: {
+      claude: normalizeOptionalString(overrides.claude),
+      codex: normalizeOptionalString(overrides.codex),
+    },
+    extra,
+  };
+}
+
+/** Resolve the effective classifier runtime ("inherit" → defaultRuntime). */
+export function resolveClassifierRuntime(ai: AiSettings): AiRuntime {
+  return ai.classifierRuntime === "inherit" ? ai.defaultRuntime : ai.classifierRuntime;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

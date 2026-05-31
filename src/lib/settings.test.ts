@@ -6,6 +6,8 @@ import {
   applyWorkspaceTasksOverrides,
   normalizeAnchorSettings,
   parseBinaryFileIncludePatternsText,
+  resolveClassifierRuntime,
+  serializeAnchorSettings,
 } from "./settings";
 
 describe("normalizeAnchorSettings", () => {
@@ -132,7 +134,13 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.terminal.launchers.codex.label).toBe("Local Codex");
     expect(settings.terminal.launchers.claude.enabled).toBe(true);
     expect(settings.terminal.launchers.shell.enabled).toBe(true);
-    expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+    expect(settings.ai).toEqual({
+      defaultRuntime: "claude",
+      classifierRuntime: "inherit",
+      permissionMode: "plan",
+      commandOverrides: { claude: null, codex: null },
+      extra: {},
+    });
   });
 
   it("parses comms mode and clamps comms settings", () => {
@@ -534,7 +542,55 @@ describe("normalizeAnchorSettings", () => {
 
     expect(settings.terminal.launchers.claude.enabled).toBe(false);
     expect(settings.terminal.launchers.claude.label).toBe("Claude Local");
-    expect(settings.ai).toEqual({ providers: {}, defaults: {} });
+    // Legacy `runtimes` is preserved round-trip-safe under `ai.extra`.
+    expect(settings.ai.defaultRuntime).toBe("claude");
+    expect(settings.ai.extra.runtimes).toEqual({
+      "claude-code": { enabled: false, label: "Claude Local" },
+    });
+  });
+
+  it("normalizes typed AI settings and trims command overrides", () => {
+    const settings = normalizeAnchorSettings({
+      ai: {
+        defaultRuntime: "codex",
+        classifierRuntime: "claude",
+        permissionMode: "acceptEdits",
+        commandOverrides: { claude: "  /bin/claude  ", codex: "" },
+        providers: { custom: 1 },
+      },
+    });
+    expect(settings.ai.defaultRuntime).toBe("codex");
+    expect(settings.ai.classifierRuntime).toBe("claude");
+    expect(settings.ai.permissionMode).toBe("acceptEdits");
+    expect(settings.ai.commandOverrides).toEqual({ claude: "/bin/claude", codex: null });
+    // unmodeled keys are preserved round-trip-safe under extra
+    expect(settings.ai.extra.providers).toEqual({ custom: 1 });
+    expect(resolveClassifierRuntime(settings.ai)).toBe("claude");
+  });
+
+  it("falls back to AI defaults on invalid values", () => {
+    const settings = normalizeAnchorSettings({
+      ai: { defaultRuntime: "gpt", permissionMode: "nope", classifierRuntime: 7 },
+    });
+    expect(settings.ai.defaultRuntime).toBe("claude");
+    expect(settings.ai.permissionMode).toBe("plan");
+    expect(settings.ai.classifierRuntime).toBe("inherit");
+    expect(resolveClassifierRuntime(settings.ai)).toBe("claude");
+  });
+
+  it("round-trips AI settings through serialize/normalize without data loss", () => {
+    const custom = normalizeAnchorSettings({
+      ai: {
+        defaultRuntime: "codex",
+        classifierRuntime: "inherit",
+        permissionMode: "bypassPermissions",
+        commandOverrides: { claude: "/usr/bin/claude", codex: null },
+        legacyFlag: true,
+      },
+    });
+    const round = normalizeAnchorSettings(serializeAnchorSettings(custom));
+    expect(round.ai).toEqual(custom.ai);
+    expect(round.ai.extra.legacyFlag).toBe(true);
   });
 
   it("normalizes binary include pattern text with comments and case-insensitive duplicates", () => {

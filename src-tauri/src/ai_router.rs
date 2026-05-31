@@ -1,12 +1,16 @@
-// Phase 2 step 4: Claude Code CLI subprocess bridge. Frontend calls
-// `start_claude_cli_invocation(prompt, cwd?, extra_args?)`; Rust spawns
-// `claude -p <prompt>` and streams stdout/stderr lines through Tauri's
-// event channel as `ai://output`, plus a final `ai://done` (or
-// `ai://error` if spawn fails). Both inbox classification (Phase 2) and
-// user-skill invocation (Phase 3) drive this surface.
+// Provider-agnostic CLI subprocess bridge. Frontend calls
+// `start_agent_cli_invocation(provider, prompt, cwd?, extra_args?, extra_env?,
+// command_override?)`; Rust resolves the provider (`claude` / `codex`) via
+// `agent_host::provider::build_cli_command` — which already knows each CLI's
+// argv shape and whether the prompt is passed as an arg (Claude `-p`) or piped
+// over stdin (Codex `exec … -`) — then spawns it and streams stdout/stderr
+// lines through Tauri's event channel as `ai://output`, plus a final
+// `ai://done` (or `ai://error` if spawn/wait fails). `start_claude_cli_invocation`
+// is kept as a thin Claude wrapper for back-compat. Both inbox classification
+// and user-skill invocation drive this surface.
 //
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 
@@ -14,7 +18,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
+use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
+use crate::agent_host::provider::{build_cli_command, CliProviderKind};
+use crate::cli_path::{augmented_path, merge_path_env};
 use crate::mission_state;
 
 #[derive(Clone, Debug, Serialize)]
@@ -44,6 +50,41 @@ pub struct AiErrorEvent {
     pub message: String,
 }
 
+/// Generic headless invocation: spawn `provider` (claude/codex) with `prompt`,
+/// streaming stdout/stderr as `ai://output` and a terminal `ai://done`/`ai://error`.
+#[tauri::command]
+pub fn start_agent_cli_invocation(
+    app: AppHandle,
+    provider: String,
+    prompt: String,
+    cwd: Option<String>,
+    extra_args: Option<Vec<String>>,
+    extra_env: Option<HashMap<String, String>>,
+    command_override: Option<String>,
+) -> Result<String, String> {
+    let (provider_kind, resolved_cwd, mut cmd, stdin_payload) = build_agent_command(
+        &provider,
+        &prompt,
+        cwd.as_deref(),
+        command_override.as_deref(),
+    )?;
+    if let Some(args) = extra_args {
+        cmd.args(args);
+    }
+    let invocation_id = format!("ai-{}", Uuid::new_v4());
+    spawn_streaming_invocation(
+        app,
+        invocation_id,
+        cmd,
+        Some(resolved_cwd),
+        stdin_payload,
+        extra_env.unwrap_or_default(),
+        provider_kind.id().to_string(),
+    )
+}
+
+/// Back-compat Claude wrapper. Preserves the original empty-prompt error string,
+/// then delegates to the generic bridge with `provider = "claude"`.
 #[tauri::command]
 pub fn start_claude_cli_invocation(
     app: AppHandle,
@@ -55,37 +96,91 @@ pub fn start_claude_cli_invocation(
     if prompt.trim().is_empty() {
         return Err("Prompt is empty.".to_string());
     }
+    start_agent_cli_invocation(
+        app,
+        "claude".to_string(),
+        prompt,
+        cwd,
+        extra_args,
+        extra_env,
+        None,
+    )
+}
 
-    let invocation_id = format!("ai-{}", Uuid::new_v4());
-
-    let claude_bin = resolve_program("claude").ok_or_else(|| {
-        "cli_missing: claude CLI not found in PATH or common install locations".to_string()
-    })?;
-
-    let mut cmd = Command::new(claude_bin);
-    cmd.arg("-p").arg(&prompt);
-    if let Some(args) = extra_args {
-        cmd.args(args);
+/// Resolve provider + cwd and build the provider command via the shared
+/// `build_cli_command`. Pure (no spawn) so it is unit-testable without an
+/// `AppHandle`. Returns the resolved cwd so the caller can set the process
+/// working dir (the builder does not).
+fn build_agent_command(
+    provider: &str,
+    prompt: &str,
+    cwd: Option<&str>,
+    command_override: Option<&str>,
+) -> Result<(CliProviderKind, String, Command, Option<String>), String> {
+    if prompt.trim().is_empty() {
+        return Err("completion_prompt_required".to_string());
     }
-    if let Some(cwd) = cwd {
+    let provider_kind = CliProviderKind::parse(provider)?;
+    let resolved_cwd = cwd
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+        .ok_or_else(|| {
+            "agent_cli_cwd_unresolved: no cwd provided and current_dir() failed".to_string()
+        })?;
+    let request = CompletionRequest {
+        schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
+        provider: provider_kind.id().to_string(),
+        prompt: prompt.to_string(),
+        cwd: resolved_cwd.clone(),
+        mode: "background".to_string(),
+        metadata: None,
+    };
+    let add_dirs = vec![request.cwd.clone()];
+    let (cmd, stdin_payload) =
+        build_cli_command(provider_kind, &request, &add_dirs, command_override)?;
+    Ok((provider_kind, resolved_cwd, cmd, stdin_payload))
+}
+
+/// Spawn `cmd`, wire stdout/stderr pumps + the reaper, register a mission keyed
+/// by `mission_kind`, and (when `stdin_payload` is `Some`) write the prompt to
+/// the child's stdin on its own thread so the pipe closes on EOF (Codex). Shared
+/// by both the generic command and the Claude wrapper.
+fn spawn_streaming_invocation(
+    app: AppHandle,
+    invocation_id: String,
+    mut cmd: Command,
+    cwd: Option<String>,
+    stdin_payload: Option<String>,
+    extra_env: HashMap<String, String>,
+    mission_kind: String,
+) -> Result<String, String> {
+    if let Some(cwd) = cwd.as_ref() {
         cmd.current_dir(cwd);
     }
-    let extra_env = extra_env.unwrap_or_default();
     let augmented = augmented_path();
     let effective_path = merge_path_env(
         extra_env.get("PATH").map(std::ffi::OsStr::new),
         Some(augmented.as_os_str()),
     );
-    cmd.env("PATH", effective_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.env("PATH", effective_path);
     for (key, value) in extra_env {
         if key == "PATH" {
             continue;
         }
         cmd.env(key, value);
     }
+    cmd.stdin(if stdin_payload.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -95,11 +190,20 @@ pub fn start_claude_cli_invocation(
     };
     let child_pid = child.id();
 
+    if let Some(payload) = stdin_payload {
+        if let Some(mut stdin) = child.stdin.take() {
+            thread::spawn(move || {
+                let _ = stdin.write_all(payload.as_bytes());
+                // `stdin` drops here, closing the pipe so the child sees EOF.
+            });
+        }
+    }
+
     let stdout = child.stdout.take().ok_or_else(|| {
-        "stdout_capture_failed: claude subprocess produced no stdout handle".to_string()
+        "stdout_capture_failed: subprocess produced no stdout handle".to_string()
     })?;
     let stderr = child.stderr.take().ok_or_else(|| {
-        "stderr_capture_failed: claude subprocess produced no stderr handle".to_string()
+        "stderr_capture_failed: subprocess produced no stderr handle".to_string()
     })?;
 
     spawn_line_pump(
@@ -114,7 +218,7 @@ pub fn start_claude_cli_invocation(
         "stderr".to_string(),
         stderr,
     );
-    let _ = mission_state::register_mission(&app, &invocation_id, "claude", child_pid);
+    let _ = mission_state::register_mission(&app, &invocation_id, &mission_kind, child_pid);
 
     // Reaper thread: wait for exit, then emit `ai://done` or `ai://error`.
     let app_done = app.clone();
@@ -185,6 +289,76 @@ fn format_spawn_error(err: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn write_fake_cli(path: std::path::PathBuf) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    #[test]
+    fn build_agent_command_rejects_empty_prompt() {
+        let err = build_agent_command("claude", "   \n\t  ", Some("/tmp"), None).unwrap_err();
+        assert_eq!(err, "completion_prompt_required");
+    }
+
+    #[test]
+    fn build_agent_command_rejects_unsupported_provider() {
+        let err = build_agent_command("openai", "hello", Some("/tmp"), None).unwrap_err();
+        assert!(err.starts_with("unsupported_provider"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_agent_command_builds_claude_with_plan_mode_and_no_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-claude"));
+        let (kind, cwd, cmd, stdin_payload) = build_agent_command(
+            "claude",
+            "classify this",
+            Some(dir.path().to_str().unwrap()),
+            Some(cli.to_str().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(kind, CliProviderKind::Claude);
+        assert_eq!(cwd, dir.path().to_str().unwrap());
+        assert!(stdin_payload.is_none());
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.contains(&"-p".to_string()), "{args:?}");
+        assert!(args.contains(&"classify this".to_string()), "{args:?}");
+        assert!(args.contains(&"--permission-mode".to_string()), "{args:?}");
+        assert!(args.contains(&"plan".to_string()), "{args:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_agent_command_builds_codex_with_stdin_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-codex"));
+        let (kind, _cwd, cmd, stdin_payload) = build_agent_command(
+            "codex",
+            "classify this",
+            Some(dir.path().to_str().unwrap()),
+            Some(cli.to_str().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(kind, CliProviderKind::Codex);
+        assert_eq!(stdin_payload.as_deref(), Some("classify this"));
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.contains(&"exec".to_string()), "{args:?}");
+        assert!(args.contains(&"--cd".to_string()), "{args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("-"), "{args:?}");
+    }
 
     #[test]
     fn empty_prompt_is_rejected() {

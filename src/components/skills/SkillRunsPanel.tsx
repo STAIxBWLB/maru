@@ -1,6 +1,8 @@
 import {
+  BarChart3,
   CheckCircle2,
   ClipboardCheck,
+  Download,
   FileSearch,
   Loader2,
   RefreshCcw,
@@ -9,12 +11,17 @@ import {
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { chooseSaveFile } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
 import {
   agentApplySkillProposal,
+  agentExportRedactedRunSummary,
   agentParseSkillProposal,
   agentReadRunEvents,
+  agentReplayRunSummary,
+  agentWriteRedactedRunSummary,
   skillsDispatchBackground,
+  type RunReplaySummary,
   type SkillDispatchRuntime,
   type SkillProposal,
 } from "../../lib/skills";
@@ -69,6 +76,10 @@ export function SkillRunsPanel({
   const [applyBusy, setApplyBusy] = useState(false);
   const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(() => new Set());
+  const [summaries, setSummaries] = useState<Record<string, RunReplaySummary>>({});
+  const [summaryBusyId, setSummaryBusyId] = useState<string | null>(null);
+  const [exportBusyId, setExportBusyId] = useState<string | null>(null);
+  const [exportNotices, setExportNotices] = useState<Record<string, string>>({});
   const reviewRequestSeq = useRef(0);
 
   useEffect(() => {
@@ -187,6 +198,53 @@ export function SkillRunsPanel({
     }
   }
 
+  async function loadSummary(mission: MissionRecord) {
+    const cwd = workspacePathFromMission(mission) ?? workPath;
+    if (!cwd) return;
+    setSummaryBusyId(mission.id);
+    onError(null);
+    try {
+      const summary = await agentReplayRunSummary(cwd, mission.id);
+      setSummaries((current) => ({ ...current, [mission.id]: summary }));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSummaryBusyId(null);
+    }
+  }
+
+  async function exportSummary(mission: MissionRecord) {
+    const cwd = workspacePathFromMission(mission) ?? workPath;
+    if (!cwd) return;
+    setExportBusyId(mission.id);
+    onError(null);
+    try {
+      const target = await chooseSaveFile(
+        t("skillRuns.export.title"),
+        `${cwd}/.anchor/run-summaries/${mission.id}.json`,
+      );
+      if (target) {
+        const written = await agentWriteRedactedRunSummary(cwd, mission.id, target);
+        setExportNotices((current) => ({
+          ...current,
+          [mission.id]: t("skillRuns.export.done", { path: written }),
+        }));
+      } else {
+        // No save target chosen (or browser dev) — fall back to the clipboard.
+        const summary = await agentExportRedactedRunSummary(cwd, mission.id);
+        await navigator.clipboard?.writeText(JSON.stringify(summary, null, 2));
+        setExportNotices((current) => ({
+          ...current,
+          [mission.id]: t("skillRuns.export.copied"),
+        }));
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExportBusyId(null);
+    }
+  }
+
   return (
     <section className="skill-runs-panel">
       <header className="skill-runs-head">
@@ -293,12 +351,45 @@ export function SkillRunsPanel({
                       {appliedIds.has(mission.id) ? t("skillRuns.applied") : t("skillRuns.apply")}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={summaryBusyId === mission.id}
+                    onClick={() => void loadSummary(mission)}
+                  >
+                    {summaryBusyId === mission.id ? <Loader2 size={12} className="spin" /> : <BarChart3 size={12} />}
+                    {t("skillRuns.summary")}
+                  </button>
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={exportBusyId === mission.id}
+                    onClick={() => void exportSummary(mission)}
+                    title={t("skillRuns.export.title")}
+                  >
+                    {exportBusyId === mission.id ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
+                    {t("skillRuns.export.title")}
+                  </button>
                 </div>
                 {activeRunId === mission.id && reviewProposal ? (
                   <div className="skill-run-proposal">
                     <strong>{t("skillRuns.proposalReady")}</strong>
                     <span>{proposalSummary(reviewProposal)}</span>
                   </div>
+                ) : null}
+                {summaries[mission.id] ? (
+                  <div className="skill-run-summary">
+                    {t("skillRuns.summary.counts", {
+                      events: summaries[mission.id].eventCount,
+                      proposals: summaries[mission.id].proposalCount,
+                      claimed: summaries[mission.id].writeClaimedCount,
+                      committed: summaries[mission.id].writeCommittedCount,
+                      conflicts: summaries[mission.id].writeConflictCount,
+                    })}
+                  </div>
+                ) : null}
+                {exportNotices[mission.id] ? (
+                  <div className="skill-run-summary">{exportNotices[mission.id]}</div>
                 ) : null}
               </article>
             );
