@@ -4,7 +4,11 @@ date: {date}
 type: {type}
 topic: {topic}
 tags: []
-attendees: []
+attendees: []          # resolved [[person]] links when enrichment is on
+project:               # [[vault_note]] when resolved (context-enrichment §4)
+relatedMeetings: []    # [[meeting-note]] links
+relatedTasks: []       # [[task-note]] links
+source_doc:            # origin path (transcript / inbox item)
 ---
 # {title}
 
@@ -30,4 +34,4 @@ attendees: []
 
 ## Actions
 
-- [ ] {action}
+- [ ] {action} — assignee: {assignee}, due: {due}

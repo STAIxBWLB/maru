@@ -59,7 +59,11 @@ If any check fails:
    - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `_sys/skills/lib/vault_adapter.md` for the summary-to-vault field policy.
    - **type remapping**: summary `type` (regulation|report|plan|...) maps to vault `type` (insight|decision|observation|person|project|method|moc) based on semantic intent. Common mappings: report→observation, plan→decision, memo→insight, proposal→decision, regulation→observation.
    - If registry matched in step 2, add `vault_note` wiki link to topics array
-   - Set source field to the work/ relative path
+   - Set source field to the work/ relative path. If the source carries backref
+     frontmatter (`source_doc`, `meetingSourcePath`, `relatedMeetings`,
+     `relatedTasks` — context-enrichment §4), preserve those origins in the
+     note's source / Relevant Notes; emit a `[[wiki-link]]` only for targets that
+     resolve (consistent with the MOC dead-link gate above)
    - Body: the insight with context
    - Relevant Notes section with wiki links
    - Topics section with MOC wiki links

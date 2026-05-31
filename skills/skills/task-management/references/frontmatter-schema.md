@@ -48,6 +48,24 @@ vaultPromotionNote:
 `proposed` means this skill found durable knowledge value and created a local
 packet. Actual vault writes require an explicit vault skill invocation.
 
+## Cross-link / Backref Fields (create-path only)
+
+Set by context enrichment (`_sys/rules/context-enrichment.md` §4) when a task is
+created, linking it back to its origin and related work:
+
+```yaml
+source_doc:            # origin path (meeting / inbox item / document)
+meetingSourcePath:     # alias of source_doc when the origin is a meeting note
+relatedMeetings: []    # [[meeting-note]] links
+relatedTasks: []       # [[task-note]] links
+```
+
+⚠ Write these on the **create** frontmatter only. Do not include them in an
+Anchor schedule-update payload — `UpdateTaskScheduleFields` is
+`deny_unknown_fields` and accepts only `project`/`priority`/`due`/
+`calendarStart`/`calendarEnd`/`estimateMinutes`. Emit a `[[wiki-link]]` only for
+entities that enrichment actually resolved.
+
 ## Status Mapping
 
 | Status | Directory |
