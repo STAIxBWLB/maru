@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# infuse-hooks.sh — _sys/skills/env 의 .claude 설정을 work/ 서브모듈에 전파
+# infuse-hooks.sh — envs/default 의 .claude 설정을 work/ 서브모듈에 전파
 #
-# 원본 파일 위치 (_sys/skills/env):
+# 원본 파일 위치 (envs/default):
 #   1. .claude/hooks/init-env.sh          — 공유 venv 활성화 스크립트
 #   2. .claude/templates/settings.json   — SessionStart 훅 템플릿 (배포용)
 #
@@ -42,12 +42,12 @@ fi
 # ── 소스 파일 확인 ────────────────────────────────────────────────────────────
 if [[ ! -f "$SRC_HOOK" ]]; then
     echo "❌ 소스 파일 없음: $SRC_HOOK"
-    echo "   _sys/skills/env/.claude/hooks/init-env.sh 가 필요합니다."
+    echo "   envs/default/.claude/hooks/init-env.sh 가 필요합니다."
     exit 1
 fi
 if [[ ! -f "$SRC_SETTINGS" ]]; then
     echo "❌ 소스 파일 없음: $SRC_SETTINGS"
-    echo "   _sys/skills/env/.claude/templates/settings.json 가 필요합니다."
+    echo "   envs/default/.claude/templates/settings.json 가 필요합니다."
     exit 1
 fi
 

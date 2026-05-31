@@ -27,11 +27,16 @@ Provide Telegram primitives and normalized inbox export.
 
 ## Anchor Runtime
 
-- `scripts/telegram_monitor.py --output-json --once --session-file <absolute>`
+These scripts import `telethon`, which is installed only in the Anchor venv
+(`~/.anchor/env/.venv`). Always launch them through `scripts/run.sh`, which
+resolves that interpreter (honoring `$ANCHOR_SKILLS_ENV`/`$VIRTUAL_ENV` and
+falling back to `~/.anchor/env/.venv`). Do not invoke the `.py` files directly.
+
+- `scripts/run.sh scripts/telegram_monitor.py --output-json --once --session-file <absolute>`
   prints normalized recent messages to stdout and does not write to the inbox.
-- `scripts/auth.py --session-file <absolute>` runs interactive Telethon login in
-  a terminal. API id/hash and tokens must come from environment or
-  workspace-local runtime config.
+- `scripts/run.sh scripts/auth.py --session-file <absolute>` runs interactive
+  Telethon login in a terminal. API id/hash and tokens must come from
+  environment or workspace-local runtime config.
 
 ## Rules
 

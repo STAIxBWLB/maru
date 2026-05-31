@@ -1,32 +1,32 @@
 # Skills Env Sharing
 
-`env/` is the reproducible runtime scaffold inside the `entelecheia/skills`
-repo. In the workspace checkout its path is:
+`envs/default/` is the reproducible runtime scaffold. `setup.sh --target
+~/.anchor/env` provisions it into the canonical runtime:
 
 ```bash
-~/workspace/work/_sys/skills/env
+~/.anchor/env        # .venv + node_modules + jre (provisioned, not in git)
 ```
 
-In a standalone clone of the skills repo, the same files live at repo-local
-`env/`.
+In a standalone clone, the source scaffold lives at repo-local `envs/default/`.
 
 ## Discovery
 
-Scripts and hooks resolve the env by walking upward from the current project or
-skill directory and checking these candidates:
+Scripts and hooks resolve the env in this order (most-specific first):
 
-1. `<ancestor>/env/.venv`
-2. `<ancestor>/_sys/skills/env/.venv`
-3. `<ancestor>/skills/env/.venv`
+1. `$SKILL_PYTHON` (caller override)
+2. `$ANCHOR_SKILLS_ENV/.venv` (host-injected)
+3. `$VIRTUAL_ENV` (active venv)
+4. `~/.anchor/env/.venv` (canonical fixed location)
+5. repo-local walk-up: `<ancestor>/{env,envs/default,skills/envs/default}/.venv` (dev-in-tree)
+6. system `python3` (warning)
 
-`SKILL_PYTHON` may override discovery for one command.
+See REFERENCE.md "Env resolution (canonical)" for the source-of-truth list.
 
 ## Provisioning
 
 ```bash
-cd ~/workspace/work/_sys/skills/env
-make setup
-make verify
+bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
+bash ~/.anchor/skills/_builtin/envs/default/setup.sh --verify --target ~/.anchor/env
 ```
 
 The tracked source of truth is `pyproject.toml`, `uv.lock`, `package.json`, and
@@ -35,9 +35,10 @@ The tracked source of truth is `pyproject.toml`, `uv.lock`, `package.json`, and
 
 ## Session Hook
 
-`env/.claude/hooks/init-env.sh` is the shared SessionStart hook. It writes
-`VIRTUAL_ENV`, `PATH`, and optional `NODE_PATH` into `CLAUDE_ENV_FILE` so later
-tool calls use the same runtime.
+`envs/default/.claude/hooks/init-env.sh` is the shared SessionStart hook. It
+writes `ANCHOR_SKILLS_ENV`, `VIRTUAL_ENV`, `PATH`, and `NODE_PATH` into
+`CLAUDE_ENV_FILE` so later tool calls use the same runtime (matching the Rust
+host's `env_vars_for_runs`).
 
-Use `env/scripts/infuse-hooks.sh --all` from the workspace checkout to refresh
-submodule-local `.claude` hooks.
+Register it globally in `~/.claude/settings.json` (SessionStart), or use
+`scripts/infuse-hooks.sh --all` to refresh submodule-local `.claude` hooks.

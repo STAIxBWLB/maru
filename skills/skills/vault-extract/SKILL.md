@@ -56,7 +56,7 @@ If any check fails:
 5. For each item, create a note in vault/notes/:
    - Filename: prose-as-title (lowercase, hyphens, .md)
    - YAML frontmatter with required fields (`description`, `type`, `domain`, `topics`)
-   - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `_sys/skills/lib/vault_adapter.md` for the summary-to-vault field policy.
+   - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `~/.anchor/skills/_builtin/lib/vault_adapter.md` for the summary-to-vault field policy.
    - **type remapping**: summary `type` (regulation|report|plan|...) maps to vault `type` (insight|decision|observation|person|project|method|moc) based on semantic intent. Common mappings: report→observation, plan→decision, memo→insight, proposal→decision, regulation→observation.
    - If registry matched in step 2, add `vault_note` wiki link to topics array
    - Set source field to the work/ relative path. If the source carries backref

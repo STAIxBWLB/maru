@@ -41,7 +41,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | 검증 | `./hwpx validate <file.hwpx>` |
 | PDF 변환 | `./hwpx to-pdf <file.hwpx>` (LibreOffice + H2Orestart 필요) |
 
-경로 기준: `~/workspace/work/_sys/skills/skills/hwpx/hwpx`
+경로 기준: `~/.anchor/skills/hwpx/hwpx`
 
 ## 한국 공문서 작성 규정 (핵심 cheat sheet)
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# run.sh — Anchor skills python interpreter wrapper
+# run.sh — Anchor skills python interpreter wrapper (io-telegram)
+#
+# telethon 은 ~/.anchor/env/.venv 에만 설치되므로 auth.py/telegram_monitor.py
+# 는 반드시 이 wrapper 를 통해 실행한다.
 #
 # 우선순위:
 #   1. $SKILL_PYTHON (caller override)
@@ -44,7 +47,7 @@ PYTHON="$(find_env_python || true)"
 if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
   if command -v python3 >/dev/null 2>&1; then
     PYTHON="$(command -v python3)"
-    echo "WARN: ~/.anchor/env/.venv 미발견, system python3 fallback: $PYTHON" >&2
+    echo "WARN: ~/.anchor/env/.venv 미발견, system python3 fallback: $PYTHON (telethon 미설치 가능)" >&2
   else
     echo "ERROR: no python. 'bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env' 실행" >&2
     exit 1

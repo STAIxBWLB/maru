@@ -9,7 +9,7 @@ description: |
 `gpt-images-deck`은 `_sys/docs/slide-decks/`의 스타일 카탈로그를 디자인 권위로 삼아, 사용자 콘텐츠를 ChatGPT Images 2.0용 슬라이드 이미지 덱으로 변환한다.
 
 - 스타일 카탈로그: `_sys/docs/slide-decks/`
-- 스타일 선택 보조: `_sys/skills/skills/notebooklm-deck/references/style-decision-tree.md`
+- 스타일 선택 보조: `~/.anchor/skills/notebooklm-deck/references/style-decision-tree.md`
 - 긴 산출물 스키마: [`references/output-schemas.md`](references/output-schemas.md)
 - 최종 산출물: `DESIGN.md`, `slide_plan.json`, `slide_prompts.json`, `page_1.png` ... `page_N.png`
 

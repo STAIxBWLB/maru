@@ -1,6 +1,6 @@
 """Build a NetworkX graph from the materialized virtual wiki-vault.
 
-Reuses primitives from _sys/skills/lib/build-graph.py so vault graph and
+Reuses primitives from ~/.anchor/skills/_builtin/lib/build-graph.py so vault graph and
 skill mining stay on the same graph pipeline.
 """
 from __future__ import annotations

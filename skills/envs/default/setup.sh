@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${PROJECT_DIR}"
 DRY_RUN=false
+VERIFY=false
 
 usage() {
     cat <<EOF
@@ -12,8 +13,59 @@ Usage: $0 [options]
 Options:
   --target PATH   Create runtime environment at PATH (default: this env directory)
   --dry-run       Show actions without changing the environment
+  --verify        Check venv/node/jre health at PATH and exit (no changes)
   -h, --help      Show help
 EOF
+}
+
+# Health check: venv importable + node docx + bundled jre (jdk.compiler).
+# jre is resolved independently (it lives in the source/_builtin env, not at
+# --target), mirroring scripts/runtime_paths.py::_jre_root.
+verify_runtimes() {
+    local target="$1" ok=0 py jre c
+    echo "🔍 Anchor 런타임 헬스체크: $target"
+
+    py="$target/.venv/bin/python3"
+    if [[ -x "$py" ]] && "$py" - <<'PYEOF' 2>/dev/null
+import importlib.util, sys
+mods = ["openpyxl", "pptx", "docx", "lxml", "networkx", "telethon"]
+missing = [m for m in mods if importlib.util.find_spec(m) is None]
+sys.exit(1 if missing else 0)
+PYEOF
+    then
+        echo "  ✅ venv: $("$py" --version) + openpyxl/pptx/docx/lxml/networkx/telethon"
+    else
+        echo "  ❌ venv: $target/.venv 누락 또는 패키지 미설치 (uv sync)"
+        ok=1
+    fi
+
+    if [[ -d "$target/node_modules/docx" ]]; then
+        echo "  ✅ node: docx 패키지 존재 ($target/node_modules)"
+    else
+        echo "  ❌ node: $target/node_modules/docx 누락 (pnpm install)"
+        ok=1
+    fi
+
+    jre=""
+    for c in \
+        "$target/jre" \
+        "$HOME/.anchor/skills/_builtin/envs/default/jre" \
+        "$PROJECT_DIR/jre"; do
+        [[ -x "$c/bin/java" ]] && jre="$c" && break
+    done
+    if [[ -n "$jre" ]] && "$jre/bin/java" --list-modules 2>/dev/null | grep -q '^jdk.compiler@'; then
+        echo "  ✅ jre: $jre ($("$jre/bin/java" -version 2>&1 | head -1)) jdk.compiler 포함"
+    else
+        echo "  ❌ jre: jdk.compiler 미발견 (bash $PROJECT_DIR/scripts/setup-jre.sh)"
+        ok=1
+    fi
+
+    if [[ $ok -eq 0 ]]; then
+        echo "✅ 모든 런타임 정상"
+    else
+        echo "⚠️  일부 런타임 누락 (위 참조)"
+    fi
+    return $ok
 }
 
 while [[ $# -gt 0 ]]; do
@@ -25,6 +77,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run|-n)
             DRY_RUN=true
+            shift
+            ;;
+        --verify|--check)
+            VERIFY=true
             shift
             ;;
         -h|--help)
@@ -51,6 +107,10 @@ if [[ -d "$TARGET_PARENT" ]]; then
 fi
 TARGET_DIR="${TARGET_PARENT}/${TARGET_BASE}"
 VENV_DIR="${TARGET_DIR}/.venv"
+
+if $VERIFY; then
+    if verify_runtimes "$TARGET_DIR"; then exit 0; else exit 1; fi
+fi
 
 echo "🔧 파일 처리 환경 구성 중..."
 echo "   project: ${PROJECT_DIR}"
@@ -94,6 +154,23 @@ else
     echo "⚠️  pnpm 미설치 — Node.js docx 패키지 사용 불가 (brew install pnpm)" >&2
 fi
 
+# 3b. Java 런타임 설치 (hwpx write-java/to-pdf/export-html 용)
+# 정규 env 와 함께 ~/.anchor/env/jre 에 둔다 (_builtin 재생성에도 보존).
+# 로컬 소스 jre 가 있으면 복사(다운로드 회피), 없으면 Temurin 다운로드.
+JRE_TARGET="${TARGET_DIR}/jre"
+if [[ -x "$JRE_TARGET/bin/java" ]]; then
+    echo "☕ JRE 이미 설치됨: $JRE_TARGET"
+elif [[ -x "${PROJECT_DIR}/jre/bin/java" ]]; then
+    echo "☕ 소스 JRE 복사 → $JRE_TARGET"
+    rm -rf "$JRE_TARGET"
+    mkdir -p "$(dirname "$JRE_TARGET")"
+    cp -R "${PROJECT_DIR}/jre" "$JRE_TARGET"
+else
+    echo "☕ Temurin JDK 다운로드 → $JRE_TARGET"
+    bash "${PROJECT_DIR}/scripts/setup-jre.sh" "$JRE_TARGET" || \
+        echo "⚠️  JRE 설치 실패 — hwpx Java 기능 비활성 (bash ${PROJECT_DIR}/scripts/setup-jre.sh $JRE_TARGET)" >&2
+fi
+
 # 4. 디렉토리 구조 확인/생성
 mkdir -p "${TARGET_DIR}"/{input/{hwp,pdf},output/{text,tables,images},temp,logs}
 
@@ -112,6 +189,8 @@ if command -v pdftotext &>/dev/null; then
 else
     echo "   pdftotext: 미설치 (brew install poppler 필요)"
 fi
+echo ""
+verify_runtimes "$TARGET_DIR" || true
 echo ""
 echo "다음 명령어로 시작하세요:"
 echo "   make process-hwp   # HWP 파일 처리"

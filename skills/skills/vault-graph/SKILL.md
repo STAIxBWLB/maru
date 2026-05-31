@@ -3,7 +3,7 @@ name: vault-graph
 trigger: /vault-graph
 description: >
   Graphify 기반 지식그래프 빌드·분석·질의 스킬. vault wiki-link 그래프와
-  코드 AST 그래프를 모두 지원한다. `_sys/skills/lib/build-graph.py`를
+  코드 AST 그래프를 모두 지원한다. `~/.anchor/skills/_builtin/lib/build-graph.py`를
   단일 빌더로 사용해 커뮤니티 탐지(Leiden), god node 분석, surprising
   connections, graphify MCP serve 안내를 제공한다.
 ---
@@ -18,9 +18,9 @@ Knowledge graph build, query, report, and Graphify MCP setup for vault notes and
 
 | Item | Path |
 |------|------|
-| Python | `<workspace-root>/_sys/skills/env/.venv/bin/python` |
-| Builder | `<workspace-root>/_sys/skills/lib/build-graph.py` |
-| Skill runner | `_sys/skills/skills/vault-graph/scripts/run.sh` |
+| Python | `~/.anchor/env/.venv/bin/python` |
+| Builder | `~/.anchor/skills/_builtin/lib/build-graph.py` |
+| Skill runner | `~/.anchor/skills/vault-graph/scripts/run.sh` |
 | graphifyignore template | `<workspace-root>/_sys/templates/graphifyignore` |
 
 ## Commands
@@ -57,8 +57,8 @@ Options:
 2. For code mode, ensure `.graphifyignore` exists. If missing, offer to copy `<workspace-root>/_sys/templates/graphifyignore`.
 3. Execute:
    ```bash
-   _sys/skills/skills/vault-graph/scripts/run.sh \
-     <workspace-root>/_sys/skills/lib/build-graph.py \
+   ~/.anchor/skills/vault-graph/scripts/run.sh \
+     ~/.anchor/skills/_builtin/lib/build-graph.py \
      --target <path> --mode <wiki|code|auto>
    ```
 4. Pipeline: read notes/code → extract graph → build NetworkX graph → Leiden/Louvain community detection → god node analysis → surprising connections → report.
@@ -84,7 +84,7 @@ Options:
 Use graphify query against the selected `graph.json`.
 
 ```bash
-_sys/skills/skills/vault-graph/scripts/run.sh \
+~/.anchor/skills/vault-graph/scripts/run.sh \
   -m graphify query "<question>" \
   --graph <graph.json> [--dfs] [--budget N]
 ```
@@ -130,5 +130,5 @@ Options:
 - `/vault-connect` Step 0 reads graph report for connection candidates
 - `/vault-sync` checks graph report for unconnected surprising connections
 - `/vault-lint` checks L11 (graph staleness > 7 days), L12 (island communities)
-- `skill-mine` imports the same builder primitives from `_sys/skills/lib/build-graph.py`
+- `skill-mine` imports the same builder primitives from `~/.anchor/skills/_builtin/lib/build-graph.py`
 - CLAUDE.md §"Vault-First" Graph Report shortcut: T2/T3 ops read report before full vault search

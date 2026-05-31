@@ -56,9 +56,9 @@ writing.
 Typical usage:
 
 ```bash
-_sys/skills/env/.venv/bin/python _sys/skills/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --title "한글 제목"
-_sys/skills/env/.venv/bin/python _sys/skills/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --inbox-item inbox/items/done/item-id
-_sys/skills/env/.venv/bin/python _sys/skills/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --dry-run
+~/.anchor/env/.venv/bin/python ~/.anchor/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --title "한글 제목"
+~/.anchor/env/.venv/bin/python ~/.anchor/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --inbox-item inbox/items/done/item-id
+~/.anchor/env/.venv/bin/python ~/.anchor/skills/share-outbox/scripts/prepare_share_file.py /path/to/source.ext --dry-run
 ```
 
 Rules:

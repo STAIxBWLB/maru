@@ -79,7 +79,7 @@ Accept: [y]es, [n]o
    for each vault file with references:
      mcp__obsidian__patch_note(path, old-name, new-name, replaceAll: true)
    ```
-4. **Batch patch references** (work/_sys/skills, filesystem):
+4. **Batch patch references** (~/.anchor/skills, filesystem):
    ```
    for each skill file with references:
      Edit(path, old-name, new-name, replace_all: true)
@@ -105,9 +105,9 @@ YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N 
 
 - **Move_note 실패 시 ABORT** — 참조 patch 단계 진입 금지
 - **Patch 도중 일부 실패** → 성공분 기록 + 실패 목록 사용자 보고, 자동 롤백 없음 (감사 가능한 부분 진척 우선)
-- **설치 스킬 인식**: `~/.claude/skills/` 및 `~/.codex/skills/`는 canonical `_sys/skills/skills/`를 가리키는 symlink 설치 대상이다. 편집은 canonical에서 수행한다.
+- **설치 스킬 인식**: `~/.claude/skills/` 및 `~/.codex/skills/`는 canonical `~/.anchor/skills/`를 가리키는 symlink 설치 대상이다. 편집은 canonical에서 수행한다.
 - **vault 쓰기는 MCP Obsidian만** (notes/·reports/·ops/·log.md)
-- **skill 파일은 Filesystem Edit** (`.claude/skills/`·`work/_sys/skills/`는 vault 외부)
+- **skill 파일은 Filesystem Edit** (`.claude/skills/`·`~/.anchor/skills/`는 vault 외부)
 
 ## Quality Gates
 

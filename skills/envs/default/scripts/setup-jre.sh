@@ -11,7 +11,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"          # skills/envs/default
-JRE_DIR="$ENV_ROOT/jre"
+
+# Optional target ($1): install the JDK at <target>/jre (or at <target> when it
+# already ends in /jre). Default: skills/envs/default/jre (dev/source location).
+# Lets setup.sh provision the JRE into the canonical ~/.anchor/env/jre.
+if [[ -n "${1:-}" ]]; then
+  case "$1" in
+    */jre) JRE_DIR="$1" ;;
+    *)     JRE_DIR="$1/jre" ;;
+  esac
+else
+  JRE_DIR="$ENV_ROOT/jre"
+fi
 
 # 1. idempotency. The hwpx writer uses Java source-file launch when
 # HwpxWriter.class is absent, so the bundled runtime must include jdk.compiler.
@@ -24,7 +35,7 @@ if [[ -x "$JRE_DIR/bin/java" ]]; then
   echo "[setup-jre] existing runtime lacks jdk.compiler; reinstalling JDK"
 fi
 
-mkdir -p "$ENV_ROOT"
+mkdir -p "$(dirname "$JRE_DIR")"
 
 # 2. Temurin download
 case "$(uname -s)" in

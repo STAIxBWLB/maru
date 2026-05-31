@@ -1,52 +1,58 @@
 #!/usr/bin/env bash
-# _sys/skills/env 공유 가상환경 활성화
-# Claude Code SessionStart 훅에서 CLAUDE_ENV_FILE로 환경변수를 주입
+# init-env.sh — Anchor 공유 런타임(~/.anchor/env) 활성화
+# Claude Code SessionStart 훅에서 CLAUDE_ENV_FILE 로 환경변수를 주입한다.
+# Rust 호스트(env_vars_for_runs)와 동일한 변수 세트를 내보낸다:
+#   ANCHOR_SKILLS_ENV, VIRTUAL_ENV, PATH(+.venv/bin), NODE_PATH(+node_modules)
 
 set -euo pipefail
 
-# 어느 서브모듈/스킬 repo에서 시작하든 env/.venv 위치 탐지
-find_env_root() {
+resolve_env_root() {
+    # 1. 명시적 호스트 주입 변수
+    if [[ -n "${ANCHOR_SKILLS_ENV:-}" && -d "$ANCHOR_SKILLS_ENV/.venv" ]]; then
+        printf '%s\n' "$ANCHOR_SKILLS_ENV"; return 0
+    fi
+    if [[ -n "${VIRTUAL_ENV:-}" && -d "$VIRTUAL_ENV" ]]; then
+        printf '%s\n' "$(cd "$VIRTUAL_ENV/.." && pwd -P)"; return 0
+    fi
+    # 2. 정규 고정 위치
+    if [[ -d "$HOME/.anchor/env/.venv" ]]; then
+        printf '%s\n' "$HOME/.anchor/env"; return 0
+    fi
+    # 3. 프로젝트 디렉토리에서 상위로 탐색 (dev-in-tree)
     local dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
     while [[ "$dir" != "/" ]]; do
         for candidate in \
-            "$dir/_sys/skills/env" \
             "$dir/env" \
-            "$dir/skills/env"; do
-            if [[ -d "$candidate/.venv" ]]; then
-                echo "$candidate"
-                return 0
-            fi
+            "$dir/envs/default" \
+            "$dir/skills/envs/default"; do
+            [[ -d "$candidate/.venv" ]] && printf '%s\n' "$candidate" && return 0
         done
         dir="$(dirname "$dir")"
     done
     return 1
 }
 
-ENV_ROOT=$(find_env_root) || {
-    echo "[init-env] skills env/.venv를 찾을 수 없음. 스킵." >&2
+ENV_ROOT="$(resolve_env_root)" || {
+    echo "[init-env] ~/.anchor/env/.venv 미발견. 스킵 (bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env)" >&2
     exit 0
 }
 
 VENV_BIN="$ENV_ROOT/.venv/bin"
-
-if [[ ! -f "$VENV_BIN/python3" ]]; then
-    echo "[init-env] venv 미설치: $ENV_ROOT 에서 'make setup' 실행 필요" >&2
+if [[ ! -x "$VENV_BIN/python3" ]]; then
+    echo "[init-env] venv 미설치: $ENV_ROOT" >&2
     exit 0
 fi
 
-# CLAUDE_ENV_FILE에 환경변수 주입
 if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
-    # Python venv
-    echo "export VIRTUAL_ENV=\"$ENV_ROOT/.venv\""  >> "$CLAUDE_ENV_FILE"
-    echo "export PATH=\"$VENV_BIN:\$PATH\""        >> "$CLAUDE_ENV_FILE"
-    echo "[init-env] 공유 venv 활성화됨: $ENV_ROOT/.venv" >&2
-
-    # Node.js: node_modules에서 require() 가능하도록 NODE_PATH 주입
-    NODE_MODULES="$ENV_ROOT/node_modules"
-    if [[ -d "$NODE_MODULES" ]]; then
-        echo "export NODE_PATH=\"$NODE_MODULES:\${NODE_PATH:-}\""  >> "$CLAUDE_ENV_FILE"
-        echo "[init-env] NODE_PATH 설정됨: $NODE_MODULES" >&2
-    fi
+    {
+        echo "export ANCHOR_SKILLS_ENV=\"$ENV_ROOT\""
+        echo "export VIRTUAL_ENV=\"$ENV_ROOT/.venv\""
+        echo "export PATH=\"$VENV_BIN:\$PATH\""
+        if [[ -d "$ENV_ROOT/node_modules" ]]; then
+            echo "export NODE_PATH=\"$ENV_ROOT/node_modules\${NODE_PATH:+:\$NODE_PATH}\""
+        fi
+    } >> "$CLAUDE_ENV_FILE"
+    echo "[init-env] 활성화: $ENV_ROOT (venv+node)" >&2
 fi
 
 exit 0
