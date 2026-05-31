@@ -1,6 +1,6 @@
 {
   "name": "anchor",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "private": true,
   "type": "module",
   "description": "Local-first Anchor Workspace and AI editing desktop app.",
