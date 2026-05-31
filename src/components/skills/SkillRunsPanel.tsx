@@ -40,6 +40,7 @@ interface SkillRunsPanelProps {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   onRefresh: () => void;
   onStopMission: (id: string) => void;
   onMissionStarted: (id: string) => void;
@@ -57,6 +58,7 @@ export function SkillRunsPanel({
   missions,
   logLines,
   runtimeCommands,
+  permissionMode,
   onRefresh,
   onStopMission,
   onMissionStarted,
@@ -180,6 +182,7 @@ export function SkillRunsPanel({
         cwd: retry.cwd ?? cwd,
         context: retry.context,
         commandOverride: retry.commandOverride ?? runtimeCommands[retry.runtime] ?? null,
+        permissionMode: retry.permissionMode ?? permissionMode ?? null,
         metadata: {
           origin: "skillRetry",
           skillName: skillNameFromMission(mission),
@@ -295,12 +298,12 @@ export function SkillRunsPanel({
                         <Square size={12} />
                         {t("skillRuns.stop")}
                       </button>
-                    ) : (
+                    ) : view.status !== "running" && view.status !== "idle" ? (
                       <button type="button" className="button button-ghost button-sm" onClick={() => void retryRun(mission)} disabled={retryBusyId === mission.id}>
                         {retryBusyId === mission.id ? <Loader2 size={12} className="spin" /> : <RotateCw size={12} />}
                         {t("skillRuns.retry")}
                       </button>
-                    )}
+                    ) : null}
                     <button type="button" className="icon-button" onClick={() => clearRun(mission.id)} aria-label={t("skillRuns.clear")} title={t("skillRuns.clear")}>
                       <Trash2 size={12} />
                     </button>

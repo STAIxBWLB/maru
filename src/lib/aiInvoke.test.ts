@@ -45,17 +45,23 @@ describe("classifyInboxItem runtime routing", () => {
   });
 
   it("routes the configured runtime to the generic agent bridge", async () => {
-    const pending = classifyInboxItem(item, "codex");
+    const pending = classifyInboxItem(
+      item,
+      "codex",
+      "/tmp/work",
+      "/opt/bin/codex",
+      "acceptEdits",
+    );
     // Wait until the run registered its event listeners (executor has run).
     await vi.waitFor(() => expect(handlers.has("ai://done")).toBe(true));
     expect(startAgentCliInvocation).toHaveBeenCalledWith(
       "codex",
       "PROMPT",
+      "/tmp/work",
       null,
       null,
-      null,
-      null,
-      null,
+      "/opt/bin/codex",
+      "acceptEdits",
     );
 
     // Drive the run to completion so the promise settles cleanly.

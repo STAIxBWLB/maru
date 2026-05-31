@@ -459,6 +459,7 @@ export interface InboxProcessMissionMetadata {
   workspacePath?: string | null;
   skillName?: string | null;
   runtime?: string | null;
+  permissionMode?: string | null;
   sourceKind?: string | null;
   parentRunId?: string | null;
 }
@@ -467,6 +468,7 @@ export interface SkillMissionMetadata {
   origin?: string | null;
   skillName?: string | null;
   runtime?: string | null;
+  permissionMode?: string | null;
   workspacePath?: string | null;
   inputPaths?: string[];
   sourceKind?: string | null;

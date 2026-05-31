@@ -19,6 +19,7 @@ import {
 import { Button } from "../ui/Button";
 
 type ComposeMode = "terminal" | "background" | "structured";
+const EMPTY_RUNTIME_COMMANDS: Partial<Record<SkillDispatchRuntime, string | null>> = {};
 
 export interface ComposeDialogSeed {
   skill?: SkillRecord | null;
@@ -41,7 +42,8 @@ interface ComposeDialogProps {
   onClose: () => void;
   onTerminalDispatch: (spec: TerminalDispatchSpec) => void;
   onBackgroundDispatch?: (invocationId: string) => void;
-  runtimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
+  terminalRuntimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
+  aiRuntimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   defaultRuntime?: SkillDispatchRuntime;
   permissionMode?: string;
   onError: (message: string | null) => void;
@@ -54,7 +56,8 @@ export function ComposeDialog({
   onClose,
   onTerminalDispatch,
   onBackgroundDispatch,
-  runtimeCommands = {},
+  terminalRuntimeCommands = EMPTY_RUNTIME_COMMANDS,
+  aiRuntimeCommands = EMPTY_RUNTIME_COMMANDS,
   defaultRuntime,
   permissionMode,
   onError,
@@ -71,6 +74,7 @@ export function ComposeDialog({
     Partial<Record<SkillDispatchRuntime, SkillRuntimeStatus>>
   >({});
   const [runtimeStatusLoading, setRuntimeStatusLoading] = useState(false);
+  const runtimeStatusCommands = mode === "terminal" ? terminalRuntimeCommands : aiRuntimeCommands;
 
   useEffect(() => {
     if (!open) return;
@@ -90,7 +94,7 @@ export function ComposeDialog({
       (["claude", "codex"] as SkillDispatchRuntime[]).map(async (candidate) => {
         const status = await skillsRuntimeStatus({
           runtime: candidate,
-          commandOverride: runtimeCommands[candidate] ?? null,
+          commandOverride: runtimeStatusCommands[candidate] ?? null,
         });
         return [candidate, status] as const;
       }),
@@ -117,7 +121,7 @@ export function ComposeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, onError, runtimeCommands]);
+  }, [open, onError, runtimeStatusCommands]);
 
   const selectedSkill = useMemo(
     () => skills.find((skill) => skill.id === skillId) ?? null,
@@ -197,7 +201,7 @@ export function ComposeDialog({
           provider: runtime,
           directive: composition.prompt,
           cwd: seed.cwd,
-          commandOverride: runtimeCommands[runtime] ?? null,
+          commandOverride: aiRuntimeCommands[runtime] ?? null,
           permissionMode: permissionMode ?? null,
         });
         onBackgroundDispatch?.(runId);
@@ -209,7 +213,7 @@ export function ComposeDialog({
           prompt,
           cwd: seed?.cwd ?? null,
           context,
-          commandOverride: runtimeCommands[runtime] ?? null,
+          commandOverride: terminalRuntimeCommands[runtime] ?? null,
         });
         onTerminalDispatch(spec);
         dispatchEvent = { mode: "terminal", runtime, invocationId: null };
@@ -220,7 +224,8 @@ export function ComposeDialog({
           prompt,
           cwd: seed?.cwd ?? null,
           context,
-          commandOverride: runtimeCommands[runtime] ?? null,
+          commandOverride: aiRuntimeCommands[runtime] ?? null,
+          permissionMode: permissionMode ?? null,
           metadata: {
             origin: "skillCompose",
             skillName: selectedSkill.name,

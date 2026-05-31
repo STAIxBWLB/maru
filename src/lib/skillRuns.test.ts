@@ -7,6 +7,8 @@ import {
   formatElapsed,
   formatSkillRunLogLine,
   isSkillMission,
+  isStructuredMission,
+  isTrackedAgentMission,
   skillRunView,
 } from "./skillRuns";
 
@@ -41,6 +43,18 @@ describe("skill run helpers", () => {
   it("identifies generic skill missions", () => {
     expect(isSkillMission(mission())).toBe(true);
     expect(isSkillMission(mission({ kind: "claude" }))).toBe(false);
+    const structured = mission({
+      kind: "codex",
+      metadata: {
+        origin: "structuredLoop",
+        runtime: "codex",
+        skillName: "Structured run",
+        workspacePath: "/tmp/work",
+      },
+    });
+    expect(isStructuredMission(structured)).toBe(true);
+    expect(isTrackedAgentMission(structured)).toBe(true);
+    expect(skillRunView(structured).canStop).toBe(false);
   });
 
   it("strips stream prefixes and classifies severity", () => {
@@ -80,6 +94,7 @@ describe("skill run helpers", () => {
           cwd: "/tmp/work",
           context: [{ path: "/tmp/a.md", kind: "file" }],
           commandOverride: "/opt/bin/claude",
+          permissionMode: "acceptEdits",
         },
       }),
     ]);
@@ -90,6 +105,7 @@ describe("skill run helpers", () => {
       cwd: "/tmp/work",
       context: [{ path: "/tmp/a.md", kind: "file" }],
       commandOverride: "/opt/bin/claude",
+      permissionMode: "acceptEdits",
     });
   });
 

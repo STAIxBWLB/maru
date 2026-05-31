@@ -124,6 +124,7 @@ interface MeetingsPaneProps {
   labelMode: DocumentLabelMode;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   processingMissions: MissionRecord[];
   processingLogLines: Record<string, string[]>;
   onRefreshMissions: () => void;
@@ -152,6 +153,7 @@ export function MeetingsPane({
   labelMode,
   skills,
   runtimeCommands,
+  permissionMode,
   processingMissions,
   processingLogLines,
   onRefreshMissions,
@@ -441,6 +443,7 @@ export function MeetingsPane({
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
+            permissionMode={permissionMode}
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
@@ -460,6 +463,7 @@ export function MeetingsPane({
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
+            permissionMode={permissionMode}
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
             onMissionStarted={onMissionStarted}
@@ -1097,6 +1101,7 @@ function MeetingsTranscriptFlow(props: {
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
@@ -1118,6 +1123,7 @@ function MeetingsExternalFlow({
   settings,
   skills,
   runtimeCommands,
+  permissionMode,
   missions,
   logLines,
   onMissionStarted,
@@ -1135,6 +1141,7 @@ function MeetingsExternalFlow({
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
@@ -1155,6 +1162,7 @@ function MeetingsExternalFlow({
       settings={settings}
       skills={skills}
       runtimeCommands={runtimeCommands}
+      permissionMode={permissionMode}
       missions={missions}
       logLines={logLines}
       onMissionStarted={onMissionStarted}
@@ -1198,6 +1206,7 @@ function MeetingsSkillWorkbench({
   settings,
   skills,
   runtimeCommands,
+  permissionMode,
   missions,
   logLines,
   onMissionStarted,
@@ -1216,6 +1225,7 @@ function MeetingsSkillWorkbench({
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onMissionStarted: (invocationId: string) => void;
@@ -1345,6 +1355,7 @@ function MeetingsSkillWorkbench({
         prompt,
         context: paths.map((path) => ({ path, kind: "file" })),
         commandOverride: runtimeCommands[runtime] ?? null,
+        permissionMode: permissionMode ?? null,
         metadata: {
           origin: sourceKind === "transcript"
             ? "meetingNotesFromTranscript"
@@ -1522,6 +1533,7 @@ function MeetingsSkillWorkbench({
           workPath,
           skills,
           runtimeCommands,
+          permissionMode,
           bundle,
           onMissionStarted,
         });
@@ -1531,6 +1543,7 @@ function MeetingsSkillWorkbench({
           workPath,
           skills,
           runtimeCommands,
+          permissionMode,
           bundle,
           onMissionStarted,
         });
@@ -2650,12 +2663,14 @@ async function dispatchSelectedFollowups({
   workPath,
   skills,
   runtimeCommands,
+  permissionMode,
   bundle,
   onMissionStarted,
 }: {
   workPath: string;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   bundle: MeetingReviewBundle;
   onMissionStarted: (invocationId: string) => void;
 }) {
@@ -2684,6 +2699,7 @@ async function dispatchSelectedFollowups({
       ].filter(Boolean).join("\n"),
       context: appliedPaths.map((path) => ({ path, kind: "document" })),
       commandOverride: runtimeCommands[runtime] ?? null,
+      permissionMode: permissionMode ?? null,
       metadata: {
         origin: followupOrigin(followup.skill),
         runtime,
@@ -2703,12 +2719,14 @@ async function dispatchApprovedFollowupContinuation({
   workPath,
   skills,
   runtimeCommands,
+  permissionMode,
   bundle,
   onMissionStarted,
 }: {
   workPath: string;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
   bundle: MeetingReviewBundle;
   onMissionStarted: (invocationId: string) => void;
 }) {
@@ -2735,6 +2753,7 @@ async function dispatchApprovedFollowupContinuation({
     ].filter(Boolean).join("\n\n"),
     context: [],
     commandOverride: runtimeCommands[runtime] ?? null,
+    permissionMode: permissionMode ?? null,
     metadata: {
       origin: followupOrigin(skillName),
       runtime,
