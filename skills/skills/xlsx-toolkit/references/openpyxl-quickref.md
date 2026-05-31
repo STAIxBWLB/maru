@@ -1,6 +1,6 @@
 # openpyxl Quick Reference
 
-> openpyxl 3.1.5 (이미 `_sys/skills/env/.venv`에 설치됨)
+> openpyxl 3.1.5 (이미 `~/.anchor/env/.venv`에 설치됨)
 > 공식 문서: https://openpyxl.readthedocs.io/en/stable/
 
 ## 로드 모드

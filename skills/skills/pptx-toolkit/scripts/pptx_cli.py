@@ -7,7 +7,7 @@ MVP scope (read-only):
 - notes:   speaker notes only
 - to-md:   markdown aggregator (same as read --output)
 
-Uses python-pptx 1.0.2 from _sys/skills/env/.venv.
+Uses python-pptx 1.0.2 from ~/.anchor/env/.venv.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ try:
     from pptx import Presentation
     from pptx.slide import Slide
 except ImportError:
-    print("[pptx-toolkit] python-pptx 미설치. _sys/skills/env/.venv 확인", file=sys.stderr)
+    print("[pptx-toolkit] python-pptx 미설치. ~/.anchor/env/.venv 확인", file=sys.stderr)
     sys.exit(2)
 
 

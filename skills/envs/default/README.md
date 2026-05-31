@@ -1,7 +1,9 @@
-# 문서 처리 환경 (_sys/skills/env/)
+# 문서 처리 환경 (envs/default → ~/.anchor/env)
 
-HWP/HWPX/PDF 파일 처리를 위한 공유 Python 가상환경.
-Claude Code SessionStart hook이 모든 서브모듈에서 이 venv를 자동 활성화한다.
+HWP/HWPX/PDF 파일 처리를 위한 공유 Python 가상환경 + Node + 번들 JRE.
+이 디렉토리(`envs/default`)는 source scaffold 이며, `setup.sh --target ~/.anchor/env`
+로 정규 런타임 `~/.anchor/env`(`.venv` + `node_modules` + `jre`)에 프로비저닝된다.
+Claude Code SessionStart hook(`init-env.sh`)이 세션에서 이 환경을 자동 활성화한다.
 
 ## 구조
 
@@ -44,11 +46,15 @@ env/
 ## 사용법
 
 ```bash
-# 초기 설정 (최초 1회)
-cd ~/workspace/work/_sys/skills/env && make setup
+# 정규 env 프로비저닝 / 복구 (venv + node_modules + jre)
+bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
 
-# 의존성 확인
-make verify
+# 헬스체크 (venv/node/jre — 변경 없음)
+bash ~/.anchor/skills/_builtin/envs/default/setup.sh --verify --target ~/.anchor/env
+
+# (dev-in-tree) 이 소스 디렉토리에서 직접
+cd <this-dir> && make setup    # = setup.sh (기본 target = 이 디렉토리)
+make verify                    # 시스템 의존성 확인
 
 # HWP/PDF 일괄 처리
 make process-hwp    # input/hwp/ → output/text/
@@ -63,9 +69,10 @@ make sync
 ## SessionStart Hook
 
 `init-env.sh`가 Claude Code 세션 시작 시 자동 실행:
-1. 현재 디렉토리에서 상위로 탐색하여 `_sys/skills/env/.venv` 위치 탐지
-2. `CLAUDE_ENV_FILE`에 `VIRTUAL_ENV`와 `PATH` 주입
-3. 이후 `python3`, `hwp5txt` 등이 공유 venv 패키지 사용
+1. `$ANCHOR_SKILLS_ENV` → `~/.anchor/env` → 상위 탐색 순으로 env 해소
+2. `CLAUDE_ENV_FILE`에 `ANCHOR_SKILLS_ENV`·`VIRTUAL_ENV`·`PATH`·`NODE_PATH` 주입
+   (Rust 호스트 `env_vars_for_runs` 와 동일 세트)
+3. 이후 `python3`(venv 패키지), `node`(node_modules `require`) 가 공유 환경 사용
 
 ## Hook 전파 (서브모듈)
 
@@ -87,4 +94,4 @@ make sync
 ## 연관 도구
 
 - **hwp-toolkit**: `~/.claude/skills/hwp-toolkit/hwp` CLI (이 venv의 python3 사용)
-- **skills**: `_sys/skills/` submodule (inbox-processor 등이 이 환경에 의존)
+- **skills**: `~/.anchor/skills/` (federation; inbox-process 등이 이 환경에 의존)

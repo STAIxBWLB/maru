@@ -7,7 +7,7 @@ MVP scope (read-only):
 - to-csv:  CSV output (stdout or file)
 - to-md:   markdown table output
 
-Uses openpyxl 3.1.5 from _sys/skills/env/.venv.
+Uses openpyxl 3.1.5 from ~/.anchor/env/.venv.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ try:
     import openpyxl
     from openpyxl.worksheet.worksheet import Worksheet
 except ImportError:
-    print("[xlsx-toolkit] openpyxl 미설치. _sys/skills/env/.venv 확인", file=sys.stderr)
+    print("[xlsx-toolkit] openpyxl 미설치. ~/.anchor/env/.venv 확인", file=sys.stderr)
     sys.exit(2)
 
 

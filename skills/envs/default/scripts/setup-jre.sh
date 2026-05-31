@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# setup-jre.sh — install Temurin JDK 21 into skills/envs/default/jre/
+# setup-jre.sh — install Temurin JDK 21 for Anchor skills
 #
 # Used by the hwpx skill (and any other skill that needs a known-good Java runtime).
 # Strategy:
-#   1. If skills/envs/default/jre/bin/java has the jdk.compiler module → exit 0.
+#   1. If the target jre/bin/java has the jdk.compiler module → exit 0.
 #   2. Else download Temurin 21 JDK from api.adoptium.net for the current OS/arch.
 #
-# Output: skills/envs/default/jre/bin/java
+# Output: ~/.anchor/env/jre/bin/java when called by setup.sh --target ~/.anchor/env.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"          # skills/envs/default
-JRE_DIR="$ENV_ROOT/jre"
+
+# Optional target ($1): install the JDK at <target>/jre (or at <target> when it
+# already ends in /jre). Default: skills/envs/default/jre (dev/source location).
+# Lets setup.sh provision the JRE into the canonical ~/.anchor/env/jre.
+if [[ -n "${1:-}" ]]; then
+  case "$1" in
+    */jre) JRE_DIR="$1" ;;
+    *)     JRE_DIR="$1/jre" ;;
+  esac
+else
+  JRE_DIR="$ENV_ROOT/jre"
+fi
 
 # 1. idempotency. The hwpx writer uses Java source-file launch when
 # HwpxWriter.class is absent, so the bundled runtime must include jdk.compiler.
@@ -24,7 +35,7 @@ if [[ -x "$JRE_DIR/bin/java" ]]; then
   echo "[setup-jre] existing runtime lacks jdk.compiler; reinstalling JDK"
 fi
 
-mkdir -p "$ENV_ROOT"
+mkdir -p "$(dirname "$JRE_DIR")"
 
 # 2. Temurin download
 case "$(uname -s)" in

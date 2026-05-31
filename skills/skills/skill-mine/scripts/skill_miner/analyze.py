@@ -273,7 +273,7 @@ def render_report(
 
     lines.append("## Next steps")
     lines.append("")
-    lines.append("- 후보를 검토하여 유의미한 것은 `/skillify` 로 수동 스킬화 또는 `_sys/skills/skills/_drafts/` 로 이동")
+    lines.append("- 후보를 검토하여 유의미한 것은 `/skillify` 로 수동 스킬화 또는 `~/.anchor/skills/_drafts/` 로 이동")
     lines.append("- 사전 커버리지 부족이 느껴지면 `skill-mine/scripts/skill_miner/vocab/actions.yaml` · `objects.yaml` 보강")
     lines.append("- 기존 스킬과 overlap 이 높으면 신규 생성 대신 해당 스킬의 triggers 를 확장 고려")
     return "\n".join(lines) + "\n"

@@ -1,7 +1,7 @@
 ---
 name: xlsx-toolkit
 description: >
-  Excel(.xlsx) 파일 읽기·요약·변환 스킬. openpyxl 기반(_sys/skills/env/.venv 기설치).
+  Excel(.xlsx) 파일 읽기·요약·변환 스킬. openpyxl 기반(~/.anchor/env/.venv 기설치).
   MVP는 read-only — 셀 값 추출, 시트 요약, markdown/CSV 변환.
   inbox-process 추출 도구로 사용되며, 스프레드시트 자료 처리에 재사용.
   트리거: xlsx, 엑셀, excel, 스프레드시트, .xlsx 읽기, 시트 요약, xlsx 변환,
@@ -12,7 +12,7 @@ description: >
 
 ## Overview
 
-Excel `.xlsx` 파일을 읽어 markdown/CSV/요약으로 변환하는 read-only 스킬. `_sys/skills/env/.venv`에 이미 설치된 openpyxl 3.1.5를 사용한다. `inbox-process` 내용 추출 도구로 호출될 수 있다.
+Excel `.xlsx` 파일을 읽어 markdown/CSV/요약으로 변환하는 read-only 스킬. `~/.anchor/env/.venv`에 이미 설치된 openpyxl 3.1.5를 사용한다. `inbox-process` 내용 추출 도구로 호출될 수 있다.
 
 ## MVP scope
 
@@ -29,8 +29,8 @@ Excel `.xlsx` 파일을 읽어 markdown/CSV/요약으로 변환하는 read-only 
 ## Quick Reference
 
 ```bash
-# 경로는 work repo 기준 (서브모듈 _sys/skills 내부)
-XLSX=~/workspace/work/_sys/skills/skills/xlsx-toolkit/xlsx
+# 경로는 work repo 기준 (서브모듈 ~/.anchor/skills 내부)
+XLSX=~/.anchor/skills/xlsx-toolkit/xlsx
 
 $XLSX read <file.xlsx>                    # 전체 시트 → markdown 표
 $XLSX read <file.xlsx> --sheet 1          # 특정 시트만
@@ -59,7 +59,7 @@ $XLSX to-md <file.xlsx> --sheet 1
 추출 도구 표:
 
 ```markdown
-| `.xlsx` | xlsx-toolkit | `_sys/skills/skills/xlsx-toolkit/xlsx read <file>` |
+| `.xlsx` | xlsx-toolkit | `~/.anchor/skills/xlsx-toolkit/xlsx read <file>` |
 ```
 
 요약 생성에 xlsx 콘텐츠를 markdown 표로 포함하여 전달.

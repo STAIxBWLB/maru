@@ -287,7 +287,7 @@ summary:
 ## 제안 조치
 
 - L01: wiki-link 수정 또는 대상 노트 생성 (`/vault-extract`)
-- L02: `_sys/skills/lib/vault_adapter.md` 정책에 맞춰 frontmatter 보강
+- L02: `~/.anchor/skills/_builtin/lib/vault_adapter.md` 정책에 맞춰 frontmatter 보강
 - L03: `/vault-connect` 재실행 또는 topics 추가
 - L05: `inbox/INDEX.md` 엔트리 정리 또는 destination 복원
 - L11: `/vault-graph build` 재실행으로 graph report 갱신
@@ -331,7 +331,7 @@ append는 `mcp__obsidian__patch_note(path: "log.md", operation: "append", ...)` 
 ## 관련 문서
 
 - `_sys/rules/ingest-chain.md` — 체인 전체 그림과 log.md 포맷
-- `_sys/skills/lib/vault_adapter.md` — vault 접근·스키마 정책
-- `_sys/skills/skills/inbox-process/SKILL.md` — inbox processing skill
+- `~/.anchor/skills/_builtin/lib/vault_adapter.md` — vault 접근·스키마 정책
+- `~/.anchor/skills/inbox-process/SKILL.md` — inbox processing skill
 - `work/project-registry.yaml` — 프로젝트 id 단일 소스
-- `_sys/skills/skills/inbox-process/references/summary-schema.md` — 요약 스키마
+- `~/.anchor/skills/inbox-process/references/summary-schema.md` — 요약 스키마

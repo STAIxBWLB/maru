@@ -1,41 +1,65 @@
 #!/usr/bin/env bash
-# run.sh — skills repo env/.venv interpreter wrapper
+# run.sh — Anchor skills python interpreter wrapper
 #
 # 우선순위:
 #   1. $SKILL_PYTHON (caller override)
-#   2. repo-local env/.venv or workspace _sys/skills/env/.venv
-#   3. python3 on PATH (경고 출력)
+#   2. $ANCHOR_SKILLS_ENV (host 주입) → ~/.anchor/env/.venv (정규)
+#   3. repo-local env/.venv (dev-in-tree)
+#   4. python3 on PATH (경고 출력)
 #
-# env/.venv 가 없으면 _sys/skills/env 에서 make setup 실행.
+# venv 미설치 시: bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
 
 set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Resolve the Anchor skills python interpreter, most-specific first.
+# Honors $SKILL_PYTHON, then host-injected $ANCHOR_SKILLS_ENV,
+# then the canonical ~/.anchor/env, then a repo-local walk-up (dev-in-tree).
+# Canonical snippet — keep in sync with skills/envs/default/REFERENCE.md.
 find_env_python() {
-  local dir="$SKILL_DIR"
-  local candidate
+  local c dir
+  if [[ -n "${SKILL_PYTHON:-}" && -x "${SKILL_PYTHON}" ]]; then
+    printf '%s\n' "$SKILL_PYTHON"; return 0
+  fi
+  for c in \
+    "${ANCHOR_SKILLS_ENV:+$ANCHOR_SKILLS_ENV/.venv/bin/python3}" \
+    "$HOME/.anchor/env/.venv/bin/python3"; do
+    [[ -n "$c" && -x "$c" ]] && printf '%s\n' "$c" && return 0
+  done
+  dir="$SKILL_DIR"
   while [[ "$dir" != "/" ]]; do
-    for candidate in \
-      "$dir/env/.venv/bin/python" \
-      "$dir/_sys/skills/env/.venv/bin/python" \
-      "$dir/skills/env/.venv/bin/python"; do
-      [[ -x "$candidate" ]] && printf '%s\n' "$candidate" && return 0
+    for c in \
+      "$dir/env/.venv/bin/python3" \
+      "$dir/envs/default/.venv/bin/python3" \
+      "$dir/skills/envs/default/.venv/bin/python3"; do
+      [[ -x "$c" ]] && printf '%s\n' "$c" && return 0
     done
     dir="$(dirname "$dir")"
   done
   return 1
 }
 
-PYTHON="${SKILL_PYTHON:-}"
+PYTHON="$(find_env_python || true)"
 if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
-  if PYTHON="$(find_env_python)"; then
-    :
-  elif command -v python3 >/dev/null 2>&1; then
+  if command -v python3 >/dev/null 2>&1; then
     PYTHON="$(command -v python3)"
-    echo "WARN: skills env/.venv not found, falling back to $PYTHON" >&2
+    echo "WARN: ~/.anchor/env/.venv 미발견, system python3 fallback: $PYTHON" >&2
   else
-    echo "ERROR: no python. Run make setup in _sys/skills/env to provision env/.venv" >&2
+    echo "ERROR: no python. 'bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env' 실행" >&2
     exit 1
   fi
 fi
+
+# Export the resolved runtime so venv/node-based steps work in a bare session too.
+case "$PYTHON" in
+  */.venv/bin/python3)
+    _ENV_ROOT="$(cd "$(dirname "$PYTHON")/../.." && pwd -P)"
+    export VIRTUAL_ENV="$_ENV_ROOT/.venv"
+    case ":$PATH:" in *":$_ENV_ROOT/.venv/bin:"*) ;; *) PATH="$_ENV_ROOT/.venv/bin:$PATH";; esac
+    export PATH
+    if [[ -d "$_ENV_ROOT/node_modules" ]]; then
+      case ":${NODE_PATH:-}:" in *":$_ENV_ROOT/node_modules:"*) ;; *) NODE_PATH="$_ENV_ROOT/node_modules${NODE_PATH:+:$NODE_PATH}"; export NODE_PATH;; esac
+    fi
+    ;;
+esac
 exec "$PYTHON" "$@"

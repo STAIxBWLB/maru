@@ -1,6 +1,6 @@
 # python-pptx Quick Reference
 
-> python-pptx 1.0.2 (`_sys/skills/env/.venv`)
+> python-pptx 1.0.2 (`~/.anchor/env/.venv`)
 > 공식 문서: https://python-pptx.readthedocs.io/en/latest/
 
 ## 로드

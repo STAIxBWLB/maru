@@ -12,12 +12,10 @@ The skill uses bundled OpenJDK + hwpxlib for generation. Two problems pushed us 
 ## Layout
 
 ```
-skills/envs/default/
-├── .gitignore                              # excludes jre/ and .venv/
-├── scripts/
-│   └── setup-jre.sh                        # one-shot installer (idempotent)
-├── jre/                                    # gitignored Temurin 21 JDK runtime
+~/.anchor/env/
+├── jre/                                    # local Temurin 21 JDK runtime
 │   └── bin/java
+├── node_modules/                           # shared Node packages
 └── .venv/                                  # shared Python utilities
 
 skills/skills/hwpx/
@@ -42,10 +40,10 @@ skills/skills/hwpx/
 ## Setup
 
 ```bash
-bash skills/envs/default/scripts/setup-jre.sh
+bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
 ```
 
-The script is idempotent when `jre/bin/java` includes the `jdk.compiler` module required for Java source-file launch.
+The setup script is idempotent when `jre/bin/java` includes the `jdk.compiler` module required for Java source-file launch.
 
 It fetches the latest Temurin 21 JDK for the host OS/arch from `https://api.adoptium.net/v3/binary/latest/21/ga/{os}/{arch}/jdk/hotspot/normal/eclipse` and unpacks it.
 
@@ -68,11 +66,11 @@ with stdin = `\n`-joined `H1:/H2:/H3:/P:` lines (UTF-8). Then `_normalize_mimety
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `bundled Java runtime 미설치` | `skills/envs/default/jre/` missing or corrupt | `bash skills/envs/default/scripts/setup-jre.sh` |
+| `bundled Java runtime 미설치` | `~/.anchor/env/jre/` missing or corrupt | `bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env` |
 | `validate FAIL: mimetype이 STORED 아님` | Old build before `_normalize_mimetype` was wired | Re-run `write-java`; the post-process runs every time now |
 | `HwpxWriter failed (exit 1): NoClassDefFoundError` | classpath wrong (jar moved or renamed) | Confirm `runtime/hwpxlib-1.0.5.jar` exists; bump version pin in `runtime_paths.py` |
 | `export-html` falls through to pypandoc | Stage 1 raising silently | Run `./hwpx write-java <out>` directly to surface the JRE error |
-| Wrong arch ("Bad CPU type") | runtime arch differs from host | Delete `skills/envs/default/jre/`, re-run `setup-jre.sh` so it downloads for the host arch |
+| Wrong arch ("Bad CPU type") | runtime arch differs from host | Delete `~/.anchor/env/jre/`, re-run setup so it downloads for the host arch |
 | Want a newer hwpxlib | Pinned 1.0.5 in code | Drop new jar in `runtime/`, update jar path constant in `runtime_paths.py`, smoke-test `write-java`, commit |
 
 ## What was deliberately NOT ported
