@@ -74,6 +74,16 @@ def text_to_lines(txt: str) -> list[str]:
     return [f"P:{line.rstrip()}" if line.strip() else "P:" for line in txt.splitlines()]
 
 
+def _line_level(raw: str) -> str:
+    """Tag of a writer line: 'H1'..'H6' or 'P'."""
+    colon = raw.find(":")
+    if 0 < colon <= 3:
+        tag = raw[:colon].strip()
+        if re.fullmatch(r"H[1-6]|P", tag):
+            return tag
+    return "P"
+
+
 def write_java(output: Path, lines: list[str], timeout: float = 30.0) -> None:
     assert_jre()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +99,17 @@ def write_java(output: Path, lines: list[str], timeout: float = 30.0) -> None:
         stderr = proc.stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"HwpxWriter failed (exit {proc.returncode}): {stderr}")
     _normalize_mimetype(output)
+
+    # Heading visual hierarchy: remap H1..H6 paragraphs to larger existing
+    # charPr (best-effort — styling must never fail the write).
+    levels = [_line_level(ln) for ln in (lines or [])]
+    if any(lv != "P" for lv in levels):
+        try:
+            import hwpx_xml as hx
+
+            hx.apply_heading_styles(output, levels)
+        except Exception:
+            pass
 
 
 def cli_write_java(args: argparse.Namespace) -> int:
