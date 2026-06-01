@@ -3314,6 +3314,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
           >
             <button
               type="button"
+              aria-pressed={defaultInstallMode === "symlink"}
               className={defaultInstallMode === "symlink" ? "active" : ""}
               onClick={() => setDefaultInstallMode("symlink")}
             >
@@ -3321,6 +3322,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             </button>
             <button
               type="button"
+              aria-pressed={defaultInstallMode === "copy"}
               className={defaultInstallMode === "copy" ? "active" : ""}
               onClick={() => setDefaultInstallMode("copy")}
             >
@@ -3582,6 +3584,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
               >
                 <button
                   type="button"
+                  aria-pressed={installModeOverride === "default"}
                   className={installModeOverride === "default" ? "active" : ""}
                   onClick={() => setInstallModeOverride("default")}
                 >
@@ -3589,6 +3592,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={installModeOverride === "symlink"}
                   className={installModeOverride === "symlink" ? "active" : ""}
                   onClick={() => setInstallModeOverride("symlink")}
                 >
@@ -3596,6 +3600,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={installModeOverride === "copy"}
                   className={installModeOverride === "copy" ? "active" : ""}
                   onClick={() => setInstallModeOverride("copy")}
                 >
