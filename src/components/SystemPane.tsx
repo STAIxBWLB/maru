@@ -101,15 +101,19 @@ import {
   skillsRemoveSource,
   skillsRescanSource,
   skillsResetRegistry,
+  skillsSyncAllSources,
   skillsSyncSource,
   skillsUninstallSkill,
   type SkillInstall,
+  type SkillInstallMode,
   type SkillInstallTarget,
   type SkillProgressEvent,
   type SkillRecord,
   type SkillSource,
   type SkillsEnvStatus,
 } from "../lib/skills";
+import { readDefaultInstallMode, writeDefaultInstallMode } from "../lib/skillsInstallMode";
+import { formatRelativeDate } from "../lib/document";
 import { openSkillEditorWindow } from "../lib/windowLayout";
 import { CommsSettingsTab } from "./comms/CommsSettingsTab";
 import { MeetingsSettingsTab } from "./meetings/MeetingsSettingsTab";
@@ -2313,7 +2317,7 @@ function progressLogLine(event: SkillProgressEvent): string {
 }
 
 function SkillsTab({ workPath }: { workPath: string }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [sources, setSources] = useState<SkillSource[]>([]);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [installs, setInstalls] = useState<SkillInstall[]>([]);
@@ -2325,6 +2329,17 @@ function SkillsTab({ workPath }: { workPath: string }) {
   const [skillQuery, setSkillQuery] = useState("");
   const [installFilter, setInstallFilter] = useState<"all" | "installed" | "uninstalled" | "dirty">("all");
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(() => new Set());
+  const [defaultInstallMode, setDefaultInstallMode] = useState<SkillInstallMode>(() =>
+    readDefaultInstallMode(),
+  );
+  const [installModeOverride, setInstallModeOverride] = useState<SkillInstallMode | "default">(
+    "default",
+  );
+  const effectiveInstallMode: SkillInstallMode =
+    installModeOverride === "default" ? defaultInstallMode : installModeOverride;
+  useEffect(() => {
+    writeDefaultInstallMode(defaultInstallMode);
+  }, [defaultInstallMode]);
   const [operation, setOperation] = useState<SkillOperationState>(EMPTY_SKILL_OPERATION);
   const [confirmState, setConfirmState] = useState<SkillConfirmState | null>(null);
   const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
@@ -2749,6 +2764,28 @@ function SkillsTab({ workPath }: { workPath: string }) {
     [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t],
   );
 
+  const syncAllSources = useCallback(async () => {
+    if (sources.length === 0) return;
+    if (!(await confirmAction(t("system.skills.syncAllConfirm", { count: sources.length })))) {
+      return;
+    }
+    await runBackendProgressOperation(
+      t("system.skills.syncingAll"),
+      sources.length,
+      async (progressId) => {
+        const outcome = await skillsSyncAllSources(workPath, progressId);
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        return outcome;
+      },
+      (outcome) =>
+        t("system.skills.syncAllComplete", {
+          succeeded: outcome.succeeded,
+          failed: outcome.failed,
+        }),
+    );
+  }, [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, sources.length, t, workPath]);
+
   const removeSource = useCallback(
     async (source: SkillSource) => {
       if (source.kind === "managed" || source.id === "anchor-managed") {
@@ -2854,7 +2891,11 @@ function SkillsTab({ workPath }: { workPath: string }) {
   ]);
 
   const installSkills = useCallback(
-    async (skillList: SkillRecord[], target: SkillBulkTarget) => {
+    async (
+      skillList: SkillRecord[],
+      target: SkillBulkTarget,
+      mode: SkillInstallMode = effectiveInstallMode,
+    ) => {
       const targets = skillTargetsFor(target);
       const tasks = skillList.flatMap((skill) =>
         targets
@@ -2880,6 +2921,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
           t("system.skills.installConfirm", {
             count: tasks.length,
             target: targetLabel,
+            mode: t(`system.skills.installMode.${mode}`),
           }),
         ))
       ) {
@@ -2899,7 +2941,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
             }),
           );
           try {
-            await skillsInstallSkill(task.skill.id, task.target, task.skill.name);
+            await skillsInstallSkill(task.skill.id, task.target, task.skill.name, mode);
             installed[task.target] += 1;
             appendOperationLog(
               t("system.skills.log.installDone", {
@@ -2943,6 +2985,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
     [
       appendOperationLog,
       confirmAction,
+      effectiveInstallMode,
       finishOperation,
       installKey,
       recordOperationError,
@@ -3228,6 +3271,15 @@ function SkillsTab({ workPath }: { workPath: string }) {
           <Button
             variant="secondary"
             size="sm"
+            onClick={() => void syncAllSources()}
+            disabled={busy || sources.length === 0}
+            icon={<RefreshCcw size={14} />}
+          >
+            {t("system.skills.syncAll")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void adoptExternalLinks()}
             disabled={busy}
           >
@@ -3250,6 +3302,36 @@ function SkillsTab({ workPath }: { workPath: string }) {
           >
             {t("system.skills.reset")}
           </Button>
+        </div>
+        <div className="skills-install-mode">
+          <span className="skills-install-mode-label">
+            {t("system.skills.installMode.label")}
+          </span>
+          <div
+            className="skills-source-kind skills-install-mode-toggle"
+            role="group"
+            aria-label={t("system.skills.installMode.label")}
+          >
+            <button
+              type="button"
+              className={defaultInstallMode === "symlink" ? "active" : ""}
+              onClick={() => setDefaultInstallMode("symlink")}
+            >
+              {t("system.skills.installMode.symlink")}
+            </button>
+            <button
+              type="button"
+              className={defaultInstallMode === "copy" ? "active" : ""}
+              onClick={() => setDefaultInstallMode("copy")}
+            >
+              {t("system.skills.installMode.copy")}
+            </button>
+          </div>
+          {defaultInstallMode === "copy" ? (
+            <span className="skills-install-mode-note">
+              {t("system.skills.installMode.copyWarning")}
+            </span>
+          ) : null}
         </div>
       </div>
       {operation.active || operation.message || operation.errors.length > 0 ? (
@@ -3357,6 +3439,13 @@ function SkillsTab({ workPath }: { workPath: string }) {
                         <span className="skill-status-pill subtle">{source.kind}</span>
                         <span>
                           <code>{source.skillsSubdir}</code>
+                        </span>
+                        <span title={source.lastSyncedAt ?? ""}>
+                          {source.lastSyncedAt
+                            ? t("system.skills.lastSynced", {
+                                when: formatRelativeDate(source.lastSyncedAt, locale),
+                              })
+                            : t("system.skills.neverSynced")}
                         </span>
                       </div>
                     </div>
@@ -3485,6 +3574,34 @@ function SkillsTab({ workPath }: { workPath: string }) {
                   count: selectedSkillIds.size,
                 })}
               </span>
+              <div
+                className="skills-source-kind skills-install-mode-toggle"
+                role="group"
+                aria-label={t("system.skills.installMode.override")}
+                title={t("system.skills.installMode.override")}
+              >
+                <button
+                  type="button"
+                  className={installModeOverride === "default" ? "active" : ""}
+                  onClick={() => setInstallModeOverride("default")}
+                >
+                  {t("system.skills.installMode.default")}
+                </button>
+                <button
+                  type="button"
+                  className={installModeOverride === "symlink" ? "active" : ""}
+                  onClick={() => setInstallModeOverride("symlink")}
+                >
+                  {t("system.skills.installMode.symlink")}
+                </button>
+                <button
+                  type="button"
+                  className={installModeOverride === "copy" ? "active" : ""}
+                  onClick={() => setInstallModeOverride("copy")}
+                >
+                  {t("system.skills.installMode.copy")}
+                </button>
+              </div>
               <Button variant="ghost" size="sm" onClick={selectFilteredSkills} disabled={busy}>
                 {t("system.skills.selectVisible")}
               </Button>

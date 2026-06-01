@@ -38,6 +38,7 @@ const MOCK_BUILTIN_SKILLS = [
 
 export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
+export type SkillInstallMode = "symlink" | "copy";
 export type SkillDispatchRuntime = "claude" | "codex";
 export type SkillTier = "core" | "public" | "private" | "imported" | "managed";
 
@@ -77,6 +78,7 @@ export interface SkillInstall {
   managedBy: "anchor" | "external" | string;
   entrypointPath: string;
   targetPath: string;
+  mode?: SkillInstallMode | string;
   createdAt?: string | null;
 }
 
@@ -213,6 +215,22 @@ export interface AdoptOutcome {
   installs: SkillInstall[];
 }
 
+export interface SyncSourceResult {
+  sourceId: string;
+  kind: string;
+  ok: boolean;
+  skills: number;
+  lastSyncedAt?: string | null;
+  error?: string | null;
+}
+
+export interface SyncAllOutcome {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: SyncSourceResult[];
+}
+
 export interface InstallOutcome {
   install: SkillInstall;
   anchorEntrypoint: string;
@@ -327,6 +345,14 @@ export async function skillsRescanSource(
   return invoke<SkillRecord[]>("skills_rescan_source", { sourceId, progressId });
 }
 
+export async function skillsSyncAllSources(
+  workPath: string | null = null,
+  progressId: string | null = null,
+): Promise<SyncAllOutcome> {
+  if (!isTauri()) return { total: 0, succeeded: 0, failed: 0, results: [] };
+  return invoke<SyncAllOutcome>("skills_sync_all_sources", { workPath, progressId });
+}
+
 export async function skillsListSkills(workPath: string | null): Promise<SkillRecord[]> {
   if (!isTauri()) return MOCK_BUILTIN_SKILLS;
   return invoke<SkillRecord[]>("skills_list_skills", { workPath });
@@ -385,9 +411,10 @@ export async function skillsInstallSkill(
   skillId: string,
   target: SkillInstallTarget,
   installedAs: string | null = null,
+  mode: SkillInstallMode = "symlink",
 ): Promise<InstallOutcome> {
   if (!isTauri()) throw new Error("Skill install requires the Tauri shell.");
-  return invoke<InstallOutcome>("skills_install_skill", { skillId, target, installedAs });
+  return invoke<InstallOutcome>("skills_install_skill", { skillId, target, installedAs, mode });
 }
 
 export async function skillsUninstallSkill(

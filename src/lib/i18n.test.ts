@@ -28,4 +28,18 @@ describe("i18n", () => {
       "Snapshot saved: $& — $1",
     );
   });
+
+  it("localizes skill install-mode and sync-all strings in both locales", () => {
+    expect(t("ko", "system.skills.installMode.copy")).toBe("복사");
+    expect(t("en", "system.skills.installMode.copy")).toBe("Copy");
+    expect(t("ko", "system.skills.syncAll")).toBe("전체 동기화");
+    expect(t("en", "system.skills.syncAll")).toBe("Sync all");
+    expect(t("en", "system.skills.neverSynced")).toBe("Never synced");
+    expect(t("en", "system.skills.syncAllComplete", { succeeded: 2, failed: 1 })).toBe(
+      "Sync all complete: 2 ok, 1 failed",
+    );
+    expect(t("en", "system.skills.installConfirm", { count: 1, target: "Claude", mode: "Copy" })).toBe(
+      "Proceed with 1 Claude install task(s) (Copy)?",
+    );
+  });
 });

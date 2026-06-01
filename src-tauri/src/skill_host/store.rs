@@ -26,6 +26,7 @@ const BUILTIN_HASHES_FILE: &str = ".anchor-builtin-hashes.json";
 const MANAGED_SOURCE_ID: &str = "anchor-managed";
 const IMPORTED_SOURCE_ID: &str = "anchor-imported";
 const STAI_PUBLIC_SOURCE_ID: &str = "stai-public";
+const INSTALL_MARKER_FILE: &str = ".anchor-install.json";
 
 static BUILTIN_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../skills");
 
@@ -89,6 +90,8 @@ pub struct SkillInstall {
     pub managed_by: String,
     pub entrypoint_path: String,
     pub target_path: String,
+    #[serde(default = "default_install_mode")]
+    pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
 }
@@ -127,6 +130,45 @@ pub struct AdoptOutcome {
     pub adopted: usize,
     pub skipped: usize,
     pub installs: Vec<SkillInstall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSourceResult {
+    pub source_id: String,
+    pub kind: String,
+    pub ok: bool,
+    pub skills: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncAllOutcome {
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub results: Vec<SyncSourceResult>,
+}
+
+/// Provenance marker written into a copy-mode install directory
+/// (`<tool>/skills/<name>/.anchor-install.json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallMarker {
+    anchor_managed: bool,
+    skill_id: String,
+    installed_as: String,
+    mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_abs_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,6 +292,10 @@ fn default_true() -> bool {
 
 fn default_skill_tier() -> String {
     "managed".to_string()
+}
+
+fn default_install_mode() -> String {
+    "symlink".to_string()
 }
 
 impl Default for SkillsRegistry {
@@ -434,9 +480,27 @@ fn skills_sync_source_impl(
         .find(|source| source.id == source_id)
         .cloned()
         .ok_or_else(|| format!("unknown_source: {source_id}"))?;
+    let skills = sync_one_source_in_registry(&mut registry, &source, progress)?;
+    save_registry_unlocked(&registry)?;
+    progress.success(format!(
+        "Sync complete for {source_id}: {} skill(s)",
+        skills.len()
+    ));
+    Ok(skills)
+}
+
+/// Pull (if `cloned`) then rescan a single source, operating on the
+/// already-loaded registry under a guard the caller holds. Never re-enters
+/// `registry_guard()` (the lock is not reentrant) and never saves — callers
+/// save once after they are done mutating.
+fn sync_one_source_in_registry(
+    registry: &mut SkillsRegistry,
+    source: &SkillSource,
+    progress: ProgressReporter<'_>,
+) -> Result<Vec<SkillRecord>, String> {
     if source.kind == "cloned" {
-        let path = source_path(&source)?;
-        progress.info(format!("Pulling latest changes for {source_id}"));
+        let path = source_path(source)?;
+        progress.info(format!("Pulling latest changes for {}", source.id));
         run_command(
             Command::new("git")
                 .arg("-C")
@@ -444,17 +508,90 @@ fn skills_sync_source_impl(
                 .arg("pull")
                 .arg("--ff-only"),
         )?;
-        progress.success(format!("Git pull complete for {source_id}"));
+        progress.success(format!("Git pull complete for {}", source.id));
     } else {
-        progress.info(format!("Source {source_id} is linked; skipping git pull"));
+        progress.info(format!("Source {} is linked; skipping git pull", source.id));
     }
-    let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
+    rescan_source_in_registry_with_progress(registry, &source.id, progress)
+}
+
+#[tauri::command]
+pub fn skills_sync_all_sources(
+    app: AppHandle,
+    work_path: Option<String>,
+    progress_id: Option<String>,
+) -> Result<SyncAllOutcome, String> {
+    skills_sync_all_sources_impl(
+        work_path,
+        ProgressReporter::new(&app, progress_id.as_deref()),
+    )
+}
+
+fn skills_sync_all_sources_impl(
+    work_path: Option<String>,
+    progress: ProgressReporter<'_>,
+) -> Result<SyncAllOutcome, String> {
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    ensure_default_sources(&mut registry, work_path.as_deref())?;
+    let ids = source_ids(&registry);
+    let total = ids.len();
+    let mut results: Vec<SyncSourceResult> = Vec::new();
+    for (index, source_id) in ids.into_iter().enumerate() {
+        progress.progress("info", format!("Syncing {source_id}"), index, total);
+        let Some(source) = registry
+            .sources
+            .iter()
+            .find(|source| source.id == source_id)
+            .cloned()
+        else {
+            continue;
+        };
+        match sync_one_source_in_registry(&mut registry, &source, progress) {
+            Ok(skills) => {
+                let last_synced_at = registry
+                    .sources
+                    .iter()
+                    .find(|item| item.id == source_id)
+                    .and_then(|item| item.last_synced_at.clone());
+                results.push(SyncSourceResult {
+                    source_id: source_id.clone(),
+                    kind: source.kind.clone(),
+                    ok: true,
+                    skills: skills.len(),
+                    last_synced_at,
+                    error: None,
+                });
+                progress.progress("success", format!("Synced {source_id}"), index + 1, total);
+            }
+            Err(error) => {
+                progress.progress(
+                    "error",
+                    format!("Failed {source_id}: {error}"),
+                    index + 1,
+                    total,
+                );
+                results.push(SyncSourceResult {
+                    source_id: source_id.clone(),
+                    kind: source.kind.clone(),
+                    ok: false,
+                    skills: 0,
+                    last_synced_at: None,
+                    error: Some(error),
+                });
+            }
+        }
+    }
     save_registry_unlocked(&registry)?;
-    progress.success(format!(
-        "Sync complete for {source_id}: {} skill(s)",
-        skills.len()
-    ));
-    Ok(skills)
+    let failed = results.iter().filter(|result| !result.ok).count();
+    let succeeded = results.len() - failed;
+    progress.success(format!("Sync all complete: {succeeded} ok, {failed} failed"));
+    Ok(SyncAllOutcome {
+        total,
+        succeeded,
+        failed,
+        results,
+    })
 }
 
 #[tauri::command]
@@ -669,6 +806,7 @@ pub fn skills_install_skill(
     skill_id: String,
     target: String,
     installed_as: Option<String>,
+    mode: Option<String>,
 ) -> Result<InstallOutcome, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -685,21 +823,37 @@ pub fn skills_install_skill(
         ));
     }
     let target = normalize_install_target(&target)?;
+    let mode = normalize_install_mode(mode.as_deref())?;
     let installed_as = host_fs::safe_entry_name(installed_as.as_deref().unwrap_or(&skill.name))?;
-    let anchor_entry = host_fs::skills_root()?.join(&installed_as);
     let skill_path = PathBuf::from(&skill.abs_path);
-    create_anchor_entry_symlink(&anchor_entry, &skill_path, &installed_as)?;
-
     let tool_target = install_target_path(&target, &installed_as)?;
-    create_install_target_symlink(&tool_target, &anchor_entry, &skill_path, &installed_as)?;
+
+    // entrypoint_path: for symlink installs it is the anchor entry that the tool
+    // target points at; for copy installs there is no anchor entry, so it records
+    // the source skill dir (origin, for drift comparison). anchor_entrypoint is the
+    // path surfaced to the UI.
+    let (entrypoint_path, anchor_entrypoint) = if mode == "copy" {
+        install_copy(&tool_target, &skill_path, &skill_id, &installed_as)?;
+        (
+            host_fs::display_path(&skill_path),
+            host_fs::display_path(&tool_target),
+        )
+    } else {
+        let anchor_entry = host_fs::skills_root()?.join(&installed_as);
+        create_anchor_entry_symlink(&anchor_entry, &skill_path, &installed_as)?;
+        create_install_target_symlink(&tool_target, &anchor_entry, &skill_path, &installed_as)?;
+        let display = host_fs::display_path(&anchor_entry);
+        (display.clone(), display)
+    };
 
     let install = SkillInstall {
         skill_id,
         target: target.clone(),
         installed_as,
         managed_by: "anchor".to_string(),
-        entrypoint_path: host_fs::display_path(&anchor_entry),
+        entrypoint_path,
         target_path: host_fs::display_path(&tool_target),
+        mode: mode.clone(),
         created_at: Some(Utc::now().to_rfc3339()),
     };
     registry.installs.retain(|existing| {
@@ -709,7 +863,7 @@ pub fn skills_install_skill(
     save_registry_unlocked(&registry)?;
     Ok(InstallOutcome {
         install,
-        anchor_entrypoint: host_fs::display_path(&anchor_entry),
+        anchor_entrypoint,
     })
 }
 
@@ -728,27 +882,41 @@ pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<()
     if install.managed_by != "anchor" {
         return Err("external_install_not_removed".to_string());
     }
-    let tool_target = PathBuf::from(&install.target_path);
-    let anchor_entry = PathBuf::from(&install.entrypoint_path);
-    let removed_target = host_fs::remove_if_matching_symlink(&tool_target, &anchor_entry)?;
-    if !removed_target {
-        return Err(format!(
-            "install_target_changed: {} no longer points to {}",
-            install.target_path, install.entrypoint_path
-        ));
-    }
-    let still_used = registry.installs.iter().any(|other| {
-        !(other.target == target && other.installed_as == installed_as)
-            && other.entrypoint_path == install.entrypoint_path
-    });
-    if !still_used {
-        let skill_target = registry
-            .skills
-            .iter()
-            .find(|skill| skill.id == install.skill_id)
-            .map(|skill| PathBuf::from(&skill.abs_path));
-        if let Some(skill_target) = skill_target {
-            let _ = host_fs::remove_if_matching_symlink(&anchor_entry, &skill_target);
+    if install.mode == "copy" {
+        let tool_target = PathBuf::from(&install.target_path);
+        // Refuse to delete anything that is not unambiguously our own copy.
+        if !copy_install_is_anchor_managed(&tool_target, &installed_as) {
+            return Err("install_not_anchor_managed".to_string());
+        }
+        fs::remove_dir_all(&tool_target).map_err(|err| {
+            format!(
+                "Cannot remove {}: {err}",
+                host_fs::display_path(&tool_target)
+            )
+        })?;
+    } else {
+        let tool_target = PathBuf::from(&install.target_path);
+        let anchor_entry = PathBuf::from(&install.entrypoint_path);
+        let removed_target = host_fs::remove_if_matching_symlink(&tool_target, &anchor_entry)?;
+        if !removed_target {
+            return Err(format!(
+                "install_target_changed: {} no longer points to {}",
+                install.target_path, install.entrypoint_path
+            ));
+        }
+        let still_used = registry.installs.iter().any(|other| {
+            !(other.target == target && other.installed_as == installed_as)
+                && other.entrypoint_path == install.entrypoint_path
+        });
+        if !still_used {
+            let skill_target = registry
+                .skills
+                .iter()
+                .find(|skill| skill.id == install.skill_id)
+                .map(|skill| PathBuf::from(&skill.abs_path));
+            if let Some(skill_target) = skill_target {
+                let _ = host_fs::remove_if_matching_symlink(&anchor_entry, &skill_target);
+            }
         }
     }
     registry
@@ -794,10 +962,54 @@ fn skills_adopt_external_links_impl(
                 index,
                 total,
             );
-            let Some(raw_target) = host_fs::read_link_target(&link_path) else {
-                skipped += 1;
-                progress.info(format!("Skipped {target}/{installed_as}: not a symlink"));
-                continue;
+            let raw_target = match host_fs::read_link_target(&link_path) {
+                Some(raw_target) => raw_target,
+                None => {
+                    // Not a symlink. If it is an Anchor-managed copy install that
+                    // fell out of the registry, re-register it; otherwise leave the
+                    // user's directory untouched.
+                    if copy_install_is_anchor_managed(&link_path, &installed_as) {
+                        if registry.installs.iter().any(|install| {
+                            install.target == target && install.installed_as == installed_as
+                        }) {
+                            skipped += 1;
+                            progress.info(format!(
+                                "Skipped {target}/{installed_as}: already registered"
+                            ));
+                            continue;
+                        }
+                        let marker = read_install_marker(&link_path);
+                        let install = SkillInstall {
+                            skill_id: marker
+                                .as_ref()
+                                .map(|m| m.skill_id.clone())
+                                .unwrap_or_default(),
+                            target: target.to_string(),
+                            installed_as: installed_as.clone(),
+                            managed_by: "anchor".to_string(),
+                            entrypoint_path: marker
+                                .as_ref()
+                                .and_then(|m| m.source_abs_path.clone())
+                                .unwrap_or_else(|| host_fs::display_path(&link_path)),
+                            target_path: host_fs::display_path(&link_path),
+                            mode: "copy".to_string(),
+                            created_at: Some(Utc::now().to_rfc3339()),
+                        };
+                        registry.installs.push(install.clone());
+                        installs.push(install);
+                        adopted += 1;
+                        progress.progress(
+                            "success",
+                            format!("Adopted {target}/{installed_as} (copy)"),
+                            index + 1,
+                            total,
+                        );
+                        continue;
+                    }
+                    skipped += 1;
+                    progress.info(format!("Skipped {target}/{installed_as}: not a symlink"));
+                    continue;
+                }
             };
             let abs_target = if raw_target.is_absolute() {
                 raw_target
@@ -851,6 +1063,7 @@ fn skills_adopt_external_links_impl(
                 managed_by: "external".to_string(),
                 entrypoint_path: host_fs::display_path(&abs_target),
                 target_path: host_fs::display_path(&link_path),
+                mode: "symlink".to_string(),
                 created_at: Some(Utc::now().to_rfc3339()),
             };
             registry.installs.push(install.clone());
@@ -1558,7 +1771,7 @@ fn preserved_installs_from_registry(registry: SkillsRegistry) -> Vec<SkillInstal
     registry
         .installs
         .into_iter()
-        .filter(install_links_are_intact)
+        .filter(install_present)
         .collect()
 }
 
@@ -1566,6 +1779,102 @@ fn install_links_are_intact(install: &SkillInstall) -> bool {
     let target_path = PathBuf::from(&install.target_path);
     let entrypoint_path = PathBuf::from(&install.entrypoint_path);
     host_fs::read_link_target(&target_path).as_deref() == Some(entrypoint_path.as_path())
+}
+
+/// Mode-aware "this install is still present and ours" check.
+/// Symlink installs verify the two-level link chain; copy installs verify a
+/// real (non-symlink) directory carrying our provenance marker.
+fn install_present(install: &SkillInstall) -> bool {
+    if install.mode == "copy" {
+        copy_install_is_anchor_managed(Path::new(&install.target_path), &install.installed_as)
+    } else {
+        install_links_are_intact(install)
+    }
+}
+
+fn is_symlink_path(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn install_marker_path(dir: &Path) -> PathBuf {
+    dir.join(INSTALL_MARKER_FILE)
+}
+
+fn read_install_marker(dir: &Path) -> Option<InstallMarker> {
+    let data = fs::read(install_marker_path(dir)).ok()?;
+    serde_json::from_slice::<InstallMarker>(&data).ok()
+}
+
+/// Write the `.anchor-install.json` provenance marker into a copied skill dir.
+/// The marker is the only reliable signal that Anchor created a real directory
+/// under a tool's skills root — it gates every destructive copy-mode operation.
+fn write_install_marker(
+    dir: &Path,
+    skill_id: &str,
+    installed_as: &str,
+    source: &Path,
+) -> Result<(), String> {
+    let marker = InstallMarker {
+        anchor_managed: true,
+        skill_id: skill_id.to_string(),
+        installed_as: installed_as.to_string(),
+        mode: "copy".to_string(),
+        source_abs_path: Some(host_fs::display_path(source)),
+        source_hash: hash_file(&source.join("SKILL.md")).ok(),
+        created_at: Some(Utc::now().to_rfc3339()),
+    };
+    host_fs::write_json_pretty(&install_marker_path(dir), &marker)
+}
+
+/// True only when `dir` is a real directory (NOT a symlink) bearing our
+/// `.anchor-install.json` marker for this `installed_as`. Any uncertainty
+/// (missing dir, symlink, absent/foreign marker) returns false so callers
+/// never delete a directory Anchor did not create.
+fn copy_install_is_anchor_managed(dir: &Path, installed_as: &str) -> bool {
+    if is_symlink_path(dir) || !dir.is_dir() {
+        return false;
+    }
+    read_install_marker(dir)
+        .map(|marker| {
+            marker.anchor_managed && marker.mode == "copy" && marker.installed_as == installed_as
+        })
+        .unwrap_or(false)
+}
+
+/// Copy a skill directory directly into a tool target as a self-contained,
+/// real directory (no symlink, no anchor entry) and drop the provenance
+/// marker. Refuses to overwrite anything Anchor did not create.
+fn install_copy(
+    tool_target: &Path,
+    skill_path: &Path,
+    skill_id: &str,
+    installed_as: &str,
+) -> Result<(), String> {
+    if is_symlink_path(tool_target) {
+        return Err(format!(
+            "install_target_exists: {} already exists as a symlink",
+            host_fs::display_path(tool_target)
+        ));
+    }
+    if tool_target.exists() {
+        if copy_install_is_anchor_managed(tool_target, installed_as) {
+            fs::remove_dir_all(tool_target).map_err(|err| {
+                format!(
+                    "Cannot replace existing install {}: {err}",
+                    host_fs::display_path(tool_target)
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "install_target_exists: {} already exists and is not Anchor-managed",
+                host_fs::display_path(tool_target)
+            ));
+        }
+    }
+    copy_dir_all(skill_path, tool_target)?;
+    write_install_marker(tool_target, skill_id, installed_as, skill_path)
 }
 
 fn create_anchor_entry_symlink(
@@ -2044,6 +2353,10 @@ fn migrate_stai_public_source(registry: &mut SkillsRegistry) -> Result<(), Strin
     let builtin_root = builtin_materialized_root()?;
     let mut needs_managed_rescan = false;
     for install in registry.installs.iter_mut() {
+        // Copy installs carry no symlink entrypoint to repoint; leave them alone.
+        if install.mode == "copy" {
+            continue;
+        }
         let Some(name) = stai_public_skill_name(&install.skill_id).map(ToString::to_string) else {
             continue;
         };
@@ -2530,16 +2843,24 @@ fn build_doctor_report(registry: &SkillsRegistry) -> SkillDoctorReport {
                 format!("install references unknown skill {}", install.skill_id),
             ));
         }
-        if !install_links_are_intact(install) {
+        if !install_present(install) {
+            let message = if install.mode == "copy" {
+                format!(
+                    "{} copy install is missing or not Anchor-managed",
+                    install.target_path
+                )
+            } else {
+                format!(
+                    "{} install link does not point to {}",
+                    install.target_path, install.entrypoint_path
+                )
+            };
             issues.push(doctor_issue(
                 "error",
                 "install_link_broken",
                 Some(install.installed_as.clone()),
                 Vec::new(),
-                format!(
-                    "{} install link does not point to {}",
-                    install.target_path, install.entrypoint_path
-                ),
+                message,
             ));
         }
     }
@@ -3059,8 +3380,8 @@ fn copy_dir_all(from: &Path, to: &Path) -> Result<(), String> {
 
 fn install_root(target: &str) -> Result<PathBuf, String> {
     match target {
-        "claude" => Ok(host_fs::home_dir()?.join(".claude").join("skills")),
-        "codex" => Ok(host_fs::home_dir()?.join(".codex").join("skills")),
+        "claude" => Ok(host_fs::install_root_base()?.join(".claude").join("skills")),
+        "codex" => Ok(host_fs::install_root_base()?.join(".codex").join("skills")),
         other => Err(format!("unsupported_install_target: {other}")),
     }
 }
@@ -3074,6 +3395,14 @@ fn normalize_install_target(target: &str) -> Result<String, String> {
     match target.as_str() {
         "claude" | "codex" => Ok(target),
         _ => Err(format!("unsupported_install_target: {target}")),
+    }
+}
+
+fn normalize_install_mode(mode: Option<&str>) -> Result<String, String> {
+    match mode.unwrap_or("symlink").trim().to_lowercase().as_str() {
+        "" | "symlink" => Ok("symlink".to_string()),
+        "copy" => Ok("copy".to_string()),
+        other => Err(format!("unsupported_install_mode: {other}")),
     }
 }
 
@@ -3144,10 +3473,15 @@ mod tests {
     use std::ffi::OsString;
     use tempfile::TempDir;
 
+    // Field order is load-bearing: Rust drops fields in declaration order, so
+    // `_guard` MUST be last. That keeps the home lock held until AFTER the env
+    // var is restored and the TempDir is removed, so the next test never starts
+    // (and never observes/mutates the process-global ANCHOR_TEST_HOME) while
+    // this one is still cleaning up. (Matches e2e_flow::tests::TestHome.)
     struct TestHome {
-        _guard: MutexGuard<'static, ()>,
         _dir: TempDir,
         previous: Option<OsString>,
+        _guard: MutexGuard<'static, ()>,
     }
 
     impl Drop for TestHome {
@@ -3166,9 +3500,9 @@ mod tests {
         let previous = std::env::var_os("ANCHOR_TEST_HOME");
         std::env::set_var("ANCHOR_TEST_HOME", dir.path());
         TestHome {
-            _guard: guard,
             _dir: dir,
             previous,
+            _guard: guard,
         }
     }
 
@@ -3503,8 +3837,9 @@ mod tests {
         rescan_source_in_registry(&mut registry, "beta").unwrap();
         save_registry_unlocked(&registry).unwrap();
 
-        let err = skills_install_skill("alpha::shared".to_string(), "claude".to_string(), None)
-            .unwrap_err();
+        let err =
+            skills_install_skill("alpha::shared".to_string(), "claude".to_string(), None, None)
+                .unwrap_err();
 
         assert!(err.contains("skill_invalid"));
     }
@@ -3704,6 +4039,7 @@ mod tests {
             managed_by: "anchor".to_string(),
             entrypoint_path: path_string(&anchor_entry),
             target_path: path_string(&tool_target),
+            mode: "symlink".to_string(),
             created_at: None,
         });
         registry.installs.push(SkillInstall {
@@ -3713,6 +4049,7 @@ mod tests {
             managed_by: "anchor".to_string(),
             entrypoint_path: path_string(&links.path().join("missing-anchor")),
             target_path: path_string(&links.path().join("missing-tool")),
+            mode: "symlink".to_string(),
             created_at: None,
         });
         save_registry_unlocked(&registry).unwrap();
@@ -3987,6 +4324,7 @@ mod tests {
             managed_by: "anchor".to_string(),
             entrypoint_path: path_string(&anchor_entry),
             target_path: path_string(&tool_target),
+            mode: "symlink".to_string(),
             created_at: None,
         });
         save_registry_unlocked(&registry).unwrap();
@@ -4050,6 +4388,7 @@ mod tests {
             managed_by: "anchor".to_string(),
             entrypoint_path: path_string(&anchor_entry),
             target_path: path_string(&tool_target),
+            mode: "symlink".to_string(),
             created_at: None,
         });
         save_registry_unlocked(&registry).unwrap();
@@ -4112,5 +4451,264 @@ mod tests {
 
         assert!(setup.ends_with(Path::new("_builtin/envs/default/setup.sh")));
         assert!(setup.is_file());
+    }
+
+    #[test]
+    fn serde_default_install_mode_is_symlink() {
+        // Registry entries written before the `mode` field existed must load as symlink.
+        let json = r#"{
+            "skillId": "anchor-managed::x",
+            "target": "claude",
+            "installedAs": "x",
+            "managedBy": "anchor",
+            "entrypointPath": "/tmp/a",
+            "targetPath": "/tmp/b"
+        }"#;
+        let install: SkillInstall = serde_json::from_str(json).unwrap();
+        assert_eq!(install.mode, "symlink");
+    }
+
+    #[test]
+    fn copy_install_creates_real_dir_with_marker() {
+        let _home = test_home();
+        let created = skills_create_skill("copytest".to_string(), None).unwrap();
+        let outcome = skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.install.mode, "copy");
+        assert_eq!(outcome.install.managed_by, "anchor");
+
+        let tool_target = install_target_path("claude", "copytest").unwrap();
+        let meta = fs::symlink_metadata(&tool_target).unwrap();
+        assert!(meta.file_type().is_dir());
+        assert!(!meta.file_type().is_symlink());
+        assert!(tool_target.join("SKILL.md").is_file());
+
+        let marker = read_install_marker(&tool_target).unwrap();
+        assert!(marker.anchor_managed);
+        assert_eq!(marker.mode, "copy");
+        assert_eq!(marker.installed_as, "copytest");
+
+        // copy installs create no anchor entry symlink
+        let anchor_entry = host_fs::skills_root().unwrap().join("copytest");
+        assert!(host_fs::read_link_target(&anchor_entry).is_none());
+
+        let registry = load_registry().unwrap();
+        assert!(registry
+            .installs
+            .iter()
+            .any(|install| install.installed_as == "copytest" && install.mode == "copy"));
+    }
+
+    #[test]
+    fn symlink_install_defaults_to_link_chain() {
+        let _home = test_home();
+        let created = skills_create_skill("linktest".to_string(), None).unwrap();
+        let outcome =
+            skills_install_skill(created.id, "claude".to_string(), None, None).unwrap();
+        assert_eq!(outcome.install.mode, "symlink");
+
+        let tool_target = install_target_path("claude", "linktest").unwrap();
+        let anchor_entry = host_fs::skills_root().unwrap().join("linktest");
+        assert_eq!(
+            host_fs::read_link_target(&tool_target).as_deref(),
+            Some(anchor_entry.as_path())
+        );
+        assert!(host_fs::read_link_target(&anchor_entry).is_some());
+    }
+
+    #[test]
+    fn uninstall_copy_removes_marked_dir() {
+        let _home = test_home();
+        let created = skills_create_skill("rmtest".to_string(), None).unwrap();
+        skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        let tool_target = install_target_path("claude", "rmtest").unwrap();
+        assert!(tool_target.is_dir());
+
+        skills_uninstall_skill("claude".to_string(), "rmtest".to_string()).unwrap();
+        assert!(!tool_target.exists());
+        let registry = load_registry().unwrap();
+        assert!(!registry
+            .installs
+            .iter()
+            .any(|install| install.installed_as == "rmtest"));
+    }
+
+    #[test]
+    fn uninstall_copy_refuses_unmarked_dir() {
+        let _home = test_home();
+        // A user-authored directory (no Anchor marker) sitting at the tool target.
+        let tool_target = install_target_path("claude", "userdir").unwrap();
+        host_fs::ensure_dir(&tool_target).unwrap();
+        fs::write(tool_target.join("SKILL.md"), "# user\n").unwrap();
+        let mut registry = SkillsRegistry::default();
+        registry.installs.push(SkillInstall {
+            skill_id: "anchor-managed::userdir".to_string(),
+            target: "claude".to_string(),
+            installed_as: "userdir".to_string(),
+            managed_by: "anchor".to_string(),
+            entrypoint_path: path_string(&tool_target),
+            target_path: path_string(&tool_target),
+            mode: "copy".to_string(),
+            created_at: None,
+        });
+        save_registry_unlocked(&registry).unwrap();
+
+        let err = skills_uninstall_skill("claude".to_string(), "userdir".to_string()).unwrap_err();
+        assert_eq!(err, "install_not_anchor_managed");
+        // The user's directory must survive.
+        assert!(tool_target.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn copy_install_reinstall_overwrites_own_marked_dir() {
+        let _home = test_home();
+        let created = skills_create_skill("reinstall".to_string(), None).unwrap();
+        skills_install_skill(
+            created.id.clone(),
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        // A second copy install of the same name must succeed (our marker is present).
+        let outcome = skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.install.mode, "copy");
+        let tool_target = install_target_path("claude", "reinstall").unwrap();
+        assert!(tool_target.join("SKILL.md").is_file());
+        assert!(read_install_marker(&tool_target).unwrap().anchor_managed);
+    }
+
+    #[test]
+    fn copy_install_errors_on_foreign_existing_dir() {
+        let _home = test_home();
+        let created = skills_create_skill("foreign".to_string(), None).unwrap();
+        let tool_target = install_target_path("claude", "foreign").unwrap();
+        host_fs::ensure_dir(&tool_target).unwrap();
+        fs::write(tool_target.join("SKILL.md"), "# foreign\n").unwrap();
+
+        let err = skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap_err();
+        assert!(err.contains("install_target_exists"));
+        // Foreign content untouched.
+        assert_eq!(
+            fs::read_to_string(tool_target.join("SKILL.md")).unwrap(),
+            "# foreign\n"
+        );
+    }
+
+    #[test]
+    fn install_present_detects_copy_state() {
+        let _home = test_home();
+        let created = skills_create_skill("presence".to_string(), None).unwrap();
+        skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+        let registry = load_registry().unwrap();
+        let install = registry
+            .installs
+            .iter()
+            .find(|install| install.installed_as == "presence")
+            .unwrap();
+        assert!(install_present(install));
+
+        let mut missing = install.clone();
+        missing.installed_as = "ghost".to_string();
+        missing.target_path = path_string(&install_target_path("claude", "ghost").unwrap());
+        assert!(!install_present(&missing));
+    }
+
+    #[test]
+    fn sync_all_aggregates_errors_without_aborting() {
+        let _home = test_home();
+        let good = TempDir::new().unwrap();
+        write_skill(good.path(), "goodskill");
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: "goodsrc".to_string(),
+            kind: "linked".to_string(),
+            path: Some(path_string(good.path())),
+            repo_url: None,
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        registry.sources.push(SkillSource {
+            id: "badsrc".to_string(),
+            kind: "cloned".to_string(),
+            path: Some(path_string(&good.path().join("does-not-exist"))),
+            repo_url: Some("https://example.invalid/x.git".to_string()),
+            skills_subdir: "skills".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+        save_registry_unlocked(&registry).unwrap();
+
+        let outcome = skills_sync_all_sources_impl(None, ProgressReporter::noop()).unwrap();
+        let good_result = outcome
+            .results
+            .iter()
+            .find(|result| result.source_id == "goodsrc")
+            .unwrap();
+        assert!(good_result.ok);
+        assert!(good_result.last_synced_at.is_some());
+        assert_eq!(good_result.skills, 1);
+
+        let bad_result = outcome
+            .results
+            .iter()
+            .find(|result| result.source_id == "badsrc")
+            .unwrap();
+        assert!(!bad_result.ok);
+        assert!(bad_result.error.is_some());
+        assert!(outcome.failed >= 1);
+    }
+
+    #[test]
+    fn reset_registry_preserves_copy_install() {
+        let _home = test_home();
+        let work = TempDir::new().unwrap();
+        let created = skills_create_skill("resetcopy".to_string(), None).unwrap();
+        skills_install_skill(
+            created.id,
+            "claude".to_string(),
+            None,
+            Some("copy".to_string()),
+        )
+        .unwrap();
+
+        skills_reset_registry_impl(Some(path_string(work.path())), ProgressReporter::noop())
+            .unwrap();
+
+        let registry = load_registry().unwrap();
+        assert!(registry
+            .installs
+            .iter()
+            .any(|install| install.installed_as == "resetcopy" && install.mode == "copy"));
     }
 }

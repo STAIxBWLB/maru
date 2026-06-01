@@ -8151,6 +8151,40 @@ button.git-badge:hover {
   color: var(--accent);
 }
 
+.skills-install-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.skills-install-mode-label {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+/* Inline, compact variant of the segmented toggle — flows 2 or 3 buttons
+   horizontally instead of the full-width 2-column form layout. */
+.skills-install-mode-toggle {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  grid-auto-columns: minmax(56px, auto);
+  width: auto;
+}
+
+.skills-install-mode-toggle button {
+  padding: 0 10px;
+}
+
+.skills-install-mode-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .source-add-card .button {
   justify-self: end;
 }

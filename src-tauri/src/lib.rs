@@ -112,8 +112,8 @@ use skill_host::{
     skills_import_unmanage, skills_install_skill, skills_list_dirty, skills_list_installs,
     skills_list_skills, skills_list_sources, skills_read_skill, skills_read_skill_file,
     skills_reconcile_skill, skills_remove_source, skills_rescan_source, skills_reset_registry,
-    skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_source,
-    skills_uninstall_skill,
+    skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_all_sources,
+    skills_sync_source, skills_uninstall_skill,
 };
 use diagram::{
     diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
@@ -296,6 +296,7 @@ pub fn run() {
             skills_add_source,
             skills_remove_source,
             skills_sync_source,
+            skills_sync_all_sources,
             skills_rescan_source,
             skills_list_skills,
             skills_read_skill,

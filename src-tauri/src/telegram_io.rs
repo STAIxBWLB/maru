@@ -598,6 +598,38 @@ fn extract_json_fragment(raw: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    // Isolates the process-global `ANCHOR_TEST_HOME` under the shared skill-host
+    // home lock. `_guard` is declared last so it drops last — the lock is held
+    // until after the env var is restored and the TempDir is removed, so this
+    // test never races skill_host tests on the global env var (and never writes
+    // the skill registry into the real ~/.anchor).
+    struct TelegramTestHome {
+        _dir: tempfile::TempDir,
+        previous: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for TelegramTestHome {
+        fn drop(&mut self) {
+            match self.previous.as_ref() {
+                Some(previous) => std::env::set_var("ANCHOR_TEST_HOME", previous),
+                None => std::env::remove_var("ANCHOR_TEST_HOME"),
+            }
+        }
+    }
+
+    fn isolated_anchor_home() -> TelegramTestHome {
+        let guard = host_fs::test_anchor_home_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("ANCHOR_TEST_HOME");
+        std::env::set_var("ANCHOR_TEST_HOME", dir.path());
+        TelegramTestHome {
+            _dir: dir,
+            previous,
+            _guard: guard,
+        }
+    }
+
     #[test]
     fn parses_noisy_telegram_output() {
         let raw = r#"login ok
@@ -610,6 +642,9 @@ mod tests {
 
     #[test]
     fn rejects_relative_session_files() {
+        // resolve_telegram_command_config calls store::default_public_env_setup,
+        // which writes the skill registry under ANCHOR_TEST_HOME; isolate it.
+        let _home = isolated_anchor_home();
         let options = TelegramFetchOptions {
             work_path: None,
             max: None,

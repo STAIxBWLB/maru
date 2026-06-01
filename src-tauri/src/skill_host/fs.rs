@@ -26,6 +26,16 @@ pub fn env_root() -> Result<PathBuf, String> {
     Ok(anchor_home()?.join("env"))
 }
 
+/// Base directory under which tool install roots (`~/.claude`, `~/.codex`)
+/// resolve. In production this is the real home; under tests it follows the
+/// `ANCHOR_TEST_HOME` override so installs stay sandboxed.
+pub fn install_root_base() -> Result<PathBuf, String> {
+    if let Some(path) = test_anchor_home_override() {
+        return Ok(path);
+    }
+    home_dir()
+}
+
 pub fn expand_tilde(input: &str) -> PathBuf {
     let trimmed = input.trim();
     if trimmed == "~" {
