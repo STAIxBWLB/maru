@@ -5375,7 +5375,10 @@ function MainApp() {
     let raf = 0;
     const compute = () => {
       raf = 0;
-      setActiveOutlineLine(Math.round(ta.scrollTop / lineHeight));
+      // floor, not round: the active line is the one whose top edge has
+      // reached the viewport top — matching jumpToOutlineLine's
+      // scrollTop = line * lineHeight mapping. round would flip early.
+      setActiveOutlineLine(Math.floor(ta.scrollTop / lineHeight));
     };
     const onScroll = () => {
       if (raf) return;

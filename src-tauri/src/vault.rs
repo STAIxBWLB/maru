@@ -115,7 +115,8 @@ pub struct VaultEntry {
     pub version_count: usize,
     /// Raw `[[wikilink]]` targets found in the body + frontmatter. Lets the
     /// frontend compute backlinks (which notes point here) without re-reading
-    /// every file. Defaulted so older v1 caches still deserialize.
+    /// every file. `#[serde(default)]` keeps deserialization tolerant of cache
+    /// files or test fixtures that predate this field.
     #[serde(default)]
     pub links: Vec<String>,
 }
