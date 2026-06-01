@@ -156,3 +156,30 @@ export function buildNeighborhood(
 
   return { upward, mentions, peers };
 }
+
+/** Notes elsewhere in the vault whose `[[links]]` resolve to the open document
+ *  — the inbound half of the graph. Pure; depends only on the entry set + the
+ *  document path (NOT draftContent), so callers should memoize on those. Reads
+ *  the `links` index produced by the Rust scan. O(total links) per switch. */
+export function buildBacklinks(
+  document: DocumentPayload,
+  entries: VaultEntry[],
+  precomputedIndex?: EntryIndex,
+): VaultEntry[] {
+  const index = precomputedIndex ?? buildEntryIndex(entries);
+  const out: VaultEntry[] = [];
+  for (const entry of entries) {
+    if (entry.path === document.path) continue;
+    const links = entry.links;
+    if (!links || links.length === 0) continue;
+    for (const target of links) {
+      const resolved = resolveTargetIndexed(index, entries, target);
+      if (resolved && resolved.path === document.path) {
+        out.push(entry);
+        break;
+      }
+    }
+  }
+  out.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  return out.slice(0, PEER_LIMIT);
+}

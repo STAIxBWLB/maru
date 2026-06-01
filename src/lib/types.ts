@@ -11,6 +11,10 @@ export interface VaultEntry {
   snippet: string;
   fileKind: string;
   versionCount: number;
+  /** Raw `[[wikilink]]` targets in this note's body + frontmatter, produced by
+   *  the Rust scan. Used to compute backlinks. Optional — absent on older
+   *  caches and in test fixtures. */
+  links?: string[];
 }
 
 export interface DocumentPayload {

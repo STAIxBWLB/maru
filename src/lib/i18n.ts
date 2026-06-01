@@ -403,6 +403,7 @@ const ko: Record<string, string> = {
   "neighborhood.title": "주변",
   "neighborhood.upward": "프로젝트 / 상위",
   "neighborhood.mentions": "본문 언급",
+  "neighborhood.backlinks": "역링크",
   "neighborhood.peers": "같은 타입",
 
   "inbox.title": "오늘의 인박스",
@@ -2197,6 +2198,7 @@ const en: Record<string, string> = {
   "neighborhood.title": "Neighborhood",
   "neighborhood.upward": "Project / up",
   "neighborhood.mentions": "Mentions",
+  "neighborhood.backlinks": "Backlinks",
   "neighborhood.peers": "Same type",
 
   "inbox.title": "Today's inbox",

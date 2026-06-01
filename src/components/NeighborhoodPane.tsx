@@ -1,7 +1,8 @@
-import { ArrowUpRight, FileText, Link2, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Link2, Users } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "../lib/i18n";
 import {
+  buildBacklinks,
   buildNeighborhood,
   type NeighborhoodTarget,
 } from "../lib/neighborhood";
@@ -31,10 +32,17 @@ export function NeighborhoodPane({
     () => buildNeighborhood(document, draftContent, entries, entryIndex),
     [document, draftContent, entries, entryIndex],
   );
+  // Backlinks depend only on other notes' links + this doc's path (not on
+  // draftContent), so they recompute on document switch, not per keystroke.
+  const backlinks = useMemo(
+    () => buildBacklinks(document, entries, entryIndex),
+    [document, entries, entryIndex],
+  );
 
   const isEmpty =
     data.upward.length === 0 &&
     data.mentions.length === 0 &&
+    backlinks.length === 0 &&
     data.peers.length === 0;
 
   if (isEmpty) return null;
@@ -89,6 +97,25 @@ export function NeighborhoodPane({
         </div>
       ) : null}
 
+      {backlinks.length > 0 ? (
+        <div className="neighborhood-section">
+          <div className="neighborhood-label" title={t("neighborhood.backlinks")}>
+            <ArrowDownLeft size={11} />
+            <span>{t("neighborhood.backlinks")}</span>
+            <span className="neighborhood-count">{backlinks.length}</span>
+          </div>
+          <div className="neighborhood-list">
+            {backlinks.map((entry) => (
+              <EntryLink
+                key={`backlink:${entry.path}`}
+                entry={entry}
+                onSelectEntry={onSelectEntry}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {data.peers.length > 0 ? (
         <div className="neighborhood-section">
           <div className="neighborhood-label" title={t("neighborhood.peers")}>
@@ -98,22 +125,35 @@ export function NeighborhoodPane({
           </div>
           <div className="neighborhood-list">
             {data.peers.map((entry) => (
-              <button
+              <EntryLink
                 key={entry.path}
-                type="button"
-                className="neighborhood-item"
-                onClick={() => onSelectEntry(entry)}
-                title={entry.relPath}
-              >
-                <FileText size={11} className="neighborhood-icon" />
-                <span className="neighborhood-item-title">{entry.title}</span>
-                <span className="neighborhood-item-path">{entry.relPath}</span>
-              </button>
+                entry={entry}
+                onSelectEntry={onSelectEntry}
+              />
             ))}
           </div>
         </div>
       ) : null}
     </section>
+  );
+}
+
+interface EntryLinkProps {
+  entry: VaultEntry;
+  onSelectEntry: (entry: VaultEntry) => void;
+}
+
+/** A resolved vault note rendered as a single-line wiki link. */
+function EntryLink({ entry, onSelectEntry }: EntryLinkProps) {
+  return (
+    <button
+      type="button"
+      className="neighborhood-item"
+      onClick={() => onSelectEntry(entry)}
+      title={entry.relPath}
+    >
+      <span className="neighborhood-item-title">{entry.title}</span>
+    </button>
   );
 }
 
@@ -123,6 +163,7 @@ interface LinkProps {
   onMissingTarget?: (target: string) => void;
 }
 
+/** A wikilink target — navigates when resolved, else offers to create it. */
 function NeighborhoodLink({ item, onSelectEntry, onMissingTarget }: LinkProps) {
   const resolved = item.entry !== null;
   return (
@@ -135,11 +176,7 @@ function NeighborhoodLink({ item, onSelectEntry, onMissingTarget }: LinkProps) {
       }}
       title={resolved ? item.relPath : item.target}
     >
-      <FileText size={11} className="neighborhood-icon" />
       <span className="neighborhood-item-title">{item.title}</span>
-      {resolved ? (
-        <span className="neighborhood-item-path">{item.relPath}</span>
-      ) : null}
     </button>
   );
 }

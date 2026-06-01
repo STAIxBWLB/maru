@@ -13,7 +13,7 @@ use include_dir::{include_dir, Dir};
 
 use crate::skill_host::fs as host_fs;
 
-const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "workspace-index-v1.json"];
+const VAULT_CACHE_REL: &[&str] = &[".anchor", "cache", "workspace-index-v2.json"];
 const GENERATED_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -50,6 +50,52 @@ fn markdown_markup_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?m)^[-*#>\s]+").expect("valid markdown regex"))
 }
 
+fn wikilink_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]").expect("valid wikilink regex")
+    })
+}
+
+fn push_wikilinks_from_str(s: &str, out: &mut Vec<String>) {
+    for cap in wikilink_re().captures_iter(s) {
+        let target = cap[1].trim();
+        if !target.is_empty() {
+            out.push(target.to_string());
+        }
+    }
+}
+
+fn collect_meta_wikilinks(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(s) => push_wikilinks_from_str(s, out),
+        Value::Sequence(seq) => {
+            for v in seq {
+                collect_meta_wikilinks(v, out);
+            }
+        }
+        Value::Mapping(map) => {
+            for (_k, v) in map {
+                collect_meta_wikilinks(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Extract every `[[wikilink]]` target from the body and any frontmatter
+/// string value, deduped preserving first-seen order. Mirrors the frontend
+/// `collectWikilinkTargets` so backlink resolution agrees in both places.
+fn extract_links(meta: &BTreeMap<String, Value>, body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    push_wikilinks_from_str(body, &mut out);
+    for value in meta.values() {
+        collect_meta_wikilinks(value, &mut out);
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.into_iter().filter(|t| seen.insert(t.clone())).collect()
+}
+
 /// VaultEntry — minimal representation of a vault note for listing.
 /// Phase 0 keeps only filesystem-derived facts plus the raw frontmatter
 /// map. Typed lenses (status, project, people, tags…) are reconstructed
@@ -67,6 +113,12 @@ pub struct VaultEntry {
     pub snippet: String,
     pub file_kind: String,
     pub version_count: usize,
+    /// Raw `[[wikilink]]` targets found in the body + frontmatter. Lets the
+    /// frontend compute backlinks (which notes point here) without re-reading
+    /// every file. `#[serde(default)]` keeps deserialization tolerant of cache
+    /// files or test fixtures that predate this field.
+    #[serde(default)]
+    pub links: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,6 +515,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         .split_whitespace()
         .filter(|part| !part.trim().is_empty())
         .count();
+    let links = extract_links(&parts.meta, &parts.body);
 
     Ok(VaultEntry {
         path: path.to_string_lossy().to_string(),
@@ -474,6 +527,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         snippet,
         file_kind,
         version_count: count_versions_from_names(path, version_names),
+        links,
     })
 }
 
@@ -652,6 +706,29 @@ mod tests {
             fm.get("status").and_then(Value::as_str),
             Some("진행중"),
             "Korean values must round-trip through scan"
+        );
+    }
+
+    #[test]
+    fn scan_vault_extracts_wikilinks_from_body_and_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(
+            root,
+            "note.md",
+            "---\nproject: \"[[Alpha]]\"\nrelated:\n  - \"[[Bravo]]\"\n---\n# Hello\nSee [[Charlie]] and [[Charlie]] and [[Delta|nickname]].\n",
+        );
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(entries.len(), 1);
+        let links = &entries[0].links;
+        assert!(links.contains(&"Charlie".to_string()), "body links surface");
+        assert!(links.contains(&"Delta".to_string()), "pipe alias keeps target");
+        assert!(links.contains(&"Alpha".to_string()), "frontmatter scalar links surface");
+        assert!(links.contains(&"Bravo".to_string()), "frontmatter list links surface");
+        assert_eq!(
+            links.iter().filter(|t| *t == "Charlie").count(),
+            1,
+            "duplicate targets are deduped"
         );
     }
 
