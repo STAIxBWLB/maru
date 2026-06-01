@@ -187,6 +187,7 @@ import {
   type TelegramMessageState,
 } from "./lib/telegram";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
+import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
   skillsListSkills,
@@ -5353,6 +5354,42 @@ function MainApp() {
     });
   }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
+  // Track which heading the source editor is scrolled to so the outline can
+  // highlight the active one. Source mode only — the textarea has a uniform
+  // line height, the same line↔scroll mapping jumpToOutlineLine relies on.
+  const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null);
+  useEffect(() => {
+    if (!outlineOpen || rightPaneTab !== "outline" || editorViewMode !== "source") {
+      setActiveOutlineLine(null);
+      return;
+    }
+    const ta =
+      focusedEditorGroup === "right"
+        ? rightEditorTextareaRef.current
+        : editorTextareaRef.current;
+    if (!ta) {
+      setActiveOutlineLine(null);
+      return;
+    }
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight || "20") || 20;
+    let raf = 0;
+    const compute = () => {
+      raf = 0;
+      setActiveOutlineLine(Math.round(ta.scrollTop / lineHeight));
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(compute);
+    };
+    compute();
+    ta.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ta.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
+
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
     const workspaceRoot = activeDocumentWorkspacePath;
     const sourceAbs = document?.path;
@@ -5519,6 +5556,8 @@ function MainApp() {
       diagramEnabled,
     ],
   );
+
+  useScopedSelectAll();
 
   useKeyboardShortcuts(
     {
@@ -6615,6 +6654,7 @@ function MainApp() {
             entries={activeDocumentEntries}
             readOnly={!activeWorkspaceCanModify}
             workspacePath={activeDocumentWorkspacePath}
+            activeLine={activeOutlineLine}
             onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
             onError={setError}

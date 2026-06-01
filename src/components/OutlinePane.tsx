@@ -84,6 +84,9 @@ interface OutlinePaneProps {
   entries: VaultEntry[];
   readOnly: boolean;
   workspacePath: string | null;
+  /** Editor line currently scrolled to the top (source mode); highlights the
+   *  matching outline heading. Null when tracking is inactive. */
+  activeLine?: number | null;
   onJumpToLine: (line: number) => void;
   onClose: () => void;
   onError: (message: string | null) => void;
@@ -199,6 +202,7 @@ export function OutlinePane({
   entries,
   readOnly,
   workspacePath,
+  activeLine = null,
   onJumpToLine,
   onClose,
   onError,
@@ -248,6 +252,22 @@ export function OutlinePane({
   const isPkm = appMode === "pkm";
   const tab: RightPaneTab = isPkm ? activeTab : "workspace";
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
+  // The active heading is the last one at or above the editor's top line.
+  const activeHeadingIndex = useMemo(() => {
+    if (activeLine == null || headings.length === 0) return -1;
+    let idx = -1;
+    for (let i = 0; i < headings.length; i++) {
+      if (headings[i].line <= activeLine) idx = i;
+      else break;
+    }
+    return idx;
+  }, [headings, activeLine]);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (activeHeadingIndex >= 0) {
+      activeItemRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeHeadingIndex]);
   const meta = document?.meta ?? {};
   const fmType = frontmatterScalar(meta, "type");
   const fmStatus = frontmatterScalar(meta, "status");
@@ -384,9 +404,15 @@ export function OutlinePane({
                     {headings.map((heading, i) => (
                       <button
                         key={`${heading.line}-${i}`}
+                        ref={i === activeHeadingIndex ? activeItemRef : undefined}
                         type="button"
-                        className="outline-item"
+                        className={
+                          i === activeHeadingIndex
+                            ? "outline-item active"
+                            : "outline-item"
+                        }
                         data-level={heading.level}
+                        aria-current={i === activeHeadingIndex ? "true" : undefined}
                         onClick={() => onJumpToLine(heading.line)}
                         title={heading.text}
                       >

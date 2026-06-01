@@ -4164,10 +4164,12 @@ a {
 
 .neighborhood {
   border-top: 1px solid var(--line-soft);
-  padding: 12px 14px 8px;
+  padding: 10px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .neighborhood-header h3 {
@@ -4228,12 +4230,12 @@ a {
   gap: 1px;
 }
 
+/* Items read as in-document wiki links: one compact line, accent color,
+ * underline on hover. The vault-relative path lives in the title tooltip. */
 .neighborhood-item {
-  display: grid;
-  grid-template-columns: 14px 1fr;
-  align-items: baseline;
-  column-gap: 6px;
-  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  padding: 2px 6px;
   border-radius: 4px;
   background: transparent;
   border: 0;
@@ -4248,27 +4250,18 @@ a {
   background: var(--accent-tint);
 }
 
-.neighborhood-icon {
-  color: var(--muted);
-  align-self: center;
-}
-
 .neighborhood-item-title {
   font-size: 12px;
-  color: var(--ink);
+  font-weight: 500;
+  color: var(--accent-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.neighborhood-item-path {
-  grid-column: 2;
-  font-size: 10px;
-  color: var(--muted);
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.neighborhood-item:hover .neighborhood-item-title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .neighborhood-item.missing .neighborhood-item-title {
@@ -5745,11 +5738,12 @@ button.git-badge:hover {
 }
 
 .outline-list {
-  flex: 1 1 42%;
+  flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 0 8px 10px;
   display: grid;
+  align-content: start;
   gap: 1px;
 }
 
@@ -6239,11 +6233,11 @@ button.git-badge:hover {
 
 .outline-item {
   display: block;
-  padding: 5px 8px;
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.3;
   text-align: left;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -6264,10 +6258,16 @@ button.git-badge:hover {
   transform: scale(0.98);
 }
 
+.outline-item.active {
+  background: var(--accent-tint);
+  color: var(--ink);
+  border-left-color: var(--accent);
+}
+
 .outline-item[data-level="1"] {
   font-weight: 650;
   color: var(--ink);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .outline-item[data-level="2"] {

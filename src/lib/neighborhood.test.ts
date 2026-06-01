@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNeighborhood } from "./neighborhood";
+import { buildBacklinks, buildNeighborhood } from "./neighborhood";
 import type { DocumentPayload, VaultEntry } from "./types";
 
 function entry(overrides: Partial<VaultEntry>): VaultEntry {
@@ -80,5 +80,57 @@ describe("buildNeighborhood", () => {
       "Missing Topic",
     ]);
     expect(neighborhood.peers.map((peer) => peer.title)).toEqual(["Meeting A", "Meeting B"]);
+  });
+});
+
+describe("buildBacklinks", () => {
+  it("finds notes whose links resolve to the open document, by title or path", () => {
+    const current = document({ path: "/vault/projects/alpha.md", relPath: "projects/alpha.md" });
+    const entries = [
+      entry({
+        path: "/vault/projects/alpha.md",
+        relPath: "projects/alpha.md",
+        title: "Project Alpha",
+      }),
+      // Links by title.
+      entry({
+        path: "/vault/meetings/a.md",
+        relPath: "meetings/a.md",
+        title: "Meeting A",
+        updatedAt: "2026-04-27T00:00:00Z",
+        links: ["Project Alpha"],
+      }),
+      // Links by relative path (no extension).
+      entry({
+        path: "/vault/meetings/b.md",
+        relPath: "meetings/b.md",
+        title: "Meeting B",
+        updatedAt: "2026-04-28T00:00:00Z",
+        links: ["projects/alpha"],
+      }),
+      // Links elsewhere — must not appear.
+      entry({
+        path: "/vault/meetings/c.md",
+        relPath: "meetings/c.md",
+        title: "Meeting C",
+        links: ["Some Other Note"],
+      }),
+      // No links at all.
+      entry({ path: "/vault/notes/d.md", relPath: "notes/d.md", title: "Note D" }),
+    ];
+
+    const backlinks = buildBacklinks(current, entries);
+
+    // Newest first; self excluded; only resolving links included.
+    expect(backlinks.map((b) => b.title)).toEqual(["Meeting B", "Meeting A"]);
+  });
+
+  it("returns nothing when no note links here", () => {
+    const current = document({ path: "/vault/lonely.md", relPath: "lonely.md" });
+    const entries = [
+      entry({ path: "/vault/lonely.md", relPath: "lonely.md", title: "Lonely" }),
+      entry({ path: "/vault/other.md", relPath: "other.md", title: "Other", links: ["Nope"] }),
+    ];
+    expect(buildBacklinks(current, entries)).toEqual([]);
   });
 });
