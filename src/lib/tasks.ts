@@ -267,10 +267,53 @@ export function buildTaskManagementSchedulePrompt(
     "- Do not write directly to any vault; create only a local vault-promotion proposal if needed.",
     "- Before dispatching writes, show the proposed markdown path and frontmatter.",
     "",
+    ...taskManagementRunContract(),
+    "",
     "Raw schedule text:",
     '"""',
     rawText.trim(),
     '"""',
+  ].join("\n");
+}
+
+/**
+ * Shared Anchor run contract injected into tracked task-management prompts so a
+ * run reliably emits the `anchor_skill_proposal_v1` + `anchor_task_review_v1`
+ * blocks the review panel parses (mirrors meeting-notes' run contract).
+ */
+export function taskManagementRunContract(): string[] {
+  return [
+    "Anchor run contract (background/review mode — proposals only):",
+    "- Do not write files or call Google Tasks/Calendar during this run; emit proposals only.",
+    "- Prefix progress logs with phase markers: [phase:source], [phase:normalize], [phase:draft], [phase:proposal], [phase:review].",
+    "- Final output must include exactly one JSON object with schemaVersion \"anchor_skill_proposal_v1\" (the local markdown file writes).",
+    "- Final output must include exactly one JSON object with schemaVersion \"anchor_task_review_v1\".",
+    "- The review JSON must include summary, taskDetails, fields, schedule, conflicts, uncertainties, and followups.",
+    "- Followups may include only vault-extract, vault-connect, and meeting-notes.",
+  ];
+}
+
+export function buildTaskManagementSyncPrompt(
+  target: string,
+  settings: Pick<TasksSettings, "root" | "timezone" | "defaultTaskList" | "defaultCalendar">,
+): string {
+  const root = settings.root?.trim() || "tasks";
+  const timezone = settings.timezone?.trim() || "Asia/Seoul";
+  const defaultTaskList = settings.defaultTaskList?.trim() || "(workspace default)";
+  const defaultCalendar = settings.defaultCalendar?.trim() || "(workspace default)";
+  return [
+    `Sync local markdown tasks under ${root} with the configured task-management workflow for ${target}.`,
+    "",
+    "Runtime and source-of-truth rules:",
+    "- Load workspace.config.yaml and its task_management section before proposing changes.",
+    `- Keep markdown task files as the local source of truth under ${root}.`,
+    "- In review mode, propose ONLY local frontmatter ID/schedule updates (googleTaskId, googleTaskListId, calendarId, calendarEventId, calendarStart, calendarEnd, timezone) as replace operations on existing task files.",
+    "- Do not add create-only backref fields in a sync proposal.",
+    `- Use timezone ${timezone} unless a task states another timezone.`,
+    `- Reconcile against Google Tasks list ${defaultTaskList} and calendar ${defaultCalendar} only through task-management's approved execution path.`,
+    "- Do not call Google APIs directly from Anchor; in the review summary, name which Google Tasks/Calendar updates will run after approval.",
+    "",
+    ...taskManagementRunContract(),
   ].join("\n");
 }
 

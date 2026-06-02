@@ -6459,6 +6459,9 @@ function MainApp() {
             effectiveSettings={effectiveTasksSettings}
             labelMode={anchorSettings.ui.documentLabelMode}
             skills={skills}
+            runtimeCommands={aiRuntimeCommands}
+            permissionMode={anchorSettings.ai.permissionMode}
+            defaultRuntime={anchorSettings.ai.defaultRuntime}
             processingMissions={activeTasksMissions(processingMissions)}
             processingLogLines={processingLogLines}
             onRefreshMissions={refreshProcessingMissions}
@@ -6466,6 +6469,9 @@ function MainApp() {
             onOpenSkillCompose={(skill, context, prompt, cwd, onDispatched) =>
               openSkillCompose(skill, context, prompt, cwd, onDispatched)
             }
+            onMissionStarted={handleMeetingsMissionStarted}
+            onStopMission={(id) => void stopProcessingMission(id)}
+            onConfirmApproval={approvalGate.confirmApproval}
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
