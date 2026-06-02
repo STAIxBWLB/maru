@@ -956,6 +956,9 @@ function MainApp() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
+  const [meetingsRequestedView, setMeetingsRequestedView] = useState<
+    "transcript" | "external" | null
+  >(null);
   const [anchorSettings, setAnchorSettings] = useState<AnchorSettings>(() =>
     normalizeAnchorSettings(DEFAULT_ANCHOR_SETTINGS),
   );
@@ -3743,6 +3746,14 @@ function MainApp() {
     [openSkillCompose, outlineOpen, setPersistedRightPaneTab, updateLayoutSettings],
   );
 
+  // The Apply-skill dialog nudge routes meeting-notes work into the dedicated
+  // Meetings transcript workbench (step tracking + diff review + followups).
+  const openMeetingsWorkbench = useCallback(() => {
+    setComposeSeed(null);
+    setMeetingsRequestedView("transcript");
+    setPersistedAppMode("meetings");
+  }, [setPersistedAppMode]);
+
   const launchSkillTerminal = useCallback((spec: TerminalDispatchSpec) => {
     setTerminalLaunchRequest({
       kind: spec.kind,
@@ -6439,6 +6450,8 @@ function MainApp() {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
             onError={setError}
+            requestedView={meetingsRequestedView}
+            onViewConsumed={() => setMeetingsRequestedView(null)}
           />
         ) : visibleAppMode === "tasks" ? (
           <TasksPane
@@ -6924,6 +6937,8 @@ function MainApp() {
           aiRuntimeCommands={aiRuntimeCommands}
           defaultRuntime={anchorSettings.ai.defaultRuntime}
           permissionMode={anchorSettings.ai.permissionMode}
+          meetingsWorkspacePath={inboxWorkspacePath}
+          onOpenMeetingsWorkbench={openMeetingsWorkbench}
           onError={setError}
         />
         <CommandPalette
