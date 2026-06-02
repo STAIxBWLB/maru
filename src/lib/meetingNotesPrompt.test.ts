@@ -64,6 +64,18 @@ describe("appendSourceBlock", () => {
     expect(result).toContain("TRANSCRIPT_TEXT:\n원문");
   });
 
+  it("does not duplicate the contract when the skill body carries JSON schemaVersion", () => {
+    const base = [
+      "Create a new meeting note.",
+      "```json",
+      '{ "schemaVersion": "anchor_meeting_review_v1", "summary": "" }',
+      "```",
+    ].join("\n");
+    const result = appendSourceBlock(base, "원문");
+    expect(occurrences(result, "Run contract:")).toBe(0);
+    expect(result).toContain("TRANSCRIPT_TEXT:\n원문");
+  });
+
   it("no-ops on empty source text", () => {
     expect(appendSourceBlock("Create a new meeting note.", "")).toBe(
       "Create a new meeting note.",

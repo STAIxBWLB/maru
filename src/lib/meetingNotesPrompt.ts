@@ -82,7 +82,12 @@ export function buildMeetingNotesPrompt({
     .join("\n\n");
 }
 
-const CONTRACT_MARKER = "schemaVersion \"anchor_meeting_review_v1\"";
+const MEETING_REVIEW_CONTRACT_PATTERN =
+  /(?:schemaVersion\s+"anchor_meeting_review_v1"|"schemaVersion"\s*:\s*"anchor_meeting_review_v1")/;
+
+function carriesMeetingReviewContract(prompt: string): boolean {
+  return MEETING_REVIEW_CONTRACT_PATTERN.test(prompt);
+}
 
 /**
  * Append a tagged SOURCE block to an arbitrary user prompt, reusing the same
@@ -103,7 +108,7 @@ export function appendSourceBlock(
   const base = basePrompt.trim();
   const sections: string[] = [];
   if (base) sections.push(base);
-  if (!base.includes(CONTRACT_MARKER)) {
+  if (!carriesMeetingReviewContract(base)) {
     sections.push(meetingNotesRunContract().join("\n"));
   }
   sections.push(`${sourceLabel(sourceKind)}:\n${trimmed}`);
