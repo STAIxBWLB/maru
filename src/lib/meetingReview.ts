@@ -98,7 +98,7 @@ export function extractSkillProposal(events: AgentRunEvent[]): SkillProposal | n
 }
 
 export function parseMeetingReviewArtifact(raw: string): MeetingReviewArtifact | null {
-  for (const candidate of extractJsonCandidates(raw)) {
+  for (const candidate of extractJsonCandidates(raw).reverse()) {
     const parsed = safeParseRecord(candidate);
     if (!parsed || parsed.schemaVersion !== MEETING_REVIEW_SCHEMA_VERSION) continue;
     return normalizeReviewArtifact(parsed);
