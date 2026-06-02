@@ -1731,6 +1731,15 @@ function MeetingsSkillWorkbench({
               checks: current.checks.map((check) => check.id === id ? { ...check, ...patch } : check),
             } : current);
           }}
+          onUpdateChecks={(ids, patch) => {
+            const targetIds = new Set(ids);
+            setBundle((current) => current ? {
+              ...current,
+              checks: current.checks.map((check) =>
+                targetIds.has(check.id) ? { ...check, ...patch } : check,
+              ),
+            } : current);
+          }}
           onToggleFollowup={(id) => {
             setBundle((current) => current ? {
               ...current,
@@ -1830,6 +1839,7 @@ function MeetingReviewPanel({
   onDismissApplyResult,
   onUpdateFile,
   onUpdateCheck,
+  onUpdateChecks,
   onToggleFollowup,
   onToggleContinuation,
 }: {
@@ -1845,6 +1855,7 @@ function MeetingReviewPanel({
   onDismissApplyResult: () => void;
   onUpdateFile: (id: string, patch: Partial<MeetingProposalFileDraft>) => void;
   onUpdateCheck: (id: string, patch: Partial<MeetingReviewCheck>) => void;
+  onUpdateChecks: (ids: string[], patch: Partial<MeetingReviewCheck>) => void;
   onToggleFollowup: (id: string) => void;
   onToggleContinuation: () => void;
 }) {
@@ -1996,7 +2007,35 @@ function MeetingReviewPanel({
           </div>
 
           <div className="meetings-confirmation-panel">
-            <h3>{t("meetings.review.confirmTitle")}</h3>
+            <div className="meetings-confirmation-heading">
+              <h3>{t("meetings.review.confirmTitle")}</h3>
+              {bundle.checks.length > 0 ? (
+                <div
+                  className="meetings-check-bulk-actions"
+                  role="group"
+                  aria-label={t("meetings.review.bulkActions")}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onUpdateChecks(
+                      bundle.checks.map((check) => check.id),
+                      { status: "accepted" },
+                    )}
+                  >
+                    {t("meetings.review.acceptAll")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateChecks(
+                      bundle.checks.map((check) => check.id),
+                      { status: "rejected" },
+                    )}
+                  >
+                    {t("meetings.review.excludeAll")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             {bundle.checks.length === 0 ? (
               <div className="meetings-review-empty compact">
                 <CheckCircle2 size={15} />
@@ -2006,13 +2045,39 @@ function MeetingReviewPanel({
             {checkGroups.map(([kind, checks]) => (
               <section className="meetings-check-group" key={kind}>
                 <header>
-                  <strong>
-                    <CheckKindIcon kind={kind} />
-                    {t(`meetings.review.kind.${kind}`)}
-                  </strong>
-                  <span>{t("meetings.review.pending", {
-                    count: checks.filter((check) => check.required && check.status === "pending").length,
-                  })}</span>
+                  <div className="meetings-check-group-title">
+                    <strong>
+                      <CheckKindIcon kind={kind} />
+                      {t(`meetings.review.kind.${kind}`)}
+                    </strong>
+                    <span>{t("meetings.review.pending", {
+                      count: checks.filter((check) => check.required && check.status === "pending").length,
+                    })}</span>
+                  </div>
+                  <div
+                    className="meetings-check-bulk-actions compact"
+                    role="group"
+                    aria-label={t("meetings.review.bulkActions")}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChecks(
+                        checks.map((check) => check.id),
+                        { status: "accepted" },
+                      )}
+                    >
+                      {t("meetings.review.acceptGroup")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChecks(
+                        checks.map((check) => check.id),
+                        { status: "rejected" },
+                      )}
+                    >
+                      {t("meetings.review.excludeGroup")}
+                    </button>
+                  </div>
                 </header>
                 {checks.map((check) => (
                   <article
