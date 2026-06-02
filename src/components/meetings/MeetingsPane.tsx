@@ -91,6 +91,7 @@ import type { CalendarView as UnifiedCalendarViewMode } from "../../lib/calendar
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import type { DocumentLabelMode, MeetingsSettings } from "../../lib/settings";
 import {
+  SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
   agentApplySkillProposal,
   agentParseSkillProposal,
   agentReadRunEvents,
@@ -1536,7 +1537,7 @@ function MeetingsSkillWorkbench({
       : null;
     const selectedFollowupItems = bundle.followups.filter((item) => item.selected);
     const approvalId = await onConfirmApproval({
-      kind: "meetings.proposal.apply",
+      kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
       summary: t("meetings.review.applySummaryDetailed", {
         files: proposal?.files.length ?? 0,
         followups: selectedFollowups + (continuationActive ? 1 : 0),
@@ -2114,6 +2115,11 @@ function MeetingReviewPanel({
             <span>
               {pendingRequired > 0
                 ? t("meetings.review.applyBlocked", { count: pendingRequired })
+                : applyBusy
+                  ? t("meetings.review.applyingDetailed", {
+                    files: selectedFiles,
+                    followups: selectedFollowups + (continuationAvailable && continuationSelected ? 1 : 0),
+                  })
                 : applied
                   ? applyResult
                     ? t("meetings.review.applyDoneDetailed", {
@@ -2131,11 +2137,15 @@ function MeetingReviewPanel({
               className="primary-button"
               disabled={!canApply}
               aria-disabled={!canApply}
-              data-state={applied ? "applied" : canApply ? "ready" : "pending"}
+              data-state={applyBusy ? "applying" : applied ? "applied" : canApply ? "ready" : "pending"}
               onClick={onApply}
             >
               {applyBusy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
-              {applied ? t("meetings.review.applied") : t("meetings.review.apply")}
+              {applyBusy
+                ? t("meetings.review.applying")
+                : applied
+                  ? t("meetings.review.applied")
+                  : t("meetings.review.apply")}
             </button>
           </div>
         </>
