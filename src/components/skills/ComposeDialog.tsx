@@ -178,7 +178,6 @@ export function ComposeDialog({
     }
     return matches;
   }, [selectedSkill, skillQuery, skills]);
-  const context = seed?.context ?? [];
   const acceptsSource = skillAcceptsSource(selectedSkill);
   const isMeetingNotes = selectedSkill?.name === MEETING_NOTES_SKILL;
   // Fold the pasted source text into the prompt and the picked files into the
@@ -340,8 +339,8 @@ export function ComposeDialog({
           <div>
             <h2>{t("skills.compose.title")}</h2>
             <p>
-              {context.length > 0
-                ? t("skills.compose.selectedCount", { count: context.length })
+              {effectiveContext.length > 0
+                ? t("skills.compose.selectedCount", { count: effectiveContext.length })
                 : t("skills.compose.noSelection")}
             </p>
           </div>
@@ -500,8 +499,8 @@ export function ComposeDialog({
             </div>
 
             <div className="compose-context">
-              {context.length > 0 ? (
-                context.map((item) => (
+              {effectiveContext.length > 0 ? (
+                effectiveContext.map((item) => (
                   <span key={`${item.kind ?? "path"}-${item.path}`} title={item.path}>
                     <FileText size={12} />
                     {item.path.split("/").pop() ?? item.path}

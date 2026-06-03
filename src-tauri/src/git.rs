@@ -392,6 +392,8 @@ pub fn git_generate_commit_message(
 }
 
 fn build_commit_message_prompt(repo: &Path, paths: &[String]) -> Result<String, String> {
+    reject_sensitive_paths_for_commit_message(paths)?;
+
     let mut out = String::new();
     out.push_str(
         "Write exactly one conventional commit subject line for these selected git changes.\n",
@@ -931,11 +933,7 @@ fn validate_git_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
 }
 
 fn reject_sensitive_paths(paths: &[String]) -> Result<(), String> {
-    let sensitive: Vec<String> = paths
-        .iter()
-        .filter(|path| is_sensitive_git_path(path))
-        .cloned()
-        .collect();
+    let sensitive = sensitive_git_paths(paths);
     if sensitive.is_empty() {
         Ok(())
     } else {
@@ -944,6 +942,26 @@ fn reject_sensitive_paths(paths: &[String]) -> Result<(), String> {
             sensitive.join(", ")
         ))
     }
+}
+
+fn reject_sensitive_paths_for_commit_message(paths: &[String]) -> Result<(), String> {
+    let sensitive = sensitive_git_paths(paths);
+    if sensitive.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "commit message generation refuses to send sensitive runtime/credential paths to an AI provider: {}",
+            sensitive.join(", ")
+        ))
+    }
+}
+
+fn sensitive_git_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| is_sensitive_git_path(path))
+        .cloned()
+        .collect()
 }
 
 fn is_sensitive_git_path(path: &str) -> bool {
@@ -1195,6 +1213,20 @@ mod tests {
 
         assert!(prompt.len() <= MAX_COMMIT_PROMPT_BYTES + 64);
         assert!(prompt.contains("truncated"));
+    }
+
+    #[test]
+    fn commit_message_prompt_rejects_sensitive_paths_before_diffing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_repo(root);
+        fs::write(root.join(".env"), "API_TOKEN=secret\n").unwrap();
+
+        let result = build_commit_message_prompt(root, &[".env".to_string()]);
+
+        let err = result.unwrap_err();
+        assert!(err.contains("refuses to send sensitive"));
+        assert!(err.contains(".env"));
     }
 
     #[test]

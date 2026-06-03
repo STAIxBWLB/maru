@@ -12,6 +12,7 @@ import {
   gitSyncScan,
   type AgentProvider,
 } from "../lib/api";
+import { gitSyncRepoIsDetached } from "../lib/gitSync";
 import { useTranslation } from "../lib/i18n";
 import type { GitFileChange, GitStatus } from "../lib/types";
 import { Button } from "./ui/Button";
@@ -212,6 +213,10 @@ export function CommitDialog({
       }
       for (const repo of scan.repos) {
         currentRepo = repo.relPath;
+        if (gitSyncRepoIsDetached(repo)) {
+          append(`SKIP ${repo.relPath}: detached HEAD; pull skipped`);
+          continue;
+        }
         append(`PULL ${repo.relPath}`);
         const pull = await gitSyncPullRebase(repo.path);
         append(`PULL_OK ${repo.relPath}: ${pull.stashed ? "stashed local changes" : "no local stash"}`);
@@ -227,6 +232,14 @@ export function CommitDialog({
       let committed = 0;
       for (const repo of postPull.repos) {
         currentRepo = repo.relPath;
+        if (gitSyncRepoIsDetached(repo)) {
+          append(
+            repo.clean || repo.paths.length === 0
+              ? `SKIP ${repo.relPath}: detached HEAD; commit/push not needed`
+              : `SKIP ${repo.relPath}: detached HEAD; commit/push skipped`,
+          );
+          continue;
+        }
         if (repo.clean || repo.paths.length === 0) {
           append(`CLEAN ${repo.relPath}`);
           continue;
