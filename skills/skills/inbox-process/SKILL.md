@@ -55,8 +55,65 @@ skill. The user may scope processing with `inbox-process <channel>`.
    `relatedMeetings` to the proposal. Write the decision to
    `inbox.naming.route_file`.
 8. Ask for confirmation before moving originals or summaries outside the inbox.
+   In Anchor review mode (see *Anchor Run Contract*), do not move anything
+   yourself — defer the move to Anchor's confirmation step.
 9. Move processed items to `done/`, `failed/`, or `duplicate/` and append a
-   receipt to `_state/index.jsonl`.
+   receipt to `_state/index.jsonl`. In Anchor review mode, skip this step;
+   Anchor performs the move and writes the receipt after the user confirms.
+
+## Anchor Run Contract
+
+When Anchor runs this skill in background/review mode (the dispatch metadata
+sets `reviewFlow: true`), process **every** selected item in one run and:
+
+1. Emit concise human-readable progress logs. Prefix each major log line with
+   exactly one phase marker at the start of the line (after any timestamp) so
+   Anchor can render stepwise status and colour-code phases:
+   - `[phase:source]` after the selected items / channels are resolved.
+   - `[phase:extract]` while extracting text into `inbox.naming.extracted_file`.
+   - `[phase:summary]` while writing `inbox.naming.summary_file`.
+   - `[phase:classify]` while classifying action/schedule/info/ideation/noise.
+   - `[phase:route]` while scoring routes against `project-registry.yaml`.
+   - `[phase:review]` when preparing the `anchor_inbox_review_v1` block.
+   - For errors prepend `ERROR:` to the message or use `[phase:error]`.
+2. You MAY write the inbox-internal artifacts during the run: per item write
+   `extracted_file`, `summary_file`, and `route_file` INSIDE that item's
+   directory. These are non-destructive and stay within the inbox.
+3. In review mode you MUST NOT perform the destructive route step yourself: do
+   not move items to `done/`, `failed/`, or `duplicate/`, do not file raw
+   originals into project folders, and do not append the `_state/index.jsonl`
+   route receipt. Anchor applies those only after the user confirms.
+4. Do not run follow-up skills (`task-management`, `meeting-notes`, vault
+   skills) directly; surface them as `recommendedAction: "handoff"` items.
+5. Return exactly one `anchor_inbox_review_v1` JSON object listing a decision
+   for every processed item:
+
+```json
+{
+  "schemaVersion": "anchor_inbox_review_v1",
+  "summary": "short batch summary across channels",
+  "items": [
+    {
+      "itemId": "pending item id",
+      "itemDir": "inbox/items/pending/<id>",
+      "title": "human title",
+      "channel": "kakao",
+      "classification": "action|schedule|info|ideation|noise",
+      "project": "project id or null",
+      "destination": "workspace-relative folder for raw originals, or null",
+      "confidence": "high|medium|low",
+      "summaryPreview": "2-3 sentence preview",
+      "requiresConfirmation": true,
+      "recommendedAction": "route|reject|skip|handoff",
+      "note": "why, or what is uncertain"
+    }
+  ]
+}
+```
+
+Set `requiresConfirmation: true` for weak routes (top score < 3), `noise`, and
+`handoff` items so the user must decide before Apply unlocks. Parsers ignore
+unknown fields, so the artifact stays forward-compatible.
 
 ## Channel Invocation
 

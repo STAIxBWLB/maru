@@ -37,6 +37,23 @@ pub struct InboxAcceptRequest {
     pub target_folder: Option<String>,
 }
 
+/// One confirmed routing decision from the inbox batch review flow. `item_dir`
+/// is the PENDING item directory (workspace-relative or absolute inside the
+/// inbox). `accept` files raw originals into `destination` (if set) and promotes
+/// the item to `done/`; `reject` moves it to `rejected/<channel>/`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxApplyDecision {
+    pub item_dir: String,
+    pub decision: String,
+    #[serde(default)]
+    pub destination: Option<String>,
+    #[serde(default)]
+    pub classification: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxDecisionOutcome {
@@ -283,6 +300,7 @@ const INBOX_FILE_ACCEPT_KIND: &str = "inbox.file.accept";
 const INBOX_FILE_REJECT_KIND: &str = "inbox.file.reject";
 const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
+const INBOX_ROUTE_KIND: &str = "inbox.route";
 
 #[tauri::command]
 pub fn scan_inbox_drop(
@@ -486,6 +504,278 @@ pub fn reject_inbox_items(
         }
     }
     Ok(outcomes)
+}
+
+/// Apply confirmed routing decisions for the inbox batch review flow. Each
+/// pending item directory is moved as a whole (manifest + raw + extracted +
+/// summary + route) — never a single file — so nothing is orphaned. A receipt
+/// is appended per item to the configured `_state/index.jsonl`.
+#[tauri::command]
+pub fn apply_inbox_decisions(
+    app: AppHandle,
+    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    decisions: Vec<InboxApplyDecision>,
+    approval_id: Option<String>,
+) -> Result<Vec<InboxDecisionOutcome>, String> {
+    crate::approval::require_approval_any(
+        &approvals,
+        approval_id,
+        &[INBOX_ROUTE_KIND, INBOX_BULK_KIND],
+    )?;
+    let work = normalize_existing_dir(&work_path)?;
+    assert_anchor_can_write(&work.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
+    let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
+    let root = inbox_settings::resolve_runtime_root(&work, &config)?;
+    let mut outcomes = Vec::new();
+    for decision in decisions {
+        let event = if decision.decision == "reject" {
+            "inbox://rejected"
+        } else {
+            "inbox://accepted"
+        };
+        let fallback_decision = apply_inbox_error_decision_label(&decision.decision);
+        match apply_inbox_decision_at(&work, &config, &root, &decision) {
+            Ok(outcome) => {
+                emit_decision(&app, event, &outcome);
+                outcomes.push(outcome);
+            }
+            Err(err) => outcomes.push(error_outcome(decision.item_dir, fallback_decision, err)),
+        }
+    }
+    Ok(outcomes)
+}
+
+fn apply_inbox_error_decision_label(decision: &str) -> &'static str {
+    match decision {
+        "accept" => "accepted",
+        "reject" => "rejected",
+        _ => "pending",
+    }
+}
+
+fn apply_inbox_decision_at(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    root: &Path,
+    decision: &InboxApplyDecision,
+) -> Result<InboxDecisionOutcome, String> {
+    let raw = PathBuf::from(&decision.item_dir);
+    let item_dir = if raw.is_absolute() {
+        inbox_settings::lexical_normalize_path(&raw)
+    } else {
+        resolve_inside_vault(&work.to_string_lossy(), &decision.item_dir)?
+    };
+    let item_metadata = fs::symlink_metadata(&item_dir).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            "inbox_item_missing".to_string()
+        } else {
+            format!("Cannot inspect inbox item: {err}")
+        }
+    })?;
+    if item_metadata.file_type().is_symlink() {
+        return Err("inbox_item_symlink_unsupported".to_string());
+    }
+    if !item_metadata.is_dir() {
+        return Err("inbox_item_not_directory".to_string());
+    }
+    if !is_pending_item_dir(work, config, &item_dir)? {
+        return Err("inbox_item_not_pending".to_string());
+    }
+    let manifest_path = item_dir.join(&config.naming.manifest_file);
+    let dir_name = item_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "inbox_item_name_invalid".to_string())?
+        .to_string();
+
+    match decision.decision.as_str() {
+        "accept" => {
+            if let Some(dest) = decision
+                .destination
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let dest_dir = resolve_target_dir(work, dest)?;
+                file_raw_originals(&item_dir, config, &dest_dir)?;
+            }
+            // Best-effort: stamp manifest status before moving the whole dir.
+            let _ = set_manifest_status(&manifest_path, "done");
+            let done_root = processed_status_dir(root, config, "done")?;
+            fs::create_dir_all(&done_root)
+                .map_err(|err| format!("Cannot create done directory: {err}"))?;
+            let target = unique_path(done_root.join(&dir_name));
+            move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
+            append_inbox_receipt(root, config, "route", decision, &dir_name, Some(&target));
+            Ok(decision_outcome(&decision.item_dir, "accepted", &item_dir, Some(&target)))
+        }
+        "reject" => {
+            let channel = read_manifest_channel(&manifest_path);
+            let rejected_dir = rejected_item_target_dir(work, root, channel.as_deref())?;
+            fs::create_dir_all(&rejected_dir)
+                .map_err(|err| format!("Cannot create rejected directory: {err}"))?;
+            let target = unique_path(rejected_dir.join(&dir_name));
+            move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
+            append_inbox_receipt(root, config, "reject", decision, &dir_name, Some(&target));
+            Ok(decision_outcome(&decision.item_dir, "rejected", &item_dir, Some(&target)))
+        }
+        other => Err(format!("inbox_unsupported_decision: {other}")),
+    }
+}
+
+/// Copy raw originals from `<item>/<raw_dir>` into the destination project
+/// folder. Copies (not moves) so the inbox `done/` item keeps its full record.
+fn file_raw_originals(
+    item_dir: &Path,
+    config: &InboxRuntimeConfig,
+    dest_dir: &Path,
+) -> Result<(), String> {
+    let raw_dir = item_dir.join(&config.naming.raw_dir);
+    let raw_metadata = match fs::symlink_metadata(&raw_dir) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(format!("Cannot inspect raw directory: {err}")),
+    };
+    if raw_metadata.file_type().is_symlink() {
+        return Err(format!(
+            "Source symlinks are not supported: {}",
+            raw_dir.display()
+        ));
+    }
+    if !raw_metadata.is_dir() {
+        return Ok(());
+    }
+    fs::create_dir_all(dest_dir)
+        .map_err(|err| format!("Cannot create destination directory: {err}"))?;
+    for entry in fs::read_dir(&raw_dir).map_err(|err| format!("Cannot read raw directory: {err}"))? {
+        let entry = entry.map_err(|err| format!("Cannot read raw entry: {err}"))?;
+        let path = entry.path();
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|err| format!("Cannot inspect raw entry: {err}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Source symlinks are not supported: {}",
+                path.display()
+            ));
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name == ".DS_Store" {
+            continue;
+        }
+        let kind = if metadata.is_dir() {
+            FileQueueSourceKind::Directory
+        } else if metadata.is_file() {
+            FileQueueSourceKind::File
+        } else {
+            continue;
+        };
+        let target = unique_path(dest_dir.join(name));
+        copy_source(&path, &target, kind)?;
+    }
+    Ok(())
+}
+
+/// Set `status:` in a pending manifest, preserving all other keys.
+fn set_manifest_status(manifest_path: &Path, status: &str) -> Result<(), String> {
+    let raw = fs::read_to_string(manifest_path)
+        .map_err(|err| format!("Cannot read manifest: {err}"))?;
+    let mut value: YamlValue =
+        serde_yaml::from_str(&raw).map_err(|err| format!("Cannot parse manifest: {err}"))?;
+    if let YamlValue::Mapping(map) = &mut value {
+        map.insert(
+            YamlValue::String("status".to_string()),
+            YamlValue::String(status.to_string()),
+        );
+    }
+    let serialized =
+        serde_yaml::to_string(&value).map_err(|err| format!("Cannot serialize manifest: {err}"))?;
+    fs::write(manifest_path, serialized).map_err(|err| format!("Cannot write manifest: {err}"))?;
+    Ok(())
+}
+
+fn read_manifest_channel(manifest_path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(manifest_path).ok()?;
+    let manifest: PendingManifest = serde_yaml::from_str(&raw).ok()?;
+    let channel = manifest.channel.trim().to_string();
+    (!channel.is_empty()).then_some(channel)
+}
+
+/// Mirror of `rejected_target_dir` but for whole item directories: a sibling
+/// `rejected/<channel>/` of the runtime inbox root, kept inside the workspace.
+fn rejected_item_target_dir(
+    work: &Path,
+    root: &Path,
+    channel: Option<&str>,
+) -> Result<PathBuf, String> {
+    let base = root
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.join("rejected"))
+        .unwrap_or_else(|| PathBuf::from("rejected"));
+    let target = match channel {
+        Some(channel) if !channel.is_empty() => base.join(channel),
+        _ => base,
+    };
+    resolve_target_dir(work, &target.to_string_lossy())
+}
+
+fn decision_outcome(
+    id: &str,
+    decision: &str,
+    source: &Path,
+    target: Option<&Path>,
+) -> InboxDecisionOutcome {
+    InboxDecisionOutcome {
+        id: id.to_string(),
+        decision: decision.to_string(),
+        source_path: source.to_string_lossy().to_string(),
+        target_path: target.map(|path| path.to_string_lossy().to_string()),
+        file_name: target
+            .and_then(|path| path.file_name())
+            .and_then(|value| value.to_str())
+            .map(str::to_string),
+        ok: true,
+        error: None,
+    }
+}
+
+/// Append a single JSON receipt line to the configured `_state/index.jsonl`.
+/// Best-effort: a receipt failure must not roll back a successful move.
+fn append_inbox_receipt(
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    event: &str,
+    decision: &InboxApplyDecision,
+    item_id: &str,
+    dest: Option<&Path>,
+) {
+    let receipts_path = inbox_settings::lexical_normalize_path(&root.join(&config.paths.receipts));
+    if let Some(parent) = receipts_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let record = serde_json::json!({
+        "schema": "inbox-receipt/v1",
+        "event": event,
+        "item_id": item_id,
+        "status": if event == "route" { "done" } else { "rejected" },
+        "classification": decision.classification,
+        "project": decision.project,
+        "dest": dest.map(|path| path.to_string_lossy().to_string()),
+        "created_at": Utc::now().to_rfc3339(),
+    });
+    if let Ok(line) = serde_json::to_string(&record) {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&receipts_path)
+        {
+            let _ = writeln!(file, "{line}");
+        }
+    }
 }
 
 fn scan_inbox_with_settings(
@@ -2894,5 +3184,221 @@ inbox:
         } else {
             fs::remove_file(path).map_err(|err| format!("remove file failed: {err}"))
         }
+    }
+
+    const APPLY_CONFIG: &str = r#"
+inbox:
+  root: inbox
+  channels:
+    kakao:
+      provider: kakao
+      kind: bundle
+      dedupe: sha256
+      drop_paths:
+        - drop/kakao
+"#;
+
+    fn apply_fixture(root: &Path, id: &str) -> PathBuf {
+        fs::write(root.join("workspace.config.yaml"), APPLY_CONFIG).unwrap();
+        let item = root.join(format!("inbox/items/pending/{id}"));
+        fs::create_dir_all(item.join("raw")).unwrap();
+        fs::write(
+            item.join("manifest.yaml"),
+            format!("id: {id}\nstatus: pending\nchannel: kakao\n"),
+        )
+        .unwrap();
+        fs::write(item.join("raw/chat.txt"), b"hello").unwrap();
+        fs::write(item.join("summary.md"), b"# summary").unwrap();
+        item
+    }
+
+    #[test]
+    fn apply_inbox_decision_labels_unsupported_apply_error_as_pending() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let item = apply_fixture(&root, "260604-kakao-unsupported");
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: "inbox/items/pending/260604-kakao-unsupported".to_string(),
+            decision: "defer".to_string(),
+            destination: Some("projects/rise/inbox".to_string()),
+            classification: Some("action".to_string()),
+            project: Some("rise".to_string()),
+        };
+
+        let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
+        let fallback_label = apply_inbox_error_decision_label(&decision.decision);
+        let outcome = error_outcome(
+            decision.item_dir.clone(),
+            fallback_label,
+            err,
+        );
+
+        assert!(!outcome.ok);
+        assert_eq!(outcome.decision, "pending");
+        assert!(outcome.target_path.is_none());
+        assert!(outcome
+            .error
+            .as_deref()
+            .is_some_and(|err| err.contains("inbox_unsupported_decision")));
+        assert!(item.exists());
+        assert!(!root.join("inbox/items/done/260604-kakao-unsupported").exists());
+        assert!(!root.join("rejected/kakao/260604-kakao-unsupported").exists());
+    }
+
+    #[test]
+    fn apply_inbox_decision_routes_accept_files_and_records_receipt() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let item = apply_fixture(&root, "260604-kakao-a");
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: "inbox/items/pending/260604-kakao-a".to_string(),
+            decision: "accept".to_string(),
+            destination: Some("projects/rise/inbox".to_string()),
+            classification: Some("action".to_string()),
+            project: Some("rise".to_string()),
+        };
+
+        let outcome = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap();
+        assert!(outcome.ok);
+        assert_eq!(outcome.decision, "accepted");
+
+        // Pending dir promoted to done/ as a whole, nothing orphaned.
+        assert!(!item.exists());
+        let done_item = root.join("inbox/items/done/260604-kakao-a");
+        assert!(done_item.join("manifest.yaml").is_file());
+        assert!(done_item.join("summary.md").is_file());
+        assert!(done_item.join("raw/chat.txt").is_file());
+
+        // Manifest status stamped done.
+        let manifest = fs::read_to_string(done_item.join("manifest.yaml")).unwrap();
+        assert!(manifest.contains("status: done"));
+
+        // Raw original filed into the destination project folder.
+        assert!(root.join("projects/rise/inbox/chat.txt").is_file());
+
+        // Receipt appended.
+        let receipts = fs::read_to_string(root.join("inbox/_state/index.jsonl")).unwrap();
+        assert!(receipts.contains("\"event\":\"route\""));
+        assert!(receipts.contains("260604-kakao-a"));
+    }
+
+    #[test]
+    fn apply_inbox_decision_reject_moves_item_to_rejected_channel() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let item = apply_fixture(&root, "260604-kakao-b");
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: item.to_string_lossy().to_string(),
+            decision: "reject".to_string(),
+            destination: None,
+            classification: None,
+            project: None,
+        };
+
+        let outcome = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap();
+        assert_eq!(outcome.decision, "rejected");
+        assert!(!item.exists());
+        assert!(root.join("rejected/kakao/260604-kakao-b").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_inbox_decision_rejects_symlink_pending_item_dir() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::write(root.join("workspace.config.yaml"), APPLY_CONFIG).unwrap();
+        let real = root.join("real-pending-target");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(
+            real.join("manifest.yaml"),
+            "id: 260604-kakao-link\nstatus: pending\nchannel: kakao\n",
+        )
+        .unwrap();
+        let link = root.join("inbox/items/pending/260604-kakao-link");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(&real, &link).unwrap();
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: "inbox/items/pending/260604-kakao-link".to_string(),
+            decision: "reject".to_string(),
+            destination: None,
+            classification: None,
+            project: None,
+        };
+
+        let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
+        assert_eq!(err, "inbox_item_symlink_unsupported");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(real.is_dir());
+        assert!(!root.join("rejected/kakao/260604-kakao-link").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_inbox_decision_rejects_raw_symlink_entries() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let item = apply_fixture(&root, "260604-kakao-raw-link");
+        fs::remove_file(item.join("raw/chat.txt")).unwrap();
+        let outside = root.join("outside-secret.txt");
+        fs::write(&outside, b"secret").unwrap();
+        symlink(&outside, item.join("raw/leak.txt")).unwrap();
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: "inbox/items/pending/260604-kakao-raw-link".to_string(),
+            decision: "accept".to_string(),
+            destination: Some("projects/rise/inbox".to_string()),
+            classification: Some("action".to_string()),
+            project: Some("rise".to_string()),
+        };
+
+        let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
+        assert!(err.contains("Source symlinks are not supported"));
+        assert!(item.exists());
+        assert!(!root.join("inbox/items/done/260604-kakao-raw-link").exists());
+        assert!(!root.join("projects/rise/inbox/leak.txt").exists());
+    }
+
+    #[test]
+    fn apply_inbox_decision_rejects_non_pending_dir() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::write(root.join("workspace.config.yaml"), APPLY_CONFIG).unwrap();
+        let stray = root.join("inbox/items/done/stray");
+        fs::create_dir_all(&stray).unwrap();
+        fs::write(stray.join("manifest.yaml"), "id: x\nstatus: done\nchannel: kakao\n").unwrap();
+
+        let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
+        let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();
+        let decision = InboxApplyDecision {
+            item_dir: "inbox/items/done/stray".to_string(),
+            decision: "accept".to_string(),
+            destination: None,
+            classification: None,
+            project: None,
+        };
+
+        let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
+        assert_eq!(err, "inbox_item_not_pending");
     }
 }

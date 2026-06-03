@@ -111,7 +111,6 @@ describe("inbox keyboard helpers", () => {
   it("builds inbox-process prompt with selected files and naming settings", () => {
     const config = runtimeConfig();
     const prompt = buildInboxProcessPrompt({
-      channel: "kakao",
       config,
       entries: [
         inboxEntry("dropFile", "drop/kakao/messages/chat.txt"),
@@ -124,6 +123,7 @@ describe("inbox keyboard helpers", () => {
     expect(prompt).toContain("/work/inbox/items/pending/a/manifest.yaml");
     expect(prompt).toContain('"summary_file": "summary.md"');
     expect(prompt).toContain("Do not fetch providers");
+    expect(prompt).toContain("anchor_inbox_review_v1");
   });
 
   it("filters processed item history by status and search text", () => {
