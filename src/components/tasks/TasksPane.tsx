@@ -184,9 +184,14 @@ export function TasksPane({
     [processingMissions],
   );
   const [localRuns, setLocalRuns] = useState<MissionRecord[]>([]);
+  const [section, setSection] = useState<"tasks" | "progress">("tasks");
   const mergedMissions = useMemo(
     () => mergeTaskMissions(tasksMissions, localRuns),
     [tasksMissions, localRuns],
+  );
+  const progressCount = useMemo(
+    () => mergedMissions.filter((mission) => mission.status === "running" || mission.status === "idle").length,
+    [mergedMissions],
   );
 
   useEffect(() => {
@@ -418,34 +423,53 @@ export function TasksPane({
   }
 
   return (
-    <main className={detailsOpen ? "tasks-pane" : "tasks-pane details-collapsed"}>
+    <main
+      className={
+        section === "progress"
+          ? "tasks-pane tasks-pane-progress"
+          : detailsOpen
+            ? "tasks-pane"
+            : "tasks-pane details-collapsed"
+      }
+    >
       <TasksSidebar
         entries={entries}
         activeView={view}
         selectedProject={projectFilter}
-        onViewChange={setView}
-        onProjectChange={setProjectFilter}
+        activeSection={section}
+        progressCount={progressCount}
+        onViewChange={(next) => {
+          setView(next);
+          setSection("tasks");
+        }}
+        onProjectChange={(next) => {
+          setProjectFilter(next);
+          setSection("tasks");
+        }}
+        onSectionChange={setSection}
         today={today}
       />
-      <section className="tasks-main">
+      <section className={section === "progress" ? "tasks-main tasks-main-progress" : "tasks-main"}>
         <header className="tasks-header">
           <div>
             <h2>{t("tasks.title")}</h2>
             <p className="muted">{t("tasks.subtitle")}</p>
           </div>
-          <div className="tasks-view-switcher" role="group" aria-label={t("tasks.display.view")}>
-            {viewButtons.map((mode) => (
-              <button
-                type="button"
-                key={mode}
-                className={displayView === mode ? "active" : ""}
-                onClick={() => setDisplayView(mode)}
-              >
-                {mode === "list" ? <List size={14} /> : <Calendar size={14} />}
-                {t(displayViewLabel(mode))}
-              </button>
-            ))}
-          </div>
+          {section === "tasks" ? (
+            <div className="tasks-view-switcher" role="group" aria-label={t("tasks.display.view")}>
+              {viewButtons.map((mode) => (
+                <button
+                  type="button"
+                  key={mode}
+                  className={displayView === mode ? "active" : ""}
+                  onClick={() => setDisplayView(mode)}
+                >
+                  {mode === "list" ? <List size={14} /> : <Calendar size={14} />}
+                  {t(displayViewLabel(mode))}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="tasks-header-actions">
             <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => setNewTaskOpen(true)}>
               {t("tasks.actions.new")}
@@ -464,94 +488,101 @@ export function TasksPane({
             </Button>
           </div>
         </header>
-        <div className="tasks-toolbar">
-          <label className="tasks-search">
-            <Search size={14} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("tasks.search")}
+        {section === "progress" ? (
+          <div className="tasks-progress-view">
+            <TasksRunsPanel
+              workPath={workPath}
+              skills={skills}
+              runtimeCommands={runtimeCommands}
+              permissionMode={permissionMode}
+              appendAuditLog={effectiveSettings.hooks.appendVaultLog}
+              missions={mergedMissions}
+              logLines={processingLogLines}
+              onMissionStarted={onMissionStarted}
+              onStopMission={onStopMission}
+              onRefreshMissions={onRefreshMissions}
+              onConfirmApproval={onConfirmApproval}
+              onApplied={() => void load()}
+              onError={onError}
             />
-          </label>
-          <select
-            value={priorityFilter}
-            onChange={(event) => setPriorityFilter(event.target.value as TaskPriority | "all")}
-          >
-            <option value="all">{t("tasks.priority.all")}</option>
-            <option value="highest">{t("tasks.priority.highest")}</option>
-            <option value="high">{t("tasks.priority.high")}</option>
-            <option value="medium">{t("tasks.priority.medium")}</option>
-            <option value="low">{t("tasks.priority.low")}</option>
-          </select>
-          <span className="tasks-result-count">
-            {t("tasks.visibleCount", { count: visibleEntries.length })}
-          </span>
-        </div>
-        {loading ? (
-          <div className="tasks-loading"><Loader2 size={16} /> {t("tasks.loading")}</div>
-        ) : displayView === "list" ? (
-          <TaskList
-            grouped={grouped}
-            selectedRelPath={selectedEntry?.relPath ?? null}
-            labelMode={labelMode}
-            onSelect={setSelectedRelPath}
-            onDone={(entry) => void setStatus(entry, "done")}
-            t={t}
-          />
+          </div>
         ) : (
-          <UnifiedCalendarView<TaskEntry>
-            events={calendarEvents}
-            view={calendarView}
-            viewDate={viewDate}
-            weekStartsOn={effectiveSettings.weekStartsOn}
-            locale={locale}
-            labelMode={labelMode}
-            today={todayDate}
-            query={query}
-            onQueryChange={setQuery}
-            onViewChange={(next) => setDisplayView(next)}
-            onViewDateChange={setViewDate}
-            onSelectEvent={(event) => setSelectedRelPath(event.resource.relPath)}
-            onSelectDate={(date) => {
-              if (displayView === "month") setDisplayView("day");
-              setViewDate(date);
-            }}
-            searchPlaceholder={t("tasks.search")}
-            emptyLabel={t("tasks.calendar.empty")}
-            startHour={effectiveSettings.calendarStartHour}
-            loadingLabel={t("tasks.loading")}
-          />
+          <>
+            <div className="tasks-toolbar">
+              <label className="tasks-search">
+                <Search size={14} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("tasks.search")}
+                />
+              </label>
+              <select
+                value={priorityFilter}
+                onChange={(event) => setPriorityFilter(event.target.value as TaskPriority | "all")}
+              >
+                <option value="all">{t("tasks.priority.all")}</option>
+                <option value="highest">{t("tasks.priority.highest")}</option>
+                <option value="high">{t("tasks.priority.high")}</option>
+                <option value="medium">{t("tasks.priority.medium")}</option>
+                <option value="low">{t("tasks.priority.low")}</option>
+              </select>
+              <span className="tasks-result-count">
+                {t("tasks.visibleCount", { count: visibleEntries.length })}
+              </span>
+            </div>
+            {loading ? (
+              <div className="tasks-loading"><Loader2 size={16} /> {t("tasks.loading")}</div>
+            ) : displayView === "list" ? (
+              <TaskList
+                grouped={grouped}
+                selectedRelPath={selectedEntry?.relPath ?? null}
+                labelMode={labelMode}
+                onSelect={setSelectedRelPath}
+                onDone={(entry) => void setStatus(entry, "done")}
+                t={t}
+              />
+            ) : (
+              <UnifiedCalendarView<TaskEntry>
+                events={calendarEvents}
+                view={calendarView}
+                viewDate={viewDate}
+                weekStartsOn={effectiveSettings.weekStartsOn}
+                locale={locale}
+                labelMode={labelMode}
+                today={todayDate}
+                query={query}
+                onQueryChange={setQuery}
+                onViewChange={(next) => setDisplayView(next)}
+                onViewDateChange={setViewDate}
+                onSelectEvent={(event) => setSelectedRelPath(event.resource.relPath)}
+                onSelectDate={(date) => {
+                  if (displayView === "month") setDisplayView("day");
+                  setViewDate(date);
+                }}
+                searchPlaceholder={t("tasks.search")}
+                emptyLabel={t("tasks.calendar.empty")}
+                startHour={effectiveSettings.calendarStartHour}
+                loadingLabel={t("tasks.loading")}
+              />
+            )}
+          </>
         )}
-        {workPath && mergedMissions.length > 0 ? (
-          <TasksRunsPanel
-            workPath={workPath}
-            skills={skills}
-            runtimeCommands={runtimeCommands}
-            permissionMode={permissionMode}
-            appendAuditLog={effectiveSettings.hooks.appendVaultLog}
-            missions={mergedMissions}
-            logLines={processingLogLines}
-            onMissionStarted={onMissionStarted}
-            onStopMission={onStopMission}
-            onRefreshMissions={onRefreshMissions}
-            onConfirmApproval={onConfirmApproval}
-            onApplied={() => void load()}
-            onError={onError}
-          />
-        ) : null}
       </section>
-      <TaskDetailDrawer
-        entry={selectedEntry}
-        metadata={metadata}
-        loading={metadataLoading}
-        labelMode={labelMode}
-        skills={skills}
-        collapsed={!detailsOpen}
-        onToggleCollapsed={() => setDetailsOpen((value) => !value)}
-        onRevealPath={onRevealPath}
-        onOpenSkillCompose={onOpenSkillCompose}
-        onUpdateSchedule={updateSchedule}
-      />
+      {section === "tasks" ? (
+        <TaskDetailDrawer
+          entry={selectedEntry}
+          metadata={metadata}
+          loading={metadataLoading}
+          labelMode={labelMode}
+          skills={skills}
+          collapsed={!detailsOpen}
+          onToggleCollapsed={() => setDetailsOpen((value) => !value)}
+          onRevealPath={onRevealPath}
+          onOpenSkillCompose={onOpenSkillCompose}
+          onUpdateSchedule={updateSchedule}
+        />
+      ) : null}
       <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreate={createTask} />
       <NaturalScheduleDialog
         open={naturalScheduleOpen}

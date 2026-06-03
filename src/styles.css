@@ -12146,6 +12146,10 @@ button.git-badge:hover {
   grid-template-columns: 210px minmax(520px, 1fr) 44px;
 }
 
+.tasks-pane.tasks-pane-progress {
+  grid-template-columns: 210px minmax(520px, 1fr);
+}
+
 .tasks-pane.tasks-empty {
   display: grid;
   place-items: center;
@@ -12223,6 +12227,19 @@ button.git-badge:hover {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.tasks-main.tasks-main-progress {
+  display: flex;
+  flex-direction: column;
+}
+
+.tasks-progress-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 22px 16px;
 }
 
 .tasks-header {
@@ -12700,11 +12717,7 @@ button.git-badge:hover {
 .tasks-runs-panel {
   display: grid;
   gap: 12px;
-  border-top: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--panel) 82%, var(--bg));
-  padding: 12px 22px;
-  max-height: 46vh;
-  overflow: auto;
+  padding-top: 12px;
 }
 
 .tasks-runs-head {

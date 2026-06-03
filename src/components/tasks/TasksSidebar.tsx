@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Inbox, ListTodo } from "lucide-react";
+import { Activity, AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Inbox, ListTodo } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -8,13 +8,17 @@ import {
 } from "../../lib/tasks";
 
 export type TasksFilterView = TaskScheduleFilterView;
+export type TasksSection = "tasks" | "progress";
 
 interface TasksSidebarProps {
   entries: TaskEntry[];
   activeView: TasksFilterView;
   selectedProject: string;
+  activeSection: TasksSection;
+  progressCount: number;
   onViewChange: (view: TasksFilterView) => void;
   onProjectChange: (project: string) => void;
+  onSectionChange: (section: TasksSection) => void;
   today: string;
 }
 
@@ -22,8 +26,11 @@ export function TasksSidebar({
   entries,
   activeView,
   selectedProject,
+  activeSection,
+  progressCount,
   onViewChange,
   onProjectChange,
+  onSectionChange,
   today,
 }: TasksSidebarProps) {
   const { t } = useTranslation();
@@ -75,6 +82,7 @@ export function TasksSidebar({
     },
   ];
 
+  const tasksActive = activeSection === "tasks";
   return (
     <aside className="tasks-sidebar">
       <div className="tasks-sidebar-section">
@@ -83,7 +91,7 @@ export function TasksSidebar({
           <button
             type="button"
             key={view.id}
-            className={activeView === view.id ? "tasks-filter active" : "tasks-filter"}
+            className={tasksActive && activeView === view.id ? "tasks-filter active" : "tasks-filter"}
             onClick={() => onViewChange(view.id)}
           >
             <span className="tasks-filter-copy">
@@ -98,7 +106,7 @@ export function TasksSidebar({
         <span className="tasks-sidebar-label">{t("tasks.sidebar.projects")}</span>
         <button
           type="button"
-          className={selectedProject === "all" ? "tasks-filter active" : "tasks-filter"}
+          className={tasksActive && selectedProject === "all" ? "tasks-filter active" : "tasks-filter"}
           onClick={() => onProjectChange("all")}
         >
           <span>{t("tasks.project.all")}</span>
@@ -108,7 +116,7 @@ export function TasksSidebar({
           <button
             type="button"
             key={project}
-            className={selectedProject === project ? "tasks-filter active" : "tasks-filter"}
+            className={tasksActive && selectedProject === project ? "tasks-filter active" : "tasks-filter"}
             onClick={() => onProjectChange(project)}
           >
             <span>{project}</span>
@@ -117,6 +125,20 @@ export function TasksSidebar({
             </span>
           </button>
         ))}
+      </div>
+      <div className="tasks-sidebar-section">
+        <span className="tasks-sidebar-label">{t("tasks.sidebar.progress")}</span>
+        <button
+          type="button"
+          className={activeSection === "progress" ? "tasks-filter active" : "tasks-filter"}
+          onClick={() => onSectionChange("progress")}
+        >
+          <span className="tasks-filter-copy">
+            <Activity size={14} />
+            <span>{t("tasks.progress.allRuns")}</span>
+          </span>
+          {progressCount > 0 ? <span className="tasks-count">{progressCount}</span> : null}
+        </button>
       </div>
     </aside>
   );
