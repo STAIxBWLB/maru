@@ -12789,6 +12789,14 @@ button.git-badge:hover {
   gap: 8px;
 }
 
+.tasks-run-card-head > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .tasks-run-card-head strong {
   font-size: 12.5px;
 }
@@ -13172,6 +13180,13 @@ button.git-badge:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.inbox-run-card-head > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .inbox-run-card-head strong { font-size: 12.5px; }
 .inbox-run-card-head span,
