@@ -1,5 +1,5 @@
 import { ClipboardCheck, Loader2, Pencil, RefreshCcw, Square } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { applyInboxDecisions } from "../../lib/api";
 import { agentReadRunEvents } from "../../lib/skills";
@@ -54,6 +54,8 @@ export function InboxRunsPanel({
   const [applyResult, setApplyResult] = useState<InboxApplyResult | null>(null);
   const [appliedRunIds, setAppliedRunIds] = useState<Set<string>>(() => new Set());
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set());
+  const reviewPanelRef = useRef<HTMLDivElement | null>(null);
+  const pendingReviewScrollRunId = useRef<string | null>(null);
 
   const decisionsComplete = bundle ? inboxReviewDecisionsComplete(bundle.decisions) : false;
   const appliedCurrentRun = Boolean(bundle && appliedRunIds.has(bundle.runId));
@@ -61,6 +63,14 @@ export function InboxRunsPanel({
     ? !appliedCurrentRun &&
       inboxReviewCanApply({ decisions: bundle.decisions, decisionsComplete, applyBusy })
     : false;
+
+  useEffect(() => {
+    if (!bundle || pendingReviewScrollRunId.current !== bundle.runId) return;
+    pendingReviewScrollRunId.current = null;
+    window.requestAnimationFrame(() => {
+      reviewPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [bundle]);
 
   const loadReviewResult = async (mission: MissionRecord) => {
     if (!workPath) return;
@@ -70,6 +80,13 @@ export function InboxRunsPanel({
       const events = await agentReadRunEvents(workPath, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
       const review = parseInboxReviewArtifact(raw) ?? emptyInboxReviewArtifact(t("inbox.review.noReview"));
+      pendingReviewScrollRunId.current = mission.id;
+      setExpandedLogs((current) => {
+        if (!current.has(mission.id)) return current;
+        const next = new Set(current);
+        next.delete(mission.id);
+        return next;
+      });
       setBundle({
         runId: mission.id,
         mission,
@@ -88,18 +105,31 @@ export function InboxRunsPanel({
   const applyReview = async () => {
     if (!bundle || !canApply || !workPath) return;
     const decisions = buildInboxApplyDecisions(bundle.decisions);
-    if (decisions.length === 0) return;
     const accepted = decisions.filter((decision) => decision.decision === "accept");
     const rejected = decisions.filter((decision) => decision.decision === "reject");
+    const deferred = bundle.decisions.filter((decision) => decision.status === "deferred").length;
+    if (decisions.length === 0) {
+      setApplyResult({
+        runId: bundle.runId,
+        accepted: 0,
+        rejected: 0,
+        deferred,
+        appliedAt: new Date().toISOString(),
+      });
+      setAppliedRunIds((current) => new Set([...current, bundle.runId]));
+      onError(t("inbox.review.deferSuccess", { count: deferred }));
+      return;
+    }
     const approvalId = await onConfirmApproval({
       kind: INBOX_ROUTE_APPROVAL_KIND,
       summary: t("inbox.review.applySummaryDetailed", {
         accepted: accepted.length,
         rejected: rejected.length,
+        deferred,
       }),
       target: decisions
         .map((decision) =>
-          decision.decision === "accept" ? decision.destination ?? "inbox/items/done" : "inbox/rejected",
+          decision.decision === "accept" ? decision.destination ?? "inbox/items/done" : "rejected",
         )
         .join("\n"),
       payloadPreview: bundle.decisions
@@ -107,7 +137,11 @@ export function InboxRunsPanel({
         .map(
           (decision) =>
             `${decision.classification} · ${decision.title} -> ${
-              decision.status === "rejected" ? "reject" : decision.destination ?? "done"
+              decision.status === "rejected"
+                ? "reject"
+                : decision.status === "deferred"
+                  ? "defer"
+                  : decision.destination ?? "done"
             } (${decision.status})`,
         )
         .join("\n"),
@@ -121,6 +155,7 @@ export function InboxRunsPanel({
         runId: bundle.runId,
         accepted: accepted.length,
         rejected: rejected.length,
+        deferred,
         appliedAt: new Date().toISOString(),
       });
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
@@ -208,111 +243,115 @@ export function InboxRunsPanel({
           const parsedLines = lines.map(parseMeetingsLogLine);
           const latestParsed = parsedLines.at(-1);
           return (
-            <article
-              className={`inbox-run-card ${statusClass}`}
-              data-active={isActive ? "true" : "false"}
-              key={mission.id}
-            >
-              <div className="inbox-run-card-head">
-                <div>
-                  <strong>{inboxMissionTitle(mission)}</strong>
-                  <span>
-                    {mission.status} · {formatTime(mission.startedAt)}
-                  </span>
+            <Fragment key={mission.id}>
+              <article
+                className={`inbox-run-card ${statusClass}`}
+                data-active={isActive ? "true" : "false"}
+              >
+                <div className="inbox-run-card-head">
+                  <div>
+                    <strong>{inboxMissionTitle(mission)}</strong>
+                    <span>
+                      {mission.status} · {formatTime(mission.startedAt)}
+                    </span>
+                  </div>
+                  {canStop ? (
+                    <button
+                      type="button"
+                      className="button button-ghost button-sm"
+                      onClick={() => onStopMission(mission.id)}
+                    >
+                      <Square size={12} />
+                      <span>{t("inbox.progress.stop")}</span>
+                    </button>
+                  ) : null}
                 </div>
-                {canStop ? (
+                <ol className="inbox-run-steps" aria-label={t("inbox.progress.steps")}>
+                  {steps.map((step) => (
+                    <li className={`inbox-run-step ${step.status}`} key={step.id}>
+                      <span className="inbox-run-step-dot" aria-hidden="true" />
+                      <span>{t(`inbox.step.${step.id}`)}</span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="inbox-run-log-summary">
+                  <span data-severity={latestParsed ? logLineSeverity(latestParsed) : "info"}>
+                    {latestParsed?.raw ?? t("inbox.progress.noLog")}
+                  </span>
                   <button
                     type="button"
-                    className="button button-ghost button-sm"
-                    onClick={() => onStopMission(mission.id)}
+                    aria-expanded={expanded}
+                    onClick={() =>
+                      setExpandedLogs((current) => {
+                        const next = new Set(current);
+                        if (next.has(mission.id)) next.delete(mission.id);
+                        else next.add(mission.id);
+                        return next;
+                      })
+                    }
                   >
-                    <Square size={12} />
-                    <span>{t("inbox.progress.stop")}</span>
+                    {expanded ? t("inbox.progress.hideLog") : t("inbox.progress.showLog")}
                   </button>
+                </div>
+                {expanded && parsedLines.length > 0 ? (
+                  <ul className="inbox-run-log" aria-label={t("inbox.progress.logLines")}>
+                    {parsedLines.slice(-60).map((parsed, index) => {
+                      const phase = logLinePhase(parsed);
+                      return (
+                        <li
+                          key={`${mission.id}-log-${index}`}
+                          data-severity={logLineSeverity(parsed)}
+                          data-phase={phase ?? undefined}
+                        >
+                          {phase ? <span className="inbox-run-log-phase">{phase}</span> : null}
+                          <span className="inbox-run-log-text">{parsed.raw}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 ) : null}
-              </div>
-              <ol className="inbox-run-steps" aria-label={t("inbox.progress.steps")}>
-                {steps.map((step) => (
-                  <li className={`inbox-run-step ${step.status}`} key={step.id}>
-                    <span className="inbox-run-step-dot" aria-hidden="true" />
-                    <span>{t(`inbox.step.${step.id}`)}</span>
-                  </li>
-                ))}
-              </ol>
-              <div className="inbox-run-log-summary">
-                <span data-severity={latestParsed ? logLineSeverity(latestParsed) : "info"}>
-                  {latestParsed?.raw ?? t("inbox.progress.noLog")}
-                </span>
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  onClick={() =>
-                    setExpandedLogs((current) => {
-                      const next = new Set(current);
-                      if (next.has(mission.id)) next.delete(mission.id);
-                      else next.add(mission.id);
-                      return next;
-                    })
-                  }
-                >
-                  {expanded ? t("inbox.progress.hideLog") : t("inbox.progress.showLog")}
-                </button>
-              </div>
-              {expanded && parsedLines.length > 0 ? (
-                <ul className="inbox-run-log" aria-label={t("inbox.progress.logLines")}>
-                  {parsedLines.slice(-60).map((parsed, index) => {
-                    const phase = logLinePhase(parsed);
-                    return (
-                      <li
-                        key={`${mission.id}-log-${index}`}
-                        data-severity={logLineSeverity(parsed)}
-                        data-phase={phase ?? undefined}
-                      >
-                        {phase ? <span className="inbox-run-log-phase">{phase}</span> : null}
-                        <span className="inbox-run-log-text">{parsed.raw}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <div className="inbox-run-card-actions">
+                  <span>
+                    {appliedRunIds.has(mission.id)
+                      ? t("inbox.step.applyDone")
+                      : isFailed
+                        ? t("inbox.progress.failedStatus")
+                        : t("inbox.progress.status", { status: mission.status })}
+                  </span>
+                  {canReview ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={reviewLoading}
+                      onClick={() => void loadReviewResult(mission)}
+                    >
+                      {reviewLoading && isActive ? <Loader2 size={14} className="spin" /> : <Pencil size={14} />}
+                      {isActive && steps.some((step) => step.id === "confirm" && step.status === "blocked")
+                        ? t("inbox.review.resolveConfirmations")
+                        : t("inbox.review.result")}
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+              {activeBundle ? (
+                <div ref={reviewPanelRef} className="inbox-run-review-slot">
+                  <InboxReviewPanel
+                    bundle={activeBundle}
+                    applyBusy={applyBusy}
+                    applied={appliedRunIds.has(mission.id)}
+                    canApply={canApply}
+                    applyResult={applyResult?.runId === mission.id ? applyResult : null}
+                    onApply={() => void applyReview()}
+                    onDismissApplyResult={() => setApplyResult(null)}
+                    onUpdateDecision={updateDecision}
+                    onUpdateDecisions={updateDecisions}
+                  />
+                </div>
               ) : null}
-              <div className="inbox-run-card-actions">
-                <span>
-                  {appliedRunIds.has(mission.id)
-                    ? t("inbox.step.applyDone")
-                    : isFailed
-                      ? t("inbox.progress.failedStatus")
-                      : t("inbox.progress.status", { status: mission.status })}
-                </span>
-                {canReview ? (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={reviewLoading}
-                    onClick={() => void loadReviewResult(mission)}
-                  >
-                    {reviewLoading && isActive ? <Loader2 size={14} className="spin" /> : <Pencil size={14} />}
-                    {t("inbox.review.result")}
-                  </button>
-                ) : null}
-              </div>
-            </article>
+            </Fragment>
           );
         })}
       </div>
-
-      {bundle ? (
-        <InboxReviewPanel
-          bundle={bundle}
-          applyBusy={applyBusy}
-          applied={appliedCurrentRun}
-          canApply={canApply}
-          applyResult={applyResult?.runId === bundle.runId ? applyResult : null}
-          onApply={() => void applyReview()}
-          onDismissApplyResult={() => setApplyResult(null)}
-          onUpdateDecision={updateDecision}
-          onUpdateDecisions={updateDecisions}
-        />
-      ) : null}
     </section>
   );
 }

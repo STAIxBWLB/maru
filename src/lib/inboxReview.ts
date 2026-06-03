@@ -16,7 +16,7 @@ export const INBOX_REVIEW_SCHEMA_VERSION = "anchor_inbox_review_v1";
 export type InboxReviewClassification = "action" | "schedule" | "info" | "ideation" | "noise";
 export type InboxConfidence = "high" | "medium" | "low";
 export type InboxRecommendedAction = "route" | "reject" | "skip" | "handoff";
-export type InboxItemDecisionStatus = "pending" | "accepted" | "edited" | "rejected";
+export type InboxItemDecisionStatus = "pending" | "accepted" | "edited" | "rejected" | "deferred";
 export type InboxRunStepId = "input" | "run" | "draft" | "review" | "confirm" | "apply";
 export type InboxRunStepStatus = "pending" | "active" | "complete" | "blocked" | "error";
 
@@ -95,7 +95,7 @@ export function inboxReviewDecisionsComplete(decisions: InboxItemDecision[]): bo
   return decisions.every((decision) => !decision.requiresConfirmation || decision.status !== "pending");
 }
 
-/** Count items that will actually be applied (routed or rejected). */
+/** Count items that have been explicitly confirmed by the user. */
 export function selectedInboxDecisionCount(decisions: InboxItemDecision[]): number {
   return decisions.filter((decision) => decision.status !== "pending").length;
 }
@@ -114,11 +114,11 @@ export function inboxReviewCanApply({
 }
 
 export function statusAfterInboxMetadataEdit(status: InboxItemDecisionStatus): InboxItemDecisionStatus {
-  return status === "rejected" ? "rejected" : "edited";
+  return status === "rejected" || status === "deferred" ? status : "edited";
 }
 
-/** Map UI decisions to the Rust `apply_inbox_decisions` payload. Pending items
- *  (only non-required ones can still be pending) are dropped — left in place. */
+/** Map UI decisions to the Rust `apply_inbox_decisions` payload. Pending and
+ *  deferred items are dropped — left in place for later manual review. */
 export function buildInboxApplyDecisions(decisions: InboxItemDecision[]): InboxApplyDecision[] {
   const out: InboxApplyDecision[] = [];
   for (const decision of decisions) {

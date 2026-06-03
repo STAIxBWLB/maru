@@ -22,11 +22,12 @@ export interface InboxApplyResult {
   runId: string;
   accepted: number;
   rejected: number;
+  deferred: number;
   appliedAt: string;
 }
 
-// Editable per-item statuses, mirroring the 3-state selector in meetings/tasks.
-const DECISION_STATUSES: InboxItemDecisionStatus[] = ["accepted", "edited", "rejected"];
+// Editable per-item statuses for route/reject/defer confirmation.
+const DECISION_STATUSES: InboxItemDecisionStatus[] = ["accepted", "edited", "rejected", "deferred"];
 
 export function InboxReviewPanel({
   bundle,
@@ -57,7 +58,22 @@ export function InboxReviewPanel({
     (decision) => decision.status === "accepted" || decision.status === "edited",
   ).length;
   const rejectedCount = bundle.decisions.filter((decision) => decision.status === "rejected").length;
+  const deferredCount = bundle.decisions.filter((decision) => decision.status === "deferred").length;
   const allIds = bundle.decisions.map((decision) => decision.id);
+  const applyDescription =
+    applyResult && applyResult.accepted === 0 && applyResult.rejected === 0 && applyResult.deferred > 0
+      ? t("inbox.review.applyDeferredOnlyDescription", {
+          deferred: applyResult.deferred,
+          time: formatTime(applyResult.appliedAt),
+        })
+      : applyResult
+        ? t("inbox.review.applyDoneDescription", {
+            accepted: applyResult.accepted,
+            rejected: applyResult.rejected,
+            deferred: applyResult.deferred,
+            time: formatTime(applyResult.appliedAt),
+          })
+        : null;
 
   return (
     <section className="inbox-review-card">
@@ -79,13 +95,7 @@ export function InboxReviewPanel({
           <CheckCircle2 size={16} />
           <div>
             <strong>{t("inbox.review.applyDoneTitle")}</strong>
-            <span>
-              {t("inbox.review.applyDoneDescription", {
-                accepted: applyResult.accepted,
-                rejected: applyResult.rejected,
-                time: formatTime(applyResult.appliedAt),
-              })}
-            </span>
+            <span>{applyDescription}</span>
           </div>
           <button
             type="button"
@@ -106,7 +116,17 @@ export function InboxReviewPanel({
           <button type="button" onClick={() => onUpdateDecisions(allIds, { status: "rejected" })}>
             {t("inbox.review.rejectAll")}
           </button>
+          <button type="button" onClick={() => onUpdateDecisions(allIds, { status: "deferred" })}>
+            {t("inbox.review.deferAll")}
+          </button>
         </div>
+
+        {pendingRequired > 0 ? (
+          <div className="inbox-review-callout" role="status">
+            <AlertTriangle size={14} />
+            <span>{t("inbox.review.confirmationCallout", { count: pendingRequired })}</span>
+          </div>
+        ) : null}
 
         {bundle.decisions.length === 0 ? (
           <div className="inbox-review-empty">
@@ -221,7 +241,11 @@ export function InboxReviewPanel({
             ? t("inbox.review.applyBlocked", { count: pendingRequired })
             : applied
               ? t("inbox.review.applyDoneTitle")
-              : t("inbox.review.applyReadyDetailed", { accepted: acceptedCount, rejected: rejectedCount })}
+              : t("inbox.review.applyReadyDetailed", {
+                  accepted: acceptedCount,
+                  rejected: rejectedCount,
+                  deferred: deferredCount,
+                })}
         </span>
         <button
           type="button"

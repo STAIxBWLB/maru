@@ -6652,6 +6652,7 @@ button.git-badge:hover {
 .field {
   display: grid;
   gap: 6px;
+  font-size: 12px;
 }
 
 .field-label {
@@ -11804,6 +11805,7 @@ button.git-badge:hover {
   background: var(--panel-raised);
   color: var(--ink);
   padding: 0 8px;
+  font-size: 11px;
   outline: 0;
 }
 
@@ -12799,6 +12801,15 @@ button.git-badge:hover {
   font-size: 11px;
 }
 
+.tasks-run-log-summary button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .tasks-run-meta {
   display: flex;
   gap: 10px;
@@ -13091,7 +13102,7 @@ button.git-badge:hover {
 .tasks-check-row > div { display: grid; gap: 1px; min-width: 0; }
 .tasks-check-row strong { font-size: 12px; }
 .tasks-check-row small { color: var(--muted); font-size: 10.5px; }
-.tasks-check-row input { min-width: 0; }
+.tasks-check-row input { min-width: 0; font-size: 11px; }
 .tasks-check-row.accepted { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 .tasks-check-row.rejected { opacity: 0.6; }
 .tasks-check-required { color: var(--danger); margin-left: 2px; }
@@ -13166,6 +13177,14 @@ button.git-badge:hover {
 .inbox-run-card-head span,
 .inbox-run-log-summary span,
 .inbox-run-card-actions span { color: var(--muted); font-size: 11px; }
+.inbox-run-log-summary button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 650;
+}
 
 .inbox-run-steps {
   display: flex;
@@ -13205,6 +13224,12 @@ button.git-badge:hover {
 .inbox-run-log-phase { margin-right: 6px; color: var(--accent); text-transform: uppercase; font-size: 9.5px; }
 .inbox-run-log [data-severity="error"] { color: var(--danger); }
 .inbox-run-log-summary span[data-severity="error"] { color: var(--danger); }
+.inbox-run-review-slot {
+  display: grid;
+  gap: 8px;
+  margin: -2px 0 4px 14px;
+  scroll-margin: 18px;
+}
 
 /* Inbox review card */
 .inbox-review-card {
@@ -13244,6 +13269,22 @@ button.git-badge:hover {
 .inbox-review-decisions { display: grid; gap: 8px; }
 
 .inbox-decision-bulk-actions { display: inline-flex; gap: 6px; }
+.inbox-review-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 9%, var(--panel));
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.inbox-review-callout svg {
+  flex: none;
+  color: var(--warn);
+}
 .inbox-decision-bulk-actions button,
 .inbox-decision-actions button {
   border: 1px solid var(--line-soft);
@@ -13251,8 +13292,18 @@ button.git-badge:hover {
   background: var(--panel);
   color: var(--muted);
   padding: 3px 8px;
+  min-height: 32px;
   font-size: 11px;
   cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 100ms ease;
+}
+.inbox-decision-bulk-actions button:active,
+.inbox-decision-actions button:active {
+  transform: scale(0.96);
 }
 .inbox-decision-actions button.active {
   border-color: var(--accent);
@@ -13272,6 +13323,10 @@ button.git-badge:hover {
 .inbox-decision-row.accepted { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 .inbox-decision-row.edited { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
 .inbox-decision-row.rejected { opacity: 0.62; }
+.inbox-decision-row.deferred {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: color-mix(in srgb, var(--warn) 5%, var(--panel));
+}
 .inbox-decision-row[data-required="true"] { box-shadow: inset 2px 0 0 var(--warn); }
 
 .inbox-decision-main { display: grid; gap: 4px; min-width: 0; }
@@ -13288,7 +13343,7 @@ button.git-badge:hover {
 .inbox-decision-field { display: grid; gap: 2px; }
 .inbox-decision-field > span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
 .inbox-decision-route select,
-.inbox-decision-route input { min-width: 0; }
+.inbox-decision-route input { min-width: 0; font-size: 11px; }
 
 .inbox-decision-actions { display: inline-flex; gap: 4px; align-self: start; }
 

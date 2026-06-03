@@ -102,12 +102,24 @@ describe("inbox decision gating", () => {
 
   it("preserves rejected status for metadata edits and marks other edits", () => {
     expect(statusAfterInboxMetadataEdit("rejected")).toBe("rejected");
+    expect(statusAfterInboxMetadataEdit("deferred")).toBe("deferred");
     expect(statusAfterInboxMetadataEdit("accepted")).toBe("edited");
     expect(statusAfterInboxMetadataEdit("pending")).toBe("edited");
     expect(statusAfterInboxMetadataEdit("edited")).toBe("edited");
   });
 
-  it("maps decisions to the rust apply payload, skipping pending items", () => {
+  it("treats deferred required items as confirmed but keeps them out of the backend payload", () => {
+    const pending = [decision("a", "pending", { requiresConfirmation: true })];
+    expect(inboxReviewDecisionsComplete(pending)).toBe(false);
+    expect(inboxReviewCanApply({ decisions: pending, decisionsComplete: false })).toBe(false);
+
+    const deferred = [decision("a", "deferred", { requiresConfirmation: true })];
+    expect(inboxReviewDecisionsComplete(deferred)).toBe(true);
+    expect(inboxReviewCanApply({ decisions: deferred, decisionsComplete: true })).toBe(true);
+    expect(buildInboxApplyDecisions(deferred)).toEqual([]);
+  });
+
+  it("maps decisions to the rust apply payload, skipping pending and deferred items", () => {
     const decisions: InboxItemDecision[] = [
       decision("a", "accepted", { destination: "projects/x" }),
       decision("b", "rejected", {
@@ -117,6 +129,7 @@ describe("inbox decision gating", () => {
       }),
       decision("c", "pending"),
       decision("d", "edited", { destination: "projects/y", classification: "schedule" }),
+      decision("e", "deferred", { destination: "projects/deferred", classification: "info" }),
     ];
     const payload = buildInboxApplyDecisions(decisions);
     expect(payload).toHaveLength(3);
@@ -128,6 +141,18 @@ describe("inbox decision gating", () => {
       project: "rise",
     });
     expect(payload[2]).toMatchObject({ decision: "accept", destination: "projects/y", classification: "schedule" });
+  });
+
+  it("allows mixed deferred decisions while applying only route and reject decisions", () => {
+    const decisions: InboxItemDecision[] = [
+      decision("route", "accepted", { requiresConfirmation: true, destination: "projects/rise/inbox" }),
+      decision("reject", "rejected", { requiresConfirmation: true }),
+      decision("media", "deferred", { requiresConfirmation: true }),
+    ];
+
+    expect(inboxReviewDecisionsComplete(decisions)).toBe(true);
+    expect(inboxReviewCanApply({ decisions, decisionsComplete: true })).toBe(true);
+    expect(buildInboxApplyDecisions(decisions).map((item) => item.decision)).toEqual(["accept", "reject"]);
   });
 });
 
