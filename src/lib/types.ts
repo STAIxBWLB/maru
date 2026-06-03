@@ -391,6 +391,20 @@ export interface InboxAcceptRequest {
   targetFolder?: string | null;
 }
 
+/** One confirmed routing decision for the inbox batch review flow. Mirrors
+ *  `InboxApplyDecision` in `src-tauri/src/inbox.rs`. `itemDir` is the pending
+ *  item directory (workspace-relative or absolute inside the inbox). */
+export interface InboxApplyDecision {
+  itemDir: string;
+  /** "accept" promotes the item (filing raw originals into `destination` then
+   *  moving the item dir to `done/`); "reject" moves it to `rejected/`. */
+  decision: "accept" | "reject";
+  /** Workspace-relative project folder for raw originals (accept only). */
+  destination?: string | null;
+  classification?: string | null;
+  project?: string | null;
+}
+
 export interface InboxDecisionOutcome {
   id: string;
   decision: InboxDecisionValue;
@@ -499,7 +513,12 @@ export type MissionStatus = "running" | "idle" | "done" | "failed" | "stopped";
 
 export interface InboxProcessMissionMetadata {
   origin: "inboxProcess";
+  /** First/primary channel (kept for back-compat with `inboxProcessChannel`). */
   channel: string;
+  /** All distinct channels covered by a bundled review-flow run. */
+  channels?: string[];
+  /** When true, Anchor renders the meetings/tasks-style review + confirm flow. */
+  reviewFlow?: boolean;
   inputPaths: string[];
   workspacePath?: string | null;
   skillName?: string | null;

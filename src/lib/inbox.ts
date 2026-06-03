@@ -181,30 +181,65 @@ export function inboxEntryProcessPath(entry: InboxEntry): string {
 }
 
 export function buildInboxProcessPrompt({
-  channel,
   entries,
   config,
+  channels,
+  reviewFlow = true,
 }: {
-  channel: string;
   entries: InboxEntry[];
   config: InboxRuntimeConfig;
+  /** Channel hint used when no entries are selected (channel-header action). */
+  channels?: string[];
+  /** When true, dispatch the meetings/tasks-style review run (propose, don't move). */
+  reviewFlow?: boolean;
 }): string {
+  const byChannel = new Map<string, InboxEntry[]>();
+  for (const entry of entries) {
+    const group = byChannel.get(entry.channel) ?? [];
+    group.push(entry);
+    byChannel.set(entry.channel, group);
+  }
+  const resolvedChannels =
+    byChannel.size > 0
+      ? [...byChannel.keys()].filter(Boolean).sort()
+      : [...new Set(channels ?? [])].filter(Boolean).sort();
+  const header =
+    resolvedChannels.length > 0 ? `inbox-process ${resolvedChannels.join(" ")}` : "inbox-process";
+
   const contextLines =
     entries.length > 0
-      ? entries.map((entry) => {
-          const label = entry.kind === "pendingItem" ? "pending manifest" : "drop file";
-          const source = entry.sourceKind ? ` sourceKind=${entry.sourceKind}` : "";
-          return `- ${label}: ${inboxEntryProcessPath(entry)}${source}`;
-        })
+      ? [...byChannel.entries()].flatMap(([channel, group]) => [
+          `- channel ${channel}:`,
+          ...group.map((entry) => {
+            const label = entry.kind === "pendingItem" ? "pending manifest" : "drop file";
+            const source = entry.sourceKind ? ` sourceKind=${entry.sourceKind}` : "";
+            return `  - ${label}: ${inboxEntryProcessPath(entry)}${source}`;
+          }),
+        ])
       : ["- channel header action: process configured local drop files and pending manifests"];
 
+  const reviewBlock = reviewFlow
+    ? [
+        "Review mode (reviewFlow): follow the skill's Anchor Run Contract —",
+        "process every selected item in this one run, emit phase markers, and",
+        "return exactly one anchor_inbox_review_v1 JSON listing a decision per",
+        "item. Do NOT move items to done/failed/duplicate, do NOT file originals",
+        "into project folders, and do NOT write receipts; Anchor applies the",
+        "confirmed routes after the user reviews them.",
+        "",
+      ]
+    : [];
+
   return [
-    `inbox-process ${channel}`,
+    header,
     "",
-    "Process the configured local inbox items for this channel.",
+    reviewFlow
+      ? "Process the selected local inbox items in one review run."
+      : "Process the configured local inbox items for this channel.",
     "Do not fetch providers; external collection stays with io-* and inbox-intake.",
     "Use workspace.config.yaml as the SSOT, especially inbox.paths and inbox.naming.",
     "",
+    ...reviewBlock,
     "Selected context:",
     ...contextLines,
     "",
@@ -268,5 +303,13 @@ export function activeInboxProcessMissions(records: MissionRecord[]): MissionRec
   return records
     .filter(isInboxProcessMission)
     .filter((record) => record.status === "running" || record.status === "idle")
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/** All inbox-process missions (including `done`), newest first. The review flow
+ *  needs finished runs to stay visible so the user can open and apply them. */
+export function inboxProcessMissions(records: MissionRecord[]): MissionRecord[] {
+  return records
+    .filter(isInboxProcessMission)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }

@@ -157,7 +157,12 @@ export function isMeetingsMission(mission: MissionRecord): boolean {
   const metadata = mission.metadata;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
   const origin = (metadata as Record<string, unknown>).origin;
-  if (typeof origin === "string" && origin.startsWith("meetingNotes")) return true;
+  if (typeof origin === "string") {
+    if (origin.startsWith("meetingNotes")) return true;
+    // Inbox-process review-flow runs set reviewFlow:true but are owned by the
+    // inbox pane; keep them out of the meetings run list.
+    if (origin === "inboxProcess") return false;
+  }
   return (metadata as Record<string, unknown>).reviewFlow === true;
 }
 

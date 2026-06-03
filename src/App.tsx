@@ -175,6 +175,7 @@ import {
   buildInboxProcessPrompt,
   buildInboxItemStates,
   activeInboxProcessMissions,
+  inboxProcessMissions,
   isInboxProcessMission,
   type InboxDecision,
   type InboxItemState,
@@ -2735,7 +2736,7 @@ function MainApp() {
   );
 
   const processInboxKeys = useCallback(
-    async (keys: string[], channelOverride?: string | null) => {
+    async (keys: string[], channelOverride?: string | null, reviewFlow = true) => {
       if (!inboxWorkspacePath) return;
       const processSkill =
         skills.find((skill) => skill.name === "inbox-process") ??
@@ -2755,16 +2756,14 @@ function MainApp() {
             : [];
       if (selectedEntries.length === 0 && !channelOverride) return;
 
-      const grouped = new Map<string, InboxEntry[]>();
-      if (channelOverride && selectedEntries.length === 0) {
-        grouped.set(channelOverride, []);
-      } else {
-        for (const entry of selectedEntries) {
-          const group = grouped.get(entry.channel) ?? [];
-          group.push(entry);
-          grouped.set(entry.channel, group);
-        }
-      }
+      // Bundle every selected entry into ONE run (한 번에). Channel becomes a
+      // per-item field of the review artifact, not a mission boundary.
+      const channels =
+        selectedEntries.length > 0
+          ? [...new Set(selectedEntries.map((entry) => entry.channel).filter(Boolean))].sort()
+          : channelOverride
+            ? [channelOverride]
+            : [];
 
       setInboxActionBusy(true);
       setError(null);
@@ -2780,40 +2779,41 @@ function MainApp() {
             ].filter(Boolean).join(" "),
           );
         }
-        for (const [channel, entries] of grouped) {
-          const prompt = buildInboxProcessPrompt({
-            channel,
-            entries,
-            config: inboxRuntimeConfig,
-          });
-          const context: SkillContextItem[] = entries.map((entry) => ({
-            path: entry.kind === "pendingItem" ? entry.manifestPath ?? entry.path : entry.path,
-            kind: entry.kind === "pendingItem" ? "manifest" : "file",
-          }));
-          const inputPaths = context.map((item) => item.path);
-          const invocationId = await skillsDispatchBackground({
-            skillId: processSkill.id,
+        const prompt = buildInboxProcessPrompt({
+          entries: selectedEntries,
+          config: inboxRuntimeConfig,
+          channels,
+          reviewFlow,
+        });
+        const context: SkillContextItem[] = selectedEntries.map((entry) => ({
+          path: entry.kind === "pendingItem" ? entry.manifestPath ?? entry.path : entry.path,
+          kind: entry.kind === "pendingItem" ? "manifest" : "file",
+        }));
+        const inputPaths = context.map((item) => item.path);
+        const invocationId = await skillsDispatchBackground({
+          skillId: processSkill.id,
+          runtime,
+          prompt,
+          cwd: inboxWorkspacePath,
+          context,
+          commandOverride,
+          permissionMode: anchorSettings.ai.permissionMode,
+          metadata: {
+            origin: "inboxProcess",
+            channel: channels[0] ?? "incoming",
+            channels,
+            reviewFlow,
+            inputPaths,
+            workspacePath: inboxWorkspacePath,
+            skillName: "inbox-process",
             runtime,
-            prompt,
-            cwd: inboxWorkspacePath,
-            context,
-            commandOverride,
-            permissionMode: anchorSettings.ai.permissionMode,
-            metadata: {
-              origin: "inboxProcess",
-              channel,
-              inputPaths,
-              workspacePath: inboxWorkspacePath,
-              skillName: "inbox-process",
-              runtime,
-            },
-          });
-          processingMissionIdsRef.current = new Set([
-            ...processingMissionIdsRef.current,
-            invocationId,
-          ]);
-          setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
-        }
+          },
+        });
+        processingMissionIdsRef.current = new Set([
+          ...processingMissionIdsRef.current,
+          invocationId,
+        ]);
+        setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
         void refreshProcessingMissions();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -6360,7 +6360,7 @@ function MainApp() {
             processedStatusFilter={processedStatusFilter}
             processedQuery={processedQuery}
             processedDetail={processedDetail}
-            processingMissions={activeInboxProcessMissions(processingMissions)}
+            processingMissions={inboxProcessMissions(processingMissions)}
             processingLogLines={processingLogLines}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
@@ -6389,6 +6389,13 @@ function MainApp() {
             }}
             onTrashItems={(targets) => void trashInboxTargets(targets)}
             onStopProcessingMission={(id) => void stopProcessingMission(id)}
+            workPath={inboxWorkspacePath}
+            onConfirmApproval={approvalGate.confirmApproval}
+            onProcessApplied={() => {
+              void refreshProcessedItems();
+              void refreshInbox();
+            }}
+            onProcessError={setError}
           />
         ) : visibleAppMode === "comms" ? (
           <CommsPane
@@ -6409,7 +6416,7 @@ function MainApp() {
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onSourceFilter={setCommsSourceFilter}
-            onProcessNow={(channel) => void processInboxKeys([], channel)}
+            onProcessNow={(channel) => void processInboxKeys([], channel, false)}
             onRefresh={refreshActiveSurface}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}

@@ -81,7 +81,7 @@ use git::{
 use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
-    accept_inbox_item, accept_inbox_items, count_inbox_processed_by_channel,
+    accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
     read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
     scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items, stage_inbox_drop_files,
     trash_inbox_items,
@@ -205,6 +205,7 @@ pub fn run() {
             stage_inbox_drop_files,
             accept_inbox_item,
             accept_inbox_items,
+            apply_inbox_decisions,
             reject_inbox_item,
             reject_inbox_items,
             start_inbox_watcher,

@@ -46,6 +46,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   InboxAcceptRequest,
+  InboxApplyDecision,
   InboxClassification,
   InboxDecisionOutcome,
   InboxDropItem,
@@ -570,6 +571,31 @@ export async function acceptInboxItems(
     }));
   }
   return invoke<InboxDecisionOutcome[]>("accept_inbox_items", { vaultPath, items, approvalId });
+}
+
+export async function applyInboxDecisions(
+  workPath: string,
+  decisions: InboxApplyDecision[],
+  approvalId: string,
+): Promise<InboxDecisionOutcome[]> {
+  if (!isTauri()) {
+    return decisions.map((decision) => {
+      const name = decision.itemDir.split("/").pop() ?? "item";
+      const accepted = decision.decision === "accept";
+      return {
+        id: decision.itemDir,
+        decision: accepted ? "accepted" : "rejected",
+        sourcePath: decision.itemDir,
+        targetPath: accepted
+          ? `${decision.destination ?? "inbox/items/done"}/${name}`
+          : `inbox/rejected/${name}`,
+        fileName: name,
+        ok: true,
+        error: null,
+      };
+    });
+  }
+  return invoke<InboxDecisionOutcome[]>("apply_inbox_decisions", { workPath, decisions, approvalId });
 }
 
 export async function rejectInboxItem(

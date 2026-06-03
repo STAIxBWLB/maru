@@ -44,7 +44,7 @@ import type {
 } from "../lib/types";
 import { BulkActionBar } from "./BulkActionBar";
 import { ProcessedItemsBrowser } from "./inbox/ProcessedItemsBrowser";
-import { ProcessingMissionsPanel } from "./inbox/ProcessingMissionsPanel";
+import { InboxRunsPanel } from "./inbox/InboxRunsPanel";
 import { formatBytes } from "./inbox/processedFormat";
 
 interface InboxPaneProps {
@@ -80,6 +80,15 @@ interface InboxPaneProps {
   onRevealPath: (path: string) => void;
   onTrashItems: (targets: InboxTrashTarget[]) => void | Promise<void>;
   onStopProcessingMission: (id: string) => void | Promise<void>;
+  workPath: string | null;
+  onConfirmApproval: (input: {
+    kind: string;
+    summary: string;
+    target?: string | null;
+    payloadPreview?: string | null;
+  }) => Promise<string | null>;
+  onProcessApplied: () => void;
+  onProcessError: (message: string | null) => void;
 }
 
 type InboxRow =
@@ -127,6 +136,10 @@ export function InboxPane({
   onRevealPath,
   onTrashItems,
   onStopProcessingMission,
+  workPath,
+  onConfirmApproval,
+  onProcessApplied,
+  onProcessError,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
   const paneRef = useRef<HTMLElement | null>(null);
@@ -586,10 +599,15 @@ export function InboxPane({
         </InboxSection>
 
         <InboxSection title="PROCESSING">
-          <ProcessingMissionsPanel
+          <InboxRunsPanel
+            workPath={workPath}
             missions={processingMissions}
             logLines={processingLogLines}
-            onStop={onStopProcessingMission}
+            onStopMission={(id) => void onStopProcessingMission(id)}
+            onRefreshMissions={onRefresh}
+            onConfirmApproval={onConfirmApproval}
+            onApplied={onProcessApplied}
+            onError={onProcessError}
           />
         </InboxSection>
 

@@ -132,8 +132,13 @@ describe("activeMeetingsMissions", () => {
         ...mission("e", "other"),
         metadata: { reviewFlow: true, skillName: "task-management" },
       },
+      {
+        ...mission("f", "other"),
+        metadata: { origin: "inboxProcess", reviewFlow: true },
+      },
     ];
 
+    // "f" is an inbox-process review-flow run — it must not leak into meetings.
     expect(activeMeetingsMissions(missions).map((item) => item.id)).toEqual(["e", "d", "c", "a"]);
   });
 });
