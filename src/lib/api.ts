@@ -29,6 +29,9 @@ import type {
   FileQueueSourceInfo,
   FileStoreOperation,
   GitFileChange,
+  GitSyncCommitPushResult,
+  GitSyncPullResult,
+  GitSyncScanResult,
   GitStatus,
   GmailMessage,
   GmailDecisionOutcome,
@@ -790,6 +793,64 @@ export async function gitCommit(
     return { isRepo: false, modified: 0, staged: 0, untracked: 0, untrackedKnown: true, clean: true, branch: null };
   }
   return invoke<GitStatus>("git_commit", { vaultPath, message, paths: paths ?? null });
+}
+
+export async function gitGenerateCommitMessage(
+  vaultPath: string,
+  paths: string[],
+  runtime: AgentProvider,
+  commandOverride?: string | null,
+): Promise<string> {
+  if (!isTauri()) return "chore(workspace): update selected changes";
+  return invoke<string>("git_generate_commit_message", {
+    vaultPath,
+    paths,
+    runtime,
+    commandOverride: commandOverride ?? null,
+  });
+}
+
+export async function gitSyncScan(
+  vaultPath: string,
+  includeExcluded = false,
+): Promise<GitSyncScanResult> {
+  if (!isTauri()) {
+    return { syncRoot: vaultPath, confirmBeforeCommit: true, repos: [], excluded: [] };
+  }
+  return invoke<GitSyncScanResult>("git_sync_scan", {
+    vaultPath,
+    includeExcluded,
+  });
+}
+
+export async function gitSyncPullRebase(repoPath: string): Promise<GitSyncPullResult> {
+  if (!isTauri()) {
+    return { repoPath, stashed: false, stdout: "", stderr: "" };
+  }
+  return invoke<GitSyncPullResult>("git_sync_pull_rebase", { repoPath });
+}
+
+export async function gitSyncCommitPush(params: {
+  repoPath: string;
+  message: string;
+  paths?: string[] | null;
+  approvalId: string;
+}): Promise<GitSyncCommitPushResult> {
+  if (!isTauri()) {
+    return {
+      repoPath: params.repoPath,
+      committed: true,
+      pushed: true,
+      commitStdout: "",
+      pushStdout: "",
+    };
+  }
+  return invoke<GitSyncCommitPushResult>("git_sync_commit_push", {
+    repoPath: params.repoPath,
+    message: params.message,
+    paths: params.paths ?? null,
+    approvalId: params.approvalId,
+  });
 }
 
 export async function gitChanges(vaultPath: string): Promise<GitFileChange[]> {

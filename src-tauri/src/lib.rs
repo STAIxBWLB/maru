@@ -74,7 +74,10 @@ use export::{
     export_record_pending, export_record_success, export_validate,
 };
 use file_manager::reveal_in_file_manager;
-use git::{git_changes, git_commit, git_diff, git_status, git_status_fast};
+use git::{
+    git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
+    git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
+};
 use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
@@ -185,6 +188,10 @@ pub fn run() {
             git_status,
             git_status_fast,
             git_commit,
+            git_generate_commit_message,
+            git_sync_scan,
+            git_sync_pull_rebase,
+            git_sync_commit_push,
             git_changes,
             git_diff,
             reveal_in_file_manager,

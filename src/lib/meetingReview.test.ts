@@ -42,6 +42,65 @@ logs
     expect(artifact?.followups[0].skill).toBe("vault-extract");
   });
 
+  it("prefers the final review artifact over a skill-body schema example", () => {
+    const artifact = parseMeetingReviewArtifact(`
+\`\`\`json
+{
+  "schemaVersion": "${MEETING_REVIEW_SCHEMA_VERSION}",
+  "summary": "short review summary",
+  "terms": [
+    { "label": "source term", "normalized": "workspace term", "note": "why", "required": true }
+  ],
+  "people": [
+    { "label": "source person", "normalized": "canonical person", "note": "role", "required": true }
+  ],
+  "properNouns": [
+    { "label": "source name", "normalized": "canonical name", "note": "context", "required": true }
+  ],
+  "uncertainties": [
+    { "label": "uncertain item", "normalized": "best guess", "note": "needs user check", "required": true }
+  ],
+  "followups": [
+    { "skill": "task-management", "title": "Create task from action item", "prompt": "proposal-only follow-up prompt", "reason": "why this is useful" }
+  ]
+}
+\`\`\`
+
+[phase:review] Proposal and review ready.
+\`\`\`json
+{
+  "schemaVersion": "${MEETING_REVIEW_SCHEMA_VERSION}",
+  "summary": "actual review",
+  "terms": [
+    { "label": "AI-900", "normalized": "Microsoft Azure AI-900", "note": "certification context", "required": true }
+  ],
+  "people": [
+    { "label": "Rose", "normalized": "서현영 (Rose Seo)", "note": "resolved instructor", "required": true }
+  ],
+  "properNouns": [
+    { "label": "KOICA", "normalized": "Korea International Cooperation Agency", "note": "project org", "required": true }
+  ],
+  "uncertainties": [
+    { "label": "Venue", "normalized": "미상", "note": "missing in source", "required": true }
+  ],
+  "followups": [
+    { "skill": "vault-extract", "title": "Extract AI-900 patterns", "prompt": "Extract", "reason": "Reusable" }
+  ]
+}
+\`\`\`
+`);
+
+    expect(artifact?.summary).toBe("actual review");
+    expect(artifact?.terms[0]).toMatchObject({
+      label: "AI-900",
+      normalized: "Microsoft Azure AI-900",
+    });
+    expect(artifact?.people[0].label).toBe("Rose");
+    expect(artifact?.properNouns[0].label).toBe("KOICA");
+    expect(artifact?.uncertainties[0].label).toBe("Venue");
+    expect(artifact?.followups[0].skill).toBe("vault-extract");
+  });
+
   it("returns null for malformed or missing review artifacts", () => {
     expect(parseMeetingReviewArtifact("no json here")).toBeNull();
     expect(parseMeetingReviewArtifact("```json\n{\"schemaVersion\":\"other\"}\n```")).toBeNull();

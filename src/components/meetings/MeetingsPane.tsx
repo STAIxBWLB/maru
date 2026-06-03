@@ -81,12 +81,17 @@ import {
   rowsToMeetingEntries,
   type MeetingNoteEntry,
 } from "../../lib/meetings";
+import {
+  buildMeetingNotesPrompt,
+  type MeetingSourceKind,
+} from "../../lib/meetingNotesPrompt";
 import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedMeetingEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView as UnifiedCalendarViewMode } from "../../lib/calendar/types";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import type { DocumentLabelMode, MeetingsSettings } from "../../lib/settings";
 import {
+  SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
   agentApplySkillProposal,
   agentParseSkillProposal,
   agentReadRunEvents,
@@ -144,6 +149,9 @@ interface MeetingsPaneProps {
   }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   onError: (message: string | null) => void;
+  /** When set, the pane switches to this view once and calls onViewConsumed. */
+  requestedView?: MeetingsView | null;
+  onViewConsumed?: () => void;
 }
 
 export function MeetingsPane({
@@ -164,6 +172,8 @@ export function MeetingsPane({
   onConfirmApproval,
   onRevealPath,
   onError,
+  requestedView,
+  onViewConsumed,
 }: MeetingsPaneProps) {
   const { t, locale } = useTranslation();
   const [view, setView] = useState<MeetingsView>("all");
@@ -400,19 +410,21 @@ export function MeetingsPane({
     };
   }, [onError, selectedEntry, workPath]);
 
+  // "New meeting note" leads into the dedicated Transcript workbench (paste /
+  // file input → tracked run → review → followups) instead of a generic
+  // terminal free-run. The External tab is one click away for auto-organized
+  // notes.
   const openNewMeeting = useCallback(() => {
-    const skill = findSkill(skills, "meeting-notes");
-    onOpenSkillCompose(
-      skill,
-      [],
-      [
-        "Create a new meeting note.",
-        `Root: ${effectiveSettings.root ?? "meetings"}`,
-        `Filename template: ${effectiveSettings.filenameTemplate}`,
-        "Use the workspace meeting-note conventions and ask only if essential details are missing.",
-      ].join("\n"),
-    );
-  }, [effectiveSettings.filenameTemplate, effectiveSettings.root, onOpenSkillCompose, skills]);
+    setView("transcript");
+  }, []);
+
+  // Honor an external view request (e.g. the Apply-skill dialog nudge routing
+  // the user to the meeting-notes workbench).
+  useEffect(() => {
+    if (!requestedView) return;
+    setView(requestedView);
+    onViewConsumed?.();
+  }, [requestedView, onViewConsumed]);
 
   return (
     <section className="meetings-pane">
@@ -591,14 +603,50 @@ function MeetingsSidebar({
   const { t } = useTranslation();
   const monthCount = entries.filter((entry) => entry.date.startsWith(monthKey)).length;
   const dateCount = entries.filter((entry) => entry.date === lookupDate).length;
-  const items: Array<{ id: MeetingsView; label: string; count?: number; icon: ReactNode }> = [
+  type SidebarItem = {
+    id: MeetingsView;
+    label: string;
+    hint?: string;
+    count?: number;
+    icon: ReactNode;
+  };
+  // The two source flows lead — they are how a transcript / auto-organized note
+  // becomes a tracked, reviewable meeting note.
+  const createItems: SidebarItem[] = [
+    {
+      id: "transcript",
+      label: t("meetings.sidebar.transcript"),
+      hint: t("meetings.sidebar.transcriptHint"),
+      icon: <FileText size={15} />,
+    },
+    {
+      id: "external",
+      label: t("meetings.sidebar.external"),
+      hint: t("meetings.sidebar.externalHint"),
+      icon: <WandSparkles size={15} />,
+    },
+  ];
+  const browseItems: SidebarItem[] = [
     { id: "all", label: t("meetings.sidebar.all"), count: entries.length, icon: <List size={15} /> },
     { id: "month", label: t("meetings.sidebar.month"), count: monthCount, icon: <CalendarIcon size={15} /> },
-    { id: "transcript", label: t("meetings.sidebar.transcript"), icon: <FileText size={15} /> },
-    { id: "external", label: t("meetings.sidebar.external"), icon: <WandSparkles size={15} /> },
     { id: "date", label: t("meetings.sidebar.date"), count: dateCount, icon: <Search size={15} /> },
     { id: "activity", label: t("meetings.sidebar.activity"), icon: <History size={15} /> },
   ];
+  const renderItem = (item: SidebarItem) => (
+    <button
+      key={item.id}
+      type="button"
+      className={view === item.id ? "meetings-sidebar-item active" : "meetings-sidebar-item"}
+      onClick={() => onView(item.id)}
+    >
+      {item.icon}
+      <span className="meetings-sidebar-item-label">
+        <span>{item.label}</span>
+        {item.hint ? <small>{item.hint}</small> : null}
+      </span>
+      {typeof item.count === "number" ? <strong>{item.count}</strong> : null}
+    </button>
+  );
   return (
     <aside className="meetings-sidebar">
       <div className="meetings-sidebar-head">
@@ -606,18 +654,10 @@ function MeetingsSidebar({
         <span>{t("meetings.subtitle", { count: entries.length })}</span>
       </div>
       <div className="meetings-sidebar-list">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={view === item.id ? "meetings-sidebar-item active" : "meetings-sidebar-item"}
-            onClick={() => onView(item.id)}
-          >
-            {item.icon}
-            <span>{item.label}</span>
-            {typeof item.count === "number" ? <strong>{item.count}</strong> : null}
-          </button>
-        ))}
+        <span className="meetings-sidebar-caption">{t("meetings.sidebar.createGroup")}</span>
+        {createItems.map(renderItem)}
+        <span className="meetings-sidebar-caption">{t("meetings.sidebar.browseGroup")}</span>
+        {browseItems.map(renderItem)}
       </div>
     </aside>
   );
@@ -1179,8 +1219,6 @@ function MeetingsExternalFlow({
   );
 }
 
-type MeetingSourceKind = "transcript" | "external";
-
 interface MeetingReviewBundle {
   runId: string;
   mission: MissionRecord;
@@ -1499,7 +1537,7 @@ function MeetingsSkillWorkbench({
       : null;
     const selectedFollowupItems = bundle.followups.filter((item) => item.selected);
     const approvalId = await onConfirmApproval({
-      kind: "meetings.proposal.apply",
+      kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
       summary: t("meetings.review.applySummaryDetailed", {
         files: proposal?.files.length ?? 0,
         followups: selectedFollowups + (continuationActive ? 1 : 0),
@@ -1693,6 +1731,15 @@ function MeetingsSkillWorkbench({
               checks: current.checks.map((check) => check.id === id ? { ...check, ...patch } : check),
             } : current);
           }}
+          onUpdateChecks={(ids, patch) => {
+            const targetIds = new Set(ids);
+            setBundle((current) => current ? {
+              ...current,
+              checks: current.checks.map((check) =>
+                targetIds.has(check.id) ? { ...check, ...patch } : check,
+              ),
+            } : current);
+          }}
           onToggleFollowup={(id) => {
             setBundle((current) => current ? {
               ...current,
@@ -1792,6 +1839,7 @@ function MeetingReviewPanel({
   onDismissApplyResult,
   onUpdateFile,
   onUpdateCheck,
+  onUpdateChecks,
   onToggleFollowup,
   onToggleContinuation,
 }: {
@@ -1807,6 +1855,7 @@ function MeetingReviewPanel({
   onDismissApplyResult: () => void;
   onUpdateFile: (id: string, patch: Partial<MeetingProposalFileDraft>) => void;
   onUpdateCheck: (id: string, patch: Partial<MeetingReviewCheck>) => void;
+  onUpdateChecks: (ids: string[], patch: Partial<MeetingReviewCheck>) => void;
   onToggleFollowup: (id: string) => void;
   onToggleContinuation: () => void;
 }) {
@@ -1958,7 +2007,35 @@ function MeetingReviewPanel({
           </div>
 
           <div className="meetings-confirmation-panel">
-            <h3>{t("meetings.review.confirmTitle")}</h3>
+            <div className="meetings-confirmation-heading">
+              <h3>{t("meetings.review.confirmTitle")}</h3>
+              {bundle.checks.length > 0 ? (
+                <div
+                  className="meetings-check-bulk-actions"
+                  role="group"
+                  aria-label={t("meetings.review.bulkActions")}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onUpdateChecks(
+                      bundle.checks.map((check) => check.id),
+                      { status: "accepted" },
+                    )}
+                  >
+                    {t("meetings.review.acceptAll")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateChecks(
+                      bundle.checks.map((check) => check.id),
+                      { status: "rejected" },
+                    )}
+                  >
+                    {t("meetings.review.excludeAll")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             {bundle.checks.length === 0 ? (
               <div className="meetings-review-empty compact">
                 <CheckCircle2 size={15} />
@@ -1968,13 +2045,39 @@ function MeetingReviewPanel({
             {checkGroups.map(([kind, checks]) => (
               <section className="meetings-check-group" key={kind}>
                 <header>
-                  <strong>
-                    <CheckKindIcon kind={kind} />
-                    {t(`meetings.review.kind.${kind}`)}
-                  </strong>
-                  <span>{t("meetings.review.pending", {
-                    count: checks.filter((check) => check.required && check.status === "pending").length,
-                  })}</span>
+                  <div className="meetings-check-group-title">
+                    <strong>
+                      <CheckKindIcon kind={kind} />
+                      {t(`meetings.review.kind.${kind}`)}
+                    </strong>
+                    <span>{t("meetings.review.pending", {
+                      count: checks.filter((check) => check.required && check.status === "pending").length,
+                    })}</span>
+                  </div>
+                  <div
+                    className="meetings-check-bulk-actions compact"
+                    role="group"
+                    aria-label={t("meetings.review.bulkActions")}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChecks(
+                        checks.map((check) => check.id),
+                        { status: "accepted" },
+                      )}
+                    >
+                      {t("meetings.review.acceptGroup")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChecks(
+                        checks.map((check) => check.id),
+                        { status: "rejected" },
+                      )}
+                    >
+                      {t("meetings.review.excludeGroup")}
+                    </button>
+                  </div>
                 </header>
                 {checks.map((check) => (
                   <article
@@ -2077,6 +2180,11 @@ function MeetingReviewPanel({
             <span>
               {pendingRequired > 0
                 ? t("meetings.review.applyBlocked", { count: pendingRequired })
+                : applyBusy
+                  ? t("meetings.review.applyingDetailed", {
+                    files: selectedFiles,
+                    followups: selectedFollowups + (continuationAvailable && continuationSelected ? 1 : 0),
+                  })
                 : applied
                   ? applyResult
                     ? t("meetings.review.applyDoneDetailed", {
@@ -2094,11 +2202,15 @@ function MeetingReviewPanel({
               className="primary-button"
               disabled={!canApply}
               aria-disabled={!canApply}
-              data-state={applied ? "applied" : canApply ? "ready" : "pending"}
+              data-state={applyBusy ? "applying" : applied ? "applied" : canApply ? "ready" : "pending"}
               onClick={onApply}
             >
               {applyBusy ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
-              {applied ? t("meetings.review.applied") : t("meetings.review.apply")}
+              {applyBusy
+                ? t("meetings.review.applying")
+                : applied
+                  ? t("meetings.review.applied")
+                  : t("meetings.review.apply")}
             </button>
           </div>
         </>
@@ -2575,66 +2687,6 @@ function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
     skills.find((skill) => skill.id === name || skill.id.endsWith(`:${name}`)) ??
     null
   );
-}
-
-function formatGuide(label: string, content: string | null): string | null {
-  return content ? `${label}:\n${content}` : null;
-}
-
-function buildMeetingNotesPrompt({
-  sourceKind,
-  settings,
-  type,
-  topic,
-  detail,
-  note,
-  guides,
-}: {
-  sourceKind: MeetingSourceKind;
-  settings: MeetingsSettings;
-  type: string;
-  topic: string;
-  detail: string;
-  note: string;
-  guides: Awaited<ReturnType<typeof readMeetingGuides>> | null;
-}): string {
-  const action = sourceKind === "transcript"
-    ? "Convert the pasted transcript text and/or selected transcript file(s) into a polished meeting note."
-    : "Refine the external note into the workspace meeting-note standard.";
-  const missingHints = [
-    topic.trim() ? null : "topic",
-    detail.trim() ? null : "detail",
-  ].filter(Boolean).join(" and ");
-  return [
-    action,
-    "",
-    "Run contract:",
-    "- Do not directly write files.",
-    "- Emit concise human-readable progress logs while working.",
-    "- Prefix major progress logs with phase markers: [phase:source], [phase:normalize], [phase:draft], [phase:proposal], [phase:review].",
-    "- Final output must include exactly one JSON object with schemaVersion \"anchor_skill_proposal_v1\".",
-    "- Final output must include exactly one JSON object with schemaVersion \"anchor_meeting_review_v1\".",
-    "- The review JSON must include summary, terms, people, properNouns, uncertainties, and followups.",
-    "- Followups may include only vault-extract, vault-connect, and task-management.",
-    "",
-    `Root: ${settings.root ?? "meetings"}`,
-    `Filename template: ${settings.filenameTemplate}`,
-    `Type: ${type}`,
-    topic.trim() ? `Topic: ${topic.trim()}` : null,
-    detail.trim() ? `Detail: ${detail.trim()}` : null,
-    missingHints
-      ? `Infer only the missing ${missingHints} from the transcript or note body; preserve any provided hint.`
-      : null,
-    "Use the six-section meeting note structure, normalized tags, and wiki-link conventions.",
-    guides ? formatGuide("QUICK_START", guides.quickStart) : null,
-    guides ? formatGuide("GLOSSARY", guides.glossary) : null,
-    guides ? formatGuide("PEOPLE", guides.people) : null,
-    guides ? formatGuide("TAG_STANDARDS", guides.tagStandards) : null,
-    guides ? formatGuide("NOTES_GUIDELINES", guides.notesGuidelines) : null,
-    note.trim()
-      ? `${sourceKind === "transcript" ? "TRANSCRIPT_TEXT" : "EXTERNAL_NOTE"}:\n${note.trim()}`
-      : null,
-  ].filter(Boolean).join("\n\n");
 }
 
 async function parseProposalFallback(raw: string): Promise<SkillProposal | null> {

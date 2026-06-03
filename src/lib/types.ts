@@ -127,6 +127,47 @@ export interface GitFileChange {
   untracked: boolean;
 }
 
+export interface GitSyncExcludedPath {
+  path: string;
+  reason: string;
+}
+
+export interface GitSyncRepo {
+  path: string;
+  relPath: string;
+  branch: string | null;
+  status: string;
+  changes: number;
+  paths: string[];
+  clean: boolean;
+  excluded: boolean;
+  exclusionReason: string | null;
+  isRoot: boolean;
+  depth: number;
+}
+
+export interface GitSyncScanResult {
+  syncRoot: string;
+  confirmBeforeCommit: boolean;
+  repos: GitSyncRepo[];
+  excluded: GitSyncExcludedPath[];
+}
+
+export interface GitSyncPullResult {
+  repoPath: string;
+  stashed: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+export interface GitSyncCommitPushResult {
+  repoPath: string;
+  committed: boolean;
+  pushed: boolean;
+  commitStdout: string;
+  pushStdout: string;
+}
+
 export interface InboxDropItem {
   id: string;
   path: string;

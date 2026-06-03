@@ -10,6 +10,8 @@ declare global {
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
+export const SKILL_PROPOSAL_APPLY_APPROVAL_KIND = "agent.proposal.apply";
+
 const MOCK_BUILTIN_SKILLS = [
   "meeting-notes",
   "vault-extract",

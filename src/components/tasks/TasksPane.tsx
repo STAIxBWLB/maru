@@ -24,10 +24,17 @@ import {
 import { useTranslation } from "../../lib/i18n";
 import type { DocumentLabelMode, TasksSettings } from "../../lib/settings";
 import { resolveDisplayLabel } from "../../lib/document";
-import type { SkillContextItem, SkillRecord } from "../../lib/skills";
+import {
+  skillsDispatchBackground,
+  skillsRuntimeStatus,
+  type SkillContextItem,
+  type SkillDispatchRuntime,
+  type SkillRecord,
+} from "../../lib/skills";
 import {
   activeTasksMissions,
   buildTaskManagementSchedulePrompt,
+  buildTaskManagementSyncPrompt,
   filterTasksByQuery,
   groupTasksByStatus,
   rowsToTaskEntries,
@@ -47,6 +54,7 @@ import { Button } from "../ui/Button";
 import { NaturalScheduleDialog } from "./NaturalScheduleDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
+import { TasksRunsPanel } from "./TasksRunsPanel";
 import { TasksSidebar, type TasksFilterView } from "./TasksSidebar";
 import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedTaskEvents } from "../../lib/calendar/fromEntries";
@@ -58,6 +66,9 @@ interface TasksPaneProps {
   effectiveSettings: TasksSettings;
   labelMode: DocumentLabelMode;
   skills: SkillRecord[];
+  runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  permissionMode?: string | null;
+  defaultRuntime?: SkillDispatchRuntime;
   processingMissions: MissionRecord[];
   processingLogLines: Record<string, string[]>;
   onRefreshMissions: () => void;
@@ -69,6 +80,14 @@ interface TasksPaneProps {
     cwd?: string | null,
     onDispatched?: () => void | Promise<void>,
   ) => void;
+  onMissionStarted: (invocationId: string) => void;
+  onStopMission: (id: string) => void;
+  onConfirmApproval: (input: {
+    kind: string;
+    summary: string;
+    target?: string | null;
+    payloadPreview?: string | null;
+  }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   onError: (message: string | null) => void;
 }
@@ -82,11 +101,17 @@ export function TasksPane({
   effectiveSettings,
   labelMode,
   skills,
+  runtimeCommands,
+  permissionMode,
+  defaultRuntime,
   processingMissions,
   processingLogLines,
   onRefreshMissions,
   onOpenSettings,
   onOpenSkillCompose,
+  onMissionStarted,
+  onStopMission,
+  onConfirmApproval,
   onRevealPath,
   onError,
 }: TasksPaneProps) {
@@ -158,6 +183,22 @@ export function TasksPane({
     () => activeTasksMissions(processingMissions),
     [processingMissions],
   );
+  const [localRuns, setLocalRuns] = useState<MissionRecord[]>([]);
+  const [section, setSection] = useState<"tasks" | "progress">("tasks");
+  const mergedMissions = useMemo(
+    () => mergeTaskMissions(tasksMissions, localRuns),
+    [tasksMissions, localRuns],
+  );
+  const progressCount = useMemo(
+    () => mergedMissions.filter((mission) => mission.status === "running" || mission.status === "idle").length,
+    [mergedMissions],
+  );
+
+  useEffect(() => {
+    if (tasksMissions.length === 0) return;
+    const ids = new Set(tasksMissions.map((mission) => mission.id));
+    setLocalRuns((current) => current.filter((mission) => !ids.has(mission.id)));
+  }, [tasksMissions]);
 
   useEffect(() => {
     if (!workPath) {
@@ -271,47 +312,104 @@ export function TasksPane({
     }
   };
 
-  const openSyncSkill = async () => {
-    const skill = findSkill(skills, "task-management");
-    const context = selectedEntry ? [{ path: selectedEntry.absPath, kind: "document" }] : [];
+  const resolveRuntime = useCallback(async (): Promise<SkillDispatchRuntime | null> => {
+    const preferred: SkillDispatchRuntime = defaultRuntime ?? "claude";
+    const order: SkillDispatchRuntime[] = preferred === "codex" ? ["codex", "claude"] : ["claude", "codex"];
+    for (const runtime of order) {
+      try {
+        const status = await skillsRuntimeStatus({ runtime, commandOverride: runtimeCommands[runtime] ?? null });
+        if (status.available) return runtime;
+      } catch {
+        // Try the next runtime.
+      }
+    }
+    return null;
+  }, [defaultRuntime, runtimeCommands]);
+
+  // Schedule-from-text and Sync now run as tracked, reviewable missions (mirror
+  // of meeting-notes): a proposal-first background run that surfaces in the
+  // tasks runs panel with diff review + confirm checks + followups.
+  const dispatchTaskSkill = useCallback(
+    async (mode: "schedule" | "sync", prompt: string, contextPaths: string[]) => {
+      if (!workPath) return;
+      const skill = findSkill(skills, "task-management");
+      if (!skill) {
+        onError(t("tasks.error.skillMissing", { skill: "task-management" }));
+        return;
+      }
+      const runtime = await resolveRuntime();
+      if (!runtime) {
+        onError(t("tasks.error.runtimeUnavailable"));
+        return;
+      }
+      onError(null);
+      try {
+        const origin = mode === "sync" ? "taskManagementSync" : "taskManagementSchedule";
+        const invocationId = await skillsDispatchBackground({
+          skillId: skill.id,
+          runtime,
+          cwd: workPath,
+          prompt,
+          context: contextPaths.map((path) => ({ path, kind: "file" as const })),
+          commandOverride: runtimeCommands[runtime] ?? null,
+          permissionMode: permissionMode ?? null,
+          metadata: {
+            origin,
+            runtime,
+            reviewFlow: true,
+            inputPaths: contextPaths,
+            workspacePath: workPath,
+            skillName: "task-management",
+          },
+        });
+        setLocalRuns((current) => [
+          createOptimisticTaskMission({ id: invocationId, runtime, origin, inputPaths: contextPaths }),
+          ...current.filter((mission) => mission.id !== invocationId),
+        ]);
+        onMissionStarted(invocationId);
+        onRefreshMissions();
+        if (effectiveSettings.hooks.appendVaultLog) {
+          await appendTasksLog(
+            workPath,
+            `- ${new Date().toISOString()} [${mode === "sync" ? "sync" : "natural-schedule"}] ${JSON.stringify({
+              skill: "task-management",
+              runId: invocationId,
+            })}`,
+          ).catch(() => {});
+        }
+      } catch (err) {
+        onError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [
+      workPath,
+      skills,
+      resolveRuntime,
+      runtimeCommands,
+      permissionMode,
+      onMissionStarted,
+      onRefreshMissions,
+      effectiveSettings.hooks.appendVaultLog,
+      onError,
+      t,
+    ],
+  );
+
+  const openSyncSkill = useCallback(async () => {
     const target = selectedEntry?.relPath ?? effectiveSettings.root ?? "tasks";
-    onOpenSkillCompose(
-      skill,
-      context,
-      `Sync local markdown tasks with the configured task-management workflow for ${target}.`,
-      workPath,
-      taskLogCallback("sync", { skill: "task-management", target }),
+    await dispatchTaskSkill(
+      "sync",
+      buildTaskManagementSyncPrompt(target, effectiveSettings),
+      selectedEntry ? [selectedEntry.absPath] : [],
     );
-  };
+  }, [dispatchTaskSkill, effectiveSettings, selectedEntry]);
 
-  const openNaturalScheduleSkill = async (rawText: string) => {
-    const skill = findSkill(skills, "task-management");
-    const root = effectiveSettings.root ?? "tasks";
-    onOpenSkillCompose(
-      skill,
-      [],
-      buildTaskManagementSchedulePrompt(rawText, effectiveSettings),
-      workPath,
-      taskLogCallback("natural-schedule", {
-        skill: "task-management",
-        target: root,
-        textLength: rawText.trim().length,
-      }),
-    );
-  };
-
-  const taskLogCallback = (
-    event: "sync" | "natural-schedule",
-    payload: Record<string, string | number>,
-  ) => {
-    if (!workPath || !effectiveSettings.hooks.appendVaultLog) return undefined;
-    return async () => {
-      await appendTasksLog(
-        workPath,
-        `- ${new Date().toISOString()} [${event}] ${JSON.stringify(payload)}`,
-      ).catch((err) => onError(err instanceof Error ? err.message : String(err)));
-    };
-  };
+  const openNaturalScheduleSkill = useCallback(
+    async (rawText: string) => {
+      await dispatchTaskSkill("schedule", buildTaskManagementSchedulePrompt(rawText, effectiveSettings), []);
+    },
+    [dispatchTaskSkill, effectiveSettings],
+  );
 
   if (!workPath) {
     return (
@@ -325,34 +423,53 @@ export function TasksPane({
   }
 
   return (
-    <main className={detailsOpen ? "tasks-pane" : "tasks-pane details-collapsed"}>
+    <main
+      className={
+        section === "progress"
+          ? "tasks-pane tasks-pane-progress"
+          : detailsOpen
+            ? "tasks-pane"
+            : "tasks-pane details-collapsed"
+      }
+    >
       <TasksSidebar
         entries={entries}
         activeView={view}
         selectedProject={projectFilter}
-        onViewChange={setView}
-        onProjectChange={setProjectFilter}
+        activeSection={section}
+        progressCount={progressCount}
+        onViewChange={(next) => {
+          setView(next);
+          setSection("tasks");
+        }}
+        onProjectChange={(next) => {
+          setProjectFilter(next);
+          setSection("tasks");
+        }}
+        onSectionChange={setSection}
         today={today}
       />
-      <section className="tasks-main">
+      <section className={section === "progress" ? "tasks-main tasks-main-progress" : "tasks-main"}>
         <header className="tasks-header">
           <div>
             <h2>{t("tasks.title")}</h2>
             <p className="muted">{t("tasks.subtitle")}</p>
           </div>
-          <div className="tasks-view-switcher" role="group" aria-label={t("tasks.display.view")}>
-            {viewButtons.map((mode) => (
-              <button
-                type="button"
-                key={mode}
-                className={displayView === mode ? "active" : ""}
-                onClick={() => setDisplayView(mode)}
-              >
-                {mode === "list" ? <List size={14} /> : <Calendar size={14} />}
-                {t(displayViewLabel(mode))}
-              </button>
-            ))}
-          </div>
+          {section === "tasks" ? (
+            <div className="tasks-view-switcher" role="group" aria-label={t("tasks.display.view")}>
+              {viewButtons.map((mode) => (
+                <button
+                  type="button"
+                  key={mode}
+                  className={displayView === mode ? "active" : ""}
+                  onClick={() => setDisplayView(mode)}
+                >
+                  {mode === "list" ? <List size={14} /> : <Calendar size={14} />}
+                  {t(displayViewLabel(mode))}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="tasks-header-actions">
             <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => setNewTaskOpen(true)}>
               {t("tasks.actions.new")}
@@ -371,94 +488,101 @@ export function TasksPane({
             </Button>
           </div>
         </header>
-        <div className="tasks-toolbar">
-          <label className="tasks-search">
-            <Search size={14} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("tasks.search")}
+        {section === "progress" ? (
+          <div className="tasks-progress-view">
+            <TasksRunsPanel
+              workPath={workPath}
+              skills={skills}
+              runtimeCommands={runtimeCommands}
+              permissionMode={permissionMode}
+              appendAuditLog={effectiveSettings.hooks.appendVaultLog}
+              missions={mergedMissions}
+              logLines={processingLogLines}
+              onMissionStarted={onMissionStarted}
+              onStopMission={onStopMission}
+              onRefreshMissions={onRefreshMissions}
+              onConfirmApproval={onConfirmApproval}
+              onApplied={() => void load()}
+              onError={onError}
             />
-          </label>
-          <select
-            value={priorityFilter}
-            onChange={(event) => setPriorityFilter(event.target.value as TaskPriority | "all")}
-          >
-            <option value="all">{t("tasks.priority.all")}</option>
-            <option value="highest">{t("tasks.priority.highest")}</option>
-            <option value="high">{t("tasks.priority.high")}</option>
-            <option value="medium">{t("tasks.priority.medium")}</option>
-            <option value="low">{t("tasks.priority.low")}</option>
-          </select>
-          <span className="tasks-result-count">
-            {t("tasks.visibleCount", { count: visibleEntries.length })}
-          </span>
-        </div>
-        {loading ? (
-          <div className="tasks-loading"><Loader2 size={16} /> {t("tasks.loading")}</div>
-        ) : displayView === "list" ? (
-          <TaskList
-            grouped={grouped}
-            selectedRelPath={selectedEntry?.relPath ?? null}
-            labelMode={labelMode}
-            onSelect={setSelectedRelPath}
-            onDone={(entry) => void setStatus(entry, "done")}
-            t={t}
-          />
+          </div>
         ) : (
-          <UnifiedCalendarView<TaskEntry>
-            events={calendarEvents}
-            view={calendarView}
-            viewDate={viewDate}
-            weekStartsOn={effectiveSettings.weekStartsOn}
-            locale={locale}
-            labelMode={labelMode}
-            today={todayDate}
-            query={query}
-            onQueryChange={setQuery}
-            onViewChange={(next) => setDisplayView(next)}
-            onViewDateChange={setViewDate}
-            onSelectEvent={(event) => setSelectedRelPath(event.resource.relPath)}
-            onSelectDate={(date) => {
-              if (displayView === "month") setDisplayView("day");
-              setViewDate(date);
-            }}
-            searchPlaceholder={t("tasks.search")}
-            emptyLabel={t("tasks.calendar.empty")}
-            startHour={effectiveSettings.calendarStartHour}
-            loadingLabel={t("tasks.loading")}
-          />
+          <>
+            <div className="tasks-toolbar">
+              <label className="tasks-search">
+                <Search size={14} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("tasks.search")}
+                />
+              </label>
+              <select
+                value={priorityFilter}
+                onChange={(event) => setPriorityFilter(event.target.value as TaskPriority | "all")}
+              >
+                <option value="all">{t("tasks.priority.all")}</option>
+                <option value="highest">{t("tasks.priority.highest")}</option>
+                <option value="high">{t("tasks.priority.high")}</option>
+                <option value="medium">{t("tasks.priority.medium")}</option>
+                <option value="low">{t("tasks.priority.low")}</option>
+              </select>
+              <span className="tasks-result-count">
+                {t("tasks.visibleCount", { count: visibleEntries.length })}
+              </span>
+            </div>
+            {loading ? (
+              <div className="tasks-loading"><Loader2 size={16} /> {t("tasks.loading")}</div>
+            ) : displayView === "list" ? (
+              <TaskList
+                grouped={grouped}
+                selectedRelPath={selectedEntry?.relPath ?? null}
+                labelMode={labelMode}
+                onSelect={setSelectedRelPath}
+                onDone={(entry) => void setStatus(entry, "done")}
+                t={t}
+              />
+            ) : (
+              <UnifiedCalendarView<TaskEntry>
+                events={calendarEvents}
+                view={calendarView}
+                viewDate={viewDate}
+                weekStartsOn={effectiveSettings.weekStartsOn}
+                locale={locale}
+                labelMode={labelMode}
+                today={todayDate}
+                query={query}
+                onQueryChange={setQuery}
+                onViewChange={(next) => setDisplayView(next)}
+                onViewDateChange={setViewDate}
+                onSelectEvent={(event) => setSelectedRelPath(event.resource.relPath)}
+                onSelectDate={(date) => {
+                  if (displayView === "month") setDisplayView("day");
+                  setViewDate(date);
+                }}
+                searchPlaceholder={t("tasks.search")}
+                emptyLabel={t("tasks.calendar.empty")}
+                startHour={effectiveSettings.calendarStartHour}
+                loadingLabel={t("tasks.loading")}
+              />
+            )}
+          </>
         )}
-        {tasksMissions.length > 0 ? (
-          <section className="tasks-runs">
-            <header>
-              <strong>{t("tasks.runs.title")}</strong>
-              <button type="button" className="inline-action" onClick={onRefreshMissions}>
-                {t("tasks.actions.refresh")}
-              </button>
-            </header>
-            {tasksMissions.slice(0, 3).map((mission) => (
-              <div key={mission.id} className="tasks-run-row">
-                <span>{mission.status}</span>
-                <code>{mission.id}</code>
-                <small>{processingLogLines[mission.id]?.at(-1) ?? ""}</small>
-              </div>
-            ))}
-          </section>
-        ) : null}
       </section>
-      <TaskDetailDrawer
-        entry={selectedEntry}
-        metadata={metadata}
-        loading={metadataLoading}
-        labelMode={labelMode}
-        skills={skills}
-        collapsed={!detailsOpen}
-        onToggleCollapsed={() => setDetailsOpen((value) => !value)}
-        onRevealPath={onRevealPath}
-        onOpenSkillCompose={onOpenSkillCompose}
-        onUpdateSchedule={updateSchedule}
-      />
+      {section === "tasks" ? (
+        <TaskDetailDrawer
+          entry={selectedEntry}
+          metadata={metadata}
+          loading={metadataLoading}
+          labelMode={labelMode}
+          skills={skills}
+          collapsed={!detailsOpen}
+          onToggleCollapsed={() => setDetailsOpen((value) => !value)}
+          onRevealPath={onRevealPath}
+          onOpenSkillCompose={onOpenSkillCompose}
+          onUpdateSchedule={updateSchedule}
+        />
+      ) : null}
       <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreate={createTask} />
       <NaturalScheduleDialog
         open={naturalScheduleOpen}
@@ -577,4 +701,43 @@ function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
     ?? skills.find((skill) => skill.name.toLowerCase() === normalized)
     ?? null
   );
+}
+
+function mergeTaskMissions(missions: MissionRecord[], localRuns: MissionRecord[]): MissionRecord[] {
+  const byId = new Map<string, MissionRecord>();
+  for (const mission of localRuns) byId.set(mission.id, mission);
+  for (const mission of missions) byId.set(mission.id, mission);
+  return Array.from(byId.values()).sort(
+    (a, b) => b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt),
+  );
+}
+
+function createOptimisticTaskMission({
+  id,
+  runtime,
+  origin,
+  inputPaths,
+}: {
+  id: string;
+  runtime: SkillDispatchRuntime;
+  origin: string;
+  inputPaths: string[];
+}): MissionRecord {
+  const now = new Date().toISOString();
+  return {
+    id,
+    kind: "skill",
+    startedAt: now,
+    lastOutputAt: now,
+    status: "idle",
+    exitCode: null,
+    outputLogPath: null,
+    metadata: {
+      origin,
+      runtime,
+      reviewFlow: true,
+      inputPaths,
+      skillName: "task-management",
+    },
+  };
 }

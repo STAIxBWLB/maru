@@ -1,4 +1,16 @@
-import { Code2, FileText, Loader2, Play, Search, SquareTerminal, Workflow, X } from "lucide-react";
+import {
+  ArrowRight,
+  Code2,
+  FileText,
+  FolderOpen,
+  Info,
+  Loader2,
+  Play,
+  Search,
+  SquareTerminal,
+  Workflow,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   DispatchComposition,
@@ -16,10 +28,21 @@ import {
   skillsDispatchTerminal,
   skillsRuntimeStatus,
 } from "../../lib/skills";
+import { chooseFiles } from "../../lib/api";
+import { appendSourceBlock } from "../../lib/meetingNotesPrompt";
 import { Button } from "../ui/Button";
 
 type ComposeMode = "terminal" | "background" | "structured";
 const EMPTY_RUNTIME_COMMANDS: Partial<Record<SkillDispatchRuntime, string | null>> = {};
+
+const MEETING_NOTES_SKILL = "meeting-notes";
+// Skills that accept a pasted/dropped transcript-like source in the dialog.
+// Today this is a fixed set; a future frontmatter flag can extend it.
+const SOURCE_INPUT_SKILLS = new Set<string>([MEETING_NOTES_SKILL]);
+
+function skillAcceptsSource(skill: SkillRecord | null): boolean {
+  return Boolean(skill && SOURCE_INPUT_SKILLS.has(skill.name));
+}
 
 export interface ComposeDialogSeed {
   skill?: SkillRecord | null;
@@ -46,6 +69,13 @@ interface ComposeDialogProps {
   aiRuntimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   defaultRuntime?: SkillDispatchRuntime;
   permissionMode?: string;
+  /**
+   * Workspace root the Meetings pane reads run events from. Meeting-notes runs
+   * launched here are pinned to it so the review panel can find their events.
+   */
+  meetingsWorkspacePath?: string | null;
+  /** Switch the app to the Meetings transcript workbench (nudge action). */
+  onOpenMeetingsWorkbench?: () => void;
   onError: (message: string | null) => void;
 }
 
@@ -60,11 +90,15 @@ export function ComposeDialog({
   aiRuntimeCommands = EMPTY_RUNTIME_COMMANDS,
   defaultRuntime,
   permissionMode,
+  meetingsWorkspacePath,
+  onOpenMeetingsWorkbench,
   onError,
 }: ComposeDialogProps) {
   const { t } = useTranslation();
   const [skillId, setSkillId] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [sourceText, setSourceText] = useState("");
+  const [sourceFiles, setSourceFiles] = useState<string[]>([]);
   const [skillQuery, setSkillQuery] = useState("");
   const [runtime, setRuntime] = useState<SkillDispatchRuntime>(defaultRuntime ?? "claude");
   const [mode, setMode] = useState<ComposeMode>("background");
@@ -80,6 +114,8 @@ export function ComposeDialog({
     if (!open) return;
     setSkillId(seed?.skill?.id ?? skills[0]?.id ?? "");
     setPrompt(seed?.prompt ?? "");
+    setSourceText("");
+    setSourceFiles([]);
     setSkillQuery("");
     setRuntime(readLastSkillRuntime() ?? defaultRuntime ?? "claude");
     setMode("background");
@@ -142,14 +178,32 @@ export function ComposeDialog({
     }
     return matches;
   }, [selectedSkill, skillQuery, skills]);
-  const context = seed?.context ?? [];
+  const acceptsSource = skillAcceptsSource(selectedSkill);
+  const isMeetingNotes = selectedSkill?.name === MEETING_NOTES_SKILL;
+  // Fold the pasted source text into the prompt and the picked files into the
+  // context, so the preview, all dispatch paths, and tracking metadata see the
+  // same composition. The backend wraps the prompt verbatim and renders context
+  // files in <selected_context>, so no backend change is needed.
+  const effectivePrompt = useMemo(() => {
+    if (!acceptsSource || !sourceText.trim()) return prompt;
+    return appendSourceBlock(prompt, sourceText);
+  }, [acceptsSource, prompt, sourceText]);
+  const effectiveContext = useMemo<SkillContextItem[]>(() => {
+    const base = seed?.context ?? [];
+    if (!acceptsSource || sourceFiles.length === 0) return base;
+    const seen = new Set(base.map((item) => item.path));
+    const extra = sourceFiles
+      .filter((path) => !seen.has(path))
+      .map((path) => ({ path, kind: "file" as const }));
+    return extra.length > 0 ? [...base, ...extra] : base;
+  }, [acceptsSource, seed?.context, sourceFiles]);
   const skillValid = selectedSkill?.valid ?? true;
   const selectedRuntimeStatus = runtimeStatuses[runtime] ?? null;
   const runtimeReady = selectedRuntimeStatus?.available === true;
-  const canRun = Boolean(selectedSkill && skillValid && prompt.trim() && runtimeReady);
+  const canRun = Boolean(selectedSkill && skillValid && effectivePrompt.trim() && runtimeReady);
 
   useEffect(() => {
-    if (!open || !selectedSkill || !skillValid || !prompt.trim()) {
+    if (!open || !selectedSkill || !skillValid || !effectivePrompt.trim()) {
       setPreview(null);
       return;
     }
@@ -157,9 +211,9 @@ export function ComposeDialog({
     const timer = window.setTimeout(() => {
       void skillsDispatchCompose({
         skillId: selectedSkill.id,
-        prompt,
+        prompt: effectivePrompt,
         cwd: seed?.cwd ?? null,
-        context,
+        context: effectiveContext,
       })
         .then((composition) => {
           if (!cancelled) setPreview(composition);
@@ -172,12 +226,12 @@ export function ComposeDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [context, open, prompt, seed?.cwd, selectedSkill, skillValid]);
+  }, [effectiveContext, open, effectivePrompt, seed?.cwd, selectedSkill, skillValid]);
 
   if (!open) return null;
 
   async function run() {
-    if (!selectedSkill || !prompt.trim() || !runtimeReady) return;
+    if (!selectedSkill || !effectivePrompt.trim() || !runtimeReady) return;
     setBusy(true);
     onError(null);
     try {
@@ -193,9 +247,9 @@ export function ComposeDialog({
         // sees the skill's actual instructions, not just its name.
         const composition = await skillsDispatchCompose({
           skillId: selectedSkill.id,
-          prompt,
+          prompt: effectivePrompt,
           cwd: seed.cwd,
-          context,
+          context: effectiveContext,
         });
         const runId = await agentRunStructuredLoop({
           provider: runtime,
@@ -210,29 +264,51 @@ export function ComposeDialog({
         const spec = await skillsDispatchTerminal({
           skillId: selectedSkill.id,
           runtime,
-          prompt,
+          prompt: effectivePrompt,
           cwd: seed?.cwd ?? null,
-          context,
+          context: effectiveContext,
           commandOverride: terminalRuntimeCommands[runtime] ?? null,
         });
         onTerminalDispatch(spec);
         dispatchEvent = { mode: "terminal", runtime, invocationId: null };
       } else {
+        // Meeting-notes runs are tracked as reviewable missions in the Meetings
+        // pane. Pin cwd to the meetings workspace root so the review panel can
+        // read this run's events, and tag the metadata so isMeetingsMission
+        // surfaces it under Transcript/External.
+        const backgroundCwd = isMeetingNotes
+          ? meetingsWorkspacePath ?? seed?.cwd ?? null
+          : seed?.cwd ?? null;
+        if (isMeetingNotes && !backgroundCwd) {
+          onError(t("skills.compose.meetingNeedsWorkspace"));
+          setBusy(false);
+          return;
+        }
         const invocationId = await skillsDispatchBackground({
           skillId: selectedSkill.id,
           runtime,
-          prompt,
-          cwd: seed?.cwd ?? null,
-          context,
+          prompt: effectivePrompt,
+          cwd: backgroundCwd,
+          context: effectiveContext,
           commandOverride: aiRuntimeCommands[runtime] ?? null,
           permissionMode: permissionMode ?? null,
-          metadata: {
-            origin: "skillCompose",
-            skillName: selectedSkill.name,
-            runtime,
-            workspacePath: seed?.cwd ?? null,
-            inputPaths: context.map((item) => item.path),
-          },
+          metadata: isMeetingNotes
+            ? {
+                origin: "meetingNotesFromTranscript",
+                skillName: selectedSkill.name,
+                runtime,
+                reviewFlow: true,
+                sourceKind: "transcript",
+                workspacePath: backgroundCwd,
+                inputPaths: effectiveContext.map((item) => item.path),
+              }
+            : {
+                origin: "skillCompose",
+                skillName: selectedSkill.name,
+                runtime,
+                workspacePath: backgroundCwd,
+                inputPaths: effectiveContext.map((item) => item.path),
+              },
         });
         onBackgroundDispatch?.(invocationId);
         dispatchEvent = { mode: "background", runtime, invocationId };
@@ -263,8 +339,8 @@ export function ComposeDialog({
           <div>
             <h2>{t("skills.compose.title")}</h2>
             <p>
-              {context.length > 0
-                ? t("skills.compose.selectedCount", { count: context.length })
+              {effectiveContext.length > 0
+                ? t("skills.compose.selectedCount", { count: effectiveContext.length })
                 : t("skills.compose.noSelection")}
             </p>
           </div>
@@ -408,6 +484,7 @@ export function ComposeDialog({
                 {mode === "terminal" ? (
                   <p className="compose-mode-note">
                     {t("skills.compose.terminalFreeRun")}
+                    {isMeetingNotes ? ` ${t("skills.compose.meetingTerminalWarning")}` : ""}
                   </p>
                 ) : mode === "structured" ? (
                   <p className="compose-mode-note">
@@ -422,8 +499,8 @@ export function ComposeDialog({
             </div>
 
             <div className="compose-context">
-              {context.length > 0 ? (
-                context.map((item) => (
+              {effectiveContext.length > 0 ? (
+                effectiveContext.map((item) => (
                   <span key={`${item.kind ?? "path"}-${item.path}`} title={item.path}>
                     <FileText size={12} />
                     {item.path.split("/").pop() ?? item.path}
@@ -436,6 +513,54 @@ export function ComposeDialog({
           </aside>
 
           <section className="compose-main">
+            {acceptsSource ? (
+              <div className="compose-source">
+                <label className="field">
+                  <span>{t("skills.compose.source")}</span>
+                  <textarea
+                    className="compose-source-text"
+                    value={sourceText}
+                    onChange={(event) => setSourceText(event.target.value)}
+                    placeholder={t("skills.compose.sourcePlaceholder")}
+                  />
+                </label>
+                <div className="compose-source-controls">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void chooseFiles(t("skills.compose.sourcePick")).then(setSourceFiles)}
+                  >
+                    <FolderOpen size={14} />
+                    {t("skills.compose.sourcePick")}
+                  </button>
+                  <div className="compose-context compose-source-files">
+                    {sourceFiles.length > 0 ? (
+                      sourceFiles.map((path) => (
+                        <span key={path} title={path}>
+                          <FileText size={12} />
+                          {path.split("/").pop() ?? path}
+                        </span>
+                      ))
+                    ) : (
+                      <span>{t("skills.compose.sourceFilesEmpty")}</span>
+                    )}
+                  </div>
+                </div>
+                {isMeetingNotes ? (
+                  <div className="compose-nudge">
+                    <Info size={14} />
+                    <span>{t("skills.compose.meetingTrackedNudge")}</span>
+                    {onOpenMeetingsWorkbench ? (
+                      <button type="button" onClick={onOpenMeetingsWorkbench}>
+                        {t("skills.compose.openMeetingsWorkbench")}
+                        <ArrowRight size={13} />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <label className="field">
               <span>{t("skills.compose.prompt")}</span>
               <textarea
