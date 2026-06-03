@@ -53,10 +53,12 @@ loaded at runtime.
 ## Anchor Run Contract
 
 When Anchor runs this skill in background/review mode (the prompt asks for
-proposals only), do not write files, call Google Tasks/Calendar, or run
-follow-up skills during the run. Google Tasks/Calendar mutations happen only
-later, through this skill's approved-execution path — never as Anchor file
-writes. Terminal and direct-CLI use of this skill is unchanged by this section.
+proposals only), do not write files, mutate Google Tasks/Calendar, or run
+follow-up skills during the run. Read-only Google Tasks/Calendar lookup is
+allowed for conflict checks, existing ID reconciliation, and sync preview
+quality. Google Tasks/Calendar mutations happen only later, through this
+skill's approved-execution path — never as Anchor file writes. Terminal and
+direct-CLI use of this skill is unchanged by this section.
 
 1. Emit concise human-readable progress logs while working. Prefix major
    progress logs with stable phase markers so Anchor can render stepwise status:

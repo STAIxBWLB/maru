@@ -202,19 +202,31 @@ export function CommitDialog({
     setError(null);
     setSyncReport([]);
     const append = (line: string) => setSyncReport((current) => [...current, line]);
+    let currentRepo = "scan";
     try {
       const scan = await gitSyncScan(vaultPath, false);
       append(`SYNC_ROOT: ${scan.syncRoot}`);
+      append(`CONFIRM_BEFORE_COMMIT: ${scan.confirmBeforeCommit ? "yes" : "no"}`);
       for (const item of scan.excluded) {
         append(`SKIP ${item.path}: ${item.reason}`);
       }
       for (const repo of scan.repos) {
+        currentRepo = repo.relPath;
         append(`PULL ${repo.relPath}`);
-        await gitSyncPullRebase(repo.path);
+        const pull = await gitSyncPullRebase(repo.path);
+        append(`PULL_OK ${repo.relPath}: ${pull.stashed ? "stashed local changes" : "no local stash"}`);
+        const pullNoise = [pull.stderr, pull.stdout]
+          .join("\n")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 3);
+        for (const line of pullNoise) append(`PULL_LOG ${repo.relPath}: ${line}`);
       }
       const postPull = await gitSyncScan(vaultPath, false);
       let committed = 0;
       for (const repo of postPull.repos) {
+        currentRepo = repo.relPath;
         if (repo.clean || repo.paths.length === 0) {
           append(`CLEAN ${repo.relPath}`);
           continue;
@@ -262,7 +274,7 @@ export function CommitDialog({
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      append(`ERROR ${message}`);
+      append(`ERROR ${currentRepo}: ${message}`);
       setError(message);
     } finally {
       setSyncing(false);

@@ -35,6 +35,7 @@ import {
   emptyTaskReviewArtifact,
   parseTaskReviewArtifact,
   selectedTaskFollowupCount,
+  taskProposalFileSelectedByDefault,
   taskReviewCanApply,
   taskReviewChecksComplete,
   type TaskFollowupCandidate,
@@ -135,7 +136,7 @@ export function TasksRunsPanel({
       const files = await Promise.all(
         (proposal?.files ?? []).map(async (file, index) => ({
           id: `${mission.id}-${index}`,
-          selected: file.operation !== "delete",
+          selected: taskProposalFileSelectedByDefault(file.operation),
           path: file.path,
           operation: file.operation,
           beforeContent: await readProposalBeforeContent(workPath, file),
@@ -528,6 +529,12 @@ function TaskReviewPanel({
                 {file.operation}
               </span>
             </header>
+            {file.operation === "delete" ? (
+              <div className="tasks-delete-warning" role="alert">
+                <ShieldAlert size={14} />
+                <span>{t("tasks.review.deleteWarning")}</span>
+              </div>
+            ) : null}
             <label className="field">
               <span>{t("tasks.review.targetPath")}</span>
               <input value={file.path} onChange={(event) => onUpdateFile(file.id, { path: event.target.value })} />
@@ -539,10 +546,14 @@ function TaskReviewPanel({
               </label>
               <label>
                 <span>{t("tasks.review.after")}</span>
-                <textarea
-                  value={file.afterContent}
-                  onChange={(event) => onUpdateFile(file.id, { afterContent: event.target.value })}
-                />
+                {file.operation === "delete" ? (
+                  <pre className="tasks-delete-placeholder">{t("tasks.review.deletePlaceholder")}</pre>
+                ) : (
+                  <textarea
+                    value={file.afterContent}
+                    onChange={(event) => onUpdateFile(file.id, { afterContent: event.target.value })}
+                  />
+                )}
               </label>
             </div>
           </article>

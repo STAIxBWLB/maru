@@ -12952,6 +12952,62 @@ button.git-badge:hover {
   color: var(--muted);
 }
 
+.tasks-operation-badge[data-operation="create"] {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line-soft));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-raised));
+  color: var(--accent);
+}
+
+.tasks-operation-badge[data-operation="replace"],
+.tasks-operation-badge[data-operation="append"] {
+  border-color: color-mix(in srgb, var(--info) 36%, var(--line-soft));
+  background: color-mix(in srgb, var(--info) 12%, var(--panel-raised));
+  color: var(--info);
+}
+
+.tasks-operation-badge[data-operation="delete"] {
+  border-color: color-mix(in srgb, var(--danger) 46%, var(--line-soft));
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel-raised));
+  color: var(--danger);
+}
+
+.tasks-proposal-file[data-operation="delete"] {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--line-soft));
+  background: color-mix(in srgb, var(--danger) 6%, var(--panel-2));
+}
+
+.tasks-proposal-file[data-operation="delete"] .tasks-before-after pre {
+  border-left: 3px solid var(--danger);
+  text-decoration: line-through;
+  color: color-mix(in srgb, var(--ink) 55%, var(--muted));
+}
+
+.tasks-delete-placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  margin: 0;
+  border: 1px dashed color-mix(in srgb, var(--danger) 48%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+  color: var(--danger);
+  font-weight: 650;
+  text-align: center;
+}
+
+.tasks-delete-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 48%, var(--line-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel-raised));
+  color: var(--danger);
+  padding: 7px 9px;
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
 .tasks-before-after {
   display: grid;
   grid-template-columns: 1fr 1fr;

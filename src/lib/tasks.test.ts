@@ -3,6 +3,7 @@ import type { MissionRecord, TaskNoteRow } from "./types";
 import {
   activeTasksMissions,
   buildTaskManagementSchedulePrompt,
+  buildTaskManagementSyncPrompt,
   filterTasksByQuery,
   isOverdue,
   normalizeTaskPriority,
@@ -220,8 +221,29 @@ describe("buildTaskManagementSchedulePrompt", () => {
     expect(prompt).toContain("calendarStart");
     expect(prompt).toContain("Asia/Seoul");
     expect(prompt).toContain("approved execution path");
-    expect(prompt).toContain("Do not call Google APIs directly from Anchor");
+    expect(prompt).toContain("read-only availability/conflict lookup");
+    expect(prompt).toContain("Anchor itself must not call Google APIs");
+    expect(prompt).toContain("Do not write files or mutate Google Tasks/Calendar");
+    expect(prompt).toContain("Read-only Google Tasks/Calendar lookup is allowed");
+    expect(prompt).toContain("All Google create/update/delete operations happen only after user approval");
     expect(prompt).toContain("Do not write directly to any vault");
+  });
+});
+
+describe("buildTaskManagementSyncPrompt", () => {
+  it("allows read-only Google reconciliation but keeps mutations approval-only", () => {
+    const prompt = buildTaskManagementSyncPrompt("tasks/active/a.md", {
+      root: "tasks",
+      timezone: "Asia/Seoul",
+      defaultTaskList: "reclaim",
+      defaultCalendar: "chu_aio",
+    });
+
+    expect(prompt).toContain("read-only lookup during review");
+    expect(prompt).toContain("Anchor itself must not call Google APIs");
+    expect(prompt).toContain("mutations will run only after approval");
+    expect(prompt).toContain("Do not write files or mutate Google Tasks/Calendar");
+    expect(prompt).toContain("Read-only Google Tasks/Calendar lookup is allowed");
   });
 });
 

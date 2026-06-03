@@ -5,6 +5,7 @@ import {
   deriveTaskRunSteps,
   parseTaskReviewArtifact,
   selectedTaskFollowupCount,
+  taskProposalFileSelectedByDefault,
   taskReviewCanApply,
   taskReviewChecksComplete,
 } from "./taskReview";
@@ -104,6 +105,34 @@ describe("task review apply readiness", () => {
   it("keeps apply blocked when nothing is selected or checks remain", () => {
     expect(taskReviewCanApply({ proposal: null, files: [], followups: [], checksComplete: true })).toBe(false);
     expect(taskReviewCanApply({ proposal: null, files: [], followups: [followup], checksComplete: false })).toBe(false);
+  });
+
+  it("keeps delete proposal files unselected and blocked until explicitly included", () => {
+    const deleteFile = {
+      id: "delete-1",
+      selected: taskProposalFileSelectedByDefault("delete"),
+      path: "tasks/active/old.md",
+      operation: "delete",
+      beforeContent: "old",
+      afterContent: "",
+    };
+    const proposal = {
+      schemaVersion: "anchor_skill_proposal_v1",
+      summary: "delete old task",
+      files: [{ path: deleteFile.path, operation: "delete", content: null }],
+      commands: [],
+      risks: [],
+      requiresApproval: true,
+    };
+
+    expect(deleteFile.selected).toBe(false);
+    expect(taskReviewCanApply({ proposal, files: [deleteFile], followups: [], checksComplete: true })).toBe(false);
+    expect(taskReviewCanApply({
+      proposal,
+      files: [{ ...deleteFile, selected: true }],
+      followups: [],
+      checksComplete: true,
+    })).toBe(true);
   });
 });
 

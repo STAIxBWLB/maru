@@ -148,6 +148,10 @@ export function taskReviewCanApply({
   return selectedFiles === 0 || Boolean(proposal);
 }
 
+export function taskProposalFileSelectedByDefault(operation: string): boolean {
+  return operation !== "delete";
+}
+
 export function deriveTaskRunSteps({
   missionStatus,
   logLines = [],
