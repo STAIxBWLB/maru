@@ -519,6 +519,8 @@ export interface InboxProcessMissionMetadata {
   channels?: string[];
   /** When true, Anchor renders the meetings/tasks-style review + confirm flow. */
   reviewFlow?: boolean;
+  /** Free-text guidance the user typed at Process time, if any. */
+  processingContext?: string;
   inputPaths: string[];
   workspacePath?: string | null;
   skillName?: string | null;

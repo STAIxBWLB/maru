@@ -40,7 +40,15 @@ import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { SystemPane } from "./components/SystemPane";
-import { TerminalPanel, type TerminalLaunchRequest } from "./components/TerminalPanel";
+import {
+  TerminalPanel,
+  type TerminalLaunchRequest,
+  type TerminalPanelHandle,
+} from "./components/TerminalPanel";
+import {
+  buildAnchorBackgroundContextEnv,
+  type ActiveTerminalContext,
+} from "./lib/terminal";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
 import { useApprovalGate } from "./approval/ApprovalDialog";
@@ -82,6 +90,7 @@ import {
   readDocument,
   readAiMissionLog,
   prepareApproval,
+  openInFileManager,
   revealInFileManager,
   countInboxProcessedByChannel,
   readInboxProcessedItem,
@@ -108,12 +117,18 @@ import {
   stopInboxWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
+  removeAgentContextHint,
+  terminalHooksInstall,
+  terminalHooksStatus,
+  terminalHooksUninstall,
+  writeAgentContextHint,
   trashDocument,
   trashInboxItems,
   updateFrontmatterField,
   type BinaryViewerClassification,
   type LegacyLaunchdService,
 } from "./lib/api";
+import { inboxRootPath, sourceFolderPath } from "./lib/inboxSources";
 import {
   exportDispatch,
   exportPlan,
@@ -821,6 +836,9 @@ function MainApp() {
   const [rightPaneTab, setRightPaneTab] = useState<RightPaneTab>(
     DEFAULT_ANCHOR_SETTINGS.ui.rightPaneTab,
   );
+  // Shareable absolute file paths reported by the Inbox selection, fed to the
+  // Shared Outbox tab's queue.
+  const [inboxShareablePaths, setInboxShareablePaths] = useState<string[]>([]);
   const [pendingSelectedPath, setPendingSelectedPath] = useState<string | null>(null);
   const [recentPaths, setRecentPaths] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -1155,6 +1173,29 @@ function MainApp() {
   const activeDocumentWorkspaceState =
     (activeDocumentWorkspacePath ? workspaceStates[activeDocumentWorkspacePath] : null) ??
     EMPTY_WORKSPACE_STATE;
+  const activeTerminalContext = useMemo<ActiveTerminalContext>(() => {
+    const frontmatterType = selectedEntry?.frontmatter?.type;
+    return {
+      workspaceRoot: activeDocumentWorkspacePath ?? null,
+      workspaceVisibility: explorerVisibility,
+      appMode,
+      docAbsPath: selectedEntry?.path ?? document?.path ?? null,
+      docRelPath: selectedEntry?.relPath ?? null,
+      docTitle: selectedEntry?.title ?? document?.title ?? null,
+      docType: typeof frontmatterType === "string" ? frontmatterType : null,
+    };
+  }, [
+    activeDocumentWorkspacePath,
+    appMode,
+    document?.path,
+    document?.title,
+    explorerVisibility,
+    selectedEntry?.frontmatter?.type,
+    selectedEntry?.path,
+    selectedEntry?.relPath,
+    selectedEntry?.title,
+  ]);
+  const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
     paneMode: anchorSettings.ui.explorerPaneMode,
     startupIoReady: explorerWorkspaceState.startupIoReady,
@@ -1169,6 +1210,10 @@ function MainApp() {
     publicWorkspaces[0]?.path ??
     null;
   const inboxWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath ?? primaryWorkspacePath;
+  // Workspace root used by the Shared Outbox tab — the active document's
+  // workspace in Docs, the inbox workspace otherwise.
+  const shareWorkspacePath =
+    activeDocumentWorkspacePath ?? inboxWorkspacePath ?? primaryWorkspacePath;
   const activeDocumentEntries =
     (activeTab ? workspaceStates[activeTab.workspacePath]?.entries : entries) ?? entries;
   const openingEntry =
@@ -1631,6 +1676,65 @@ function MainApp() {
     [updateSettings],
   );
 
+  const attachActiveItemToTerminal = useCallback(() => {
+    if (!anchorSettings.ui.layout.terminalOpen) {
+      updateLayoutSettings({ terminalOpen: true });
+    }
+    return terminalPanelRef.current?.attachActiveItem() ?? false;
+  }, [anchorSettings.ui.layout.terminalOpen, updateLayoutSettings]);
+
+  const attachPathToTerminal = useCallback(
+    (relPath: string | null, absPath: string | null) => {
+      if (!anchorSettings.ui.layout.terminalOpen) {
+        updateLayoutSettings({ terminalOpen: true });
+      }
+      return terminalPanelRef.current?.attachPath(relPath, absPath) ?? false;
+    },
+    [anchorSettings.ui.layout.terminalOpen, updateLayoutSettings],
+  );
+
+  const toggleAgentStatusHooks = useCallback(async () => {
+    const workPath = activeDocumentWorkspacePath;
+    const scope: "project" | "global" = workPath ? "project" : "global";
+    try {
+      const status = await terminalHooksStatus(workPath, scope);
+      const next = status.claudeInstalled
+        ? await terminalHooksUninstall(workPath, scope)
+        : await terminalHooksInstall(workPath, scope);
+      setError(
+        next.claudeInstalled
+          ? t("terminal.hooks.enabled", { path: next.claudePath })
+          : t("terminal.hooks.disabled", { path: next.claudePath }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [activeDocumentWorkspacePath, t]);
+
+  const writeAgentContextHintCommand = useCallback(
+    async (remove: boolean) => {
+      const workPath = activeDocumentWorkspacePath;
+      if (!workPath) {
+        setError(t("terminal.hint.noWorkspace"));
+        return;
+      }
+      try {
+        const targets = ["claude", "agents"];
+        const paths = remove
+          ? await removeAgentContextHint(workPath, targets)
+          : await writeAgentContextHint(workPath, targets);
+        setError(
+          remove
+            ? t("terminal.hint.removed", { count: paths.length })
+            : t("terminal.hint.written", { count: paths.length }),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [activeDocumentWorkspacePath, t],
+  );
+
   const refreshSkills = useCallback(async () => {
     setSkillsLoading(true);
     try {
@@ -2068,6 +2172,10 @@ function MainApp() {
   const inboxItems = useMemo<InboxItemState[]>(
     () => buildInboxItemStates(inboxDrops, inboxCarry),
     [inboxDrops, inboxCarry],
+  );
+  const inboxSourceFolderKeys = useMemo(
+    () => Object.keys(inboxRuntimeConfig.channels ?? {}),
+    [inboxRuntimeConfig],
   );
 
   const gmailItems = useMemo<GmailMessageState[]>(
@@ -2736,8 +2844,14 @@ function MainApp() {
   );
 
   const processInboxKeys = useCallback(
-    async (keys: string[], channelOverride?: string | null, reviewFlow = true) => {
+    async (
+      keys: string[],
+      channelOverride?: string | null,
+      reviewFlow = true,
+      processingContext?: string,
+    ) => {
       if (!inboxWorkspacePath) return;
+      const trimmedContext = processingContext?.trim() ?? "";
       const processSkill =
         skills.find((skill) => skill.name === "inbox-process") ??
         skills.find((skill) => skill.id.endsWith(":inbox-process") || skill.id === "inbox-process");
@@ -2784,6 +2898,7 @@ function MainApp() {
           config: inboxRuntimeConfig,
           channels,
           reviewFlow,
+          processingContext: trimmedContext || undefined,
         });
         const context: SkillContextItem[] = selectedEntries.map((entry) => ({
           path: entry.kind === "pendingItem" ? entry.manifestPath ?? entry.path : entry.path,
@@ -2807,6 +2922,7 @@ function MainApp() {
             workspacePath: inboxWorkspacePath,
             skillName: "inbox-process",
             runtime,
+            ...(trimmedContext ? { processingContext: trimmedContext } : {}),
           },
         });
         processingMissionIdsRef.current = new Set([
@@ -2889,12 +3005,25 @@ function MainApp() {
       updateInboxCarry(id, { classifying: true, classifyError: null });
       try {
         const runtime = resolveClassifierRuntime(anchorSettings.ai);
+        const contextEnv = buildAnchorBackgroundContextEnv(
+          {
+            workspaceRoot: inboxWorkspacePath,
+            workspaceVisibility: explorerVisibility,
+            appMode: "inbox",
+            docAbsPath: null,
+            docRelPath: target.relPath ?? null,
+            docTitle: null,
+            docType: null,
+          },
+          anchorSettings.terminal.injectActiveContext,
+        );
         const classification = await classifyInboxItem(
           target,
           runtime,
           inboxWorkspacePath,
           anchorSettings.ai.commandOverrides[runtime],
           anchorSettings.ai.permissionMode,
+          contextEnv,
         );
         updateInboxCarry(id, { classifying: false, classification });
       } catch (err) {
@@ -2904,7 +3033,14 @@ function MainApp() {
         });
       }
     },
-    [anchorSettings.ai, inboxDrops, inboxWorkspacePath, updateInboxCarry],
+    [
+      anchorSettings.ai,
+      anchorSettings.terminal.injectActiveContext,
+      explorerVisibility,
+      inboxDrops,
+      inboxWorkspacePath,
+      updateInboxCarry,
+    ],
   );
 
   useEffect(() => {
@@ -5492,6 +5628,18 @@ function MainApp() {
         case "split-right":
           splitEditorRight();
           break;
+        case "attach-active-item":
+          void attachActiveItemToTerminal();
+          break;
+        case "toggle-agent-hooks":
+          void toggleAgentStatusHooks();
+          break;
+        case "write-context-hint":
+          void writeAgentContextHintCommand(false);
+          break;
+        case "remove-context-hint":
+          void writeAgentContextHintCommand(true);
+          break;
         case "dock-terminal-right":
           dockTerminal("right");
           break;
@@ -5556,6 +5704,9 @@ function MainApp() {
       openTasks,
       checkForUpdates,
       splitEditorRight,
+      attachActiveItemToTerminal,
+      toggleAgentStatusHooks,
+      writeAgentContextHintCommand,
       dockTerminal,
       closeAllCleanTabs,
       editorViewMode,
@@ -5802,10 +5953,24 @@ function MainApp() {
   useEffect(() => {
     const previous = lastAppModeRef.current;
     lastAppModeRef.current = visibleAppMode;
-    if (previous !== visibleAppMode && visibleAppMode !== "pkm" && outlineOpen) {
+    // Keep the right pane available in Docs (pkm) and Inbox — the modes that
+    // expose right-pane tabs (workspace / shareOutbox). Auto-close it only for
+    // the chrome-less full-screen modes.
+    if (
+      previous !== visibleAppMode &&
+      visibleAppMode !== "pkm" &&
+      visibleAppMode !== "inbox" &&
+      outlineOpen
+    ) {
       updateLayoutSettings({ outlineOpen: false });
     }
   }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
+  useEffect(() => {
+    // Inbox selection only feeds the Shared Outbox queue while in Inbox mode.
+    if (visibleAppMode !== "inbox" && inboxShareablePaths.length > 0) {
+      setInboxShareablePaths([]);
+    }
+  }, [visibleAppMode, inboxShareablePaths.length]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
@@ -6364,6 +6529,7 @@ function MainApp() {
             processingLogLines={processingLogLines}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
+            sourceFolderKeys={inboxSourceFolderKeys}
             fileDropTarget={inboxRuntimeConfig.file_drop}
             focusRequest={inboxFocusTick}
             actionBusy={inboxActionBusy}
@@ -6373,12 +6539,26 @@ function MainApp() {
               void refreshProcessingMissions();
             }}
             onOpenSettings={openInboxSettings}
+            onOpenInboxFolder={() => {
+              if (!inboxWorkspacePath) return;
+              void openInFileManager(
+                inboxWorkspacePath,
+                inboxRootPath(inboxRuntimeConfig),
+              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+            onOpenSourceFolder={(key) => {
+              if (!inboxWorkspacePath) return;
+              void openInFileManager(
+                inboxWorkspacePath,
+                sourceFolderPath(inboxRuntimeConfig, key),
+              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
             onBulkAccept={bulkAcceptInboxKeys}
             onBulkReject={bulkRejectInboxKeys}
             onBulkMoveFiles={bulkMoveInboxFiles}
-            onProcessEntries={(keys) => void processInboxKeys(keys)}
+            onProcessEntries={(keys, context) => void processInboxKeys(keys, undefined, true, context)}
             onStageFiles={(paths) => void stageInboxFiles(paths)}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}
@@ -6396,6 +6576,7 @@ function MainApp() {
               void refreshInbox();
             }}
             onProcessError={setError}
+            onShareSelectionChange={setInboxShareablePaths}
           />
         ) : visibleAppMode === "comms" ? (
           <CommsPane
@@ -6619,6 +6800,7 @@ function MainApp() {
                   );
                 }}
                 onApplySkillToTarget={applySkillToFileTarget}
+                onAttachToTerminal={attachPathToTerminal}
               />
             ) : null}
             {documentsPaneOpen ? (
@@ -6710,6 +6892,9 @@ function MainApp() {
             activeTab={rightPaneTab}
             onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
+            shareWorkspacePath={shareWorkspacePath}
+            shareDocumentDirty={Boolean(dirty)}
+            inboxShareablePaths={inboxShareablePaths}
             appMode={visibleAppMode}
             contentCount={documentIndex.contentCount}
             typeCounts={documentIndex.typeCounts}
@@ -6767,7 +6952,9 @@ function MainApp() {
         ) : null}
 
         <TerminalPanel
+          ref={terminalPanelRef}
           cwd={activeDocumentWorkspacePath}
+          activeContext={activeTerminalContext}
           settings={anchorSettings}
           launchRequest={terminalLaunchRequest}
           open={anchorSettings.ui.layout.terminalOpen}

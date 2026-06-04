@@ -1,5 +1,6 @@
 use crate::kordoc_lite::{extract_hwpx_text_html, DocumentFormat, HwpxPreview};
 use crate::vault::resolve_inside_vault;
+use crate::win_process::NoWindow;
 use encoding_rs::EUC_KR;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
@@ -265,6 +266,7 @@ fn preview_command_spec_for(platform: DesktopPlatform, target: &str) -> CommandS
 fn spawn_command(spec: CommandSpec, label: &str) -> Result<(), String> {
     Command::new(&spec.program)
         .args(spec.args)
+        .no_window()
         .spawn()
         .map_err(|err| format!("{label}: {err}"))?;
     Ok(())

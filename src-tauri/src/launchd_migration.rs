@@ -2,6 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::win_process::NoWindow;
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -78,6 +80,7 @@ fn unload_launchctl(path: &Path) -> Result<(), String> {
     let output = Command::new("launchctl")
         .arg("unload")
         .arg(path)
+        .no_window()
         .output()
         .map_err(|err| format!("launchctl_spawn_failed: {err}"))?;
     if output.status.success() {
@@ -124,6 +127,7 @@ fn detect_legacy_telegram_launchd_in(
 fn loaded_launchd_labels() -> Vec<String> {
     Command::new("launchctl")
         .arg("list")
+        .no_window()
         .output()
         .ok()
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())

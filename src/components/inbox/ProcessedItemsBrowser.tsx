@@ -1,6 +1,7 @@
-import { AlertTriangle, FileText, RefreshCcw, Search } from "lucide-react";
+import { AlertTriangle, FileText, FolderOpen, RefreshCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type React from "react";
+import { useTranslation } from "../../lib/i18n";
 import type {
   InboxProcessedItem,
   InboxProcessedItemDetail,
@@ -47,6 +48,7 @@ export function ProcessedItemsBrowser({
   onRevealPath,
   onContextMenu,
 }: ProcessedItemsBrowserProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<ProcessedDetailTab>("summary");
   const visibleItems = useMemo(
     () => (channelFilter ? items.filter((item) => item.channel === channelFilter) : items),
@@ -98,35 +100,48 @@ export function ProcessedItemsBrowser({
             </div>
           ) : null}
           {visibleItems.map((item) => (
-            <button
-              type="button"
-              key={`${item.status}:${item.id}`}
-              className={
-                detail?.item.itemDir === item.itemDir
-                  ? `processed-row active ${item.status}`
-                  : `processed-row ${item.status}`
-              }
-              onClick={() => void onSelect(item)}
-              onContextMenu={onContextMenu ? (event) => onContextMenu(event, item) : undefined}
-            >
-              <div className="processed-row-title">
-                <span className={`status-chip ${item.status}`}>{statusLabel(item.status)}</span>
-                <strong>{item.title || item.id}</strong>
-              </div>
-              <div className="processed-row-meta">
-                <span>{item.channel}</span>
-                {item.project ? <span>{item.project}</span> : null}
-                {item.classification ? <span>{item.classification}</span> : null}
-                {item.receivedAt ? <time>{formatShortDate(item.receivedAt)}</time> : null}
-              </div>
-              {item.summaryPreview ? <p>{item.summaryPreview}</p> : null}
-              {item.error ? (
-                <div className="processed-row-error">
-                  <AlertTriangle size={13} />
-                  <span>{item.error}</span>
+            <div className="processed-row-wrap" key={`${item.status}:${item.id}`}>
+              <button
+                type="button"
+                className={
+                  detail?.item.itemDir === item.itemDir
+                    ? `processed-row active ${item.status}`
+                    : `processed-row ${item.status}`
+                }
+                onClick={() => void onSelect(item)}
+                onContextMenu={onContextMenu ? (event) => onContextMenu(event, item) : undefined}
+              >
+                <div className="processed-row-title">
+                  <span className={`status-chip ${item.status}`}>{statusLabel(item.status)}</span>
+                  <strong>{item.title || item.id}</strong>
                 </div>
-              ) : null}
-            </button>
+                <div className="processed-row-meta">
+                  <span>{item.channel}</span>
+                  {item.project ? <span>{item.project}</span> : null}
+                  {item.classification ? <span>{item.classification}</span> : null}
+                  {item.receivedAt ? <time>{formatShortDate(item.receivedAt)}</time> : null}
+                </div>
+                {item.summaryPreview ? <p>{item.summaryPreview}</p> : null}
+                {item.error ? (
+                  <div className="processed-row-error">
+                    <AlertTriangle size={13} />
+                    <span>{item.error}</span>
+                  </div>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="icon-button processed-row-reveal"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRevealPath(item.itemDir);
+                }}
+                title={t("inbox.menu.revealFinder")}
+                aria-label={t("inbox.menu.revealFinder")}
+              >
+                <FolderOpen size={14} />
+              </button>
+            </div>
           ))}
         </div>
         {detail ? (

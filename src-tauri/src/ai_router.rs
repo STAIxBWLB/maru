@@ -20,6 +20,7 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
+use crate::win_process::NoWindow;
 use crate::agent_host::provider::{
     build_cli_command, normalize_permission_mode, CliProviderKind,
 };
@@ -207,7 +208,8 @@ fn spawn_streaming_invocation(
         Stdio::null()
     })
     .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
+    .stderr(Stdio::piped())
+    .no_window();
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,

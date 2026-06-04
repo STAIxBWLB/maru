@@ -21,6 +21,7 @@ pub fn run_cli(args: Vec<String>) -> i32 {
         }
         "doctor" => run_doctor(&args[1..]),
         "skills" => run_skills(&args[1..]),
+        "terminal-hook" => crate::terminal_hooks::run_terminal_hook(&args[1..]),
         other => {
             eprintln!("unknown command: {other}");
             eprintln!("{}", usage());

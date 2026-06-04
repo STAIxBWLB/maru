@@ -14,6 +14,7 @@ use crate::cli_path::{augmented_path, is_executable};
 use crate::inbox_settings;
 use crate::skill_host::{fs as host_fs, store};
 use crate::vault::resolve_inside_vault;
+use crate::win_process::NoWindow;
 
 const TELEGRAM_ACCEPT_KIND: &str = "telegram.accept";
 const TELEGRAM_REJECT_KIND: &str = "telegram.reject";
@@ -308,6 +309,7 @@ fn fetch_telegram_recent_inner(
     if !config.legacy_auto_drop {
         cmd.arg("--output-json");
     }
+    cmd.no_window();
     let output = cmd
         .current_dir(
             config

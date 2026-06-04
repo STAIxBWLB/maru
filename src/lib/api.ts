@@ -892,9 +892,19 @@ export async function revealInFileManager(
   targetPath: string,
 ): Promise<void> {
   if (!isTauri()) {
-    throw new Error("Reveal in Finder requires the Tauri app.");
+    throw new Error("Reveal in file manager requires the Tauri app.");
   }
   await invoke("reveal_in_file_manager", { vaultPath, targetPath });
+}
+
+export async function openInFileManager(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Open in file manager requires the Tauri app.");
+  }
+  await invoke("open_in_file_manager", { vaultPath, targetPath });
 }
 
 export async function applyFileQueue(
@@ -1080,6 +1090,48 @@ export async function terminalResize(
 export async function terminalKill(sessionId: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("terminal_kill", { sessionId });
+}
+
+export interface TerminalHooksStatus {
+  scope: string;
+  claudePath: string;
+  claudeInstalled: boolean;
+  codexHint: string;
+}
+
+export async function terminalHooksStatus(
+  workPath: string | null,
+  scope: "project" | "global",
+): Promise<TerminalHooksStatus> {
+  return invoke<TerminalHooksStatus>("terminal_hooks_status", { workPath, scope });
+}
+
+export async function terminalHooksInstall(
+  workPath: string | null,
+  scope: "project" | "global",
+): Promise<TerminalHooksStatus> {
+  return invoke<TerminalHooksStatus>("terminal_hooks_install", { workPath, scope });
+}
+
+export async function terminalHooksUninstall(
+  workPath: string | null,
+  scope: "project" | "global",
+): Promise<TerminalHooksStatus> {
+  return invoke<TerminalHooksStatus>("terminal_hooks_uninstall", { workPath, scope });
+}
+
+export async function writeAgentContextHint(
+  workPath: string,
+  targets: string[],
+): Promise<string[]> {
+  return invoke<string[]>("write_agent_context_hint", { workPath, targets });
+}
+
+export async function removeAgentContextHint(
+  workPath: string,
+  targets: string[],
+): Promise<string[]> {
+  return invoke<string[]>("remove_agent_context_hint", { workPath, targets });
 }
 
 /** Pull unread Gmail messages via the user's existing `gws` Google

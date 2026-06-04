@@ -126,6 +126,75 @@ describe("inbox keyboard helpers", () => {
     expect(prompt).toContain("anchor_inbox_review_v1");
   });
 
+  it("leaves the prompt unchanged when processing context is empty", () => {
+    const config = runtimeConfig();
+    const entries = [inboxEntry("pendingItem", "items/pending/a/manifest.yaml")];
+    const base = buildInboxProcessPrompt({ config, entries });
+    expect(buildInboxProcessPrompt({ config, entries, processingContext: undefined })).toBe(base);
+    expect(buildInboxProcessPrompt({ config, entries, processingContext: "" })).toBe(base);
+    expect(buildInboxProcessPrompt({ config, entries, processingContext: "   \n\t " })).toBe(base);
+    expect(base).not.toContain("Processing context (user-provided):");
+  });
+
+  it("weaves user context into the inbox-process header and a labeled block", () => {
+    const config = runtimeConfig();
+    const prompt = buildInboxProcessPrompt({
+      config,
+      entries: [inboxEntry("pendingItem", "items/pending/a/manifest.yaml")],
+      processingContext: "ai professor 사업, detdc 계약 참고자료 project=rise",
+    });
+
+    // Header carries the raw context (key=value left intact for the skill).
+    expect(prompt.split("\n")[0]).toBe(
+      "inbox-process kakao ai professor 사업, detdc 계약 참고자료 project=rise",
+    );
+    // Labeled block is present and read before the item list.
+    expect(prompt).toContain("Processing context (user-provided):");
+    expect(prompt.indexOf("Processing context (user-provided):")).toBeLessThan(
+      prompt.indexOf("Selected context:"),
+    );
+    // key=value token is preserved verbatim (the builder must not parse hints).
+    expect(prompt).toContain("project=rise");
+  });
+
+  it("appends context once after a sorted multi-channel header", () => {
+    const config = runtimeConfig();
+    const prompt = buildInboxProcessPrompt({
+      config,
+      entries: [
+        { ...inboxEntry("dropFile", "drop/mso/b.txt"), channel: "mso" },
+        inboxEntry("dropFile", "drop/kakao/a.txt"),
+      ],
+      processingContext: "shared note",
+    });
+    expect(prompt.split("\n")[0]).toBe("inbox-process kakao mso shared note");
+  });
+
+  it("supports context on the channel-header action (no entries)", () => {
+    const config = runtimeConfig();
+    const prompt = buildInboxProcessPrompt({
+      config,
+      entries: [],
+      channels: ["mso"],
+      processingContext: "regional plan",
+    });
+    expect(prompt.split("\n")[0]).toBe("inbox-process mso regional plan");
+    expect(prompt).toContain("- channel header action");
+  });
+
+  it("trims outer whitespace and keeps multi-line context in the block", () => {
+    const config = runtimeConfig();
+    const prompt = buildInboxProcessPrompt({
+      config,
+      entries: [inboxEntry("pendingItem", "items/pending/a/manifest.yaml")],
+      processingContext: "  line one\nline two  ",
+    });
+    // Header collapses internal newlines so the invocation stays one line.
+    expect(prompt.split("\n")[0]).toBe("inbox-process kakao line one line two");
+    // The labeled block preserves the multi-line text.
+    expect(prompt).toContain("line one\nline two");
+  });
+
   it("filters processed item history by status and search text", () => {
     const items = [
       processedItem("done", "a", "kakao", "Project A", "reference", "alpha summary"),

@@ -242,6 +242,7 @@ export function InboxRunsPanel({
           const expanded = expandedLogs.has(mission.id);
           const parsedLines = lines.map(parseMeetingsLogLine);
           const latestParsed = parsedLines.at(-1);
+          const contextNote = inboxMissionContext(mission);
           return (
             <Fragment key={mission.id}>
               <article
@@ -254,6 +255,11 @@ export function InboxRunsPanel({
                     <span>
                       {mission.status} · {formatTime(mission.startedAt)}
                     </span>
+                    {contextNote ? (
+                      <span className="inbox-run-context" title={contextNote}>
+                        {contextNote}
+                      </span>
+                    ) : null}
                   </div>
                   {canStop ? (
                     <button
@@ -370,6 +376,16 @@ function inboxMissionTitle(mission: MissionRecord): string {
     }
   }
   return "inbox-process";
+}
+
+/** Free-text guidance the user attached to this run, if any. */
+function inboxMissionContext(mission: MissionRecord): string | null {
+  const metadata = mission.metadata;
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const value = (metadata as Record<string, unknown>).processingContext;
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
 }
 
 function formatTime(value: string): string {

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { filterItemsBySource, uniqueSources } from "./inbox";
+import {
+  countInboxEntryChannels,
+  filterEntriesByChannel,
+  filterItemsBySource,
+  groupEntriesByChannel,
+  groupFilesBySource,
+  mergeInboxSourceKeys,
+  uniqueEntryChannels,
+  uniqueSources,
+} from "./inbox";
+import type { InboxEntry } from "./types";
 
 interface Wrapped {
   item: { source: string; id: string };
@@ -36,3 +46,98 @@ describe("uniqueSources", () => {
     expect(uniqueSources([])).toEqual([]);
   });
 });
+
+describe("groupEntriesByChannel", () => {
+  it("groups configured entries by sorted channel while preserving item order", () => {
+    const entries = [
+      inboxEntry("mso-b", "mso"),
+      inboxEntry("kakao-a", "kakao"),
+      inboxEntry("mso-c", "mso"),
+    ];
+
+    const groups = groupEntriesByChannel(entries);
+    expect(groups.map((group) => group.key)).toEqual(["kakao", "mso"]);
+    expect(groups.find((group) => group.key === "mso")?.entries.map((entry) => entry.id)).toEqual([
+      "mso-b",
+      "mso-c",
+    ]);
+  });
+
+  it("returns empty groups for empty configured entries", () => {
+    expect(groupEntriesByChannel([])).toEqual([]);
+  });
+});
+
+describe("configured entry source filters", () => {
+  const entries = [
+    inboxEntry("mso-b", "mso"),
+    inboxEntry("kakao-a", "kakao"),
+    inboxEntry("mso-c", "mso"),
+  ];
+
+  it("filters configured entries by channel", () => {
+    expect(filterEntriesByChannel(entries, null).map((entry) => entry.id)).toEqual([
+      "mso-b",
+      "kakao-a",
+      "mso-c",
+    ]);
+    expect(filterEntriesByChannel(entries, "mso").map((entry) => entry.id)).toEqual([
+      "mso-b",
+      "mso-c",
+    ]);
+    expect(filterEntriesByChannel(entries, "gws")).toEqual([]);
+  });
+
+  it("collects and counts configured entry channels", () => {
+    expect(uniqueEntryChannels(entries)).toEqual(["kakao", "mso"]);
+    const counts = countInboxEntryChannels(entries);
+    expect(counts.get("mso")).toBe(2);
+    expect(counts.get("kakao")).toBe(1);
+  });
+
+  it("keeps configured source folder keys visible before observed sources", () => {
+    expect(
+      mergeInboxSourceKeys(
+        ["incoming", "kakao", "gws", "telegram"],
+        uniqueEntryChannels(entries),
+        uniqueSources(items),
+      ),
+    ).toEqual(["incoming", "kakao", "gws", "telegram", "mso", "outlook", "sharepoint"]);
+  });
+});
+
+describe("groupFilesBySource", () => {
+  it("groups staged files by sorted source while preserving item order", () => {
+    const groups = groupFilesBySource(items);
+    expect(groups.map((group) => group.key)).toEqual(["kakao", "outlook", "sharepoint"]);
+    expect(groups.find((group) => group.key === "outlook")?.items.map((entry) => entry.item.id)).toEqual([
+      "a",
+      "c",
+    ]);
+  });
+
+  it("returns empty groups for empty staged files", () => {
+    expect(groupFilesBySource([])).toEqual([]);
+  });
+});
+
+function inboxEntry(id: string, channel: string): InboxEntry {
+  return {
+    id,
+    kind: "dropFile",
+    path: `/work/inbox/drop/${channel}/${id}.txt`,
+    relPath: `inbox/drop/${channel}/${id}.txt`,
+    title: `${id}.txt`,
+    channel,
+    sourceKind: "message",
+    dropPath: `drop/${channel}`,
+    configuredRoot: "/work/inbox",
+    itemId: null,
+    status: "drop",
+    manifestPath: null,
+    summaryPath: null,
+    routePath: null,
+    sizeBytes: 4,
+    receivedAt: null,
+  };
+}

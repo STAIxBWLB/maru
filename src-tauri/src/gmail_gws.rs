@@ -16,6 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::win_process::NoWindow;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_yaml::Value as YamlValue;
@@ -152,6 +154,7 @@ pub fn fetch_gmail_unread(
     }
 
     let output = cmd
+        .no_window()
         .output()
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
 
@@ -355,6 +358,7 @@ fn list_gmail_labels(gws_bin: &PathBuf) -> Result<Vec<GmailLabel>, String> {
             "--format",
             "json",
         ])
+        .no_window()
         .output()
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
     parse_gws_json_output(output, "gmail_labels_list").and_then(parse_label_list)
@@ -375,6 +379,7 @@ fn create_gmail_label(gws_bin: &PathBuf, name: &str) -> Result<GmailLabel, Strin
             "--json",
             &body,
         ])
+        .no_window()
         .output()
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
     let raw = parse_gws_json_output(output, "gmail_labels_create")?;
@@ -394,6 +399,7 @@ fn modify_gmail_message(
             "gmail", "users", "messages", "modify", "--params", &params, "--format", "json",
             "--json", &body,
         ])
+        .no_window()
         .output()
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
     parse_gws_json_output(output, "gmail_messages_modify").map(|_| ())

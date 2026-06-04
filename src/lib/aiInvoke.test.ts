@@ -45,12 +45,14 @@ describe("classifyInboxItem runtime routing", () => {
   });
 
   it("routes the configured runtime to the generic agent bridge", async () => {
+    const extraEnv = { ANCHOR_WORKSPACE: "/tmp/work", ANCHOR_APP_MODE: "inbox" };
     const pending = classifyInboxItem(
       item,
       "codex",
       "/tmp/work",
       "/opt/bin/codex",
       "acceptEdits",
+      extraEnv,
     );
     // Wait until the run registered its event listeners (executor has run).
     await vi.waitFor(() => expect(handlers.has("ai://done")).toBe(true));
@@ -59,7 +61,7 @@ describe("classifyInboxItem runtime routing", () => {
       "PROMPT",
       "/tmp/work",
       null,
-      null,
+      extraEnv,
       "/opt/bin/codex",
       "acceptEdits",
     );

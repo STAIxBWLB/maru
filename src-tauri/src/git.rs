@@ -15,6 +15,7 @@ use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_
 use crate::agent_host::provider::{build_cli_command, CliProviderKind};
 use crate::approval::{require_approval, ApprovalState};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
+use crate::win_process::NoWindow;
 
 pub const GIT_SYNC_COMMIT_PUSH_APPROVAL_KIND: &str = "git.sync.commit_push";
 
@@ -59,6 +60,7 @@ fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<G
     let output = Command::new("git")
         .args(["status", "--porcelain=v1", untracked_arg, "--branch"])
         .current_dir(path)
+        .no_window()
         .output()
         .map_err(|err| format!("git invocation failed: {err}"))?;
 
@@ -218,6 +220,7 @@ pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     let output = Command::new("git")
         .args(["status", "--porcelain=v1", "-uall"])
         .current_dir(path)
+        .no_window()
         .output()
         .map_err(|err| format!("git invocation failed: {err}"))?;
     if !output.status.success() {
@@ -278,6 +281,7 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
         .args(["diff", "HEAD", "--", &file_path])
         .arg("-U2")
         .current_dir(path)
+        .no_window()
         .output()
         .map_err(|err| format!("git diff failed: {err}"))?;
     if !output.status.success() {
@@ -357,7 +361,8 @@ pub fn git_generate_commit_message(
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .no_window();
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("commit_message_provider_spawn_failed: {err}"))?;
@@ -584,6 +589,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
         let stash = Command::new("git")
             .args(["stash", "push", "-u", "-m", "anchor-git-sync-before-pull"])
             .current_dir(repo)
+            .no_window()
             .output()
             .map_err(|err| format!("git stash failed: {err}"))?;
         if !stash.status.success() {
@@ -599,6 +605,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
     let pull = Command::new("git")
         .args(["pull", "--rebase"])
         .current_dir(repo)
+        .no_window()
         .output()
         .map_err(|err| format!("git pull --rebase failed: {err}"))?;
     if !pull.status.success() {
@@ -612,6 +619,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
         let pop = Command::new("git")
             .args(["stash", "pop"])
             .current_dir(repo)
+            .no_window()
             .output()
             .map_err(|err| format!("git stash pop failed: {err}"))?;
         if !pop.status.success() {
@@ -668,6 +676,7 @@ pub fn git_sync_commit_push(
         stage_cmd.args(["add", "-A"]);
     }
     let stage = stage_cmd
+        .no_window()
         .output()
         .map_err(|err| format!("git add failed: {err}"))?;
     if !stage.status.success() {
@@ -684,6 +693,7 @@ pub fn git_sync_commit_push(
     }
     let commit = commit_cmd
         .current_dir(repo)
+        .no_window()
         .output()
         .map_err(|err| format!("git commit failed: {err}"))?;
     if !commit.status.success() {
@@ -700,6 +710,7 @@ pub fn git_sync_commit_push(
     let push = Command::new("git")
         .args(git_push_args())
         .current_dir(repo)
+        .no_window()
         .output()
         .map_err(|err| format!("git push failed: {err}"))?;
     if !push.status.success() {
@@ -729,6 +740,7 @@ fn git_toplevel(start: &Path) -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(start)
+        .no_window()
         .output()
         .map_err(|err| format!("git rev-parse failed: {err}"))?;
     if !output.status.success() {
@@ -746,6 +758,7 @@ fn repo_status(repo: &Path) -> Result<RepoStatus, String> {
     let output = Command::new("git")
         .args(["status", "--porcelain=v1", "-uall", "--branch"])
         .current_dir(repo)
+        .no_window()
         .output()
         .map_err(|err| format!("git status failed: {err}"))?;
     if !output.status.success() {
@@ -780,6 +793,7 @@ fn git_output(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo)
+        .no_window()
         .output()
         .map_err(|err| format!("git {:?} failed: {err}", args))?;
     if !output.status.success() {
@@ -802,6 +816,7 @@ fn list_submodule_paths(sync_root: &Path) -> Result<Vec<String>, String> {
             "printf '%s\n' \"$displaypath\"",
         ])
         .current_dir(sync_root)
+        .no_window()
         .output()
         .map_err(|err| format!("git submodule foreach failed: {err}"))?;
     if !output.status.success() {
@@ -1027,6 +1042,7 @@ pub fn git_commit(
     }
     let stage = stage_cmd
         .current_dir(path)
+        .no_window()
         .output()
         .map_err(|err| format!("git add failed: {err}"))?;
     if !stage.status.success() {
@@ -1043,6 +1059,7 @@ pub fn git_commit(
     }
     let commit = commit_cmd
         .current_dir(path)
+        .no_window()
         .output()
         .map_err(|err| format!("git commit failed: {err}"))?;
     if !commit.status.success() {

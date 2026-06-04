@@ -33,6 +33,10 @@ skill. The user may scope processing with `inbox-process <channel>`.
    - `<channel> [context...]`: treat remaining words as processing context.
      Preserve free text as `metadata.processing_context`; parse `key=value`
      tokens into `metadata.processing_hints`.
+   - A `Processing context (user-provided):` block in the request carries the
+     same guidance as trailing `<channel> [context...]`; treat its text
+     identically. When an item's manifest already has
+     `metadata.processing_context`, honor it as guidance on (re)processing.
 2. If a channel is provided, scan that channel's configured `drop_paths` first.
    Stage unnormalized files there through `inbox-intake` before processing.
    Ignore `.DS_Store` and other configured OS noise files.
@@ -78,7 +82,11 @@ sets `reviewFlow: true`), process **every** selected item in one run and:
    - For errors prepend `ERROR:` to the message or use `[phase:error]`.
 2. You MAY write the inbox-internal artifacts during the run: per item write
    `extracted_file`, `summary_file`, and `route_file` INSIDE that item's
-   directory. These are non-destructive and stay within the inbox.
+   directory. These are non-destructive and stay within the inbox. You MAY also
+   record the user's processing context onto each item by writing
+   `metadata.processing_context` / `metadata.processing_hints` into that item's
+   `manifest.yaml`; this is a non-destructive in-item write and is allowed in
+   review mode.
 3. In review mode you MUST NOT perform the destructive route step yourself: do
    not move items to `done/`, `failed/`, or `duplicate/`, do not file raw
    originals into project folders, and do not append the `_state/index.jsonl`

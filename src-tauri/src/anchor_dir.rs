@@ -413,7 +413,9 @@ fn default_settings_json() -> JsonValue {
                     "enabled": true,
                     "label": "Shell"
                 }
-            }
+            },
+            "injectActiveContext": true,
+            "attachMentionStyle": "mention"
         },
         "ai": {
             "providers": {},

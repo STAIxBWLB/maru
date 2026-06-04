@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::default_public_env_setup;
+use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +93,8 @@ pub fn skills_env_bootstrap(
             .arg("--target")
             .arg(&root)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .no_window();
         match cmd.spawn() {
             Ok(mut child) => {
                 if let Some(stdout) = child.stdout.take() {

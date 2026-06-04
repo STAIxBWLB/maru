@@ -6,6 +6,7 @@ use crate::agent_host::contracts::{
     CompletionRequest, CompletionResponse, COMPLETION_RESPONSE_SCHEMA_VERSION,
 };
 use crate::cli_path::resolve_program;
+use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -194,7 +195,8 @@ impl ProviderAdapter for CliProviderAdapter {
                 Stdio::null()
             })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .no_window();
         let mut child = cmd.spawn().map_err(|err| spawn_error_kind(&err))?;
         if let Some(payload) = stdin_payload {
             if let Some(mut stdin) = child.stdin.take() {

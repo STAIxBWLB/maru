@@ -25,6 +25,7 @@ import {
   Plus,
   Presentation,
   Save,
+  Send,
   StickyNote,
   Trash2,
   X,
@@ -76,6 +77,7 @@ import {
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
+import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
 interface OutlinePaneProps {
@@ -122,6 +124,12 @@ interface OutlinePaneProps {
   skillsNode?: React.ReactNode;
   guidelineNode?: React.ReactNode;
   evidenceNode?: React.ReactNode;
+  /** Workspace root for share-outbox commands (PKM doc workspace or inbox). */
+  shareWorkspacePath: string | null;
+  /** Whether the active document has unsaved edits (drives "save first"). */
+  shareDocumentDirty: boolean;
+  /** Shareable absolute file paths reported by the Inbox selection. */
+  inboxShareablePaths: string[];
   appMode: AnchorAppMode;
   contentCount: number;
   typeCounts: Array<[string, number]>;
@@ -232,6 +240,9 @@ export function OutlinePane({
   skillsNode,
   guidelineNode,
   evidenceNode,
+  shareWorkspacePath,
+  shareDocumentDirty,
+  inboxShareablePaths,
   appMode,
   contentCount,
   typeCounts,
@@ -250,7 +261,15 @@ export function OutlinePane({
 }: OutlinePaneProps) {
   const { t } = useTranslation();
   const isPkm = appMode === "pkm";
-  const tab: RightPaneTab = isPkm ? activeTab : "workspace";
+  // Shared Outbox is reachable in PKM (Docs) and Inbox only; other modes keep
+  // the workspace tab. Fall back to the first valid tab when the persisted
+  // tab is not available in the current mode.
+  const visibleTabs: readonly RightPaneTab[] = isPkm
+    ? ["workspace", "outline", "files", "memo", "shareOutbox", "skills", "guideline", "evidence", "info"]
+    : appMode === "inbox"
+      ? ["workspace", "shareOutbox"]
+      : ["workspace"];
+  const tab: RightPaneTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
   const headings = useMemo(() => extractOutline(draftContent), [draftContent]);
   // The active heading is the last one at or above the editor's top line.
   const activeHeadingIndex = useMemo(() => {
@@ -302,10 +321,6 @@ export function OutlinePane({
     },
     [onQueueFileSources],
   );
-
-  const visibleTabs: readonly RightPaneTab[] = isPkm
-    ? ["workspace", "outline", "files", "memo", "skills", "guideline", "evidence", "info"]
-    : ["workspace"];
 
   return (
     <aside className="outline-pane" ref={paneRef}>
@@ -363,6 +378,8 @@ export function OutlinePane({
                 <Files size={20} />
               ) : id === "memo" ? (
                 <StickyNote size={20} />
+              ) : id === "shareOutbox" ? (
+                <Send size={20} />
               ) : id === "skills" ? (
                 <FileCode2 size={20} />
               ) : id === "guideline" ? (
@@ -474,6 +491,21 @@ export function OutlinePane({
               onError={onError}
               onRefreshWorkspace={onRefreshWorkspace}
               t={t}
+            />
+          ) : null}
+
+          {tab === "shareOutbox" ? (
+            <SharedOutboxPane
+              workspacePath={shareWorkspacePath}
+              activeDocument={
+                document
+                  ? { path: document.path, title: document.title, dirty: shareDocumentDirty }
+                  : null
+              }
+              selectedFileEntries={selectedWorkspaceFileEntries}
+              inboxShareablePaths={inboxShareablePaths}
+              onError={onError}
+              onRevealFileInFinder={onRevealFileInFinder}
             />
           ) : null}
 

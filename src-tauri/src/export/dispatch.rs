@@ -11,6 +11,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use crate::win_process::NoWindow;
+
 use super::manifest::{
     compute_source_sha256, load_manifest, record_output_failure, record_output_pending,
     record_output_success, ExportFormat, ExportManifest, ExportOutputEntry,
@@ -321,7 +323,7 @@ fn convert_pdf(
 
 fn run(program: &Path, args: &[OsString]) -> ConverterRun {
     let command = command_label(program, args);
-    let output = Command::new(program).args(args).output();
+    let output = Command::new(program).args(args).no_window().output();
     ConverterRun {
         command,
         result: output.and_then(check_output),

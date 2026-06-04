@@ -30,6 +30,7 @@ mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+mod share_outbox;
 mod shelf;
 mod skill_host;
 mod studio;
@@ -38,8 +39,10 @@ mod tasks;
 mod telegram_io;
 mod template_fill;
 mod terminal;
+mod terminal_hooks;
 mod vault;
 mod vault_list;
+mod win_process;
 mod workspace;
 mod workspace_files;
 
@@ -73,7 +76,7 @@ use export::{
     export_dispatch, export_manifest_load, export_plan, export_record_failure,
     export_record_pending, export_record_success, export_validate,
 };
-use file_manager::reveal_in_file_manager;
+use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
@@ -91,6 +94,10 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
+use share_outbox::{
+    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
+    save_share_outbox_root, scan_share_outbox,
+};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -138,6 +145,11 @@ use telegram_io::{
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
+use terminal_hooks::{
+    remove_agent_context_hint, start_terminal_hook_watcher, terminal_hooks_install,
+    terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
+    TerminalHookWatcherState,
+};
 use vault::{default_vault_path, read_vault_cache, sample_workspace_path, scan_vault};
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
@@ -164,9 +176,16 @@ pub fn run() {
         .manage(InboxWatcherState::default())
         .manage(TelegramIoState::default())
         .manage(TerminalState::default())
+        .manage(TerminalHookWatcherState::default())
         .manage(ApprovalState::default())
         .manage(MissionState::default())
         .manage(CatalogWatcherState::default())
+        .setup(|app| {
+            // Start the agent-hook status watcher (best-effort; absent hooks
+            // simply produce no events).
+            let _ = start_terminal_hook_watcher(&app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             default_vault_path,
             sample_workspace_path,
@@ -194,6 +213,7 @@ pub fn run() {
             git_sync_commit_push,
             git_changes,
             git_diff,
+            open_in_file_manager,
             reveal_in_file_manager,
             scan_inbox_drop,
             scan_inbox_entries,
@@ -214,6 +234,11 @@ pub fn run() {
             save_inbox_settings,
             read_inbox_runtime_config,
             save_inbox_runtime_config,
+            read_share_outbox_config,
+            save_share_outbox_root,
+            ensure_share_outbox_root,
+            scan_share_outbox,
+            prepare_share_outbox_files,
             parse_korean_date_cmd,
             scan_meeting_notes,
             read_meeting_metadata,
@@ -245,6 +270,11 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_kill,
+            terminal_hooks_install,
+            terminal_hooks_uninstall,
+            terminal_hooks_status,
+            write_agent_context_hint,
+            remove_agent_context_hint,
             build_inbox_classification_prompt,
             parse_inbox_classification,
             fetch_gmail_unread,

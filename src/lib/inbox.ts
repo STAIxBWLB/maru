@@ -64,6 +64,79 @@ export function countInboxSources<T extends { item: { source: string } }>(
   return counts;
 }
 
+export function filterEntriesByChannel<T extends { channel: string }>(
+  entries: T[],
+  source: string | null,
+): T[] {
+  if (source === null) return entries;
+  return entries.filter((entry) => entry.channel === source);
+}
+
+export function uniqueEntryChannels<T extends { channel: string }>(entries: T[]): string[] {
+  const seen = new Set<string>();
+  for (const entry of entries) seen.add(entry.channel);
+  return [...seen].sort();
+}
+
+export function countInboxEntryChannels<T extends { channel: string }>(
+  entries: T[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.channel, (counts.get(entry.channel) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export function mergeInboxSourceKeys(...groups: string[][]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const group of groups) {
+    for (const key of group) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(key);
+    }
+  }
+  return merged;
+}
+
+export interface InboxEntryChannelGroup {
+  key: string;
+  entries: InboxEntry[];
+}
+
+export function groupEntriesByChannel(entries: InboxEntry[]): InboxEntryChannelGroup[] {
+  const groups = new Map<string, InboxEntry[]>();
+  for (const entry of entries) {
+    const group = groups.get(entry.channel) ?? [];
+    group.push(entry);
+    groups.set(entry.channel, group);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupedEntries]) => ({ key, entries: groupedEntries }));
+}
+
+export interface InboxFileSourceGroup<T extends { item: { source: string } } = InboxItemState> {
+  key: string;
+  items: T[];
+}
+
+export function groupFilesBySource<T extends { item: { source: string } }>(
+  items: T[],
+): InboxFileSourceGroup<T>[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const group = groups.get(item.item.source) ?? [];
+    group.push(item);
+    groups.set(item.item.source, group);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupedItems]) => ({ key, items: groupedItems }));
+}
+
 export function buildInboxFeedRowKeys({
   entries,
   files,
@@ -185,6 +258,7 @@ export function buildInboxProcessPrompt({
   config,
   channels,
   reviewFlow = true,
+  processingContext,
 }: {
   entries: InboxEntry[];
   config: InboxRuntimeConfig;
@@ -192,6 +266,12 @@ export function buildInboxProcessPrompt({
   channels?: string[];
   /** When true, dispatch the meetings/tasks-style review run (propose, don't move). */
   reviewFlow?: boolean;
+  /** Free-text guidance the user typed at Process time. Woven into the
+   *  invocation header so the skill's `<channel> [context...]` parser captures it
+   *  (key=value tokens stay raw → metadata.processing_hints), and emitted as a
+   *  labeled block. Optional; empty/whitespace is treated as absent so the prompt
+   *  stays byte-for-byte identical to a context-free run. */
+  processingContext?: string;
 }): string {
   const byChannel = new Map<string, InboxEntry[]>();
   for (const entry of entries) {
@@ -203,8 +283,16 @@ export function buildInboxProcessPrompt({
     byChannel.size > 0
       ? [...byChannel.keys()].filter(Boolean).sort()
       : [...new Set(channels ?? [])].filter(Boolean).sort();
-  const header =
+  const trimmedContext = processingContext?.trim() ?? "";
+  const baseHeader =
     resolvedChannels.length > 0 ? `inbox-process ${resolvedChannels.join(" ")}` : "inbox-process";
+  // Append the user context to the invocation line so the skill's
+  // "<channel> [context...]" parser fires. Internal whitespace/newlines are
+  // collapsed to single spaces so the invocation stays one line (the full,
+  // newline-preserving text is repeated in the labeled block below). key=value
+  // tokens are left raw for the skill to parse into metadata.processing_hints.
+  const headerContext = trimmedContext.replace(/\s+/g, " ");
+  const header = headerContext ? `${baseHeader} ${headerContext}` : baseHeader;
 
   const contextLines =
     entries.length > 0
@@ -230,6 +318,20 @@ export function buildInboxProcessPrompt({
       ]
     : [];
 
+  // User-typed guidance, emitted as an explicit labeled block (in addition to the
+  // header suffix) so the model reliably treats it as processing context.
+  const contextBlock = trimmedContext
+    ? [
+        "Processing context (user-provided):",
+        trimmedContext,
+        "",
+        "Honor this context when extracting, classifying, and routing. Store the",
+        "raw text as metadata.processing_context and parse any key=value tokens",
+        "into metadata.processing_hints (per the skill's Workflow step 1).",
+        "",
+      ]
+    : [];
+
   return [
     header,
     "",
@@ -240,6 +342,7 @@ export function buildInboxProcessPrompt({
     "Use workspace.config.yaml as the SSOT, especially inbox.paths and inbox.naming.",
     "",
     ...reviewBlock,
+    ...contextBlock,
     "Selected context:",
     ...contextLines,
     "",

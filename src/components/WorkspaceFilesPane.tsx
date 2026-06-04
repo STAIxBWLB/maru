@@ -128,6 +128,7 @@ interface WorkspaceFilesPaneProps {
     operation: FileStoreOperation,
   ) => void;
   onApplySkillToTarget?: (targetPath: string, targetKind: "file" | "directory") => void;
+  onAttachToTerminal?: (relPath: string, absPath: string) => void;
 }
 
 export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
@@ -162,6 +163,7 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   onOpenFile,
   onQueueFiles,
   onRevealInFinder,
+  onAttachToTerminal,
   onRefresh,
   onClose,
   paneRef,
@@ -783,6 +785,20 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
               }}
             >
               {t("context.applySkill")}
+            </button>
+          ) : null}
+          {onAttachToTerminal && contextMenu.targetKind === "file" ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const rel = contextMenu.relPath;
+                const abs = contextMenu.targetPath;
+                setContextMenu(null);
+                onAttachToTerminal(rel, abs);
+              }}
+            >
+              {t("context.attachToTerminal")}
             </button>
           ) : null}
           <button

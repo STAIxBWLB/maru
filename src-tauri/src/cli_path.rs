@@ -22,6 +22,21 @@ pub fn extra_path_dirs() -> Vec<PathBuf> {
     }
     out.push(PathBuf::from("/opt/homebrew/lib/node_modules/.bin"));
     out.push(PathBuf::from("/usr/local/lib/node_modules/.bin"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) {
+            out.push(appdata.join("npm")); // npm global installs on Windows
+        }
+        if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+            out.push(home.join(".cargo").join("bin"));
+            out.push(
+                home.join("AppData")
+                    .join("Local")
+                    .join("Microsoft")
+                    .join("WindowsApps"),
+            );
+        }
+    }
     out
 }
 
@@ -76,15 +91,61 @@ pub fn which_in_path(program: &str, path_env: Option<&OsStr>) -> Result<PathBuf,
         ));
     };
     for dir in std::env::split_paths(path_env) {
-        let candidate = dir.join(program);
-        if is_executable(&candidate) {
-            return Ok(candidate);
+        if let Some(found) = probe_in_dir(&dir, program) {
+            return Ok(found);
         }
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
         format!("{program} not found"),
     ))
+}
+
+#[cfg(not(windows))]
+fn probe_in_dir(dir: &Path, program: &str) -> Option<PathBuf> {
+    let candidate = dir.join(program);
+    is_executable(&candidate).then_some(candidate)
+}
+
+/// On Windows a bare command name (e.g. `claude`) resolves to `claude.exe` /
+/// `claude.cmd`. Try the literal name first, then append each PATHEXT extension
+/// when the command has no extension of its own (matches Warp's resolver).
+#[cfg(windows)]
+fn probe_in_dir(dir: &Path, program: &str) -> Option<PathBuf> {
+    let direct = dir.join(program);
+    if is_executable(&direct) {
+        return Some(direct);
+    }
+    if Path::new(program).extension().is_none() {
+        for ext in windows_path_extensions() {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if is_executable(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn windows_path_extensions() -> Vec<String> {
+    std::env::var_os("PATHEXT")
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .split(';')
+                .map(str::trim)
+                .filter(|ext| !ext.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|exts| !exts.is_empty())
+        .unwrap_or_else(|| {
+            [".COM", ".EXE", ".BAT", ".CMD"]
+                .iter()
+                .map(|ext| ext.to_string())
+                .collect()
+        })
 }
 
 #[cfg(unix)]

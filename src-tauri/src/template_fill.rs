@@ -9,6 +9,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use crate::win_process::NoWindow;
 use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -485,6 +487,7 @@ fn parse_replaced_count(stderr: &[u8]) -> u32 {
 fn run_command(program: &Path, args: &[OsString]) -> Result<Output, String> {
     let output = Command::new(program)
         .args(args)
+        .no_window()
         .output()
         .map_err(|err| format!("Cannot run {}: {err}", program.display()))?;
     if output.status.success() {

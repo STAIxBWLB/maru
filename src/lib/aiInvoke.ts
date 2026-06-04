@@ -55,6 +55,7 @@ export async function classifyInboxItem(
   cwd: string | null = null,
   commandOverride: string | null = null,
   permissionMode: string | null = null,
+  extraEnv: Record<string, string> | null = null,
 ): Promise<InboxClassification> {
   const prompt = await buildInboxClassificationPrompt(item);
 
@@ -74,7 +75,7 @@ export async function classifyInboxItem(
     prompt,
     cwd,
     null,
-    null,
+    extraEnv,
     commandOverride,
     permissionMode,
   );

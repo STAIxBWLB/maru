@@ -1,7 +1,9 @@
 import {
   Brain,
   Check,
+  ChevronDown,
   FilePlus2,
+  FolderOpen,
   HelpCircle,
   Inbox,
   Loader2,
@@ -14,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { chooseFiles } from "../lib/api";
+import { isInboxRowShareable } from "../lib/shareOutbox";
 import {
   clearExplorerDragPayload,
   hasExplorerDragPayload,
@@ -21,17 +24,24 @@ import {
 } from "../lib/fileDrag";
 import {
   categoryLabel,
+  countInboxEntryChannels,
   countInboxSources,
+  filterEntriesByChannel,
   filterItemsBySource,
+  groupEntriesByChannel,
+  groupFilesBySource,
   inboxContextActionKeys,
   inboxTrashTargetsForRows,
+  mergeInboxSourceKeys,
   shouldHandleInboxDeleteShortcut,
+  uniqueEntryChannels,
   uniqueSources,
   type InboxDecision,
   type InboxItemState,
   type InboxTrashableRow,
 } from "../lib/inbox";
 import { useTranslation } from "../lib/i18n";
+import { allSourceSelectValue } from "../lib/inboxSources";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
   InboxEntry,
@@ -43,6 +53,7 @@ import type {
   MissionRecord,
 } from "../lib/types";
 import { BulkActionBar } from "./BulkActionBar";
+import { InboxProcessComposer } from "./inbox/InboxProcessComposer";
 import { ProcessedItemsBrowser } from "./inbox/ProcessedItemsBrowser";
 import { InboxRunsPanel } from "./inbox/InboxRunsPanel";
 import { formatBytes } from "./inbox/processedFormat";
@@ -61,9 +72,12 @@ interface InboxPaneProps {
   processingLogLines: Record<string, string[]>;
   sourceFilter: string | null;
   onSourceFilter: (source: string | null) => void;
+  sourceFolderKeys?: string[];
   fileDropTarget: InboxFileDropConfig;
   onRefresh: () => void;
   onOpenSettings: () => void;
+  onOpenInboxFolder?: () => void;
+  onOpenSourceFolder?: (sourceKey: string) => void;
   focusRequest?: number;
   actionBusy?: boolean;
   onClassify: (id: string) => void;
@@ -71,7 +85,7 @@ interface InboxPaneProps {
   onBulkAccept: (keys: string[]) => void | Promise<void>;
   onBulkReject: (keys: string[]) => void | Promise<void>;
   onBulkMoveFiles: (keys: string[]) => void | Promise<void>;
-  onProcessEntries: (keys: string[]) => void | Promise<void>;
+  onProcessEntries: (keys: string[], context?: string) => void | Promise<void>;
   onStageFiles: (paths: string[]) => void | Promise<void>;
   onProcessedStatusFilter: (status: InboxProcessedStatus | "all") => void;
   onProcessedQuery: (query: string) => void;
@@ -89,6 +103,9 @@ interface InboxPaneProps {
   }) => Promise<string | null>;
   onProcessApplied: () => void;
   onProcessError: (message: string | null) => void;
+  /** Reports the absolute paths of shareable selected rows (drop files /
+   *  dropFile entries) for the Shared Outbox tab. */
+  onShareSelectionChange?: (paths: string[]) => void;
 }
 
 type InboxRow =
@@ -117,9 +134,12 @@ export function InboxPane({
   processingLogLines,
   sourceFilter,
   onSourceFilter,
+  sourceFolderKeys = [],
   fileDropTarget,
   onRefresh,
   onOpenSettings,
+  onOpenInboxFolder,
+  onOpenSourceFolder,
   focusRequest = 0,
   actionBusy = false,
   onClassify,
@@ -140,6 +160,7 @@ export function InboxPane({
   onConfirmApproval,
   onProcessApplied,
   onProcessError,
+  onShareSelectionChange,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
   const paneRef = useRef<HTMLElement | null>(null);
@@ -149,31 +170,86 @@ export function InboxPane({
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [dragOverDrop, setDragOverDrop] = useState(false);
   const [contextMenu, setContextMenu] = useState<InboxContextMenuState | null>(null);
+  const [processComposer, setProcessComposer] = useState<{ keys: string[] } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const handleContextMenuKeyDown = useContextMenuKeyboard(
     contextMenuRef,
     !!contextMenu,
     () => setContextMenu(null),
   );
-  const sources = useMemo(() => uniqueSources(items), [items]);
-  const sourceCounts = useMemo(() => countInboxSources(items), [items]);
+  const fileSources = useMemo(() => uniqueSources(items), [items]);
+  const entrySources = useMemo(() => uniqueEntryChannels(entries), [entries]);
+  const sources = useMemo(
+    () => mergeInboxSourceKeys(sourceFolderKeys, entrySources, fileSources),
+    [sourceFolderKeys, entrySources, fileSources],
+  );
+  const fileSourceCounts = useMemo(() => countInboxSources(items), [items]);
+  const entrySourceCounts = useMemo(() => countInboxEntryChannels(entries), [entries]);
+  const visibleEntries = useMemo(
+    () => filterEntriesByChannel(entries, sourceFilter),
+    [entries, sourceFilter],
+  );
   const visibleItems = useMemo(
     () => filterItemsBySource(items, sourceFilter),
     [items, sourceFilter],
   );
+  const entryGroups = useMemo(() => groupEntriesByChannel(visibleEntries), [visibleEntries]);
+  const fileGroups = useMemo(() => groupFilesBySource(visibleItems), [visibleItems]);
   const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
-  const entryPending = entries.filter((entry) => entry.status !== "done").length;
+  const entryPending = visibleEntries.filter((entry) => entry.status !== "done").length;
+  const totalSourceCount = entries.length + items.length;
+  const countForSource = (source: string) =>
+    (entrySourceCounts.get(source) ?? 0) + (fileSourceCounts.get(source) ?? 0);
+  const selectedSourceCount =
+    sourceFilter === null ? totalSourceCount : countForSource(sourceFilter);
+  const allSourceValue = useMemo(() => allSourceSelectValue(sources), [sources]);
+  const sourceSelectValue = sourceFilter ?? allSourceValue;
+  const selectedFolderTitle =
+    sourceFilter === null
+      ? t("inbox.openFolder")
+      : t("inbox.openSourceFolder", { source: sourceFilter });
+  const selectedFolderDisabled =
+    sourceFilter === null ? !onOpenInboxFolder : !onOpenSourceFolder;
   const rows = useMemo<InboxRow[]>(
     () => [
-      ...entries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
-      ...visibleItems.map((entry) => ({ key: `file:${entry.item.id}`, kind: "file" as const, entry })),
+      ...entryGroups.flatMap((group) =>
+        group.entries.map((entry) => ({
+          key: `entry:${entry.id}`,
+          kind: "entry" as const,
+          entry,
+        })),
+      ),
+      ...fileGroups.flatMap((group) =>
+        group.items.map((entry) => ({
+          key: `file:${entry.item.id}`,
+          kind: "file" as const,
+          entry,
+        })),
+      ),
     ],
-    [entries, visibleItems],
+    [entryGroups, fileGroups],
   );
   const selected = useMemo(
     () => rows.filter((row) => selectedKeys.has(row.key)),
     [rows, selectedKeys],
   );
+  // Absolute paths of selected rows that map to concrete shareable files
+  // (drop files / dropFile entries; pendingItem dirs are excluded).
+  const shareablePaths = useMemo(
+    () =>
+      selected
+        .filter((row) =>
+          isInboxRowShareable({
+            kind: row.kind,
+            entryKind: row.kind === "entry" ? row.entry.kind : undefined,
+          }),
+        )
+        .map((row) => pathForRow(row)),
+    [selected],
+  );
+  useEffect(() => {
+    onShareSelectionChange?.(shareablePaths);
+  }, [shareablePaths, onShareSelectionChange]);
   const selectedDecisionKeys = useMemo(
     () => selected.filter((row) => row.kind !== "entry").map((row) => row.key),
     [selected],
@@ -191,6 +267,10 @@ export function InboxPane({
     setSelectedKeys((current) => new Set([...current].filter((key) => valid.has(key))));
     if (focusedKey && !valid.has(focusedKey)) setFocusedKey(rows[0]?.key ?? null);
   }, [focusedKey, rows]);
+
+  useEffect(() => {
+    if (sourceFilter !== null && !sources.includes(sourceFilter)) onSourceFilter(null);
+  }, [onSourceFilter, sourceFilter, sources]);
 
   useEffect(() => {
     if (focusRequest <= 0) return;
@@ -253,6 +333,26 @@ export function InboxPane({
     if (focusedKey?.startsWith("entry:")) return [focusedKey];
     const fallback = rows.find((row) => row.kind === "entry")?.key;
     return fallback ? [fallback] : [];
+  };
+
+  // Distinct channels of the staged entry keys, for the composer's
+  // `inbox-process <channels>` preview line.
+  const channelsForKeys = (keys: string[]): string[] => {
+    const ids = new Set(
+      keys.filter((key) => key.startsWith("entry:")).map((key) => key.slice("entry:".length)),
+    );
+    const channels = entries
+      .filter((entry) => ids.has(entry.id))
+      .map((entry) => entry.channel)
+      .filter(Boolean);
+    return [...new Set(channels)].sort();
+  };
+
+  // All Process triggers route through here so the user can add free-text
+  // context before the run is dispatched.
+  const openProcessComposer = (keys: string[]) => {
+    if (keys.length === 0) return;
+    setProcessComposer({ keys });
   };
 
   const actionKeys = () => {
@@ -440,7 +540,7 @@ export function InboxPane({
           void actOnKeys(actionKeys(), "rejected");
         } else if (event.key.toLowerCase() === "p") {
           event.preventDefault();
-          void onProcessEntries(processActionKeys());
+          openProcessComposer(processActionKeys());
         } else if (event.key === "?") {
           event.preventDefault();
           setCheatsheetOpen((value) => !value);
@@ -458,6 +558,16 @@ export function InboxPane({
           </p>
         </div>
         <div className="inbox-header-actions">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => onOpenInboxFolder?.()}
+            disabled={!onOpenInboxFolder}
+            title={t("inbox.openFolder")}
+            aria-label={t("inbox.openFolder")}
+          >
+            <FolderOpen size={15} />
+          </button>
           <button
             type="button"
             className="icon-button"
@@ -499,28 +609,52 @@ export function InboxPane({
       ) : null}
 
       {sources.length > 0 ? (
-        <div className="inbox-filter-row" role="toolbar" aria-label={t("inbox.filter.label")}>
+        <div
+          className="inbox-filter-row inbox-source-toolbar"
+          role="toolbar"
+          aria-label={t("inbox.filter.label")}
+        >
+          <label className="inbox-source-select-control">
+            <span className="inbox-source-select-label">{t("inbox.filter.source")}</span>
+            <span className="inbox-source-select-wrap">
+              <select
+                className="inbox-source-select"
+                value={sourceSelectValue}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onSourceFilter(value === allSourceValue ? null : value);
+                }}
+              >
+                <option value={allSourceValue}>{t("inbox.filter.all")}</option>
+                {sources.map((source) => (
+                  <option value={source} key={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                className="inbox-source-select-chevron"
+                aria-hidden="true"
+              />
+            </span>
+          </label>
+          <span className="inbox-source-count-badge">
+            {selectedSourceCount.toLocaleString(locale)}
+          </span>
           <button
             type="button"
-            className={sourceFilter === null ? "inbox-filter-chip active" : "inbox-filter-chip"}
-            onClick={() => onSourceFilter(null)}
+            className="icon-button inbox-filter-folder-button"
+            onClick={() => {
+              if (sourceFilter === null) onOpenInboxFolder?.();
+              else onOpenSourceFolder?.(sourceFilter);
+            }}
+            disabled={selectedFolderDisabled}
+            title={selectedFolderTitle}
+            aria-label={selectedFolderTitle}
           >
-            {t("inbox.filter.all")} <span className="count">{items.length}</span>
+            <FolderOpen size={14} />
           </button>
-          {sources.map((source) => {
-            const count = sourceCounts.get(source) ?? 0;
-            const active = sourceFilter === source;
-            return (
-              <button
-                type="button"
-                key={source}
-                className={active ? "inbox-filter-chip active" : "inbox-filter-chip"}
-                onClick={() => onSourceFilter(active ? null : source)}
-              >
-                {source} <span className="count">{count}</span>
-              </button>
-            );
-          })}
         </div>
       ) : null}
 
@@ -529,14 +663,22 @@ export function InboxPane({
           title="CONFIGURED ENTRIES"
         >
             <div className="inbox-list">
-              {entries.length === 0 ? (
+              {visibleEntries.length === 0 ? (
                 <div className="inbox-empty">
                   <Inbox size={24} />
                   <strong>No configured inbox items</strong>
                   <span>Configured drop files and pending manifests will appear here.</span>
                 </div>
               ) : null}
-              {entries.map((entry) => {
+              {entryGroups.map((group) => (
+                <div className="inbox-source-group-block" key={`entry-group:${group.key}`}>
+                  <InboxSourceGroupHeader
+                    source={group.key}
+                    count={group.entries.length.toLocaleString(locale)}
+                    title={t("inbox.openSourceFolder", { source: group.key })}
+                    onOpen={onOpenSourceFolder ? () => onOpenSourceFolder(group.key) : undefined}
+                  />
+                  {group.entries.map((entry) => {
                     const key = `entry:${entry.id}`;
                     const row: InboxRow = { key, kind: "entry", entry };
                     return (
@@ -581,11 +723,23 @@ export function InboxPane({
                         <div className="inbox-decision">
                           <button
                             type="button"
+                            className="icon-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onRevealPath(pathForRow(row));
+                            }}
+                            title={t("inbox.menu.revealFinder")}
+                            aria-label={t("inbox.menu.revealFinder")}
+                          >
+                            <FolderOpen size={14} />
+                          </button>
+                          <button
+                            type="button"
                             className="button button-ghost button-sm"
                             disabled={actionBusy}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void onProcessEntries([key]);
+                              openProcessComposer([key]);
                             }}
                           >
                             <Play size={14} />
@@ -595,6 +749,8 @@ export function InboxPane({
                       </article>
                     );
                   })}
+                </div>
+              ))}
             </div>
         </InboxSection>
 
@@ -665,109 +821,131 @@ export function InboxPane({
                 <span>Drop or choose files above to stage them into the configured inbox.</span>
               </div>
             ) : null}
-            {visibleItems.map((entry) => {
-              const key = `file:${entry.item.id}`;
-              const row: InboxRow = { key, kind: "file", entry };
-              return (
-              <article
-                className={`inbox-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
-                key={entry.item.id}
-                data-inbox-row-key={key}
-                onClick={(event) => handleRowClick(event, key)}
-                onContextMenu={(event) => openRowContextMenu(event, row)}
-              >
-                <input
-                  type="checkbox"
-                  className="inbox-row-check"
-                  checked={selectedKeys.has(key)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleSelection(key, event.shiftKey);
-                  }}
-                  onChange={() => {}}
-                  aria-label={`Select ${entry.item.title}`}
+            {fileGroups.map((group) => (
+              <div className="inbox-source-group-block" key={`file-group:${group.key}`}>
+                <InboxSourceGroupHeader
+                  source={group.key}
+                  count={group.items.length.toLocaleString(locale)}
+                  title={t("inbox.openSourceFolder", { source: group.key })}
+                  onOpen={onOpenSourceFolder ? () => onOpenSourceFolder(group.key) : undefined}
                 />
-                <div className="inbox-item-main">
-                  <div className="inbox-item-title">
-                    <span className="source-chip">{entry.item.source}</span>
-                    <strong>{entry.item.title}</strong>
-                  </div>
+                {group.items.map((entry) => {
+                  const key = `file:${entry.item.id}`;
+                  const row: InboxRow = { key, kind: "file", entry };
+                  return (
+                    <article
+                      className={`inbox-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
+                      key={entry.item.id}
+                      data-inbox-row-key={key}
+                      onClick={(event) => handleRowClick(event, key)}
+                      onContextMenu={(event) => openRowContextMenu(event, row)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="inbox-row-check"
+                        checked={selectedKeys.has(key)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelection(key, event.shiftKey);
+                        }}
+                        onChange={() => {}}
+                        aria-label={`Select ${entry.item.title}`}
+                      />
+                      <div className="inbox-item-main">
+                        <div className="inbox-item-title">
+                          <span className="source-chip">{entry.item.source}</span>
+                          <strong>{entry.item.title}</strong>
+                        </div>
 
-                  {entry.classification ? (
-                    <p>
-                      <span className="category-chip">
-                        {categoryLabel(entry.classification.category)}
-                      </span>{" "}
-                      {entry.classification.summary}
-                    </p>
-                  ) : (
-                    <p className="inbox-item-hint">{t("inbox.notClassified")}</p>
-                  )}
+                        {entry.classification ? (
+                          <p>
+                            <span className="category-chip">
+                              {categoryLabel(entry.classification.category)}
+                            </span>{" "}
+                            {entry.classification.summary}
+                          </p>
+                        ) : (
+                          <p className="inbox-item-hint">{t("inbox.notClassified")}</p>
+                        )}
 
-                  <div className="inbox-item-meta">
-                    <span>{formatBytes(entry.item.sizeBytes)}</span>
-                    {entry.item.receivedAt ? (
-                      <time dateTime={entry.item.receivedAt}>{entry.item.receivedAt}</time>
-                    ) : null}
-                    {entry.classification?.suggestedFolder ? (
-                      <span className="suggested-folder">
-                        → {entry.classification.suggestedFolder}
-                      </span>
-                    ) : null}
-                  </div>
+                        <div className="inbox-item-meta">
+                          <span>{formatBytes(entry.item.sizeBytes)}</span>
+                          {entry.item.receivedAt ? (
+                            <time dateTime={entry.item.receivedAt}>{entry.item.receivedAt}</time>
+                          ) : null}
+                          {entry.classification?.suggestedFolder ? (
+                            <span className="suggested-folder">
+                              → {entry.classification.suggestedFolder}
+                            </span>
+                          ) : null}
+                        </div>
 
-                  {entry.classifyError ? (
-                    <div className="inbox-error">{entry.classifyError}</div>
-                  ) : null}
-                </div>
+                        {entry.classifyError ? (
+                          <div className="inbox-error">{entry.classifyError}</div>
+                        ) : null}
+                      </div>
 
-                <div className="inbox-decision">
-                  <button
-                    type="button"
-                    className="button button-ghost button-sm"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onClassify(entry.item.id);
-                    }}
-                    disabled={entry.classifying}
-                    title={t("inbox.classify")}
-                  >
-                    {entry.classifying ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : (
-                      <Brain size={14} />
-                    )}
-                    <span>{t("inbox.classify")}</span>
-                  </button>
-                  <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecide(entry.item.id, "accepted");
-                    }}
-                    title={t("inbox.accept")}
-                    aria-label={t("inbox.accept")}
-                  >
-                    <Check size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecide(entry.item.id, "rejected");
-                    }}
-                    title={t("inbox.reject")}
-                    aria-label={t("inbox.reject")}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </article>
-            );
-            })}
+                      <div className="inbox-decision">
+                        <button
+                          type="button"
+                          className="button button-ghost button-sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onClassify(entry.item.id);
+                          }}
+                          disabled={entry.classifying}
+                          title={t("inbox.classify")}
+                        >
+                          {entry.classifying ? (
+                            <Loader2 size={14} className="spin" />
+                          ) : (
+                            <Brain size={14} />
+                          )}
+                          <span>{t("inbox.classify")}</span>
+                        </button>
+                        <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onDecide(entry.item.id, "accepted");
+                          }}
+                          title={t("inbox.accept")}
+                          aria-label={t("inbox.accept")}
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onDecide(entry.item.id, "rejected");
+                          }}
+                          title={t("inbox.reject")}
+                          aria-label={t("inbox.reject")}
+                        >
+                          <X size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRevealPath(entry.item.path);
+                          }}
+                          title={t("inbox.menu.revealFinder")}
+                          aria-label={t("inbox.menu.revealFinder")}
+                        >
+                          <FolderOpen size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </InboxSection>
 
@@ -820,8 +998,24 @@ export function InboxPane({
         onAccept={() => void onBulkAccept(selectedDecisionKeys)}
         onReject={() => void onBulkReject(selectedDecisionKeys)}
         onMoveFiles={() => void onBulkMoveFiles([...selectedKeys])}
-        onProcess={() => void onProcessEntries([...selectedKeys])}
+        onProcess={() => openProcessComposer([...selectedKeys])}
         onCancel={() => setSelectedKeys(new Set())}
+      />
+      <InboxProcessComposer
+        open={processComposer !== null}
+        targetCount={
+          processComposer
+            ? processComposer.keys.filter((key) => key.startsWith("entry:")).length
+            : 0
+        }
+        channels={processComposer ? channelsForKeys(processComposer.keys) : []}
+        busy={actionBusy}
+        onRun={(context) => {
+          const keys = processComposer?.keys ?? [];
+          setProcessComposer(null);
+          void onProcessEntries(keys, context);
+        }}
+        onCancel={() => setProcessComposer(null)}
       />
     </main>
   );
@@ -843,6 +1037,40 @@ function InboxSection({
       </div>
       {children}
     </section>
+  );
+}
+
+function InboxSourceGroupHeader({
+  source,
+  count,
+  title,
+  onOpen,
+}: {
+  source: string;
+  count: string;
+  title: string;
+  onOpen?: () => void;
+}) {
+  return (
+    <div className="inbox-source-group">
+      <div className="inbox-source-group-label">
+        <span>{source}</span>
+        <span className="count">{count}</span>
+      </div>
+      <button
+        type="button"
+        className="icon-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen?.();
+        }}
+        disabled={!onOpen}
+        title={title}
+        aria-label={title}
+      >
+        <FolderOpen size={14} />
+      </button>
+    </div>
   );
 }
 

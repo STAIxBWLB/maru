@@ -1,19 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeItemMention,
+  buildAgentContextArgs,
+  buildAgentResumeArgs,
+  buildAnchorBackgroundContextEnv,
+  buildAnchorContextEnv,
   createTerminalTab,
+  createTerminalTask,
+  describeActiveContextChip,
   EMPTY_TERMINAL_STATE,
   getTerminalSplitPaneTabs,
+  hydrateTerminalStateFromPersisted,
+  isRelaunchableTab,
+  pathMention,
+  resolveExistingLaunchTaskId,
   selectTerminalSplitLeftTabId,
+  selectTerminalTabByIndex,
+  serializeTerminalState,
+  terminalHookEventToStatus,
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
   shouldSuppressTerminalHoverMouseEvent,
   shouldSuppressTerminalMouseTracking,
+  tabsForTask,
   terminalCommandPreview,
+  terminalTabStatus,
+  terminalTaskStatus,
   TERMINAL_SHIFT_ENTER_DATA,
   terminalShiftEnterData,
   terminalTabsReducer,
+  type ActiveTerminalContext,
 } from "./terminal";
 import { DEFAULT_ANCHOR_SETTINGS, normalizeAnchorSettings } from "./settings";
+
+const CTX: ActiveTerminalContext = {
+  workspaceRoot: "/work/vault",
+  workspaceVisibility: "private",
+  appMode: "pkm",
+  docAbsPath: "/work/vault/notes/메모.md",
+  docRelPath: "notes/메모.md",
+  docTitle: "메모",
+  docType: "note",
+};
 
 function key(opts: {
   type?: string;
@@ -97,14 +125,16 @@ describe("terminal tab reducer", () => {
       activate: false,
     });
 
-    expect(selectTerminalSplitLeftTabId(state, "tab-2")).toBe("tab-1");
+    expect(selectTerminalSplitLeftTabId(state.tabs, state.activeTabId, "tab-2")).toBe("tab-1");
 
     const rightOnly = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
       type: "create",
       tab: shell,
       activate: false,
     });
-    expect(selectTerminalSplitLeftTabId(rightOnly, "tab-1")).toBeNull();
+    expect(
+      selectTerminalSplitLeftTabId(rightOnly.tabs, rightOnly.activeTabId, "tab-1"),
+    ).toBeNull();
   });
 
   it("groups split terminal tabs by pane", () => {
@@ -125,7 +155,7 @@ describe("terminal tab reducer", () => {
       activate: false,
     });
 
-    const groups = getTerminalSplitPaneTabs(state, "tab-2");
+    const groups = getTerminalSplitPaneTabs(state.tabs, state.activeTabId, "tab-2");
     expect(groups.leftTabs.map((tab) => tab.id)).toEqual(["tab-1", "tab-3"]);
     expect(groups.rightTabs.map((tab) => tab.id)).toEqual(["tab-2"]);
     expect(groups.leftActiveTabId).toBe("tab-1");
@@ -145,9 +175,9 @@ describe("terminal tab reducer", () => {
       activate: false,
     });
 
-    expect(shouldCloseTerminalSplitAfterTabClose(state, true, "tab-2", "tab-1")).toBe(true);
-    expect(shouldCloseTerminalSplitAfterTabClose(state, true, "tab-2", "tab-2")).toBe(true);
-    expect(shouldCloseTerminalSplitAfterTabClose(state, false, "tab-2", "tab-1")).toBe(false);
+    expect(shouldCloseTerminalSplitAfterTabClose(state.tabs, true, "tab-2", "tab-1")).toBe(true);
+    expect(shouldCloseTerminalSplitAfterTabClose(state.tabs, true, "tab-2", "tab-2")).toBe(true);
+    expect(shouldCloseTerminalSplitAfterTabClose(state.tabs, false, "tab-2", "tab-1")).toBe(false);
   });
 
   it("auto-launches only when open, empty, and enabled", () => {
@@ -205,5 +235,355 @@ describe("terminal tab reducer", () => {
         buttons: 0,
       } as MouseEvent),
     ).toBe(false);
+  });
+});
+
+describe("terminal task layer", () => {
+  function seedTwoTasks() {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "createTask",
+      task: createTerminalTask("task-1", "Task 1", "/a"),
+    });
+    state = terminalTabsReducer(state, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude", { taskId: "task-1", cwd: "/a" }),
+    });
+    state = terminalTabsReducer(state, {
+      type: "createTask",
+      task: createTerminalTask("task-2", "Task 2", "/b"),
+    });
+    state = terminalTabsReducer(state, {
+      type: "create",
+      tab: createTerminalTab("tab-2", "shell", "Shell", { taskId: "task-2", cwd: "/b" }),
+    });
+    return state;
+  }
+
+  it("creates tasks and groups tabs by task", () => {
+    const state = seedTwoTasks();
+    expect(state.tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+    expect(state.activeTaskId).toBe("task-2");
+    expect(tabsForTask(state, "task-1").map((tab) => tab.id)).toEqual(["tab-1"]);
+    expect(tabsForTask(state, "task-2").map((tab) => tab.id)).toEqual(["tab-2"]);
+  });
+
+  it("switchTask moves the active tab into the selected task", () => {
+    let state = seedTwoTasks();
+    state = terminalTabsReducer(state, { type: "switchTask", taskId: "task-1" });
+    expect(state.activeTaskId).toBe("task-1");
+    expect(state.activeTabId).toBe("tab-1");
+    // Unknown task is a no-op.
+    expect(terminalTabsReducer(state, { type: "switchTask", taskId: "nope" })).toBe(state);
+  });
+
+  it("renameTask trims and ignores empty names", () => {
+    let state = seedTwoTasks();
+    state = terminalTabsReducer(state, { type: "renameTask", taskId: "task-1", name: "  Build  " });
+    expect(state.tasks.find((task) => task.id === "task-1")?.name).toBe("Build");
+    expect(terminalTabsReducer(state, { type: "renameTask", taskId: "task-1", name: "   " })).toBe(
+      state,
+    );
+  });
+
+  it("closeTask removes the task and its tabs and reselects", () => {
+    let state = seedTwoTasks();
+    state = terminalTabsReducer(state, { type: "closeTask", taskId: "task-2" });
+    expect(state.tasks.map((task) => task.id)).toEqual(["task-1"]);
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["tab-1"]);
+    expect(state.activeTaskId).toBe("task-1");
+    expect(state.activeTabId).toBe("tab-1");
+  });
+
+  it("closing the active tab selects the nearest same-task sibling by task-local index", () => {
+    const state = {
+      tasks: [
+        createTerminalTask("task-1", "Task 1", "/a"),
+        createTerminalTask("task-2", "Task 2", "/b"),
+      ],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [
+        createTerminalTab("other-task-tab", "shell", "Other", { taskId: "task-2", cwd: "/b" }),
+        createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-b", "codex", "B", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-c", "shell", "C", { taskId: "task-1", cwd: "/a" }),
+      ],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-1");
+    expect(next.activeTabId).toBe("tab-b");
+  });
+
+  it("closing the active tab updates activeTaskId when fallback is from another task", () => {
+    const state = {
+      tasks: [
+        createTerminalTask("task-1", "Task 1", "/a"),
+        createTerminalTask("task-2", "Task 2", "/b"),
+      ],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [
+        createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-b", "shell", "B", { taskId: "task-2", cwd: "/b" }),
+      ],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-2");
+    expect(next.activeTabId).toBe("tab-b");
+  });
+
+  it("closing the only active tab keeps the task selected with no active tab", () => {
+    const state = {
+      tasks: [createTerminalTask("task-1", "Task 1", "/a")],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" })],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-1");
+    expect(next.activeTabId).toBeNull();
+    expect(next.tabs).toEqual([]);
+  });
+
+  it("resolves the launch target task without stale-state double-create", () => {
+    const tasks = [createTerminalTask("task-1", "A", "/a"), createTerminalTask("task-2", "B", "/b")];
+    // Explicit existing task (relaunch path) wins.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { requestedTaskId: "task-2" })).toBe("task-2");
+    // No request → active task (normal launcher button).
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", {})).toBe("task-1");
+    // forceNewTask → null (caller creates a fresh task) — the "+" path.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { forceNewTask: true })).toBeNull();
+    // Requested id that no longer exists → ignored, falls back to active.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { requestedTaskId: "gone" })).toBe("task-1");
+    // Nothing to target → null.
+    expect(resolveExistingLaunchTaskId([], null, {})).toBeNull();
+  });
+});
+
+describe("terminal session status", () => {
+  it("renames a session, ignoring empty titles", () => {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "shell", "Shell"),
+    });
+    state = terminalTabsReducer(state, { type: "rename", tabId: "tab-1", title: "  build  " });
+    expect(state.tabs[0].title).toBe("build");
+    expect(terminalTabsReducer(state, { type: "rename", tabId: "tab-1", title: "  " })).toBe(state);
+  });
+
+  it("marks and clears attention by session/tab id", () => {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude"),
+    });
+    state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
+    state = terminalTabsReducer(state, { type: "markAttention", sessionId: "s1" });
+    expect(state.tabs[0].attention).toBe(true);
+    state = terminalTabsReducer(state, { type: "clearAttention", tabId: "tab-1" });
+    expect(state.tabs[0].attention).toBe(false);
+  });
+
+  it("returns the same state reference when attention/status do not change", () => {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude"),
+    });
+    state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
+    // clearAttention when already clear → no-op (same reference, no re-render).
+    expect(terminalTabsReducer(state, { type: "clearAttention", tabId: "tab-1" })).toBe(state);
+    // First markAttention changes; a second identical one is a no-op.
+    const flagged = terminalTabsReducer(state, { type: "markAttention", sessionId: "s1" });
+    expect(flagged).not.toBe(state);
+    expect(terminalTabsReducer(flagged, { type: "markAttention", sessionId: "s1" })).toBe(flagged);
+    // Unknown session → no-op.
+    expect(terminalTabsReducer(state, { type: "markAttention", sessionId: "nope" })).toBe(state);
+    // setStatus with identical result → no-op.
+    const running = terminalTabsReducer(state, { type: "setStatus", sessionId: "s1", status: "running" });
+    expect(terminalTabsReducer(running, { type: "setStatus", sessionId: "s1", status: "running" })).toBe(running);
+  });
+
+  it("applies precise agent status and captures the resume id", () => {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude"),
+    });
+    state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
+    state = terminalTabsReducer(state, {
+      type: "setStatus",
+      sessionId: "s1",
+      status: "needs-input",
+      agentSessionId: "abc123",
+    });
+    expect(state.tabs[0].agentStatus).toBe("needs-input");
+    expect(state.tabs[0].attention).toBe(true);
+    expect(state.tabs[0].agentSessionId).toBe("abc123");
+  });
+
+  it("derives single-session status with agent state taking precedence", () => {
+    const base = createTerminalTab("tab-1", "claude", "Claude");
+    expect(terminalTabStatus({ ...base, sessionId: null })).toBe("spawning");
+    expect(terminalTabStatus({ ...base, sessionId: "s1" })).toBe("running");
+    expect(terminalTabStatus({ ...base, sessionId: "s1", attention: true })).toBe("attention");
+    expect(
+      terminalTabStatus({ ...base, sessionId: "s1", attention: true, agentStatus: "needs-input" }),
+    ).toBe("needs-input");
+    expect(terminalTabStatus({ ...base, running: false, exitCode: 0 })).toBe("exited");
+  });
+
+  it("aggregates task status by highest priority", () => {
+    const running = { ...createTerminalTab("a", "shell", "a"), sessionId: "s" };
+    const needs = { ...createTerminalTab("b", "claude", "b"), sessionId: "s2", agentStatus: "needs-input" as const };
+    expect(terminalTaskStatus([])).toBe("exited");
+    expect(terminalTaskStatus([running])).toBe("running");
+    expect(terminalTaskStatus([running, needs])).toBe("needs-input");
+  });
+
+  it("selects a session by 1-based index", () => {
+    const tabs = [
+      createTerminalTab("a", "shell", "a"),
+      createTerminalTab("b", "shell", "b"),
+    ];
+    expect(selectTerminalTabByIndex(tabs, 1)?.id).toBe("a");
+    expect(selectTerminalTabByIndex(tabs, 2)?.id).toBe("b");
+    expect(selectTerminalTabByIndex(tabs, 0)).toBeNull();
+    expect(selectTerminalTabByIndex(tabs, 3)).toBeNull();
+  });
+});
+
+describe("active-item context bridge", () => {
+  it("injects ANCHOR_* env, omitting empty item keys", () => {
+    const env = buildAnchorContextEnv(CTX, "term-1", true);
+    expect(env.ANCHOR_TERMINAL).toBe("1");
+    expect(env.ANCHOR_SESSION_ID).toBe("term-1");
+    expect(env.ANCHOR_WORKSPACE).toBe("/work/vault");
+    expect(env.ANCHOR_APP_MODE).toBe("pkm");
+    expect(env.ANCHOR_ACTIVE_DOC_REL).toBe("notes/메모.md");
+
+    const noItem = buildAnchorContextEnv(
+      { ...CTX, docAbsPath: null, docRelPath: null, docTitle: null, docType: null },
+      "term-2",
+      true,
+    );
+    expect("ANCHOR_ACTIVE_DOC" in noItem).toBe(false);
+    expect("ANCHOR_ACTIVE_DOC_REL" in noItem).toBe(false);
+  });
+
+  it("returns only safe markers when disabled", () => {
+    const env = buildAnchorContextEnv(CTX, "term-1", false);
+    expect(Object.keys(env).sort()).toEqual(["ANCHOR_SESSION_ID", "ANCHOR_TERMINAL"]);
+  });
+
+  it("builds non-terminal context env for background agent runs", () => {
+    const env = buildAnchorBackgroundContextEnv(CTX, true);
+    expect(env.ANCHOR_WORKSPACE).toBe("/work/vault");
+    expect(env.ANCHOR_APP_MODE).toBe("pkm");
+    expect(env.ANCHOR_ACTIVE_DOC_REL).toBe("notes/메모.md");
+    expect("ANCHOR_TERMINAL" in env).toBe(false);
+    expect("ANCHOR_SESSION_ID" in env).toBe(false);
+    expect(buildAnchorBackgroundContextEnv(CTX, false)).toEqual({});
+  });
+
+  it("adds --add-dir only for agents with a workspace", () => {
+    expect(buildAgentContextArgs("shell", CTX, true)).toEqual([]);
+    expect(buildAgentContextArgs("claude", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("codex", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("claude", { ...CTX, workspaceRoot: null }, true)).toEqual([]);
+    expect(buildAgentContextArgs("claude", CTX, false)).toEqual([]);
+  });
+
+  it("builds file mentions in each style with a trailing space", () => {
+    expect(activeItemMention(CTX, "mention")).toBe("@notes/메모.md ");
+    expect(activeItemMention(CTX, "read")).toBe('Read this file: "/work/vault/notes/메모.md" ');
+    expect(activeItemMention(CTX, "path")).toBe('"/work/vault/notes/메모.md" ');
+    expect(pathMention(null, "/x/y.md", "mention")).toBe("/x/y.md ");
+    expect(pathMention(null, null, "mention")).toBeNull();
+  });
+
+  it("describes the context chip and its enabled state", () => {
+    expect(describeActiveContextChip(CTX, { focusedKind: "claude" })).toMatchObject({
+      label: "메모",
+      enabled: true,
+    });
+    expect(describeActiveContextChip(CTX, { focusedKind: "shell" }).enabled).toBe(false);
+    expect(
+      describeActiveContextChip(
+        { ...CTX, docTitle: null, docRelPath: null, docAbsPath: null },
+        { focusedKind: "claude" },
+      ).enabled,
+    ).toBe(false);
+  });
+});
+
+describe("terminal persistence", () => {
+  function liveState() {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "createTask",
+      task: createTerminalTask("task-1", "Build", "/work"),
+    });
+    state = terminalTabsReducer(state, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude", { taskId: "task-1", cwd: "/work" }),
+    });
+    state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
+    state = terminalTabsReducer(state, {
+      type: "setStatus",
+      sessionId: "s1",
+      status: "done",
+      agentSessionId: "resume-xyz",
+    });
+    return state;
+  }
+
+  it("serializes durable task + session metadata", () => {
+    const persisted = serializeTerminalState(liveState());
+    expect(persisted.version).toBe(1);
+    expect(persisted.tasks).toEqual([
+      { id: "task-1", name: "Build", cwd: "/work", contextLabel: null, createdAt: 0 },
+    ]);
+    expect(persisted.sessions).toEqual([
+      { taskId: "task-1", kind: "claude", title: "Claude", cwd: "/work", agentSessionId: "resume-xyz" },
+    ]);
+  });
+
+  it("round-trips into relaunchable placeholders", () => {
+    const persisted = serializeTerminalState(liveState());
+    const restored = hydrateTerminalStateFromPersisted(persisted);
+    expect(restored.tasks.map((task) => task.id)).toEqual(["task-1"]);
+    expect(restored.activeTaskId).toBe("task-1");
+    expect(restored.tabs).toHaveLength(1);
+    const tab = restored.tabs[0];
+    expect(tab.running).toBe(false);
+    expect(tab.sessionId).toBeNull();
+    expect(tab.agentSessionId).toBe("resume-xyz");
+    expect(isRelaunchableTab(tab)).toBe(true);
+  });
+
+  it("rejects malformed or empty persisted blobs", () => {
+    expect(hydrateTerminalStateFromPersisted(null)).toBe(EMPTY_TERMINAL_STATE);
+    expect(hydrateTerminalStateFromPersisted({ tasks: [] })).toBe(EMPTY_TERMINAL_STATE);
+    const dropped = hydrateTerminalStateFromPersisted({
+      tasks: [{ id: "t", name: "T", cwd: null, contextLabel: null, createdAt: 0 }],
+      sessions: [{ taskId: "missing", kind: "claude", title: "x", cwd: null, agentSessionId: null }],
+    });
+    expect(dropped.tabs).toHaveLength(0);
+  });
+
+  it("builds native agent resume args", () => {
+    expect(buildAgentResumeArgs("claude", "abc")).toEqual(["--resume", "abc"]);
+    expect(buildAgentResumeArgs("codex", "abc")).toEqual(["resume", "abc"]);
+    expect(buildAgentResumeArgs("shell", "abc")).toEqual([]);
+    expect(buildAgentResumeArgs("claude", null)).toEqual([]);
+  });
+
+  it("maps hook event tokens to precise status", () => {
+    expect(terminalHookEventToStatus("running")).toBe("running");
+    expect(terminalHookEventToStatus("needs-input")).toBe("needs-input");
+    expect(terminalHookEventToStatus("Notification")).toBe("needs-input");
+    expect(terminalHookEventToStatus("done")).toBe("done");
+    expect(terminalHookEventToStatus("Stop")).toBe("done");
+    expect(terminalHookEventToStatus("garbage")).toBeNull();
   });
 });

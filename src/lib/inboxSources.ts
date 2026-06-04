@@ -31,9 +31,22 @@ export const CHANNEL_TO_COMMS_PROVIDER: Partial<Record<InboxSourceChannel, Comms
 };
 
 const SOURCE_CHANNEL_SET = new Set<string>(INBOX_SOURCE_CHANNELS);
+const ALL_SOURCE_VALUE_BASE = "__all_sources__";
 
 export function isInboxSourceChannel(channel: string): channel is InboxSourceChannel {
   return SOURCE_CHANNEL_SET.has(channel);
+}
+
+export function allSourceSelectValue(sources: readonly string[]): string {
+  const sourceSet = new Set(sources);
+  if (!sourceSet.has(ALL_SOURCE_VALUE_BASE)) return ALL_SOURCE_VALUE_BASE;
+  let suffix = 1;
+  let candidate = `${ALL_SOURCE_VALUE_BASE}:${suffix}`;
+  while (sourceSet.has(candidate)) {
+    suffix += 1;
+    candidate = `${ALL_SOURCE_VALUE_BASE}:${suffix}`;
+  }
+  return candidate;
 }
 
 /**
@@ -49,6 +62,36 @@ export function enumerateSourceChannels(config: InboxRuntimeConfig | null | unde
     return entry != null && entry.provider !== "local";
   });
   return present.length > 0 ? present : [...INBOX_SOURCE_CHANNELS];
+}
+
+export function sourceDropPath(config: InboxRuntimeConfig, key: string): string {
+  const configured = config.channels?.[key]?.drop_paths?.[0];
+  if (configured) return configured;
+  const dropRoot = config.paths.drop.replace(/\/+$/, "");
+  return dropRoot ? `${dropRoot}/${key}` : key;
+}
+
+export function inboxRootPath(config: InboxRuntimeConfig): string {
+  return trimTrailingPathSlashes(config.root) || ".";
+}
+
+export function sourceFolderPath(config: InboxRuntimeConfig, key: string): string {
+  return joinInboxPath(inboxRootPath(config), sourceDropPath(config, key));
+}
+
+function joinInboxPath(root: string, child: string): string {
+  const left = trimTrailingPathSlashes(root);
+  const right = child.replace(/^\/+/, "");
+  if (!right) return left || ".";
+  if (!left) return right;
+  if (left === "/") return `/${right}`;
+  return `${left}/${right}`;
+}
+
+function trimTrailingPathSlashes(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  if (trimmed.length > 0) return trimmed;
+  return path.startsWith("/") ? "/" : "";
 }
 
 /** Index source runs by channel for O(1) lookup in the dashboard. */
