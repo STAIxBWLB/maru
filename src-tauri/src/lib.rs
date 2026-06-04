@@ -41,6 +41,7 @@ mod terminal;
 mod terminal_hooks;
 mod vault;
 mod vault_list;
+mod win_process;
 mod workspace;
 mod workspace_files;
 

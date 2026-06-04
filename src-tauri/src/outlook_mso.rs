@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::vault::resolve_inside_vault;
+use crate::win_process::NoWindow;
 
 const OUTLOOK_ACCEPT_KIND: &str = "outlook.accept";
 const OUTLOOK_REJECT_KIND: &str = "outlook.reject";
@@ -127,6 +128,7 @@ pub fn fetch_outlook_unread(
         "json",
     ]);
     let output = cmd
+        .no_window()
         .output()
         .map_err(|err| format!("m365_spawn_failed: {err}"))?;
     if !output.status.success() {
@@ -257,6 +259,7 @@ fn fetch_message_categories(m365_bin: &Path, message_id: &str) -> Result<BTreeSe
     let output = Command::new(m365_bin)
         .env("PATH", augmented_path())
         .args(["request", "--url", &url, "--output", "json"])
+        .no_window()
         .output()
         .map_err(|err| format!("m365_spawn_failed: {err}"))?;
     if !output.status.success() {
@@ -300,6 +303,7 @@ fn patch_message_categories(
             "--output",
             "json",
         ])
+        .no_window()
         .output()
         .map_err(|err| format!("m365_spawn_failed: {err}"))?;
     if output.status.success() {

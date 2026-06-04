@@ -17,6 +17,7 @@ use std::os::unix::fs::PermissionsExt;
 use crate::cli_path::merge_path_env;
 use crate::skill_host::fs as host_fs;
 use crate::vault::{parse_frontmatter, title_from_content};
+use crate::win_process::NoWindow;
 
 const REGISTRY_VERSION: u32 = 2;
 const REGISTRY_FILE: &str = "registry.json";
@@ -1600,6 +1601,7 @@ fn source_git_repo_root(source: &SkillSource) -> Result<Option<PathBuf>, String>
         .arg(&path)
         .arg("rev-parse")
         .arg("--show-toplevel")
+        .no_window()
         .output();
     let Ok(output) = output else {
         return Ok(None);
@@ -1651,6 +1653,7 @@ fn run_git_capture(repo_root: &Path, args: &[&str]) -> Result<String, String> {
         .arg("-C")
         .arg(repo_root)
         .args(args)
+        .no_window()
         .output()
         .map_err(|err| format!("command_failed_to_start: {err}"))?;
     if output.status.success() {
@@ -1669,6 +1672,7 @@ fn git_staged_changes_for_path(repo_root: &Path, rel: &str) -> Result<bool, Stri
         .arg("--quiet")
         .arg("--")
         .arg(rel)
+        .no_window()
         .output()
         .map_err(|err| format!("command_failed_to_start: {err}"))?;
     match output.status.code() {
@@ -3267,6 +3271,7 @@ fn git_dirty(path: &Path) -> Result<bool, String> {
         .arg(path)
         .arg("status")
         .arg("--porcelain")
+        .no_window()
         .output();
     let Ok(output) = output else {
         return Ok(false);
@@ -3451,6 +3456,7 @@ fn canonicalize_or_self(path: &Path) -> PathBuf {
 
 fn run_command(cmd: &mut Command) -> Result<(), String> {
     let output = cmd
+        .no_window()
         .output()
         .map_err(|err| format!("command_failed_to_start: {err}"))?;
     if output.status.success() {

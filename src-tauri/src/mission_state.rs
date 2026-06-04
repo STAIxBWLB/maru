@@ -6,6 +6,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
+#[cfg(windows)]
+use crate::win_process::NoWindow;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration as StdDuration;
@@ -505,6 +507,7 @@ fn kill_pid(pid: u32, force: bool) -> Result<(), String> {
         }
         let status = Command::new("taskkill")
             .args(args)
+            .no_window()
             .status()
             .map_err(|err| format!("mission_stop_failed: {err}"))?;
         if status.success() {

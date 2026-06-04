@@ -9,6 +9,8 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+
+use crate::win_process::NoWindow;
 use walkdir::WalkDir;
 
 const GENERATED_DIRS: &[&str] = &[
@@ -360,6 +362,7 @@ fn git_tracked_paths(vault: &Path) -> HashSet<String> {
     let output = Command::new("git")
         .args(["ls-files", "-z"])
         .current_dir(vault)
+        .no_window()
         .output();
     let Ok(output) = output else {
         return HashSet::new();

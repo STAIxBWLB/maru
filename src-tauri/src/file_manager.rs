@@ -1,4 +1,5 @@
 use crate::vault::resolve_inside_vault;
+use crate::win_process::NoWindow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,6 +15,7 @@ pub fn reveal_in_file_manager(vault_path: String, target_path: String) -> Result
     let command = build_reveal_command(&target)?;
     Command::new(&command.program)
         .args(&command.args)
+        .no_window()
         .spawn()
         .map_err(|err| format!("Cannot reveal target: {err}"))?;
     Ok(())
@@ -25,6 +27,7 @@ pub fn open_in_file_manager(vault_path: String, target_path: String) -> Result<(
     let command = build_open_command(&target)?;
     Command::new(&command.program)
         .args(&command.args)
+        .no_window()
         .spawn()
         .map_err(|err| format!("Cannot open target: {err}"))?;
     Ok(())

@@ -22,6 +22,7 @@ use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::mission_state;
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::{env_vars_for_runs, get_skill};
+use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -391,6 +392,7 @@ fn spawn_background(
     for (key, value) in env {
         cmd.env(key, value);
     }
+    cmd.no_window();
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) => {
@@ -641,7 +643,7 @@ impl StatusCommandResult {
 }
 
 fn run_status_command(binary: &Path, args: &[&str]) -> StatusCommandResult {
-    match Command::new(binary).args(args).output() {
+    match Command::new(binary).args(args).no_window().output() {
         Ok(output) => StatusCommandResult {
             success: output.status.success(),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
