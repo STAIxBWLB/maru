@@ -84,6 +84,14 @@ async function runCommandPaletteAction(page: Page, label: string) {
   await page.locator(".cmdk-item", { hasText: label }).click();
 }
 
+async function ensureRightPaneVisible(page: Page) {
+  const rightPane = page.locator(".outline-pane");
+  if (!(await rightPane.isVisible())) {
+    await page.locator(".activity-rail").getByLabel("오른쪽 패널 보이기").click();
+  }
+  await expect(rightPane).toBeVisible();
+}
+
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
 
@@ -295,7 +303,7 @@ test("restores the previous app state on startup", async ({ page }) => {
   await expect(page.locator(".inbox-pane")).toBeVisible();
   await rail.getByRole("button", { name: "문서", exact: true }).click();
 
-  await rail.getByLabel("오른쪽 패널 보이기").click();
+  await ensureRightPaneVisible(page);
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await page.getByLabel("오른쪽으로 분할").first().click();
   await page.getByRole("button", { name: "Files" }).click();
