@@ -310,12 +310,19 @@ export function terminalTabsReducer(
       if (state.activeTabId !== action.tabId) return { ...state, tabs };
       // Pick the nearest remaining tab in the SAME task when possible.
       const closing = state.tabs[closingIndex];
+      const originalSiblings = state.tabs.filter((tab) => tab.taskId === closing.taskId);
+      const siblingIndex = originalSiblings.findIndex((tab) => tab.id === action.tabId);
       const siblings = tabs.filter((tab) => tab.taskId === closing.taskId);
       const fallback =
-        siblings[Math.min(closingIndex, siblings.length - 1)] ??
+        siblings[Math.min(Math.max(siblingIndex, 0), siblings.length - 1)] ??
         tabs[Math.min(closingIndex, tabs.length - 1)] ??
         null;
-      return { ...state, tabs, activeTabId: fallback?.id ?? null };
+      return {
+        ...state,
+        tabs,
+        activeTaskId: fallback ? fallback.taskId : state.activeTaskId,
+        activeTabId: fallback?.id ?? null,
+      };
     }
     case "createTask":
       return {

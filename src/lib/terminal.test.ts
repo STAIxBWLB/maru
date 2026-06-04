@@ -293,6 +293,60 @@ describe("terminal task layer", () => {
     expect(state.activeTabId).toBe("tab-1");
   });
 
+  it("closing the active tab selects the nearest same-task sibling by task-local index", () => {
+    const state = {
+      tasks: [
+        createTerminalTask("task-1", "Task 1", "/a"),
+        createTerminalTask("task-2", "Task 2", "/b"),
+      ],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [
+        createTerminalTab("other-task-tab", "shell", "Other", { taskId: "task-2", cwd: "/b" }),
+        createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-b", "codex", "B", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-c", "shell", "C", { taskId: "task-1", cwd: "/a" }),
+      ],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-1");
+    expect(next.activeTabId).toBe("tab-b");
+  });
+
+  it("closing the active tab updates activeTaskId when fallback is from another task", () => {
+    const state = {
+      tasks: [
+        createTerminalTask("task-1", "Task 1", "/a"),
+        createTerminalTask("task-2", "Task 2", "/b"),
+      ],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [
+        createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" }),
+        createTerminalTab("tab-b", "shell", "B", { taskId: "task-2", cwd: "/b" }),
+      ],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-2");
+    expect(next.activeTabId).toBe("tab-b");
+  });
+
+  it("closing the only active tab keeps the task selected with no active tab", () => {
+    const state = {
+      tasks: [createTerminalTask("task-1", "Task 1", "/a")],
+      activeTaskId: "task-1",
+      activeTabId: "tab-a",
+      tabs: [createTerminalTab("tab-a", "claude", "A", { taskId: "task-1", cwd: "/a" })],
+    };
+
+    const next = terminalTabsReducer(state, { type: "close", tabId: "tab-a" });
+    expect(next.activeTaskId).toBe("task-1");
+    expect(next.activeTabId).toBeNull();
+    expect(next.tabs).toEqual([]);
+  });
+
   it("resolves the launch target task without stale-state double-create", () => {
     const tasks = [createTerminalTask("task-1", "A", "/a"), createTerminalTask("task-2", "B", "/b")];
     // Explicit existing task (relaunch path) wins.

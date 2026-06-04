@@ -1008,14 +1008,22 @@ export const TerminalPanel = memo(
         .filter(Boolean)
         .join(" ");
       const cwdLabel = pathBaseName(task.cwd);
+      const switchTask = () => dispatch({ type: "switchTask", taskId: task.id });
       return (
         <div
           key={task.id}
           className={className}
           role="option"
           aria-selected={isActive}
-          onClick={() => dispatch({ type: "switchTask", taskId: task.id })}
+          tabIndex={0}
+          onClick={switchTask}
           onDoubleClick={() => setRenamingTaskId(task.id)}
+          onKeyDown={(event) => {
+            if (event.currentTarget !== event.target) return;
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            switchTask();
+          }}
           title={task.cwd ?? task.name}
         >
           <span className={`terminal-status-dot ${status}`} />
