@@ -252,21 +252,43 @@ export function terminalTabsReducer(
         ),
       };
     }
-    case "markAttention":
+    case "markAttention": {
+      // No-op (return the same reference) when nothing changes so useReducer
+      // bails out of re-rendering — avoids a re-render storm on output spam.
+      const target = state.tabs.find((tab) => tab.sessionId === action.sessionId);
+      if (!target || target.attention) return state;
       return {
         ...state,
         tabs: state.tabs.map((tab) =>
           tab.sessionId === action.sessionId ? { ...tab, attention: true } : tab,
         ),
       };
-    case "clearAttention":
+    }
+    case "clearAttention": {
+      const target = state.tabs.find((tab) => tab.id === action.tabId);
+      if (!target || !target.attention) return state;
       return {
         ...state,
         tabs: state.tabs.map((tab) =>
           tab.id === action.tabId ? { ...tab, attention: false } : tab,
         ),
       };
-    case "setStatus":
+    }
+    case "setStatus": {
+      const target = state.tabs.find((tab) => tab.sessionId === action.sessionId);
+      if (!target) return state;
+      const nextAgentSessionId =
+        action.agentSessionId !== undefined && action.agentSessionId !== null
+          ? action.agentSessionId
+          : target.agentSessionId;
+      const nextAttention = action.status === "needs-input" ? true : target.attention;
+      if (
+        target.agentStatus === action.status &&
+        target.agentSessionId === nextAgentSessionId &&
+        target.attention === nextAttention
+      ) {
+        return state;
+      }
       return {
         ...state,
         tabs: state.tabs.map((tab) =>
@@ -274,16 +296,13 @@ export function terminalTabsReducer(
             ? {
                 ...tab,
                 agentStatus: action.status,
-                attention:
-                  action.status === "needs-input" ? true : tab.attention,
-                agentSessionId:
-                  action.agentSessionId !== undefined && action.agentSessionId !== null
-                    ? action.agentSessionId
-                    : tab.agentSessionId,
+                attention: nextAttention,
+                agentSessionId: nextAgentSessionId,
               }
             : tab,
         ),
       };
+    }
     case "close": {
       const closingIndex = state.tabs.findIndex((tab) => tab.id === action.tabId);
       if (closingIndex === -1) return state;
@@ -341,6 +360,25 @@ export function terminalTabsReducer(
 /** Tabs belonging to a task, in creation order. */
 export function tabsForTask(state: TerminalTabsState, taskId: string | null): TerminalTab[] {
   return state.tabs.filter((tab) => tab.taskId === taskId);
+}
+
+/**
+ * Resolve which EXISTING task a launch should target, or null when the caller
+ * must create a fresh one. Keeping this pure (no stale closure state) is what
+ * prevents the double-task bug: `launch` owns task creation in one place.
+ */
+export function resolveExistingLaunchTaskId(
+  tasks: TerminalTask[],
+  activeTaskId: string | null,
+  opts: { requestedTaskId?: string | null; forceNewTask?: boolean },
+): string | null {
+  if (opts.requestedTaskId && tasks.some((task) => task.id === opts.requestedTaskId)) {
+    return opts.requestedTaskId;
+  }
+  if (!opts.forceNewTask && activeTaskId && tasks.some((task) => task.id === activeTaskId)) {
+    return activeTaskId;
+  }
+  return null;
 }
 
 /** 1-based index into the active task's tabs (for ⌘1–9). */

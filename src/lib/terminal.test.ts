@@ -12,6 +12,7 @@ import {
   hydrateTerminalStateFromPersisted,
   isRelaunchableTab,
   pathMention,
+  resolveExistingLaunchTaskId,
   selectTerminalSplitLeftTabId,
   selectTerminalTabByIndex,
   serializeTerminalState,
@@ -291,6 +292,20 @@ describe("terminal task layer", () => {
     expect(state.activeTaskId).toBe("task-1");
     expect(state.activeTabId).toBe("tab-1");
   });
+
+  it("resolves the launch target task without stale-state double-create", () => {
+    const tasks = [createTerminalTask("task-1", "A", "/a"), createTerminalTask("task-2", "B", "/b")];
+    // Explicit existing task (relaunch path) wins.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { requestedTaskId: "task-2" })).toBe("task-2");
+    // No request → active task (normal launcher button).
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", {})).toBe("task-1");
+    // forceNewTask → null (caller creates a fresh task) — the "+" path.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { forceNewTask: true })).toBeNull();
+    // Requested id that no longer exists → ignored, falls back to active.
+    expect(resolveExistingLaunchTaskId(tasks, "task-1", { requestedTaskId: "gone" })).toBe("task-1");
+    // Nothing to target → null.
+    expect(resolveExistingLaunchTaskId([], null, {})).toBeNull();
+  });
 });
 
 describe("terminal session status", () => {
@@ -314,6 +329,25 @@ describe("terminal session status", () => {
     expect(state.tabs[0].attention).toBe(true);
     state = terminalTabsReducer(state, { type: "clearAttention", tabId: "tab-1" });
     expect(state.tabs[0].attention).toBe(false);
+  });
+
+  it("returns the same state reference when attention/status do not change", () => {
+    let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
+      type: "create",
+      tab: createTerminalTab("tab-1", "claude", "Claude"),
+    });
+    state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
+    // clearAttention when already clear → no-op (same reference, no re-render).
+    expect(terminalTabsReducer(state, { type: "clearAttention", tabId: "tab-1" })).toBe(state);
+    // First markAttention changes; a second identical one is a no-op.
+    const flagged = terminalTabsReducer(state, { type: "markAttention", sessionId: "s1" });
+    expect(flagged).not.toBe(state);
+    expect(terminalTabsReducer(flagged, { type: "markAttention", sessionId: "s1" })).toBe(flagged);
+    // Unknown session → no-op.
+    expect(terminalTabsReducer(state, { type: "markAttention", sessionId: "nope" })).toBe(state);
+    // setStatus with identical result → no-op.
+    const running = terminalTabsReducer(state, { type: "setStatus", sessionId: "s1", status: "running" });
+    expect(terminalTabsReducer(running, { type: "setStatus", sessionId: "s1", status: "running" })).toBe(running);
   });
 
   it("applies precise agent status and captures the resume id", () => {

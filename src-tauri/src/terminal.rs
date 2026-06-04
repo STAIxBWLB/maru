@@ -101,8 +101,13 @@ pub fn terminal_spawn(
         Some(augmented.as_os_str()),
     );
     cmd.env("PATH", effective_path);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
+    // Windows consoles (cmd/PowerShell over ConPTY) don't use TERM/COLORTERM
+    // and some tools misbehave when they're set, so skip them there (matches Warp).
+    #[cfg(not(windows))]
+    {
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+    }
     cmd.env("TERM_PROGRAM", "Anchor");
     for (key, value) in &spec.extra_env {
         if key == "PATH" {
@@ -312,7 +317,7 @@ fn build_terminal_command_spec(
         (_, Some(program)) => (program.to_string(), Vec::<String>::new()),
         ("claude", None) => ("claude".to_string(), Vec::new()),
         ("codex", None) => ("codex".to_string(), vec!["--cd".to_string(), cwd_str]),
-        ("shell", None) => (user_shell(), Vec::new()),
+        ("shell", None) => (default_shell_program(), Vec::new()),
         (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
     };
     args.extend(extras);
@@ -335,14 +340,69 @@ fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
     if !path.is_dir() {
         return Err("terminal_cwd_invalid: cwd is not a directory".to_string());
     }
-    Ok(path)
+    Ok(strip_unc_prefix(path))
 }
 
-fn user_shell() -> String {
-    env::var("SHELL")
+/// On Windows, `canonicalize` returns a `\\?\C:\...` verbatim path that some
+/// programs choke on as a working directory. Strip the prefix for local drive
+/// paths (leave UNC network paths untouched). No-op on Unix.
+#[cfg(windows)]
+fn strip_unc_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        if !stripped.starts_with("UNC\\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path
+}
+
+#[cfg(not(windows))]
+fn strip_unc_prefix(path: PathBuf) -> PathBuf {
+    path
+}
+
+/// Pick the shell to spawn. Always returns a program that exists so the
+/// "shell" launcher never fails with `terminal_cli_missing`.
+#[cfg(not(windows))]
+fn default_shell_program() -> String {
+    if let Some(shell) = env::var("SHELL")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "/bin/zsh".to_string())
+    {
+        if std::path::Path::new(&shell).is_file() {
+            return shell;
+        }
+    }
+    for candidate in ["/bin/zsh", "/bin/bash", "/bin/sh"] {
+        if std::path::Path::new(candidate).is_file() {
+            return candidate.to_string();
+        }
+    }
+    "/bin/sh".to_string()
+}
+
+/// Windows shell preference (mirrors Warp): PowerShell 7 → PowerShell 5 →
+/// Command Prompt (always present via %COMSPEC%). An explicit $SHELL wins.
+#[cfg(windows)]
+fn default_shell_program() -> String {
+    if let Some(shell) = env::var("SHELL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        if std::path::Path::new(&shell).is_file() {
+            return shell;
+        }
+    }
+    for candidate in ["pwsh.exe", "powershell.exe"] {
+        if let Some(path) = resolve_program(candidate) {
+            return path.to_string_lossy().to_string();
+        }
+    }
+    env::var("COMSPEC")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "cmd.exe".to_string())
 }
 
 fn resolve_terminal_program(program: &str) -> Result<PathBuf, String> {
@@ -373,6 +433,18 @@ mod tests {
         let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None, None).unwrap();
         assert!(!shell.program.is_empty());
         assert!(shell.args.is_empty());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn default_shell_program_returns_an_existing_program() {
+        // Must never be the old blind "/bin/zsh" fallback when zsh is absent —
+        // the resolved program must exist so the shell launcher cannot error.
+        let shell = default_shell_program();
+        assert!(
+            std::path::Path::new(&shell).is_file(),
+            "default shell {shell} should exist"
+        );
     }
 
     #[test]

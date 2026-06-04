@@ -8065,6 +8065,11 @@ button.git-badge:hover {
   min-height: 0;
   overflow: hidden;
   background: #111111;
+  /* Belt-and-suspenders with the selectstart guard + .terminal-instance:
+     no native selection anchor anywhere in the terminal body. xterm renders
+     its own selection, so this never affects copy. */
+  user-select: none;
+  -webkit-user-select: none;
   --terminal-split-ratio: 0.5;
   --terminal-split-left: 50%;
   --terminal-split-right: 50%;

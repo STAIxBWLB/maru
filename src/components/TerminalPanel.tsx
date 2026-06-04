@@ -48,6 +48,7 @@ import {
   hydrateTerminalStateFromPersisted,
   isRelaunchableTab,
   pathMention,
+  resolveExistingLaunchTaskId,
   selectTerminalSplitLeftTabId,
   selectTerminalTabByIndex,
   serializeTerminalState,
@@ -98,6 +99,8 @@ export interface TerminalLaunchRequest {
   extraArgs?: string[] | null;
   extraEnv?: Record<string, string> | null;
   taskId?: string | null;
+  /** Force a brand-new task (sidebar "+"), ignoring the active task. */
+  forceNewTask?: boolean;
 }
 
 /** Imperative surface so App can attach files to a focused agent session. */
@@ -396,6 +399,18 @@ export const TerminalPanel = memo(
       return () => window.clearTimeout(id);
     }, [state]);
 
+    // Root-cause guard against native browser text-selection in the terminal.
+    // xterm v6 manages its own selection (and copy) internally and does NOT use
+    // the native `selectstart`, so preventing it here blocks the stray blue
+    // highlight without affecting xterm copy — and survives any re-render.
+    useEffect(() => {
+      const body = terminalBodyRef.current;
+      if (!body) return;
+      const onSelectStart = (event: Event) => event.preventDefault();
+      body.addEventListener("selectstart", onSelectStart);
+      return () => body.removeEventListener("selectstart", onSelectStart);
+    }, []);
+
     const launch = useCallback(
       async (
         kind: TerminalKind,
@@ -409,9 +424,14 @@ export const TerminalPanel = memo(
         const launcher = settings.terminal.launchers[kind];
         if (!launcher?.enabled) return;
         const resolvedCwd = request?.cwd ?? cwd;
-        // Resolve the owning task: explicit → active → create a fresh one.
-        let taskId = request?.taskId ?? state.activeTaskId ?? null;
-        if (!taskId || !state.tasks.some((task) => task.id === taskId)) {
+        // Resolve the owning task in ONE place (launch owns creation). Using a
+        // pure resolver avoids the stale-closure double-create bug where a
+        // pre-dispatched task isn't yet visible in `state`.
+        let taskId = resolveExistingLaunchTaskId(state.tasks, state.activeTaskId, {
+          requestedTaskId: request?.taskId,
+          forceNewTask: request?.forceNewTask,
+        });
+        if (!taskId) {
           taskId = `task-${Date.now()}-${taskSeqRef.current++}`;
           const taskName =
             pathBaseName(resolvedCwd) ?? `${t("terminal.task")} ${state.tasks.length + 1}`;
@@ -654,16 +674,10 @@ export const TerminalPanel = memo(
     }, [rightTab, state.tabs]);
 
     const createTask = useCallback(() => {
-      const launcher = settings.terminal.autoLaunch ?? "shell";
-      const taskId = `task-${Date.now()}-${taskSeqRef.current++}`;
-      const taskName =
-        pathBaseName(cwd) ?? `${t("terminal.task")} ${state.tasks.length + 1}`;
-      dispatch({
-        type: "createTask",
-        task: createTerminalTask(taskId, taskName, cwd, { createdAt: Date.now() }),
-      });
-      void launch(launcher, "left", { taskId });
-    }, [cwd, launch, settings.terminal.autoLaunch, state.tasks.length, t]);
+      // Delegate to launch with forceNewTask so task + session are created in a
+      // single place — prevents the duplicate empty-task bug.
+      void launch(settings.terminal.autoLaunch ?? "shell", "left", { forceNewTask: true });
+    }, [launch, settings.terminal.autoLaunch]);
 
     // Re-spawn a restored placeholder in place: drop the placeholder and launch
     // a fresh session in the same task, resuming the agent when we have its id.
