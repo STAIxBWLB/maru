@@ -51,6 +51,13 @@ export function enumerateSourceChannels(config: InboxRuntimeConfig | null | unde
   return present.length > 0 ? present : [...INBOX_SOURCE_CHANNELS];
 }
 
+export function sourceDropPath(config: InboxRuntimeConfig, key: string): string {
+  const configured = config.channels?.[key]?.drop_paths?.[0];
+  if (configured) return configured;
+  const dropRoot = config.paths.drop.replace(/\/+$/, "");
+  return dropRoot ? `${dropRoot}/${key}` : key;
+}
+
 /** Index source runs by channel for O(1) lookup in the dashboard. */
 export function sourceRunByChannel(runs: InboxSourceRun[]): Map<string, InboxSourceRun> {
   const map = new Map<string, InboxSourceRun>();

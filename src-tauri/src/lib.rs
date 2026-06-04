@@ -74,7 +74,7 @@ use export::{
     export_dispatch, export_manifest_load, export_plan, export_record_failure,
     export_record_pending, export_record_success, export_validate,
 };
-use file_manager::reveal_in_file_manager;
+use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
@@ -207,6 +207,7 @@ pub fn run() {
             git_sync_commit_push,
             git_changes,
             git_diff,
+            open_in_file_manager,
             reveal_in_file_manager,
             scan_inbox_drop,
             scan_inbox_entries,

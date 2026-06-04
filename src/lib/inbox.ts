@@ -64,6 +64,42 @@ export function countInboxSources<T extends { item: { source: string } }>(
   return counts;
 }
 
+export interface InboxEntryChannelGroup {
+  key: string;
+  entries: InboxEntry[];
+}
+
+export function groupEntriesByChannel(entries: InboxEntry[]): InboxEntryChannelGroup[] {
+  const groups = new Map<string, InboxEntry[]>();
+  for (const entry of entries) {
+    const group = groups.get(entry.channel) ?? [];
+    group.push(entry);
+    groups.set(entry.channel, group);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupedEntries]) => ({ key, entries: groupedEntries }));
+}
+
+export interface InboxFileSourceGroup<T extends { item: { source: string } } = InboxItemState> {
+  key: string;
+  items: T[];
+}
+
+export function groupFilesBySource<T extends { item: { source: string } }>(
+  items: T[],
+): InboxFileSourceGroup<T>[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const group = groups.get(item.item.source) ?? [];
+    group.push(item);
+    groups.set(item.item.source, group);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupedItems]) => ({ key, items: groupedItems }));
+}
+
 export function buildInboxFeedRowKeys({
   entries,
   files,

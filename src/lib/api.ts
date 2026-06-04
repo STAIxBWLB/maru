@@ -897,6 +897,16 @@ export async function revealInFileManager(
   await invoke("reveal_in_file_manager", { vaultPath, targetPath });
 }
 
+export async function openInFileManager(
+  vaultPath: string,
+  targetPath: string,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Open in Finder requires the Tauri app.");
+  }
+  await invoke("open_in_file_manager", { vaultPath, targetPath });
+}
+
 export async function applyFileQueue(
   vaultPath: string,
   items: FileQueueApplyItem[],

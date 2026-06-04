@@ -24,6 +24,8 @@ import {
   categoryLabel,
   countInboxSources,
   filterItemsBySource,
+  groupEntriesByChannel,
+  groupFilesBySource,
   inboxContextActionKeys,
   inboxTrashTargetsForRows,
   shouldHandleInboxDeleteShortcut,
@@ -66,6 +68,8 @@ interface InboxPaneProps {
   fileDropTarget: InboxFileDropConfig;
   onRefresh: () => void;
   onOpenSettings: () => void;
+  onOpenInboxFolder?: () => void;
+  onOpenSourceFolder?: (sourceKey: string) => void;
   focusRequest?: number;
   actionBusy?: boolean;
   onClassify: (id: string) => void;
@@ -122,6 +126,8 @@ export function InboxPane({
   fileDropTarget,
   onRefresh,
   onOpenSettings,
+  onOpenInboxFolder,
+  onOpenSourceFolder,
   focusRequest = 0,
   actionBusy = false,
   onClassify,
@@ -164,14 +170,28 @@ export function InboxPane({
     () => filterItemsBySource(items, sourceFilter),
     [items, sourceFilter],
   );
+  const entryGroups = useMemo(() => groupEntriesByChannel(entries), [entries]);
+  const fileGroups = useMemo(() => groupFilesBySource(visibleItems), [visibleItems]);
   const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
   const entryPending = entries.filter((entry) => entry.status !== "done").length;
   const rows = useMemo<InboxRow[]>(
     () => [
-      ...entries.map((entry) => ({ key: `entry:${entry.id}`, kind: "entry" as const, entry })),
-      ...visibleItems.map((entry) => ({ key: `file:${entry.item.id}`, kind: "file" as const, entry })),
+      ...entryGroups.flatMap((group) =>
+        group.entries.map((entry) => ({
+          key: `entry:${entry.id}`,
+          kind: "entry" as const,
+          entry,
+        })),
+      ),
+      ...fileGroups.flatMap((group) =>
+        group.items.map((entry) => ({
+          key: `file:${entry.item.id}`,
+          kind: "file" as const,
+          entry,
+        })),
+      ),
     ],
-    [entries, visibleItems],
+    [entryGroups, fileGroups],
   );
   const selected = useMemo(
     () => rows.filter((row) => selectedKeys.has(row.key)),
@@ -484,6 +504,16 @@ export function InboxPane({
           <button
             type="button"
             className="icon-button"
+            onClick={() => onOpenInboxFolder?.()}
+            disabled={!onOpenInboxFolder}
+            title={t("inbox.openFolder")}
+            aria-label={t("inbox.openFolder")}
+          >
+            <FolderOpen size={15} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
             onClick={() => setCheatsheetOpen((value) => !value)}
             title="Keyboard help"
             aria-label="Keyboard help"
@@ -559,7 +589,15 @@ export function InboxPane({
                   <span>Configured drop files and pending manifests will appear here.</span>
                 </div>
               ) : null}
-              {entries.map((entry) => {
+              {entryGroups.map((group) => (
+                <div className="inbox-source-group-block" key={`entry-group:${group.key}`}>
+                  <InboxSourceGroupHeader
+                    source={group.key}
+                    count={group.entries.length.toLocaleString(locale)}
+                    title={t("inbox.openSourceFolder", { source: group.key })}
+                    onOpen={onOpenSourceFolder ? () => onOpenSourceFolder(group.key) : undefined}
+                  />
+                  {group.entries.map((entry) => {
                     const key = `entry:${entry.id}`;
                     const row: InboxRow = { key, kind: "entry", entry };
                     return (
@@ -630,6 +668,8 @@ export function InboxPane({
                       </article>
                     );
                   })}
+                </div>
+              ))}
             </div>
         </InboxSection>
 
@@ -700,121 +740,131 @@ export function InboxPane({
                 <span>Drop or choose files above to stage them into the configured inbox.</span>
               </div>
             ) : null}
-            {visibleItems.map((entry) => {
-              const key = `file:${entry.item.id}`;
-              const row: InboxRow = { key, kind: "file", entry };
-              return (
-              <article
-                className={`inbox-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
-                key={entry.item.id}
-                data-inbox-row-key={key}
-                onClick={(event) => handleRowClick(event, key)}
-                onContextMenu={(event) => openRowContextMenu(event, row)}
-              >
-                <input
-                  type="checkbox"
-                  className="inbox-row-check"
-                  checked={selectedKeys.has(key)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleSelection(key, event.shiftKey);
-                  }}
-                  onChange={() => {}}
-                  aria-label={`Select ${entry.item.title}`}
+            {fileGroups.map((group) => (
+              <div className="inbox-source-group-block" key={`file-group:${group.key}`}>
+                <InboxSourceGroupHeader
+                  source={group.key}
+                  count={group.items.length.toLocaleString(locale)}
+                  title={t("inbox.openSourceFolder", { source: group.key })}
+                  onOpen={onOpenSourceFolder ? () => onOpenSourceFolder(group.key) : undefined}
                 />
-                <div className="inbox-item-main">
-                  <div className="inbox-item-title">
-                    <span className="source-chip">{entry.item.source}</span>
-                    <strong>{entry.item.title}</strong>
-                  </div>
+                {group.items.map((entry) => {
+                  const key = `file:${entry.item.id}`;
+                  const row: InboxRow = { key, kind: "file", entry };
+                  return (
+                    <article
+                      className={`inbox-item ${entry.decision}${focusedKey === key ? " focused" : ""}${selectedKeys.has(key) ? " selected" : ""}`}
+                      key={entry.item.id}
+                      data-inbox-row-key={key}
+                      onClick={(event) => handleRowClick(event, key)}
+                      onContextMenu={(event) => openRowContextMenu(event, row)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="inbox-row-check"
+                        checked={selectedKeys.has(key)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelection(key, event.shiftKey);
+                        }}
+                        onChange={() => {}}
+                        aria-label={`Select ${entry.item.title}`}
+                      />
+                      <div className="inbox-item-main">
+                        <div className="inbox-item-title">
+                          <span className="source-chip">{entry.item.source}</span>
+                          <strong>{entry.item.title}</strong>
+                        </div>
 
-                  {entry.classification ? (
-                    <p>
-                      <span className="category-chip">
-                        {categoryLabel(entry.classification.category)}
-                      </span>{" "}
-                      {entry.classification.summary}
-                    </p>
-                  ) : (
-                    <p className="inbox-item-hint">{t("inbox.notClassified")}</p>
-                  )}
+                        {entry.classification ? (
+                          <p>
+                            <span className="category-chip">
+                              {categoryLabel(entry.classification.category)}
+                            </span>{" "}
+                            {entry.classification.summary}
+                          </p>
+                        ) : (
+                          <p className="inbox-item-hint">{t("inbox.notClassified")}</p>
+                        )}
 
-                  <div className="inbox-item-meta">
-                    <span>{formatBytes(entry.item.sizeBytes)}</span>
-                    {entry.item.receivedAt ? (
-                      <time dateTime={entry.item.receivedAt}>{entry.item.receivedAt}</time>
-                    ) : null}
-                    {entry.classification?.suggestedFolder ? (
-                      <span className="suggested-folder">
-                        → {entry.classification.suggestedFolder}
-                      </span>
-                    ) : null}
-                  </div>
+                        <div className="inbox-item-meta">
+                          <span>{formatBytes(entry.item.sizeBytes)}</span>
+                          {entry.item.receivedAt ? (
+                            <time dateTime={entry.item.receivedAt}>{entry.item.receivedAt}</time>
+                          ) : null}
+                          {entry.classification?.suggestedFolder ? (
+                            <span className="suggested-folder">
+                              → {entry.classification.suggestedFolder}
+                            </span>
+                          ) : null}
+                        </div>
 
-                  {entry.classifyError ? (
-                    <div className="inbox-error">{entry.classifyError}</div>
-                  ) : null}
-                </div>
+                        {entry.classifyError ? (
+                          <div className="inbox-error">{entry.classifyError}</div>
+                        ) : null}
+                      </div>
 
-                <div className="inbox-decision">
-                  <button
-                    type="button"
-                    className="button button-ghost button-sm"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onClassify(entry.item.id);
-                    }}
-                    disabled={entry.classifying}
-                    title={t("inbox.classify")}
-                  >
-                    {entry.classifying ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : (
-                      <Brain size={14} />
-                    )}
-                    <span>{t("inbox.classify")}</span>
-                  </button>
-                  <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecide(entry.item.id, "accepted");
-                    }}
-                    title={t("inbox.accept")}
-                    aria-label={t("inbox.accept")}
-                  >
-                    <Check size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onDecide(entry.item.id, "rejected");
-                    }}
-                    title={t("inbox.reject")}
-                    aria-label={t("inbox.reject")}
-                  >
-                    <X size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRevealPath(entry.item.path);
-                    }}
-                    title={t("inbox.menu.revealFinder")}
-                    aria-label={t("inbox.menu.revealFinder")}
-                  >
-                    <FolderOpen size={14} />
-                  </button>
-                </div>
-              </article>
-            );
-            })}
+                      <div className="inbox-decision">
+                        <button
+                          type="button"
+                          className="button button-ghost button-sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onClassify(entry.item.id);
+                          }}
+                          disabled={entry.classifying}
+                          title={t("inbox.classify")}
+                        >
+                          {entry.classifying ? (
+                            <Loader2 size={14} className="spin" />
+                          ) : (
+                            <Brain size={14} />
+                          )}
+                          <span>{t("inbox.classify")}</span>
+                        </button>
+                        <span className="decision-status">{t(`inbox.decision.${entry.decision}`)}</span>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onDecide(entry.item.id, "accepted");
+                          }}
+                          title={t("inbox.accept")}
+                          aria-label={t("inbox.accept")}
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onDecide(entry.item.id, "rejected");
+                          }}
+                          title={t("inbox.reject")}
+                          aria-label={t("inbox.reject")}
+                        >
+                          <X size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRevealPath(entry.item.path);
+                          }}
+                          title={t("inbox.menu.revealFinder")}
+                          aria-label={t("inbox.menu.revealFinder")}
+                        >
+                          <FolderOpen size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </InboxSection>
 
@@ -906,6 +956,40 @@ function InboxSection({
       </div>
       {children}
     </section>
+  );
+}
+
+function InboxSourceGroupHeader({
+  source,
+  count,
+  title,
+  onOpen,
+}: {
+  source: string;
+  count: string;
+  title: string;
+  onOpen?: () => void;
+}) {
+  return (
+    <div className="inbox-source-group">
+      <div className="inbox-source-group-label">
+        <span>{source}</span>
+        <span className="count">{count}</span>
+      </div>
+      <button
+        type="button"
+        className="icon-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen?.();
+        }}
+        disabled={!onOpen}
+        title={title}
+        aria-label={title}
+      >
+        <FolderOpen size={14} />
+      </button>
+    </div>
   );
 }
 

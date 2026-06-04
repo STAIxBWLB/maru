@@ -87,6 +87,7 @@ import {
   readDocument,
   readAiMissionLog,
   prepareApproval,
+  openInFileManager,
   revealInFileManager,
   countInboxProcessedByChannel,
   readInboxProcessedItem,
@@ -124,6 +125,7 @@ import {
   type BinaryViewerClassification,
   type LegacyLaunchdService,
 } from "./lib/api";
+import { sourceDropPath } from "./lib/inboxSources";
 import {
   exportDispatch,
   exportPlan,
@@ -6502,6 +6504,22 @@ function MainApp() {
               void refreshProcessingMissions();
             }}
             onOpenSettings={openInboxSettings}
+            onOpenInboxFolder={() => {
+              if (!inboxWorkspacePath) return;
+              void openInFileManager(inboxWorkspacePath, inboxRuntimeConfig.root).catch((err) =>
+                setError(err instanceof Error ? err.message : String(err)),
+              );
+            }}
+            onOpenSourceFolder={(key) => {
+              if (!inboxWorkspacePath) return;
+              const inboxRoot = inboxRuntimeConfig.root.replace(/\/+$/, "");
+              const dropPath = sourceDropPath(inboxRuntimeConfig, key).replace(/^\/+/, "");
+              const targetPath = inboxRoot ? `${inboxRoot}/${dropPath}` : dropPath;
+              void openInFileManager(
+                inboxWorkspacePath,
+                targetPath,
+              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
             onClassify={(id) => void classifyItem(id)}
             onDecide={decideInboxItem}
             onBulkAccept={bulkAcceptInboxKeys}
