@@ -25,6 +25,15 @@ describe("normalizeAnchorSettings", () => {
     ).toBe("title");
   });
 
+  it("accepts the shareOutbox right-pane tab and falls back for unknown values", () => {
+    expect(normalizeAnchorSettings({ ui: { rightPaneTab: "shareOutbox" } }).ui.rightPaneTab).toBe(
+      "shareOutbox",
+    );
+    expect(normalizeAnchorSettings({ ui: { rightPaneTab: "bogus" } }).ui.rightPaneTab).toBe(
+      "workspace",
+    );
+  });
+
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {

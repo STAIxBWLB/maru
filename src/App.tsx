@@ -833,6 +833,9 @@ function MainApp() {
   const [rightPaneTab, setRightPaneTab] = useState<RightPaneTab>(
     DEFAULT_ANCHOR_SETTINGS.ui.rightPaneTab,
   );
+  // Shareable absolute file paths reported by the Inbox selection, fed to the
+  // Shared Outbox tab's queue.
+  const [inboxShareablePaths, setInboxShareablePaths] = useState<string[]>([]);
   const [pendingSelectedPath, setPendingSelectedPath] = useState<string | null>(null);
   const [recentPaths, setRecentPaths] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -1204,6 +1207,10 @@ function MainApp() {
     publicWorkspaces[0]?.path ??
     null;
   const inboxWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath ?? primaryWorkspacePath;
+  // Workspace root used by the Shared Outbox tab — the active document's
+  // workspace in Docs, the inbox workspace otherwise.
+  const shareWorkspacePath =
+    activeDocumentWorkspacePath ?? inboxWorkspacePath ?? primaryWorkspacePath;
   const activeDocumentEntries =
     (activeTab ? workspaceStates[activeTab.workspacePath]?.entries : entries) ?? entries;
   const openingEntry =
@@ -5937,10 +5944,24 @@ function MainApp() {
   useEffect(() => {
     const previous = lastAppModeRef.current;
     lastAppModeRef.current = visibleAppMode;
-    if (previous !== visibleAppMode && visibleAppMode !== "pkm" && outlineOpen) {
+    // Keep the right pane available in Docs (pkm) and Inbox — the modes that
+    // expose right-pane tabs (workspace / shareOutbox). Auto-close it only for
+    // the chrome-less full-screen modes.
+    if (
+      previous !== visibleAppMode &&
+      visibleAppMode !== "pkm" &&
+      visibleAppMode !== "inbox" &&
+      outlineOpen
+    ) {
       updateLayoutSettings({ outlineOpen: false });
     }
   }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
+  useEffect(() => {
+    // Inbox selection only feeds the Shared Outbox queue while in Inbox mode.
+    if (visibleAppMode !== "inbox" && inboxShareablePaths.length > 0) {
+      setInboxShareablePaths([]);
+    }
+  }, [visibleAppMode, inboxShareablePaths.length]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
@@ -6546,6 +6567,7 @@ function MainApp() {
               void refreshInbox();
             }}
             onProcessError={setError}
+            onShareSelectionChange={setInboxShareablePaths}
           />
         ) : visibleAppMode === "comms" ? (
           <CommsPane
@@ -6861,6 +6883,9 @@ function MainApp() {
             activeTab={rightPaneTab}
             onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
+            shareWorkspacePath={shareWorkspacePath}
+            shareDocumentDirty={Boolean(dirty)}
+            inboxShareablePaths={inboxShareablePaths}
             appMode={visibleAppMode}
             contentCount={documentIndex.contentCount}
             typeCounts={documentIndex.typeCounts}

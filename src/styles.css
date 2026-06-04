@@ -15796,3 +15796,255 @@ button.git-badge:hover {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* ---------- Shared Outbox pane ---------- */
+.share-outbox-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 12px 16px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.share-outbox-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.share-outbox-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.share-outbox-section h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.share-outbox-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.share-outbox-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.share-outbox-root {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.share-outbox-root-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.share-outbox-root-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  word-break: break-all;
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+}
+.share-outbox-warn {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--warn);
+}
+.share-outbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.share-outbox-actions button,
+.share-outbox-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 5px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+.share-outbox-actions button:hover:not(:disabled),
+.share-outbox-apply:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.share-outbox-actions button:disabled,
+.share-outbox-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.share-outbox-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.share-outbox-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.share-outbox-options select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.share-outbox-checkbox {
+  cursor: pointer;
+}
+.share-outbox-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.share-outbox-queue-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+.share-outbox-queue-item.disabled {
+  opacity: 0.6;
+}
+.share-outbox-queue-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.share-outbox-queue-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-outbox-source-chip {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.share-outbox-title-input {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.share-outbox-reason {
+  font-size: 11px;
+  color: var(--warn);
+}
+.share-outbox-apply {
+  justify-content: center;
+  margin-top: 4px;
+}
+.share-outbox-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.share-outbox-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.share-outbox-result.ok {
+  color: var(--accent);
+}
+.share-outbox-result.failed {
+  color: var(--danger);
+}
+.share-outbox-result span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-outbox-result em {
+  margin-left: auto;
+  font-style: normal;
+  color: var(--muted);
+}
+.share-outbox-result-error {
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-outbox-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.share-outbox-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.share-outbox-recent-item.missing {
+  opacity: 0.5;
+}
+.share-outbox-recent-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.share-outbox-recent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-outbox-recent-meta {
+  font-size: 11px;
+  color: var(--muted);
+}

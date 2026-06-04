@@ -30,6 +30,7 @@ mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+mod share_outbox;
 mod shelf;
 mod skill_host;
 mod studio;
@@ -93,6 +94,10 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
+use share_outbox::{
+    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
+    save_share_outbox_root, scan_share_outbox,
+};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -229,6 +234,11 @@ pub fn run() {
             save_inbox_settings,
             read_inbox_runtime_config,
             save_inbox_runtime_config,
+            read_share_outbox_config,
+            save_share_outbox_root,
+            ensure_share_outbox_root,
+            scan_share_outbox,
+            prepare_share_outbox_files,
             parse_korean_date_cmd,
             scan_meeting_notes,
             read_meeting_metadata,

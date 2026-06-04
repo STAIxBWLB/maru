@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { chooseFiles } from "../lib/api";
+import { isInboxRowShareable } from "../lib/shareOutbox";
 import {
   clearExplorerDragPayload,
   hasExplorerDragPayload,
@@ -101,6 +102,9 @@ interface InboxPaneProps {
   }) => Promise<string | null>;
   onProcessApplied: () => void;
   onProcessError: (message: string | null) => void;
+  /** Reports the absolute paths of shareable selected rows (drop files /
+   *  dropFile entries) for the Shared Outbox tab. */
+  onShareSelectionChange?: (paths: string[]) => void;
 }
 
 type InboxRow =
@@ -157,6 +161,7 @@ export function InboxPane({
   onConfirmApproval,
   onProcessApplied,
   onProcessError,
+  onShareSelectionChange,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
   const paneRef = useRef<HTMLElement | null>(null);
@@ -228,6 +233,23 @@ export function InboxPane({
     () => rows.filter((row) => selectedKeys.has(row.key)),
     [rows, selectedKeys],
   );
+  // Absolute paths of selected rows that map to concrete shareable files
+  // (drop files / dropFile entries; pendingItem dirs are excluded).
+  const shareablePaths = useMemo(
+    () =>
+      selected
+        .filter((row) =>
+          isInboxRowShareable({
+            kind: row.kind,
+            entryKind: row.kind === "entry" ? row.entry.kind : undefined,
+          }),
+        )
+        .map((row) => pathForRow(row)),
+    [selected],
+  );
+  useEffect(() => {
+    onShareSelectionChange?.(shareablePaths);
+  }, [shareablePaths, onShareSelectionChange]);
   const selectedDecisionKeys = useMemo(
     () => selected.filter((row) => row.kind !== "entry").map((row) => row.key),
     [selected],

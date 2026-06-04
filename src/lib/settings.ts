@@ -30,7 +30,8 @@ export type RightPaneTab =
   | "info"
   | "skills"
   | "guideline"
-  | "evidence";
+  | "evidence"
+  | "shareOutbox";
 export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
 export type AiRuntime = "claude" | "codex";
@@ -1073,6 +1074,7 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
   return value === "workspace" || value === "outline" || value === "files" || value === "memo"
     || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
+    || value === "shareOutbox"
     ? value
     : null;
 }
