@@ -1,6 +1,7 @@
 import {
   Brain,
   Check,
+  ChevronDown,
   FilePlus2,
   FolderOpen,
   HelpCircle,
@@ -114,6 +115,8 @@ type InboxContextMenuState = {
   targets: InboxTrashTarget[];
 };
 
+const ALL_SOURCE_VALUE = "__all_sources__";
+
 export function InboxPane({
   items,
   entries,
@@ -191,6 +194,17 @@ export function InboxPane({
   const pending = visibleItems.filter((entry) => entry.decision === "pending").length;
   const entryPending = visibleEntries.filter((entry) => entry.status !== "done").length;
   const totalSourceCount = entries.length + items.length;
+  const countForSource = (source: string) =>
+    (entrySourceCounts.get(source) ?? 0) + (fileSourceCounts.get(source) ?? 0);
+  const selectedSourceCount =
+    sourceFilter === null ? totalSourceCount : countForSource(sourceFilter);
+  const sourceSelectValue = sourceFilter ?? ALL_SOURCE_VALUE;
+  const selectedFolderTitle =
+    sourceFilter === null
+      ? t("inbox.openFolder")
+      : t("inbox.openSourceFolder", { source: sourceFilter });
+  const selectedFolderDisabled =
+    sourceFilter === null ? !onOpenInboxFolder : !onOpenSourceFolder;
   const rows = useMemo<InboxRow[]>(
     () => [
       ...entryGroups.flatMap((group) =>
@@ -231,6 +245,10 @@ export function InboxPane({
     setSelectedKeys((current) => new Set([...current].filter((key) => valid.has(key))));
     if (focusedKey && !valid.has(focusedKey)) setFocusedKey(rows[0]?.key ?? null);
   }, [focusedKey, rows]);
+
+  useEffect(() => {
+    if (sourceFilter !== null && !sources.includes(sourceFilter)) onSourceFilter(null);
+  }, [onSourceFilter, sourceFilter, sources]);
 
   useEffect(() => {
     if (focusRequest <= 0) return;
@@ -569,40 +587,52 @@ export function InboxPane({
       ) : null}
 
       {sources.length > 0 ? (
-        <div className="inbox-filter-row" role="toolbar" aria-label={t("inbox.filter.label")}>
+        <div
+          className="inbox-filter-row inbox-source-toolbar"
+          role="toolbar"
+          aria-label={t("inbox.filter.label")}
+        >
+          <label className="inbox-source-select-control">
+            <span className="inbox-source-select-label">{t("inbox.filter.source")}</span>
+            <span className="inbox-source-select-wrap">
+              <select
+                className="inbox-source-select"
+                value={sourceSelectValue}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onSourceFilter(value === ALL_SOURCE_VALUE ? null : value);
+                }}
+              >
+                <option value={ALL_SOURCE_VALUE}>{t("inbox.filter.all")}</option>
+                {sources.map((source) => (
+                  <option value={source} key={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                className="inbox-source-select-chevron"
+                aria-hidden="true"
+              />
+            </span>
+          </label>
+          <span className="inbox-source-count-badge">
+            {selectedSourceCount.toLocaleString(locale)}
+          </span>
           <button
             type="button"
-            className={sourceFilter === null ? "inbox-filter-chip active" : "inbox-filter-chip"}
-            onClick={() => onSourceFilter(null)}
+            className="icon-button inbox-filter-folder-button"
+            onClick={() => {
+              if (sourceFilter === null) onOpenInboxFolder?.();
+              else onOpenSourceFolder?.(sourceFilter);
+            }}
+            disabled={selectedFolderDisabled}
+            title={selectedFolderTitle}
+            aria-label={selectedFolderTitle}
           >
-            {t("inbox.filter.all")} <span className="count">{totalSourceCount}</span>
+            <FolderOpen size={14} />
           </button>
-          {sources.map((source) => {
-            const count =
-              (entrySourceCounts.get(source) ?? 0) + (fileSourceCounts.get(source) ?? 0);
-            const active = sourceFilter === source;
-            return (
-              <div className="inbox-filter-source" key={source}>
-                <button
-                  type="button"
-                  className={active ? "inbox-filter-chip active" : "inbox-filter-chip"}
-                  onClick={() => onSourceFilter(active ? null : source)}
-                >
-                  {source} <span className="count">{count}</span>
-                </button>
-                <button
-                  type="button"
-                  className="icon-button inbox-filter-folder-button"
-                  onClick={() => onOpenSourceFolder?.(source)}
-                  disabled={!onOpenSourceFolder}
-                  title={t("inbox.openSourceFolder", { source })}
-                  aria-label={t("inbox.openSourceFolder", { source })}
-                >
-                  <FolderOpen size={13} />
-                </button>
-              </div>
-            );
-          })}
         </div>
       ) : null}
 

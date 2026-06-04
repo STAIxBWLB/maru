@@ -10741,15 +10741,93 @@ button.git-badge:hover {
   font-weight: 650;
 }
 
-.inbox-filter-source {
+.inbox-source-toolbar {
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--panel) 88%, var(--panel-2));
+}
+
+.inbox-source-select-control {
+  min-width: 0;
+  flex: 0 1 390px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+}
+
+.inbox-source-select-label {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inbox-source-select-wrap {
+  position: relative;
+  flex: 1 1 190px;
+  display: inline-flex;
+  align-items: center;
+  min-width: 190px;
+  max-width: 320px;
+}
+
+.inbox-source-select {
+  width: 100%;
+  height: 34px;
+  appearance: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  padding: 0 34px 0 11px;
+  outline: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+}
+
+.inbox-source-select:hover {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.inbox-source-select:focus {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.inbox-source-select-chevron {
+  position: absolute;
+  right: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.inbox-source-count-badge {
+  min-width: 30px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
 }
 
 .inbox-filter-folder-button {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
 }
 
