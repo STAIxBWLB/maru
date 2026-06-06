@@ -11,6 +11,7 @@ import {
   Search,
 } from "lucide-react";
 import type React from "react";
+import { createPortal } from "react-dom";
 import {
   memo,
   useDeferredValue,
@@ -720,81 +721,84 @@ export const DocumentList = memo(function DocumentList({
           </div>
         ) : null}
       </div>
-      {contextMenu ? (
-        <div
-          ref={contextMenuRef}
-          className="context-menu"
-          role="menu"
-          tabIndex={-1}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={handleContextMenuKeyDown}
-        >
-          <div className="context-menu-title" title={contextMenu.title}>
-            {contextMenu.title}
-          </div>
-          {contextMenu.entry ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const entry = contextMenu.entry;
-                setContextMenu(null);
-                if (entry) void onSelect(entry);
-              }}
+      {contextMenu
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="context-menu"
+              role="menu"
+              tabIndex={-1}
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={handleContextMenuKeyDown}
             >
-              {t("context.openFile")}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const target = contextMenu.targetPath;
-              setContextMenu(null);
-              onRevealInFinder(target);
-            }}
-          >
-            {t("context.revealInFinder")}
-          </button>
-          {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
-            <>
+              <div className="context-menu-title" title={contextMenu.title}>
+                {contextMenu.title}
+              </div>
+              {contextMenu.entry ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const entry = contextMenu.entry;
+                    setContextMenu(null);
+                    if (entry) void onSelect(entry);
+                  }}
+                >
+                  {t("context.openFile")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const target = contextMenu.targetPath;
+                  setContextMenu(null);
+                  onRevealInFinder(target);
+                }}
+              >
+                {t("context.revealInFinder")}
+              </button>
+              {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
+                <>
+                  <div className="context-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const target = contextMenu.targetPath;
+                      const kind = contextMenu.targetKind;
+                      setContextMenu(null);
+                      onApplyFileQueueToDestination(target, kind, "copy");
+                    }}
+                  >
+                    {t("rightPane.files.copySelectedHere", { count: selectedFileQueueCount })}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const target = contextMenu.targetPath;
+                      const kind = contextMenu.targetKind;
+                      setContextMenu(null);
+                      onApplyFileQueueToDestination(target, kind, "move");
+                    }}
+                  >
+                    {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+                  </button>
+                </>
+              ) : null}
               <div className="context-menu-separator" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const target = contextMenu.targetPath;
-                  const kind = contextMenu.targetKind;
-                  setContextMenu(null);
-                  onApplyFileQueueToDestination(target, kind, "copy");
-                }}
-              >
-                {t("rightPane.files.copySelectedHere", { count: selectedFileQueueCount })}
+              <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.targetPath)}>
+                {t("context.copyPath")}
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const target = contextMenu.targetPath;
-                  const kind = contextMenu.targetKind;
-                  setContextMenu(null);
-                  onApplyFileQueueToDestination(target, kind, "move");
-                }}
-              >
-                {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+              <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.relPath)}>
+                {t("context.copyRelativePath")}
               </button>
-            </>
-          ) : null}
-          <div className="context-menu-separator" role="separator" />
-          <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.targetPath)}>
-            {t("context.copyPath")}
-          </button>
-          <button type="button" role="menuitem" onClick={() => copyContextText(contextMenu.relPath)}>
-            {t("context.copyRelativePath")}
-          </button>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 });
