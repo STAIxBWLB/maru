@@ -96,6 +96,7 @@ import {
   readInboxProcessedItem,
   readInboxSourceRuns,
   readInboxRuntimeConfig,
+  readTelegramMonitorConfig,
   readVaultCache,
   unloadLegacyTelegramLaunchd,
   refreshWorkspaceCapabilities,
@@ -110,7 +111,10 @@ import {
   scanWorkspaceFiles,
   scanVault,
   setActiveWorkspaceRoot,
+  stageGmailItems,
   stageInboxDropFiles,
+  stageOutlookItems,
+  stageTelegramItems,
   startInboxWatcher,
   startTelegramPolling,
   stopAiMission,
@@ -146,6 +150,7 @@ import {
 import {
   readAnchorSettings,
   readWorkspaceConfig,
+  listWorkspaceProjects,
   registerWorkspaceRoots,
   saveAnchorSettings,
   listenAnchorSettingsUpdated,
@@ -198,10 +203,17 @@ import {
 import { buildOutlookMessageStates, type OutlookMessageState } from "./lib/outlook";
 import {
   buildTelegramMessageStates,
+  gwsAuthCommand,
+  m365LoginCommand,
   telegramFetchOptions,
   telegramLoginCommand,
   type TelegramMessageState,
 } from "./lib/telegram";
+import { normalizeTelegramMonitorConfig } from "./lib/telegramMonitor";
+import {
+  SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT,
+  type SettingsWindowTerminalLaunchPayload,
+} from "./lib/settingsWindowEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
@@ -1676,6 +1688,33 @@ function MainApp() {
     [updateSettings],
   );
 
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, (event) => {
+          const payload = event.payload as SettingsWindowTerminalLaunchPayload | null;
+          if (!payload) return;
+          setTerminalLaunchRequest({
+            kind: "shell",
+            nonce: Date.now(),
+            title: "Provider Auth",
+            cwd: payload.cwd,
+            command: payload.command,
+            extraArgs: payload.args,
+          });
+          updateLayoutSettings({ terminalOpen: true });
+        }),
+      )
+      .then((off) => {
+        dispose = off;
+      })
+      .catch(() => {});
+    return () => {
+      dispose?.();
+    };
+  }, [updateLayoutSettings]);
+
   const attachActiveItemToTerminal = useCallback(() => {
     if (!anchorSettings.ui.layout.terminalOpen) {
       updateLayoutSettings({ terminalOpen: true });
@@ -2947,6 +2986,147 @@ function MainApp() {
       anchorSettings.ai.permissionMode,
       skills,
     ],
+  );
+
+  const processCommsChannelNow = useCallback(
+    async (channel: string) => {
+      if (!inboxWorkspacePath) return;
+      if (channel === "kakao") {
+        await processInboxKeys([], channel, false);
+        return;
+      }
+      setInboxActionBusy(true);
+      setError(null);
+      try {
+        if (channel === "gws") {
+          const gmailConfig = inboxRuntimeConfig.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
+          const messages = await fetchGmailUnread(
+            inboxWorkspacePath,
+            normalizeGmailScanLimit(gmailConfig.max_results),
+            buildGmailScanQuery(gmailConfig),
+          );
+          setGmailMessages(messages);
+          if (messages.length > 0) {
+            const approvalId = await approvalGate.confirmApproval({
+              kind: "gmail.stage",
+              summary: "Write Gmail message envelopes into the configured gws inbox drop.",
+              target: "inbox/drop/gws",
+              payloadPreview: messages.map((message) => `${message.from}: ${message.subject}`).join("\n"),
+            });
+            if (!approvalId) return;
+            const outcomes = await stageGmailItems(inboxWorkspacePath, messages, approvalId);
+            const failed = outcomes.filter((outcome) => !outcome.ok);
+            if (failed.length > 0) {
+              throw new Error(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+            }
+          }
+        } else if (channel === "mso") {
+          const messages = await fetchOutlookUnread(
+            inboxWorkspacePath,
+            effectiveCommsSettings.outlook.maxResults,
+            effectiveCommsSettings.outlook.m365Path,
+          );
+          setOutlookMessages(messages);
+          if (messages.length > 0) {
+            const approvalId = await approvalGate.confirmApproval({
+              kind: "outlook.stage",
+              summary: "Write Outlook message envelopes into the configured mso inbox drop.",
+              target: "inbox/drop/mso",
+              payloadPreview: messages.map((message) => `${message.from}: ${message.subject}`).join("\n"),
+            });
+            if (!approvalId) return;
+            const outcomes = await stageOutlookItems(inboxWorkspacePath, messages, approvalId);
+            const failed = outcomes.filter((outcome) => !outcome.ok);
+            if (failed.length > 0) {
+              throw new Error(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+            }
+          }
+        } else if (channel === "telegram") {
+          const messages = await fetchTelegramRecent(
+            telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
+          );
+          setTelegramMessages(messages);
+          if (messages.length > 0) {
+            const approvalId = await approvalGate.confirmApproval({
+              kind: "telegram.stage",
+              summary: "Write Telegram message envelopes into the configured Telegram inbox drop.",
+              target: "inbox/drop/telegram",
+              payloadPreview: messages.map((message) => `${message.chatTitle}: ${message.text}`).join("\n"),
+            });
+            if (!approvalId) return;
+            const outcomes = await stageTelegramItems(inboxWorkspacePath, messages, approvalId);
+            const failed = outcomes.filter((outcome) => !outcome.ok);
+            if (failed.length > 0) {
+              throw new Error(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+            }
+          }
+        }
+        await refreshInbox();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setInboxActionBusy(false);
+      }
+      await processInboxKeys([], channel, false);
+    },
+    [
+      approvalGate,
+      effectiveCommsSettings.outlook,
+      effectiveCommsSettings.telegram,
+      inboxRuntimeConfig.gmail,
+      inboxWorkspacePath,
+      processInboxKeys,
+      refreshInbox,
+    ],
+  );
+
+  const deepProcessCommsChannel = useCallback(
+    async (channel: string) => {
+      if (!inboxWorkspacePath || channel !== "telegram") return;
+      try {
+        const [monitorConfig, projects] = await Promise.all([
+          readTelegramMonitorConfig(
+            inboxWorkspacePath,
+            effectiveCommsSettings.telegram.monitorConfigPath,
+          ).then(normalizeTelegramMonitorConfig),
+          listWorkspaceProjects(inboxWorkspacePath).catch(() => []),
+        ]);
+        const projectById = new Map(projects.map((project) => [project.id, project]));
+        const chats = monitorConfig.chats
+          .filter((chat) => chat.enabled && chat.contexts.length > 0)
+          .map((chat) => {
+            const projectId = chat.contexts[0];
+            const project = projectById.get(projectId) ?? null;
+            return {
+              chatId: chat.chat_id,
+              name: chat.name,
+              profile: chat.profile ?? "deep-digest",
+              projectId,
+              projectPath: project?.path ?? null,
+              tags: chat.tags,
+            };
+          });
+        const projectIds = Array.from(new Set(chats.map((chat) => chat.projectId)));
+        const projectId = projectIds.length === 1 ? projectIds[0] : null;
+        const projectPath = projectId ? projectById.get(projectId)?.path ?? null : null;
+        const context = JSON.stringify(
+          {
+            channel: "telegram",
+            profile: "deep-digest",
+            projectId,
+            projectPath,
+            chats,
+          },
+          null,
+          2,
+        );
+        await processInboxKeys([], "telegram", false, context);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [effectiveCommsSettings.telegram.monitorConfigPath, inboxWorkspacePath, processInboxKeys],
   );
 
   const stopProcessingMission = useCallback(async (id: string) => {
@@ -4727,6 +4907,32 @@ function MainApp() {
     });
     updateLayoutSettings({ terminalOpen: true });
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath, updateLayoutSettings]);
+
+  const startGwsAuth = useCallback(() => {
+    const command = gwsAuthCommand(inboxRuntimeConfig.gmail?.gws_path ?? null);
+    setTerminalLaunchRequest({
+      kind: "shell",
+      nonce: Date.now(),
+      title: "Gmail Auth",
+      cwd: inboxWorkspacePath,
+      command: command.command,
+      extraArgs: command.args,
+    });
+    updateLayoutSettings({ terminalOpen: true });
+  }, [inboxRuntimeConfig.gmail?.gws_path, inboxWorkspacePath, updateLayoutSettings]);
+
+  const startMsoLogin = useCallback(() => {
+    const command = m365LoginCommand(effectiveCommsSettings.outlook.m365Path);
+    setTerminalLaunchRequest({
+      kind: "shell",
+      nonce: Date.now(),
+      title: "Outlook Auth",
+      cwd: inboxWorkspacePath,
+      command: command.command,
+      extraArgs: command.args,
+    });
+    updateLayoutSettings({ terminalOpen: true });
+  }, [effectiveCommsSettings.outlook.m365Path, inboxWorkspacePath, updateLayoutSettings]);
 
   const refreshMigrationServices = useCallback(() => {
     if (!isMac) {
@@ -6597,7 +6803,7 @@ function MainApp() {
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onSourceFilter={setCommsSourceFilter}
-            onProcessNow={(channel) => void processInboxKeys([], channel, false)}
+            onProcessNow={(channel) => void processCommsChannelNow(channel)}
             onRefresh={refreshActiveSurface}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}
@@ -6608,9 +6814,12 @@ function MainApp() {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
             onRefreshTelegram={() => void refreshTelegram({ force: true })}
+            onGwsReauth={startGwsAuth}
+            onMsoReauth={startMsoLogin}
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}
             onTelegramLogin={startTelegramLogin}
+            onDeepProcess={(channel) => void deepProcessCommsChannel(channel)}
             onOpenCommsSettings={openCommsSettings}
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={unloadMigrationService}

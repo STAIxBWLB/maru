@@ -22,7 +22,7 @@ import { AllSourcesOverview } from "./comms/AllSourcesOverview";
 import { MigrationBanner } from "./comms/MigrationBanner";
 import { SourceHeaderCard } from "./comms/SourceHeaderCard";
 import { SourceSelector } from "./comms/SourceSelector";
-import { TelegramControls } from "./comms/TelegramControls";
+import { SourceControls } from "./comms/SourceControls";
 
 interface CommsPaneProps {
   runtimeConfig: InboxRuntimeConfig;
@@ -52,9 +52,12 @@ interface CommsPaneProps {
   onStopProcessingMission: (id: string) => void | Promise<void>;
   onRevealPath: (path: string) => void;
   onRefreshTelegram: () => void;
+  onGwsReauth: () => void;
+  onMsoReauth: () => void;
   onStartTelegramPolling: () => void;
   onStopTelegramPolling: () => void;
   onTelegramLogin: () => void;
+  onDeepProcess: (channel: string) => void;
   onOpenCommsSettings: () => void;
   onRefreshMigration: () => void;
   onUnloadMigration: (plistPath: string) => void;
@@ -87,9 +90,12 @@ export function CommsPane({
   onStopProcessingMission,
   onRevealPath,
   onRefreshTelegram,
+  onGwsReauth,
+  onMsoReauth,
   onStartTelegramPolling,
   onStopTelegramPolling,
   onTelegramLogin,
+  onDeepProcess,
   onOpenCommsSettings,
   onRefreshMigration,
   onUnloadMigration,
@@ -201,16 +207,26 @@ export function CommsPane({
               actionBusy={actionBusy}
               onProcessNow={onProcessNow}
             />
-            {sourceFilter === "telegram" ? (
-              <TelegramControls
-                pollingStatus={telegramPollingStatus}
-                onRefresh={onRefreshTelegram}
-                onStartPolling={onStartTelegramPolling}
-                onStopPolling={onStopTelegramPolling}
-                onTelegramLogin={onTelegramLogin}
-                onOpenSettings={onOpenCommsSettings}
-              />
-            ) : null}
+            <SourceControls
+              channel={sourceFilter}
+              pollingStatus={sourceFilter === "telegram" ? telegramPollingStatus : null}
+              actionBusy={actionBusy}
+              onRefresh={sourceFilter === "telegram" ? onRefreshTelegram : onRefresh}
+              onReauth={
+                sourceFilter === "gws"
+                  ? onGwsReauth
+                  : sourceFilter === "mso"
+                    ? onMsoReauth
+                    : sourceFilter === "telegram"
+                      ? onTelegramLogin
+                      : undefined
+              }
+              onProcessNow={onProcessNow}
+              onDeepProcess={sourceFilter === "telegram" ? onDeepProcess : undefined}
+              onStartPolling={onStartTelegramPolling}
+              onStopPolling={onStopTelegramPolling}
+              onOpenSettings={onOpenCommsSettings}
+            />
             <ProcessingMissionsPanel
               missions={missionsForActive}
               logLines={processingLogLines}

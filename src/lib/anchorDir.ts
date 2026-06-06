@@ -10,6 +10,7 @@ import type {
   AnchorWorkspaceMetaPatch,
   ImportPlan,
   ImportReceipt,
+  ProjectPickerEntry,
   RegisterWorkspaceOutcome,
   RuleDocument,
   RuleEntry,
@@ -193,6 +194,21 @@ export async function saveAnchorMcp(workPath: string, value: unknown): Promise<v
 export async function readAnchorProjects(workPath: string): Promise<unknown> {
   if (!isTauri()) return null;
   return invoke<unknown>("read_anchor_projects", { workPath });
+}
+
+export async function listWorkspaceProjects(
+  workPath: string,
+  includeInactive = false,
+): Promise<ProjectPickerEntry[]> {
+  if (!isTauri()) {
+    return [
+      { id: "sample", name: "Sample Project", path: "projects/sample/", status: "active" },
+    ];
+  }
+  return invoke<ProjectPickerEntry[]>("list_workspace_projects", {
+    workPath,
+    includeInactive,
+  });
 }
 
 export async function saveAnchorProjects(workPath: string, value: unknown): Promise<void> {

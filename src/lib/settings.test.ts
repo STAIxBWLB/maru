@@ -34,6 +34,24 @@ describe("normalizeAnchorSettings", () => {
     );
   });
 
+  it("does not persist Telegram monitor secrets in Anchor settings", () => {
+    const settings = normalizeAnchorSettings({
+      comms: {
+        telegram: {
+          apiHash: "super-secret-hash",
+          botToken: "super-bot-token",
+          monitorConfigPath: "~/workspace/work/.secrets/services/telegram-monitor.config.yaml",
+        },
+      },
+    });
+    const serializedSettings = serializeAnchorSettings(settings);
+    const serialized = JSON.stringify(serializedSettings);
+    expect(serialized).not.toMatch(/"apiHash"\s*:/);
+    expect(serialized).not.toMatch(/"botToken"\s*:/);
+    expect(serialized).not.toContain("super-secret-hash");
+    expect(serialized).not.toContain("super-bot-token");
+  });
+
   it("merges partial settings with terminal defaults", () => {
     const settings = normalizeAnchorSettings({
       ui: {

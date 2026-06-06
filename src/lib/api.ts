@@ -36,11 +36,17 @@ import type {
   GmailMessage,
   GmailDecisionOutcome,
   GmailDecisionRequest,
+  ProviderAuthStatus,
   OutlookMessage,
   OutlookDecisionOutcome,
   OutlookDecisionRequest,
+  ProjectPickerEntry,
+  StageOutcome,
   TelegramMessage,
   TelegramFetchOptions,
+  TelegramMonitorChat,
+  TelegramMonitorConfigSave,
+  TelegramMonitorConfigView,
   TelegramPollingStatus,
   TelegramDecisionOutcome,
   ApprovalDecision,
@@ -1248,6 +1254,29 @@ export async function fetchGmailUnread(
   return invoke<GmailMessage[]>("fetch_gmail_unread", { vaultPath, max, query });
 }
 
+export async function stageGmailItems(
+  workPath: string,
+  messages: GmailMessage[],
+  approvalId: string,
+): Promise<StageOutcome[]> {
+  if (!isTauri()) {
+    return messages.map((message) => ({
+      messageId: message.id,
+      channel: "gws",
+      provider: "gws",
+      targetPath: `${workPath}/inbox/drop/gws/${message.id}.json`,
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<StageOutcome[]>("stage_gmail_items", { workPath, messages, approvalId });
+}
+
+export async function checkGwsAuth(vaultPath: string | null): Promise<ProviderAuthStatus> {
+  if (!isTauri()) return mockAuthStatus("gws");
+  return invoke<ProviderAuthStatus>("check_gws_auth", { vaultPath });
+}
+
 export async function decideGmailItem(
   vaultPath: string | null,
   messageId: string,
@@ -1307,6 +1336,35 @@ export async function fetchOutlookUnread(
   });
 }
 
+export async function stageOutlookItems(
+  workPath: string,
+  messages: OutlookMessage[],
+  approvalId: string,
+): Promise<StageOutcome[]> {
+  if (!isTauri()) {
+    return messages.map((message) => ({
+      messageId: message.id,
+      channel: "mso",
+      provider: "mso",
+      targetPath: `${workPath}/inbox/drop/mso/${message.id}.json`,
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<StageOutcome[]>("stage_outlook_items", { workPath, messages, approvalId });
+}
+
+export async function checkMsoAuth(
+  workPath: string | null,
+  m365Path?: string | null,
+): Promise<ProviderAuthStatus> {
+  if (!isTauri()) return mockAuthStatus("mso");
+  return invoke<ProviderAuthStatus>("check_mso_auth", {
+    workPath,
+    m365Path: m365Path ?? null,
+  });
+}
+
 export async function decideOutlookItem(
   workPath: string | null,
   messageId: string,
@@ -1362,6 +1420,112 @@ export async function fetchTelegramRecent(
 ): Promise<TelegramMessage[]> {
   if (!isTauri()) return mockTelegramRecent();
   return invoke<TelegramMessage[]>("fetch_telegram_recent", { options });
+}
+
+export async function stageTelegramItems(
+  workPath: string,
+  messages: TelegramMessage[],
+  approvalId: string,
+): Promise<StageOutcome[]> {
+  if (!isTauri()) {
+    return messages.map((message) => ({
+      messageId: message.id,
+      channel: "telegram",
+      provider: "telegram",
+      targetPath: `${workPath}/inbox/drop/telegram/${message.id}.json`,
+      ok: true,
+      error: null,
+    }));
+  }
+  return invoke<StageOutcome[]>("stage_telegram_items", { workPath, messages, approvalId });
+}
+
+export async function checkTelegramAuth(
+  options: TelegramFetchOptions,
+): Promise<ProviderAuthStatus> {
+  if (!isTauri()) return mockAuthStatus("telegram");
+  return invoke<ProviderAuthStatus>("check_telegram_auth", { options });
+}
+
+export async function readTelegramMonitorConfig(
+  workPath: string | null,
+  monitorConfigPath?: string | null,
+): Promise<TelegramMonitorConfigView> {
+  if (!isTauri()) return mockTelegramMonitorConfig(workPath, monitorConfigPath);
+  return invoke<TelegramMonitorConfigView>("read_telegram_monitor_config", {
+    workPath,
+    monitorConfigPath: monitorConfigPath ?? null,
+  });
+}
+
+export async function saveTelegramMonitorConfig(
+  workPath: string | null,
+  monitorConfigPath: string | null,
+  config: TelegramMonitorConfigSave,
+): Promise<TelegramMonitorConfigView> {
+  if (!isTauri()) return mockTelegramMonitorConfigFromSave(workPath, monitorConfigPath, config);
+  return invoke<TelegramMonitorConfigView>("save_telegram_monitor_config", {
+    workPath,
+    monitorConfigPath,
+    config,
+  });
+}
+
+export async function upsertTelegramChat(
+  workPath: string | null,
+  monitorConfigPath: string | null,
+  chat: TelegramMonitorChat,
+): Promise<TelegramMonitorConfigView> {
+  if (!isTauri()) {
+    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
+    return { ...config, chats: [...config.chats.filter((item) => item.chat_id !== chat.chat_id), chat] };
+  }
+  return invoke<TelegramMonitorConfigView>("upsert_telegram_chat", {
+    workPath,
+    monitorConfigPath,
+    chat,
+  });
+}
+
+export async function removeTelegramChat(
+  workPath: string | null,
+  monitorConfigPath: string | null,
+  chatId: number,
+): Promise<TelegramMonitorConfigView> {
+  if (!isTauri()) {
+    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
+    return { ...config, chats: config.chats.filter((chat) => chat.chat_id !== chatId) };
+  }
+  return invoke<TelegramMonitorConfigView>("remove_telegram_chat", {
+    workPath,
+    monitorConfigPath,
+    chatId,
+  });
+}
+
+export async function setTelegramChatContexts(
+  workPath: string | null,
+  monitorConfigPath: string | null,
+  chatId: number,
+  contexts: string[],
+  enabled?: boolean | null,
+): Promise<TelegramMonitorConfigView> {
+  if (!isTauri()) {
+    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
+    return {
+      ...config,
+      chats: config.chats.map((chat) =>
+        chat.chat_id === chatId ? { ...chat, contexts, enabled: enabled ?? chat.enabled } : chat,
+      ),
+    };
+  }
+  return invoke<TelegramMonitorConfigView>("set_telegram_chat_contexts", {
+    workPath,
+    monitorConfigPath,
+    chatId,
+    contexts,
+    enabled: enabled ?? null,
+  });
 }
 
 export async function acceptTelegramItem(
@@ -1622,6 +1786,77 @@ function mockTelegramRecent(): TelegramMessage[] {
       permalink: null,
     },
   ];
+}
+
+function mockAuthStatus(provider: string): ProviderAuthStatus {
+  return {
+    provider,
+    state: "ok",
+    detail: null,
+    cliPath:
+      provider === "mso"
+        ? "/opt/homebrew/bin/m365"
+        : provider === "gws"
+          ? "/opt/homebrew/bin/gws"
+          : "$HOME/.anchor/env/.venv/bin/python",
+    account: provider === "telegram" ? null : "mock@example.com",
+  };
+}
+
+function mockTelegramMonitorConfig(
+  workPath: string | null,
+  monitorConfigPath?: string | null,
+): TelegramMonitorConfigView {
+  return {
+    path:
+      monitorConfigPath ??
+      `${workPath ?? MOCK_VAULT_PATH}/.secrets/services/telegram-monitor.config.yaml`,
+    exists: false,
+    warnings: [],
+    telegram: {
+      apiId: null,
+      apiHash: null,
+      hasApiHash: false,
+      phone: null,
+      selfId: null,
+    },
+    polling: { interval_seconds: 60 },
+    chats: [],
+    notification: {
+      telegram: {
+        botToken: null,
+        hasBotToken: false,
+        chatId: null,
+      },
+    },
+  };
+}
+
+function mockTelegramMonitorConfigFromSave(
+  workPath: string | null,
+  monitorConfigPath: string | null,
+  config: TelegramMonitorConfigSave,
+): TelegramMonitorConfigView {
+  return {
+    ...mockTelegramMonitorConfig(workPath, monitorConfigPath),
+    exists: true,
+    telegram: {
+      apiId: config.telegram.apiId,
+      apiHash: config.telegram.apiHash ? "****mock" : null,
+      hasApiHash: Boolean(config.telegram.apiHash),
+      phone: config.telegram.phone,
+      selfId: config.telegram.selfId,
+    },
+    polling: config.polling,
+    chats: config.chats,
+    notification: {
+      telegram: {
+        botToken: config.notification.telegram.botToken ? "****mock" : null,
+        hasBotToken: Boolean(config.notification.telegram.botToken),
+        chatId: config.notification.telegram.chatId,
+      },
+    },
+  };
 }
 
 function mockClassification(raw: string): InboxClassification {

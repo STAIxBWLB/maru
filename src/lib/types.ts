@@ -276,6 +276,96 @@ export interface TelegramDecisionOutcome {
   error: string | null;
 }
 
+export interface StageOutcome {
+  messageId: string;
+  channel: string;
+  provider: string;
+  targetPath: string | null;
+  ok: boolean;
+  error: string | null;
+}
+
+export type ProviderAuthState =
+  | "ok"
+  | "auth_required"
+  | "cli_missing"
+  | "env_missing"
+  | "error";
+
+export interface ProviderAuthStatus {
+  provider: "gws" | "mso" | "telegram" | string;
+  state: ProviderAuthState | string;
+  detail: string | null;
+  cliPath: string | null;
+  account: string | null;
+}
+
+export interface TelegramPollingConfig {
+  interval_seconds?: number | null;
+  [extra: string]: unknown;
+}
+
+export interface TelegramMonitorChat {
+  chat_id: number;
+  name?: string | null;
+  enabled: boolean;
+  priority?: string | null;
+  tags: string[];
+  contexts: string[];
+  profile?: string | null;
+  [extra: string]: unknown;
+}
+
+export interface TelegramAuthConfigView {
+  apiId: string | null;
+  apiHash: string | null;
+  hasApiHash: boolean;
+  phone: string | null;
+  selfId: string | null;
+}
+
+export interface TelegramNotificationTelegramView {
+  botToken: string | null;
+  hasBotToken: boolean;
+  chatId: string | null;
+}
+
+export interface TelegramMonitorConfigView {
+  path: string;
+  exists: boolean;
+  warnings: string[];
+  telegram: TelegramAuthConfigView;
+  polling: TelegramPollingConfig;
+  chats: TelegramMonitorChat[];
+  notification: {
+    telegram: TelegramNotificationTelegramView;
+  };
+}
+
+export interface TelegramMonitorConfigSave {
+  telegram: {
+    apiId: string | null;
+    apiHash: string | null;
+    phone: string | null;
+    selfId: string | null;
+  };
+  polling: TelegramPollingConfig;
+  chats: TelegramMonitorChat[];
+  notification: {
+    telegram: {
+      botToken: string | null;
+      chatId: string | null;
+    };
+  };
+}
+
+export interface ProjectPickerEntry {
+  id: string;
+  name: string;
+  path: string;
+  status: string;
+}
+
 export interface InboxChannelConfig {
   provider: string;
   skill?: string | null;

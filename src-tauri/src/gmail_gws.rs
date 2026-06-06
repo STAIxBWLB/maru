@@ -24,6 +24,7 @@ use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::inbox_drop::{auth_status, stage_message_outcome, ProviderAuthStatus, StageOutcome};
 use crate::inbox_settings::{self, InboxGmailConfig};
 use crate::vault::resolve_inside_vault;
 
@@ -91,6 +92,7 @@ struct GmailLabel {
 
 const GMAIL_ACCEPT_KIND: &str = "gmail.accept";
 const GMAIL_REJECT_KIND: &str = "gmail.reject";
+const GMAIL_STAGE_KIND: &str = "gmail.stage";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 const ACCEPTED_LABEL: &str = "anchor-accepted";
 const REJECTED_LABEL: &str = "anchor-rejected";
@@ -159,19 +161,81 @@ pub fn fetch_gmail_unread(
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.trim();
-        let kind =
-            if detail.contains("scope") || detail.contains("consent") || detail.contains("token") {
-                "auth_required"
-            } else {
-                "gws_failed"
-            };
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let kind = if classify_gws_auth_state(&detail) == "auth_required" {
+            "auth_required"
+        } else {
+            "gws_failed"
+        };
         return Err(format!("{kind}: {detail}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_triage_output(&stdout).map_err(|err| format!("gws_parse_failed: {err}"))
+}
+
+#[tauri::command]
+pub fn stage_gmail_items(
+    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    messages: Vec<GmailMessage>,
+    approval_id: Option<String>,
+) -> Result<Vec<StageOutcome>, String> {
+    crate::approval::require_approval_any(
+        &approvals,
+        approval_id,
+        &[GMAIL_STAGE_KIND, INBOX_BULK_KIND],
+    )?;
+    let work = resolve_inside_vault(&work_path, ".")?;
+    Ok(messages
+        .into_iter()
+        .map(|message| stage_message_outcome(&work, "gws", "gws", &message.id, &message))
+        .collect())
+}
+
+#[tauri::command]
+pub fn check_gws_auth(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
+    let override_path = vault_path
+        .as_deref()
+        .and_then(configured_gws_path_for_vault);
+    let Some(gws_bin) = resolve_gws_path(override_path.as_deref()) else {
+        return Ok(auth_status(
+            "gws",
+            "cli_missing",
+            Some("gws CLI not found".to_string()),
+            None,
+            None,
+        ));
+    };
+    let output = gws_command(&gws_bin)
+        .args([
+            "gmail",
+            "users",
+            "labels",
+            "list",
+            "--params",
+            r#"{"userId":"me"}"#,
+            "--format",
+            "json",
+        ])
+        .output()
+        .map_err(|err| format!("gws_spawn_failed: {err}"))?;
+    if output.status.success() {
+        return Ok(auth_status("gws", "ok", None, Some(gws_bin), None));
+    }
+    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
+        .into_iter()
+        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(auth_status(
+        "gws",
+        classify_gws_auth_state(&detail),
+        Some(detail),
+        Some(gws_bin),
+        None,
+    ))
 }
 
 #[tauri::command]
@@ -330,6 +394,22 @@ fn gmail_scan_query(config: &InboxGmailConfig) -> Option<String> {
         None
     } else {
         Some(terms.join(" "))
+    }
+}
+
+pub fn classify_gws_auth_state(detail: &str) -> &'static str {
+    let lower = detail.to_lowercase();
+    if lower.contains("scope")
+        || lower.contains("consent")
+        || lower.contains("token")
+        || lower.contains("auth")
+        || lower.contains("login")
+        || lower.contains("keychain")
+        || lower.contains("keyring")
+    {
+        "auth_required"
+    } else {
+        "error"
     }
 }
 
@@ -662,5 +742,15 @@ mod tests {
         assert_eq!(GmailDecision::Accepted.approval_kind(), "gmail.accept");
         assert_eq!(GmailDecision::Rejected.label_name(), "anchor-rejected");
         assert_eq!(GmailDecision::Rejected.approval_kind(), "gmail.reject");
+    }
+
+    #[test]
+    fn classifies_gws_auth_errors() {
+        assert_eq!(classify_gws_auth_state("token expired"), "auth_required");
+        assert_eq!(
+            classify_gws_auth_state("No keychain is available"),
+            "auth_required"
+        );
+        assert_eq!(classify_gws_auth_state("network down"), "error");
     }
 }

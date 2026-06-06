@@ -53,6 +53,28 @@ export function telegramLoginCommand(settings: CommsSettings["telegram"]): {
   };
 }
 
+export function gwsAuthCommand(gwsPath?: string | null): {
+  command: string | null;
+  args: string[];
+} {
+  const gws = gwsPath?.trim() || "gws";
+  return {
+    command: null,
+    args: ["-lc", `exec ${quoteShell(gws)} auth`],
+  };
+}
+
+export function m365LoginCommand(m365Path?: string | null): {
+  command: string | null;
+  args: string[];
+} {
+  const m365 = m365Path?.trim() || "m365";
+  return {
+    command: null,
+    args: ["-lc", `exec ${quoteShell(m365)} login`],
+  };
+}
+
 export function isTelegramMonitorConfigOutsideAnchor(
   path: string | null | undefined,
 ): boolean {
