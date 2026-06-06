@@ -15,6 +15,7 @@ import {
   memo,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,7 @@ import {
   type DocumentIndex,
 } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
+import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type { DocumentBrowserMode, DocumentLabelMode, DocumentViewDefinition } from "../lib/settings";
 import type { ExplorerPaneMode } from "../lib/settings";
@@ -174,6 +176,19 @@ export const DocumentList = memo(function DocumentList({
     lastSentQueryRef.current = query;
     setInputQuery(query);
   }, [query]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const menu = contextMenuRef.current;
+    if (!menu) return;
+    const next = clampMenuPosition(
+      { x: contextMenu.x, y: contextMenu.y },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (next.x === contextMenu.x && next.y === contextMenu.y) return;
+    setContextMenu({ ...contextMenu, ...next });
+  }, [contextMenu]);
 
   const filtered = useMemo(
     () =>
