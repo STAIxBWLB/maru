@@ -750,19 +750,26 @@ export const NativeTerminalView = memo(
     const onKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         const native = event.nativeEvent;
-        const composing = composingRef.current || native.isComposing;
-        if (event.key === "Enter" && composing) {
-          // Let the IME finalize; the trailing Enter is replayed after
-          // compositionend so the order is always text-then-Enter, exactly once.
+        // Use the authoritative per-event flag, NOT composingRef: a missed
+        // compositionend can latch composingRef true and then swallow every
+        // subsequent Enter (incl. Shift+Enter) forever.
+        const composing = native.isComposing;
+        const modified =
+          event.shiftKey || event.altKey || event.ctrlKey || event.metaKey;
+        // A *plain* Enter mid-composition commits the syllable: defer it and
+        // replay after compositionend so the order is text-then-Enter. A
+        // modified Enter (Shift/Alt/Ctrl/Meta) is a deliberate control input —
+        // never a composition commit — so it must go straight through.
+        if (event.key === "Enter" && composing && !modified) {
           enterDuringCompositionRef.current = {
-            shiftKey: event.shiftKey,
-            altKey: event.altKey,
-            ctrlKey: event.ctrlKey,
-            metaKey: event.metaKey,
+            shiftKey: false,
+            altKey: false,
+            ctrlKey: false,
+            metaKey: false,
           };
           return;
         }
-        if (composing) return;
+        if (composing && !modified) return;
         const command = terminalKeyEventToInput(native);
         if (!command) return;
         event.preventDefault();
