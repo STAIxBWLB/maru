@@ -7629,7 +7629,7 @@ button.git-badge:hover {
 }
 
 /* The workspace (session sidebar + main) stays mounted across collapse/expand
-   to preserve xterm DOM, so [hidden] must beat display:flex. */
+   to preserve PTY-backed pane state, so [hidden] must beat display:flex. */
 .terminal-workspace {
   flex: 1;
   min-height: 0;
@@ -8110,8 +8110,7 @@ button.git-badge:hover {
   overflow: hidden;
   background: #111111;
   /* Belt-and-suspenders with the selectstart guard + .terminal-instance:
-     no native selection anchor anywhere in the terminal body. xterm renders
-     its own selection, so this never affects copy. */
+     selection/copy are owned by the native terminal renderer. */
   user-select: none;
   -webkit-user-select: none;
   --terminal-split-ratio: 0.5;
@@ -8167,11 +8166,7 @@ button.git-badge:hover {
   background: #111111;
   visibility: hidden;
   pointer-events: none;
-  /* xterm renders its own selection via a custom renderer, so native
-     browser selection is never wanted inside the terminal pane. Without
-     this, a drag that starts on the padding around xterm (or that crosses
-     a re-render) starts a native selection that visually mimics xterm
-     selection but xterm cannot clear. */
+  /* The native terminal renderer owns selection state. */
   user-select: none;
   -webkit-user-select: none;
 }
@@ -8201,21 +8196,56 @@ button.git-badge:hover {
   overflow: hidden;
 }
 
-.terminal-instance .xterm {
+.native-terminal-view {
+  position: relative;
+  width: 100%;
   height: 100%;
-}
-
-.terminal-instance .xterm-viewport,
-.terminal-instance .xterm-screen {
+  overflow: hidden;
+  font-family: "JetBrains Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.25;
+  color: #d4d4d4;
   background: #111111;
+  outline: none;
 }
 
-.terminal-instance .xterm-helper-textarea {
+.native-terminal-grid {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.native-terminal-row {
+  height: 1.25em;
+  min-width: max-content;
+}
+
+.native-terminal-cell {
+  display: inline-block;
+  width: 1ch;
+  height: 1.25em;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.native-terminal-cell.selected {
+  background: #264f78 !important;
+  color: #ffffff !important;
+}
+
+.native-terminal-cell.cursor {
+  box-shadow: inset 0 -2px 0 #d4d4d4;
+}
+
+.native-terminal-input {
   position: absolute !important;
-  left: -9999px !important;
+  left: 0 !important;
   top: 0 !important;
-  width: 0 !important;
-  height: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
   min-width: 0 !important;
   min-height: 0 !important;
   padding: 0 !important;
@@ -8225,7 +8255,17 @@ button.git-badge:hover {
   resize: none !important;
   background: transparent !important;
   color: transparent !important;
+  caret-color: transparent !important;
   pointer-events: none !important;
+  z-index: -1;
+}
+
+.native-terminal-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font: inherit;
 }
 
 .terminal-pane-close {

@@ -66,6 +66,11 @@ use binary_viewer::{
     binary_viewer_read_text,
 };
 use calendar_search::search_calendar_notes;
+use diagram::{
+    diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
+    diagram_list_documents, diagram_list_snapshots, diagram_load_document,
+    diagram_restore_snapshot, diagram_save_document, diagram_save_snapshot,
+};
 use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
     save_document, trash_document, update_frontmatter_field,
@@ -94,10 +99,6 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
-use share_outbox::{
-    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
-    save_share_outbox_root, scan_share_outbox,
-};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -111,6 +112,10 @@ use ops_catalog::{
     watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState},
 };
 use outlook_mso::{decide_outlook_item, decide_outlook_items, fetch_outlook_unread};
+use share_outbox::{
+    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
+    save_share_outbox_root, scan_share_outbox,
+};
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
@@ -124,11 +129,6 @@ use skill_host::{
     skills_reconcile_skill, skills_remove_source, skills_rescan_source, skills_reset_registry,
     skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_all_sources,
     skills_sync_source, skills_uninstall_skill,
-};
-use diagram::{
-    diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
-    diagram_list_documents, diagram_list_snapshots, diagram_load_document, diagram_restore_snapshot,
-    diagram_save_document, diagram_save_snapshot,
 };
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
@@ -144,7 +144,9 @@ use telegram_io::{
     stop_poller_on_exit, stop_telegram_polling, telegram_polling_status, TelegramIoState,
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
-use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
+use terminal::{
+    terminal_input, terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState,
+};
 use terminal_hooks::{
     remove_agent_context_hint, start_terminal_hook_watcher, terminal_hooks_install,
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
@@ -266,6 +268,7 @@ pub fn run() {
             list_ai_missions,
             read_ai_mission_log,
             stop_ai_mission,
+            terminal_input,
             terminal_spawn,
             terminal_write,
             terminal_resize,

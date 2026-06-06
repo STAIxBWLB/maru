@@ -94,57 +94,7 @@ export const TERMINAL_LAUNCHERS: Array<{
   { id: "shell", titleKey: "terminal.launcher.shell" },
 ];
 
-export const TERMINAL_SHIFT_ENTER_DATA = "\x1b[13;2u";
-
-type TerminalKeyboardEvent = Pick<
-  KeyboardEvent,
-  "type" | "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
->;
-
 type TerminalMouseMoveEvent = Pick<MouseEvent, "type" | "buttons">;
-
-// DEC private modes that enable mouse tracking. When a TUI (e.g. Claude Code,
-// Codex) enables any of these the embedded xterm forwards mouse events to the
-// pty, which can make the CLI repaint hover effects whenever the cursor moves.
-// Keep focus reporting, alternate scroll, alt-screen, and bracketed paste out
-// of this list so keyboard and normal terminal behavior stay intact.
-const SUPPRESSED_MOUSE_TRACKING_MODES = new Set([
-  9,
-  1000,
-  1001,
-  1002,
-  1003,
-  1005,
-  1006,
-  1015,
-  1016,
-]);
-
-export function terminalShiftEnterData(
-  kind: TerminalKind,
-  event: TerminalKeyboardEvent,
-): string | null {
-  if (kind !== "claude" && kind !== "codex") return null;
-  if (event.type !== "keydown") return null;
-  if (event.key !== "Enter") return null;
-  if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return null;
-  return TERMINAL_SHIFT_ENTER_DATA;
-}
-
-export function shouldSuppressTerminalMouseTracking(
-  params: (number | number[])[],
-): boolean {
-  for (const param of params) {
-    if (Array.isArray(param)) {
-      for (const sub of param) {
-        if (SUPPRESSED_MOUSE_TRACKING_MODES.has(sub)) return true;
-      }
-    } else if (SUPPRESSED_MOUSE_TRACKING_MODES.has(param)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 export function shouldSuppressTerminalHoverMouseEvent(
   event: TerminalMouseMoveEvent,

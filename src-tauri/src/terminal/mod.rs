@@ -1,19 +1,28 @@
+mod input;
+mod model;
+mod snapshot;
+
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 use std::{env, str};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
+pub use input::{encode_terminal_input, TerminalInputCommand};
+
+use self::model::{write_shared, SharedTerminalWriter, TerminalModel};
 
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_ROWS: u16 = 30;
 const MAX_COLS: u16 = 500;
 const MAX_ROWS: u16 = 200;
+const FRAME_COALESCE_MS: u64 = 16;
 
 #[derive(Clone, Default)]
 pub struct TerminalState {
@@ -21,9 +30,11 @@ pub struct TerminalState {
 }
 
 struct TerminalSession {
+    kind: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: SharedTerminalWriter,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    model: Arc<Mutex<TerminalModel>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,11 +92,13 @@ pub fn terminal_spawn(
         extra_args,
         extra_env,
     )?;
+    let initial_cols = cols.unwrap_or(DEFAULT_COLS).clamp(2, MAX_COLS);
+    let initial_rows = rows.unwrap_or(DEFAULT_ROWS).clamp(1, MAX_ROWS);
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: rows.unwrap_or(DEFAULT_ROWS).clamp(1, MAX_ROWS),
-            cols: cols.unwrap_or(DEFAULT_COLS).clamp(2, MAX_COLS),
+            rows: initial_rows,
+            cols: initial_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -101,14 +114,11 @@ pub fn terminal_spawn(
         Some(augmented.as_os_str()),
     );
     cmd.env("PATH", effective_path);
-    // Windows consoles (cmd/PowerShell over ConPTY) don't use TERM/COLORTERM
-    // and some tools misbehave when they're set, so skip them there (matches Warp).
     #[cfg(not(windows))]
     {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
     }
-    cmd.env("TERM_PROGRAM", "Anchor");
     for (key, value) in &spec.extra_env {
         if key == "PATH" {
             continue;
@@ -124,6 +134,19 @@ pub fn terminal_spawn(
         .master
         .take_writer()
         .map_err(|err| format!("terminal_writer_failed: {err}"))?;
+    let shared_writer: SharedTerminalWriter = Arc::new(Mutex::new(writer));
+    let model = Arc::new(Mutex::new(TerminalModel::with_shared_writer_size(
+        shared_writer.clone(),
+        initial_cols,
+        initial_rows,
+    )));
+    {
+        let guard = model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        let _ = app.emit("terminal://frame", guard.snapshot(&session_id));
+    }
+
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -131,9 +154,11 @@ pub fn terminal_spawn(
     let killer = child.clone_killer();
 
     let session = Arc::new(TerminalSession {
+        kind: kind.clone(),
         master: Mutex::new(pair.master),
-        writer: Mutex::new(writer),
+        writer: shared_writer,
         killer: Mutex::new(killer),
+        model: model.clone(),
     });
     state
         .sessions
@@ -141,17 +166,13 @@ pub fn terminal_spawn(
         .map_err(|_| "terminal_registry_poisoned".to_string())?
         .insert(session_id.clone(), session);
 
-    let pump_handle = spawn_output_pump(app.clone(), session_id.clone(), reader);
+    let pump_handle = spawn_output_pump(app.clone(), session_id.clone(), reader, model);
 
     let sessions = state.sessions.clone();
     let exit_app = app.clone();
     let exit_id = session_id.clone();
     thread::spawn(move || {
         let exit_code = child.wait().ok().map(|status| status.exit_code() as i32);
-        // Drop the master so the pump's reader gets EOF and drains its buffer
-        // before we publish the exit event. Without this the exit event can
-        // beat the last terminal://output emission and the UI prints
-        // "[process exited]" above the final lines.
         if let Ok(mut guard) = sessions.lock() {
             guard.remove(&exit_id);
         }
@@ -175,18 +196,35 @@ pub fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     let session = get_session(&state, &session_id)?;
-    let mut writer = session
-        .writer
-        .lock()
-        .map_err(|_| "terminal_writer_poisoned".to_string())?;
-    writer
-        .write_all(data.as_bytes())
-        .and_then(|_| writer.flush())
-        .map_err(|err| format!("terminal_write_failed: {err}"))
+    write_shared(&session.writer, data.as_bytes())
+}
+
+#[tauri::command]
+pub fn terminal_input(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    command: TerminalInputCommand,
+) -> Result<(), String> {
+    let session = get_session(&state, &session_id)?;
+    let (kitty, bracketed) = {
+        let guard = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        (
+            guard.kitty_keyboard_active(),
+            guard.bracketed_paste_active(),
+        )
+    };
+    if let Some(data) = encode_terminal_input(&session.kind, &command, kitty, bracketed) {
+        write_shared(&session.writer, data.as_bytes())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 pub fn terminal_resize(
+    app: AppHandle,
     state: State<'_, TerminalState>,
     session_id: String,
     cols: u16,
@@ -195,18 +233,29 @@ pub fn terminal_resize(
     let session = get_session(&state, &session_id)?;
     let cols = cols.clamp(2, MAX_COLS);
     let rows = rows.clamp(1, MAX_ROWS);
-    let master = session
-        .master
-        .lock()
-        .map_err(|_| "terminal_master_poisoned".to_string())?;
-    master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|err| format!("terminal_resize_failed: {err}"))
+    {
+        let master = session
+            .master
+            .lock()
+            .map_err(|_| "terminal_master_poisoned".to_string())?;
+        master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|err| format!("terminal_resize_failed: {err}"))?;
+    }
+    {
+        let mut model = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        model.resize(cols, rows);
+        let _ = app.emit("terminal://frame", model.snapshot(&session_id));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -247,38 +296,35 @@ fn spawn_output_pump(
     app: AppHandle,
     session_id: String,
     mut reader: Box<dyn Read + Send>,
+    model: Arc<Mutex<TerminalModel>>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut buf = [0_u8; 8192];
         let mut carry: Vec<u8> = Vec::new();
+        let mut last_frame = Instant::now() - Duration::from_millis(FRAME_COALESCE_MS);
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    carry.extend_from_slice(&buf[..n]);
-                    let split = valid_utf8_prefix_len(&carry);
-                    if split == 0 {
-                        continue;
-                    }
-                    // Safe: valid_utf8_prefix_len returned a length that
-                    // ends on a complete UTF-8 codepoint.
-                    let chunk = match str::from_utf8(&carry[..split]) {
-                        Ok(s) => s.to_string(),
-                        Err(_) => String::from_utf8_lossy(&carry[..split]).into_owned(),
+                    emit_compat_output(&app, &session_id, &mut carry, &buf[..n]);
+                    let frame = {
+                        let mut guard = match model.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => break,
+                        };
+                        guard.advance(&buf[..n]);
+                        guard.snapshot(&session_id)
                     };
-                    carry.drain(..split);
-                    let _ = app.emit(
-                        "terminal://output",
-                        TerminalOutputEvent {
-                            session_id: session_id.clone(),
-                            data: chunk,
-                        },
-                    );
+                    let elapsed = last_frame.elapsed();
+                    if elapsed < Duration::from_millis(FRAME_COALESCE_MS) {
+                        thread::sleep(Duration::from_millis(FRAME_COALESCE_MS) - elapsed);
+                    }
+                    last_frame = Instant::now();
+                    let _ = app.emit("terminal://frame", frame);
                 }
                 Err(_) => break,
             }
         }
-        // Flush any trailing bytes (must be lossy if the child died mid-codepoint).
         if !carry.is_empty() {
             let data = String::from_utf8_lossy(&carry).into_owned();
             let _ = app.emit(
@@ -289,9 +335,26 @@ fn spawn_output_pump(
     })
 }
 
-/// Return the length of the longest valid UTF-8 prefix of `bytes`. Trailing
-/// incomplete codepoints (1–3 bytes) are excluded so the caller can carry
-/// them into the next read.
+fn emit_compat_output(app: &AppHandle, session_id: &str, carry: &mut Vec<u8>, bytes: &[u8]) {
+    carry.extend_from_slice(bytes);
+    let split = valid_utf8_prefix_len(carry);
+    if split == 0 {
+        return;
+    }
+    let chunk = match str::from_utf8(&carry[..split]) {
+        Ok(s) => s.to_string(),
+        Err(_) => String::from_utf8_lossy(&carry[..split]).into_owned(),
+    };
+    carry.drain(..split);
+    let _ = app.emit(
+        "terminal://output",
+        TerminalOutputEvent {
+            session_id: session_id.to_string(),
+            data: chunk,
+        },
+    );
+}
+
 fn valid_utf8_prefix_len(bytes: &[u8]) -> usize {
     match str::from_utf8(bytes) {
         Ok(s) => s.len(),
@@ -321,12 +384,24 @@ fn build_terminal_command_spec(
         (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
     };
     args.extend(extras);
+    let mut extra_env = extra_env.unwrap_or_default();
+    extra_env
+        .entry("TERM_PROGRAM".to_string())
+        .or_insert_with(|| default_term_program(kind).to_string());
     Ok(TerminalCommandSpec {
         program,
         args,
         cwd,
-        extra_env: extra_env.unwrap_or_default(),
+        extra_env,
     })
+}
+
+fn default_term_program(kind: &str) -> &'static str {
+    if kind == "claude" {
+        "ghostty"
+    } else {
+        "Anchor"
+    }
 }
 
 fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -343,9 +418,6 @@ fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
     Ok(strip_unc_prefix(path))
 }
 
-/// On Windows, `canonicalize` returns a `\\?\C:\...` verbatim path that some
-/// programs choke on as a working directory. Strip the prefix for local drive
-/// paths (leave UNC network paths untouched). No-op on Unix.
 #[cfg(windows)]
 fn strip_unc_prefix(path: PathBuf) -> PathBuf {
     let text = path.to_string_lossy();
@@ -362,8 +434,6 @@ fn strip_unc_prefix(path: PathBuf) -> PathBuf {
     path
 }
 
-/// Pick the shell to spawn. Always returns a program that exists so the
-/// "shell" launcher never fails with `terminal_cli_missing`.
 #[cfg(not(windows))]
 fn default_shell_program() -> String {
     if let Some(shell) = env::var("SHELL")
@@ -382,8 +452,6 @@ fn default_shell_program() -> String {
     "/bin/sh".to_string()
 }
 
-/// Windows shell preference (mirrors Warp): PowerShell 7 → PowerShell 5 →
-/// Command Prompt (always present via %COMSPEC%). An explicit $SHELL wins.
 #[cfg(windows)]
 fn default_shell_program() -> String {
     if let Some(shell) = env::var("SHELL")
@@ -425,21 +493,33 @@ mod tests {
             build_terminal_command_spec("claude", Some(&cwd_str), None, None, None).unwrap();
         assert_eq!(claude.program, "claude");
         assert!(claude.args.is_empty());
+        assert_eq!(claude.extra_env["TERM_PROGRAM"], "ghostty");
 
         let codex = build_terminal_command_spec("codex", Some(&cwd_str), None, None, None).unwrap();
         assert_eq!(codex.program, "codex");
         assert_eq!(codex.args, vec!["--cd", cwd_str.as_str()]);
+        assert_eq!(codex.extra_env["TERM_PROGRAM"], "Anchor");
 
         let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None, None).unwrap();
         assert!(!shell.program.is_empty());
         assert!(shell.args.is_empty());
+        assert_eq!(shell.extra_env["TERM_PROGRAM"], "Anchor");
+    }
+
+    #[test]
+    fn explicit_term_program_overrides_launcher_default() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let mut env = HashMap::new();
+        env.insert("TERM_PROGRAM".to_string(), "WezTerm".to_string());
+        let spec =
+            build_terminal_command_spec("claude", Some(&cwd_str), None, None, Some(env)).unwrap();
+        assert_eq!(spec.extra_env["TERM_PROGRAM"], "WezTerm");
     }
 
     #[cfg(not(windows))]
     #[test]
     fn default_shell_program_returns_an_existing_program() {
-        // Must never be the old blind "/bin/zsh" fallback when zsh is absent —
-        // the resolved program must exist so the shell launcher cannot error.
         let shell = default_shell_program();
         assert!(
             std::path::Path::new(&shell).is_file(),
@@ -532,14 +612,12 @@ mod tests {
 
     #[test]
     fn valid_utf8_prefix_excludes_partial_codepoints() {
-        // か = E3 81 8B (3 bytes). First 2 bytes are an incomplete codepoint.
         let bytes = [0xE3, 0x81];
         assert_eq!(valid_utf8_prefix_len(&bytes), 0);
     }
 
     #[test]
     fn valid_utf8_prefix_returns_complete_prefix() {
-        // "ok" + first 2 bytes of か.
         let bytes = [b'o', b'k', 0xE3, 0x81];
         assert_eq!(valid_utf8_prefix_len(&bytes), 2);
     }
@@ -552,7 +630,6 @@ mod tests {
 
     #[test]
     fn carry_buffer_pattern_decodes_split_codepoint_intact() {
-        // Simulate two reads splitting か across the boundary.
         let mut carry: Vec<u8> = Vec::new();
         let mut emitted = String::new();
 

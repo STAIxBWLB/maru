@@ -1052,6 +1052,52 @@ export interface TerminalSpawnOptions {
   rows?: number | null;
 }
 
+export type TerminalColor =
+  | { kind: "named"; name: string }
+  | { kind: "indexed"; index: number }
+  | { kind: "rgb"; r: number; g: number; b: number };
+
+export interface TerminalCell {
+  ch: string;
+  width: number;
+  fg: TerminalColor;
+  bg: TerminalColor;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  inverse: boolean;
+}
+
+export interface TerminalCursor {
+  row: number;
+  col: number;
+  visible: boolean;
+}
+
+export interface TerminalFrame {
+  sessionId: string;
+  cols: number;
+  rows: number;
+  cursor: TerminalCursor;
+  lines: TerminalCell[][];
+  scrollbackLen: number;
+  title?: string | null;
+  dirtyRows?: number[] | null;
+}
+
+export type TerminalInputCommand =
+  | { type: "text"; text: string }
+  | { type: "paste"; text: string }
+  | {
+      type: "key";
+      key: string;
+      code?: string | null;
+      shiftKey?: boolean;
+      altKey?: boolean;
+      ctrlKey?: boolean;
+      metaKey?: boolean;
+    };
+
 export async function terminalSpawn(
   sessionId: string,
   kind: TerminalKind,
@@ -1076,6 +1122,14 @@ export async function terminalSpawn(
 export async function terminalWrite(sessionId: string, data: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("terminal_write", { sessionId, data });
+}
+
+export async function terminalInput(
+  sessionId: string,
+  command: TerminalInputCommand,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_input", { sessionId, command });
 }
 
 export async function terminalResize(
