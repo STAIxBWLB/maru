@@ -129,9 +129,30 @@ const INDEXED_COLORS = [
   "#ffffff",
 ];
 
+/** xterm-256 cube levels for indices 16-231 (6x6x6). */
+const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
+
+/** Resolve an xterm-256 indexed color: 0-15 themed table, 16-231 color cube,
+ *  232-255 grayscale ramp. */
+export function indexedColorToCss(index: number, fallback: string): string {
+  if (index < 16) return INDEXED_COLORS[index] ?? fallback;
+  if (index <= 231) {
+    const offset = index - 16;
+    const r = CUBE_LEVELS[Math.floor(offset / 36)];
+    const g = CUBE_LEVELS[Math.floor(offset / 6) % 6];
+    const b = CUBE_LEVELS[offset % 6];
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  if (index <= 255) {
+    const gray = 8 + (index - 232) * 10;
+    return `rgb(${gray}, ${gray}, ${gray})`;
+  }
+  return fallback;
+}
+
 export function terminalColorToCss(color: TerminalColor, fallback: string): string {
   if (color.kind === "rgb") return `rgb(${color.r}, ${color.g}, ${color.b})`;
-  if (color.kind === "indexed") return INDEXED_COLORS[color.index] ?? fallback;
+  if (color.kind === "indexed") return indexedColorToCss(color.index, fallback);
   return ANSI_COLORS[color.name] ?? fallback;
 }
 
@@ -1125,6 +1146,14 @@ export const NativeTerminalView = memo(
         if (!text) return;
         event.preventDefault();
         event.currentTarget.value = "";
+        // This is the path that actually delivers the WKWebView trailing
+        // insertText echo after compositionend (preventDefault here suppresses
+        // the later `input` event), so the dedup guard must run here too.
+        const now = performance.now();
+        if (isTrailingCompositionDuplicate(text, compositionSessionRef.current, now)) {
+          compositionSessionRef.current = null;
+          return;
+        }
         compositionSessionRef.current = null;
         onInput({ type: "text", text });
       },
@@ -1179,6 +1208,12 @@ export const NativeTerminalView = memo(
         const enter = enterDuringCompositionRef.current;
         if (enter) {
           enterDuringCompositionRef.current = null;
+          // Arm the Enter dedup window before replaying: the un-suppressed
+          // composing-Enter keydown may still produce a textarea
+          // insertLineBreak right after compositionend, which would otherwise
+          // emit a second newline.
+          enterHandledAtRef.current = performance.now();
+          capturedEnterRef.current = null;
           onInput(
             terminalEnterCommandFromMods({
               shift: enter.shiftKey,

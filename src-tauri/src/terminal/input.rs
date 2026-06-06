@@ -127,8 +127,10 @@ impl MouseModes {
 
 /// Encode a `Mouse`/`Wheel` command into a terminal mouse report, honoring the
 /// active modes. Returns `None` when the app has not requested mouse reporting,
-/// or when a motion event arrives without a mode that wants motion.
-pub fn encode_mouse_input(command: &TerminalInputCommand, modes: MouseModes) -> Option<String> {
+/// or when a motion event arrives without a mode that wants motion. Returns raw
+/// wire bytes: legacy X10 fields are single bytes that are not valid UTF-8
+/// above 127, so this must not round-trip through `String`.
+pub fn encode_mouse_input(command: &TerminalInputCommand, modes: MouseModes) -> Option<Vec<u8>> {
     if !modes.any() {
         return None;
     }
@@ -190,7 +192,7 @@ fn encode_mouse_report(
     alt: bool,
     ctrl: bool,
     sgr: bool,
-) -> String {
+) -> Vec<u8> {
     let mut cb = base_button;
     if motion {
         cb += 32;
@@ -208,20 +210,18 @@ fn encode_mouse_report(
     let y = row as u32 + 1;
     if sgr {
         let suffix = if release { 'm' } else { 'M' };
-        format!("\x1b[<{cb};{x};{y}{suffix}")
+        format!("\x1b[<{cb};{x};{y}{suffix}").into_bytes()
     } else {
-        // Legacy X10: ESC [ M Cb Cx Cy, every field offset by 32. Release is
-        // reported as button 3, and coordinates clamp at 223 (255 - 32).
+        // Legacy X10: ESC [ M Cb Cx Cy, every field a single raw byte offset
+        // by 32 (NOT UTF-8 — values 128-255 must stay one byte on the wire).
+        // Release is reported as button 3; coordinates clamp at 223 (255-32).
         let cb_x10 = if release { (cb & !0b11) | 0b11 } else { cb };
-        let encode = |value: u32| -> char {
-            char::from_u32((value + 32).min(255)).unwrap_or(' ')
-        };
-        format!(
-            "\x1b[M{}{}{}",
-            encode(cb_x10),
-            encode(x),
-            encode(y)
-        )
+        let encode = |value: u32| -> u8 { (value + 32).min(255) as u8 };
+        let mut out = b"\x1b[M".to_vec();
+        out.push(encode(cb_x10));
+        out.push(encode(x));
+        out.push(encode(y));
+        out
     }
 }
 
@@ -498,11 +498,11 @@ mod tests {
         // cols/rows are 0-based in, 1-based out.
         assert_eq!(
             encode_mouse_input(&mouse(0, 4, 9, MouseAction::Press), modes),
-            Some("\x1b[<0;5;10M".to_string())
+            Some(b"\x1b[<0;5;10M".to_vec())
         );
         assert_eq!(
             encode_mouse_input(&mouse(0, 4, 9, MouseAction::Release), modes),
-            Some("\x1b[<0;5;10m".to_string())
+            Some(b"\x1b[<0;5;10m".to_vec())
         );
     }
 
@@ -527,7 +527,7 @@ mod tests {
         // motion adds 32 to the button code.
         assert_eq!(
             encode_mouse_input(&mouse(3, 1, 1, MouseAction::Move), any_motion),
-            Some("\x1b[<35;2;2M".to_string())
+            Some(b"\x1b[<35;2;2M".to_vec())
         );
     }
 
@@ -555,8 +555,8 @@ mod tests {
             alt_key: false,
             ctrl_key: false,
         };
-        assert_eq!(encode_mouse_input(&up, modes), Some("\x1b[<64;1;1M".to_string()));
-        assert_eq!(encode_mouse_input(&down, modes), Some("\x1b[<65;1;1M".to_string()));
+        assert_eq!(encode_mouse_input(&up, modes), Some(b"\x1b[<64;1;1M".to_vec()));
+        assert_eq!(encode_mouse_input(&down, modes), Some(b"\x1b[<65;1;1M".to_vec()));
     }
 
     #[test]
@@ -570,7 +570,28 @@ mod tests {
         // left press at (0,0): ESC [ M space ! ! (32, 33, 33).
         assert_eq!(
             encode_mouse_input(&mouse(0, 0, 0, MouseAction::Press), modes),
-            Some("\x1b[M\x20\x21\x21".to_string())
+            Some(b"\x1b[M\x20\x21\x21".to_vec())
+        );
+    }
+
+    #[test]
+    fn mouse_legacy_x10_high_coordinates_stay_single_byte() {
+        let modes = MouseModes {
+            click: true,
+            motion: false,
+            drag: false,
+            sgr: false,
+        };
+        // col 150 (0-based) -> 151 + 32 = 183: must be ONE raw byte, not the
+        // two-byte UTF-8 encoding of U+00B7.
+        assert_eq!(
+            encode_mouse_input(&mouse(0, 150, 9, MouseAction::Press), modes),
+            Some(vec![0x1b, b'[', b'M', 32, 183, 42])
+        );
+        // Coordinates clamp at 255 (223 + offset 32) instead of wrapping.
+        assert_eq!(
+            encode_mouse_input(&mouse(0, 400, 400, MouseAction::Press), modes),
+            Some(vec![0x1b, b'[', b'M', 32, 255, 255])
         );
     }
 

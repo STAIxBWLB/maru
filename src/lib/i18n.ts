@@ -643,6 +643,8 @@ const ko: Record<string, string> = {
   "comms.auth.status.unauthenticated": "미설정",
   "comms.auth.status.unknown": "상태 미확인",
   "comms.auth.reauth": "재인증",
+  "comms.auth.mainWindowRequired":
+    "메인 창이 닫혀 있어 인증 터미널을 열 수 없습니다. 메인 창을 연 뒤 다시 시도하세요.",
   "comms.gws.reauth": "Gmail 재인증",
   "comms.telegram.title": "Telegram",
   "comms.telegram.loading": "Telegram 메시지 로딩",
@@ -2663,6 +2665,8 @@ const en: Record<string, string> = {
   "comms.auth.status.unauthenticated": "Not configured",
   "comms.auth.status.unknown": "Status unknown",
   "comms.auth.reauth": "Re-auth",
+  "comms.auth.mainWindowRequired":
+    "The main window is closed, so the auth terminal cannot open. Open the main window and try again.",
   "comms.gws.reauth": "Re-auth Gmail",
   "comms.telegram.title": "Telegram",
   "comms.telegram.loading": "Loading Telegram messages",

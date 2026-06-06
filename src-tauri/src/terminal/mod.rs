@@ -220,10 +220,11 @@ pub fn terminal_input(
                 guard.kitty_keyboard_active(),
                 guard.bracketed_paste_active(),
             )
+            .map(String::into_bytes)
         }
     };
     if let Some(data) = encoded {
-        write_shared(&session.writer, data.as_bytes())?;
+        write_shared(&session.writer, &data)?;
     }
     Ok(())
 }

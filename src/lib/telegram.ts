@@ -86,8 +86,15 @@ export function isTelegramMonitorConfigOutsideAnchor(
   return true;
 }
 
+/** Escape shell-active characters inside a double-quoted string body. */
+function escapeDoubleQuoted(value: string): string {
+  return value.replace(/([\\"$`])/g, "\\$1");
+}
+
 function quoteShell(value: string): string {
-  if (value.startsWith("~/")) return `"$HOME/${value.slice(2)}"`;
-  if (value.startsWith("$HOME/")) return `"${value}"`;
+  // ~/ and $HOME/ prefixes stay double-quoted so the shell expands $HOME;
+  // everything after the prefix is user-controlled and must be escaped.
+  if (value.startsWith("~/")) return `"$HOME/${escapeDoubleQuoted(value.slice(2))}"`;
+  if (value.startsWith("$HOME/")) return `"$HOME/${escapeDoubleQuoted(value.slice(6))}"`;
   return `'${value.replace(/'/g, "'\\''")}'`;
 }

@@ -50,6 +50,19 @@ describe("provider reauth commands", () => {
       'exec "$HOME/bin/m365" login',
     );
   });
+
+  it("escapes shell-active characters inside $HOME-expanded double quotes", () => {
+    // A path that tries to break out of the double quotes must stay inert.
+    expect(m365LoginCommand('~/x";echo pwned;"').args[1]).toBe(
+      'exec "$HOME/x\\";echo pwned;\\"" login',
+    );
+    expect(m365LoginCommand("~/x$(whoami)`id`").args[1]).toBe(
+      'exec "$HOME/x\\$(whoami)\\`id\\`" login',
+    );
+    expect(gwsAuthCommand("$HOME/bin/g$ws").args[1]).toBe(
+      'exec "$HOME/bin/g\\$ws" auth',
+    );
+  });
 });
 
 describe("isTelegramMonitorConfigOutsideAnchor", () => {

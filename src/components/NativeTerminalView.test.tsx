@@ -546,4 +546,28 @@ describe("NativeTerminalView helpers", () => {
       "rgb(1, 2, 3)",
     );
   });
+
+  it("resolves the full xterm-256 indexed palette, not just the 16 themed entries", () => {
+    // 6x6x6 cube: 16 = rgb(0,0,0), 21 = pure blue end of the first row,
+    // 196 = pure red, 231 = white corner.
+    expect(terminalColorToCss({ kind: "indexed", index: 16 }, "#fff")).toBe("rgb(0, 0, 0)");
+    expect(terminalColorToCss({ kind: "indexed", index: 21 }, "#fff")).toBe(
+      "rgb(0, 0, 255)",
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 196 }, "#fff")).toBe(
+      "rgb(255, 0, 0)",
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 231 }, "#fff")).toBe(
+      "rgb(255, 255, 255)",
+    );
+    // Grayscale ramp: 232 = rgb(8,8,8), 255 = rgb(238,238,238).
+    expect(terminalColorToCss({ kind: "indexed", index: 232 }, "#fff")).toBe(
+      "rgb(8, 8, 8)",
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 255 }, "#fff")).toBe(
+      "rgb(238, 238, 238)",
+    );
+    // Out of range falls back.
+    expect(terminalColorToCss({ kind: "indexed", index: 256 }, "#fff")).toBe("#fff");
+  });
 });

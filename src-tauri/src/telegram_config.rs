@@ -228,102 +228,6 @@ pub fn save_telegram_monitor_config(
     Ok(redacted_view(&work, &path, saved, exists))
 }
 
-#[tauri::command]
-pub fn upsert_telegram_chat(
-    app: AppHandle,
-    work_path: Option<String>,
-    monitor_config_path: Option<String>,
-    chat: TelegramChatConfig,
-) -> Result<TelegramMonitorConfigView, String> {
-    let (work, path) =
-        resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())?;
-    ensure_secret_config_path(&path)?;
-    let (mut config, _) = read_config_or_default(&path)?;
-    validate_chat(&chat)?;
-    match config
-        .chats
-        .iter_mut()
-        .find(|existing| existing.chat_id == chat.chat_id)
-    {
-        Some(existing) => *existing = chat,
-        None => config.chats.push(chat),
-    }
-    validate_config(&work, &config)?;
-    write_config_blocks(&path, &config, &["chats"])?;
-    set_secret_file_mode(&path)?;
-    let (saved, exists) = read_config_or_default(&path)?;
-    let _ = app.emit(
-        "telegram://monitor_config_updated",
-        TelegramMonitorConfigUpdated {
-            path: path.to_string_lossy().to_string(),
-        },
-    );
-    Ok(redacted_view(&work, &path, saved, exists))
-}
-
-#[tauri::command]
-pub fn remove_telegram_chat(
-    app: AppHandle,
-    work_path: Option<String>,
-    monitor_config_path: Option<String>,
-    chat_id: i64,
-) -> Result<TelegramMonitorConfigView, String> {
-    if chat_id == 0 {
-        return Err("chat_id_required".to_string());
-    }
-    let (work, path) =
-        resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())?;
-    ensure_secret_config_path(&path)?;
-    let (mut config, _) = read_config_or_default(&path)?;
-    config.chats.retain(|chat| chat.chat_id != chat_id);
-    write_config_blocks(&path, &config, &["chats"])?;
-    set_secret_file_mode(&path)?;
-    let (saved, exists) = read_config_or_default(&path)?;
-    let _ = app.emit(
-        "telegram://monitor_config_updated",
-        TelegramMonitorConfigUpdated {
-            path: path.to_string_lossy().to_string(),
-        },
-    );
-    Ok(redacted_view(&work, &path, saved, exists))
-}
-
-#[tauri::command]
-pub fn set_telegram_chat_contexts(
-    app: AppHandle,
-    work_path: Option<String>,
-    monitor_config_path: Option<String>,
-    chat_id: i64,
-    contexts: Vec<String>,
-    enabled: Option<bool>,
-) -> Result<TelegramMonitorConfigView, String> {
-    if chat_id == 0 {
-        return Err("chat_id_required".to_string());
-    }
-    let (work, path) =
-        resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())?;
-    ensure_secret_config_path(&path)?;
-    let (mut config, _) = read_config_or_default(&path)?;
-    let Some(chat) = config.chats.iter_mut().find(|chat| chat.chat_id == chat_id) else {
-        return Err("chat_not_found".to_string());
-    };
-    chat.contexts = normalize_contexts(contexts)?;
-    if let Some(enabled) = enabled {
-        chat.enabled = enabled;
-    }
-    validate_config(&work, &config)?;
-    write_config_blocks(&path, &config, &["chats"])?;
-    set_secret_file_mode(&path)?;
-    let (saved, exists) = read_config_or_default(&path)?;
-    let _ = app.emit(
-        "telegram://monitor_config_updated",
-        TelegramMonitorConfigUpdated {
-            path: path.to_string_lossy().to_string(),
-        },
-    );
-    Ok(redacted_view(&work, &path, saved, exists))
-}
-
 fn resolve_monitor_config_path(
     work_path: Option<&str>,
     monitor_config_path: Option<&str>,
@@ -549,7 +453,25 @@ fn write_config_blocks(
         };
         next = replace_top_level_yaml_block(&next, key, &block);
     }
-    fs::write(path, next).map_err(|err| format!("Cannot write Telegram monitor config: {err}"))
+    write_secret_file(path, &next)
+        .map_err(|err| format!("Cannot write Telegram monitor config: {err}"))
+}
+
+/// Write a secret-bearing file, creating it 0600 from the start so the
+/// contents are never group/world-readable — even briefly. (`fs::write`
+/// creates with the process umask, typically 0644, and the later chmod in
+/// `set_secret_file_mode` would leave a readable window.)
+fn write_secret_file(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())
 }
 
 fn yaml_top_level_block<T: Serialize>(key: &str, value: &T) -> Result<String, String> {
@@ -705,6 +627,25 @@ fn collect_project_ids_yaml(value: &YamlValue, ids: &mut BTreeSet<String>) {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_secret_file_creates_with_owner_only_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("monitor.config.yaml");
+        write_secret_file(&path, "telegram:\n  api_hash: secret\n").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "secret file must be created 0600, not chmod'd later");
+        // Overwrites keep working and keep the restrictive mode.
+        write_secret_file(&path, "telegram:\n  api_hash: rotated\n").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "telegram:\n  api_hash: rotated\n"
+        );
+    }
 
     #[test]
     fn redacted_view_masks_secrets() {

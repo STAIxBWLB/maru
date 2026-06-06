@@ -44,7 +44,6 @@ import type {
   StageOutcome,
   TelegramMessage,
   TelegramFetchOptions,
-  TelegramMonitorChat,
   TelegramMonitorConfigSave,
   TelegramMonitorConfigView,
   TelegramPollingStatus,
@@ -1468,63 +1467,6 @@ export async function saveTelegramMonitorConfig(
     workPath,
     monitorConfigPath,
     config,
-  });
-}
-
-export async function upsertTelegramChat(
-  workPath: string | null,
-  monitorConfigPath: string | null,
-  chat: TelegramMonitorChat,
-): Promise<TelegramMonitorConfigView> {
-  if (!isTauri()) {
-    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
-    return { ...config, chats: [...config.chats.filter((item) => item.chat_id !== chat.chat_id), chat] };
-  }
-  return invoke<TelegramMonitorConfigView>("upsert_telegram_chat", {
-    workPath,
-    monitorConfigPath,
-    chat,
-  });
-}
-
-export async function removeTelegramChat(
-  workPath: string | null,
-  monitorConfigPath: string | null,
-  chatId: number,
-): Promise<TelegramMonitorConfigView> {
-  if (!isTauri()) {
-    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
-    return { ...config, chats: config.chats.filter((chat) => chat.chat_id !== chatId) };
-  }
-  return invoke<TelegramMonitorConfigView>("remove_telegram_chat", {
-    workPath,
-    monitorConfigPath,
-    chatId,
-  });
-}
-
-export async function setTelegramChatContexts(
-  workPath: string | null,
-  monitorConfigPath: string | null,
-  chatId: number,
-  contexts: string[],
-  enabled?: boolean | null,
-): Promise<TelegramMonitorConfigView> {
-  if (!isTauri()) {
-    const config = mockTelegramMonitorConfig(workPath, monitorConfigPath);
-    return {
-      ...config,
-      chats: config.chats.map((chat) =>
-        chat.chat_id === chatId ? { ...chat, contexts, enabled: enabled ?? chat.enabled } : chat,
-      ),
-    };
-  }
-  return invoke<TelegramMonitorConfigView>("set_telegram_chat_contexts", {
-    workPath,
-    monitorConfigPath,
-    chatId,
-    contexts,
-    enabled: enabled ?? null,
   });
 }
 

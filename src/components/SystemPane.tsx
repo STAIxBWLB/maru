@@ -171,14 +171,30 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
   );
 }
 
+/** Emit a terminal launch request for the main window. The only listener (and
+ *  the terminal itself) lives in the main window, so bring it forward first —
+ *  emitting with no listener would silently drop the re-auth launch. Returns
+ *  false when the main window is gone and the launch cannot be delivered. */
 async function emitSettingsTerminalLaunch(
   payload: SettingsWindowTerminalLaunchPayload,
-): Promise<void> {
+): Promise<boolean> {
   try {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const mainWindow = await WebviewWindow.getByLabel("main");
+    if (!mainWindow) return false;
+    try {
+      await mainWindow.show();
+      await mainWindow.unminimize();
+      await mainWindow.setFocus();
+    } catch {
+      // Focusing is best-effort; the emit below still reaches the listener.
+    }
     const { emit } = await import("@tauri-apps/api/event");
     await emit(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, payload);
+    return true;
   } catch {
     // Browser dev shell: no Tauri event bus.
+    return true;
   }
 }
 
@@ -440,7 +456,15 @@ function CommsSettingsSystemTab({
     };
   }, [workPath]);
 
-  const load = useCallback(async () => {
+  const dirtyRef = useRef(dirty);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  const load = useCallback(
+    async (options?: { force?: boolean; isCancelled?: () => boolean }) => {
+    const force = options?.force ?? false;
+    const isCancelled = options?.isCancelled ?? (() => false);
     setError(null);
     setStatus(null);
     try {
@@ -482,10 +506,16 @@ function CommsSettingsSystemTab({
             account: null,
           })),
         ]);
-      setConfig(runtime);
-      setPristine(runtime);
-      setMonitorConfig(monitor);
-      setPristineMonitorConfig(monitor);
+      if (isCancelled()) return;
+      // A dependency-driven reload must not clobber unsaved edits: only the
+      // initial load and the explicit refresh button (force) may overwrite
+      // the editable config and reset the pristine baselines.
+      if (force || !dirtyRef.current) {
+        setConfig(runtime);
+        setPristine(runtime);
+        setMonitorConfig(monitor);
+        setPristineMonitorConfig(monitor);
+      }
       setProjects(projectEntries);
       setAuthStatuses({
         gws: gwsStatus,
@@ -493,12 +523,19 @@ function CommsSettingsSystemTab({
         telegram: telegramStatus,
       });
     } catch (err) {
+      if (isCancelled()) return;
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [effectiveComms, workPath]);
+    },
+    [effectiveComms, workPath],
+  );
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void load({ isCancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   const save = async () => {
@@ -538,13 +575,15 @@ function CommsSettingsSystemTab({
   };
 
   const launchTerminalCommand = useCallback(
-    (command: { command: string | null; args: string[] }) =>
-      emitSettingsTerminalLaunch({
+    async (command: { command: string | null; args: string[] }) => {
+      const delivered = await emitSettingsTerminalLaunch({
         command: command.command,
         args: command.args,
         cwd: workPath,
-      }),
-    [workPath],
+      });
+      if (!delivered) setError(t("comms.auth.mainWindowRequired"));
+    },
+    [t, workPath],
   );
 
   return (
@@ -555,7 +594,12 @@ function CommsSettingsSystemTab({
         <span className={dirty ? "save-state dirty" : "save-state saved"}>
           {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
         </span>
-        <Button size="sm" variant="ghost" onClick={() => void load()} icon={<RefreshCcw size={14} />}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void load({ force: true })}
+          icon={<RefreshCcw size={14} />}
+        >
           Refresh
         </Button>
         <Button

@@ -147,10 +147,7 @@ use tasks::{
     scan_task_notes, update_task_schedule_fields, update_task_status,
 };
 use tauri::Manager;
-use telegram_config::{
-    read_telegram_monitor_config, remove_telegram_chat, save_telegram_monitor_config,
-    set_telegram_chat_contexts, upsert_telegram_chat,
-};
+use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{
     accept_telegram_item, check_telegram_auth, fetch_telegram_recent, reject_telegram_item,
     stage_telegram_items, start_telegram_polling, stop_poller_on_exit, stop_telegram_polling,
@@ -315,9 +312,6 @@ pub fn run() {
             telegram_polling_status,
             read_telegram_monitor_config,
             save_telegram_monitor_config,
-            upsert_telegram_chat,
-            remove_telegram_chat,
-            set_telegram_chat_contexts,
             detect_legacy_telegram_launchd,
             unload_legacy_telegram_launchd,
             prepare_approval,

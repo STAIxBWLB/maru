@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type {
   ProjectPickerEntry,
   TelegramMonitorChat,
@@ -15,6 +16,48 @@ interface TelegramChatMappingEditorProps {
   config: TelegramMonitorConfigView;
   projects: ProjectPickerEntry[];
   onChange: (config: TelegramMonitorConfigView) => void;
+}
+
+/** Editable chat-id cell. The value is held as a local string draft and only
+ *  committed on blur/Enter so partial states ("-", "-100") stay typeable —
+ *  Telegram supergroup ids are negative. A commit that collides with another
+ *  row's id is rejected (it would merge both rows' identity in the reducer). */
+function ChatIdInput({
+  chat,
+  chats,
+  onCommit,
+}: {
+  chat: TelegramMonitorChat;
+  chats: TelegramMonitorChat[];
+  onCommit: (previousId: number, nextId: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(chat.chat_id));
+  useEffect(() => {
+    setDraft(String(chat.chat_id));
+  }, [chat.chat_id]);
+  const commit = () => {
+    const trimmed = draft.trim();
+    const revert = () => setDraft(String(chat.chat_id));
+    if (!/^-?\d+$/.test(trimmed)) return revert();
+    const next = Number(trimmed);
+    if (!Number.isSafeInteger(next) || next === 0) return revert();
+    if (next === chat.chat_id) return revert();
+    if (chats.some((other) => other !== chat && other.chat_id === next)) return revert();
+    onCommit(chat.chat_id, next);
+  };
+  return (
+    <input
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
 }
 
 export function TelegramChatMappingEditor({
@@ -78,6 +121,9 @@ export function TelegramChatMappingEditor({
               {config.chats.map((chat) => {
                 const selectedProject = selectedProjectId(chat);
                 const project = projectById.get(selectedProject) ?? null;
+                // chat_id is a safe row key: ChatIdInput buffers edits locally
+                // and only commits on blur, so the key (and row identity) can
+                // change only after focus has already left the field.
                 return (
                   <tr key={chat.chat_id}>
                     <td>
@@ -106,13 +152,14 @@ export function TelegramChatMappingEditor({
                       />
                     </td>
                     <td>
-                      <input
-                        value={String(chat.chat_id)}
-                        onChange={(event) =>
+                      <ChatIdInput
+                        chat={chat}
+                        chats={config.chats}
+                        onCommit={(previousId, nextId) =>
                           dispatch({
                             type: "update",
-                            chatId: chat.chat_id,
-                            patch: { chat_id: Number(event.target.value) || chat.chat_id },
+                            chatId: previousId,
+                            patch: { chat_id: nextId },
                           })
                         }
                       />

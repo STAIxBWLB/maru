@@ -1688,7 +1688,16 @@ function MainApp() {
     [updateSettings],
   );
 
+  // Keep the latest updater in a ref so the launch listener below registers
+  // exactly once: re-registering on workspace/policy changes opens a window
+  // where a settings-window emit has no subscriber and is silently lost.
+  const updateLayoutSettingsRef = useRef(updateLayoutSettings);
   useEffect(() => {
+    updateLayoutSettingsRef.current = updateLayoutSettings;
+  }, [updateLayoutSettings]);
+
+  useEffect(() => {
+    let disposed = false;
     let dispose: (() => void) | null = null;
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
@@ -1703,17 +1712,22 @@ function MainApp() {
             command: payload.command,
             extraArgs: payload.args,
           });
-          updateLayoutSettings({ terminalOpen: true });
+          updateLayoutSettingsRef.current({ terminalOpen: true });
         }),
       )
       .then((off) => {
-        dispose = off;
+        if (disposed) {
+          off();
+        } else {
+          dispose = off;
+        }
       })
       .catch(() => {});
     return () => {
+      disposed = true;
       dispose?.();
     };
-  }, [updateLayoutSettings]);
+  }, []);
 
   const attachActiveItemToTerminal = useCallback(() => {
     if (!anchorSettings.ui.layout.terminalOpen) {
