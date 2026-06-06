@@ -128,10 +128,41 @@ interface TerminalStatusEvent {
   agentSessionId?: string | null;
 }
 
+export interface TerminalFocusState {
+  open: boolean;
+  searchOpen: boolean;
+  renamingTaskId: string | null;
+}
+
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
 const MIN_WIDTH = 320;
 const MIN_MAIN_WIDTH = 360;
+
+export function shouldFocusTerminalInput(state: TerminalFocusState): boolean {
+  return state.open && !state.searchOpen && state.renamingTaskId === null;
+}
+
+export function cancelTerminalLayoutRefresh(
+  rafRef: React.MutableRefObject<number | null>,
+  cancelAnimationFrameFn: (handle: number) => void = window.cancelAnimationFrame,
+): boolean {
+  if (rafRef.current == null) return false;
+  cancelAnimationFrameFn(rafRef.current);
+  rafRef.current = null;
+  return true;
+}
+
+export function refreshFocusedTerminal(
+  handle: NativeTerminalViewHandle | null | undefined,
+  state: TerminalFocusState,
+): boolean {
+  if (!handle || !state.open) return false;
+  handle.refreshLayout({ focus: false });
+  if (shouldFocusTerminalInput(state)) handle.focus();
+  return true;
+}
+
 function pathBaseName(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.replace(/[/\\]+$/, "");
@@ -218,6 +249,12 @@ export const TerminalPanel = memo(
     const autoLaunchRef = useRef(false);
     const handledLaunchRequestRef = useRef<number | null>(null);
     const focusedTabIdRef = useRef<string | null>(null);
+    const layoutRefreshRafRef = useRef<number | null>(null);
+    const terminalFocusStateRef = useRef<TerminalFocusState>({
+      open,
+      searchOpen,
+      renamingTaskId,
+    });
 
     const injectContext = settings.terminal.injectActiveContext ?? true;
     const attachStyle: AttachMentionStyle = settings.terminal.attachMentionStyle ?? "mention";
@@ -336,6 +373,7 @@ export const TerminalPanel = memo(
 
     useEffect(() => {
       return () => {
+        cancelTerminalLayoutRefresh(layoutRefreshRafRef);
         for (const sessionId of sessionByTabRef.current.values()) {
           void terminalKill(sessionId);
         }
@@ -806,6 +844,51 @@ export const TerminalPanel = memo(
       return tabId ? handlesRef.current.get(tabId) ?? null : null;
     }, []);
 
+    const cancelFocusedTerminalRefresh = useCallback(() => {
+      cancelTerminalLayoutRefresh(layoutRefreshRafRef);
+    }, []);
+
+    const scheduleFocusedTerminalRefresh = useCallback(() => {
+      cancelFocusedTerminalRefresh();
+      layoutRefreshRafRef.current = window.requestAnimationFrame(() => {
+        layoutRefreshRafRef.current = null;
+        refreshFocusedTerminal(getFocusedTerminalHandle(), terminalFocusStateRef.current);
+      });
+    }, [cancelFocusedTerminalRefresh, getFocusedTerminalHandle]);
+
+    useEffect(() => {
+      terminalFocusStateRef.current = { open, searchOpen, renamingTaskId };
+    }, [open, renamingTaskId, searchOpen]);
+
+    useEffect(() => {
+      if (!open) {
+        cancelFocusedTerminalRefresh();
+        return;
+      }
+      scheduleFocusedTerminalRefresh();
+    }, [
+      cancelFocusedTerminalRefresh,
+      dock,
+      draftHeight,
+      draftWidth,
+      maximized,
+      open,
+      renamingTaskId,
+      scheduleFocusedTerminalRefresh,
+      searchOpen,
+      splitOpen,
+      splitRatio,
+    ]);
+
+    const keepTerminalFocusOnToolbarPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!shouldFocusTerminalInput({ open, searchOpen, renamingTaskId })) return;
+        event.preventDefault();
+        getFocusedTerminalHandle()?.focus();
+      },
+      [getFocusedTerminalHandle, open, renamingTaskId, searchOpen],
+    );
+
     const getFocusedSessionId = useCallback(() => {
       const tabId = focusedTabIdRef.current;
       return tabId ? sessionByTabRef.current.get(tabId) ?? null : null;
@@ -1218,6 +1301,7 @@ export const TerminalPanel = memo(
           <button
             type="button"
             className="terminal-icon-button"
+            onPointerDown={keepTerminalFocusOnToolbarPointerDown}
             onClick={() => onDockChange(dockTarget)}
             aria-label={dockTitle}
             title={dockTitle}
@@ -1227,6 +1311,7 @@ export const TerminalPanel = memo(
           <button
             type="button"
             className="terminal-icon-button"
+            onPointerDown={keepTerminalFocusOnToolbarPointerDown}
             onClick={() => onMaximizedChange(!maximized)}
             aria-label={maximized ? t("terminal.restore") : t("terminal.maximize")}
             title={maximized ? t("terminal.restore") : t("terminal.maximize")}

@@ -19,6 +19,7 @@ import type {
 
 export interface NativeTerminalViewHandle {
   focus: () => void;
+  refreshLayout: (options?: { focus?: boolean }) => void;
   pasteText: (text: string) => void;
   copySelection: () => string | null;
   selectAll: (text?: string | null) => void;
@@ -599,39 +600,6 @@ export const NativeTerminalView = memo(
     const pendingPaintRef = useRef<"all" | Set<number> | null>(null);
     const rafRef = useRef<number | null>(null);
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => textareaRef.current?.focus(),
-        pasteText: (text: string) => {
-          if (!text) return;
-          onInput({ type: "paste", text: normalizeTerminalInputText(text) });
-          textareaRef.current?.focus();
-        },
-        copySelection: () => {
-          const selected = allSelectionTextRef.current
-            ?? selectedTerminalText(gridRef.current, selectionRef.current);
-          return selected || null;
-        },
-        selectAll: (text?: string | null) => {
-          allSelectionTextRef.current = text ?? frameToText(frame);
-          const { cols, rows } = dimsRef.current;
-          if (cols > 0 && rows > 0) {
-            setSelection({
-              anchor: { row: 0, col: 0 },
-              focus: { row: rows - 1, col: cols - 1 },
-            });
-          }
-          textareaRef.current?.focus();
-        },
-        clearSelection: () => {
-          allSelectionTextRef.current = null;
-          setSelection(null);
-        },
-      }),
-      [frame, onInput],
-    );
-
     useEffect(() => {
       if (focused && active) textareaRef.current?.focus();
     }, [active, focused]);
@@ -644,6 +612,13 @@ export const NativeTerminalView = memo(
       if (!canvas || !ctx || !m) return;
       const { cols, rows } = dimsRef.current;
       if (cols === 0 || rows === 0) return;
+
+      if (which === "all") {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
 
       const rowList = which === "all" ? rangeRows(0, rows - 1) : which;
       const cursor = cursorRef.current;
@@ -798,6 +773,86 @@ export const NativeTerminalView = memo(
       ta.style.width = `${Math.max(8, m.charWidth * 24)}px`;
     }, []);
 
+    const refreshLayout = useCallback(
+      (options: { focus?: boolean } = {}) => {
+        if (!active || !resizeReady) return;
+        const root = rootRef.current;
+        const canvas = canvasRef.current;
+        if (!root || !canvas) return;
+
+        const rect = root.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        rectRef.current = rect;
+        const metrics = measureMetrics(root, canvas);
+        if (!metrics) return;
+        metricsRef.current = metrics;
+
+        const dpr = window.devicePixelRatio || 1;
+        const targetW = Math.max(1, Math.floor(rect.width * dpr));
+        const targetH = Math.max(1, Math.floor(rect.height * dpr));
+        if (canvas.width !== targetW || canvas.height !== targetH) {
+          canvas.width = targetW;
+          canvas.height = targetH;
+        }
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        const ctx = canvas.getContext("2d");
+        if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const cols = Math.max(
+          2,
+          Math.floor((rect.width - metrics.padLeft * 2) / metrics.charWidth),
+        );
+        const rows = Math.max(
+          1,
+          Math.floor((rect.height - metrics.padTop * 2) / metrics.lineHeight),
+        );
+        const previous = lastSizeRef.current;
+        if (!previous || previous.cols !== cols || previous.rows !== rows) {
+          lastSizeRef.current = { cols, rows };
+          onResize(cols, rows);
+        }
+        positionTextarea();
+        requestPaint("all");
+        if (options.focus) textareaRef.current?.focus();
+      },
+      [active, onResize, positionTextarea, requestPaint, resizeReady],
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: () => textareaRef.current?.focus(),
+        refreshLayout,
+        pasteText: (text: string) => {
+          if (!text) return;
+          onInput({ type: "paste", text: normalizeTerminalInputText(text) });
+          textareaRef.current?.focus();
+        },
+        copySelection: () => {
+          const selected = allSelectionTextRef.current
+            ?? selectedTerminalText(gridRef.current, selectionRef.current);
+          return selected || null;
+        },
+        selectAll: (text?: string | null) => {
+          allSelectionTextRef.current = text ?? frameToText(frame);
+          const { cols, rows } = dimsRef.current;
+          if (cols > 0 && rows > 0) {
+            setSelection({
+              anchor: { row: 0, col: 0 },
+              focus: { row: rows - 1, col: cols - 1 },
+            });
+          }
+          textareaRef.current?.focus();
+        },
+        clearSelection: () => {
+          allSelectionTextRef.current = null;
+          setSelection(null);
+        },
+      }),
+      [frame, onInput, refreshLayout],
+    );
+
     // Apply each incoming frame to the retained grid and repaint the rows that
     // changed (plus the cursor's old and new rows).
     useEffect(() => {
@@ -835,45 +890,13 @@ export const NativeTerminalView = memo(
     useEffect(() => {
       if (!active || !resizeReady) return;
       const root = rootRef.current;
-      const canvas = canvasRef.current;
-      if (!root || !canvas) return;
+      if (!root) return;
 
-      const update = () => {
-        const rect = root.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        rectRef.current = rect;
-        const metrics = measureMetrics(root, canvas);
-        if (!metrics) return;
-        metricsRef.current = metrics;
-
-        const dpr = window.devicePixelRatio || 1;
-        const targetW = Math.max(1, Math.floor(rect.width * dpr));
-        const targetH = Math.max(1, Math.floor(rect.height * dpr));
-        if (canvas.width !== targetW || canvas.height !== targetH) {
-          canvas.width = targetW;
-          canvas.height = targetH;
-        }
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
-        const ctx = canvas.getContext("2d");
-        if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        const cols = Math.max(2, Math.floor((rect.width - metrics.padLeft * 2) / metrics.charWidth));
-        const rows = Math.max(1, Math.floor((rect.height - metrics.padTop * 2) / metrics.lineHeight));
-        const previous = lastSizeRef.current;
-        if (!previous || previous.cols !== cols || previous.rows !== rows) {
-          lastSizeRef.current = { cols, rows };
-          onResize(cols, rows);
-        }
-        positionTextarea();
-        requestPaint("all");
-      };
-
-      update();
-      const observer = new ResizeObserver(update);
+      refreshLayout();
+      const observer = new ResizeObserver(() => refreshLayout());
       observer.observe(root);
       return () => observer.disconnect();
-    }, [active, onResize, positionTextarea, requestPaint, resizeReady]);
+    }, [active, refreshLayout, resizeReady]);
 
     // Repaint affected rows when the local selection changes.
     useEffect(() => {

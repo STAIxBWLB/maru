@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { act, createRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TerminalCell, TerminalFrame } from "../lib/api";
 import {
+  NativeTerminalView,
   cellDisplayText,
   cellDisplayWidth,
   domButtonToTerminal,
@@ -30,6 +35,7 @@ import {
   terminalInputEventToText,
   terminalKeyEventToInput,
   terminalLineBreakCommand,
+  type NativeTerminalViewHandle,
 } from "./NativeTerminalView";
 
 const baseCell: TerminalCell = {
@@ -62,6 +68,171 @@ function frame(lines: TerminalCell[][]): TerminalFrame {
     altScreen: false,
   };
 }
+
+interface CanvasStub {
+  clearRect: ReturnType<typeof vi.fn>;
+  fillRect: ReturnType<typeof vi.fn>;
+  fillText: ReturnType<typeof vi.fn>;
+  strokeRect: ReturnType<typeof vi.fn>;
+  setTransform: ReturnType<typeof vi.fn>;
+}
+
+let rectSize = { width: 800, height: 300 };
+let rafQueue: FrameRequestCallback[] = [];
+let canvasStub: CanvasStub;
+let roots: Root[] = [];
+let devicePixelRatioDescriptor: PropertyDescriptor | undefined;
+let actEnvironmentDescriptor: PropertyDescriptor | undefined;
+
+function installDomStubs() {
+  rectSize = { width: 800, height: 300 };
+  rafQueue = [];
+  devicePixelRatioDescriptor = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+  actEnvironmentDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "IS_REACT_ACT_ENVIRONMENT",
+  );
+  canvasStub = {
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    fillText: vi.fn(),
+    strokeRect: vi.fn(),
+    setTransform: vi.fn(),
+  };
+
+  Object.defineProperty(window, "devicePixelRatio", {
+    configurable: true,
+    value: 2,
+  });
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    value: true,
+  });
+
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    rafQueue.push(callback);
+    return rafQueue.length;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    rafQueue[id - 1] = () => undefined;
+  });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () =>
+      ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: rectSize.width,
+        bottom: rectSize.height,
+        width: rectSize.width,
+        height: rectSize.height,
+        toJSON: () => ({}),
+      }) as DOMRect,
+  );
+  vi.spyOn(window, "getComputedStyle").mockReturnValue({
+    fontSize: "12px",
+    fontFamily: "monospace",
+    lineHeight: "15px",
+    paddingLeft: "8px",
+    paddingTop: "6px",
+  } as CSSStyleDeclaration);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+    () =>
+      ({
+        ...canvasStub,
+        measureText: vi.fn(() => ({ width: 10 })),
+        beginPath: vi.fn(),
+        moveTo: vi.fn(),
+        lineTo: vi.fn(),
+        stroke: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        font: "",
+        fillStyle: "",
+        strokeStyle: "",
+        lineWidth: 1,
+        textBaseline: "alphabetic",
+      }) as unknown as CanvasRenderingContext2D,
+  );
+
+  class TestResizeObserver {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
+}
+
+function restoreProperty(
+  target: object,
+  key: PropertyKey,
+  descriptor: PropertyDescriptor | undefined,
+) {
+  if (descriptor) {
+    Object.defineProperty(target, key, descriptor);
+    return;
+  }
+  delete (target as Record<PropertyKey, unknown>)[key];
+}
+
+function restoreDomStubGlobals() {
+  restoreProperty(window, "devicePixelRatio", devicePixelRatioDescriptor);
+  restoreProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironmentDescriptor);
+  devicePixelRatioDescriptor = undefined;
+  actEnvironmentDescriptor = undefined;
+}
+
+function flushRaf() {
+  const callbacks = rafQueue;
+  rafQueue = [];
+  callbacks.forEach((callback, index) => callback(index + 1));
+}
+
+function renderNativeTerminalView(
+  props: Partial<React.ComponentProps<typeof NativeTerminalView>> = {},
+) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  roots.push(root);
+  const ref = createRef<NativeTerminalViewHandle>();
+  const onResize = vi.fn();
+  const onInput = vi.fn();
+  act(() => {
+    root.render(
+      <NativeTerminalView
+        ref={ref}
+        sessionId="term-1"
+        frame={frame([[cell("a"), cell("b")]])}
+        active
+        focused={false}
+        resizeReady
+        inputLabel="Terminal input"
+        onInput={onInput}
+        onResize={onResize}
+        onScroll={vi.fn()}
+        {...props}
+      />,
+    );
+  });
+  return { container, ref, onResize, onInput };
+}
+
+beforeEach(() => {
+  installDomStubs();
+});
+
+afterEach(() => {
+  roots.forEach((root) => {
+    act(() => root.unmount());
+  });
+  roots = [];
+  document.body.innerHTML = "";
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  restoreDomStubGlobals();
+});
 
 describe("NativeTerminalView helpers", () => {
   it("extracts row and frame text while ignoring wide spacers", () => {
@@ -580,5 +751,66 @@ describe("NativeTerminalView helpers", () => {
     );
     // Out of range falls back.
     expect(terminalColorToCss({ kind: "indexed", index: 256 }, "#fff")).toBe("#fff");
+  });
+});
+
+describe("NativeTerminalView test harness cleanup", () => {
+  it("restores globals changed by installDomStubs", () => {
+    expect(Object.getOwnPropertyDescriptor(window, "devicePixelRatio")?.value).toBe(2);
+    expect(Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT")?.value).toBe(
+      true,
+    );
+
+    restoreDomStubGlobals();
+
+    expect(Object.getOwnPropertyDescriptor(window, "devicePixelRatio")?.value).not.toBe(2);
+    expect(
+      Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT"),
+    ).toBeUndefined();
+
+    installDomStubs();
+  });
+});
+
+describe("NativeTerminalView layout refresh", () => {
+  it("refreshLayout remeasures and focuses the textarea without prop focus changes", () => {
+    const { container, ref, onResize } = renderNativeTerminalView();
+
+    act(() => {
+      flushRaf();
+    });
+    expect(onResize).toHaveBeenLastCalledWith(78, 19);
+    expect(document.activeElement).not.toBe(
+      container.querySelector(".native-terminal-input"),
+    );
+
+    rectSize = { width: 640, height: 180 };
+    act(() => {
+      ref.current?.refreshLayout({ focus: true });
+      flushRaf();
+    });
+
+    expect(onResize).toHaveBeenLastCalledWith(62, 11);
+    expect(document.activeElement).toBe(
+      container.querySelector(".native-terminal-input"),
+    );
+  });
+
+  it("full repaint after unchanged refresh clears the entire canvas bitmap without resizing", () => {
+    const { ref, onResize } = renderNativeTerminalView();
+    act(() => {
+      flushRaf();
+    });
+    expect(onResize).toHaveBeenCalledTimes(1);
+    canvasStub.clearRect.mockClear();
+
+    act(() => {
+      ref.current?.refreshLayout({ focus: false });
+      flushRaf();
+    });
+
+    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(canvasStub.clearRect).toHaveBeenCalled();
+    expect(canvasStub.clearRect.mock.calls[0]).toEqual([0, 0, 1600, 600]);
   });
 });
