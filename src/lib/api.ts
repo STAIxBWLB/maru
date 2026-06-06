@@ -1052,6 +1052,86 @@ export interface TerminalSpawnOptions {
   rows?: number | null;
 }
 
+export type TerminalColor =
+  | { kind: "named"; name: string }
+  | { kind: "indexed"; index: number }
+  | { kind: "rgb"; r: number; g: number; b: number };
+
+export interface TerminalCell {
+  ch: string;
+  width: number;
+  fg: TerminalColor;
+  bg: TerminalColor;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  inverse: boolean;
+}
+
+export interface TerminalCursor {
+  row: number;
+  col: number;
+  visible: boolean;
+}
+
+export interface TerminalMouseFlags {
+  click: boolean;
+  motion: boolean;
+  drag: boolean;
+  sgr: boolean;
+}
+
+export interface TerminalFrame {
+  sessionId: string;
+  cols: number;
+  rows: number;
+  cursor: TerminalCursor;
+  /** Full grid when `dirtyRows` is null/absent; otherwise only the changed
+   *  rows, aligned 1:1 to `dirtyRows`, to be patched into the retained grid. */
+  lines: TerminalCell[][];
+  scrollbackLen: number;
+  title?: string | null;
+  dirtyRows?: number[] | null;
+  displayOffset: number;
+  mouse: TerminalMouseFlags;
+  altScreen: boolean;
+}
+
+export type TerminalMouseAction = "press" | "release" | "move";
+
+export type TerminalInputCommand =
+  | { type: "text"; text: string }
+  | { type: "paste"; text: string }
+  | { type: "lineBreak" }
+  | {
+      type: "key";
+      key: string;
+      code?: string | null;
+      shiftKey?: boolean;
+      altKey?: boolean;
+      ctrlKey?: boolean;
+      metaKey?: boolean;
+    }
+  | {
+      type: "mouse";
+      button: number;
+      col: number;
+      row: number;
+      action: TerminalMouseAction;
+      shiftKey?: boolean;
+      altKey?: boolean;
+      ctrlKey?: boolean;
+    }
+  | {
+      type: "wheel";
+      up: boolean;
+      col: number;
+      row: number;
+      shiftKey?: boolean;
+      altKey?: boolean;
+      ctrlKey?: boolean;
+    };
+
 export async function terminalSpawn(
   sessionId: string,
   kind: TerminalKind,
@@ -1078,6 +1158,14 @@ export async function terminalWrite(sessionId: string, data: string): Promise<vo
   await invoke("terminal_write", { sessionId, data });
 }
 
+export async function terminalInput(
+  sessionId: string,
+  command: TerminalInputCommand,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_input", { sessionId, command });
+}
+
 export async function terminalResize(
   sessionId: string,
   cols: number,
@@ -1085,6 +1173,13 @@ export async function terminalResize(
 ): Promise<void> {
   if (!isTauri()) return;
   await invoke("terminal_resize", { sessionId, cols, rows });
+}
+
+/** Scroll the viewport through scrollback by `delta` lines (positive = toward
+ *  history). The backend emits a fresh frame reflecting the scrolled view. */
+export async function terminalScroll(sessionId: string, delta: number): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_scroll", { sessionId, delta });
 }
 
 export async function terminalKill(sessionId: string): Promise<void> {

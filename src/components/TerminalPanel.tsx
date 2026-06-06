@@ -1,5 +1,3 @@
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal as XtermTerminal } from "@xterm/xterm";
 import {
   ChevronDown,
   ChevronUp,
@@ -29,13 +27,18 @@ import {
 } from "react";
 import {
   terminalAvailable,
+  terminalInput,
   terminalKill,
   terminalResize,
+  terminalScroll,
   terminalSpawn,
   terminalWrite,
+  type TerminalFrame,
+  type TerminalInputCommand,
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import type { AnchorSettings, TerminalDock } from "../lib/settings";
+import { NativeTerminalView, type NativeTerminalViewHandle } from "./NativeTerminalView";
 import {
   activeItemMention,
   buildAgentContextArgs,
@@ -53,14 +56,12 @@ import {
   selectTerminalTabByIndex,
   serializeTerminalState,
   shouldSuppressTerminalHoverMouseEvent,
-  shouldSuppressTerminalMouseTracking,
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
   tabsForTask,
   TERMINAL_LAUNCHERS,
   terminalCommandPreview,
   terminalHookEventToStatus,
-  terminalShiftEnterData,
   terminalTabStatus,
   terminalTabsReducer,
   terminalTaskStatus,
@@ -110,11 +111,6 @@ export interface TerminalPanelHandle {
   attachPath: (relPath: string | null, absPath: string | null) => boolean;
 }
 
-interface TerminalOutputEvent {
-  sessionId: string;
-  data: string;
-}
-
 interface TerminalExitEvent {
   sessionId: string;
   exitCode: number | null;
@@ -124,11 +120,6 @@ interface TerminalStatusEvent {
   sessionId: string;
   status: string;
   agentSessionId?: string | null;
-}
-
-interface TerminalHandle {
-  terminal: XtermTerminal;
-  fit: FitAddon;
 }
 
 const MIN_HEIGHT = 160;
@@ -191,11 +182,28 @@ export const TerminalPanel = memo(
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const handlesRef = useRef<Map<string, TerminalHandle>>(new Map());
-    const hostRef = useRef<Map<string, HTMLDivElement>>(new Map());
+    const handlesRef = useRef<Map<string, NativeTerminalViewHandle>>(new Map());
     const terminalBodyRef = useRef<HTMLDivElement | null>(null);
     const sessionByTabRef = useRef<Map<string, string>>(new Map());
     const tabBySessionRef = useRef<Map<string, string>>(new Map());
+    // One stable handler object per session so NativeTerminalView's memo() can
+    // bail out — inline closures here would re-render every grid on any state
+    // change. Pruned when the session ends.
+    const sessionHandlersRef = useRef<
+      Map<
+        string,
+        {
+          onInput: (command: TerminalInputCommand) => void;
+          onResize: (cols: number, rows: number) => void;
+          onScroll: (delta: number) => void;
+        }
+      >
+    >(new Map());
+    // Whether each session's program has requested a mouse mode; lets us stop
+    // suppressing hover so TUIs (claude/codex) receive it.
+    const mouseModesBySessionRef = useRef<Map<string, boolean>>(new Map());
+    const [framesBySession, setFramesBySession] = useState<Record<string, TerminalFrame>>({});
+    const [resizeReadySessions, setResizeReadySessions] = useState<Record<string, true>>({});
     const seqRef = useRef(1);
     const taskSeqRef = useRef(1);
     const autoLaunchRef = useRef(false);
@@ -222,13 +230,6 @@ export const TerminalPanel = memo(
     const canRunTerminal = useMemo(() => terminalAvailable(), []);
     const headerCwd = activeTask?.cwd ?? cwd;
 
-    const waitForTerminalHost = useCallback(async (tabId: string) => {
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (hostRef.current.has(tabId)) return;
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      }
-    }, []);
-
     useEffect(() => {
       setDraftHeight(height);
     }, [height]);
@@ -237,41 +238,24 @@ export const TerminalPanel = memo(
       setDraftWidth(width);
     }, [width]);
 
-    const fitTab = useCallback((tabId: string) => {
-      const handle = handlesRef.current.get(tabId);
-      if (!handle) return;
-      try {
-        handle.fit.fit();
-        const sessionId = sessionByTabRef.current.get(tabId);
-        if (sessionId) {
-          void terminalResize(sessionId, handle.terminal.cols, handle.terminal.rows);
-        }
-      } catch {
-        // xterm fit can fail while the host is hidden during layout changes.
-      }
-    }, []);
-
-    const attachTerminal = useCallback(
-      (tabId: string) => {
-        const handle = handlesRef.current.get(tabId);
-        const host = hostRef.current.get(tabId);
-        if (!handle || !host || host.childElementCount > 0) return;
-        handle.terminal.open(host);
-        window.requestAnimationFrame(() => fitTab(tabId));
-      },
-      [fitTab],
-    );
-
     useEffect(() => {
       if (!canRunTerminal) return;
       let disposed = false;
 
-      const outputPromise = import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<TerminalOutputEvent>("terminal://output", (event) => {
+      const framePromise = import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<TerminalFrame>("terminal://frame", (event) => {
           if (disposed) return;
           const tabId = tabBySessionRef.current.get(event.payload.sessionId);
           if (!tabId) return;
-          handlesRef.current.get(tabId)?.terminal.write(event.payload.data);
+          const mouse = event.payload.mouse;
+          mouseModesBySessionRef.current.set(
+            event.payload.sessionId,
+            Boolean(mouse && (mouse.click || mouse.motion || mouse.drag)),
+          );
+          setFramesBySession((current) => ({
+            ...current,
+            [event.payload.sessionId]: event.payload,
+          }));
           // Output on a non-focused session raises an attention flag.
           if (tabId !== focusedTabIdRef.current) {
             dispatch({ type: "markAttention", sessionId: event.payload.sessionId });
@@ -283,14 +267,22 @@ export const TerminalPanel = memo(
           if (disposed) return;
           const tabId = tabBySessionRef.current.get(event.payload.sessionId);
           if (tabId) {
-            handlesRef.current
-              .get(tabId)
-              ?.terminal.writeln(
-                `\r\n[process exited: ${event.payload.exitCode ?? "unknown"}]`,
-              );
             sessionByTabRef.current.delete(tabId);
           }
           tabBySessionRef.current.delete(event.payload.sessionId);
+          sessionHandlersRef.current.delete(event.payload.sessionId);
+          mouseModesBySessionRef.current.delete(event.payload.sessionId);
+          setResizeReadySessions((current) => {
+            const next = { ...current };
+            delete next[event.payload.sessionId];
+            return next;
+          });
+          setFramesBySession((current) => {
+            if (!(event.payload.sessionId in current)) return current;
+            const next = { ...current };
+            delete next[event.payload.sessionId];
+            return next;
+          });
           dispatch({
             type: "exit",
             sessionId: event.payload.sessionId,
@@ -313,7 +305,7 @@ export const TerminalPanel = memo(
         }),
       );
 
-      outputPromise.catch((err) => {
+      framePromise.catch((err) => {
         setError(err instanceof Error ? err.message : String(err));
       });
       exitPromise.catch((err) => {
@@ -327,59 +319,18 @@ export const TerminalPanel = memo(
         disposed = true;
         // Wait for the listen() promises to resolve before unsubscribing,
         // otherwise we leak the registration.
-        void outputPromise.then((off) => off()).catch(() => {});
+        void framePromise.then((off) => off()).catch(() => {});
         void exitPromise.then((off) => off()).catch(() => {});
         void statusPromise.then((off) => off()).catch(() => {});
       };
     }, [canRunTerminal]);
 
     useEffect(() => {
-      const leftFitTab = splitOpen ? splitLeftTab : activeTab;
-      if (!open || !leftFitTab) return;
-      window.requestAnimationFrame(() => fitTab(leftFitTab.id));
-      if (rightTab) window.requestAnimationFrame(() => fitTab(rightTab.id));
-    }, [
-      activeTab,
-      draftHeight,
-      fitTab,
-      maximized,
-      open,
-      rightTab,
-      splitLeftTab,
-      splitOpen,
-      splitRatio,
-      dock,
-      draftWidth,
-      sidebarCollapsed,
-    ]);
-
-    useEffect(() => {
-      const leftFitTab = splitOpen ? splitLeftTab : activeTab;
-      if (!open || !leftFitTab) return;
-      let frame = 0;
-      const onResize = () => {
-        if (frame) cancelAnimationFrame(frame);
-        frame = window.requestAnimationFrame(() => {
-          frame = 0;
-          fitTab(leftFitTab.id);
-          if (rightTab) fitTab(rightTab.id);
-        });
-      };
-      window.addEventListener("resize", onResize);
-      return () => {
-        if (frame) cancelAnimationFrame(frame);
-        window.removeEventListener("resize", onResize);
-      };
-    }, [activeTab, fitTab, maximized, open, rightTab, splitLeftTab, splitOpen]);
-
-    useEffect(() => {
       return () => {
         for (const sessionId of sessionByTabRef.current.values()) {
           void terminalKill(sessionId);
         }
-        for (const handle of handlesRef.current.values()) {
-          handle.terminal.dispose();
-        }
+        handlesRef.current.clear();
       };
     }, []);
 
@@ -399,10 +350,8 @@ export const TerminalPanel = memo(
       return () => window.clearTimeout(id);
     }, [state]);
 
-    // Root-cause guard against native browser text-selection in the terminal.
-    // xterm v6 manages its own selection (and copy) internally and does NOT use
-    // the native `selectstart`, so preventing it here blocks the stray blue
-    // highlight without affecting xterm copy — and survives any re-render.
+    // The native renderer owns terminal selection/copy. Prevent page-level
+    // selection from leaking in around the terminal grid.
     useEffect(() => {
       const body = terminalBodyRef.current;
       if (!body) return;
@@ -447,60 +396,8 @@ export const TerminalPanel = memo(
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`
         }`;
         const title = request?.title || launcher.label || t(`terminal.launcher.${kind}`);
-        const terminal = new XtermTerminal({
-          cursorBlink: true,
-          convertEol: false,
-          fontFamily: "JetBrains Mono, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          fontSize: 12,
-          lineHeight: 1.25,
-          scrollback: 5000,
-          theme: {
-            background: "#111111",
-            foreground: "#d4d4d4",
-            cursor: "#d4d4d4",
-            selectionBackground: "#264f78",
-            black: "#111111",
-            red: "#f87171",
-            green: "#8bc891",
-            yellow: "#e5c07b",
-            blue: "#7aa2f7",
-            magenta: "#c792ea",
-            cyan: "#70c0ba",
-            white: "#d4d4d4",
-          },
-        });
-        const fit = new FitAddon();
-        terminal.loadAddon(fit);
-        terminal.parser.registerCsiHandler(
-          { prefix: "?", final: "h" },
-          shouldSuppressTerminalMouseTracking,
-        );
-        terminal.parser.registerCsiHandler(
-          { prefix: "?", final: "l" },
-          shouldSuppressTerminalMouseTracking,
-        );
-        terminal.attachCustomKeyEventHandler((event) => {
-          const shiftedEnter = terminalShiftEnterData(kind, event);
-          if (shiftedEnter) {
-            event.preventDefault();
-            void terminalWrite(sessionId, shiftedEnter);
-            return false;
-          }
-          const isMac = navigator.platform.toLowerCase().includes("mac");
-          const mod = isMac ? event.metaKey : event.ctrlKey;
-          if (mod && event.key.toLowerCase() === "d") {
-            event.preventDefault();
-            onSplitOpenChange(true);
-            return false;
-          }
-          return true;
-        });
-        terminal.onData((data) => {
-          void terminalWrite(sessionId, data);
-        });
-        handlesRef.current.set(tabId, { terminal, fit });
         // Register the session↔tab mapping BEFORE spawning so we don't drop
-        // any terminal://output events that race ahead of the IPC return.
+        // any terminal://frame events that race ahead of the IPC return.
         sessionByTabRef.current.set(tabId, sessionId);
         tabBySessionRef.current.set(sessionId, tabId);
         dispatch({
@@ -523,51 +420,48 @@ export const TerminalPanel = memo(
         setError(null);
 
         try {
-          await waitForTerminalHost(tabId);
-          attachTerminal(tabId);
-          try {
-            fit.fit();
-          } catch {
-            // The panel can still be settling after opening or splitting.
-          }
           const contextEnv = buildAnchorContextEnv(activeContext, sessionId, injectContext);
           const contextArgs = buildAgentContextArgs(kind, activeContext, injectContext);
           await terminalSpawn(sessionId, kind, resolvedCwd, {
             command: request?.command ?? launcher.command ?? null,
             extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
             extraEnv: { ...contextEnv, ...(request?.extraEnv ?? {}) },
-            cols: terminal.cols,
-            rows: terminal.rows,
+            cols: 120,
+            rows: 30,
           });
+          setResizeReadySessions((current) => ({
+            ...current,
+            [sessionId]: true,
+          }));
           window.requestAnimationFrame(() => {
-            attachTerminal(tabId);
-            fitTab(tabId);
-            if (group === focusedGroup || group === "right") terminal.focus();
+            if (group === focusedGroup || group === "right") {
+              handlesRef.current.get(tabId)?.focus();
+            }
           });
         } catch (err) {
           sessionByTabRef.current.delete(tabId);
           tabBySessionRef.current.delete(sessionId);
-          terminal.writeln(`\r\n${err instanceof Error ? err.message : String(err)}`);
+          setResizeReadySessions((current) => {
+            const next = { ...current };
+            delete next[sessionId];
+            return next;
+          });
           dispatch({ type: "fail", tabId });
           setError(err instanceof Error ? err.message : String(err));
         }
       },
       [
         activeContext,
-        attachTerminal,
         canRunTerminal,
         cwd,
-        fitTab,
         focusedGroup,
         injectContext,
         onOpenChange,
-        onSplitOpenChange,
         open,
         settings.terminal.launchers,
         state.activeTaskId,
         state.tasks,
         t,
-        waitForTerminalHost,
       ],
     );
 
@@ -638,10 +532,20 @@ export const TerminalPanel = memo(
           void terminalKill(sessionId);
           sessionByTabRef.current.delete(tabId);
           tabBySessionRef.current.delete(sessionId);
+          sessionHandlersRef.current.delete(sessionId);
+          mouseModesBySessionRef.current.delete(sessionId);
+          setResizeReadySessions((current) => {
+            const next = { ...current };
+            delete next[sessionId];
+            return next;
+          });
+          setFramesBySession((current) => {
+            const next = { ...current };
+            delete next[sessionId];
+            return next;
+          });
         }
-        handlesRef.current.get(tabId)?.terminal.dispose();
         handlesRef.current.delete(tabId);
-        hostRef.current.delete(tabId);
 
         if (shouldCloseTerminalSplitAfterTabClose(activeTaskTabs, splitOpen, rightTabId, tabId)) {
           setRightTabId(null);
@@ -661,10 +565,20 @@ export const TerminalPanel = memo(
           void terminalKill(sessionId);
           sessionByTabRef.current.delete(tab.id);
           tabBySessionRef.current.delete(sessionId);
+          sessionHandlersRef.current.delete(sessionId);
+          mouseModesBySessionRef.current.delete(sessionId);
+          setResizeReadySessions((current) => {
+            const next = { ...current };
+            delete next[sessionId];
+            return next;
+          });
+          setFramesBySession((current) => {
+            const next = { ...current };
+            delete next[sessionId];
+            return next;
+          });
         }
-        handlesRef.current.get(tab.id)?.terminal.dispose();
         handlesRef.current.delete(tab.id);
-        hostRef.current.delete(tab.id);
       }
       if (rightTab && rightTab.taskId === taskId) {
         setRightTabId(null);
@@ -821,12 +735,8 @@ export const TerminalPanel = memo(
     const dockTitle =
       dockTarget === "right" ? t("terminal.dockRight") : t("terminal.dockBottom");
     const splitMode = splitOpen && Boolean(rightTab);
-    // Use a CSS variable instead of grid columns so terminal-instance divs stay
-    // direct children of terminal-body. If we wrapped each side in its own
-    // container the LEFT instance's DOM parent would change every time split
-    // toggles, React would remount the div, and xterm.Terminal.open() would
-    // refuse to re-attach (its element.parentElement guard) — leaving the left
-    // pane blank and unable to receive input.
+    // Use CSS variables instead of wrapper columns so terminal-instance divs
+    // stay direct children of terminal-body across split toggles.
     const splitLayoutStyle = splitMode
       ? ({
           "--terminal-split-ratio": String(splitRatio),
@@ -866,7 +776,7 @@ export const TerminalPanel = memo(
         const sessionId = sessionByTabRef.current.get(tabId);
         if (!sessionId) return false;
         void terminalWrite(sessionId, mention);
-        handlesRef.current.get(tabId)?.terminal.focus();
+        handlesRef.current.get(tabId)?.focus();
         return true;
       },
       [state.tabs],
@@ -918,7 +828,7 @@ export const TerminalPanel = memo(
               dispatch({ type: "switch", tabId: target.id });
               setFocusedGroup("left");
             }
-            handlesRef.current.get(target.id)?.terminal.focus();
+            handlesRef.current.get(target.id)?.focus();
           }
         }
       },
@@ -936,12 +846,45 @@ export const TerminalPanel = memo(
 
     const handleTerminalMouseMoveCapture = useCallback(
       (event: React.MouseEvent<HTMLDivElement>) => {
-        if (!shouldSuppressTerminalHoverMouseEvent(event.nativeEvent)) return;
+        const focusedSession = focusedTabIdRef.current
+          ? sessionByTabRef.current.get(focusedTabIdRef.current)
+          : undefined;
+        const mouseModeActive = focusedSession
+          ? mouseModesBySessionRef.current.get(focusedSession) ?? false
+          : false;
+        if (!shouldSuppressTerminalHoverMouseEvent(event.nativeEvent, mouseModeActive)) return;
         event.preventDefault();
         event.stopPropagation();
       },
       [],
     );
+
+    // Stable per-session handlers, created once and cached. Passing fresh
+    // closures here would defeat NativeTerminalView's memo() and re-render
+    // every grid on any TerminalPanel state change.
+    const getSessionHandlers = useCallback((sessionId: string) => {
+      const cache = sessionHandlersRef.current;
+      let handlers = cache.get(sessionId);
+      if (!handlers) {
+        handlers = {
+          onInput: (command: TerminalInputCommand) => {
+            void terminalInput(sessionId, command);
+          },
+          onResize: (cols: number, rows: number) => {
+            void terminalResize(sessionId, cols, rows).catch(() => {
+              // Session may exit between measurement and IPC delivery.
+            });
+          },
+          onScroll: (delta: number) => {
+            void terminalScroll(sessionId, delta).catch(() => {
+              // Session may exit before the scroll command lands.
+            });
+          },
+        };
+        cache.set(sessionId, handlers);
+      }
+      return handlers;
+    }, []);
 
     const renderTerminalTab = (tab: (typeof state.tabs)[number]) => {
       const className = tab.id === focusedTabId ? "terminal-tab active" : "terminal-tab";
@@ -963,7 +906,7 @@ export const TerminalPanel = memo(
               }
               dispatch({ type: "switch", tabId: tab.id });
               setFocusedGroup("left");
-              handlesRef.current.get(tab.id)?.terminal.focus();
+              handlesRef.current.get(tab.id)?.focus();
             }}
             title={
               relaunchable
@@ -1163,8 +1106,8 @@ export const TerminalPanel = memo(
           </button>
         </header>
 
-        {/* Workspace (sidebar + main) stays mounted across collapse so xterm DOM
-            keeps its parent. Visibility is controlled via [hidden]. */}
+        {/* Workspace (sidebar + main) stays mounted across collapse so PTY-backed
+            panes keep their React state. Visibility is controlled via [hidden]. */}
         <div
           className={
             sidebarCollapsed ? "terminal-workspace sidebar-collapsed" : "terminal-workspace"
@@ -1237,9 +1180,8 @@ export const TerminalPanel = memo(
               ) : activeTaskTabs.length === 0 ? (
                 <div className="terminal-empty">{t("terminal.empty.detail")}</div>
               ) : null}
-              {/* Flat sibling list under terminal-body across ALL tasks. Each
-                  instance keeps the same parent so xterm DOM is never reparented;
-                  non-active-task instances are simply hidden (PTY kept alive). */}
+              {/* Flat sibling list under terminal-body across ALL tasks.
+                  Non-active-task instances are hidden while PTYs stay alive. */}
               {state.tabs.map((tab) => {
                 const inActiveTask = tab.taskId === activeTaskId;
                 const isRight = splitMode && rightTabId === tab.id;
@@ -1249,8 +1191,13 @@ export const TerminalPanel = memo(
                 const isVisible = inActiveTask && (isRight || isLeftActive);
                 const isFocused =
                   isVisible &&
-                  splitMode &&
-                  (isRight ? focusedGroup === "right" : focusedGroup === "left");
+                  (splitMode
+                    ? isRight
+                      ? focusedGroup === "right"
+                      : focusedGroup === "left"
+                    : state.activeTabId === tab.id);
+                const sessionId = tab.sessionId ?? sessionByTabRef.current.get(tab.id) ?? null;
+                const handlers = sessionId ? getSessionHandlers(sessionId) : null;
                 const className = [
                   "terminal-instance",
                   isVisible ? "active" : null,
@@ -1282,17 +1229,28 @@ export const TerminalPanel = memo(
                         <X size={13} />
                       </button>
                     ) : null}
-                    <div
-                      className="terminal-instance-host"
-                      ref={(node) => {
-                        if (node) {
-                          hostRef.current.set(tab.id, node);
-                          attachTerminal(tab.id);
-                        } else {
-                          hostRef.current.delete(tab.id);
-                        }
-                      }}
-                    />
+                    <div className="terminal-instance-host">
+                      {sessionId && handlers ? (
+                        <NativeTerminalView
+                          ref={(handle) => {
+                            if (handle) {
+                              handlesRef.current.set(tab.id, handle);
+                            } else {
+                              handlesRef.current.delete(tab.id);
+                            }
+                          }}
+                          sessionId={sessionId}
+                          frame={framesBySession[sessionId] ?? null}
+                          active={isVisible}
+                          focused={isFocused}
+                          resizeReady={resizeReadySessions[sessionId] === true}
+                          inputLabel={t("terminal.input")}
+                          onInput={handlers.onInput}
+                          onResize={handlers.onResize}
+                          onScroll={handlers.onScroll}
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}

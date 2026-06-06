@@ -21,13 +21,10 @@ import {
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
   shouldSuppressTerminalHoverMouseEvent,
-  shouldSuppressTerminalMouseTracking,
   tabsForTask,
   terminalCommandPreview,
   terminalTabStatus,
   terminalTaskStatus,
-  TERMINAL_SHIFT_ENTER_DATA,
-  terminalShiftEnterData,
   terminalTabsReducer,
   type ActiveTerminalContext,
 } from "./terminal";
@@ -42,24 +39,6 @@ const CTX: ActiveTerminalContext = {
   docTitle: "메모",
   docType: "note",
 };
-
-function key(opts: {
-  type?: string;
-  key?: string;
-  shift?: boolean;
-  meta?: boolean;
-  ctrl?: boolean;
-  alt?: boolean;
-} = {}): KeyboardEvent {
-  return {
-    type: opts.type ?? "keydown",
-    key: opts.key ?? "Enter",
-    shiftKey: opts.shift ?? false,
-    metaKey: opts.meta ?? false,
-    ctrlKey: opts.ctrl ?? false,
-    altKey: opts.alt ?? false,
-  } as KeyboardEvent;
-}
 
 function mouseMove(buttons: number): MouseEvent {
   return {
@@ -195,35 +174,6 @@ describe("terminal tab reducer", () => {
       },
     });
     expect(shouldAutoLaunchTerminal(disabled, true, 0)).toBeNull();
-  });
-
-  it("maps Shift+Enter to modified-key data for AI terminal tabs only", () => {
-    const event = key({ shift: true });
-    expect(terminalShiftEnterData("claude", event)).toBe(TERMINAL_SHIFT_ENTER_DATA);
-    expect(terminalShiftEnterData("codex", event)).toBe(TERMINAL_SHIFT_ENTER_DATA);
-    expect(terminalShiftEnterData("shell", event)).toBeNull();
-  });
-
-  it("does not map plain Enter, other modifiers, or non-keydown events", () => {
-    expect(terminalShiftEnterData("claude", key())).toBeNull();
-    expect(terminalShiftEnterData("claude", key({ key: "a", shift: true }))).toBeNull();
-    expect(terminalShiftEnterData("claude", key({ shift: true, meta: true }))).toBeNull();
-    expect(terminalShiftEnterData("claude", key({ shift: true, ctrl: true }))).toBeNull();
-    expect(terminalShiftEnterData("claude", key({ shift: true, alt: true }))).toBeNull();
-    expect(terminalShiftEnterData("claude", key({ type: "keyup", shift: true }))).toBeNull();
-  });
-
-  it("suppresses terminal mouse tracking modes without blocking non-mouse modes", () => {
-    expect(shouldSuppressTerminalMouseTracking([9])).toBe(true);
-    expect(shouldSuppressTerminalMouseTracking([1003])).toBe(true);
-    expect(shouldSuppressTerminalMouseTracking([1006])).toBe(true);
-    expect(shouldSuppressTerminalMouseTracking([[1000, 1006]])).toBe(true);
-
-    expect(shouldSuppressTerminalMouseTracking([1004])).toBe(false);
-    expect(shouldSuppressTerminalMouseTracking([1007])).toBe(false);
-    expect(shouldSuppressTerminalMouseTracking([1049])).toBe(false);
-    expect(shouldSuppressTerminalMouseTracking([2004])).toBe(false);
-    expect(shouldSuppressTerminalMouseTracking([[1004, 1049, 2004]])).toBe(false);
   });
 
   it("suppresses hover mousemove while preserving drag selection", () => {
