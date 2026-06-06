@@ -5320,6 +5320,46 @@ button.git-badge:hover {
   font-size: 12px;
 }
 
+.source-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.auth-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-status-badge.ok {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line-soft));
+  color: var(--accent);
+}
+
+.auth-status-badge.auth_required,
+.auth-status-badge.cli_missing,
+.auth-status-badge.env_missing,
+.auth-status-badge.error {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--line-soft));
+  color: var(--warn);
+}
+
+.auth-status-account {
+  color: var(--muted);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -5477,6 +5517,61 @@ button.git-badge:hover {
 
 .comms-setup-banner p {
   margin: 3px 0 0;
+}
+
+.telegram-auth-fields,
+.telegram-chat-mapping {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-muted);
+}
+
+.settings-section-heading.inline {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.secret-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.telegram-chat-table-wrap {
+  overflow-x: auto;
+}
+
+.telegram-chat-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.telegram-chat-table th,
+.telegram-chat-table td {
+  padding: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.telegram-chat-table input,
+.telegram-chat-table select,
+.project-picker select {
+  width: 100%;
+}
+
+.project-picker {
+  display: grid;
+  gap: 3px;
+}
+
+.project-picker small {
+  color: var(--muted);
+  word-break: break-all;
 }
 
 .checkbox-field {

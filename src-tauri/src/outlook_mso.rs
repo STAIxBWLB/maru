@@ -9,12 +9,15 @@ use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::inbox_drop::{auth_status, stage_message_outcome, ProviderAuthStatus, StageOutcome};
 use crate::vault::resolve_inside_vault;
 use crate::win_process::NoWindow;
 
 const OUTLOOK_ACCEPT_KIND: &str = "outlook.accept";
 const OUTLOOK_REJECT_KIND: &str = "outlook.reject";
+const OUTLOOK_STAGE_KIND: &str = "outlook.stage";
 const COMMS_BULK_KIND: &str = "comms.bulk";
+const INBOX_BULK_KIND: &str = "inbox.bulk";
 const ACCEPTED_CATEGORY: &str = "anchor-accepted";
 const REJECTED_CATEGORY: &str = "anchor-rejected";
 
@@ -144,6 +147,77 @@ pub fn fetch_outlook_unread(
     let limit = max.unwrap_or(50).clamp(1, 200) as usize;
     messages.truncate(limit);
     Ok(messages)
+}
+
+#[tauri::command]
+pub fn stage_outlook_items(
+    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    messages: Vec<OutlookMessage>,
+    approval_id: Option<String>,
+) -> Result<Vec<StageOutcome>, String> {
+    crate::approval::require_approval_any(
+        &approvals,
+        approval_id,
+        &[OUTLOOK_STAGE_KIND, COMMS_BULK_KIND, INBOX_BULK_KIND],
+    )?;
+    let work = resolve_inside_vault(&work_path, ".")?;
+    Ok(messages
+        .into_iter()
+        .map(|message| stage_message_outcome(&work, "mso", "mso", &message.id, &message))
+        .collect())
+}
+
+#[tauri::command]
+pub fn check_mso_auth(
+    work_path: Option<String>,
+    m365_path: Option<String>,
+) -> Result<ProviderAuthStatus, String> {
+    let work = work_path
+        .as_deref()
+        .and_then(|raw| resolve_inside_vault(raw, ".").ok());
+    let configured_m365 = work
+        .as_deref()
+        .and_then(|path| workspace_provider_string(path, "mso", &["command", "m365_path"]));
+    let Some(m365_bin) = resolve_m365_path(m365_path.as_deref().or(configured_m365.as_deref()))
+    else {
+        return Ok(auth_status(
+            "mso",
+            "cli_missing",
+            Some("m365 CLI not found".to_string()),
+            None,
+            None,
+        ));
+    };
+    let output = Command::new(&m365_bin)
+        .env("PATH", augmented_path())
+        .args(["status", "--output", "json"])
+        .no_window()
+        .output()
+        .map_err(|err| format!("m365_spawn_failed: {err}"))?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Ok(auth_status(
+            "mso",
+            "ok",
+            None,
+            Some(m365_bin),
+            extract_m365_account(&stdout),
+        ));
+    }
+    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
+        .into_iter()
+        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(auth_status(
+        "mso",
+        classify_m365_auth_state(&detail),
+        Some(detail),
+        Some(m365_bin),
+        None,
+    ))
 }
 
 #[tauri::command]
@@ -358,17 +432,8 @@ fn classify_m365_error(stderr: &[u8], stdout: &[u8]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     let lower = detail.to_lowercase();
-    let kind = if lower.contains("aadsts")
-        || lower.contains("login")
-        || lower.contains("not logged")
-        || lower.contains("auth")
-        || lower.contains("token")
-        || lower.contains("access is denied")
-        || lower.contains("403")
-        || lower.contains("forbidden")
-        || lower.contains("insufficient privileges")
-        || lower.contains("permission")
-    {
+    let auth_state = classify_m365_auth_state(&detail);
+    let kind = if auth_state == "auth_required" {
         "auth_required"
     } else {
         "m365_failed"
@@ -385,6 +450,47 @@ fn classify_m365_error(stderr: &[u8], stdout: &[u8]) -> String {
     } else {
         format!("{kind}: {detail}")
     }
+}
+
+pub fn classify_m365_auth_state(detail: &str) -> &'static str {
+    let lower = detail.to_lowercase();
+    if lower.contains("aadsts")
+        || lower.contains("login")
+        || lower.contains("not logged")
+        || lower.contains("auth")
+        || lower.contains("token")
+        || lower.contains("access is denied")
+        || lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("insufficient privileges")
+        || lower.contains("permission")
+    {
+        "auth_required"
+    } else {
+        "error"
+    }
+}
+
+fn extract_m365_account(stdout: &str) -> Option<String> {
+    let json = extract_json_fragment(stdout)?;
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    for key in [
+        "connectedAs",
+        "account",
+        "userName",
+        "userPrincipalName",
+        "name",
+    ] {
+        if let Some(value) = value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 fn provider_enabled(work_path: Option<&Path>, provider: &str) -> Option<bool> {

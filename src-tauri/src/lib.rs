@@ -20,6 +20,7 @@ mod gmail_gws;
 mod hub_client;
 mod inbox;
 mod inbox_classifier;
+mod inbox_drop;
 mod inbox_settings;
 mod inbox_watcher;
 mod kordoc_lite;
@@ -36,6 +37,7 @@ mod skill_host;
 mod studio;
 mod sys_import;
 mod tasks;
+mod telegram_config;
 mod telegram_io;
 mod template_fill;
 mod terminal;
@@ -54,10 +56,11 @@ use agent_host::{
 use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
 use anchor_dir::{
     bootstrap_anchor_dir, delete_anchor_rule, delete_anchor_template, list_anchor_rules,
-    list_anchor_templates, read_anchor_imports, read_anchor_mcp, read_anchor_projects,
-    read_anchor_rule, read_anchor_settings, read_anchor_skills, read_anchor_template,
-    read_anchor_workspace, save_anchor_mcp, save_anchor_projects, save_anchor_rule,
-    save_anchor_settings, save_anchor_skills, save_anchor_template, update_anchor_workspace,
+    list_anchor_templates, list_workspace_projects, read_anchor_imports, read_anchor_mcp,
+    read_anchor_projects, read_anchor_rule, read_anchor_settings, read_anchor_skills,
+    read_anchor_template, read_anchor_workspace, save_anchor_mcp, save_anchor_projects,
+    save_anchor_rule, save_anchor_settings, save_anchor_skills, save_anchor_template,
+    update_anchor_workspace,
 };
 use approval::{prepare_approval, record_approval, ApprovalState};
 use binary_viewer::{
@@ -66,6 +69,11 @@ use binary_viewer::{
     binary_viewer_read_text,
 };
 use calendar_search::search_calendar_notes;
+use diagram::{
+    diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
+    diagram_list_documents, diagram_list_snapshots, diagram_load_document,
+    diagram_restore_snapshot, diagram_save_document, diagram_save_snapshot,
+};
 use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
     save_document, trash_document, update_frontmatter_field,
@@ -81,7 +89,9 @@ use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
 };
-use gmail_gws::{decide_gmail_item, decide_gmail_items, fetch_gmail_unread};
+use gmail_gws::{
+    check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
+};
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
@@ -94,10 +104,6 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
-use share_outbox::{
-    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
-    save_share_outbox_root, scan_share_outbox,
-};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -110,7 +116,14 @@ use ops_catalog::{
     catalog_drilldown, catalog_query, catalog_scan,
     watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState},
 };
-use outlook_mso::{decide_outlook_item, decide_outlook_items, fetch_outlook_unread};
+use outlook_mso::{
+    check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
+    stage_outlook_items,
+};
+use share_outbox::{
+    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
+    save_share_outbox_root, scan_share_outbox,
+};
 use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
@@ -125,11 +138,6 @@ use skill_host::{
     skills_runtime_status, skills_save_skill_as, skills_save_skill_file, skills_sync_all_sources,
     skills_sync_source, skills_uninstall_skill,
 };
-use diagram::{
-    diagram_delete_document, diagram_export_blob, diagram_export_blob_to_path,
-    diagram_list_documents, diagram_list_snapshots, diagram_load_document, diagram_restore_snapshot,
-    diagram_save_document, diagram_save_snapshot,
-};
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
@@ -139,9 +147,14 @@ use tasks::{
     scan_task_notes, update_task_schedule_fields, update_task_status,
 };
 use tauri::Manager;
+use telegram_config::{
+    read_telegram_monitor_config, remove_telegram_chat, save_telegram_monitor_config,
+    set_telegram_chat_contexts, upsert_telegram_chat,
+};
 use telegram_io::{
-    accept_telegram_item, fetch_telegram_recent, reject_telegram_item, start_telegram_polling,
-    stop_poller_on_exit, stop_telegram_polling, telegram_polling_status, TelegramIoState,
+    accept_telegram_item, check_telegram_auth, fetch_telegram_recent, reject_telegram_item,
+    stage_telegram_items, start_telegram_polling, stop_poller_on_exit, stop_telegram_polling,
+    telegram_polling_status, TelegramIoState,
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{terminal_kill, terminal_resize, terminal_spawn, terminal_write, TerminalState};
@@ -278,17 +291,28 @@ pub fn run() {
             build_inbox_classification_prompt,
             parse_inbox_classification,
             fetch_gmail_unread,
+            stage_gmail_items,
+            check_gws_auth,
             decide_gmail_item,
             decide_gmail_items,
             fetch_outlook_unread,
+            stage_outlook_items,
+            check_mso_auth,
             decide_outlook_item,
             decide_outlook_items,
             fetch_telegram_recent,
             accept_telegram_item,
             reject_telegram_item,
+            stage_telegram_items,
+            check_telegram_auth,
             start_telegram_polling,
             stop_telegram_polling,
             telegram_polling_status,
+            read_telegram_monitor_config,
+            save_telegram_monitor_config,
+            upsert_telegram_chat,
+            remove_telegram_chat,
+            set_telegram_chat_contexts,
             detect_legacy_telegram_launchd,
             unload_legacy_telegram_launchd,
             prepare_approval,
@@ -322,6 +346,7 @@ pub fn run() {
             read_anchor_mcp,
             save_anchor_mcp,
             read_anchor_projects,
+            list_workspace_projects,
             save_anchor_projects,
             read_anchor_skills,
             save_anchor_skills,

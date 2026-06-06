@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAnchorSettings } from "./settings";
 import {
+  gwsAuthCommand,
   isTelegramMonitorConfigOutsideAnchor,
+  m365LoginCommand,
   telegramLoginCommand,
 } from "./telegram";
 
@@ -35,6 +37,17 @@ describe("telegramLoginCommand", () => {
     );
     expect(command.args[1]).toContain(
       '--config-file "$HOME/workspace/work/.secrets/services/telegram-monitor.config.yaml"',
+    );
+  });
+});
+
+describe("provider reauth commands", () => {
+  it("quotes explicit gws and m365 paths", () => {
+    expect(gwsAuthCommand("/opt/homebrew/bin/gws").args[1]).toBe(
+      "exec '/opt/homebrew/bin/gws' auth",
+    );
+    expect(m365LoginCommand("~/bin/m365").args[1]).toBe(
+      'exec "$HOME/bin/m365" login',
     );
   });
 });

@@ -3,21 +3,25 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::cli_path::{augmented_path, is_executable};
-use crate::inbox_settings;
+use crate::inbox_drop::{
+    auth_status, stage_message_json, stage_message_outcome, ProviderAuthStatus, StageOutcome,
+};
 use crate::skill_host::{fs as host_fs, store};
 use crate::vault::resolve_inside_vault;
 use crate::win_process::NoWindow;
 
 const TELEGRAM_ACCEPT_KIND: &str = "telegram.accept";
 const TELEGRAM_REJECT_KIND: &str = "telegram.reject";
+const TELEGRAM_STAGE_KIND: &str = "telegram.stage";
+const INBOX_BULK_KIND: &str = "inbox.bulk";
 const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 60;
 const MIN_POLL_INTERVAL_SECONDS: u64 = 30;
 
@@ -151,6 +155,84 @@ pub fn reject_telegram_item(
         ok: true,
         error: None,
     })
+}
+
+#[tauri::command]
+pub fn stage_telegram_items(
+    approvals: State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    messages: Vec<TelegramMessage>,
+    approval_id: Option<String>,
+) -> Result<Vec<StageOutcome>, String> {
+    crate::approval::require_approval_any(
+        &approvals,
+        approval_id,
+        &[TELEGRAM_STAGE_KIND, INBOX_BULK_KIND],
+    )?;
+    let work = resolve_inside_vault(&work_path, ".")?;
+    Ok(messages
+        .into_iter()
+        .map(|message| stage_message_outcome(&work, "telegram", "telegram", &message.id, &message))
+        .collect())
+}
+
+#[tauri::command]
+pub fn check_telegram_auth(options: TelegramFetchOptions) -> Result<ProviderAuthStatus, String> {
+    let config = match resolve_telegram_command_config(&options) {
+        Ok(config) => config,
+        Err(err) => {
+            let state = classify_telegram_setup_state(&err);
+            return Ok(auth_status("telegram", state, Some(err), None, None));
+        }
+    };
+    let mut cmd = Command::new(&config.python_path);
+    cmd.env("PATH", augmented_path())
+        .env(
+            "ANCHOR_SKILLS_ENV",
+            config.env_root.to_string_lossy().to_string(),
+        )
+        .arg(&config.script_path)
+        .arg("--once")
+        .arg("--session-file")
+        .arg(&config.session_file)
+        .arg("--limit")
+        .arg("1")
+        .arg("--output-json");
+    if let Some(monitor_config_path) = &config.monitor_config_path {
+        cmd.arg("--config-file").arg(monitor_config_path);
+    }
+    let output = cmd
+        .current_dir(
+            config
+                .script_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        )
+        .no_window()
+        .output()
+        .map_err(|err| format!("telegram_spawn_failed: {err}"))?;
+    if output.status.success() {
+        return Ok(auth_status(
+            "telegram",
+            "ok",
+            None,
+            Some(config.python_path),
+            None,
+        ));
+    }
+    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
+        .into_iter()
+        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(auth_status(
+        "telegram",
+        classify_telegram_auth_state(&detail),
+        Some(detail),
+        Some(config.python_path),
+        None,
+    ))
 }
 
 #[tauri::command]
@@ -321,10 +403,7 @@ fn fetch_telegram_recent_inner(
         .map_err(|err| format!("telegram_spawn_failed: {err}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let kind = if detail.to_lowercase().contains("session")
-            || detail.to_lowercase().contains("auth")
-            || detail.to_lowercase().contains("api_id")
-        {
+        let kind = if classify_telegram_auth_state(&detail) == "auth_required" {
             "auth_required"
         } else {
             "telegram_failed"
@@ -449,29 +528,36 @@ fn write_telegram_message_to_inbox(
     message: &TelegramMessage,
 ) -> Result<String, String> {
     let work = resolve_inside_vault(work_path, ".")?;
-    let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
-    let root = inbox_settings::resolve_runtime_root(&work, &config)?;
-    let drop_path = config
-        .channels
-        .get("telegram")
-        .and_then(|channel| channel.drop_paths.first())
-        .cloned()
-        .unwrap_or_else(|| "drop/telegram".to_string());
-    let target_dir = inbox_settings::lexical_normalize_path(&root.join(drop_path));
-    fs::create_dir_all(&target_dir)
-        .map_err(|err| format!("Cannot create {}: {err}", target_dir.to_string_lossy()))?;
-    let stamp = timestamp_for_filename();
-    let name = sanitize_filename(&format!("{stamp}-telegram-{}.json", message.id));
-    let target = target_dir.join(name);
-    let payload = serde_json::to_vec_pretty(&serde_json::json!({
-        "provider": "telegram",
-        "kind": "message",
-        "message": message,
-    }))
-    .map_err(|err| format!("telegram_payload_failed: {err}"))?;
-    fs::write(&target, payload)
-        .map_err(|err| format!("Cannot write {}: {err}", target.to_string_lossy()))?;
-    Ok(target.to_string_lossy().to_string())
+    stage_message_json(&work, "telegram", "telegram", &message.id, message)
+}
+
+pub fn classify_telegram_auth_state(detail: &str) -> &'static str {
+    let lower = detail.to_lowercase();
+    if lower.contains("session")
+        || lower.contains("auth")
+        || lower.contains("api_id")
+        || lower.contains("api hash")
+        || lower.contains("api_hash")
+        || lower.contains("phone")
+        || lower.contains("login")
+        || lower.contains("unauthorized")
+    {
+        "auth_required"
+    } else {
+        "error"
+    }
+}
+
+fn classify_telegram_setup_state(detail: &str) -> &'static str {
+    if detail.starts_with("env_missing") {
+        "env_missing"
+    } else if detail.starts_with("script_missing") || detail.starts_with("config_missing") {
+        "error"
+    } else if classify_telegram_auth_state(detail) == "auth_required" {
+        "auth_required"
+    } else {
+        "error"
+    }
 }
 
 fn parse_telegram_output(raw: &str) -> Result<Vec<TelegramMessage>, String> {
@@ -546,21 +632,6 @@ fn workspace_provider_nested_string(
     None
 }
 
-fn timestamp_for_filename() -> String {
-    let now: DateTime<Utc> = SystemTime::now().into();
-    now.format("%Y%m%dT%H%M%SZ").to_string()
-}
-
-fn sanitize_filename(input: &str) -> String {
-    input
-        .chars()
-        .map(|ch| match ch {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '-',
-        })
-        .collect()
-}
-
 fn extract_json_fragment(raw: &str) -> Option<&str> {
     let bytes = raw.as_bytes();
     for (start, byte) in bytes.iter().enumerate() {
@@ -599,6 +670,7 @@ fn extract_json_fragment(raw: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inbox_drop::sanitize_filename;
 
     // Isolates the process-global `ANCHOR_TEST_HOME` under the shared skill-host
     // home lock. `_guard` is declared last so it drops last — the lock is held
@@ -691,5 +763,22 @@ mod tests {
     #[test]
     fn sanitizes_message_ids_for_drop_files() {
         assert_eq!(sanitize_filename("a/b+c=.json"), "a-b-c-.json");
+    }
+
+    #[test]
+    fn classifies_telegram_auth_and_setup_errors() {
+        assert_eq!(
+            classify_telegram_auth_state("api_id missing"),
+            "auth_required"
+        );
+        assert_eq!(
+            classify_telegram_auth_state("Please login with phone"),
+            "auth_required"
+        );
+        assert_eq!(classify_telegram_auth_state("network down"), "error");
+        assert_eq!(
+            classify_telegram_setup_state("env_missing: python not found"),
+            "env_missing"
+        );
     }
 }

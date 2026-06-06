@@ -22,7 +22,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_INBOX_RUNTIME_CONFIG,
+  checkGwsAuth,
+  checkMsoAuth,
+  checkTelegramAuth,
   readInboxRuntimeConfig,
+  readTelegramMonitorConfig,
+  saveTelegramMonitorConfig,
   saveInboxRuntimeConfig,
 } from "../lib/api";
 import {
@@ -31,6 +36,7 @@ import {
   deleteAnchorTemplate,
   listAnchorRules,
   listAnchorTemplates,
+  listWorkspaceProjects,
   planSysImport,
   readAnchorMcp,
   readAnchorProjects,
@@ -76,6 +82,8 @@ import {
 } from "../lib/skillEditorEvents";
 import {
   SETTINGS_WINDOW_OPEN_TAB_EVENT,
+  SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT,
+  type SettingsWindowTerminalLaunchPayload,
   type SettingsWindowOpenTabPayload,
 } from "../lib/settingsWindowEvents";
 import { DIAGRAM_ENABLE_STORAGE_KEY } from "../lib/diagramFlag";
@@ -84,8 +92,11 @@ import type {
   ImportPlan,
   InboxChannelConfig,
   InboxRuntimeConfig,
+  ProjectPickerEntry,
+  ProviderAuthStatus,
   RuleEntry,
   TemplateEntry,
+  TelegramMonitorConfigView,
   WorkspaceConfig,
 } from "../lib/types";
 import {
@@ -114,6 +125,11 @@ import {
 } from "../lib/skills";
 import { readDefaultInstallMode, writeDefaultInstallMode } from "../lib/skillsInstallMode";
 import { formatRelativeDate } from "../lib/document";
+import { gwsAuthCommand, m365LoginCommand, telegramLoginCommand } from "../lib/telegram";
+import {
+  normalizeTelegramMonitorConfig,
+  telegramMonitorConfigToSave,
+} from "../lib/telegramMonitor";
 import { openSkillEditorWindow } from "../lib/windowLayout";
 import { CommsSettingsTab } from "./comms/CommsSettingsTab";
 import { MeetingsSettingsTab } from "./meetings/MeetingsSettingsTab";
@@ -153,6 +169,17 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
     value === "skills" ||
     value === "import"
   );
+}
+
+async function emitSettingsTerminalLaunch(
+  payload: SettingsWindowTerminalLaunchPayload,
+): Promise<void> {
+  try {
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, payload);
+  } catch {
+    // Browser dev shell: no Tauri event bus.
+  }
 }
 
 interface SystemPaneProps {
@@ -336,11 +363,22 @@ function CommsSettingsSystemTab({
   const { t } = useTranslation();
   const [telegramEnvHealthy, setTelegramEnvHealthy] = useState<boolean | null>(null);
   const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
+  const [monitorConfig, setMonitorConfig] = useState<TelegramMonitorConfigView | null>(null);
+  const [pristineMonitorConfig, setPristineMonitorConfig] =
+    useState<TelegramMonitorConfigView | null>(null);
+  const [projects, setProjects] = useState<ProjectPickerEntry[]>([]);
+  const [authStatuses, setAuthStatuses] = useState<
+    Partial<Record<"gws" | "mso" | "telegram", ProviderAuthStatus | null>>
+  >({});
   const effectiveComms = useMemo(
     () => applyWorkspaceCommsOverrides(settings.comms, workspaceConfig),
     [settings.comms, workspaceConfig],
   );
   const [draftComms, setDraftComms] = useState(settings.comms);
+  const effectiveDraftComms = useMemo(
+    () => applyWorkspaceCommsOverrides(draftComms, workspaceConfig),
+    [draftComms, workspaceConfig],
+  );
   const [config, setConfig] = useState<InboxRuntimeConfig>(() =>
     cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
   );
@@ -367,7 +405,8 @@ function CommsSettingsSystemTab({
   const dirty =
     JSON.stringify(draftComms) !== JSON.stringify(settings.comms) ||
     JSON.stringify(gmail) !==
-      JSON.stringify(pristine.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail);
+      JSON.stringify(pristine.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail) ||
+    JSON.stringify(monitorConfig) !== JSON.stringify(pristineMonitorConfig);
 
   useEffect(() => {
     setDraftComms(settings.comms);
@@ -405,13 +444,58 @@ function CommsSettingsSystemTab({
     setError(null);
     setStatus(null);
     try {
-      const runtime = await readInboxRuntimeConfig(workPath);
+      const [runtime, monitor, projectEntries, gwsStatus, msoStatus, telegramStatus] =
+        await Promise.all([
+          readInboxRuntimeConfig(workPath),
+          readTelegramMonitorConfig(
+            workPath,
+            effectiveComms.telegram.monitorConfigPath ?? null,
+          ).then(normalizeTelegramMonitorConfig),
+          listWorkspaceProjects(workPath).catch(() => []),
+          checkGwsAuth(workPath).catch((err) => ({
+            provider: "gws",
+            state: "error",
+            detail: err instanceof Error ? err.message : String(err),
+            cliPath: null,
+            account: null,
+          })),
+          checkMsoAuth(workPath, effectiveComms.outlook.m365Path).catch((err) => ({
+            provider: "mso",
+            state: "error",
+            detail: err instanceof Error ? err.message : String(err),
+            cliPath: null,
+            account: null,
+          })),
+          checkTelegramAuth({
+            workPath,
+            max: 1,
+            pythonPath: effectiveComms.telegram.pythonPath,
+            scriptPath: effectiveComms.telegram.scriptPath,
+            sessionFile: effectiveComms.telegram.sessionFile,
+            monitorConfigPath: effectiveComms.telegram.monitorConfigPath,
+            legacyAutoDrop: false,
+          }).catch((err) => ({
+            provider: "telegram",
+            state: "error",
+            detail: err instanceof Error ? err.message : String(err),
+            cliPath: null,
+            account: null,
+          })),
+        ]);
       setConfig(runtime);
       setPristine(runtime);
+      setMonitorConfig(monitor);
+      setPristineMonitorConfig(monitor);
+      setProjects(projectEntries);
+      setAuthStatuses({
+        gws: gwsStatus,
+        mso: msoStatus,
+        telegram: telegramStatus,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workPath]);
+  }, [effectiveComms, workPath]);
 
   useEffect(() => {
     void load();
@@ -428,6 +512,16 @@ function CommsSettingsSystemTab({
       });
       setConfig(saved);
       setPristine(saved);
+      if (monitorConfig) {
+        const savedMonitor = await saveTelegramMonitorConfig(
+          workPath,
+          effectiveDraftComms.telegram.monitorConfigPath ??
+            monitorConfig.path,
+          telegramMonitorConfigToSave(monitorConfig),
+        ).then(normalizeTelegramMonitorConfig);
+        setMonitorConfig(savedMonitor);
+        setPristineMonitorConfig(savedMonitor);
+      }
       onSaved?.(saved);
       onSettingsChange(
         normalizeAnchorSettings({
@@ -442,6 +536,16 @@ function CommsSettingsSystemTab({
       setSaving(false);
     }
   };
+
+  const launchTerminalCommand = useCallback(
+    (command: { command: string | null; args: string[] }) =>
+      emitSettingsTerminalLaunch({
+        command: command.command,
+        args: command.args,
+        cwd: workPath,
+      }),
+    [workPath],
+  );
 
   return (
     <div className="system-detail" style={{ width: "100%" }}>
@@ -472,6 +576,9 @@ function CommsSettingsSystemTab({
         gmailSettings={gmail}
         effectiveGwsPath={effectiveGwsPath}
         telegramEnvHealthy={telegramEnvHealthy}
+        authStatuses={authStatuses}
+        monitorConfig={monitorConfig}
+        projects={projects}
         onSettingsChange={(comms) => {
           setDraftComms(comms);
           setStatus(null);
@@ -482,6 +589,19 @@ function CommsSettingsSystemTab({
             gmail: nextGmail,
           }));
           setStatus(null);
+        }}
+        onMonitorConfigChange={(nextMonitorConfig) => {
+          setMonitorConfig(normalizeTelegramMonitorConfig(nextMonitorConfig));
+          setStatus(null);
+        }}
+        onGwsReauth={() => {
+          void launchTerminalCommand(gwsAuthCommand(gmail.gws_path ?? effectiveGwsPath));
+        }}
+        onMsoReauth={() => {
+          void launchTerminalCommand(m365LoginCommand(effectiveDraftComms.outlook.m365Path));
+        }}
+        onTelegramLogin={() => {
+          void launchTerminalCommand(telegramLoginCommand(effectiveDraftComms.telegram));
         }}
         onOpenSkillsEnvSettings={onOpenSkills}
       />

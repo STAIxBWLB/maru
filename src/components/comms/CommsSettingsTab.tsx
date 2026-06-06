@@ -1,5 +1,10 @@
 import { AlertTriangle, LogIn, Play, Square } from "lucide-react";
-import type { InboxGmailConfig } from "../../lib/types";
+import type {
+  InboxGmailConfig,
+  ProjectPickerEntry,
+  ProviderAuthStatus,
+  TelegramMonitorConfigView,
+} from "../../lib/types";
 import {
   COMMS_PROVIDER_RESULTS_MAX,
   COMMS_PROVIDER_RESULTS_MIN,
@@ -10,6 +15,9 @@ import {
 import { isTelegramMonitorConfigOutsideAnchor } from "../../lib/telegram";
 import type { TelegramPollingStatus } from "../../lib/types";
 import { useTranslation } from "../../lib/i18n";
+import { AuthStatusBadge } from "./AuthStatusBadge";
+import { TelegramAuthFields } from "./TelegramAuthFields";
+import { TelegramChatMappingEditor } from "./TelegramChatMappingEditor";
 
 interface CommsSettingsTabProps {
   settings: CommsSettings;
@@ -18,8 +26,14 @@ interface CommsSettingsTabProps {
   effectiveGwsPath?: string | null;
   pollingStatus?: TelegramPollingStatus;
   telegramEnvHealthy?: boolean | null;
+  authStatuses?: Partial<Record<"gws" | "mso" | "telegram", ProviderAuthStatus | null>>;
+  monitorConfig?: TelegramMonitorConfigView | null;
+  projects?: ProjectPickerEntry[];
   onSettingsChange: (settings: CommsSettings) => void;
   onGmailSettingsChange: (settings: InboxGmailConfig) => void;
+  onMonitorConfigChange?: (config: TelegramMonitorConfigView) => void;
+  onGwsReauth?: () => void;
+  onMsoReauth?: () => void;
   onStartPolling?: () => void;
   onStopPolling?: () => void;
   onTelegramLogin?: () => void;
@@ -40,8 +54,14 @@ export function CommsSettingsTab({
     lastError: null,
   },
   telegramEnvHealthy,
+  authStatuses = {},
+  monitorConfig,
+  projects = [],
   onSettingsChange,
   onGmailSettingsChange,
+  onMonitorConfigChange,
+  onGwsReauth,
+  onMsoReauth,
   onStartPolling,
   onStopPolling,
   onTelegramLogin,
@@ -67,9 +87,16 @@ export function CommsSettingsTab({
       <section className="settings-section-panel">
         <div className="settings-section-heading">
           <div>
-            <strong>Gmail / Google Workspace</strong>
-            <span>Envelope scan settings for Gmail through gws.</span>
+            <strong>{t("comms.gmail.title")}</strong>
+            <span>{t("comms.gmail.settings.description")}</span>
           </div>
+          <AuthStatusBadge status={authStatuses.gws} />
+          {onGwsReauth ? (
+            <button type="button" className="secondary-button" onClick={onGwsReauth}>
+              <LogIn size={14} />
+              <span>{t("comms.gws.reauth")}</span>
+            </button>
+          ) : null}
         </div>
         <label className="field checkbox-field">
           <input
@@ -81,7 +108,7 @@ export function CommsSettingsTab({
         </label>
         <div className="settings-grid two">
           <label className="field">
-            <span>Scan window (days)</span>
+            <span>{t("comms.gmail.scanWindowDays")}</span>
             <input
               type="number"
               min={0}
@@ -119,7 +146,7 @@ export function CommsSettingsTab({
             />
           </label>
           <label className="field">
-            <span>Auto refresh TTL (seconds)</span>
+            <span>{t("comms.gmail.autoRefreshTtl")}</span>
             <input
               type="number"
               min={0}
@@ -143,10 +170,10 @@ export function CommsSettingsTab({
               checked={gmailSettings.unread_only}
               onChange={(event) => updateGmail({ unread_only: event.target.checked })}
             />
-            <span>Unread only</span>
+            <span>{t("comms.gmail.unreadOnly")}</span>
           </label>
           <label className="field">
-            <span>gws CLI path</span>
+            <span>{t("comms.gmail.gwsPath")}</span>
             <input
               className="path-input"
               value={gwsValue}
@@ -159,19 +186,19 @@ export function CommsSettingsTab({
               spellCheck={false}
             />
             {!gmailSettings.gws_path && effectiveGwsPath ? (
-              <small>Using workspace config: {effectiveGwsPath}</small>
+              <small>{t("comms.settings.usingWorkspaceConfig", { path: effectiveGwsPath })}</small>
             ) : null}
           </label>
         </div>
         <label className="field">
-          <span>Query override</span>
+          <span>{t("comms.gmail.queryOverride")}</span>
           <input
             value={gmailSettings.query}
             onChange={(event) => updateGmail({ query: event.target.value })}
             placeholder="is:unread newer_than:14d"
             spellCheck={false}
           />
-          <small>Leave empty to build a query from unread-only and scan-window settings.</small>
+          <small>{t("comms.gmail.queryHelp")}</small>
         </label>
       </section>
 
@@ -181,6 +208,13 @@ export function CommsSettingsTab({
             <strong>{t("comms.outlook.title")}</strong>
             <span>{t("comms.outlook.settings.description")}</span>
           </div>
+          <AuthStatusBadge status={authStatuses.mso} />
+          {onMsoReauth ? (
+            <button type="button" className="secondary-button" onClick={onMsoReauth}>
+              <LogIn size={14} />
+              <span>{t("comms.outlook.reauth")}</span>
+            </button>
+          ) : null}
         </div>
         <label className="field checkbox-field">
           <input
@@ -204,7 +238,7 @@ export function CommsSettingsTab({
             spellCheck={false}
           />
           {!settings.outlook.m365Path && effectiveM365Path ? (
-            <small>Using workspace config: {effectiveM365Path}</small>
+            <small>{t("comms.settings.usingWorkspaceConfig", { path: effectiveM365Path })}</small>
           ) : null}
         </label>
         <label className="field">
@@ -301,6 +335,21 @@ export function CommsSettingsTab({
             </div>
           </div>
         ) : null}
+        {monitorConfig && onMonitorConfigChange ? (
+          <>
+            <TelegramAuthFields
+              config={monitorConfig}
+              status={authStatuses.telegram}
+              onChange={onMonitorConfigChange}
+              onLogin={onTelegramLogin}
+            />
+            <TelegramChatMappingEditor
+              config={monitorConfig}
+              projects={projects}
+              onChange={onMonitorConfigChange}
+            />
+          </>
+        ) : null}
         <label className="field">
           <span>{t("comms.telegram.pythonPath")}</span>
           <input
@@ -371,12 +420,8 @@ export function CommsSettingsTab({
           />
           <span>{t("comms.telegram.legacyAutoDrop")}</span>
         </label>
-        {onTelegramLogin && onStartPolling && onStopPolling ? (
+        {onStartPolling && onStopPolling ? (
           <div className="comms-settings-actions">
-            <button type="button" className="secondary-button" onClick={onTelegramLogin}>
-              <LogIn size={14} />
-              <span>{t("comms.telegram.login")}</span>
-            </button>
             {pollingStatus.running ? (
               <button type="button" className="secondary-button" onClick={onStopPolling}>
                 <Square size={14} />

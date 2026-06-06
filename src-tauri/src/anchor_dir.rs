@@ -25,7 +25,7 @@ use crate::vault::{lexical_normalize, parse_frontmatter, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -632,6 +632,15 @@ pub struct AnchorSettingsSaveOutcome {
     pub workspace_changed: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPickerEntry {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub status: String,
+}
+
 // ---------------------------------------------------------------------------
 // Workspace meta
 // ---------------------------------------------------------------------------
@@ -1028,10 +1037,159 @@ pub fn read_anchor_projects(work_path: String) -> Result<JsonValue, String> {
 }
 
 #[tauri::command]
+pub fn list_workspace_projects(
+    work_path: String,
+    include_inactive: Option<bool>,
+) -> Result<Vec<ProjectPickerEntry>, String> {
+    let work = normalize_work_path(&work_path)?;
+    let include_inactive = include_inactive.unwrap_or(false);
+    let mut entries = Vec::new();
+    let mut seen = BTreeSet::new();
+    let projects_path = projects_json_path(&work);
+    if projects_path.is_file() {
+        if let Ok(value) = read_json(&projects_path) {
+            collect_project_picker_entries_json(&value, include_inactive, &mut seen, &mut entries);
+        }
+    }
+    if entries.is_empty() {
+        let registry_path = work.join("project-registry.yaml");
+        if registry_path.is_file() {
+            let raw = fs::read_to_string(&registry_path)
+                .map_err(|err| format!("Cannot read project-registry.yaml: {err}"))?;
+            let value: serde_yaml::Value = serde_yaml::from_str(&raw)
+                .map_err(|err| format!("Cannot parse project-registry.yaml: {err}"))?;
+            collect_project_picker_entries_yaml(&value, include_inactive, &mut seen, &mut entries);
+        }
+    }
+    entries.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    Ok(entries)
+}
+
+#[tauri::command]
 pub fn save_anchor_projects(work_path: String, value: JsonValue) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
     ensure_anchor_dir(&work)?;
     write_json_pretty(&projects_json_path(&work), &value)
+}
+
+fn collect_project_picker_entries_json(
+    value: &JsonValue,
+    include_inactive: bool,
+    seen: &mut BTreeSet<String>,
+    entries: &mut Vec<ProjectPickerEntry>,
+) {
+    match value {
+        JsonValue::Object(map) => {
+            let id = map
+                .get("id")
+                .or_else(|| map.get("key"))
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let path = map
+                .get("path")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let (Some(id), Some(path)) = (id, path) {
+                let status = map
+                    .get("status")
+                    .and_then(JsonValue::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("active");
+                if include_inactive || status == "active" {
+                    let key = format!("{id}\n{path}");
+                    if seen.insert(key) {
+                        let name = map
+                            .get("name")
+                            .or_else(|| map.get("label"))
+                            .or_else(|| map.get("name_en"))
+                            .and_then(JsonValue::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or(id);
+                        entries.push(ProjectPickerEntry {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            path: path.to_string(),
+                            status: status.to_string(),
+                        });
+                    }
+                }
+            }
+            for value in map.values() {
+                collect_project_picker_entries_json(value, include_inactive, seen, entries);
+            }
+        }
+        JsonValue::Array(items) => {
+            for item in items {
+                collect_project_picker_entries_json(item, include_inactive, seen, entries);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_project_picker_entries_yaml(
+    value: &serde_yaml::Value,
+    include_inactive: bool,
+    seen: &mut BTreeSet<String>,
+    entries: &mut Vec<ProjectPickerEntry>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            let id = yaml_key_string(map, "id")
+                .or_else(|| yaml_key_string(map, "key"))
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let path = yaml_key_string(map, "path")
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let (Some(id), Some(path)) = (id, path) {
+                let status = yaml_key_string(map, "status")
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("active");
+                if include_inactive || status == "active" {
+                    let key = format!("{id}\n{path}");
+                    if seen.insert(key) {
+                        let name = yaml_key_string(map, "name")
+                            .or_else(|| yaml_key_string(map, "label"))
+                            .or_else(|| yaml_key_string(map, "name_en"))
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or(id);
+                        entries.push(ProjectPickerEntry {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            path: path.to_string(),
+                            status: status.to_string(),
+                        });
+                    }
+                }
+            }
+            for value in map.values() {
+                collect_project_picker_entries_yaml(value, include_inactive, seen, entries);
+            }
+        }
+        serde_yaml::Value::Sequence(items) => {
+            for item in items {
+                collect_project_picker_entries_yaml(item, include_inactive, seen, entries);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn yaml_key_string<'a>(map: &'a serde_yaml::Mapping, key: &str) -> Option<&'a str> {
+    map.get(serde_yaml::Value::String(key.to_string()))
+        .and_then(serde_yaml::Value::as_str)
 }
 
 #[tauri::command]
