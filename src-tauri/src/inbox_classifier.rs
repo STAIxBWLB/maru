@@ -206,14 +206,16 @@ mod tests {
 
     #[test]
     fn unknown_category_collapses_to_noise() {
-        let raw = r#"{"category":"spam","summary":"광고","suggestedFolder":null,"extractedDate":null}"#;
+        let raw =
+            r#"{"category":"spam","summary":"광고","suggestedFolder":null,"extractedDate":null}"#;
         let result = parse_inbox_classification(raw.to_string()).unwrap();
         assert_eq!(result.category, "noise");
     }
 
     #[test]
     fn empty_summary_is_replaced_with_default() {
-        let raw = r#"{"category":"admin","summary":"","suggestedFolder":null,"extractedDate":null}"#;
+        let raw =
+            r#"{"category":"admin","summary":"","suggestedFolder":null,"extractedDate":null}"#;
         let result = parse_inbox_classification(raw.to_string()).unwrap();
         assert_eq!(result.category, "admin");
         assert!(!result.summary.is_empty());
@@ -247,7 +249,8 @@ mod tests {
 
     #[test]
     fn whitespace_only_folder_is_dropped() {
-        let raw = r#"{"category":"reference","summary":"x","suggestedFolder":"   ","extractedDate":""}"#;
+        let raw =
+            r#"{"category":"reference","summary":"x","suggestedFolder":"   ","extractedDate":""}"#;
         let result = parse_inbox_classification(raw.to_string()).unwrap();
         assert_eq!(result.suggested_folder, None);
         assert_eq!(result.extracted_date, None);

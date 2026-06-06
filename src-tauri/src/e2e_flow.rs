@@ -508,14 +508,14 @@ fn measured_baseline(total_ms: f64) -> E2EFlowBaseline {
     }
 }
 
-fn compare_timings(
-    baseline: &E2EFlowBaseline,
-    result: &E2EFlowTimings,
-) -> E2EFlowTimingComparison {
+fn compare_timings(baseline: &E2EFlowBaseline, result: &E2EFlowTimings) -> E2EFlowTimingComparison {
     E2EFlowTimingComparison {
         total: timing_gate(Some(baseline.total_ms), result.total_ms),
         stages: E2EFlowStageTimingGates {
-            sample_load_ms: timing_gate(baseline.stages.sample_load_ms, result.stages.sample_load_ms),
+            sample_load_ms: timing_gate(
+                baseline.stages.sample_load_ms,
+                result.stages.sample_load_ms,
+            ),
             skill_lifecycle_ms: timing_gate(
                 baseline.stages.skill_lifecycle_ms,
                 result.stages.skill_lifecycle_ms,
@@ -631,15 +631,16 @@ fn write_text(path: &Path, content: &str) -> Result<(), String> {
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let content =
-        serde_json::to_string_pretty(value).map_err(|err| format!("Cannot serialize JSON: {err}"))?;
+    let content = serde_json::to_string_pretty(value)
+        .map_err(|err| format!("Cannot serialize JSON: {err}"))?;
     write_text(path, &content)
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
     let content = fs::read_to_string(path)
         .map_err(|err| format!("Cannot read {}: {err}", display_path(path)))?;
-    serde_json::from_str(&content).map_err(|err| format!("Cannot parse {}: {err}", display_path(path)))
+    serde_json::from_str(&content)
+        .map_err(|err| format!("Cannot parse {}: {err}", display_path(path)))
 }
 
 fn display_path(path: &Path) -> String {
@@ -701,7 +702,9 @@ mod tests {
         assert_eq!(result.metadata.source_of_truth, "README.md");
         assert_eq!(result.metadata.report_artifact.format, "markdown");
         assert_eq!(result.metadata.slide_artifact.format, "html");
-        assert!(result.report_markdown.contains("Anchor E2E Development Report"));
+        assert!(result
+            .report_markdown
+            .contains("Anchor E2E Development Report"));
         assert!(result.slides_html.contains("<!doctype html>"));
         assert!(workspace
             .path()

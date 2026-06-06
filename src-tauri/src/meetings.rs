@@ -200,8 +200,8 @@ pub fn read_meetings_log(
     if !log_path.exists() {
         return Ok(Vec::new());
     }
-    let raw = fs::read_to_string(&log_path)
-        .map_err(|err| format!("Cannot read meetings log: {err}"))?;
+    let raw =
+        fs::read_to_string(&log_path).map_err(|err| format!("Cannot read meetings log: {err}"))?;
     let cap = limit
         .unwrap_or(MEETINGS_LOG_DEFAULT_LIMIT)
         .min(MEETINGS_LOG_MAX_LIMIT)
@@ -272,7 +272,11 @@ fn parse_meetings_log_line(raw: &str) -> MeetingsLogLine {
                     run_id: None,
                     status: Some("started".to_string()),
                     skill: Some(skill.to_string()),
-                    target: if target.is_empty() { None } else { Some(target.to_string()) },
+                    target: if target.is_empty() {
+                        None
+                    } else {
+                        Some(target.to_string())
+                    },
                     payload: None,
                     legacy: true,
                 };
@@ -675,7 +679,10 @@ mod tests {
         assert_eq!(entries[0].status.as_deref(), Some("cleared"));
         assert!(!entries[0].legacy);
         assert_eq!(entries[1].event, "apply");
-        assert_eq!(entries[1].target.as_deref(), Some("meetings/2026/2026-05/note.md"));
+        assert_eq!(
+            entries[1].target.as_deref(),
+            Some("meetings/2026/2026-05/note.md")
+        );
         assert!(entries[1]
             .payload
             .as_ref()
@@ -735,8 +742,7 @@ mod tests {
         assert_eq!(limited[0].event, "clear");
         assert_eq!(limited[0].run_id.as_deref(), Some("r4"));
 
-        let filtered =
-            read_meetings_log(work, Some(10), Some(vec!["apply".to_string()])).unwrap();
+        let filtered = read_meetings_log(work, Some(10), Some(vec!["apply".to_string()])).unwrap();
         assert_eq!(filtered.len(), 5);
         assert!(filtered.iter().all(|entry| entry.event == "apply"));
     }

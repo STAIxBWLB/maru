@@ -587,7 +587,9 @@ fn skills_sync_all_sources_impl(
     save_registry_unlocked(&registry)?;
     let failed = results.iter().filter(|result| !result.ok).count();
     let succeeded = results.len() - failed;
-    progress.success(format!("Sync all complete: {succeeded} ok, {failed} failed"));
+    progress.success(format!(
+        "Sync all complete: {succeeded} ok, {failed} failed"
+    ));
     Ok(SyncAllOutcome {
         total,
         succeeded,
@@ -3319,30 +3321,34 @@ fn git_dirty(path: &Path) -> Result<bool, String> {
 }
 
 fn hash_directory(path: &Path) -> Result<String, String> {
-    profile_timing_result(format!("skills.hash_directory.{}", host_fs::display_path(path)), || {
-        let mut entries: Vec<PathBuf> = WalkDir::new(path)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_type().is_file())
-            .map(|entry| entry.path().to_path_buf())
-            .collect();
-        entries.sort();
-        let mut hasher = Sha256::new();
-        for file in entries {
-            if file.file_name().and_then(|name| name.to_str()) == Some(BUILTIN_HASHES_FILE) {
-                continue;
+    profile_timing_result(
+        format!("skills.hash_directory.{}", host_fs::display_path(path)),
+        || {
+            let mut entries: Vec<PathBuf> = WalkDir::new(path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_file())
+                .map(|entry| entry.path().to_path_buf())
+                .collect();
+            entries.sort();
+            let mut hasher = Sha256::new();
+            for file in entries {
+                if file.file_name().and_then(|name| name.to_str()) == Some(BUILTIN_HASHES_FILE) {
+                    continue;
+                }
+                let rel = file.strip_prefix(path).unwrap_or(&file).to_string_lossy();
+                hasher.update(rel.as_bytes());
+                hasher.update(b"\0");
+                let data = fs::read(&file).map_err(|err| {
+                    format!("Cannot read {}: {err}", host_fs::display_path(&file))
+                })?;
+                hasher.update(sha256_hex(&data).as_bytes());
+                hasher.update(b"\0");
             }
-            let rel = file.strip_prefix(path).unwrap_or(&file).to_string_lossy();
-            hasher.update(rel.as_bytes());
-            hasher.update(b"\0");
-            let data = fs::read(&file)
-                .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&file)))?;
-            hasher.update(sha256_hex(&data).as_bytes());
-            hasher.update(b"\0");
-        }
-        Ok(format!("{:x}", hasher.finalize()))
-    })
+            Ok(format!("{:x}", hasher.finalize()))
+        },
+    )
 }
 
 fn hash_file(path: &Path) -> Result<String, String> {
@@ -3891,9 +3897,13 @@ mod tests {
         rescan_source_in_registry(&mut registry, "beta").unwrap();
         save_registry_unlocked(&registry).unwrap();
 
-        let err =
-            skills_install_skill("alpha::shared".to_string(), "claude".to_string(), None, None)
-                .unwrap_err();
+        let err = skills_install_skill(
+            "alpha::shared".to_string(),
+            "claude".to_string(),
+            None,
+            None,
+        )
+        .unwrap_err();
 
         assert!(err.contains("skill_invalid"));
     }
@@ -4631,8 +4641,7 @@ mod tests {
     fn symlink_install_defaults_to_link_chain() {
         let _home = test_home();
         let created = skills_create_skill("linktest".to_string(), None).unwrap();
-        let outcome =
-            skills_install_skill(created.id, "claude".to_string(), None, None).unwrap();
+        let outcome = skills_install_skill(created.id, "claude".to_string(), None, None).unwrap();
         assert_eq!(outcome.install.mode, "symlink");
 
         let tool_target = install_target_path("claude", "linktest").unwrap();

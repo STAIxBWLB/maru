@@ -1316,7 +1316,11 @@ mod tests {
         );
         let preview = extract_hwpx_text_html(&hwpx).unwrap();
         assert_eq!(preview.sections, 1);
-        assert!(preview.html.contains("<p>제목입니다</p>"), "{}", preview.html);
+        assert!(
+            preview.html.contains("<p>제목입니다</p>"),
+            "{}",
+            preview.html
+        );
         assert!(
             preview.html.contains("&amp; HTML 이스케이프 &lt;b&gt;"),
             "{}",

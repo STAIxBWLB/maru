@@ -13,9 +13,7 @@ const FORBIDDEN_KEYS: &[&str] = &[
     "binary_payload",
 ];
 
-const REAL_NAME_PATTERNS: &[&str] = &[
-    "RISE", "KOICA", "TIU", "CHU", "제주한라",
-];
+const REAL_NAME_PATTERNS: &[&str] = &["RISE", "KOICA", "TIU", "CHU", "제주한라"];
 
 /// `Ok(())` on safe to send. `Err(reason)` when blocked.
 pub fn check_submit_gate(req: &HubSubmitGateRequest) -> Result<(), String> {

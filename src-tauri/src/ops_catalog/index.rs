@@ -21,10 +21,10 @@ pub struct CatalogEntry {
     pub title: String,
     pub business_unit: Option<String>,
     pub category: Option<DocCategory>,
-    pub deadline: Option<String>,         // YYYY-MM-DD
-    pub approval_status: Option<String>,  // draft|review|in_review|approved|...
-    pub evidence_kind: Option<String>,    // receipt|contract|...
-    pub last_updated: String,             // ISO8601
+    pub deadline: Option<String>,        // YYYY-MM-DD
+    pub approval_status: Option<String>, // draft|review|in_review|approved|...
+    pub evidence_kind: Option<String>,   // receipt|contract|...
+    pub last_updated: String,            // ISO8601
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,7 +61,11 @@ impl CatalogIndex {
             (None, None) => b.last_updated.cmp(&a.last_updated),
         });
 
-        let limit = if q.limit == 0 { filtered.len() } else { q.limit };
+        let limit = if q.limit == 0 {
+            filtered.len()
+        } else {
+            q.limit
+        };
         filtered.into_iter().take(limit).cloned().collect()
     }
 }

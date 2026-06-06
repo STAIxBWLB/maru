@@ -334,8 +334,8 @@ fn apply_template(work: &Path, item: &ImportItem) -> Result<(), String> {
 }
 
 fn apply_mcp(work: &Path, item: &ImportItem) -> Result<(), String> {
-    let raw =
-        fs::read_to_string(&item.origin_abs).map_err(|err| format!("Cannot read mcp.json: {err}"))?;
+    let raw = fs::read_to_string(&item.origin_abs)
+        .map_err(|err| format!("Cannot read mcp.json: {err}"))?;
     let mut value: JsonValue =
         serde_json::from_str(&raw).map_err(|err| format!("Cannot parse mcp.json: {err}"))?;
     if let JsonValue::Object(ref mut obj) = value {
@@ -466,7 +466,10 @@ fn yaml_to_json(value: &serde_yaml::Value) -> JsonValue {
             for (k, v) in map {
                 let key = match k {
                     serde_yaml::Value::String(s) => s.clone(),
-                    _ => serde_yaml::to_string(k).unwrap_or_default().trim().to_string(),
+                    _ => serde_yaml::to_string(k)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
                 };
                 obj.insert(key, yaml_to_json(v));
             }
@@ -489,7 +492,11 @@ pub fn apply_sys_import(
     let mut receipts: Vec<JsonValue> = Vec::new();
     let now = Utc::now().to_rfc3339();
 
-    let process = |item: ImportItem, applied: &mut Vec<ImportItem>, skipped: &mut Vec<ImportItem>, receipts: &mut Vec<JsonValue>| -> Result<(), String> {
+    let process = |item: ImportItem,
+                   applied: &mut Vec<ImportItem>,
+                   skipped: &mut Vec<ImportItem>,
+                   receipts: &mut Vec<JsonValue>|
+     -> Result<(), String> {
         if !allow.contains(&item.origin_rel) {
             skipped.push(item);
             return Ok(());
@@ -568,21 +575,13 @@ mod tests {
             "_sys/templates/meeting.md",
             "---\ntype: meeting\n---\n# Meeting Template\n\n## Agenda\n",
         );
-        write_file(
-            work,
-            "_sys/mcp.json",
-            "{\"servers\":{\"obsidian\":{}}}",
-        );
+        write_file(work, "_sys/mcp.json", "{\"servers\":{\"obsidian\":{}}}");
         write_file(
             work,
             "project-registry.yaml",
             "version: 1\ncategories:\n  - key: rise\n    label: RISE\n",
         );
-        write_file(
-            work,
-            "_sys/skills/SKILL_INDEX.md",
-            "# Skills Index\n",
-        );
+        write_file(work, "_sys/skills/SKILL_INDEX.md", "# Skills Index\n");
         write_file(
             work,
             "_sys/skills/skills/private/sample/SKILL.md",
@@ -620,7 +619,10 @@ mod tests {
             apply_sys_import(tmp.path().to_string_lossy().to_string(), plan, selected).unwrap();
         assert_eq!(receipt.applied.len(), 3); // 2 rules + 1 mcp
         assert!(tmp.path().join(".anchor/rules/ingest-chain.md").exists());
-        assert!(tmp.path().join(".anchor/rules/gitignore-policy.md").exists());
+        assert!(tmp
+            .path()
+            .join(".anchor/rules/gitignore-policy.md")
+            .exists());
         assert!(tmp.path().join(".anchor/mcp.json").exists());
         // Templates not selected → not written.
         assert!(!tmp.path().join(".anchor/templates/meeting.md").exists());

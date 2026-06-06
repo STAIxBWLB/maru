@@ -636,7 +636,10 @@ mod tests {
         let path = tmp.path().join("monitor.config.yaml");
         write_secret_file(&path, "telegram:\n  api_hash: secret\n").unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "secret file must be created 0600, not chmod'd later");
+        assert_eq!(
+            mode, 0o600,
+            "secret file must be created 0600, not chmod'd later"
+        );
         // Overwrites keep working and keep the restrictive mode.
         write_secret_file(&path, "telegram:\n  api_hash: rotated\n").unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;

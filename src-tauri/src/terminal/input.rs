@@ -484,7 +484,10 @@ mod tests {
     #[test]
     fn mouse_reports_require_an_active_mode() {
         let off = MouseModes::default();
-        assert_eq!(encode_mouse_input(&mouse(0, 4, 9, MouseAction::Press), off), None);
+        assert_eq!(
+            encode_mouse_input(&mouse(0, 4, 9, MouseAction::Press), off),
+            None
+        );
     }
 
     #[test]
@@ -555,8 +558,14 @@ mod tests {
             alt_key: false,
             ctrl_key: false,
         };
-        assert_eq!(encode_mouse_input(&up, modes), Some(b"\x1b[<64;1;1M".to_vec()));
-        assert_eq!(encode_mouse_input(&down, modes), Some(b"\x1b[<65;1;1M".to_vec()));
+        assert_eq!(
+            encode_mouse_input(&up, modes),
+            Some(b"\x1b[<64;1;1M".to_vec())
+        );
+        assert_eq!(
+            encode_mouse_input(&down, modes),
+            Some(b"\x1b[<65;1;1M".to_vec())
+        );
     }
 
     #[test]

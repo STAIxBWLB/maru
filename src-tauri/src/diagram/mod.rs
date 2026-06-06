@@ -107,11 +107,7 @@ fn extract_doc_title(file_path: &Path) -> String {
 }
 
 #[tauri::command]
-pub fn diagram_save_document(
-    workspace: String,
-    name: String,
-    body: String,
-) -> Result<(), String> {
+pub fn diagram_save_document(workspace: String, name: String, body: String) -> Result<(), String> {
     let path = diagram_file_path(&workspace, &name)?;
     let action = if path.is_file() {
         WorkspaceWriteAction::Modify
@@ -228,7 +224,9 @@ fn validate_export_target_path(target_path: &str, kind: &str) -> Result<PathBuf,
         _ => ext == expected,
     };
     if !ext_ok {
-        return Err(format!("Export path extension .{ext} does not match {expected}"));
+        return Err(format!(
+            "Export path extension .{ext} does not match {expected}"
+        ));
     }
     Ok(path)
 }
@@ -357,7 +355,9 @@ fn prune_snapshots(dir: &Path, cap: usize) -> Result<(), String> {
     for entry in read {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
         if !(name.starts_with("snapshot-") && name.ends_with(".json")) {
             continue;
         }
@@ -391,8 +391,12 @@ pub fn diagram_list_snapshots(
     for entry in read {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        let Some(stripped) = name.strip_prefix("snapshot-").and_then(|s| s.strip_suffix(".json"))
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(stripped) = name
+            .strip_prefix("snapshot-")
+            .and_then(|s| s.strip_suffix(".json"))
         else {
             continue;
         };
@@ -480,7 +484,10 @@ mod tests {
     #[test]
     fn delete_returns_false_when_missing() {
         let (_tmp, work) = setup_workspace();
-        assert_eq!(diagram_delete_document(work, "ghost".into()).unwrap(), false);
+        assert_eq!(
+            diagram_delete_document(work, "ghost".into()).unwrap(),
+            false
+        );
     }
 
     #[test]
@@ -515,8 +522,13 @@ mod tests {
     #[test]
     fn export_blob_writes_png_file() {
         let (_tmp, work) = setup_workspace();
-        let path = diagram_export_blob(work, "demo".into(), "png".into(), vec![0x89, 0x50, 0x4e, 0x47])
-            .unwrap();
+        let path = diagram_export_blob(
+            work,
+            "demo".into(),
+            "png".into(),
+            vec![0x89, 0x50, 0x4e, 0x47],
+        )
+        .unwrap();
         assert!(path.ends_with("/diagrams/demo.png") || path.contains("\\diagrams\\demo.png"));
         let bytes = fs::read(&path).unwrap();
         assert_eq!(&bytes, &[0x89, 0x50, 0x4e, 0x47]);
@@ -602,12 +614,8 @@ mod tests {
     #[test]
     fn snapshot_rejects_bad_ts() {
         let (_tmp, work) = setup_workspace();
-        assert!(diagram_save_snapshot(
-            work,
-            "doc".into(),
-            "../escape".into(),
-            "{}".into()
-        )
-        .is_err());
+        assert!(
+            diagram_save_snapshot(work, "doc".into(), "../escape".into(), "{}".into()).is_err()
+        );
     }
 }

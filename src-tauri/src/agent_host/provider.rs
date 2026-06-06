@@ -418,7 +418,10 @@ mod tests {
             "plan".to_string(),
         );
         let response = adapter
-            .complete(completion_request("PROMPT-MARKER", dir.path().to_str().unwrap()))
+            .complete(completion_request(
+                "PROMPT-MARKER",
+                dir.path().to_str().unwrap(),
+            ))
             .unwrap();
         assert_eq!(response.content.trim(), "PROMPT-MARKER");
         assert_eq!(response.provider, "codex");
@@ -464,7 +467,10 @@ mod tests {
     #[test]
     fn permission_mode_normalizes_unknown_to_plan() {
         assert_eq!(normalize_permission_mode("acceptEdits"), "acceptEdits");
-        assert_eq!(normalize_permission_mode("bypassPermissions"), "bypassPermissions");
+        assert_eq!(
+            normalize_permission_mode("bypassPermissions"),
+            "bypassPermissions"
+        );
         assert_eq!(normalize_permission_mode("default"), "default");
         assert_eq!(normalize_permission_mode(""), "plan");
         assert_eq!(normalize_permission_mode("nonsense"), "plan");
@@ -510,7 +516,9 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert!(plan_args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(plan_args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
 
         let (write_cmd, _stdin) = build_cli_command(
             CliProviderKind::Codex,

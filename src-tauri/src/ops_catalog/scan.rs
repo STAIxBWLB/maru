@@ -138,7 +138,10 @@ fn collect_bu_configs(
     warnings: &mut Vec<String>,
 ) -> HashMap<String, BuConfig> {
     let mut out: HashMap<String, BuConfig> = HashMap::new();
-    let bases = [workspace_root.join("projects"), workspace_root.join("admin")];
+    let bases = [
+        workspace_root.join("projects"),
+        workspace_root.join("admin"),
+    ];
 
     for base in bases.iter() {
         if !base.exists() {
@@ -161,10 +164,7 @@ fn collect_bu_configs(
             {
                 match parse_bu_config(p) {
                     Ok(cfg) => {
-                        let bu_root = p
-                            .parent()
-                            .and_then(|x| x.parent())
-                            .map(|x| x.to_path_buf());
+                        let bu_root = p.parent().and_then(|x| x.parent()).map(|x| x.to_path_buf());
                         if let Some(bu_root) = bu_root {
                             let resolved = resolve_tree_map(&cfg, &bu_root, workspace_root);
                             out.insert(
@@ -287,9 +287,7 @@ fn scan_inbox_pending(workspace_root: &Path, out: &mut Vec<CatalogEntry>) -> io:
     Ok(())
 }
 
-fn extract_manifest_meta(
-    manifest_path: &Path,
-) -> (Option<String>, Option<String>, Option<String>) {
+fn extract_manifest_meta(manifest_path: &Path) -> (Option<String>, Option<String>, Option<String>) {
     let text = match std::fs::read_to_string(manifest_path) {
         Ok(t) => t,
         Err(_) => return (None, None, None),
@@ -587,11 +585,7 @@ fn extract_bu(fm: &Option<YamlValue>) -> Option<String> {
 }
 
 fn parse_iso_date(s: &str) -> Option<NaiveDate> {
-    let date_prefix = if s.len() >= 10 {
-        s.get(..10)?
-    } else {
-        s
-    };
+    let date_prefix = if s.len() >= 10 { s.get(..10)? } else { s };
     NaiveDate::parse_from_str(date_prefix, "%Y-%m-%d").ok()
 }
 
@@ -644,7 +638,13 @@ fn is_excluded_dir_for_bu_scan(p: &Path) -> bool {
         if parent.file_name().map_or(false, |n| n == ".anchor") {
             return matches!(
                 name.as_ref(),
-                "cache" | "runs" | "queue" | "studio" | "evidence-stage" | "certification" | "versions"
+                "cache"
+                    | "runs"
+                    | "queue"
+                    | "studio"
+                    | "evidence-stage"
+                    | "certification"
+                    | "versions"
             );
         }
     }
@@ -674,15 +674,20 @@ fn category_for_doc_type(dt: &str) -> Option<DocCategory> {
     Some(match dt {
         "business-plan" | "annual-report" | "interim-report" | "quarterly-report"
         | "monthly-report" | "self-evaluation" | "final-report" => DocCategory::FormalReport,
-        "internal-approval" | "external-dispatch" | "expense-request"
-        | "procurement-request" | "official-letter" => DocCategory::AdminApproval,
-        "evidence-receipt" | "evidence-contract" | "evidence-invoice"
-        | "evidence-payment" | "evidence-attendance" | "evidence-certificate"
+        "internal-approval"
+        | "external-dispatch"
+        | "expense-request"
+        | "procurement-request"
+        | "official-letter" => DocCategory::AdminApproval,
+        "evidence-receipt"
+        | "evidence-contract"
+        | "evidence-invoice"
+        | "evidence-payment"
+        | "evidence-attendance"
+        | "evidence-certificate"
         | "certification-bundle" => DocCategory::EvidenceCert,
-        "meeting-minutes" | "trip-plan" | "trip-report" | "event-plan" | "event-report"
-        | "mou" | "change-request" | "proposal" | "spec" | "guide" | "readme" => {
-            DocCategory::Operations
-        }
+        "meeting-minutes" | "trip-plan" | "trip-report" | "event-plan" | "event-report" | "mou"
+        | "change-request" | "proposal" | "spec" | "guide" | "readme" => DocCategory::Operations,
         _ => return None,
     })
 }
@@ -828,9 +833,15 @@ mod tests {
     #[test]
     fn evidence_zone_detection() {
         let cases = [
-            ("projects/x/03-evidence-cert/2026/receipts/foo.pdf", "receipt"),
+            (
+                "projects/x/03-evidence-cert/2026/receipts/foo.pdf",
+                "receipt",
+            ),
             ("projects/y/04-evidence/contracts/bar.pdf", "contract"),
-            ("admin/innovation/03-evidence-cert/invoices/baz.pdf", "invoice"),
+            (
+                "admin/innovation/03-evidence-cert/invoices/baz.pdf",
+                "invoice",
+            ),
         ];
         for (path, expected) in cases {
             assert_eq!(guess_evidence_kind(path), expected, "path={}", path);

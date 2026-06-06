@@ -7,19 +7,22 @@
 //
 // Cache: <workspace>/.anchor/cache/catalog.json (gitignored)
 
-pub mod scan;
 pub mod index;
+pub mod scan;
 pub mod watcher;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub use scan::{CatalogScanReport, scan_catalog_impl};
-pub use index::{CatalogIndex, CatalogEntry, CatalogQuery};
+pub use index::{CatalogEntry, CatalogIndex, CatalogQuery};
+pub use scan::{scan_catalog_impl, CatalogScanReport};
 
 /// Operations Catalog 캐시 경로 헬퍼.
 pub(crate) fn catalog_cache_path(workspace_root: &std::path::Path) -> PathBuf {
-    workspace_root.join(".anchor").join("cache").join("catalog.json")
+    workspace_root
+        .join(".anchor")
+        .join("cache")
+        .join("catalog.json")
 }
 
 /// 4 doc categories (frontmatter-schema.md §3).
@@ -103,9 +106,7 @@ pub struct CatalogDrilldownResponse {
 }
 
 #[tauri::command]
-pub fn catalog_drilldown(
-    req: CatalogDrilldownRequest,
-) -> Result<CatalogDrilldownResponse, String> {
+pub fn catalog_drilldown(req: CatalogDrilldownRequest) -> Result<CatalogDrilldownResponse, String> {
     let root = PathBuf::from(&req.workspace_root);
     index::drilldown_impl(&root, &req.entry_path).map_err(|e| e.to_string())
 }

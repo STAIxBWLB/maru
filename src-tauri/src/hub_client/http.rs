@@ -154,9 +154,14 @@ pub(crate) fn fetch_with_cache(
         }
         Some((body, new_etag)) => {
             let ttl = cfg.cache_ttl_seconds();
-            if let Err(e) =
-                cache::save_resource(&cfg.cache_root, resource, params, &body, new_etag.clone(), ttl)
-            {
+            if let Err(e) = cache::save_resource(
+                &cfg.cache_root,
+                resource,
+                params,
+                &body,
+                new_etag.clone(),
+                ttl,
+            ) {
                 eprintln!("[hub_client] cache save failed: {}", e);
             }
             Ok(HubFetchResponse {
@@ -176,10 +181,26 @@ mod tests {
     #[test]
     fn build_url_kebab_cases() {
         let cases = [
-            ("https://h/api/v1", "business_units", "https://h/api/v1/business-units"),
-            ("https://h/api/v1/", "templates", "https://h/api/v1/templates"),
-            ("https://h/api/v1", "templates/abc/render-spec", "https://h/api/v1/templates/abc/render-spec"),
-            ("https://h/api/v1", "evidence_index", "https://h/api/v1/evidence-index"),
+            (
+                "https://h/api/v1",
+                "business_units",
+                "https://h/api/v1/business-units",
+            ),
+            (
+                "https://h/api/v1/",
+                "templates",
+                "https://h/api/v1/templates",
+            ),
+            (
+                "https://h/api/v1",
+                "templates/abc/render-spec",
+                "https://h/api/v1/templates/abc/render-spec",
+            ),
+            (
+                "https://h/api/v1",
+                "evidence_index",
+                "https://h/api/v1/evidence-index",
+            ),
         ];
         for (endpoint, res, expected) in cases {
             assert_eq!(build_url(endpoint, res), expected, "res={res}");

@@ -161,8 +161,8 @@ pub fn plan_bundle(
     };
 
     let manifest_path = bundle_dir.join("manifest.yaml");
-    let yaml = serde_yaml::to_string(&manifest)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let yaml =
+        serde_yaml::to_string(&manifest).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     std::fs::write(&manifest_path, yaml)?;
 
     Ok((manifest_path, manifest))
@@ -375,8 +375,7 @@ mod tests {
         let output = tmp.path().join("draft.exports/draft.docx");
         std::fs::create_dir_all(output.parent().unwrap()).unwrap();
         std::fs::write(&output, b"fake docx bytes").unwrap();
-        let manifest =
-            record_output_success(&manifest_path, ExportFormat::Docx, &output).unwrap();
+        let manifest = record_output_success(&manifest_path, ExportFormat::Docx, &output).unwrap();
         let docx = manifest
             .outputs
             .iter()
@@ -415,8 +414,7 @@ mod tests {
         // Idempotent + recovery: a failed entry can be re-marked successful
         // on the next conversion attempt without manual cleanup.
         let (tmp, _source, manifest_path) = fresh_bundle();
-        record_output_failure(&manifest_path, ExportFormat::Docx, "first attempt failed")
-            .unwrap();
+        record_output_failure(&manifest_path, ExportFormat::Docx, "first attempt failed").unwrap();
         let output = tmp.path().join("draft.exports/draft.docx");
         std::fs::create_dir_all(output.parent().unwrap()).unwrap();
         std::fs::write(&output, b"retry").unwrap();

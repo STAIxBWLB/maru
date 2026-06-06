@@ -196,11 +196,26 @@ mod tests {
 
     #[test]
     fn relative_day_words_default_to_nine_am() {
-        assert_eq!(parse_korean_date("오늘", now()), Some(ymd_hms(2026, 4, 28, 9, 0)));
-        assert_eq!(parse_korean_date("내일", now()), Some(ymd_hms(2026, 4, 29, 9, 0)));
-        assert_eq!(parse_korean_date("어제", now()), Some(ymd_hms(2026, 4, 27, 9, 0)));
-        assert_eq!(parse_korean_date("모레", now()), Some(ymd_hms(2026, 4, 30, 9, 0)));
-        assert_eq!(parse_korean_date("글피", now()), Some(ymd_hms(2026, 5, 1, 9, 0)));
+        assert_eq!(
+            parse_korean_date("오늘", now()),
+            Some(ymd_hms(2026, 4, 28, 9, 0))
+        );
+        assert_eq!(
+            parse_korean_date("내일", now()),
+            Some(ymd_hms(2026, 4, 29, 9, 0))
+        );
+        assert_eq!(
+            parse_korean_date("어제", now()),
+            Some(ymd_hms(2026, 4, 27, 9, 0))
+        );
+        assert_eq!(
+            parse_korean_date("모레", now()),
+            Some(ymd_hms(2026, 4, 30, 9, 0))
+        );
+        assert_eq!(
+            parse_korean_date("글피", now()),
+            Some(ymd_hms(2026, 5, 1, 9, 0))
+        );
     }
 
     #[test]

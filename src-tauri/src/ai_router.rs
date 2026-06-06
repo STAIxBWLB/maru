@@ -20,12 +20,10 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
-use crate::win_process::NoWindow;
-use crate::agent_host::provider::{
-    build_cli_command, normalize_permission_mode, CliProviderKind,
-};
+use crate::agent_host::provider::{build_cli_command, normalize_permission_mode, CliProviderKind};
 use crate::cli_path::{augmented_path, merge_path_env};
 use crate::mission_state;
+use crate::win_process::NoWindow;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,12 +226,14 @@ fn spawn_streaming_invocation(
         }
     }
 
-    let stdout = child.stdout.take().ok_or_else(|| {
-        "stdout_capture_failed: subprocess produced no stdout handle".to_string()
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        "stderr_capture_failed: subprocess produced no stderr handle".to_string()
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "stdout_capture_failed: subprocess produced no stdout handle".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "stderr_capture_failed: subprocess produced no stderr handle".to_string())?;
 
     spawn_line_pump(
         app.clone(),
@@ -337,7 +337,8 @@ mod tests {
 
     #[test]
     fn build_agent_command_rejects_empty_prompt() {
-        let err = build_agent_command("claude", "   \n\t  ", Some("/tmp"), None, "plan").unwrap_err();
+        let err =
+            build_agent_command("claude", "   \n\t  ", Some("/tmp"), None, "plan").unwrap_err();
         assert_eq!(err, "completion_prompt_required");
     }
 

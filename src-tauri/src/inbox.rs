@@ -608,7 +608,12 @@ fn apply_inbox_decision_at(
             let target = unique_path(done_root.join(&dir_name));
             move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
             append_inbox_receipt(root, config, "route", decision, &dir_name, Some(&target));
-            Ok(decision_outcome(&decision.item_dir, "accepted", &item_dir, Some(&target)))
+            Ok(decision_outcome(
+                &decision.item_dir,
+                "accepted",
+                &item_dir,
+                Some(&target),
+            ))
         }
         "reject" => {
             let channel = read_manifest_channel(&manifest_path);
@@ -618,7 +623,12 @@ fn apply_inbox_decision_at(
             let target = unique_path(rejected_dir.join(&dir_name));
             move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
             append_inbox_receipt(root, config, "reject", decision, &dir_name, Some(&target));
-            Ok(decision_outcome(&decision.item_dir, "rejected", &item_dir, Some(&target)))
+            Ok(decision_outcome(
+                &decision.item_dir,
+                "rejected",
+                &item_dir,
+                Some(&target),
+            ))
         }
         other => Err(format!("inbox_unsupported_decision: {other}")),
     }
@@ -648,11 +658,13 @@ fn file_raw_originals(
     }
     fs::create_dir_all(dest_dir)
         .map_err(|err| format!("Cannot create destination directory: {err}"))?;
-    for entry in fs::read_dir(&raw_dir).map_err(|err| format!("Cannot read raw directory: {err}"))? {
+    for entry in
+        fs::read_dir(&raw_dir).map_err(|err| format!("Cannot read raw directory: {err}"))?
+    {
         let entry = entry.map_err(|err| format!("Cannot read raw entry: {err}"))?;
         let path = entry.path();
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|err| format!("Cannot inspect raw entry: {err}"))?;
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|err| format!("Cannot inspect raw entry: {err}"))?;
         if metadata.file_type().is_symlink() {
             return Err(format!(
                 "Source symlinks are not supported: {}",
@@ -680,8 +692,8 @@ fn file_raw_originals(
 
 /// Set `status:` in a pending manifest, preserving all other keys.
 fn set_manifest_status(manifest_path: &Path, status: &str) -> Result<(), String> {
-    let raw = fs::read_to_string(manifest_path)
-        .map_err(|err| format!("Cannot read manifest: {err}"))?;
+    let raw =
+        fs::read_to_string(manifest_path).map_err(|err| format!("Cannot read manifest: {err}"))?;
     let mut value: YamlValue =
         serde_yaml::from_str(&raw).map_err(|err| format!("Cannot parse manifest: {err}"))?;
     if let YamlValue::Mapping(map) = &mut value {
@@ -1114,7 +1126,10 @@ fn read_source_runs_with_config(
             let Some(channel) = parsed.channel.clone() else {
                 continue;
             };
-            match cursors.iter_mut().find(|(existing, _)| *existing == channel) {
+            match cursors
+                .iter_mut()
+                .find(|(existing, _)| *existing == channel)
+            {
                 Some(slot) => slot.1 = parsed,
                 None => cursors.push((channel, parsed)),
             }
@@ -1157,7 +1172,10 @@ fn read_source_runs_with_config(
                     note: yaml_string(fm, "note"),
                 },
             };
-            match digests.iter_mut().find(|existing| existing.channel == channel) {
+            match digests
+                .iter_mut()
+                .find(|existing| existing.channel == channel)
+            {
                 Some(slot)
                     if digest_generated_after(
                         &parsed.digest.generated_at,
@@ -2702,7 +2720,10 @@ inbox:
 
         let runs = read_inbox_source_runs(root.to_string_lossy().to_string()).unwrap();
 
-        let gws = runs.iter().find(|run| run.channel == "gws").expect("gws run");
+        let gws = runs
+            .iter()
+            .find(|run| run.channel == "gws")
+            .expect("gws run");
         // Newer cursor line wins.
         assert_eq!(gws.items_new, Some(7));
         assert_eq!(gws.items_fetched, Some(31));
@@ -2741,8 +2762,7 @@ inbox:
         write_processed_item(root, "failed", "c", "mso", "P", "summary c");
         write_processed_item(root, "duplicate", "d", "kakao", "P", "summary d");
 
-        let counts =
-            count_inbox_processed_by_channel(root.to_string_lossy().to_string()).unwrap();
+        let counts = count_inbox_processed_by_channel(root.to_string_lossy().to_string()).unwrap();
 
         assert_eq!(counts.get("gws"), Some(&2));
         assert_eq!(counts.get("mso"), Some(&1));
@@ -2761,7 +2781,10 @@ inbox:
             &Some("2026-05-20T09:00:00+09:00".to_string()),
             &Some("2026-05-20T00:30:00Z".to_string()),
         ));
-        assert!(digest_generated_after(&Some("2026-05-20T00:00:00Z".to_string()), &None));
+        assert!(digest_generated_after(
+            &Some("2026-05-20T00:00:00Z".to_string()),
+            &None
+        ));
     }
 
     #[test]
@@ -3230,11 +3253,7 @@ inbox:
 
         let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
         let fallback_label = apply_inbox_error_decision_label(&decision.decision);
-        let outcome = error_outcome(
-            decision.item_dir.clone(),
-            fallback_label,
-            err,
-        );
+        let outcome = error_outcome(decision.item_dir.clone(), fallback_label, err);
 
         assert!(!outcome.ok);
         assert_eq!(outcome.decision, "pending");
@@ -3244,8 +3263,12 @@ inbox:
             .as_deref()
             .is_some_and(|err| err.contains("inbox_unsupported_decision")));
         assert!(item.exists());
-        assert!(!root.join("inbox/items/done/260604-kakao-unsupported").exists());
-        assert!(!root.join("rejected/kakao/260604-kakao-unsupported").exists());
+        assert!(!root
+            .join("inbox/items/done/260604-kakao-unsupported")
+            .exists());
+        assert!(!root
+            .join("rejected/kakao/260604-kakao-unsupported")
+            .exists());
     }
 
     #[test]
@@ -3386,7 +3409,11 @@ inbox:
         fs::write(root.join("workspace.config.yaml"), APPLY_CONFIG).unwrap();
         let stray = root.join("inbox/items/done/stray");
         fs::create_dir_all(&stray).unwrap();
-        fs::write(stray.join("manifest.yaml"), "id: x\nstatus: done\nchannel: kakao\n").unwrap();
+        fs::write(
+            stray.join("manifest.yaml"),
+            "id: x\nstatus: done\nchannel: kakao\n",
+        )
+        .unwrap();
 
         let config = inbox_settings::load_runtime_config_or_legacy(&root).unwrap();
         let inbox_root = inbox_settings::resolve_runtime_root(&root, &config).unwrap();

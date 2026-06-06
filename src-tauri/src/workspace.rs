@@ -228,10 +228,10 @@ fn resolve_config_path(raw: Option<&str>) -> (Option<String>, bool) {
 }
 
 fn read_workspace_config_at(path: &Path) -> Result<WorkspaceConfig, String> {
-    let content =
-        fs::read_to_string(path).map_err(|err| format!("Cannot read workspace.config.yaml: {err}"))?;
-    let mut config: WorkspaceConfig =
-        serde_yaml::from_str(&content).map_err(|err| format!("Cannot parse workspace.config.yaml: {err}"))?;
+    let content = fs::read_to_string(path)
+        .map_err(|err| format!("Cannot read workspace.config.yaml: {err}"))?;
+    let mut config: WorkspaceConfig = serde_yaml::from_str(&content)
+        .map_err(|err| format!("Cannot parse workspace.config.yaml: {err}"))?;
     // Sanitize: strip known string path whitespace.
     if let Some(p) = config.paths.primary.as_mut() {
         *p = p.trim().to_string();
@@ -312,7 +312,10 @@ pub fn read_workspace_config(work_path: String) -> Result<WorkspaceConfig, Strin
     let work = canonicalize_or_self(&PathBuf::from(&work_path));
     let config_path = work.join(CONFIG_FILE);
     if !config_path.exists() {
-        return Err(format!("workspace.config.yaml not found at {}", config_path.display()));
+        return Err(format!(
+            "workspace.config.yaml not found at {}",
+            config_path.display()
+        ));
     }
     read_workspace_config_at(&config_path)
 }
@@ -381,7 +384,11 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
 
     let mut registered_public_paths: Vec<String> = Vec::new();
     if let Some(detected) = detected.as_ref() {
-        for public in detected.public_workspaces.iter().filter(|workspace| workspace.exists) {
+        for public in detected
+            .public_workspaces
+            .iter()
+            .filter(|workspace| workspace.exists)
+        {
             let role = public.role.clone();
             upsert_workspace_root(WorkspaceRootEntry {
                 label: public.label.clone(),
@@ -417,8 +424,7 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
         set_owner_name(&private_path, Some(owner))?;
     }
 
-    let workspace_registry =
-        set_active_workspace_root(private.clone(), "private".to_string())?;
+    let workspace_registry = set_active_workspace_root(private.clone(), "private".to_string())?;
 
     Ok(RegisterOutcome {
         workspace_registry,
@@ -434,15 +440,15 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>, String> {
     let mut by_root: BTreeMap<String, WorkspaceSummary> = BTreeMap::new();
     for entry in registry.workspaces {
         let root = entry.path.clone();
-        let summary = by_root.entry(root.clone()).or_insert_with(|| {
-            WorkspaceSummary {
+        let summary = by_root
+            .entry(root.clone())
+            .or_insert_with(|| WorkspaceSummary {
                 root: root.clone(),
                 private_label: None,
                 private_path: None,
                 public_label: None,
                 public_path: None,
-            }
-        });
+            });
         match entry.visibility.as_str() {
             "private" => {
                 summary.private_label = Some(entry.label.clone());
@@ -504,7 +510,11 @@ mod tests {
             .expect("workspace.config.yaml must be detected");
         assert_eq!(detected.config.version, 1);
         assert_eq!(
-            detected.config.owner.as_ref().and_then(|o| o.name.as_deref()),
+            detected
+                .config
+                .owner
+                .as_ref()
+                .and_then(|o| o.name.as_deref()),
             Some("이영준")
         );
         assert!(detected.resolved_private_exists);
@@ -555,8 +565,14 @@ mod tests {
             Some(canonical_drive.to_str().unwrap())
         );
         assert_eq!(detected.public_workspaces[0].provider, "googleDrive");
-        assert_eq!(detected.public_workspaces[0].provider_id.as_deref(), Some("drive-1"));
-        assert_eq!(detected.public_workspaces[0].role.as_deref(), Some("contentManager"));
+        assert_eq!(
+            detected.public_workspaces[0].provider_id.as_deref(),
+            Some("drive-1")
+        );
+        assert_eq!(
+            detected.public_workspaces[0].role.as_deref(),
+            Some("contentManager")
+        );
         assert_eq!(detected.public_workspaces[1].provider, "sharePoint");
         assert_eq!(detected.public_workspaces[1].write_policy, "readOnly");
     }

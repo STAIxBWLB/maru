@@ -171,7 +171,13 @@ mod tests {
         .unwrap();
         append_run_event(
             &cwd,
-            &new_run_event("ai-export", "proposal.created", "anchor.structured_loop", json!({}), None),
+            &new_run_event(
+                "ai-export",
+                "proposal.created",
+                "anchor.structured_loop",
+                json!({}),
+                None,
+            ),
         )
         .unwrap();
         let target = tmp.path().join("export").join("summary.json");

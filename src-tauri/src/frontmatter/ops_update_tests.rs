@@ -1,4 +1,3 @@
-
 use super::{update_frontmatter_content, FrontmatterValue};
 
 struct UpdateCase<'a> {

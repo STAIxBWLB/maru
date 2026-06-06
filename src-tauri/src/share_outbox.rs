@@ -353,7 +353,12 @@ pub fn prepare_share_outbox_files(
             .arg(&source)
             .arg("--config")
             .arg(&config_path);
-        if let Some(title) = src.title.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(title) = src
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             cmd.arg("--title").arg(title);
         }
         if let Some(author) = options
@@ -389,9 +394,10 @@ pub fn prepare_share_outbox_files(
                 &output.stderr,
                 options.dry_run,
             )),
-            Err(err) => {
-                results.push(ShareOutboxResult::failure(&src.path, format!("spawn_failed: {err}")))
-            }
+            Err(err) => results.push(ShareOutboxResult::failure(
+                &src.path,
+                format!("spawn_failed: {err}"),
+            )),
         }
     }
     Ok(results)
@@ -450,7 +456,11 @@ fn build_config_view(work: &Path, yaml: Option<&YamlValue>) -> ShareOutboxConfig
     let root_raw = map.and_then(|m| string_field(m, "root"));
     let resolved = root_raw.as_deref().and_then(|r| resolve_root(work, r));
     let (root_resolved, root_exists, inside) = match &resolved {
-        Some((_, abs, inside)) => (Some(abs.to_string_lossy().to_string()), abs.is_dir(), *inside),
+        Some((_, abs, inside)) => (
+            Some(abs.to_string_lossy().to_string()),
+            abs.is_dir(),
+            *inside,
+        ),
         None => (None, false, false),
     };
     let missing_keys: Vec<String> = REQUIRED_KEYS
@@ -736,7 +746,10 @@ sync:
             new_root.to_string_lossy().to_string(),
         )
         .unwrap();
-        assert_eq!(view.root.as_deref(), Some(new_root.to_string_lossy().as_ref()));
+        assert_eq!(
+            view.root.as_deref(),
+            Some(new_root.to_string_lossy().as_ref())
+        );
         assert!(view.inside_workspace);
         assert!(view.has_required_config);
 
@@ -808,10 +821,9 @@ sync:
 
     #[test]
     fn config_view_reports_missing_keys() {
-        let yaml: YamlValue = serde_yaml::from_str(
-            "share_outbox:\n  root: shared\n  timezone: Asia/Seoul\n",
-        )
-        .unwrap();
+        let yaml: YamlValue =
+            serde_yaml::from_str("share_outbox:\n  root: shared\n  timezone: Asia/Seoul\n")
+                .unwrap();
         let work = PathBuf::from("/tmp/ws");
         let view = build_config_view(&work, Some(&yaml));
         assert!(view.present);
@@ -871,7 +883,10 @@ not json
             false,
         );
         assert!(!json_err.ok);
-        assert_eq!(json_err.error.as_deref(), Some("Outgoing title has no Hangul."));
+        assert_eq!(
+            json_err.error.as_deref(),
+            Some("Outgoing title has no Hangul.")
+        );
 
         let raw_err = parse_one("/src.docx", false, b"", b"Traceback: boom", false);
         assert!(!raw_err.ok);

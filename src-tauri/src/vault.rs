@@ -52,9 +52,7 @@ fn markdown_markup_re() -> &'static Regex {
 
 fn wikilink_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]").expect("valid wikilink regex")
-    })
+    RE.get_or_init(|| Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]").expect("valid wikilink regex"))
 }
 
 fn push_wikilinks_from_str(s: &str, out: &mut Vec<String>) {
@@ -722,9 +720,18 @@ mod tests {
         assert_eq!(entries.len(), 1);
         let links = &entries[0].links;
         assert!(links.contains(&"Charlie".to_string()), "body links surface");
-        assert!(links.contains(&"Delta".to_string()), "pipe alias keeps target");
-        assert!(links.contains(&"Alpha".to_string()), "frontmatter scalar links surface");
-        assert!(links.contains(&"Bravo".to_string()), "frontmatter list links surface");
+        assert!(
+            links.contains(&"Delta".to_string()),
+            "pipe alias keeps target"
+        );
+        assert!(
+            links.contains(&"Alpha".to_string()),
+            "frontmatter scalar links surface"
+        );
+        assert!(
+            links.contains(&"Bravo".to_string()),
+            "frontmatter list links surface"
+        );
         assert_eq!(
             links.iter().filter(|t| *t == "Charlie").count(),
             1,

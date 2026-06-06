@@ -96,7 +96,10 @@ mod tests {
         let work = dir.path();
         write(&work.join("tasks/active/a.md"), "본문에 주간점검 단어");
         write(&work.join("tasks/active/b.md"), "irrelevant content");
-        write(&work.join("meetings/2026/2026-05/05-14 회의 - 주간.md"), "Body text WITH 주간점검 KEY");
+        write(
+            &work.join("meetings/2026/2026-05/05-14 회의 - 주간.md"),
+            "Body text WITH 주간점검 KEY",
+        );
         let hits = search_calendar_notes(
             work.to_string_lossy().into_owned(),
             vec!["tasks".into(), "meetings".into()],

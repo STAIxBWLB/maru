@@ -19,9 +19,7 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::event_store::{append_run_event_payload, validate_run_id};
-use crate::agent_host::provider::{
-    normalize_permission_mode, CliProviderAdapter, CliProviderKind,
-};
+use crate::agent_host::provider::{normalize_permission_mode, CliProviderAdapter, CliProviderKind};
 use crate::agent_host::roles::{run_five_role_loop, FiveRoleLoopInput};
 use crate::ai_router::{AiDoneEvent, AiErrorEvent};
 use crate::mission_state;
