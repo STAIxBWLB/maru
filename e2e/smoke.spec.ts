@@ -772,7 +772,9 @@ test("copies selected Files shelf items into a tree context target", async ({ pa
   });
   await expect(weeklyItem).toBeVisible();
   await expect(templateItem).toBeVisible();
-  await weeklyItem.click({ modifiers: ["Shift"] });
+  await weeklyItem.click();
+  await templateItem.click({ modifiers: ["Meta"] });
+  await expect(rightPane.getByRole("button", { name: "선택 항목 2개 비우기" })).toBeEnabled();
 
   await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "선택 항목 2개 여기에 복사" }).click();
