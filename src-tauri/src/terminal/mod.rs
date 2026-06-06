@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
 pub use input::{encode_mouse_input, encode_terminal_input, TerminalInputCommand};
 
-use self::model::{write_shared, SharedTerminalWriter, TerminalModel};
+use self::model::{write_shared, SearchDirection, SharedTerminalWriter, TerminalModel};
 
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_ROWS: u16 = 30;
@@ -51,6 +51,18 @@ struct TerminalCommandSpec {
 pub struct TerminalExitEvent {
     pub session_id: String,
     pub exit_code: Option<i32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSearchResult {
+    pub session_id: String,
+    pub query: String,
+    pub found: bool,
+    pub row: Option<usize>,
+    pub col: Option<usize>,
+    pub length: usize,
+    pub display_offset: usize,
 }
 
 #[tauri::command]
@@ -249,6 +261,58 @@ pub fn terminal_scroll(
     };
     let _ = app.emit("terminal://frame", frame);
     Ok(())
+}
+
+#[tauri::command]
+pub fn terminal_text(
+    state: State<'_, TerminalState>,
+    session_id: String,
+) -> Result<String, String> {
+    let session = get_session(&state, &session_id)?;
+    let model = session
+        .model
+        .lock()
+        .map_err(|_| "terminal_model_poisoned".to_string())?;
+    Ok(model.text())
+}
+
+#[tauri::command]
+pub fn terminal_search(
+    app: AppHandle,
+    state: State<'_, TerminalState>,
+    session_id: String,
+    query: String,
+    direction: Option<String>,
+    case_sensitive: Option<bool>,
+) -> Result<TerminalSearchResult, String> {
+    let session = get_session(&state, &session_id)?;
+    let direction = match direction.as_deref() {
+        Some("previous") => SearchDirection::Previous,
+        _ => SearchDirection::Next,
+    };
+    let (hit, frame) = {
+        let mut model = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        let hit = model.search(&query, direction, case_sensitive.unwrap_or(false));
+        let frame = model.snapshot(&session_id);
+        (hit, frame)
+    };
+    let display_offset = hit
+        .as_ref()
+        .map(|item| item.display_offset)
+        .unwrap_or(frame.display_offset);
+    let _ = app.emit("terminal://frame", frame);
+    Ok(TerminalSearchResult {
+        session_id,
+        query,
+        found: hit.is_some(),
+        row: hit.as_ref().map(|item| item.row),
+        col: hit.as_ref().map(|item| item.col),
+        length: hit.as_ref().map(|item| item.length).unwrap_or(0),
+        display_offset,
+    })
 }
 
 #[tauri::command]

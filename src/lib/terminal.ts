@@ -115,6 +115,8 @@ export const EMPTY_TERMINAL_STATE: TerminalTabsState = {
   activeTaskId: null,
 };
 
+export const TERMINAL_STORAGE_KEY = "anchor:terminal:v1";
+
 export interface CreateTerminalTabOptions {
   taskId?: string | null;
   cwd?: string | null;
@@ -555,6 +557,34 @@ export function hydrateTerminalStateFromPersisted(
   const activeTaskId = tasks[0]?.id ?? null;
   const activeTabId = tabs.find((tab) => tab.taskId === activeTaskId)?.id ?? null;
   return { tasks, tabs, activeTaskId, activeTabId };
+}
+
+export function loadPersistedTerminalState(): TerminalTabsState {
+  if (typeof window === "undefined") return EMPTY_TERMINAL_STATE;
+  try {
+    const raw = window.localStorage.getItem(TERMINAL_STORAGE_KEY);
+    if (!raw) return EMPTY_TERMINAL_STATE;
+    return hydrateTerminalStateFromPersisted(JSON.parse(raw));
+  } catch {
+    return EMPTY_TERMINAL_STATE;
+  }
+}
+
+export function persistTerminalState(state: TerminalTabsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      TERMINAL_STORAGE_KEY,
+      JSON.stringify(serializeTerminalState(state)),
+    );
+  } catch {
+    // localStorage may be unavailable (private mode); persistence is best-effort.
+  }
+}
+
+export function hasPersistedTerminalTabs(): boolean {
+  const state = loadPersistedTerminalState();
+  return state.tasks.length > 0 || state.tabs.length > 0;
 }
 
 /** Native resume args for an agent CLI given a captured session id. */

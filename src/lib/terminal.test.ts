@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   activeItemMention,
   buildAgentContextArgs,
@@ -10,9 +10,12 @@ import {
   describeActiveContextChip,
   EMPTY_TERMINAL_STATE,
   getTerminalSplitPaneTabs,
+  hasPersistedTerminalTabs,
   hydrateTerminalStateFromPersisted,
   isRelaunchableTab,
+  loadPersistedTerminalState,
   pathMention,
+  persistTerminalState,
   resolveExistingLaunchTaskId,
   selectTerminalSplitLeftTabId,
   selectTerminalTabByIndex,
@@ -46,6 +49,32 @@ function mouseMove(buttons: number): MouseEvent {
     buttons,
   } as MouseEvent;
 }
+
+function installLocalStorage() {
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      },
+    },
+  });
+  return store;
+}
+
+afterEach(() => {
+  delete (globalThis as { window?: unknown }).window;
+});
 
 describe("terminal tab reducer", () => {
   it("creates, switches, attaches, exits, and closes tabs", () => {
@@ -519,6 +548,18 @@ describe("terminal persistence", () => {
       sessions: [{ taskId: "missing", kind: "claude", title: "x", cwd: null, agentSessionId: null }],
     });
     expect(dropped.tabs).toHaveLength(0);
+  });
+
+  it("loads and detects persisted terminal tabs from localStorage", () => {
+    installLocalStorage();
+    expect(hasPersistedTerminalTabs()).toBe(false);
+
+    persistTerminalState(liveState());
+
+    expect(hasPersistedTerminalTabs()).toBe(true);
+    const restored = loadPersistedTerminalState();
+    expect(restored.tasks.map((task) => task.id)).toEqual(["task-1"]);
+    expect(restored.tabs).toHaveLength(1);
   });
 
   it("builds native agent resume args", () => {

@@ -138,6 +138,58 @@ pub fn snapshot_term(
     }
 }
 
+pub fn terminal_indexed_lines(term: &Term<TerminalEventProxy>) -> Vec<(i32, String)> {
+    let grid = term.grid();
+    let history = grid.history_size() as i32;
+    let rows = grid.screen_lines() as i32;
+    let mut lines = Vec::with_capacity((history + rows).max(0) as usize);
+    for line_index in -history..rows {
+        lines.push((line_index, terminal_line_text(term, line_index)));
+    }
+    lines
+}
+
+pub fn terminal_text(term: &Term<TerminalEventProxy>) -> String {
+    let mut lines: Vec<String> = terminal_indexed_lines(term)
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect();
+    while lines.first().is_some_and(|line| line.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn terminal_line_text(term: &Term<TerminalEventProxy>, line_index: i32) -> String {
+    let grid = term.grid();
+    let cols = grid.columns();
+    let line = &grid[Line(line_index)];
+    let mut text = String::with_capacity(cols);
+    for col in 0..cols {
+        let cell = &line[Column(col)];
+        if cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
+        }
+        if cell.flags.contains(Flags::HIDDEN) {
+            text.push(' ');
+            continue;
+        }
+        text.push(cell.c);
+        if let Some(chars) = cell.zerowidth() {
+            for c in chars {
+                text.push(*c);
+            }
+        }
+    }
+    text.trim_end().to_string()
+}
+
 fn snapshot_cell(cell: &Cell) -> TerminalCell {
     let mut ch = String::new();
     let spacer = cell

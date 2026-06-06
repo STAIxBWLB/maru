@@ -8340,6 +8340,67 @@ button.git-badge:hover {
   z-index: 1;
 }
 
+.terminal-search-overlay {
+  position: absolute;
+  top: 8px;
+  right: 36px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: min(520px, calc(100% - 56px));
+  padding: 0 6px 0 9px;
+  border: 1px solid #3b3b3b;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, 0.96);
+  color: #d4d4d4;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+}
+
+.terminal-search-overlay input[type="text"],
+.terminal-search-overlay input:not([type]) {
+  width: min(260px, 36vw);
+  min-width: 120px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #eeeeee;
+  font-size: 12px;
+}
+
+.terminal-search-button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: #cfcfcf;
+}
+
+.terminal-search-button:hover {
+  background: #343434;
+  color: #ffffff;
+}
+
+.terminal-search-case {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px;
+  color: #bdbdbd;
+  font-size: 11px;
+}
+
+.terminal-search-case input {
+  width: 13px;
+  height: 13px;
+  accent-color: #b89235;
+}
+
 .terminal-pane-close {
   position: absolute;
   top: 6px;
@@ -10334,6 +10395,49 @@ button.git-badge:hover {
 
 .settings-checkbox-grid .checkbox-field {
   width: auto;
+}
+
+.terminal-shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 7px;
+}
+
+.terminal-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(92px, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.terminal-shortcut-row label {
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.terminal-shortcut-row input {
+  height: 28px;
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11.5px;
+}
+
+.terminal-shortcut-reset {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.terminal-shortcut-reset:hover {
+  background: var(--panel-raised);
+  color: var(--ink);
 }
 
 .settings-form .field span {

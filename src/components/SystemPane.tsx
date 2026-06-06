@@ -75,6 +75,11 @@ import {
   normalizeDotFolderIncludes,
   parseBinaryFileIncludePatternsText,
 } from "../lib/settings";
+import {
+  DEFAULT_TERMINAL_SHORTCUTS,
+  TERMINAL_SHORTCUT_ACTIONS,
+  type TerminalShortcutAction,
+} from "../lib/terminalShortcuts";
 import { normalizeAccentInput } from "../lib/theme";
 import {
   SKILLS_UPDATED_EVENT,
@@ -1171,6 +1176,37 @@ function PreferencesTab({
     );
   };
 
+  const updateTerminalCopyOnSelect = (copyOnSelect: boolean) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        terminal: {
+          ...settings.terminal,
+          copyOnSelect,
+        },
+      }),
+    );
+  };
+
+  const updateTerminalShortcut = (action: TerminalShortcutAction, value: string) => {
+    onSettingsChange(
+      normalizeAnchorSettings({
+        ...settings,
+        terminal: {
+          ...settings.terminal,
+          shortcuts: {
+            ...settings.terminal.shortcuts,
+            [action]: value.trim() ? value.trim() : null,
+          },
+        },
+      }),
+    );
+  };
+
+  const resetTerminalShortcut = (action: TerminalShortcutAction) => {
+    updateTerminalShortcut(action, DEFAULT_TERMINAL_SHORTCUTS[action] ?? "");
+  };
+
   return (
     <div className="system-detail" style={{ width: "100%" }}>
       <div className="settings-form">
@@ -1330,6 +1366,50 @@ function PreferencesTab({
             <option value="right">{t("terminal.dock.right")}</option>
           </select>
         </label>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={settings.terminal.copyOnSelect}
+            onChange={(event) => updateTerminalCopyOnSelect(event.target.checked)}
+          />
+          <span>{t("system.preferences.terminalCopyOnSelect")}</span>
+        </label>
+        <div className="field">
+          <span>{t("system.preferences.terminalShortcuts")}</span>
+          <div className="terminal-shortcut-grid">
+            {TERMINAL_SHORTCUT_ACTIONS.map((action) => {
+              const value = settings.terminal.shortcuts[action] ?? "";
+              return (
+                <div key={action} className="terminal-shortcut-row">
+                  <label htmlFor={`terminal-shortcut-${action}`}>
+                    {t(`system.preferences.terminalShortcut.${action}`)}
+                  </label>
+                  <input
+                    key={`${action}:${value}`}
+                    id={`terminal-shortcut-${action}`}
+                    defaultValue={value}
+                    placeholder={t("system.preferences.terminalShortcut.unbound")}
+                    onBlur={(event) => updateTerminalShortcut(action, event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    className="terminal-shortcut-reset"
+                    onClick={() => resetTerminalShortcut(action)}
+                    aria-label={t("system.preferences.terminalShortcut.reset")}
+                    title={t("system.preferences.terminalShortcut.reset")}
+                  >
+                    <RefreshCcw size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <small>{t("system.preferences.terminalShortcuts.help")}</small>
+        </div>
         <DiagramPreviewToggle />
       </div>
     </div>
@@ -2514,7 +2594,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
     setError(null);
     try {
       const nextSources = await skillsListSources(workPath);
-      const nextSkills = await skillsListSkills(workPath);
+      const nextSkills = await skillsListSkills(workPath, { refresh: true });
       const nextInstalls = await skillsListInstalls(workPath);
       const nextEnv = await skillsEnvStatus(workPath);
       setSources(nextSources);
@@ -2762,7 +2842,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
       stepOperation();
 
       appendOperationLog(t("system.skills.log.refreshSkills"));
-      const nextSkills = await skillsListSkills(workPath);
+      const nextSkills = await skillsListSkills(workPath, { refresh: true });
       setSkills(nextSkills);
       stepOperation();
 

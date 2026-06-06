@@ -1,8 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import type React from "react";
 import {
   AlertTriangle,
+  ChevronUp,
   Clock3,
+  Code2,
   Command,
   FileText,
   Inbox,
@@ -10,11 +21,14 @@ import {
   ListTodo,
   MessageSquare,
   Network,
+  PanelBottom,
+  PanelRight,
   PanelRightClose,
   PanelRightOpen,
   RefreshCcw,
   Route,
   Settings2,
+  SquareTerminal,
   UsersRound,
   WandSparkles,
   Workflow,
@@ -40,18 +54,21 @@ import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { SystemPane } from "./components/SystemPane";
-import {
-  TerminalPanel,
-  type TerminalLaunchRequest,
-  type TerminalPanelHandle,
+import type {
+  TerminalLaunchRequest,
+  TerminalPanelHandle,
 } from "./components/TerminalPanel";
 import {
   buildAnchorBackgroundContextEnv,
+  hasPersistedTerminalTabs,
+  TERMINAL_LAUNCHERS,
+  terminalCommandPreview,
   type ActiveTerminalContext,
 } from "./lib/terminal";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
 import { useApprovalGate } from "./approval/ApprovalDialog";
+import { markStartup, measureStartup, scheduleStartupIdle } from "./lib/startupProfile";
 import {
   ComposeDialog,
   type ComposeDialogSeed,
@@ -125,6 +142,7 @@ import {
   terminalHooksInstall,
   terminalHooksStatus,
   terminalHooksUninstall,
+  terminalAvailable,
   writeAgentContextHint,
   trashDocument,
   trashInboxItems,
@@ -344,6 +362,77 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 const OUTLOOK_REFRESH_TTL_MS = 60_000;
 const TELEGRAM_REFRESH_TTL_MS = 60_000;
+
+const LazyTerminalPanel = lazy(async () => {
+  markStartup("terminal:module-import:start");
+  const module = await import("./components/TerminalPanel");
+  markStartup("terminal:module-import:end");
+  return { default: module.TerminalPanel };
+});
+
+function preloadTerminalPanel(): void {
+  markStartup("terminal:module-preload");
+  void import("./components/TerminalPanel");
+}
+
+function TerminalDockPlaceholder({
+  cwd,
+  dock,
+  settings,
+  t,
+  onOpen,
+  onLaunch,
+}: {
+  cwd: string | null;
+  dock: TerminalDock;
+  settings: AnchorSettings;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  onOpen: () => void;
+  onLaunch: (kind: TerminalKind) => void;
+}) {
+  const canRunTerminal = terminalAvailable();
+  return (
+    <section className={`terminal-panel dock-${dock} collapsed`}>
+      <div className="terminal-resize-handle" />
+      <header className="terminal-header">
+        <button
+          type="button"
+          className="terminal-title"
+          onClick={onOpen}
+          aria-expanded={false}
+          title={t("terminal.expand")}
+          aria-label={t("terminal.expand")}
+        >
+          {dock === "right" ? <PanelRight size={14} /> : <PanelBottom size={14} />}
+          <span>{t("terminal.title")}</span>
+          <ChevronUp size={14} />
+        </button>
+        <div className="terminal-launchers" role="group" aria-label={t("terminal.launchers")}>
+          {TERMINAL_LAUNCHERS.map((launcher) => {
+            const enabled = settings.terminal.launchers[launcher.id]?.enabled ?? true;
+            return (
+              <button
+                key={launcher.id}
+                type="button"
+                disabled={!canRunTerminal || !enabled}
+                onClick={() => onLaunch(launcher.id)}
+                title={
+                  canRunTerminal
+                    ? terminalCommandPreview(launcher.id, cwd ?? "")
+                    : t("terminal.tauriRequired")
+                }
+                aria-label={t(launcher.titleKey)}
+              >
+                {launcher.id === "codex" ? <Code2 size={13} /> : <SquareTerminal size={13} />}
+                <span>{t(launcher.titleKey)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </header>
+    </section>
+  );
+}
 
 interface ProviderRefreshCache {
   fetchedAt: number | null;
@@ -768,6 +857,10 @@ function MainApp() {
   const approvalGate = useApprovalGate();
   const isMac = useMemo(() => isMacPlatform(currentPlatform()), []);
 
+  useEffect(() => {
+    markStartup("app:mounted");
+  }, []);
+
   const [workspaceRegistry, setWorkspaceRegistry] = useState<WorkspaceRegistry>({
     workspaces: [],
     activeByVisibility: {
@@ -986,6 +1079,10 @@ function MainApp() {
     useState<TerminalLaunchRequest | null>(null);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
+  const skillsStartupLoadKeyRef = useRef<string | null>(null);
+  const [terminalPanelMounted, setTerminalPanelMounted] = useState(() =>
+    hasPersistedTerminalTabs(),
+  );
   const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
     "transcript" | "external" | null
@@ -1303,6 +1400,8 @@ function MainApp() {
     settingsWorkPath != null &&
     (settingsWorkspace?.visibility !== "public" || workspaceCan(settingsWorkspace, "modify"));
   const workspaceConfigPath = settingsWorkPath ?? inboxWorkspacePath;
+  const settingsWorkspaceStartupReady =
+    !settingsWorkPath || Boolean(workspaceStates[settingsWorkPath]?.startupIoReady);
   useEffect(() => {
     let cancelled = false;
     if (!workspaceConfigPath) {
@@ -1697,6 +1796,38 @@ function MainApp() {
   }, [updateLayoutSettings]);
 
   useEffect(() => {
+    if (terminalPanelMounted) return;
+    if (!anchorSettings.ui.layout.terminalOpen && !terminalLaunchRequest) return;
+    markStartup("terminal:full-mount-request", {
+      open: anchorSettings.ui.layout.terminalOpen,
+      launch: terminalLaunchRequest?.kind ?? null,
+    });
+    setTerminalPanelMounted(true);
+    preloadTerminalPanel();
+  }, [
+    anchorSettings.ui.layout.terminalOpen,
+    terminalLaunchRequest,
+    terminalPanelMounted,
+  ]);
+
+  useEffect(() => {
+    if (booting || !settingsWorkspaceStartupReady || terminalPanelMounted) return;
+    return scheduleStartupIdle(() => preloadTerminalPanel(), 2000);
+  }, [booting, settingsWorkspaceStartupReady, terminalPanelMounted]);
+
+  const requestTerminalLaunch = useCallback(
+    (kind: TerminalKind) => {
+      markStartup("terminal:launch-request", { kind });
+      setTerminalLaunchRequest({
+        kind,
+        nonce: Date.now(),
+      });
+      updateLayoutSettings({ terminalOpen: true });
+    },
+    [updateLayoutSettings],
+  );
+
+  useEffect(() => {
     let disposed = false;
     let dispose: (() => void) | null = null;
     void import("@tauri-apps/api/event")
@@ -1788,20 +1919,57 @@ function MainApp() {
     [activeDocumentWorkspacePath, t],
   );
 
-  const refreshSkills = useCallback(async () => {
+  const refreshSkills = useCallback(async (options: { refresh?: boolean } = {}) => {
+    if (!settingsWorkPath) {
+      setSkills([]);
+      return [];
+    }
     setSkillsLoading(true);
     try {
-      setSkills(await skillsListSkills(settingsWorkPath));
+      const next = await measureStartup(
+        options.refresh ? "skills:refresh" : "skills:cached-read",
+        () => skillsListSkills(settingsWorkPath, options),
+        { workPath: settingsWorkPath },
+      );
+      setSkills(next);
+      return next;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return [];
     } finally {
       setSkillsLoading(false);
     }
   }, [settingsWorkPath]);
 
   useEffect(() => {
-    void refreshSkills();
-  }, [refreshSkills]);
+    if (booting || !settingsWorkPath || !settingsWorkspaceStartupReady) return;
+    if (skillsStartupLoadKeyRef.current === settingsWorkPath) return;
+
+    const key = settingsWorkPath;
+    let cancelled = false;
+    let started = false;
+    let cancelRefresh: (() => void) | null = null;
+    const cancelCached = scheduleStartupIdle(() => {
+      started = true;
+      skillsStartupLoadKeyRef.current = key;
+      void (async () => {
+        const cached = await refreshSkills();
+        if (cancelled || cached.length > 0) return;
+        cancelRefresh = scheduleStartupIdle(() => {
+          if (!cancelled) void refreshSkills({ refresh: true });
+        }, 2500);
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      cancelCached();
+      cancelRefresh?.();
+      if (!started && skillsStartupLoadKeyRef.current === key) {
+        skillsStartupLoadKeyRef.current = null;
+      }
+    };
+  }, [booting, refreshSkills, settingsWorkPath, settingsWorkspaceStartupReady]);
 
   const setPersistedAppMode = useCallback(
     (activeAppMode: AppMode) => {
@@ -3326,16 +3494,24 @@ function MainApp() {
   useEffect(() => {
     if (appMode === "inbox" || appMode === "comms") void refreshProcessedItems();
     if (appMode === "comms") void refreshSourceRuns();
-    if (
+    if (!booting && settingsWorkspaceStartupReady && (
       appMode === "inbox" ||
       appMode === "comms" ||
       appMode === "meetings" ||
       appMode === "tasks" ||
       rightPaneTab === "skills"
-    ) {
+    )) {
       void refreshProcessingMissions();
     }
-  }, [appMode, refreshProcessedItems, refreshProcessingMissions, refreshSourceRuns, rightPaneTab]);
+  }, [
+    appMode,
+    booting,
+    refreshProcessedItems,
+    refreshProcessingMissions,
+    refreshSourceRuns,
+    rightPaneTab,
+    settingsWorkspaceStartupReady,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3480,6 +3656,7 @@ function MainApp() {
       visibility: WorkspaceVisibility,
       preferRelPath: string | null = null,
     ) => {
+      markStartup("workspace:load:start", { path, visibility });
       const requestId = ++loadWorkspaceRequestRef.current;
       updateWorkspaceState(path, {
         loading: true,
@@ -3489,7 +3666,7 @@ function MainApp() {
       setError(null);
       const storedTabs = readStoredTabsForWorkspace(path);
 
-      const restorePrimaryTab = async (nextEntries: VaultEntry[]) => {
+      const restorePrimaryTab = async (nextEntries: VaultEntry[], source: "cache" | "scan") => {
         if (requestId !== loadWorkspaceRequestRef.current) return false;
         updateWorkspaceState(path, { entries: nextEntries });
 
@@ -3516,10 +3693,15 @@ function MainApp() {
           setFocusedEditorGroup("left");
           setPendingSelectedPath(null);
           updateWorkspaceState(path, { loading: false, startupIoReady: true });
+          markStartup("workspace:first-usable", { path, source, entries: nextEntries.length });
           return true;
         }
 
-        const payload = await readDocument(path, candidate.path);
+        const payload = await measureStartup(
+          "document:primary-read",
+          () => readDocument(path, candidate.path),
+          { path, documentPath: candidate.path, source },
+        );
         if (requestId !== loadWorkspaceRequestRef.current) return false;
         const primaryTab: EditorTab = {
           id: tabIdForEntry(candidate),
@@ -3555,6 +3737,12 @@ function MainApp() {
         applyStoredTabState([primaryTab]);
         setPendingSelectedPath(null);
         updateWorkspaceState(path, { loading: false, startupIoReady: true });
+        markStartup("workspace:first-usable", {
+          path,
+          source,
+          entries: nextEntries.length,
+          documentPath: candidate.path,
+        });
         pushRecent(candidate.path);
 
         const rest = tabEntries.slice(1);
@@ -3608,12 +3796,24 @@ function MainApp() {
       const runAuthoritativeScan = async (paintAfterScan: boolean) => {
         if (!paintAfterScan) updateWorkspaceState(path, { refreshing: true });
         try {
-          const fresh = await scanVault(path, scanOptions);
+          const fresh = await measureStartup(
+            "vault:authoritative-scan",
+            () => scanVault(path, scanOptions),
+            { path, paintAfterScan },
+          );
           if (requestId !== loadWorkspaceRequestRef.current) return;
           if (paintAfterScan) {
-            await restorePrimaryTab(fresh);
+            await restorePrimaryTab(fresh, "scan");
+            markStartup("vault:authoritative-scan-done", {
+              path,
+              entries: fresh.length,
+            });
           } else {
             mergeFreshEntries(fresh);
+            markStartup("vault:authoritative-scan-done", {
+              path,
+              entries: fresh.length,
+            });
           }
         } catch (err) {
           if (requestId !== loadWorkspaceRequestRef.current) return;
@@ -3629,9 +3829,11 @@ function MainApp() {
       };
 
       try {
-        const cached = await readVaultCache(path);
+        const cached = await measureStartup("vault:cache-read", () => readVaultCache(path), {
+          path,
+        });
         if (requestId !== loadWorkspaceRequestRef.current) return;
-        const paintedFromCache = cached ? await restorePrimaryTab(cached) : false;
+        const paintedFromCache = cached ? await restorePrimaryTab(cached, "cache") : false;
         if (paintedFromCache) {
           void runAuthoritativeScan(false);
         } else {
@@ -3666,8 +3868,11 @@ function MainApp() {
   useEffect(() => {
     async function boot() {
       try {
+        markStartup("boot:start");
         setBooting(true);
-        const registry = await listWorkspaceRoots();
+        const registry = await measureStartup("workspace:registry-read", () =>
+          listWorkspaceRoots(),
+        );
         if (registry.workspaces.length === 0) {
           const samplePath = await getSampleWorkspacePath();
           const seeded = await addWorkspaceRoot({
@@ -3685,8 +3890,14 @@ function MainApp() {
             setExplorerVisibility("private");
             await loadWorkspace(seeded.activeByVisibility.private, "private");
             setBooting(false);
+            markStartup("boot:end", {
+              initialPath: seeded.activeByVisibility.private,
+              initialVisibility: "private",
+              seeded: true,
+            });
           } else {
             setBooting(false);
+            markStartup("boot:end", { initialPath: null, seeded: true });
           }
           return;
         }
@@ -3695,7 +3906,9 @@ function MainApp() {
         const bootSettingsPath = startupSettingsPath(registry);
         if (bootSettingsPath) {
           try {
-            bootSettings = await readAnchorSettings(bootSettingsPath);
+            bootSettings = await measureStartup("settings:startup-read", () =>
+              readAnchorSettings(bootSettingsPath),
+            );
             setAnchorSettings(bootSettings);
             setAppMode(bootSettings.ui.activeAppMode);
             setEditorViewMode(bootSettings.ui.editorViewMode);
@@ -3717,12 +3930,15 @@ function MainApp() {
               : null;
           await loadWorkspace(initialPath, initialVisibility, lastRel);
           setBooting(false);
+          markStartup("boot:end", { initialPath, initialVisibility });
         } else {
           setBooting(false);
+          markStartup("boot:end", { initialPath: null, initialVisibility });
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setBooting(false);
+        markStartup("boot:error", { message: err instanceof Error ? err.message : String(err) });
       }
     }
     void boot();
@@ -5925,6 +6141,7 @@ function MainApp() {
       checkForUpdates,
       splitEditorRight,
       attachActiveItemToTerminal,
+      requestTerminalLaunch,
       toggleAgentStatusHooks,
       writeAgentContextHintCommand,
       dockTerminal,
@@ -6083,11 +6300,7 @@ function MainApp() {
         case "terminal.shell":
         case "terminal.claude":
         case "terminal.codex":
-          setTerminalLaunchRequest({
-            kind: id.split(".")[1] as TerminalKind,
-            nonce: Date.now(),
-          });
-          updateLayoutSettings({ terminalOpen: true });
+          requestTerminalLaunch(id.split(".")[1] as TerminalKind);
           break;
         case "terminal.split":
           splitTerminalRight();
@@ -6198,6 +6411,8 @@ function MainApp() {
       : "";
   const terminalDockClass =
     layoutSettings.terminalDock === "right" ? " terminal-dock-right" : " terminal-dock-bottom";
+  const shouldRenderFullTerminalPanel =
+    terminalPanelMounted || layoutSettings.terminalOpen || terminalLaunchRequest !== null;
   const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
     documentsPaneOpen ? "" : " documents-closed"
   }${terminalMaximizedClass}${terminalDockClass}`;
@@ -7174,35 +7389,59 @@ function MainApp() {
           />
         ) : null}
 
-        <TerminalPanel
-          ref={terminalPanelRef}
-          cwd={activeDocumentWorkspacePath}
-          activeContext={activeTerminalContext}
-          settings={anchorSettings}
-          launchRequest={terminalLaunchRequest}
-          open={anchorSettings.ui.layout.terminalOpen}
-          height={anchorSettings.ui.layout.terminalHeight}
-          dock={anchorSettings.ui.layout.terminalDock}
-          width={anchorSettings.ui.layout.terminalWidth}
-          splitOpen={anchorSettings.ui.layout.terminalSplitOpen}
-          splitRatio={anchorSettings.ui.layout.terminalSplitRatio}
-          maximized={anchorSettings.ui.layout.terminalMaximized}
-          onOpenChange={(terminalOpen) =>
-            updateLayoutSettings({ terminalOpen }, { flush: true })
-          }
-          onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
-          onDockChange={dockTerminal}
-          onWidthChange={(terminalWidth) => updateLayoutSettings({ terminalWidth })}
-          onSplitOpenChange={(terminalSplitOpen) =>
-            updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
-          }
-          onSplitRatioChange={(terminalSplitRatio) =>
-            updateLayoutSettings({ terminalSplitRatio })
-          }
-          onMaximizedChange={(terminalMaximized) =>
-            updateLayoutSettings({ terminalMaximized, terminalOpen: true })
-          }
-        />
+        {shouldRenderFullTerminalPanel ? (
+          <Suspense
+            fallback={
+              <TerminalDockPlaceholder
+                cwd={activeDocumentWorkspacePath}
+                dock={anchorSettings.ui.layout.terminalDock}
+                settings={anchorSettings}
+                t={t}
+                onOpen={() => updateLayoutSettings({ terminalOpen: true }, { flush: true })}
+                onLaunch={requestTerminalLaunch}
+              />
+            }
+          >
+            <LazyTerminalPanel
+              ref={terminalPanelRef}
+              cwd={activeDocumentWorkspacePath}
+              activeContext={activeTerminalContext}
+              settings={anchorSettings}
+              launchRequest={terminalLaunchRequest}
+              open={anchorSettings.ui.layout.terminalOpen}
+              height={anchorSettings.ui.layout.terminalHeight}
+              dock={anchorSettings.ui.layout.terminalDock}
+              width={anchorSettings.ui.layout.terminalWidth}
+              splitOpen={anchorSettings.ui.layout.terminalSplitOpen}
+              splitRatio={anchorSettings.ui.layout.terminalSplitRatio}
+              maximized={anchorSettings.ui.layout.terminalMaximized}
+              onOpenChange={(terminalOpen) =>
+                updateLayoutSettings({ terminalOpen }, { flush: true })
+              }
+              onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
+              onDockChange={dockTerminal}
+              onWidthChange={(terminalWidth) => updateLayoutSettings({ terminalWidth })}
+              onSplitOpenChange={(terminalSplitOpen) =>
+                updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
+              }
+              onSplitRatioChange={(terminalSplitRatio) =>
+                updateLayoutSettings({ terminalSplitRatio })
+              }
+              onMaximizedChange={(terminalMaximized) =>
+                updateLayoutSettings({ terminalMaximized, terminalOpen: true })
+              }
+            />
+          </Suspense>
+        ) : (
+          <TerminalDockPlaceholder
+            cwd={activeDocumentWorkspacePath}
+            dock={anchorSettings.ui.layout.terminalDock}
+            settings={anchorSettings}
+            t={t}
+            onOpen={() => updateLayoutSettings({ terminalOpen: true }, { flush: true })}
+            onLaunch={requestTerminalLaunch}
+          />
+        )}
 
         <div className="toast-stack">
           {error ? (

@@ -14,10 +14,15 @@ import type {
   TerminalFrame,
   TerminalInputCommand,
   TerminalMouseFlags,
+  TerminalSearchMatch,
 } from "../lib/api";
 
 export interface NativeTerminalViewHandle {
   focus: () => void;
+  pasteText: (text: string) => void;
+  copySelection: () => string | null;
+  selectAll: (text?: string | null) => void;
+  clearSelection: () => void;
 }
 
 interface NativeTerminalViewProps {
@@ -27,9 +32,12 @@ interface NativeTerminalViewProps {
   focused: boolean;
   resizeReady: boolean;
   inputLabel: string;
+  copyOnSelect?: boolean;
+  searchMatch?: TerminalSearchMatch | null;
   onInput: (command: TerminalInputCommand) => void;
   onResize: (cols: number, rows: number) => void;
   onScroll: (delta: number) => void;
+  onCopyOnSelect?: (text: string) => void;
 }
 
 interface CellPoint {
@@ -87,6 +95,7 @@ const COMPOSITION_TRAILING_MS = 100;
 const DEFAULT_FG = "#d4d4d4";
 const DEFAULT_BG = "#111111";
 const SELECTION_FILL = "rgba(56, 99, 161, 0.40)";
+const SEARCH_FILL = "rgba(221, 171, 53, 0.34)";
 const CURSOR_COLOR = "#d4d4d4";
 
 const ANSI_COLORS: Record<string, string> = {
@@ -201,6 +210,17 @@ export function selectionSpanForRow(
   const start = row === range.start.row ? range.start.col : 0;
   const end = row === range.end.row ? range.end.col : cols - 1;
   if (end < start) return null;
+  return { start, end };
+}
+
+export function terminalSearchSpanForRow(
+  match: TerminalSearchMatch | null | undefined,
+  row: number,
+  cols: number,
+): { start: number; end: number } | null {
+  if (!match || match.row !== row || match.length <= 0 || cols <= 0) return null;
+  const start = Math.max(0, Math.min(cols - 1, match.col));
+  const end = Math.max(start, Math.min(cols - 1, match.col + match.length - 1));
   return { start, end };
 }
 
@@ -515,7 +535,20 @@ export function terminalEnterCommandFromMods(mods: KeyMods): TerminalInputComman
 
 export const NativeTerminalView = memo(
   forwardRef<NativeTerminalViewHandle, NativeTerminalViewProps>(function NativeTerminalView(
-    { sessionId, frame, active, focused, resizeReady, inputLabel, onInput, onResize, onScroll },
+    {
+      sessionId,
+      frame,
+      active,
+      focused,
+      resizeReady,
+      inputLabel,
+      copyOnSelect = false,
+      searchMatch = null,
+      onInput,
+      onResize,
+      onScroll,
+      onCopyOnSelect,
+    },
     ref,
   ) {
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -556,8 +589,11 @@ export const NativeTerminalView = memo(
     const lastMotionCellRef = useRef<CellPoint | null>(null);
     const wheelAccumRef = useRef(0);
     const [selection, setSelection] = useState<CellSelection | null>(null);
+    const selectionRef = useRef<CellSelection | null>(null);
     const selectionRangeRef = useRef<CellRange | null>(null);
     const prevSelectionRangeRef = useRef<CellRange | null>(null);
+    const allSelectionTextRef = useRef<string | null>(null);
+    const searchMatchRef = useRef<TerminalSearchMatch | null>(null);
 
     // Paint scheduling.
     const pendingPaintRef = useRef<"all" | Set<number> | null>(null);
@@ -567,8 +603,33 @@ export const NativeTerminalView = memo(
       ref,
       () => ({
         focus: () => textareaRef.current?.focus(),
+        pasteText: (text: string) => {
+          if (!text) return;
+          onInput({ type: "paste", text: normalizeTerminalInputText(text) });
+          textareaRef.current?.focus();
+        },
+        copySelection: () => {
+          const selected = allSelectionTextRef.current
+            ?? selectedTerminalText(gridRef.current, selectionRef.current);
+          return selected || null;
+        },
+        selectAll: (text?: string | null) => {
+          allSelectionTextRef.current = text ?? frameToText(frame);
+          const { cols, rows } = dimsRef.current;
+          if (cols > 0 && rows > 0) {
+            setSelection({
+              anchor: { row: 0, col: 0 },
+              focus: { row: rows - 1, col: cols - 1 },
+            });
+          }
+          textareaRef.current?.focus();
+        },
+        clearSelection: () => {
+          allSelectionTextRef.current = null;
+          setSelection(null);
+        },
       }),
-      [],
+      [frame, onInput],
     );
 
     useEffect(() => {
@@ -621,6 +682,17 @@ export const NativeTerminalView = memo(
             ctx.fillRect(m.padLeft + c * m.charWidth, y, (end - c + 1) * m.charWidth, m.lineHeight);
           }
           c = end + 1;
+        }
+
+        const searchSpan = terminalSearchSpanForRow(searchMatchRef.current, r, cols);
+        if (searchSpan) {
+          ctx.fillStyle = SEARCH_FILL;
+          ctx.fillRect(
+            m.padLeft + searchSpan.start * m.charWidth,
+            y,
+            (searchSpan.end - searchSpan.start + 1) * m.charWidth,
+            m.lineHeight,
+          );
         }
 
         // Glyphs + underline.
@@ -807,6 +879,7 @@ export const NativeTerminalView = memo(
     useEffect(() => {
       const prev = prevSelectionRangeRef.current;
       const next = selection ? normalizeSelection(selection) : null;
+      selectionRef.current = selection;
       selectionRangeRef.current = next;
       prevSelectionRangeRef.current = next;
       const rows = new Set<number>();
@@ -818,6 +891,16 @@ export const NativeTerminalView = memo(
       addRange(next);
       if (rows.size) requestPaint([...rows]);
     }, [selection, requestPaint]);
+
+    useEffect(() => {
+      const prev = searchMatchRef.current;
+      const next = searchMatch ?? null;
+      searchMatchRef.current = next;
+      const rows = new Set<number>();
+      if (prev) rows.add(prev.row);
+      if (next) rows.add(next.row);
+      if (rows.size) requestPaint([...rows]);
+    }, [requestPaint, searchMatch]);
 
     // Cursor style depends on focus (solid vs hollow); repaint its row.
     useEffect(() => {
@@ -873,6 +956,7 @@ export const NativeTerminalView = memo(
             ctrlKey: event.ctrlKey,
           });
         } else {
+          allSelectionTextRef.current = null;
           pointerStateRef.current = { mode: "select", button: event.button };
           setSelection({ anchor: point, focus: point });
         }
@@ -937,10 +1021,18 @@ export const NativeTerminalView = memo(
             ctrlKey: event.ctrlKey,
           });
         } else {
-          setSelection((current) => (current ? { ...current, focus: point } : current));
+          setSelection((current) => {
+            if (!current) return current;
+            const next = { ...current, focus: point };
+            if (copyOnSelect && comparePoint(current.anchor, point) !== 0) {
+              const text = selectedTerminalText(gridRef.current, next);
+              if (text) onCopyOnSelect?.(text);
+            }
+            return next;
+          });
         }
       },
-      [cellFromClient, onInput],
+      [cellFromClient, copyOnSelect, onCopyOnSelect, onInput],
     );
 
     // Wheel must be a native, non-passive listener: React attaches `onWheel`
@@ -1239,7 +1331,7 @@ export const NativeTerminalView = memo(
     const onCopy = useCallback(
       (event: React.ClipboardEvent<HTMLDivElement>) => {
         if (!selection) return;
-        const text = selectedTerminalText(gridRef.current, selection);
+        const text = allSelectionTextRef.current ?? selectedTerminalText(gridRef.current, selection);
         if (!text) return;
         event.preventDefault();
         event.clipboardData.setData("text/plain", text);
