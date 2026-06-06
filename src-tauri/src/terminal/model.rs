@@ -6,7 +6,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use super::input::MouseModes;
-use super::snapshot::{snapshot_term, TerminalFrame};
+use super::snapshot::{snapshot_term, terminal_indexed_lines, terminal_text, TerminalFrame};
 
 #[derive(Clone)]
 pub struct TerminalEventProxy {
@@ -108,6 +108,20 @@ pub struct TerminalModel {
     window_size: Arc<Mutex<WindowSize>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchDirection {
+    Next,
+    Previous,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalSearchHit {
+    pub row: usize,
+    pub col: usize,
+    pub length: usize,
+    pub display_offset: usize,
+}
+
 impl TerminalModel {
     #[cfg(test)]
     pub fn new<W>(cols: u16, rows: u16, writer: W) -> Self
@@ -195,6 +209,45 @@ impl TerminalModel {
         self.term.scroll_display(Scroll::Delta(delta));
     }
 
+    pub fn text(&self) -> String {
+        terminal_text(&self.term)
+    }
+
+    pub fn search(
+        &mut self,
+        query: &str,
+        direction: SearchDirection,
+        case_sensitive: bool,
+    ) -> Option<TerminalSearchHit> {
+        if query.is_empty() {
+            return None;
+        }
+        let lines = terminal_indexed_lines(&self.term);
+        let iter: Box<dyn Iterator<Item = &(i32, String)> + '_> = match direction {
+            SearchDirection::Next => Box::new(lines.iter()),
+            SearchDirection::Previous => Box::new(lines.iter().rev()),
+        };
+        let (line_index, col) = iter
+            .filter_map(|(line_index, text)| {
+                search_column(text, query, case_sensitive).map(|col| (*line_index, col))
+            })
+            .next()?;
+        let current_offset = self.term.grid().display_offset() as i32;
+        let target_offset = if line_index < 0 { -line_index } else { 0 };
+        self.term
+            .scroll_display(Scroll::Delta(target_offset - current_offset));
+        let display_offset = self.term.grid().display_offset();
+        let rows = self.term.grid().screen_lines();
+        let row =
+            (line_index + display_offset as i32).clamp(0, rows.saturating_sub(1) as i32) as usize;
+        Some(TerminalSearchHit {
+            row,
+            col,
+            length: query.chars().count(),
+            display_offset,
+        })
+    }
+
     pub fn kitty_keyboard_active(&self) -> bool {
         self.term
             .mode()
@@ -224,6 +277,18 @@ pub fn write_shared(writer: &SharedTerminalWriter, bytes: &[u8]) -> Result<(), S
         .write_all(bytes)
         .and_then(|_| guard.flush())
         .map_err(|err| format!("terminal_write_failed: {err}"))
+}
+
+fn search_column(text: &str, query: &str, case_sensitive: bool) -> Option<usize> {
+    if case_sensitive {
+        return text
+            .find(query)
+            .map(|byte_col| text[..byte_col].chars().count());
+    }
+    let needle = query.to_lowercase();
+    text.char_indices()
+        .find(|(byte_col, _)| text[*byte_col..].to_lowercase().starts_with(&needle))
+        .map(|(byte_col, _)| text[..byte_col].chars().count())
 }
 
 #[cfg(test)]
@@ -323,5 +388,41 @@ mod tests {
         assert!(model.bracketed_paste_active());
         model.advance(b"\x1b[?2004l");
         assert!(!model.bracketed_paste_active());
+    }
+
+    #[test]
+    fn model_extracts_scrollback_text_for_copy_all() {
+        let mut model = TerminalModel::new(20, 2, NullTerminalWriter);
+        model.advance(b"alpha\r\nbeta\r\ngamma");
+
+        assert_eq!(model.text(), "alpha\nbeta\ngamma");
+    }
+
+    #[test]
+    fn model_search_scrolls_to_scrollback_match() {
+        let mut model = TerminalModel::new(20, 2, NullTerminalWriter);
+        model.advance(b"alpha needle\r\nbeta\r\ngamma");
+
+        let hit = model
+            .search("needle", SearchDirection::Next, false)
+            .expect("expected search hit");
+
+        assert!(hit.display_offset > 0);
+        assert_eq!(hit.col, 6);
+        let frame = model.snapshot("term-1");
+        assert_eq!(frame.display_offset, hit.display_offset);
+        assert_eq!(frame.lines[hit.row][0].ch, "a");
+    }
+
+    #[test]
+    fn model_search_handles_case_folded_utf8_offsets() {
+        let mut model = TerminalModel::new(20, 2, NullTerminalWriter);
+        model.advance("İNEEDLE\r\nbeta".as_bytes());
+
+        let hit = model
+            .search("needle", SearchDirection::Next, false)
+            .expect("expected search hit");
+
+        assert_eq!(hit.col, 1);
     }
 }

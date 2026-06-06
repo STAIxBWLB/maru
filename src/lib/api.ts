@@ -1102,6 +1102,24 @@ export interface TerminalFrame {
   altScreen: boolean;
 }
 
+export type TerminalSearchDirection = "next" | "previous";
+
+export interface TerminalSearchMatch {
+  row: number;
+  col: number;
+  length: number;
+}
+
+export interface TerminalSearchResult {
+  sessionId: string;
+  query: string;
+  found: boolean;
+  row: number | null;
+  col: number | null;
+  length: number;
+  displayOffset: number;
+}
+
 export type TerminalMouseAction = "press" | "release" | "move";
 
 export type TerminalInputCommand =
@@ -1185,6 +1203,36 @@ export async function terminalResize(
 export async function terminalScroll(sessionId: string, delta: number): Promise<void> {
   if (!isTauri()) return;
   await invoke("terminal_scroll", { sessionId, delta });
+}
+
+export async function terminalText(sessionId: string): Promise<string> {
+  if (!isTauri()) return "";
+  return invoke<string>("terminal_text", { sessionId });
+}
+
+export async function terminalSearch(
+  sessionId: string,
+  query: string,
+  direction: TerminalSearchDirection = "next",
+  caseSensitive = false,
+): Promise<TerminalSearchResult> {
+  if (!isTauri()) {
+    return {
+      sessionId,
+      query,
+      found: false,
+      row: null,
+      col: null,
+      length: 0,
+      displayOffset: 0,
+    };
+  }
+  return invoke<TerminalSearchResult>("terminal_search", {
+    sessionId,
+    query,
+    direction,
+    caseSensitive,
+  });
 }
 
 export async function terminalKill(sessionId: string): Promise<void> {

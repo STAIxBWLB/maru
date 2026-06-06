@@ -22,6 +22,7 @@ import {
   resetTerminalModifierTracking,
   selectedTerminalText,
   selectionSpanForRow,
+  terminalSearchSpanForRow,
   terminalBeforeInputToText,
   terminalColorToCss,
   terminalEnterAlreadyHandled,
@@ -105,6 +106,16 @@ describe("NativeTerminalView helpers", () => {
     expect(selectionSpanForRow(range, 2, 10)).toEqual({ start: 0, end: 9 });
     expect(selectionSpanForRow(range, 3, 10)).toEqual({ start: 0, end: 2 });
     expect(selectionSpanForRow(range, 4, 10)).toBeNull();
+  });
+
+  it("computes visible terminal search highlight spans", () => {
+    const match = { row: 1, col: 2, length: 4 };
+    expect(terminalSearchSpanForRow(match, 0, 10)).toBeNull();
+    expect(terminalSearchSpanForRow(match, 1, 10)).toEqual({ start: 2, end: 5 });
+    expect(terminalSearchSpanForRow({ row: 1, col: 8, length: 5 }, 1, 10)).toEqual({
+      start: 8,
+      end: 9,
+    });
   });
 
   it("builds Enter commands and promotes simple Shift+Enter to lineBreak", () => {

@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TERMINAL_SHORTCUTS,
+  normalizeTerminalShortcuts,
+  type TerminalShortcutMap,
+} from "./terminalShortcuts";
+
 export type DocumentBrowserMode = "list" | "tree";
 export type DocumentLabelMode = "title" | "filename" | "both";
 export type ExplorerPaneMode = "documents" | "files";
@@ -163,6 +169,8 @@ export interface AnchorSettings {
     lastHeight: number;
     autoLaunch: TerminalLauncherId | null;
     launchers: Record<TerminalLauncherId, TerminalLauncherSettings>;
+    copyOnSelect: boolean;
+    shortcuts: TerminalShortcutMap;
     /** Inject ANCHOR_* env + --add-dir from the active item into agent sessions. */
     injectActiveContext: boolean;
     /** How "attach active item" inserts a file reference into a focused agent. */
@@ -326,6 +334,8 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
         label: "Shell",
       },
     },
+    copyOnSelect: false,
+    shortcuts: { ...DEFAULT_TERMINAL_SHORTCUTS },
     injectActiveContext: true,
     attachMentionStyle: "mention",
   },
@@ -466,6 +476,11 @@ export function normalizeAnchorSettings(value: unknown): AnchorSettings {
         typeof terminal.injectActiveContext === "boolean"
           ? terminal.injectActiveContext
           : DEFAULT_ANCHOR_SETTINGS.terminal.injectActiveContext,
+      copyOnSelect:
+        typeof terminal.copyOnSelect === "boolean"
+          ? terminal.copyOnSelect
+          : DEFAULT_ANCHOR_SETTINGS.terminal.copyOnSelect,
+      shortcuts: normalizeTerminalShortcuts(terminal.shortcuts),
       attachMentionStyle: parseAttachMentionStyle(terminal.attachMentionStyle),
     },
     ai: normalizeAi(value.ai),
@@ -764,6 +779,7 @@ function cloneDefaultSettings(): AnchorSettings {
         codex: { ...DEFAULT_ANCHOR_SETTINGS.terminal.launchers.codex },
         shell: { ...DEFAULT_ANCHOR_SETTINGS.terminal.launchers.shell },
       },
+      shortcuts: { ...DEFAULT_ANCHOR_SETTINGS.terminal.shortcuts },
     },
     ai: {
       ...DEFAULT_ANCHOR_SETTINGS.ai,

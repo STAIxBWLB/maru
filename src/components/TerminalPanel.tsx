@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   PanelRight,
   Plus,
+  Search,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -30,14 +31,19 @@ import {
   terminalInput,
   terminalKill,
   terminalResize,
+  terminalSearch,
   terminalScroll,
   terminalSpawn,
+  terminalText,
   terminalWrite,
   type TerminalFrame,
   type TerminalInputCommand,
+  type TerminalSearchDirection,
+  type TerminalSearchMatch,
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import type { AnchorSettings, TerminalDock } from "../lib/settings";
+import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
 import { NativeTerminalView, type NativeTerminalViewHandle } from "./NativeTerminalView";
 import {
   activeItemMention,
@@ -48,13 +54,13 @@ import {
   createTerminalTask,
   describeActiveContextChip,
   EMPTY_TERMINAL_STATE,
-  hydrateTerminalStateFromPersisted,
   isRelaunchableTab,
+  loadPersistedTerminalState,
   pathMention,
+  persistTerminalState,
   resolveExistingLaunchTaskId,
   selectTerminalSplitLeftTabId,
   selectTerminalTabByIndex,
-  serializeTerminalState,
   shouldSuppressTerminalHoverMouseEvent,
   shouldCloseTerminalSplitAfterTabClose,
   shouldAutoLaunchTerminal,
@@ -126,23 +132,19 @@ const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
 const MIN_WIDTH = 320;
 const MIN_MAIN_WIDTH = 360;
-const TERMINAL_STORAGE_KEY = "anchor:terminal:v1";
-
-function loadPersistedTerminalState(): typeof EMPTY_TERMINAL_STATE {
-  try {
-    const raw = window.localStorage.getItem(TERMINAL_STORAGE_KEY);
-    if (!raw) return EMPTY_TERMINAL_STATE;
-    return hydrateTerminalStateFromPersisted(JSON.parse(raw));
-  } catch {
-    return EMPTY_TERMINAL_STATE;
-  }
-}
-
 function pathBaseName(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.replace(/[/\\]+$/, "");
   const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.closest(".native-terminal-view")) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
 }
 
 export const TerminalPanel = memo(
@@ -184,6 +186,7 @@ export const TerminalPanel = memo(
     const [error, setError] = useState<string | null>(null);
     const handlesRef = useRef<Map<string, NativeTerminalViewHandle>>(new Map());
     const terminalBodyRef = useRef<HTMLDivElement | null>(null);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
     const sessionByTabRef = useRef<Map<string, string>>(new Map());
     const tabBySessionRef = useRef<Map<string, string>>(new Map());
     // One stable handler object per session so NativeTerminalView's memo() can
@@ -203,6 +206,12 @@ export const TerminalPanel = memo(
     // suppressing hover so TUIs (claude/codex) receive it.
     const mouseModesBySessionRef = useRef<Map<string, boolean>>(new Map());
     const [framesBySession, setFramesBySession] = useState<Record<string, TerminalFrame>>({});
+    const [searchOpen, setSearchOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+    const [searchMatchesBySession, setSearchMatchesBySession] = useState<
+      Record<string, TerminalSearchMatch | null>
+    >({});
     const [resizeReadySessions, setResizeReadySessions] = useState<Record<string, true>>({});
     const seqRef = useRef(1);
     const taskSeqRef = useRef(1);
@@ -338,14 +347,7 @@ export const TerminalPanel = memo(
     // relaunchable entries after a restart (PTYs themselves cannot survive).
     useEffect(() => {
       const id = window.setTimeout(() => {
-        try {
-          window.localStorage.setItem(
-            TERMINAL_STORAGE_KEY,
-            JSON.stringify(serializeTerminalState(state)),
-          );
-        } catch {
-          // localStorage may be unavailable (private mode); persistence is best-effort.
-        }
+        persistTerminalState(state);
       }, 400);
       return () => window.clearTimeout(id);
     }, [state]);
@@ -799,29 +801,149 @@ export const TerminalPanel = memo(
       [activeContext, focusedKind],
     );
 
+    const getFocusedTerminalHandle = useCallback(() => {
+      const tabId = focusedTabIdRef.current;
+      return tabId ? handlesRef.current.get(tabId) ?? null : null;
+    }, []);
+
+    const getFocusedSessionId = useCallback(() => {
+      const tabId = focusedTabIdRef.current;
+      return tabId ? sessionByTabRef.current.get(tabId) ?? null : null;
+    }, []);
+
+    const writeClipboardText = useCallback(
+      async (text: string) => {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          setError(t("terminal.clipboard.writeFailed"));
+        }
+      },
+      [t],
+    );
+
+    const readClipboardText = useCallback(async (): Promise<string> => {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        setError(t("terminal.clipboard.readFailed"));
+        return "";
+      }
+    }, [t]);
+
+    const copySelectedTerminalText = useCallback(
+      (text: string) => {
+        void writeClipboardText(text);
+      },
+      [writeClipboardText],
+    );
+
+    const openSearch = useCallback(() => {
+      setSearchOpen(true);
+      window.requestAnimationFrame(() => searchInputRef.current?.select());
+    }, []);
+
+    const closeSearch = useCallback(() => {
+      setSearchOpen(false);
+      const handle = getFocusedTerminalHandle();
+      handle?.focus();
+    }, [getFocusedTerminalHandle]);
+
+    const runTerminalSearch = useCallback(
+      async (direction: TerminalSearchDirection) => {
+        const sessionId = getFocusedSessionId();
+        const query = searchQuery;
+        if (!sessionId || !query) return;
+        try {
+          const result = await terminalSearch(
+            sessionId,
+            query,
+            direction,
+            searchCaseSensitive,
+          );
+          setSearchMatchesBySession((current) => ({
+            ...current,
+            [sessionId]: result.found && result.row != null && result.col != null
+              ? { row: result.row, col: result.col, length: result.length }
+              : null,
+          }));
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      },
+      [getFocusedSessionId, searchCaseSensitive, searchQuery],
+    );
+
     const handleTerminalKeyDownCapture = useCallback(
       (event: React.KeyboardEvent<HTMLElement>) => {
+        if (isTextEditingTarget(event.target)) return;
         const isMac = navigator.platform.toLowerCase().includes("mac");
-        const mod = isMac ? event.metaKey : event.ctrlKey;
-        if (!mod || event.altKey) return;
-        const lower = event.key.toLowerCase();
-        if (lower === "w" && !event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
+        const action = terminalShortcutActionForEvent(
+          event.nativeEvent,
+          settings.terminal.shortcuts,
+          isMac,
+        );
+        if (!action) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (action === "paste") {
+          void (async () => {
+            const text = await readClipboardText();
+            if (!text) return;
+            const handle = getFocusedTerminalHandle();
+            if (handle) {
+              handle.pasteText(text);
+              return;
+            }
+            const sessionId = getFocusedSessionId();
+            if (sessionId) await terminalInput(sessionId, { type: "paste", text });
+          })();
+          return;
+        }
+        if (action === "copy") {
+          const text = getFocusedTerminalHandle()?.copySelection();
+          if (text) void writeClipboardText(text);
+          return;
+        }
+        if (action === "selectAll") {
+          void (async () => {
+            const handle = getFocusedTerminalHandle();
+            if (!handle) return;
+            const sessionId = getFocusedSessionId();
+            let text: string | null = null;
+            if (sessionId) {
+              try {
+                text = await terminalText(sessionId);
+              } catch {
+                text = null;
+              }
+            }
+            handle.selectAll(text);
+          })();
+          return;
+        }
+        if (action === "find") {
+          openSearch();
+          return;
+        }
+        if (action === "closeTab") {
           if (focusedTabId) closeTab(focusedTabId);
           return;
         }
-        if (lower === "t" && !event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
+        if (action === "newTab") {
           void launch(settings.terminal.autoLaunch ?? "shell", focusedGroup);
           return;
         }
-        if (!event.shiftKey && /^[1-9]$/.test(event.key)) {
-          const target = selectTerminalTabByIndex(activeTaskTabs, Number(event.key));
+        if (action === "split") {
+          onSplitOpenChange(true);
+          return;
+        }
+        if (action.startsWith("tab")) {
+          const index = Number(action.slice(3));
+          const target = selectTerminalTabByIndex(activeTaskTabs, index);
           if (target) {
-            event.preventDefault();
-            event.stopPropagation();
             if (splitOpen && rightTab?.id === target.id) {
               setFocusedGroup("right");
             } else {
@@ -837,10 +959,17 @@ export const TerminalPanel = memo(
         closeTab,
         focusedGroup,
         focusedTabId,
+        getFocusedSessionId,
+        getFocusedTerminalHandle,
         launch,
+        onSplitOpenChange,
+        openSearch,
+        readClipboardText,
         rightTab,
         settings.terminal.autoLaunch,
+        settings.terminal.shortcuts,
         splitOpen,
+        writeClipboardText,
       ],
     );
 
@@ -1245,15 +1374,79 @@ export const TerminalPanel = memo(
                           focused={isFocused}
                           resizeReady={resizeReadySessions[sessionId] === true}
                           inputLabel={t("terminal.input")}
+                          copyOnSelect={settings.terminal.copyOnSelect}
+                          searchMatch={searchMatchesBySession[sessionId] ?? null}
                           onInput={handlers.onInput}
                           onResize={handlers.onResize}
                           onScroll={handlers.onScroll}
+                          onCopyOnSelect={copySelectedTerminalText}
                         />
                       ) : null}
                     </div>
                   </div>
                 );
               })}
+              {searchOpen ? (
+                <form
+                  className="terminal-search-overlay"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void runTerminalSearch("next");
+                  }}
+                >
+                  <Search size={13} aria-hidden="true" />
+                  <input
+                    ref={searchInputRef}
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeSearch();
+                      } else if (event.key === "Enter" && event.shiftKey) {
+                        event.preventDefault();
+                        void runTerminalSearch("previous");
+                      }
+                    }}
+                    placeholder={t("terminal.search.placeholder")}
+                    aria-label={t("terminal.search.placeholder")}
+                  />
+                  <button
+                    type="button"
+                    className="terminal-search-button"
+                    onClick={() => void runTerminalSearch("previous")}
+                    aria-label={t("terminal.search.previous")}
+                    title={t("terminal.search.previous")}
+                  >
+                    <ChevronUp size={13} />
+                  </button>
+                  <button
+                    type="submit"
+                    className="terminal-search-button"
+                    aria-label={t("terminal.search.next")}
+                    title={t("terminal.search.next")}
+                  >
+                    <ChevronDown size={13} />
+                  </button>
+                  <label className="terminal-search-case" title={t("terminal.search.case")}>
+                    <input
+                      type="checkbox"
+                      checked={searchCaseSensitive}
+                      onChange={(event) => setSearchCaseSensitive(event.target.checked)}
+                    />
+                    <span>Aa</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="terminal-search-button"
+                    onClick={closeSearch}
+                    aria-label={t("terminal.search.close")}
+                    title={t("terminal.search.close")}
+                  >
+                    <X size={13} />
+                  </button>
+                </form>
+              ) : null}
               {!splitMode && activeTab && isRelaunchableTab(activeTab) ? (
                 <div className="terminal-relaunch-overlay">
                   <button

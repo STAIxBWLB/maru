@@ -620,6 +620,28 @@ describe("normalizeAnchorSettings", () => {
     expect(round.ai.extra.legacyFlag).toBe(true);
   });
 
+  it("normalizes terminal reliability settings", () => {
+    const settings = normalizeAnchorSettings({
+      terminal: {
+        copyOnSelect: true,
+        shortcuts: {
+          paste: "mod+shift+v",
+          find: null,
+          copy: "bogus",
+        },
+      },
+    });
+
+    expect(settings.terminal.copyOnSelect).toBe(true);
+    expect(settings.terminal.shortcuts.paste).toBe("mod+shift+v");
+    expect(settings.terminal.shortcuts.find).toBeNull();
+    expect(settings.terminal.shortcuts.copy).toBe("mod+c");
+
+    const round = normalizeAnchorSettings(serializeAnchorSettings(settings));
+    expect(round.terminal.copyOnSelect).toBe(true);
+    expect(round.terminal.shortcuts).toEqual(settings.terminal.shortcuts);
+  });
+
   it("normalizes binary include pattern text with comments and case-insensitive duplicates", () => {
     expect(
       parseBinaryFileIncludePatternsText(`

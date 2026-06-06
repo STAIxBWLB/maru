@@ -355,9 +355,15 @@ export async function skillsSyncAllSources(
   return invoke<SyncAllOutcome>("skills_sync_all_sources", { workPath, progressId });
 }
 
-export async function skillsListSkills(workPath: string | null): Promise<SkillRecord[]> {
+export async function skillsListSkills(
+  workPath: string | null,
+  options: { refresh?: boolean } = {},
+): Promise<SkillRecord[]> {
   if (!isTauri()) return MOCK_BUILTIN_SKILLS;
-  return invoke<SkillRecord[]>("skills_list_skills", { workPath });
+  return invoke<SkillRecord[]>("skills_list_skills", {
+    workPath,
+    refresh: Boolean(options.refresh),
+  });
 }
 
 export async function skillsReadSkill(skillId: string): Promise<SkillDocument> {

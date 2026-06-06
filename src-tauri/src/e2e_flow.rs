@@ -318,7 +318,7 @@ pub fn anchor_e2e_read(work_path: String, run_id: String) -> Result<E2EFlowRun, 
 }
 
 fn ensure_sample_skill(work_path: &str) -> Result<String, String> {
-    let existing = skills_list_skills(Some(work_path.to_string()))?
+    let existing = skills_list_skills(Some(work_path.to_string()), Some(true))?
         .into_iter()
         .find(|skill| skill.name == SAMPLE_SKILL_NAME);
     let skill = match existing {

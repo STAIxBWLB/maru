@@ -155,8 +155,8 @@ use telegram_io::{
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{
-    terminal_input, terminal_kill, terminal_resize, terminal_scroll, terminal_spawn,
-    terminal_write, TerminalState,
+    terminal_input, terminal_kill, terminal_resize, terminal_scroll, terminal_search,
+    terminal_spawn, terminal_text, terminal_write, TerminalState,
 };
 use terminal_hooks::{
     remove_agent_context_hint, start_terminal_hook_watcher, terminal_hooks_install,
@@ -284,6 +284,8 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_scroll,
+            terminal_text,
+            terminal_search,
             terminal_kill,
             terminal_hooks_install,
             terminal_hooks_uninstall,

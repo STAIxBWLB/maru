@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
 }));
 
-import { skillsInstallSkill, skillsSyncAllSources } from "./skills";
+import { skillsInstallSkill, skillsListSkills, skillsSyncAllSources } from "./skills";
 
 function enterTauri() {
   (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
@@ -52,6 +52,26 @@ describe("skills invoke wrappers", () => {
       progressId: "pid-1",
     });
     expect(outcome.succeeded).toBe(1);
+  });
+
+  it("lists skills from the cached registry by default", async () => {
+    enterTauri();
+    invoke.mockResolvedValue([]);
+    await skillsListSkills("/work");
+    expect(invoke).toHaveBeenCalledWith("skills_list_skills", {
+      workPath: "/work",
+      refresh: false,
+    });
+  });
+
+  it("can request a full skills refresh explicitly", async () => {
+    enterTauri();
+    invoke.mockResolvedValue([]);
+    await skillsListSkills("/work", { refresh: true });
+    expect(invoke).toHaveBeenCalledWith("skills_list_skills", {
+      workPath: "/work",
+      refresh: true,
+    });
   });
 
   it("returns an empty sync outcome outside Tauri without invoking", async () => {

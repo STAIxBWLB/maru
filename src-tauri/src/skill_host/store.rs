@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
@@ -623,19 +624,24 @@ fn skills_rescan_source_impl(
 }
 
 #[tauri::command]
-pub fn skills_list_skills(work_path: Option<String>) -> Result<Vec<SkillRecord>, String> {
+pub fn skills_list_skills(
+    work_path: Option<String>,
+    refresh: Option<bool>,
+) -> Result<Vec<SkillRecord>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    ensure_default_sources(&mut registry, work_path.as_deref())?;
-    let source_ids: Vec<String> = registry
-        .sources
-        .iter()
-        .map(|source| source.id.clone())
-        .collect();
-    for source_id in source_ids {
-        let _ = rescan_source_in_registry(&mut registry, &source_id);
+    if refresh.unwrap_or(false) {
+        ensure_default_sources(&mut registry, work_path.as_deref())?;
+        let source_ids: Vec<String> = registry
+            .sources
+            .iter()
+            .map(|source| source.id.clone())
+            .collect();
+        for source_id in source_ids {
+            let _ = rescan_source_in_registry(&mut registry, &source_id);
+        }
+        save_registry_unlocked(&registry)?;
     }
-    save_registry_unlocked(&registry)?;
     Ok(registry.skills)
 }
 
@@ -1998,6 +2004,32 @@ fn registry_guard() -> Result<MutexGuard<'static, ()>, String> {
         .map_err(|_| "skills_registry_lock_poisoned".to_string())
 }
 
+fn startup_profile_enabled() -> bool {
+    std::env::var("ANCHOR_STARTUP_PROFILE")
+        .map(|value| {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
+}
+
+fn profile_timing_result<T, E>(
+    name: impl AsRef<str>,
+    work: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    if !startup_profile_enabled() {
+        return work();
+    }
+    let name = name.as_ref().to_string();
+    let started = Instant::now();
+    let result = work();
+    eprintln!(
+        "[anchor-startup] {name}: {:.2}ms",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    result
+}
+
 pub fn load_registry() -> Result<SkillsRegistry, String> {
     let _guard = registry_guard()?;
     load_registry_unlocked()
@@ -2148,7 +2180,9 @@ fn ensure_default_sources(
 fn ensure_builtin_source(registry: &mut SkillsRegistry) -> Result<(), String> {
     clear_removed_source(registry, BUILTIN_SOURCE_ID);
     let builtin = builtin_materialized_root()?;
-    materialize_builtin_bundle(&builtin)?;
+    profile_timing_result("skills.materialize_builtin_bundle", || {
+        materialize_builtin_bundle(&builtin)
+    })?;
     let source = SkillSource {
         id: BUILTIN_SOURCE_ID.to_string(),
         kind: "builtin".to_string(),
@@ -2640,7 +2674,9 @@ fn rescan_source_in_registry_with_progress(
                 .map(|hash| (skill.id.clone(), hash.clone()))
         })
         .collect();
-    let scanned = scan_source_with_progress(&source, progress, &saved_hashes)?;
+    let scanned = profile_timing_result(format!("skills.rescan_source.{source_id}"), || {
+        scan_source_with_progress(&source, progress, &saved_hashes)
+    })?;
     registry.skills.retain(|skill| skill.source_id != source_id);
     registry.skills.extend(scanned);
     apply_registry_validation(registry);
@@ -3283,28 +3319,30 @@ fn git_dirty(path: &Path) -> Result<bool, String> {
 }
 
 fn hash_directory(path: &Path) -> Result<String, String> {
-    let mut entries: Vec<PathBuf> = WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.path().to_path_buf())
-        .collect();
-    entries.sort();
-    let mut hasher = Sha256::new();
-    for file in entries {
-        if file.file_name().and_then(|name| name.to_str()) == Some(BUILTIN_HASHES_FILE) {
-            continue;
+    profile_timing_result(format!("skills.hash_directory.{}", host_fs::display_path(path)), || {
+        let mut entries: Vec<PathBuf> = WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        entries.sort();
+        let mut hasher = Sha256::new();
+        for file in entries {
+            if file.file_name().and_then(|name| name.to_str()) == Some(BUILTIN_HASHES_FILE) {
+                continue;
+            }
+            let rel = file.strip_prefix(path).unwrap_or(&file).to_string_lossy();
+            hasher.update(rel.as_bytes());
+            hasher.update(b"\0");
+            let data = fs::read(&file)
+                .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&file)))?;
+            hasher.update(sha256_hex(&data).as_bytes());
+            hasher.update(b"\0");
         }
-        let rel = file.strip_prefix(path).unwrap_or(&file).to_string_lossy();
-        hasher.update(rel.as_bytes());
-        hasher.update(b"\0");
-        let data = fs::read(&file)
-            .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&file)))?;
-        hasher.update(sha256_hex(&data).as_bytes());
-        hasher.update(b"\0");
-    }
-    Ok(format!("{:x}", hasher.finalize()))
+        Ok(format!("{:x}", hasher.finalize()))
+    })
 }
 
 fn hash_file(path: &Path) -> Result<String, String> {
@@ -4314,7 +4352,7 @@ mod tests {
     fn builtin_catalog_scans_public_skills_without_design_prefix() {
         let _home = test_home();
 
-        let skills = skills_list_skills(None).unwrap();
+        let skills = skills_list_skills(None, Some(true)).unwrap();
         let builtin: Vec<_> = skills
             .iter()
             .filter(|skill| skill.source_id == BUILTIN_SOURCE_ID)
@@ -4324,6 +4362,43 @@ mod tests {
             .iter()
             .all(|skill| !skill.name.starts_with("design-")));
         assert!(builtin.iter().all(|skill| skill.editable));
+    }
+
+    #[test]
+    fn cached_skill_list_does_not_materialize_builtin_bundle() {
+        let _home = test_home();
+        let skills_root = host_fs::skills_root().unwrap();
+        let builtin_root = skills_root.join(BUILTIN_DIR_NAME);
+
+        assert!(!builtin_root.exists());
+        assert!(skills_list_skills(None, Some(false)).unwrap().is_empty());
+        assert!(!builtin_root.exists());
+
+        let mut registry = SkillsRegistry::default();
+        registry.skills.push(SkillRecord {
+            id: "cached-source::cached".to_string(),
+            source_id: "cached-source".to_string(),
+            name: "cached".to_string(),
+            rel_path: "skills/cached".to_string(),
+            abs_path: path_string(&skills_root.join("cached")),
+            title: "Cached".to_string(),
+            description: None,
+            runtime: None,
+            category: None,
+            tier: "managed".to_string(),
+            valid: true,
+            validation_errors: Vec::new(),
+            editable: true,
+            dirty: false,
+            content_hash: None,
+            saved_hash: None,
+        });
+        save_registry_unlocked(&registry).unwrap();
+
+        let skills = skills_list_skills(None, Some(false)).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].id, "cached-source::cached");
+        assert!(!builtin_root.exists());
     }
 
     #[test]
@@ -4457,7 +4532,7 @@ mod tests {
     #[test]
     fn builtin_skill_save_persists_and_marks_customized_dirty() {
         let _home = test_home();
-        let skills = skills_list_skills(None).unwrap();
+        let skills = skills_list_skills(None, Some(true)).unwrap();
         let skill = skills
             .into_iter()
             .find(|skill| skill.id == "anchor-builtin::gaejosik")
@@ -4476,7 +4551,7 @@ mod tests {
     #[test]
     fn save_skill_as_creates_clean_managed_copy() {
         let _home = test_home();
-        skills_list_skills(None).unwrap();
+        skills_list_skills(None, Some(true)).unwrap();
 
         let created = skills_save_skill_as(
             "anchor-builtin::gaejosik".to_string(),
