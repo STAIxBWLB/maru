@@ -60,7 +60,7 @@ export function telegramMonitorConfigToSave(
       apiId: normalized.telegram.apiId,
       apiHash: normalized.telegram.hasApiHash
         ? secretForSave(normalized.telegram.apiHash)
-        : normalized.telegram.apiHash,
+        : "",
       phone: normalized.telegram.phone,
       selfId: normalized.telegram.selfId,
     },
@@ -70,7 +70,7 @@ export function telegramMonitorConfigToSave(
       telegram: {
         botToken: normalized.notification.telegram.hasBotToken
           ? secretForSave(normalized.notification.telegram.botToken)
-          : normalized.notification.telegram.botToken,
+          : "",
         chatId: normalized.notification.telegram.chatId,
       },
     },
@@ -174,6 +174,8 @@ function normalizeStringArray(value: unknown): string[] {
 }
 
 function normalizeOptionalInteger(value: unknown, fallback: number): number {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(30, Math.trunc(number));

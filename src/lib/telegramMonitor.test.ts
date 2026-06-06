@@ -47,6 +47,34 @@ describe("normalizeTelegramMonitorConfig", () => {
     expect(save.notification.telegram.botToken).toBe(TELEGRAM_SECRET_UNCHANGED);
   });
 
+  it("normalizes null polling interval to the fallback", () => {
+    const normalized = normalizeTelegramMonitorConfig({
+      ...baseConfig,
+      polling: { interval_seconds: null },
+    });
+    expect(normalized.polling.interval_seconds).toBe(60);
+  });
+
+  it("serializes cleared existing secrets as empty strings", () => {
+    const save = telegramMonitorConfigToSave({
+      ...baseConfig,
+      telegram: {
+        ...baseConfig.telegram,
+        apiHash: null,
+        hasApiHash: false,
+      },
+      notification: {
+        telegram: {
+          ...baseConfig.notification.telegram,
+          botToken: null,
+          hasBotToken: false,
+        },
+      },
+    });
+    expect(save.telegram.apiHash).toBe("");
+    expect(save.notification.telegram.botToken).toBe("");
+  });
+
   it("coerces contexts and keeps the first selected project", () => {
     const normalized = normalizeTelegramMonitorConfig({
       ...baseConfig,
