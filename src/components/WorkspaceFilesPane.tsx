@@ -17,16 +17,19 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import type React from "react";
+import { createPortal } from "react-dom";
 import {
   memo,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useTransition,
 } from "react";
 import { useTranslation } from "../lib/i18n";
+import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import {
   clearExplorerDragPayload,
@@ -204,6 +207,19 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     lastSentQueryRef.current = query;
     setInputQuery(query);
   }, [query]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const menu = contextMenuRef.current;
+    if (!menu) return;
+    const next = clampMenuPosition(
+      { x: contextMenu.x, y: contextMenu.y },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (next.x === contextMenu.x && next.y === contextMenu.y) return;
+    setContextMenu({ ...contextMenu, ...next });
+  }, [contextMenu]);
 
   const filtered = useMemo(
     () => filterWorkspaceFiles(entries, deferredQuery, filter, binaryIncludePatterns),
@@ -734,122 +750,125 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         ) : null}
       </div>
 
-      {contextMenu ? (
-        <div
-          ref={contextMenuRef}
-          className="context-menu"
-          role="menu"
-          tabIndex={-1}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={handleContextMenuKeyDown}
-        >
-          <div className="context-menu-title" title={contextMenu.relPath}>
-            {contextMenu.title}
-          </div>
-          {contextMenu.entry && isOpenableFile(contextMenu.entry) ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const entry = contextMenu.entry;
-                if (!entry) return;
-                setContextMenu(null);
-                onOpenFile(entry);
-              }}
+      {contextMenu
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="context-menu"
+              role="menu"
+              tabIndex={-1}
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={handleContextMenuKeyDown}
             >
-              {t("context.openFile")}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const entry = contextMenu.entry;
-              setContextMenu(null);
-              if (entry) onQueueFiles([entry]);
-            }}
-            disabled={!contextMenu.entry}
-          >
-            {t("files.queue")}
-          </button>
-          {onApplySkillToTarget ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const target = contextMenu.targetPath;
-                const kind = contextMenu.targetKind;
-                setContextMenu(null);
-                onApplySkillToTarget(target, kind);
-              }}
-            >
-              {t("context.applySkill")}
-            </button>
-          ) : null}
-          {onAttachToTerminal && contextMenu.targetKind === "file" ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const rel = contextMenu.relPath;
-                const abs = contextMenu.targetPath;
-                setContextMenu(null);
-                onAttachToTerminal(rel, abs);
-              }}
-            >
-              {t("context.attachToTerminal")}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const target = contextMenu.targetPath;
-              setContextMenu(null);
-              onRevealInFinder(target);
-            }}
-          >
-            {t("context.revealInFinder")}
-          </button>
-          {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
-            <>
+              <div className="context-menu-title" title={contextMenu.relPath}>
+                {contextMenu.title}
+              </div>
+              {contextMenu.entry && isOpenableFile(contextMenu.entry) ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const entry = contextMenu.entry;
+                    if (!entry) return;
+                    setContextMenu(null);
+                    onOpenFile(entry);
+                  }}
+                >
+                  {t("context.openFile")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const entry = contextMenu.entry;
+                  setContextMenu(null);
+                  if (entry) onQueueFiles([entry]);
+                }}
+                disabled={!contextMenu.entry}
+              >
+                {t("files.queue")}
+              </button>
+              {onApplySkillToTarget ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const target = contextMenu.targetPath;
+                    const kind = contextMenu.targetKind;
+                    setContextMenu(null);
+                    onApplySkillToTarget(target, kind);
+                  }}
+                >
+                  {t("context.applySkill")}
+                </button>
+              ) : null}
+              {onAttachToTerminal && contextMenu.targetKind === "file" ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const rel = contextMenu.relPath;
+                    const abs = contextMenu.targetPath;
+                    setContextMenu(null);
+                    onAttachToTerminal(rel, abs);
+                  }}
+                >
+                  {t("context.attachToTerminal")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const target = contextMenu.targetPath;
+                  setContextMenu(null);
+                  onRevealInFinder(target);
+                }}
+              >
+                {t("context.revealInFinder")}
+              </button>
+              {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
+                <>
+                  <div className="context-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const target = contextMenu.targetPath;
+                      const kind = contextMenu.targetKind;
+                      setContextMenu(null);
+                      onApplyFileQueueToDestination(target, kind, "copy");
+                    }}
+                  >
+                    {t("rightPane.files.copySelectedHere", { count: selectedFileQueueCount })}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const target = contextMenu.targetPath;
+                      const kind = contextMenu.targetKind;
+                      setContextMenu(null);
+                      onApplyFileQueueToDestination(target, kind, "move");
+                    }}
+                  >
+                    {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+                  </button>
+                </>
+              ) : null}
               <div className="context-menu-separator" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const target = contextMenu.targetPath;
-                  const kind = contextMenu.targetKind;
-                  setContextMenu(null);
-                  onApplyFileQueueToDestination(target, kind, "copy");
-                }}
-              >
-                {t("rightPane.files.copySelectedHere", { count: selectedFileQueueCount })}
+              <button type="button" role="menuitem" onClick={() => copyText(contextMenu.targetPath)}>
+                {t("context.copyPath")}
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const target = contextMenu.targetPath;
-                  const kind = contextMenu.targetKind;
-                  setContextMenu(null);
-                  onApplyFileQueueToDestination(target, kind, "move");
-                }}
-              >
-                {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+              <button type="button" role="menuitem" onClick={() => copyText(contextMenu.relPath)}>
+                {t("context.copyRelativePath")}
               </button>
-            </>
-          ) : null}
-          <div className="context-menu-separator" role="separator" />
-          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.targetPath)}>
-            {t("context.copyPath")}
-          </button>
-          <button type="button" role="menuitem" onClick={() => copyText(contextMenu.relPath)}>
-            {t("context.copyRelativePath")}
-          </button>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 });

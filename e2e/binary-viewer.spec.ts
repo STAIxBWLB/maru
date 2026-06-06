@@ -44,7 +44,7 @@ test("right-clicking a binary file exposes Open file menu item", async ({ page }
     .click({ button: "right" });
 
   await expect(
-    explorer.locator(".context-menu").getByRole("menuitem", { name: "파일 열기" }),
+    page.locator(".context-menu").getByRole("menuitem", { name: "파일 열기" }),
   ).toBeVisible();
 });
 
