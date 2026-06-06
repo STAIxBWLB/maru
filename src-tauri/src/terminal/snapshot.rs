@@ -150,17 +150,20 @@ pub fn terminal_indexed_lines(term: &Term<TerminalEventProxy>) -> Vec<(i32, Stri
 }
 
 pub fn terminal_text(term: &Term<TerminalEventProxy>) -> String {
-    let mut lines: Vec<String> = terminal_indexed_lines(term)
+    let lines: Vec<String> = terminal_indexed_lines(term)
         .into_iter()
         .map(|(_, text)| text)
         .collect();
-    while lines.first().is_some_and(|line| line.is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    lines.join("\n")
+    let start = lines
+        .iter()
+        .position(|line| !line.is_empty())
+        .unwrap_or(lines.len());
+    let end = lines
+        .iter()
+        .rposition(|line| !line.is_empty())
+        .map(|index| index + 1)
+        .unwrap_or(start);
+    lines[start..end].join("\n")
 }
 
 fn terminal_line_text(term: &Term<TerminalEventProxy>, line_index: i32) -> String {

@@ -8365,10 +8365,15 @@ button.git-badge:hover {
   height: 24px;
   padding: 0 6px;
   border: 0;
-  outline: 0;
   background: transparent;
   color: #eeeeee;
   font-size: 12px;
+}
+
+.terminal-search-overlay input[type="text"]:focus-visible,
+.terminal-search-overlay input:not([type]):focus-visible {
+  outline: 2px solid var(--accent, #7aa2ff);
+  outline-offset: 2px;
 }
 
 .terminal-search-button {
