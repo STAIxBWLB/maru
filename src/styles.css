@@ -8257,7 +8257,7 @@ button.git-badge:hover {
   color: transparent !important;
   caret-color: transparent !important;
   pointer-events: none !important;
-  z-index: -1;
+  z-index: 1;
 }
 
 .native-terminal-measure {

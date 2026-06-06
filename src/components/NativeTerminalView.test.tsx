@@ -6,8 +6,12 @@ import {
   finalCompositionText,
   frameLineToText,
   frameToText,
+  isDuplicateCompositionInput,
+  normalizeTerminalInputText,
   selectedTerminalText,
+  terminalBeforeInputToText,
   terminalColorToCss,
+  terminalInputEventToText,
   terminalKeyEventToInput,
 } from "./NativeTerminalView";
 
@@ -67,7 +71,7 @@ describe("NativeTerminalView helpers", () => {
     ).toBe("bc\nde");
   });
 
-  it("maps printable and control keys to structured input", () => {
+  it("does not send printable keydown text before input events commit it", () => {
     expect(
       terminalKeyEventToInput({
         key: "a",
@@ -78,8 +82,22 @@ describe("NativeTerminalView helpers", () => {
         metaKey: false,
         isComposing: false,
       }),
-    ).toEqual({ type: "text", text: "a" });
+    ).toBeNull();
 
+    expect(
+      terminalKeyEventToInput({
+        key: "ㅎ",
+        code: "KeyG",
+        shiftKey: false,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        isComposing: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("maps Shift+Enter to structured key input", () => {
     expect(
       terminalKeyEventToInput({
         key: "Enter",
@@ -99,6 +117,28 @@ describe("NativeTerminalView helpers", () => {
       ctrlKey: false,
       metaKey: false,
     });
+  });
+
+  it("extracts committed text from beforeinput and input events", () => {
+    expect(
+      terminalBeforeInputToText(
+        { inputType: "insertText", data: "a", isComposing: false },
+        false,
+      ),
+    ).toBe("a");
+    expect(
+      terminalInputEventToText(
+        { inputType: "insertText", data: null, isComposing: false },
+        "b",
+        false,
+      ),
+    ).toBe("b");
+    expect(
+      terminalBeforeInputToText(
+        { inputType: "insertCompositionText", data: "ㅎ", isComposing: true },
+        true,
+      ),
+    ).toBeNull();
   });
 
   it("keeps Alt-modified printable keys on the structured key path", () => {
@@ -149,6 +189,14 @@ describe("NativeTerminalView helpers", () => {
     ).toBeNull();
     expect(finalCompositionText("안녕하세요", "ㅇㅏㄴ")).toBe("안녕하세요");
     expect(finalCompositionText("", "안녕")).toBe("안녕");
+    expect(normalizeTerminalInputText("\u1112\u1161\u11AB")).toBe("한");
+  });
+
+  it("detects duplicate post-composition input", () => {
+    const recent = { text: "한글 입력", at: 1000 };
+    expect(isDuplicateCompositionInput("한글 입력", recent, 1200)).toBe(true);
+    expect(isDuplicateCompositionInput("한글 입력", recent, 1600)).toBe(false);
+    expect(isDuplicateCompositionInput("한글", recent, 1200)).toBe(false);
   });
 
   it("converts terminal colors to CSS", () => {

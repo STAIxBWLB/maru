@@ -71,14 +71,10 @@ fn encode_key(
     alt: bool,
     ctrl: bool,
     meta: bool,
-    kitty_keyboard_active: bool,
+    _kitty_keyboard_active: bool,
 ) -> Option<String> {
     if key == "Enter" && shift && !alt && !ctrl && !meta && (kind == "claude" || kind == "codex") {
-        return Some(if kitty_keyboard_active {
-            "\x1b[13;2u".to_string()
-        } else {
-            "\n".to_string()
-        });
+        return Some("\x1b[13;2u".to_string());
     }
 
     let mut encoded = match key {
@@ -150,14 +146,14 @@ mod tests {
     }
 
     #[test]
-    fn shift_enter_ai_falls_back_to_lf_without_kitty() {
+    fn shift_enter_ai_uses_csi_u_without_observed_kitty_mode() {
         assert_eq!(
             encode_terminal_input("claude", &key("Enter", true), false, false),
-            Some("\n".to_string())
+            Some("\x1b[13;2u".to_string())
         );
         assert_eq!(
             encode_terminal_input("codex", &key("Enter", true), false, false),
-            Some("\n".to_string())
+            Some("\x1b[13;2u".to_string())
         );
     }
 
@@ -189,6 +185,21 @@ mod tests {
                 true
             ),
             Some("\x1b[200~hello\x1b[201~".to_string())
+        );
+    }
+
+    #[test]
+    fn text_preserves_composed_hangul() {
+        assert_eq!(
+            encode_terminal_input(
+                "claude",
+                &TerminalInputCommand::Text {
+                    text: "한글 입력".to_string(),
+                },
+                false,
+                false,
+            ),
+            Some("한글 입력".to_string())
         );
     }
 

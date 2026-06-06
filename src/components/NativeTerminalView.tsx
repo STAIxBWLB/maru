@@ -41,6 +41,17 @@ interface CellSelection {
   focus: CellPoint;
 }
 
+interface TerminalInputEventLike {
+  data: string | null;
+  inputType: string;
+  isComposing?: boolean;
+}
+
+interface RecentComposition {
+  text: string;
+  at: number;
+}
+
 const ANSI_COLORS: Record<string, string> = {
   Black: "#111111",
   Red: "#f87171",
@@ -143,7 +154,7 @@ export function terminalKeyEventToInput(
 ): TerminalInputCommand | null {
   if (event.isComposing) return null;
   if (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
-    return { type: "text", text: event.key };
+    return null;
   }
   if (event.key === "Meta" || event.key === "Control" || event.key === "Alt" || event.key === "Shift") {
     return null;
@@ -159,8 +170,46 @@ export function terminalKeyEventToInput(
   };
 }
 
+export function normalizeTerminalInputText(text: string): string {
+  return text.normalize("NFC");
+}
+
+export function terminalBeforeInputToText(
+  event: TerminalInputEventLike,
+  composing: boolean,
+): string | null {
+  if (composing || event.isComposing || event.inputType === "insertCompositionText") {
+    return null;
+  }
+  if (event.inputType !== "insertText") return null;
+  const text = normalizeTerminalInputText(event.data ?? "");
+  return text ? text : null;
+}
+
+export function terminalInputEventToText(
+  event: TerminalInputEventLike,
+  textareaValue: string,
+  composing: boolean,
+): string | null {
+  if (composing || event.isComposing || event.inputType === "insertCompositionText") {
+    return null;
+  }
+  if (event.inputType && event.inputType !== "insertText") return null;
+  const text = normalizeTerminalInputText(event.data ?? textareaValue);
+  return text ? text : null;
+}
+
+export function isDuplicateCompositionInput(
+  text: string,
+  recent: RecentComposition | null,
+  now: number,
+  windowMs = 500,
+): boolean {
+  return Boolean(recent && recent.text === text && now - recent.at <= windowMs);
+}
+
 export function finalCompositionText(eventData: string, textareaValue: string): string {
-  return eventData || textareaValue;
+  return normalizeTerminalInputText(eventData || textareaValue);
 }
 
 export const NativeTerminalView = memo(
@@ -172,6 +221,7 @@ export const NativeTerminalView = memo(
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const measureRef = useRef<HTMLSpanElement | null>(null);
     const composingRef = useRef(false);
+    const recentCompositionRef = useRef<RecentComposition | null>(null);
     const pointerDownRef = useRef(false);
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const [selection, setSelection] = useState<CellSelection | null>(null);
@@ -278,6 +328,41 @@ export const NativeTerminalView = memo(
       [onInput],
     );
 
+    const onBeforeInput = useCallback(
+      (event: React.FormEvent<HTMLTextAreaElement>) => {
+        const text = terminalBeforeInputToText(
+          event.nativeEvent as InputEvent,
+          composingRef.current,
+        );
+        if (!text) return;
+        event.preventDefault();
+        event.currentTarget.value = "";
+        recentCompositionRef.current = null;
+        onInput({ type: "text", text });
+      },
+      [onInput],
+    );
+
+    const onTextInput = useCallback(
+      (event: React.FormEvent<HTMLTextAreaElement>) => {
+        const text = terminalInputEventToText(
+          event.nativeEvent as InputEvent,
+          event.currentTarget.value,
+          composingRef.current,
+        );
+        event.currentTarget.value = "";
+        if (!text) return;
+        const now = performance.now();
+        if (isDuplicateCompositionInput(text, recentCompositionRef.current, now)) {
+          recentCompositionRef.current = null;
+          return;
+        }
+        recentCompositionRef.current = null;
+        onInput({ type: "text", text });
+      },
+      [onInput],
+    );
+
     const onPaste = useCallback(
       (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         event.preventDefault();
@@ -317,6 +402,8 @@ export const NativeTerminalView = memo(
           autoCorrect="off"
           spellCheck={false}
           onKeyDown={onKeyDown}
+          onBeforeInput={onBeforeInput}
+          onInput={onTextInput}
           onPaste={onPaste}
           onCompositionStart={() => {
             composingRef.current = true;
@@ -325,7 +412,10 @@ export const NativeTerminalView = memo(
             composingRef.current = false;
             const text = finalCompositionText(event.data, event.currentTarget.value);
             event.currentTarget.value = "";
-            if (text) onInput({ type: "text", text });
+            if (text) {
+              recentCompositionRef.current = { text, at: performance.now() };
+              onInput({ type: "text", text });
+            }
           }}
         />
         <div className="native-terminal-grid" role="presentation">
