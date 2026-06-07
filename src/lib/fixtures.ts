@@ -508,6 +508,7 @@ export function mockTaskMetadata(relPath: string): TaskMetadata {
       tags: ["tasks", "anchor"],
     },
     tags: ["tasks", "anchor"],
+    body: "# Anchor tasks mode\n\nAdd first-class task management.",
     preview: "# Anchor tasks mode\n\nAdd first-class task management.",
     lineCount: 4,
     charCount: 58,

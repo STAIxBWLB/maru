@@ -29,6 +29,7 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
       setError(t("tasks.new.titleRequired"));
       return;
     }
+    const parsedEstimateMinutes = parseEstimateMinutes(estimateMinutes);
     setBusy(true);
     setError(null);
     try {
@@ -44,7 +45,7 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
           ...(due ? { due } : {}),
           ...(calendarStart ? { calendarStart } : {}),
           ...(calendarEnd ? { calendarEnd } : {}),
-          ...(estimateMinutes.trim() ? { estimateMinutes: Number(estimateMinutes) } : {}),
+          ...(parsedEstimateMinutes ? { estimateMinutes: parsedEstimateMinutes } : {}),
         },
         body: `# ${title.trim()}\n\n`,
       });
@@ -141,8 +142,8 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
             <span>{t("tasks.new.field.estimate")}</span>
             <input
               type="number"
-              min="0"
-              step="15"
+              min="1"
+              step="1"
               value={estimateMinutes}
               onChange={(event) => setEstimateMinutes(event.target.value)}
             />
@@ -159,4 +160,11 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
       </section>
     </div>
   );
+}
+
+function parseEstimateMinutes(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }

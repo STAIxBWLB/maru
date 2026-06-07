@@ -99,6 +99,7 @@ pub struct TaskNoteRow {
 pub struct TaskMetadata {
     pub rel_path: String,
     pub frontmatter: JsonValue,
+    pub body: String,
     pub preview: String,
     pub line_count: usize,
     pub char_count: usize,
@@ -124,6 +125,20 @@ pub struct UpdateTaskScheduleFields {
     pub calendar_start: Option<Option<String>>,
     pub calendar_end: Option<Option<String>>,
     pub estimate_minutes: Option<Option<f64>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateTaskDetailsFields {
+    pub title: Option<String>,
+    pub status: Option<TaskStatus>,
+    pub project: Option<Option<String>>,
+    pub priority: Option<Option<String>>,
+    pub due: Option<Option<String>>,
+    pub calendar_start: Option<Option<String>>,
+    pub calendar_end: Option<Option<String>>,
+    pub estimate_minutes: Option<Option<f64>>,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +214,7 @@ pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMet
             .into_iter()
             .collect(),
         frontmatter: frontmatter_json,
+        body: parts.body.clone(),
         preview,
         line_count: raw.lines().count(),
         char_count: raw.chars().count(),
@@ -306,6 +322,73 @@ pub fn update_task_schedule_fields(
     }
     let bucket = bucket_from_rel_path(&rel_path).unwrap_or(TaskBucket::Active);
     task_row_for_path(&work, &path, bucket)
+}
+
+#[tauri::command]
+pub fn update_task_details(
+    work_path: String,
+    rel_path: String,
+    fields: UpdateTaskDetailsFields,
+    root: Option<String>,
+) -> Result<TaskNoteRow, String> {
+    assert_anchor_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let path = resolve_inside_vault(&work_path, &rel_path)?;
+    let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
+    let current_bucket = bucket_from_task_path(&tasks_root, &path)?;
+    let original =
+        fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
+    let current_status = task_status_from_content(&original, current_bucket);
+    let target_status = fields.status.unwrap_or(current_status);
+
+    let mut updated = original.clone();
+    if let Some(title) = fields.title {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("task_title_required".to_string());
+        }
+        updated = update_frontmatter_content(
+            &updated,
+            "title",
+            Some(FrontmatterValue::String(title.to_string())),
+        )?;
+    }
+    if fields.status.is_some() {
+        updated = update_frontmatter_content(
+            &updated,
+            "status",
+            Some(FrontmatterValue::String(target_status.as_str().to_string())),
+        )?;
+    }
+    updated = patch_optional_string_field(updated, "project", fields.project)?;
+    updated = patch_optional_string_field(updated, "priority", fields.priority)?;
+    updated = patch_optional_string_field(updated, "due", fields.due)?;
+    updated = patch_optional_string_field(updated, "calendarStart", fields.calendar_start)?;
+    updated = patch_optional_string_field(updated, "calendarEnd", fields.calendar_end)?;
+    updated = patch_optional_number_field(updated, "estimateMinutes", fields.estimate_minutes)?;
+    if let Some(body) = fields.body {
+        updated = replace_markdown_body(&updated, &body)?;
+    }
+
+    if updated != original {
+        fs::write(&path, &updated).map_err(|err| format!("Cannot update task details: {err}"))?;
+    }
+
+    let target_bucket = target_status.target_bucket();
+    if fields.status.is_some() && target_status != current_status && current_bucket != target_bucket
+    {
+        assert_anchor_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
+        let target =
+            conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Cannot create task target: {err}"))?;
+        }
+        fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))?;
+        return task_row_for_path(&work, &target, target_bucket);
+    }
+
+    task_row_for_path(&work, &path, current_bucket)
 }
 
 #[tauri::command]
@@ -542,6 +625,40 @@ fn patch_optional_number_field(
     update_frontmatter_content(&content, key, next)
 }
 
+fn replace_markdown_body(content: &str, body: &str) -> Result<String, String> {
+    let clean_body = body.trim_start_matches('\n');
+    if !content.starts_with("---\n") {
+        return Ok(clean_body.to_string());
+    }
+    let Some(end) = content[4..].find("\n---") else {
+        return Err("Malformed frontmatter: no closing ---".to_string());
+    };
+    let closing_end = 4 + end + "\n---".len();
+    let mut next = content[..closing_end].to_string();
+    next.push('\n');
+    next.push_str(clean_body);
+    Ok(next)
+}
+
+fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
+    let parts = parse_frontmatter(content);
+    let frontmatter = yaml_to_json(&parts.meta);
+    string_field(&frontmatter, "status")
+        .and_then(|value| parse_task_status(&value))
+        .unwrap_or_else(|| default_status_for_bucket_enum(bucket))
+}
+
+fn parse_task_status(value: &str) -> Option<TaskStatus> {
+    match value.trim().to_lowercase().replace('_', "-").as_str() {
+        "active" => Some(TaskStatus::Active),
+        "in-progress" => Some(TaskStatus::InProgress),
+        "done" => Some(TaskStatus::Done),
+        "cancelled" => Some(TaskStatus::Cancelled),
+        "backlog" => Some(TaskStatus::Backlog),
+        _ => None,
+    }
+}
+
 fn target_path_for_bucket(
     tasks_root: &Path,
     path: &Path,
@@ -633,6 +750,14 @@ fn default_status_for_bucket(bucket: TaskBucket) -> &'static str {
         TaskBucket::Active | TaskBucket::Calendar => "active",
         TaskBucket::Backlog => "backlog",
         TaskBucket::Archive => "done",
+    }
+}
+
+fn default_status_for_bucket_enum(bucket: TaskBucket) -> TaskStatus {
+    match bucket {
+        TaskBucket::Active | TaskBucket::Calendar => TaskStatus::Active,
+        TaskBucket::Backlog => TaskStatus::Backlog,
+        TaskBucket::Archive => TaskStatus::Done,
     }
 }
 
@@ -744,6 +869,7 @@ mod tests {
 
         assert_eq!(metadata.tags, vec!["anchor", "tasks"]);
         assert_eq!(metadata.frontmatter["status"], json!("active"));
+        assert_eq!(metadata.body, "# Body\n\nText");
         assert!(metadata.preview.contains("# Body"));
         assert!(metadata.line_count > 0);
     }
@@ -899,6 +1025,140 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn update_task_details_preserves_unrelated_frontmatter_and_replaces_body() {
+        let tmp = tempdir().unwrap();
+        let note = tmp.path().join("tasks/active/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(
+            &note,
+            "---\ntitle: Old title\nstatus: active\n# keep this comment\nowner: Luca\ntags:\n  - keep\n---\n# Old\n\nKeep no.\n",
+        )
+        .unwrap();
+
+        let row = update_task_details(
+            tmp.path().to_string_lossy().to_string(),
+            "tasks/active/task.md".to_string(),
+            UpdateTaskDetailsFields {
+                title: Some("New title".to_string()),
+                status: Some(TaskStatus::InProgress),
+                project: Some(Some("Anchor".to_string())),
+                priority: Some(Some("high".to_string())),
+                due: Some(Some("2026-05-15".to_string())),
+                calendar_start: Some(Some("2026-05-15T09:00".to_string())),
+                calendar_end: Some(Some("2026-05-15T10:00".to_string())),
+                estimate_minutes: Some(Some(60.0)),
+                body: Some("# New\n\nKeep yes.\n".to_string()),
+            },
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(row.rel_path, "tasks/active/task.md");
+        let raw = fs::read_to_string(&note).unwrap();
+        assert!(raw.contains("title: New title"));
+        assert!(raw.contains("status: in-progress"));
+        assert!(raw.contains("# keep this comment"));
+        assert!(raw.contains("owner: Luca"));
+        assert!(raw.contains("- keep"));
+        assert!(raw.contains("project: Anchor"));
+        assert!(raw.contains("priority: high"));
+        assert!(raw.contains("due: 2026-05-15"));
+        assert!(raw.contains("calendarStart: \"2026-05-15T09:00\""));
+        assert!(raw.contains("calendarEnd: \"2026-05-15T10:00\""));
+        assert!(raw.contains("estimateMinutes: 60"));
+        assert!(raw.ends_with("# New\n\nKeep yes.\n"));
+        assert!(!raw.contains("# Old"));
+    }
+
+    #[test]
+    fn update_task_details_moves_when_status_changes_bucket() {
+        let tmp = tempdir().unwrap();
+        let note = tmp.path().join("tasks/active/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(&note, "---\ntitle: Task\nstatus: active\n---\n# Body\n").unwrap();
+
+        let row = update_task_details(
+            tmp.path().to_string_lossy().to_string(),
+            "tasks/active/task.md".to_string(),
+            UpdateTaskDetailsFields {
+                title: None,
+                status: Some(TaskStatus::Done),
+                project: None,
+                priority: None,
+                due: None,
+                calendar_start: None,
+                calendar_end: None,
+                estimate_minutes: None,
+                body: Some("# Done body\n".to_string()),
+            },
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(row.bucket, TaskBucket::Archive);
+        assert_eq!(row.rel_path, "tasks/archive/task.md");
+        assert!(!note.exists());
+        let raw = fs::read_to_string(tmp.path().join("tasks/archive/task.md")).unwrap();
+        assert!(raw.contains("status: done"));
+        assert!(raw.ends_with("# Done body\n"));
+    }
+
+    #[test]
+    fn update_task_details_does_not_move_calendar_when_status_is_unchanged() {
+        let tmp = tempdir().unwrap();
+        let note = tmp.path().join("tasks/calendar/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(&note, "---\ntitle: Task\nstatus: active\n---\n# Body\n").unwrap();
+
+        let row = update_task_details(
+            tmp.path().to_string_lossy().to_string(),
+            "tasks/calendar/task.md".to_string(),
+            UpdateTaskDetailsFields {
+                title: Some("Task edited".to_string()),
+                status: Some(TaskStatus::Active),
+                project: None,
+                priority: None,
+                due: None,
+                calendar_start: None,
+                calendar_end: None,
+                estimate_minutes: None,
+                body: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(row.bucket, TaskBucket::Calendar);
+        assert_eq!(row.rel_path, "tasks/calendar/task.md");
+        assert!(note.exists());
+    }
+
+    #[test]
+    fn update_task_details_rejects_path_escape() {
+        let tmp = tempdir().unwrap();
+
+        let err = update_task_details(
+            tmp.path().to_string_lossy().to_string(),
+            "../outside.md".to_string(),
+            UpdateTaskDetailsFields {
+                title: Some("Anchor".to_string()),
+                status: None,
+                project: None,
+                priority: None,
+                due: None,
+                calendar_start: None,
+                calendar_end: None,
+                estimate_minutes: None,
+                body: None,
+            },
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("escapes") || err.contains("outside"));
     }
 
     #[test]

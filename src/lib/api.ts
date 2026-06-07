@@ -78,6 +78,7 @@ import type {
   StoredFileOutcome,
   CreateTaskDraft,
   TaskBucket,
+  TaskDetailsPatch,
   TaskMetadata,
   TaskNoteRow,
   TaskSchedulePatch,
@@ -352,6 +353,21 @@ export async function updateTaskScheduleFields(
 ): Promise<TaskNoteRow> {
   if (!isTauri()) return mockTaskNoteRows(workPath)[0];
   return invoke<TaskNoteRow>("update_task_schedule_fields", { workPath, relPath, fields });
+}
+
+export async function updateTaskDetails(
+  workPath: string,
+  relPath: string,
+  fields: TaskDetailsPatch,
+  root?: string | null,
+): Promise<TaskNoteRow> {
+  if (!isTauri()) return mockTaskNoteRows(workPath)[0];
+  return invoke<TaskNoteRow>("update_task_details", {
+    workPath,
+    relPath,
+    fields,
+    root: root ?? null,
+  });
 }
 
 export async function moveTaskNote(

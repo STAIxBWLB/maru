@@ -149,7 +149,7 @@ use studio::{
 use sys_import::{apply_sys_import, plan_sys_import};
 use tasks::{
     append_tasks_log, create_task_note, move_task_note, read_task_metadata, read_tasks_log,
-    scan_task_notes, update_task_schedule_fields, update_task_status,
+    scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
 };
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
@@ -269,6 +269,7 @@ pub fn run() {
             create_task_note,
             update_task_status,
             update_task_schedule_fields,
+            update_task_details,
             move_task_note,
             append_tasks_log,
             read_tasks_log,

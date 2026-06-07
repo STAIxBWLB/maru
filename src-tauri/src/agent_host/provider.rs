@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use crate::agent_host::contracts::{
     CompletionRequest, CompletionResponse, COMPLETION_RESPONSE_SCHEMA_VERSION,
 };
-use crate::cli_path::resolve_program;
+use crate::cli_path::{augmented_path, resolve_program};
 use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +92,10 @@ fn apply_codex_permission_args(cmd: &mut Command, permission_mode: &str) {
     }
 }
 
+fn apply_provider_env(cmd: &mut Command) {
+    cmd.env("PATH", augmented_path());
+}
+
 pub fn build_cli_command(
     provider: CliProviderKind,
     request: &CompletionRequest,
@@ -106,6 +110,7 @@ pub fn build_cli_command(
                 "cli_missing: claude CLI not found in PATH or common install locations".to_string()
             })?;
             let mut cmd = Command::new(bin);
+            apply_provider_env(&mut cmd);
             cmd.arg("-p")
                 .arg(&request.prompt)
                 .arg("--permission-mode")
@@ -121,6 +126,7 @@ pub fn build_cli_command(
                 "cli_missing: codex CLI not found in PATH or common install locations".to_string()
             })?;
             let mut cmd = Command::new(bin);
+            apply_provider_env(&mut cmd);
             cmd.arg("exec");
             apply_codex_permission_args(&mut cmd, permission_mode);
             cmd.arg("--cd").arg(&request.cwd);
@@ -462,6 +468,67 @@ mod tests {
             .complete(completion_request("   ", dir.path().to_str().unwrap()))
             .unwrap_err();
         assert_eq!(err, "completion_prompt_required");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_carries_augmented_path_for_env_node_wrappers() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let fake_node = write_fake_cli(
+            bin_dir.join("node"),
+            "#!/bin/sh\nprintf 'fake-node-ok\\n'\n",
+        );
+        let provider = write_fake_cli(
+            dir.path().join("fake-claude"),
+            "#!/usr/bin/env node\nthis is intentionally not valid javascript\n",
+        );
+
+        let old_path = std::env::var_os("PATH");
+        let mut path_with_fake_node = bin_dir.as_os_str().to_os_string();
+        if let Some(value) = old_path.as_ref() {
+            path_with_fake_node.push(":");
+            path_with_fake_node.push(value);
+        }
+        std::env::set_var("PATH", &path_with_fake_node);
+        let (mut cmd, _stdin) = build_cli_command(
+            CliProviderKind::Claude,
+            &completion_request("hi", dir.path().to_str().unwrap()),
+            &[],
+            Some(provider.to_str().unwrap()),
+            "plan",
+        )
+        .unwrap();
+        if let Some(value) = old_path.as_ref() {
+            std::env::set_var("PATH", value);
+        } else {
+            std::env::remove_var("PATH");
+        }
+
+        let explicit_path = cmd
+            .get_envs()
+            .find_map(|(key, value)| (key == "PATH").then_some(value.unwrap()))
+            .unwrap();
+        let explicit_entries: Vec<_> = std::env::split_paths(explicit_path).collect();
+        assert!(explicit_entries.contains(&bin_dir));
+        assert_eq!(fake_node, bin_dir.join("node"));
+
+        let output = cmd
+            .current_dir(dir.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "fake-node-ok"
+        );
     }
 
     #[test]
