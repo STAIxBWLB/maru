@@ -407,13 +407,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
   }, [workPath]);
 
   const selectableMigrationActions = useMemo(
-    () =>
-      migration?.actions.filter(
-        (action) =>
-          Boolean(action.relPath) &&
-          (action.action === "move-secret-file" ||
-            action.action === "retarget-legacy-symlink"),
-      ) ?? [],
+    () => migration?.actions.filter(isSelectableMigrationAction) ?? [],
     [migration],
   );
 
@@ -421,13 +415,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
     () =>
       (migration?.actions ?? [])
         .filter((action, index) => {
-          if (
-            !action.relPath ||
-            !(
-              action.action === "move-secret-file" ||
-              action.action === "retarget-legacy-symlink"
-            )
-          ) {
+          if (!isSelectableMigrationAction(action)) {
             return false;
           }
           return selectedMigrationActions.has(migrationActionKey(action, index));
@@ -465,7 +453,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
         new Set(
           next.actions
             .map((action, index) =>
-              action.relPath ? migrationActionKey(action, index) : null,
+              isSelectableMigrationAction(action) ? migrationActionKey(action, index) : null,
             )
             .filter((key): key is string => Boolean(key)),
         ),
@@ -483,7 +471,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
   };
 
   const toggleMigrationAction = (action: SecretsMigrationAction, index: number) => {
-    if (!action.relPath) return;
+    if (!isSelectableMigrationAction(action)) return;
     const key = migrationActionKey(action, index);
     setSelectedMigrationActions((current) => {
       const next = new Set(current);
@@ -569,7 +557,9 @@ function SecretsTab({ workPath }: { workPath: string }) {
     if (!editor || editor.mode !== "edit") return;
     if (
       typeof window !== "undefined" &&
-      !window.confirm(`Delete text secret metadata entry ${editor.relPath}?`)
+      !window.confirm(
+        `Delete the text secret file .anchor/secrets/${editor.relPath}? This removes the file from disk.`,
+      )
     ) {
       return;
     }
@@ -852,14 +842,14 @@ function SecretsTab({ workPath }: { workPath: string }) {
               <tbody>
                 {migration.actions.map((action, index) => {
                   const key = migrationActionKey(action, index);
-                  const selectable = Boolean(action.relPath);
+                  const selectable = isSelectableMigrationAction(action);
                   return (
                     <tr key={`${action.action}-${index}`}>
                       {!migration.applied ? (
                         <td>
                           <input
                             type="checkbox"
-                            checked={selectedMigrationActions.has(key)}
+                            checked={selectable && selectedMigrationActions.has(key)}
                             disabled={!selectable}
                             onChange={() => toggleMigrationAction(action, index)}
                             aria-label={`Select ${action.action} ${action.relPath ?? index}`}
@@ -1021,6 +1011,13 @@ function SecretStat({
 
 function migrationActionKey(action: SecretsMigrationAction, index: number): string {
   return `${action.action}:${action.relPath ?? index}:${action.targetPath ?? ""}`;
+}
+
+function isSelectableMigrationAction(action: SecretsMigrationAction): boolean {
+  return (
+    Boolean(action.relPath) &&
+    (action.action === "move-secret-file" || action.action === "retarget-legacy-symlink")
+  );
 }
 
 function isTextSecretEditable(item: SecretInventoryItem): boolean {

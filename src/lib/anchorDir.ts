@@ -225,6 +225,13 @@ export async function migrateSecrets(
     const allowed = new Set(selected ?? []);
     const includeAll = allowed.size === 0;
     const actions = [
+      {
+        action: "create-legacy-symlink",
+        sourcePath: `${workPath}/.secrets`,
+        targetPath: `${workPath}/.anchor/secrets`,
+        relPath: ".secrets",
+        status: dryRun ? "planned" : "applied",
+      },
       ...scan.candidates.map((candidate) => ({
         action: "move-secret-file",
         sourcePath: candidate.absPath,
@@ -239,7 +246,13 @@ export async function migrateSecrets(
         relPath: candidate.relPath,
         status: dryRun ? "planned" : "applied",
       })),
-    ].filter((action) => includeAll || (action.relPath ? allowed.has(action.relPath) : true));
+    ].filter((action) => {
+      if (includeAll) return true;
+      if (action.action !== "move-secret-file" && action.action !== "retarget-legacy-symlink") {
+        return true;
+      }
+      return action.relPath ? allowed.has(action.relPath) : true;
+    });
     return {
       applied: !dryRun,
       ok: true,

@@ -539,16 +539,26 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
     hasText: "Migration Dry Run",
   });
   await expect(migrationPanel).toBeVisible();
+  await expect(migrationPanel).toContainText("3 action(s) · 2 selected");
   const applySelected = migrationPanel.getByRole("button", { name: "Apply selected" });
   await expect(applySelected).toBeEnabled();
 
-  const selectedChecks = migrationPanel.getByRole("checkbox");
+  const automaticActionCheck = migrationPanel.getByRole("checkbox", {
+    name: "Select create-legacy-symlink .secrets",
+  });
+  await expect(automaticActionCheck).toBeDisabled();
+  await expect(automaticActionCheck).not.toBeChecked();
+
+  const selectedChecks = migrationPanel.locator('input[type="checkbox"]:not(:disabled)');
+  await expect(selectedChecks).toHaveCount(2);
   const checkCount = await selectedChecks.count();
   for (let index = 0; index < checkCount; index += 1) {
     await selectedChecks.nth(index).uncheck();
   }
+  await expect(migrationPanel).toContainText("3 action(s) · 0 selected");
   await expect(applySelected).toBeDisabled();
   await selectedChecks.first().check();
+  await expect(migrationPanel).toContainText("3 action(s) · 1 selected");
   await applySelected.click();
   await expect(form.locator(".settings-section-panel", { hasText: "Applied Migration" })).toBeVisible();
 
@@ -568,6 +578,21 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   await expect(textarea).toBeEnabled();
   await expect(textarea).toHaveValue(/api_hash/);
   await expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled();
+
+  const confirmDialogPromise = new Promise<string>((resolve) => {
+    page.once("dialog", async (confirmDialog) => {
+      const message = confirmDialog.message();
+      await confirmDialog.dismiss();
+      resolve(message);
+    });
+  });
+  await dialog.getByRole("button", { name: "Delete" }).click();
+  const confirmMessage = await confirmDialogPromise;
+  expect(confirmMessage).toContain(
+    "Delete the text secret file .anchor/secrets/services/telegram-monitor.config.yaml?",
+  );
+  expect(confirmMessage).not.toContain("metadata entry");
+  await expect(dialog).toBeVisible();
 });
 
 test("supports tree bulk controls and Finder context menu", async ({ page }) => {
