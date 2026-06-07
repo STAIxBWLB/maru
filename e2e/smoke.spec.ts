@@ -517,6 +517,9 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   await expect(form).toBeVisible();
   await expect(form).toContainText("Workspace Secrets");
   await expect(form).toContainText("Managed Inventory");
+  const inventoryTable = form.locator(".secrets-inventory-table");
+  await expect(inventoryTable).toBeVisible();
+  await expect(inventoryTable).not.toContainText(".DS_Store");
 
   const bodyBox = await body.boundingBox();
   const formBox = await form.boundingBox();

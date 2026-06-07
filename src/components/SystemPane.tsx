@@ -597,6 +597,11 @@ function SecretsTab({ workPath }: { workPath: string }) {
     return { errors, warnings };
   }, [report]);
 
+  const visibleManagedSecrets = useMemo(
+    () => report?.managed.filter((item) => !isGeneratedSecretLeafPath(item.relPath)) ?? [],
+    [report],
+  );
+
   return (
     <div className="settings-form secrets-settings-form">
       <section className="settings-section-panel secrets-overview-panel">
@@ -635,7 +640,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
         ) : null}
         {report ? (
           <div className="secrets-dashboard-grid">
-            <SecretStat label="Managed" value={String(report.managed.length)} />
+            <SecretStat label="Managed" value={String(visibleManagedSecrets.length)} />
             <SecretStat label="Candidates" value={String(report.candidates.length)} />
             <SecretStat label="Legacy links" value={String(report.legacySymlinks.length)} />
             <SecretStat
@@ -754,7 +759,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
         </section>
       ) : null}
 
-      {report?.managed.length ? (
+      {visibleManagedSecrets.length ? (
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
@@ -776,7 +781,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
                 </tr>
               </thead>
               <tbody>
-                {report.managed.map((item) => {
+                {visibleManagedSecrets.map((item) => {
                   const editable = isTextSecretEditable(item);
                   return (
                     <tr key={`${item.root}-${item.relPath}`}>
@@ -1020,8 +1025,8 @@ function migrationActionKey(action: SecretsMigrationAction, index: number): stri
 
 function isTextSecretEditable(item: SecretInventoryItem): boolean {
   if (item.root !== "primary" || item.kind !== "file" || item.symlinkTarget) return false;
+  if (isGeneratedSecretLeafPath(item.relPath)) return false;
   const name = item.relPath.split("/").pop()?.toLowerCase() ?? "";
-  if (name === ".ds_store") return false;
   const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
   const blocked = new Set([
     "age",
@@ -1041,6 +1046,17 @@ function isTextSecretEditable(item: SecretInventoryItem): boolean {
     "zip",
   ]);
   return !blocked.has(ext);
+}
+
+function isGeneratedSecretLeafPath(relPath: string): boolean {
+  const name = relPath.split("/").pop()?.toLowerCase() ?? "";
+  return (
+    name.startsWith("._") ||
+    name === ".ds_store" ||
+    name === ".localized" ||
+    name === "thumbs.db" ||
+    name === "desktop.ini"
+  );
 }
 
 function shortenSecretPath(path: string): string {

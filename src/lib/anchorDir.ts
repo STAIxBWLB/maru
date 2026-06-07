@@ -42,6 +42,12 @@ const isTauri = () =>
 
 const SETTINGS_FALLBACK_KEY = "anchor:settings:fallback:v1";
 const MOCK_SECRET_TEXTS_KEY_PREFIX = "anchor:mock-secret-texts:";
+const GENERATED_SECRET_LEAF_FILES = new Set([
+  ".ds_store",
+  ".localized",
+  "thumbs.db",
+  "desktop.ini",
+]);
 export const ANCHOR_SETTINGS_UPDATED_EVENT = "anchor://settings-updated";
 
 export interface AnchorSettingsUpdatedPayload {
@@ -66,10 +72,16 @@ function defaultMockSecretTexts(): Record<string, string> {
   return {
     "services/telegram-monitor.config.yaml":
       "telegram:\n  api_id: \"12345\"\n  api_hash: \"mock-api-hash\"\n",
+    ".DS_Store": "finder metadata\n",
     "workspace/local.env": "ANCHOR_LOCAL_ONLY=1\n",
     "projects/demo/api-token": "demo-token-placeholder\n",
     ...generated,
   };
+}
+
+function isGeneratedSecretLeafPath(relPath: string): boolean {
+  const name = relPath.split("/").pop()?.toLowerCase() ?? "";
+  return name.startsWith("._") || GENERATED_SECRET_LEAF_FILES.has(name);
 }
 
 function mockSecretTextsKey(workPath: string): string {
@@ -98,6 +110,7 @@ function writeMockSecretTexts(workPath: string, texts: Record<string, string>) {
 function mockSecretsScanReport(workPath: string): SecretsScanReport {
   const texts = readMockSecretTexts(workPath);
   const managed = Object.entries(texts)
+    .filter(([relPath]) => !isGeneratedSecretLeafPath(relPath))
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([relPath, contents]) => ({
       relPath,

@@ -24,6 +24,9 @@ const GENERATED_DIRS: &[&str] = &[
     ".pnpm-store",
 ];
 
+const GENERATED_SECRET_LEAF_FILES: &[&str] =
+    &[".ds_store", ".localized", "thumbs.db", "desktop.ini"];
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretsRootStatus {
@@ -536,6 +539,9 @@ fn collect_managed(
             }
             continue;
         }
+        if is_generated_secret_leaf(path) {
+            continue;
+        }
         let symlink_target = if meta.file_type().is_symlink() {
             fs::read_link(path)
                 .ok()
@@ -728,6 +734,17 @@ fn should_prune(paths: &SecretsPaths, path: &Path) -> bool {
     })
 }
 
+fn is_generated_secret_leaf(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    name.starts_with("._")
+        || GENERATED_SECRET_LEAF_FILES
+            .iter()
+            .any(|generated| generated == &name.as_str())
+}
+
 fn resolve_primary_secret_path(
     paths: &SecretsPaths,
     rel_path: &str,
@@ -769,12 +786,7 @@ fn normalize_secret_rel_path(input: &str) -> Result<PathBuf, String> {
 
 fn ensure_text_secret_path(rel_path: &str) -> Result<(), String> {
     let path = Path::new(rel_path);
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    if name == ".ds_store" {
+    if is_generated_secret_leaf(path) {
         return Err("secret_text_extension_unsupported".to_string());
     }
     let ext = path
@@ -1248,6 +1260,28 @@ mod tests {
             work,
             &work.join("outside/config.yaml")
         ));
+    }
+
+    #[test]
+    fn scan_ignores_generated_managed_secret_files() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+        let secrets = work.join(".anchor/secrets");
+        fs::create_dir_all(secrets.join("services")).unwrap();
+        fs::write(secrets.join(".DS_Store"), "finder metadata\n").unwrap();
+        fs::write(secrets.join("._token"), "appledouble metadata\n").unwrap();
+        fs::write(secrets.join("desktop.ini"), "windows metadata\n").unwrap();
+        fs::write(secrets.join(".localized"), "localized metadata\n").unwrap();
+        fs::write(secrets.join("services/demo.env"), "TOKEN=secret\n").unwrap();
+
+        let report = scan_at(work).unwrap();
+        let managed_rel_paths = report
+            .managed
+            .iter()
+            .map(|item| item.rel_path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(managed_rel_paths, vec!["services/demo.env"]);
     }
 
     #[test]
