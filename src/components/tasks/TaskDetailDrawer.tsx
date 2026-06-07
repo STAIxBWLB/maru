@@ -305,8 +305,8 @@ export function TaskDetailDrawer({
             <span>{t("tasks.field.estimate")}</span>
             <input
               type="number"
-              min="0"
-              step="15"
+              min="1"
+              step="1"
               value={estimateMinutes}
               onChange={(event) => setEstimateMinutes(event.target.value)}
             />
@@ -428,7 +428,18 @@ function normalizeDraft(draft: TaskDetailDraft): TaskDetailDraft {
 }
 
 function draftsEqual(left: TaskDetailDraft, right: TaskDetailDraft): boolean {
-  return JSON.stringify(normalizeDraft(left)) === JSON.stringify(normalizeDraft(right));
+  return (
+    left.relPath === right.relPath
+    && left.title.trim() === right.title.trim()
+    && left.status === right.status
+    && left.project.trim() === right.project.trim()
+    && left.priority === right.priority
+    && left.due.trim() === right.due.trim()
+    && left.calendarStart.trim() === right.calendarStart.trim()
+    && left.calendarEnd.trim() === right.calendarEnd.trim()
+    && left.estimateMinutes.trim() === right.estimateMinutes.trim()
+    && left.body === right.body
+  );
 }
 
 function parseEstimateMinutes(value: string): number | null {
@@ -445,9 +456,10 @@ function toDateTimeInput(value: string | null | undefined): string {
 
 function readEstimateMinutes(frontmatter: Record<string, unknown> | undefined): number | null {
   const value = frontmatter?.estimateMinutes ?? frontmatter?.estimate_minutes;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
-    return Number(value);
+    const parsed = Number(value);
+    return parsed > 0 ? parsed : null;
   }
   return null;
 }
