@@ -193,6 +193,7 @@ release-preflight: ## Release preflight: diff, verify, CLI smoke, e2e, and debug
 	$(MAKE) cli-smoke
 	$(MAKE) test-e2e
 	$(PNPM) tauri build --debug --no-bundle
+	$(PNPM) clean:tauri-debug -- --force
 
 .PHONY: macos-distribution-check
 macos-distribution-check: ## Check repo config and GitHub secrets for notarized macOS direct distribution
@@ -251,6 +252,10 @@ clean-frontend: ## Remove vite dist + tsbuildinfo
 .PHONY: clean-rust
 clean-rust: ## Remove cargo target/
 	cd $(TAURI_DIR) && $(CARGO) clean
+
+.PHONY: clean-tauri-debug
+clean-tauri-debug: ## Prune oversized src-tauri/target/debug artifacts
+	$(PNPM) clean:tauri-debug -- --force
 
 .PHONY: distclean
 distclean: clean ## Also remove node_modules + tauri stub icon

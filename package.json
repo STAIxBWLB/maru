@@ -14,8 +14,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 5308",
     "tauri": "tauri",
     "clean:tauri-bundles": "node scripts/clean-tauri-bundles.mjs",
-    "tauri:dev": "pnpm clean:tauri-bundles && tauri dev",
-    "tauri:build": "pnpm clean:tauri-bundles && tauri build",
+    "clean:tauri-debug": "node scripts/prune-tauri-debug.mjs",
+    "tauri:dev": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri dev",
+    "tauri:build": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri build",
     "test": "vitest run src",
     "test:e2e": "playwright test",
     "typecheck": "tsc -b"

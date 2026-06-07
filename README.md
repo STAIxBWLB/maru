@@ -356,6 +356,12 @@ pnpm tauri:build
 pnpm clean:tauri-bundles
 pnpm tauri build
 
+# Prune oversized local Tauri debug artifacts:
+pnpm clean:tauri-debug
+# Also runs from pnpm tauri:dev and pnpm tauri:build. By default it checks once
+# every 24 hours and prunes src-tauri/target/debug when artifacts exceed 4GiB.
+# make release-preflight forces cleanup after its debug no-bundle build.
+
 # Rust unit + integration tests:
 cd src-tauri && cargo test
 
