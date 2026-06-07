@@ -502,6 +502,99 @@ test("shows the meetings settings tab in the settings window shell", async ({ pa
   await expect(page.getByText("작업 로그 append", { exact: true })).toBeVisible();
 });
 
+test("manages secrets settings with full-width scroll and explicit reveal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 720 });
+  await page.goto("/?window=settings&workPath=mock%3A%2F%2Fanchor-sample-workspace&tab=secrets");
+
+  await expect(page.getByRole("tab", { name: "Secrets" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const body = page.locator(".settings-window-shell .system-body");
+  const form = body.locator(".secrets-settings-form");
+  await expect(form).toBeVisible();
+  await expect(form).toContainText("Workspace Secrets");
+  await expect(form).toContainText("Managed Inventory");
+  const inventoryTable = form.locator(".secrets-inventory-table");
+  await expect(inventoryTable).toBeVisible();
+  await expect(inventoryTable).not.toContainText(".DS_Store");
+
+  const bodyBox = await body.boundingBox();
+  const formBox = await form.boundingBox();
+  expect(bodyBox).not.toBeNull();
+  expect(formBox).not.toBeNull();
+  if (!bodyBox || !formBox) return;
+  expect(formBox.width).toBeGreaterThan(bodyBox.width * 0.85);
+
+  const scrollMetrics = await body.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+
+  await form.getByRole("button", { name: "Dry run" }).click();
+  const migrationPanel = form.locator(".settings-section-panel", {
+    hasText: "Migration Dry Run",
+  });
+  await expect(migrationPanel).toBeVisible();
+  await expect(migrationPanel).toContainText("3 action(s) · 2 selected");
+  const applySelected = migrationPanel.getByRole("button", { name: "Apply selected" });
+  await expect(applySelected).toBeEnabled();
+
+  const automaticActionCheck = migrationPanel.getByRole("checkbox", {
+    name: "Select create-legacy-symlink .secrets",
+  });
+  await expect(automaticActionCheck).toBeDisabled();
+  await expect(automaticActionCheck).not.toBeChecked();
+
+  const selectedChecks = migrationPanel.locator('input[type="checkbox"]:not(:disabled)');
+  await expect(selectedChecks).toHaveCount(2);
+  const checkCount = await selectedChecks.count();
+  for (let index = 0; index < checkCount; index += 1) {
+    await selectedChecks.nth(index).uncheck();
+  }
+  await expect(migrationPanel).toContainText("3 action(s) · 0 selected");
+  await expect(applySelected).toBeDisabled();
+  await selectedChecks.first().check();
+  await expect(migrationPanel).toContainText("3 action(s) · 1 selected");
+  await applySelected.click();
+  await expect(form.locator(".settings-section-panel", { hasText: "Applied Migration" })).toBeVisible();
+
+  await form
+    .getByRole("button", {
+      name: /Reveal and edit services\/telegram-monitor\.config\.yaml/,
+    })
+    .click();
+  const dialog = page.locator(".secret-editor-dialog");
+  await expect(dialog).toBeVisible();
+  const textarea = dialog.locator("textarea");
+  await expect(textarea).toBeDisabled();
+  await expect(textarea).toHaveValue("");
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+
+  await dialog.getByRole("button", { name: "Reveal" }).click();
+  await expect(textarea).toBeEnabled();
+  await expect(textarea).toHaveValue(/api_hash/);
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled();
+
+  const confirmDialogPromise = new Promise<string>((resolve) => {
+    page.once("dialog", async (confirmDialog) => {
+      const message = confirmDialog.message();
+      await confirmDialog.dismiss();
+      resolve(message);
+    });
+  });
+  await dialog.getByRole("button", { name: "Delete" }).click();
+  const confirmMessage = await confirmDialogPromise;
+  expect(confirmMessage).toContain(
+    "Delete the text secret file .anchor/secrets/services/telegram-monitor.config.yaml?",
+  );
+  expect(confirmMessage).not.toContain("metadata entry");
+  await expect(dialog).toBeVisible();
+});
+
 test("supports tree bulk controls and Finder context menu", async ({ page }) => {
   await page.goto("/");
 

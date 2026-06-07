@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   Check,
   Code2,
+  Eye,
+  FilePenLine,
   PackageCheck,
   Plus,
   RefreshCcw,
@@ -37,9 +39,11 @@ import {
   listAnchorRules,
   listAnchorTemplates,
   listWorkspaceProjects,
+  deleteSecretText,
   doctorSecrets,
   migrateSecrets,
   planSysImport,
+  readSecretText,
   readAnchorMcp,
   readAnchorProjects,
   readAnchorRule,
@@ -49,6 +53,7 @@ import {
   saveAnchorMcp,
   saveAnchorRule,
   saveAnchorTemplate,
+  writeSecretText,
 } from "../lib/anchorDir";
 import { useTranslation } from "../lib/i18n";
 import type {
@@ -103,6 +108,8 @@ import type {
   ProjectPickerEntry,
   ProviderAuthStatus,
   RuleEntry,
+  SecretInventoryItem,
+  SecretsMigrationAction,
   SecretsMigrationReport,
   SecretsScanReport,
   TemplateEntry,
@@ -382,6 +389,10 @@ function SecretsTab({ workPath }: { workPath: string }) {
   const [migration, setMigration] = useState<SecretsMigrationReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMigrationActions, setSelectedMigrationActions] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [editor, setEditor] = useState<SecretEditorState | null>(null);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -394,6 +405,25 @@ function SecretsTab({ workPath }: { workPath: string }) {
       setBusy(false);
     }
   }, [workPath]);
+
+  const selectableMigrationActions = useMemo(
+    () => migration?.actions.filter(isSelectableMigrationAction) ?? [],
+    [migration],
+  );
+
+  const selectedRelPaths = useMemo(
+    () =>
+      (migration?.actions ?? [])
+        .filter((action, index) => {
+          if (!isSelectableMigrationAction(action)) {
+            return false;
+          }
+          return selectedMigrationActions.has(migrationActionKey(action, index));
+        })
+        .map((action) => action.relPath)
+        .filter((relPath): relPath is string => Boolean(relPath)),
+    [migration, selectedMigrationActions],
+  );
 
   useEffect(() => {
     void refresh();
@@ -412,13 +442,22 @@ function SecretsTab({ workPath }: { workPath: string }) {
     }
   };
 
-  const runMigration = async (dryRun: boolean) => {
+  const runMigration = async (dryRun: boolean, selected?: string[]) => {
     setBusy(true);
     setError(null);
     try {
-      const next = await migrateSecrets(workPath, dryRun);
+      const next = await migrateSecrets(workPath, dryRun, selected);
       setMigration(next);
       setReport(next.scan);
+      setSelectedMigrationActions(
+        new Set(
+          next.actions
+            .map((action, index) =>
+              isSelectableMigrationAction(action) ? migrationActionKey(action, index) : null,
+            )
+            .filter((key): key is string => Boolean(key)),
+        ),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -426,13 +465,140 @@ function SecretsTab({ workPath }: { workPath: string }) {
     }
   };
 
+  const applySelectedMigration = () => {
+    if (!migration || migration.applied || selectedRelPaths.length === 0) return;
+    void runMigration(false, selectedRelPaths);
+  };
+
+  const toggleMigrationAction = (action: SecretsMigrationAction, index: number) => {
+    if (!isSelectableMigrationAction(action)) return;
+    const key = migrationActionKey(action, index);
+    setSelectedMigrationActions((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const openCreateEditor = () => {
+    setEditor({
+      mode: "create",
+      relPath: "",
+      contents: "",
+      revealed: true,
+      busy: false,
+      error: null,
+    });
+  };
+
+  const openEditEditor = (item: SecretInventoryItem) => {
+    setEditor({
+      mode: "edit",
+      relPath: item.relPath,
+      contents: "",
+      revealed: false,
+      busy: false,
+      error: null,
+    });
+  };
+
+  const revealEditorSecret = async () => {
+    if (!editor) return;
+    setEditor({ ...editor, busy: true, error: null });
+    try {
+      const doc = await readSecretText(workPath, editor.relPath);
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              relPath: doc.relPath,
+              contents: doc.contents,
+              revealed: true,
+              busy: false,
+              error: null,
+            }
+          : current,
+      );
+    } catch (err) {
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : current,
+      );
+    }
+  };
+
+  const saveEditorSecret = async () => {
+    if (!editor || !editor.revealed || !editor.relPath.trim()) return;
+    setEditor({ ...editor, busy: true, error: null });
+    try {
+      await writeSecretText(workPath, editor.relPath.trim(), editor.contents);
+      setEditor(null);
+      await refresh();
+    } catch (err) {
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : current,
+      );
+    }
+  };
+
+  const deleteEditorSecret = async () => {
+    if (!editor || editor.mode !== "edit") return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Delete the text secret file .anchor/secrets/${editor.relPath}? This removes the file from disk.`,
+      )
+    ) {
+      return;
+    }
+    setEditor({ ...editor, busy: true, error: null });
+    try {
+      const next = await deleteSecretText(workPath, editor.relPath);
+      setReport(next);
+      setEditor(null);
+    } catch (err) {
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : current,
+      );
+    }
+  };
+
+  const issueCounts = useMemo(() => {
+    const errors = report?.issues.filter((issue) => issue.severity === "error").length ?? 0;
+    const warnings = report?.issues.filter((issue) => issue.severity !== "error").length ?? 0;
+    return { errors, warnings };
+  }, [report]);
+
+  const visibleManagedSecrets = useMemo(
+    () => report?.managed.filter((item) => !isGeneratedSecretLeafPath(item.relPath)) ?? [],
+    [report],
+  );
+
   return (
-    <div className="settings-form">
-      <section className="settings-section-panel">
+    <div className="settings-form secrets-settings-form">
+      <section className="settings-section-panel secrets-overview-panel">
         <div className="settings-section-heading">
           <div>
             <strong>Workspace Secrets</strong>
-            <span>Managed under .anchor/secrets with .secrets kept as a compatibility symlink.</span>
+            <span>Managed under .anchor/secrets with .secrets kept as a compatibility symlink. Secret values stay hidden unless explicitly revealed.</span>
           </div>
           <div className="system-detail-actions compact">
             <Button size="sm" variant="ghost" icon={<RefreshCcw size={14} />} onClick={refresh} disabled={busy}>
@@ -441,11 +607,18 @@ function SecretsTab({ workPath }: { workPath: string }) {
             <Button size="sm" variant="ghost" icon={<ShieldCheck size={14} />} onClick={runDoctor} disabled={busy}>
               Doctor
             </Button>
+            <Button size="sm" variant="ghost" icon={<FilePenLine size={14} />} onClick={openCreateEditor} disabled={busy}>
+              New text secret
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => runMigration(true)} disabled={busy}>
               Dry run
             </Button>
-            <Button size="sm" onClick={() => runMigration(false)} disabled={busy}>
-              Apply
+            <Button
+              size="sm"
+              onClick={applySelectedMigration}
+              disabled={busy || !migration || migration.applied || selectedRelPaths.length === 0}
+            >
+              Apply selected
             </Button>
           </div>
         </div>
@@ -456,16 +629,29 @@ function SecretsTab({ workPath }: { workPath: string }) {
           </div>
         ) : null}
         {report ? (
-          <div className="settings-grid two">
-            <ReadOnlyPath label="Primary root" value={report.root.primaryRoot} />
-            <ReadOnlyPath
-              label="Legacy .secrets"
-              value={`${report.root.legacyKind}${report.root.legacyTarget ? ` -> ${report.root.legacyTarget}` : ""}`}
+          <div className="secrets-dashboard-grid">
+            <SecretStat label="Managed" value={String(visibleManagedSecrets.length)} />
+            <SecretStat label="Candidates" value={String(report.candidates.length)} />
+            <SecretStat label="Legacy links" value={String(report.legacySymlinks.length)} />
+            <SecretStat
+              label="Issues"
+              value={`${issueCounts.errors} error / ${issueCounts.warnings} warn`}
+              tone={issueCounts.errors ? "danger" : issueCounts.warnings ? "warn" : "ok"}
             />
-            <ReadOnlyPath label="Managed files" value={String(report.managed.length)} />
-            <ReadOnlyPath label="Unmanaged candidates" value={String(report.candidates.length)} />
+            <div className="secrets-root-card">
+              <span>Primary root</span>
+              <code>{report.root.primaryRoot}</code>
+            </div>
+            <div className="secrets-root-card">
+              <span>Legacy .secrets</span>
+              <code>{report.root.legacyKind}{report.root.legacyTarget ? ` -> ${report.root.legacyTarget}` : ""}</code>
+            </div>
           </div>
-        ) : null}
+        ) : busy ? (
+          <div className="secrets-empty-state">Scanning workspace secrets...</div>
+        ) : (
+          <div className="secrets-empty-state">No scan has run yet.</div>
+        )}
       </section>
 
       {report?.issues.length ? (
@@ -476,14 +662,27 @@ function SecretsTab({ workPath }: { workPath: string }) {
               <span>Policy or compatibility checks that need attention.</span>
             </div>
           </div>
-          <div className="system-list">
-            {report.issues.map((issue, index) => (
-              <div className="system-list-item" key={`${issue.code}-${index}`}>
-                <strong>{issue.code}</strong>
-                <span>{issue.message}</span>
-                {issue.path ? <code>{issue.path}</code> : null}
-              </div>
-            ))}
+          <div className="secrets-table-wrap">
+            <table className="secrets-table">
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Code</th>
+                  <th>Message</th>
+                  <th>Path</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.issues.map((issue, index) => (
+                  <tr key={`${issue.code}-${index}`}>
+                    <td><span className={`secrets-pill ${issue.severity === "error" ? "danger" : "warn"}`}>{issue.severity}</span></td>
+                    <td><code>{issue.code}</code></td>
+                    <td>{issue.message}</td>
+                    <td>{issue.path ? <code>{issue.path}</code> : <span className="muted">-</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
@@ -496,14 +695,25 @@ function SecretsTab({ workPath }: { workPath: string }) {
               <span>Secret-like files outside .anchor/secrets. Values are not displayed.</span>
             </div>
           </div>
-          <div className="system-list">
-            {report.candidates.map((candidate) => (
-              <div className="system-list-item" key={candidate.relPath}>
-                <strong>{candidate.relPath}</strong>
-                <span>{candidate.reason}</span>
-                <code>{candidate.recommendedRelPath}</code>
-              </div>
-            ))}
+          <div className="secrets-table-wrap">
+            <table className="secrets-table">
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>Reason</th>
+                  <th>Recommended target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.candidates.map((candidate) => (
+                  <tr key={candidate.relPath}>
+                    <td><strong>{candidate.relPath}</strong></td>
+                    <td>{candidate.reason}</td>
+                    <td><code>{candidate.recommendedRelPath}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
@@ -516,19 +726,30 @@ function SecretsTab({ workPath }: { workPath: string }) {
               <span>Runtime links still pointing at .secrets and eligible for retargeting.</span>
             </div>
           </div>
-          <div className="system-list">
-            {report.legacySymlinks.map((candidate) => (
-              <div className="system-list-item" key={candidate.relPath}>
-                <strong>{candidate.relPath}</strong>
-                <span>{candidate.reason}</span>
-                <code>{candidate.recommendedRelPath}</code>
-              </div>
-            ))}
+          <div className="secrets-table-wrap">
+            <table className="secrets-table">
+              <thead>
+                <tr>
+                  <th>Link</th>
+                  <th>Reason</th>
+                  <th>Retarget to</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.legacySymlinks.map((candidate) => (
+                  <tr key={candidate.relPath}>
+                    <td><strong>{candidate.relPath}</strong></td>
+                    <td>{candidate.reason}</td>
+                    <td><code>{candidate.recommendedRelPath}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
 
-      {report?.managed.length ? (
+      {visibleManagedSecrets.length ? (
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
@@ -536,23 +757,51 @@ function SecretsTab({ workPath }: { workPath: string }) {
               <span>Path, size, and permission metadata only.</span>
             </div>
           </div>
-          <div className="system-list">
-            {report.managed.slice(0, 80).map((item) => (
-              <div className="system-list-item" key={`${item.root}-${item.relPath}`}>
-                <strong>{item.relPath}</strong>
-                <span>
-                  {item.root} · {item.kind} · {formatBytes(item.sizeBytes)}
-                  {item.mode ? ` · ${item.mode}` : ""}
-                  {item.permissionsOk ? "" : " · permission warning"}
-                </span>
-              </div>
-            ))}
-            {report.managed.length > 80 ? (
-              <div className="system-list-item">
-                <strong>{report.managed.length - 80} more</strong>
-                <span>Additional managed secret files hidden from this compact view.</span>
-              </div>
-            ) : null}
+          <div className="secrets-table-wrap managed">
+            <table className="secrets-table secrets-inventory-table">
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>Root</th>
+                  <th>Kind</th>
+                  <th>Size</th>
+                  <th>Mode</th>
+                  <th>Status</th>
+                  <th>Text edit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleManagedSecrets.map((item) => {
+                  const editable = isTextSecretEditable(item);
+                  return (
+                    <tr key={`${item.root}-${item.relPath}`}>
+                      <td><strong>{item.relPath}</strong></td>
+                      <td>{item.root}</td>
+                      <td>{item.kind}</td>
+                      <td>{formatBytes(item.sizeBytes)}</td>
+                      <td>{item.mode ?? "-"}</td>
+                      <td>
+                        <span className={`secrets-pill ${item.permissionsOk ? "ok" : "warn"}`}>
+                          {item.permissionsOk ? "private" : "permission warning"}
+                        </span>
+                      </td>
+                      <td>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<Eye size={14} />}
+                          onClick={() => openEditEditor(item)}
+                          disabled={!editable}
+                          aria-label={`Reveal and edit ${item.relPath}`}
+                        >
+                          Edit
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
@@ -562,31 +811,255 @@ function SecretsTab({ workPath }: { workPath: string }) {
           <div className="settings-section-heading">
             <div>
               <strong>{migration.applied ? "Applied Migration" : "Migration Dry Run"}</strong>
-              <span>{migration.actions.length} action(s)</span>
+              <span>
+                {migration.actions.length} action(s)
+                {!migration.applied && selectableMigrationActions.length
+                  ? ` · ${selectedRelPaths.length} selected`
+                  : ""}
+              </span>
             </div>
+            {!migration.applied ? (
+              <Button
+                size="sm"
+                onClick={applySelectedMigration}
+                disabled={busy || selectedRelPaths.length === 0}
+              >
+                Apply selected
+              </Button>
+            ) : null}
           </div>
-          <div className="system-list">
-            {migration.actions.map((action, index) => (
-              <div className="system-list-item" key={`${action.action}-${index}`}>
-                <strong>{action.action}</strong>
-                <span>{action.status}</span>
-                {action.relPath ? <code>{action.relPath}</code> : null}
-              </div>
-            ))}
+          <div className="secrets-table-wrap">
+            <table className="secrets-table">
+              <thead>
+                <tr>
+                  {!migration.applied ? <th>Select</th> : null}
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>Path</th>
+                  <th>Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {migration.actions.map((action, index) => {
+                  const key = migrationActionKey(action, index);
+                  const selectable = isSelectableMigrationAction(action);
+                  return (
+                    <tr key={`${action.action}-${index}`}>
+                      {!migration.applied ? (
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectable && selectedMigrationActions.has(key)}
+                            disabled={!selectable}
+                            onChange={() => toggleMigrationAction(action, index)}
+                            aria-label={`Select ${action.action} ${action.relPath ?? index}`}
+                          />
+                        </td>
+                      ) : null}
+                      <td><strong>{action.action}</strong></td>
+                      <td><span className={`secrets-pill ${action.status === "applied" || action.status === "ok" ? "ok" : action.status.startsWith("blocked") ? "danger" : "warn"}`}>{action.status}</span></td>
+                      <td>{action.relPath ? <code>{action.relPath}</code> : <span className="muted">-</span>}</td>
+                      <td>{action.targetPath ? <code>{shortenSecretPath(action.targetPath)}</code> : <span className="muted">-</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
+      <SecretTextEditorDialog
+        editor={editor}
+        onEditorChange={setEditor}
+        onReveal={revealEditorSecret}
+        onSave={saveEditorSecret}
+        onDelete={deleteEditorSecret}
+      />
     </div>
   );
 }
 
-function ReadOnlyPath({ label, value }: { label: string; value: string }) {
+interface SecretEditorState {
+  mode: "create" | "edit";
+  relPath: string;
+  contents: string;
+  revealed: boolean;
+  busy: boolean;
+  error: string | null;
+}
+
+function SecretTextEditorDialog({
+  editor,
+  onEditorChange,
+  onReveal,
+  onSave,
+  onDelete,
+}: {
+  editor: SecretEditorState | null;
+  onEditorChange: (editor: SecretEditorState | null) => void;
+  onReveal: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  const open = Boolean(editor);
   return (
-    <label className="field">
-      <span>{label}</span>
-      <input value={value} readOnly spellCheck={false} />
-    </label>
+    <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onEditorChange(null); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content dialog-content--wide secret-editor-dialog">
+          <Dialog.Title>{editor?.mode === "create" ? "New text secret" : "Edit text secret"}</Dialog.Title>
+          <Dialog.Description>
+            Text values are hidden by default. Reveal loads the current file content into this editor.
+          </Dialog.Description>
+          {editor ? (
+            <div className="settings-form secret-editor-form">
+              {editor.error ? (
+                <div className="comms-setup-banner warn">
+                  <AlertTriangle size={14} />
+                  <div>{editor.error}</div>
+                </div>
+              ) : null}
+              <label className="field">
+                <span>Relative path under .anchor/secrets</span>
+                <input
+                  value={editor.relPath}
+                  readOnly={editor.mode === "edit"}
+                  spellCheck={false}
+                  placeholder="services/example.env"
+                  onChange={(event) =>
+                    onEditorChange({ ...editor, relPath: event.target.value })
+                  }
+                />
+                <small>Text files only. Certificate and key bundles stay inventory-only.</small>
+              </label>
+              <label className="field">
+                <span>Secret value</span>
+                <textarea
+                  className="settings-textarea secret-editor-textarea"
+                  value={editor.revealed ? editor.contents : ""}
+                  disabled={!editor.revealed || editor.busy}
+                  spellCheck={false}
+                  placeholder="Value hidden. Click Reveal to load it."
+                  onChange={(event) =>
+                    onEditorChange({ ...editor, contents: event.target.value })
+                  }
+                />
+              </label>
+              <div className="system-detail-actions compact">
+                {editor.mode === "edit" && !editor.revealed ? (
+                  <Button
+                    size="sm"
+                    icon={<Eye size={14} />}
+                    onClick={onReveal}
+                    disabled={editor.busy}
+                  >
+                    Reveal
+                  </Button>
+                ) : null}
+                {editor.mode === "edit" ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon={<Trash2 size={14} />}
+                    onClick={onDelete}
+                    disabled={editor.busy}
+                  >
+                    Delete
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  onClick={onSave}
+                  disabled={editor.busy || !editor.revealed || !editor.relPath.trim()}
+                  icon={<Save size={14} />}
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onEditorChange(null)}
+                  disabled={editor.busy}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
+}
+
+function SecretStat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "ok" | "warn" | "danger";
+}) {
+  return (
+    <div className={`secrets-stat ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function migrationActionKey(action: SecretsMigrationAction, index: number): string {
+  return `${action.action}:${action.relPath ?? index}:${action.targetPath ?? ""}`;
+}
+
+function isSelectableMigrationAction(action: SecretsMigrationAction): boolean {
+  return (
+    Boolean(action.relPath) &&
+    (action.action === "move-secret-file" || action.action === "retarget-legacy-symlink")
+  );
+}
+
+function isTextSecretEditable(item: SecretInventoryItem): boolean {
+  if (item.root !== "primary" || item.kind !== "file" || item.symlinkTarget) return false;
+  if (isGeneratedSecretLeafPath(item.relPath)) return false;
+  const name = item.relPath.split("/").pop()?.toLowerCase() ?? "";
+  const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
+  const blocked = new Set([
+    "age",
+    "bin",
+    "cer",
+    "crt",
+    "db",
+    "der",
+    "gz",
+    "key",
+    "p12",
+    "p8",
+    "pdf",
+    "pem",
+    "sqlite",
+    "tar",
+    "zip",
+  ]);
+  return !blocked.has(ext);
+}
+
+function isGeneratedSecretLeafPath(relPath: string): boolean {
+  const name = relPath.split("/").pop()?.toLowerCase() ?? "";
+  return (
+    name.startsWith("._") ||
+    name === ".ds_store" ||
+    name === ".localized" ||
+    name === "thumbs.db" ||
+    name === "desktop.ini"
+  );
+}
+
+function shortenSecretPath(path: string): string {
+  const marker = ".anchor/secrets/";
+  const index = path.indexOf(marker);
+  return index >= 0 ? path.slice(index + marker.length) : path;
 }
 
 function formatBytes(value: number): string {

@@ -10268,8 +10268,10 @@ button.git-badge:hover {
 }
 .system-body {
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   display: grid;
+  align-content: start;
+  scrollbar-width: thin;
 }
 
 .system-split {
@@ -10370,6 +10372,16 @@ button.git-badge:hover {
   max-width: 100%;
   display: grid;
   gap: 16px;
+}
+
+.system-body > .settings-form {
+  width: min(760px, calc(100% - 48px));
+  margin: 18px 24px 24px;
+}
+
+.system-body > .settings-form.secrets-settings-form {
+  width: calc(100% - 48px);
+  max-width: none;
 }
 
 .settings-form .field {
@@ -10548,6 +10560,200 @@ button.git-badge:hover {
   text-wrap: pretty;
 }
 
+.secrets-settings-form {
+  gap: 18px;
+}
+
+.secrets-settings-form .settings-section-heading {
+  align-items: flex-start;
+}
+
+.secrets-settings-form .system-detail-actions.compact {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.secrets-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(128px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.secrets-stat,
+.secrets-root-card {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.secrets-stat span,
+.secrets-root-card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.secrets-stat strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.secrets-stat.ok {
+  border-color: color-mix(in srgb, var(--success) 24%, var(--line-soft));
+}
+
+.secrets-stat.warn {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--line-soft));
+}
+
+.secrets-stat.danger {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--line-soft));
+}
+
+.secrets-root-card {
+  grid-column: span 2;
+}
+
+.secrets-root-card code {
+  min-width: 0;
+  color: var(--ink);
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.secrets-empty-state {
+  padding: 12px;
+  border: 1px dashed var(--line-soft);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.secrets-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.secrets-table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.secrets-inventory-table {
+  min-width: 980px;
+}
+
+.secrets-table th,
+.secrets-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.secrets-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.secrets-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.secrets-table strong {
+  color: var(--ink);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.secrets-table code {
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.secrets-table input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.secrets-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--ink-2);
+  background: var(--panel-raised);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.secrets-pill.ok {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--line-soft));
+}
+
+.secrets-pill.warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--line-soft));
+}
+
+.secrets-pill.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line-soft));
+}
+
+.secret-editor-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.secret-editor-dialog [data-radix-dialog-description] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.secret-editor-form {
+  width: 100%;
+  max-width: none;
+  gap: 12px;
+}
+
+.secret-editor-textarea {
+  min-height: 240px;
+}
+
 .inbox-channel-editor {
   display: grid;
   grid-template-columns: minmax(160px, 220px) minmax(280px, 1fr);
@@ -10639,12 +10845,26 @@ button.git-badge:hover {
     padding-right: 14px;
   }
 
+  .system-body > .settings-form,
+  .system-body > .settings-form.secrets-settings-form {
+    width: calc(100% - 28px);
+    margin: 14px;
+  }
+
   .settings-section-heading {
     display: grid;
   }
 
   .settings-form .checkbox-field {
     width: 100%;
+  }
+
+  .secrets-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .secrets-root-card {
+    grid-column: auto;
   }
 }
 

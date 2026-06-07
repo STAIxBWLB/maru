@@ -1,5 +1,5 @@
 use crate::vault::lexical_normalize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -23,6 +23,9 @@ const GENERATED_DIRS: &[&str] = &[
     ".omx",
     ".pnpm-store",
 ];
+
+const GENERATED_SECRET_LEAF_FILES: &[&str] =
+    &[".ds_store", ".localized", "thumbs.db", "desktop.ini"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +101,23 @@ pub struct SecretsMigrationReport {
     pub actions: Vec<SecretsMigrationAction>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretTextDocument {
+    pub rel_path: String,
+    pub abs_path: String,
+    pub contents: String,
+    pub size_bytes: u64,
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretTextWriteRequest {
+    pub rel_path: String,
+    pub contents: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SecretsPaths {
     work: PathBuf,
@@ -134,6 +154,35 @@ pub fn secrets_migrate(
 ) -> Result<SecretsMigrationReport, String> {
     let work = normalize_work_path(&work_path)?;
     migrate_at(&work, dry_run.unwrap_or(true), selected)
+}
+
+#[tauri::command]
+pub fn secrets_read_text(
+    work_path: String,
+    rel_path: String,
+) -> Result<SecretTextDocument, String> {
+    let work = normalize_work_path(&work_path)?;
+    read_text_at(&work, &rel_path)
+}
+
+#[tauri::command]
+pub fn secrets_write_text(
+    work_path: String,
+    rel_path: String,
+    contents: String,
+) -> Result<SecretInventoryItem, String> {
+    let work = normalize_work_path(&work_path)?;
+    write_text_at(&work, SecretTextWriteRequest { rel_path, contents })
+}
+
+#[tauri::command]
+pub fn secrets_delete_text(
+    work_path: String,
+    rel_path: String,
+) -> Result<SecretsScanReport, String> {
+    let work = normalize_work_path(&work_path)?;
+    delete_text_at(&work, &rel_path)?;
+    scan_at(&work)
 }
 
 pub fn primary_root(work: &Path) -> PathBuf {
@@ -324,6 +373,76 @@ fn migrate_at(
     })
 }
 
+fn read_text_at(work: &Path, rel_path: &str) -> Result<SecretTextDocument, String> {
+    let paths = SecretsPaths::new(work);
+    let (path, normalized_rel) = resolve_primary_secret_path(&paths, rel_path)?;
+    ensure_text_secret_path(&normalized_rel)?;
+    let meta = fs::symlink_metadata(&path)
+        .map_err(|err| format!("Cannot inspect secret text file: {err}"))?;
+    if meta.file_type().is_symlink() {
+        return Err("secret_text_symlink_unsupported".to_string());
+    }
+    if !meta.is_file() {
+        return Err("secret_text_file_required".to_string());
+    }
+    let bytes = fs::read(&path).map_err(|err| format!("Cannot read secret text file: {err}"))?;
+    if looks_binary(&bytes) {
+        return Err("secret_binary_unsupported".to_string());
+    }
+    let contents = String::from_utf8(bytes).map_err(|_| "secret_text_utf8_required".to_string())?;
+    Ok(SecretTextDocument {
+        rel_path: normalized_rel,
+        abs_path: path.to_string_lossy().to_string(),
+        size_bytes: meta.len(),
+        mode: file_mode(&path),
+        contents,
+    })
+}
+
+fn write_text_at(
+    work: &Path,
+    request: SecretTextWriteRequest,
+) -> Result<SecretInventoryItem, String> {
+    let paths = SecretsPaths::new(work);
+    let (path, normalized_rel) = resolve_primary_secret_path(&paths, &request.rel_path)?;
+    ensure_text_secret_path(&normalized_rel)?;
+    if looks_binary(request.contents.as_bytes()) {
+        return Err("secret_binary_unsupported".to_string());
+    }
+    if let Ok(meta) = fs::symlink_metadata(&path) {
+        if meta.file_type().is_symlink() {
+            return Err("secret_text_symlink_unsupported".to_string());
+        }
+        if !meta.is_file() {
+            return Err("secret_text_file_required".to_string());
+        }
+    }
+    ensure_secret_parent_dirs(&paths, &path)?;
+    write_secret_text_file(&path, &request.contents)
+        .map_err(|err| format!("Cannot write secret text file: {err}"))?;
+    set_file_private(&path)?;
+    inventory_item_for_path(&paths.primary, "primary", &path, normalized_rel)
+}
+
+fn delete_text_at(work: &Path, rel_path: &str) -> Result<(), String> {
+    let paths = SecretsPaths::new(work);
+    let (path, normalized_rel) = resolve_primary_secret_path(&paths, rel_path)?;
+    ensure_text_secret_path(&normalized_rel)?;
+    let meta = fs::symlink_metadata(&path)
+        .map_err(|err| format!("Cannot inspect secret text file: {err}"))?;
+    if meta.file_type().is_symlink() {
+        return Err("secret_text_symlink_unsupported".to_string());
+    }
+    if !meta.is_file() {
+        return Err("secret_text_file_required".to_string());
+    }
+    let bytes = fs::read(&path).map_err(|err| format!("Cannot read secret text file: {err}"))?;
+    if looks_binary(&bytes) {
+        return Err("secret_binary_unsupported".to_string());
+    }
+    fs::remove_file(&path).map_err(|err| format!("Cannot delete secret text file: {err}"))
+}
+
 fn scan_at(work: &Path) -> Result<SecretsScanReport, String> {
     let paths = SecretsPaths::new(work);
     let root = root_status(&paths)?;
@@ -420,6 +539,9 @@ fn collect_managed(
             }
             continue;
         }
+        if is_generated_secret_leaf(path) {
+            continue;
+        }
         let symlink_target = if meta.file_type().is_symlink() {
             fs::read_link(path)
                 .ok()
@@ -459,6 +581,51 @@ fn collect_managed(
     }
     out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(())
+}
+
+fn inventory_item_for_path(
+    root: &Path,
+    root_label: &str,
+    path: &Path,
+    rel_path: String,
+) -> Result<SecretInventoryItem, String> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|err| format!("Cannot inspect secret inventory item: {err}"))?;
+    let symlink_target = if meta.file_type().is_symlink() {
+        fs::read_link(path)
+            .ok()
+            .map(|target| target.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    let permissions_ok = if meta.file_type().is_symlink() {
+        true
+    } else {
+        private_file_mode_ok(path)
+    };
+    Ok(SecretInventoryItem {
+        rel_path: if rel_path.is_empty() {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        } else {
+            rel_path
+        },
+        abs_path: path.to_string_lossy().to_string(),
+        root: root_label.to_string(),
+        kind: if meta.file_type().is_symlink() {
+            "symlink".to_string()
+        } else if meta.is_file() {
+            "file".to_string()
+        } else {
+            "other".to_string()
+        },
+        size_bytes: meta.len(),
+        mode: file_mode(path),
+        permissions_ok,
+        symlink_target,
+    })
 }
 
 fn collect_candidates(
@@ -565,6 +732,103 @@ fn should_prune(paths: &SecretsPaths, path: &Path) -> bool {
         }
         _ => false,
     })
+}
+
+fn is_generated_secret_leaf(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    name.starts_with("._")
+        || GENERATED_SECRET_LEAF_FILES
+            .iter()
+            .any(|generated| generated == &name.as_str())
+}
+
+fn resolve_primary_secret_path(
+    paths: &SecretsPaths,
+    rel_path: &str,
+) -> Result<(PathBuf, String), String> {
+    let normalized_rel = normalize_secret_rel_path(rel_path)?;
+    let primary = lexical_normalize(&paths.primary);
+    let path = lexical_normalize(&primary.join(&normalized_rel));
+    if !path.starts_with(&primary) {
+        return Err("secret_path_outside_primary".to_string());
+    }
+    Ok((path, normalized_rel.to_string_lossy().replace('\\', "/")))
+}
+
+fn normalize_secret_rel_path(input: &str) -> Result<PathBuf, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("secret_path_required".to_string());
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err("secret_path_absolute_unsupported".to_string());
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(name) => normalized.push(name),
+            Component::CurDir => {}
+            Component::ParentDir => return Err("secret_path_traversal_unsupported".to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("secret_path_absolute_unsupported".to_string())
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("secret_path_required".to_string());
+    }
+    Ok(normalized)
+}
+
+fn ensure_text_secret_path(rel_path: &str) -> Result<(), String> {
+    let path = Path::new(rel_path);
+    if is_generated_secret_leaf(path) {
+        return Err("secret_text_extension_unsupported".to_string());
+    }
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let unsupported = [
+        "age", "bin", "cer", "crt", "db", "der", "gz", "key", "p12", "p8", "pdf", "pem", "sqlite",
+        "tar", "zip",
+    ];
+    if unsupported.iter().any(|blocked| blocked == &ext.as_str()) {
+        return Err("secret_text_extension_unsupported".to_string());
+    }
+    Ok(())
+}
+
+fn ensure_secret_parent_dirs(paths: &SecretsPaths, path: &Path) -> Result<(), String> {
+    let primary = lexical_normalize(&paths.primary);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "secret_parent_missing".to_string())?;
+    let parent = lexical_normalize(parent);
+    if !parent.starts_with(&primary) {
+        return Err("secret_path_outside_primary".to_string());
+    }
+    fs::create_dir_all(&parent).map_err(|err| format!("Cannot create secret directory: {err}"))?;
+    let mut current = primary.clone();
+    set_dir_private(&current)?;
+    if let Ok(rel) = parent.strip_prefix(&primary) {
+        for component in rel.components() {
+            if let Component::Normal(name) = component {
+                current.push(name);
+                set_dir_private(&current)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().any(|byte| *byte == 0)
 }
 
 fn secret_candidate_reason(path: &Path) -> Option<String> {
@@ -908,6 +1172,19 @@ fn set_file_private(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn write_secret_text_file(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())
+}
+
 fn set_dir_private(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -986,6 +1263,28 @@ mod tests {
     }
 
     #[test]
+    fn scan_ignores_generated_managed_secret_files() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+        let secrets = work.join(".anchor/secrets");
+        fs::create_dir_all(secrets.join("services")).unwrap();
+        fs::write(secrets.join(".DS_Store"), "finder metadata\n").unwrap();
+        fs::write(secrets.join("._token"), "appledouble metadata\n").unwrap();
+        fs::write(secrets.join("desktop.ini"), "windows metadata\n").unwrap();
+        fs::write(secrets.join(".localized"), "localized metadata\n").unwrap();
+        fs::write(secrets.join("services/demo.env"), "TOKEN=secret\n").unwrap();
+
+        let report = scan_at(work).unwrap();
+        let managed_rel_paths = report
+            .managed
+            .iter()
+            .map(|item| item.rel_path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(managed_rel_paths, vec!["services/demo.env"]);
+    }
+
+    #[test]
     fn migrate_moves_secret_and_leaves_runtime_symlink() {
         let tmp = TempDir::new().unwrap();
         let work = tmp.path();
@@ -1011,5 +1310,113 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
+    }
+
+    #[test]
+    fn selected_migration_only_moves_selected_candidates() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+        fs::create_dir_all(work.join("sites/demo")).unwrap();
+        fs::create_dir_all(work.join("sites/other")).unwrap();
+        fs::write(work.join("sites/demo/.env.local"), "TOKEN=secret\n").unwrap();
+        fs::write(work.join("sites/other/.env.local"), "TOKEN=other\n").unwrap();
+        fs::write(
+            work.join("workspace.config.yaml"),
+            "version: 1\npaths:\n  primary: .\n",
+        )
+        .unwrap();
+        fs::write(work.join(".gitignore"), ".anchor/secrets/\n").unwrap();
+        fs::write(work.join(".anchorignore"), ".anchor/secrets\n").unwrap();
+
+        let report =
+            migrate_at(work, false, Some(vec!["sites/demo/.env.local".to_string()])).unwrap();
+
+        assert!(report.applied);
+        assert!(work.join(".anchor/secrets/sites/demo/local.env").is_file());
+        assert!(!work.join(".anchor/secrets/sites/other/local.env").exists());
+        assert!(work.join("sites/other/.env.local").is_file());
+    }
+
+    #[test]
+    fn text_secret_write_is_contained_and_private() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+
+        let item = write_text_at(
+            work,
+            SecretTextWriteRequest {
+                rel_path: "services/demo.env".to_string(),
+                contents: "TOKEN=secret\n".to_string(),
+            },
+        )
+        .unwrap();
+        let doc = read_text_at(work, "services/demo.env").unwrap();
+
+        assert_eq!(item.rel_path, "services/demo.env");
+        assert_eq!(doc.contents, "TOKEN=secret\n");
+        assert!(write_text_at(
+            work,
+            SecretTextWriteRequest {
+                rel_path: "../outside.env".to_string(),
+                contents: "TOKEN=bad\n".to_string(),
+            },
+        )
+        .is_err());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(work.join(".anchor/secrets/services/demo.env"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn text_secret_rejects_binary_and_certificate_like_files() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+        fs::create_dir_all(work.join(".anchor/secrets/apple")).unwrap();
+        fs::write(
+            work.join(".anchor/secrets/apple/certificate-password"),
+            b"a\0b",
+        )
+        .unwrap();
+
+        assert!(read_text_at(work, "apple/certificate-password").is_err());
+        assert!(write_text_at(
+            work,
+            SecretTextWriteRequest {
+                rel_path: "apple/AuthKey_ABC123.p8".to_string(),
+                contents: "-----BEGIN PRIVATE KEY-----\n".to_string(),
+            },
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn text_secret_rejects_symlink_targets() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path();
+        fs::create_dir_all(work.join(".anchor/secrets/services")).unwrap();
+        fs::write(work.join("outside.env"), "TOKEN=outside\n").unwrap();
+        std::os::unix::fs::symlink(
+            "../../outside.env",
+            work.join(".anchor/secrets/services/demo.env"),
+        )
+        .unwrap();
+
+        assert!(read_text_at(work, "services/demo.env").is_err());
+        assert!(write_text_at(
+            work,
+            SecretTextWriteRequest {
+                rel_path: "services/demo.env".to_string(),
+                contents: "TOKEN=next\n".to_string(),
+            },
+        )
+        .is_err());
     }
 }

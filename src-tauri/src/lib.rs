@@ -121,7 +121,10 @@ use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
     stage_outlook_items,
 };
-use secrets::{secrets_doctor, secrets_migrate, secrets_scan};
+use secrets::{
+    secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
+    secrets_write_text,
+};
 use share_outbox::{
     ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
     save_share_outbox_root, scan_share_outbox,
@@ -359,6 +362,9 @@ pub fn run() {
             secrets_scan,
             secrets_doctor,
             secrets_migrate,
+            secrets_read_text,
+            secrets_write_text,
+            secrets_delete_text,
             plan_sys_import,
             apply_sys_import,
             skills_list_sources,

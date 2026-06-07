@@ -920,6 +920,14 @@ export interface SecretsMigrationReport {
   actions: SecretsMigrationAction[];
 }
 
+export interface SecretTextDocument {
+  relPath: string;
+  absPath: string;
+  contents: string;
+  sizeBytes: number;
+  mode: string | null;
+}
+
 export interface WorkspaceDetect {
   workPath: string;
   configPath: string;

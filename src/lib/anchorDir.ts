@@ -14,6 +14,7 @@ import type {
   RegisterWorkspaceOutcome,
   RuleDocument,
   RuleEntry,
+  SecretTextDocument,
   SecretsMigrationReport,
   SecretsScanReport,
   TemplateEntry,
@@ -40,6 +41,13 @@ const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
 const SETTINGS_FALLBACK_KEY = "anchor:settings:fallback:v1";
+const MOCK_SECRET_TEXTS_KEY_PREFIX = "anchor:mock-secret-texts:";
+const GENERATED_SECRET_LEAF_FILES = new Set([
+  ".ds_store",
+  ".localized",
+  "thumbs.db",
+  "desktop.ini",
+]);
 export const ANCHOR_SETTINGS_UPDATED_EVENT = "anchor://settings-updated";
 
 export interface AnchorSettingsUpdatedPayload {
@@ -52,6 +60,119 @@ export interface AnchorSettingsUpdatedPayload {
 interface AnchorSettingsSaveOutcome {
   globalChanged: boolean;
   workspaceChanged: boolean;
+}
+
+function defaultMockSecretTexts(): Record<string, string> {
+  const generated = Object.fromEntries(
+    Array.from({ length: 88 }, (_, index) => {
+      const suffix = String(index + 1).padStart(2, "0");
+      return [`services/mock-${suffix}.env`, `MOCK_SECRET_${suffix}=placeholder\n`];
+    }),
+  );
+  return {
+    "services/telegram-monitor.config.yaml":
+      "telegram:\n  api_id: \"12345\"\n  api_hash: \"mock-api-hash\"\n",
+    ".DS_Store": "finder metadata\n",
+    "workspace/local.env": "ANCHOR_LOCAL_ONLY=1\n",
+    "projects/demo/api-token": "demo-token-placeholder\n",
+    ...generated,
+  };
+}
+
+function isGeneratedSecretLeafPath(relPath: string): boolean {
+  const name = relPath.split("/").pop()?.toLowerCase() ?? "";
+  return name.startsWith("._") || GENERATED_SECRET_LEAF_FILES.has(name);
+}
+
+function mockSecretTextsKey(workPath: string): string {
+  return `${MOCK_SECRET_TEXTS_KEY_PREFIX}${workPath}`;
+}
+
+function readMockSecretTexts(workPath: string): Record<string, string> {
+  const defaults = defaultMockSecretTexts();
+  if (typeof window === "undefined") return defaults;
+  try {
+    const raw = window.localStorage.getItem(mockSecretTextsKey(workPath));
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return defaults;
+    return { ...defaults, ...(parsed as Record<string, string>) };
+  } catch {
+    return defaults;
+  }
+}
+
+function writeMockSecretTexts(workPath: string, texts: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(mockSecretTextsKey(workPath), JSON.stringify(texts));
+}
+
+function mockSecretsScanReport(workPath: string): SecretsScanReport {
+  const texts = readMockSecretTexts(workPath);
+  const managed = Object.entries(texts)
+    .filter(([relPath]) => !isGeneratedSecretLeafPath(relPath))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relPath, contents]) => ({
+      relPath,
+      absPath: `${workPath}/.anchor/secrets/${relPath}`,
+      root: "primary",
+      kind: "file",
+      sizeBytes: new TextEncoder().encode(contents).length,
+      mode: "0600",
+      permissionsOk: true,
+      symlinkTarget: null,
+    }));
+  return {
+    ok: true,
+    root: {
+      workPath,
+      primaryRoot: `${workPath}/.anchor/secrets`,
+      primaryExists: true,
+      legacyPath: `${workPath}/.secrets`,
+      legacyExists: true,
+      legacyKind: "symlink_to_primary",
+      legacyTarget: ".anchor/secrets",
+    },
+    managed: [
+      ...managed,
+      {
+        relPath: "apple/DeveloperIDApplication.p12",
+        absPath: `${workPath}/.anchor/secrets/apple/DeveloperIDApplication.p12`,
+        root: "primary",
+        kind: "file",
+        sizeBytes: 3272,
+        mode: "0600",
+        permissionsOk: true,
+        symlinkTarget: null,
+      },
+    ],
+    candidates: [
+      {
+        relPath: "sites/demo/.env.local",
+        absPath: `${workPath}/sites/demo/.env.local`,
+        reason: "environment file",
+        recommendedRelPath: "sites/demo/local.env",
+        recommendedAbsPath: `${workPath}/.anchor/secrets/sites/demo/local.env`,
+      },
+    ],
+    legacySymlinks: [
+      {
+        relPath: "services/legacy-monitor.env",
+        absPath: `${workPath}/services/legacy-monitor.env`,
+        reason: "legacy .secrets symlink target",
+        recommendedRelPath: "services/legacy-monitor.env",
+        recommendedAbsPath: `${workPath}/.anchor/secrets/services/legacy-monitor.env`,
+      },
+    ],
+    issues: [
+      {
+        severity: "warn",
+        code: "legacy_config_ref",
+        path: "workspace.config.yaml.io.providers.telegram.secrets.monitor_config",
+        message: "workspace.config.yaml still references .secrets",
+      },
+    ],
+  };
 }
 
 // === Workspace detection / pairing ===
@@ -84,22 +205,7 @@ export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
 
 export async function scanSecrets(workPath: string): Promise<SecretsScanReport> {
   if (!isTauri()) {
-    return {
-      ok: true,
-      root: {
-        workPath,
-        primaryRoot: `${workPath}/.anchor/secrets`,
-        primaryExists: false,
-        legacyPath: `${workPath}/.secrets`,
-        legacyExists: false,
-        legacyKind: "missing",
-        legacyTarget: null,
-      },
-      managed: [],
-      candidates: [],
-      legacySymlinks: [],
-      issues: [],
-    };
+    return mockSecretsScanReport(workPath);
   }
   return invoke<SecretsScanReport>("secrets_scan", { workPath });
 }
@@ -115,11 +221,43 @@ export async function migrateSecrets(
   selected?: string[],
 ): Promise<SecretsMigrationReport> {
   if (!isTauri()) {
+    const scan = await scanSecrets(workPath);
+    const allowed = new Set(selected ?? []);
+    const includeAll = allowed.size === 0;
+    const actions = [
+      {
+        action: "create-legacy-symlink",
+        sourcePath: `${workPath}/.secrets`,
+        targetPath: `${workPath}/.anchor/secrets`,
+        relPath: ".secrets",
+        status: dryRun ? "planned" : "applied",
+      },
+      ...scan.candidates.map((candidate) => ({
+        action: "move-secret-file",
+        sourcePath: candidate.absPath,
+        targetPath: candidate.recommendedAbsPath,
+        relPath: candidate.relPath,
+        status: dryRun ? "planned" : "applied",
+      })),
+      ...scan.legacySymlinks.map((candidate) => ({
+        action: "retarget-legacy-symlink",
+        sourcePath: candidate.absPath,
+        targetPath: candidate.recommendedAbsPath,
+        relPath: candidate.relPath,
+        status: dryRun ? "planned" : "applied",
+      })),
+    ].filter((action) => {
+      if (includeAll) return true;
+      if (action.action !== "move-secret-file" && action.action !== "retarget-legacy-symlink") {
+        return true;
+      }
+      return action.relPath ? allowed.has(action.relPath) : true;
+    });
     return {
       applied: !dryRun,
       ok: true,
-      scan: await scanSecrets(workPath),
-      actions: [],
+      scan,
+      actions,
     };
   }
   return invoke<SecretsMigrationReport>("secrets_migrate", {
@@ -127,6 +265,48 @@ export async function migrateSecrets(
     dryRun,
     selected: selected ?? null,
   });
+}
+
+export async function readSecretText(
+  workPath: string,
+  relPath: string,
+): Promise<SecretTextDocument> {
+  if (!isTauri()) {
+    const texts = readMockSecretTexts(workPath);
+    const contents = texts[relPath] ?? "";
+    return {
+      relPath,
+      absPath: `${workPath}/.anchor/secrets/${relPath}`,
+      contents,
+      sizeBytes: new TextEncoder().encode(contents).length,
+      mode: "0600",
+    };
+  }
+  return invoke<SecretTextDocument>("secrets_read_text", { workPath, relPath });
+}
+
+export async function writeSecretText(
+  workPath: string,
+  relPath: string,
+  contents: string,
+): Promise<void> {
+  if (!isTauri()) {
+    const texts = readMockSecretTexts(workPath);
+    texts[relPath] = contents;
+    writeMockSecretTexts(workPath, texts);
+    return;
+  }
+  await invoke("secrets_write_text", { workPath, relPath, contents });
+}
+
+export async function deleteSecretText(workPath: string, relPath: string): Promise<SecretsScanReport> {
+  if (!isTauri()) {
+    const texts = readMockSecretTexts(workPath);
+    delete texts[relPath];
+    writeMockSecretTexts(workPath, texts);
+    return mockSecretsScanReport(workPath);
+  }
+  return invoke<SecretsScanReport>("secrets_delete_text", { workPath, relPath });
 }
 
 // === .anchor/ workspace meta ===
