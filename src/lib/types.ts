@@ -705,6 +705,7 @@ export interface TaskNoteRow {
 export interface TaskMetadata {
   relPath: string;
   frontmatter: Record<string, unknown>;
+  body: string;
   preview: string;
   lineCount: number;
   charCount: number;
@@ -726,6 +727,12 @@ export interface TaskSchedulePatch {
   calendarStart?: string | null;
   calendarEnd?: string | null;
   estimateMinutes?: number | null;
+}
+
+export interface TaskDetailsPatch extends TaskSchedulePatch {
+  title?: string;
+  status?: TaskStatus;
+  body?: string;
 }
 
 export interface TasksLogLineRecord {

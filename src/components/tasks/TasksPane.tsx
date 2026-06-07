@@ -18,7 +18,7 @@ import {
   readTaskMetadata,
   scanTaskNotes,
   searchCalendarNotes,
-  updateTaskScheduleFields,
+  updateTaskDetails,
   updateTaskStatus,
 } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
@@ -44,10 +44,10 @@ import {
 } from "../../lib/tasks";
 import type {
   CreateTaskDraft,
+  TaskDetailsPatch,
   MissionRecord,
   TaskMetadata,
   TaskNoteRow,
-  TaskSchedulePatch,
   TaskStatus,
 } from "../../lib/types";
 import { Button } from "../ui/Button";
@@ -129,6 +129,7 @@ export function TasksPane({
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [naturalScheduleOpen, setNaturalScheduleOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailDirty, setDetailDirty] = useState(false);
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
   const [bodyHits, setBodyHits] = useState<Set<string>>(() => new Set());
   const debouncedQuery = useDebouncedValue(query, 250);
@@ -260,6 +261,7 @@ export function TasksPane({
       return;
     }
     let cancelled = false;
+    setMetadata(null);
     setMetadataLoading(true);
     if (workPath) {
       void readTaskMetadata(workPath, selectedEntry.relPath)
@@ -300,17 +302,39 @@ export function TasksPane({
     }
   };
 
-  const updateSchedule = async (entry: TaskEntry, fields: TaskSchedulePatch) => {
+  const updateDetails = async (entry: TaskEntry, fields: TaskDetailsPatch) => {
     if (!workPath) return;
     try {
-      const updated = await updateTaskScheduleFields(workPath, entry.relPath, fields);
-      setRows((current) => current.map((row) => (row.relPath === entry.relPath ? updated : row)));
+      const updated = await updateTaskDetails(
+        workPath,
+        entry.relPath,
+        fields,
+        effectiveSettings.root,
+      );
+      setRows((current) => replaceTaskRow(current, entry.relPath, updated));
       setSelectedRelPath(updated.relPath);
+      setMetadata(null);
+      setDetailDirty(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
       throw err;
     }
   };
+
+  const selectTask = useCallback(
+    (relPath: string) => {
+      if (
+        relPath !== selectedRelPath
+        && !canSwitchTaskDetails(detailDirty, () => window.confirm(t("tasks.detail.discardConfirm")))
+      ) {
+        return;
+      }
+      setSelectedRelPath(relPath);
+      setDetailsOpen(true);
+      setDetailDirty(false);
+    },
+    [detailDirty, selectedRelPath, t],
+  );
 
   const resolveRuntime = useCallback(async (): Promise<SkillDispatchRuntime | null> => {
     const preferred: SkillDispatchRuntime = defaultRuntime ?? "claude";
@@ -538,7 +562,7 @@ export function TasksPane({
                 grouped={grouped}
                 selectedRelPath={selectedEntry?.relPath ?? null}
                 labelMode={labelMode}
-                onSelect={setSelectedRelPath}
+                onSelect={selectTask}
                 onDone={(entry) => void setStatus(entry, "done")}
                 t={t}
               />
@@ -555,7 +579,7 @@ export function TasksPane({
                 onQueryChange={setQuery}
                 onViewChange={(next) => setDisplayView(next)}
                 onViewDateChange={setViewDate}
-                onSelectEvent={(event) => setSelectedRelPath(event.resource.relPath)}
+                onSelectEvent={(event) => selectTask(event.resource.relPath)}
                 onSelectDate={(date) => {
                   if (displayView === "month") setDisplayView("day");
                   setViewDate(date);
@@ -580,7 +604,8 @@ export function TasksPane({
           onToggleCollapsed={() => setDetailsOpen((value) => !value)}
           onRevealPath={onRevealPath}
           onOpenSkillCompose={onOpenSkillCompose}
-          onUpdateSchedule={updateSchedule}
+          onSaveDetails={updateDetails}
+          onDirtyChange={setDetailDirty}
         />
       ) : null}
       <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreate={createTask} />
@@ -692,6 +717,23 @@ function mergeTaskEntries(primary: TaskEntry[], secondary: TaskEntry[]): TaskEnt
     merged.push(entry);
   }
   return merged;
+}
+
+function replaceTaskRow(rows: TaskNoteRow[], relPath: string, updated: TaskNoteRow): TaskNoteRow[] {
+  let replaced = false;
+  const next = rows.map((row) => {
+    if (row.relPath !== relPath) return row;
+    replaced = true;
+    return updated;
+  });
+  return replaced ? next : [updated, ...rows];
+}
+
+export function canSwitchTaskDetails(
+  dirty: boolean,
+  confirmDiscard: () => boolean,
+): boolean {
+  return !dirty || confirmDiscard();
 }
 
 function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
