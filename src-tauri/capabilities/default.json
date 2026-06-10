@@ -23,6 +23,8 @@
     "core:window:allow-set-size",
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "dialog:default",
     "updater:default",
     "process:default"

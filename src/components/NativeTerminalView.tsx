@@ -84,9 +84,27 @@ interface TerminalMetrics {
   padTop: number;
 }
 
-interface PointerState {
-  mode: "select" | "mouse";
+export type SelectionKind = "cell" | "word" | "line";
+
+type PointerState =
+  | { mode: "mouse"; button: number }
+  | {
+      mode: "select";
+      button: number;
+      anchor: CellPoint;
+      moved: boolean;
+      kind: SelectionKind;
+      anchorSpan: CellRange | null;
+    };
+
+/** Consecutive left-click tracking for double/triple-click gestures.
+ *  WKWebView reports `event.detail` unreliably for pointer events, so click
+ *  counts are derived from our own timestamps. */
+export interface ClickChain {
+  at: number;
+  point: CellPoint;
   button: number;
+  count: number;
 }
 
 /** macOS WKWebView can emit a trailing `insertText` carrying the same text a
@@ -189,7 +207,7 @@ export function cellDisplayText(cell: TerminalCell): string {
   return cell.ch || " ";
 }
 
-function comparePoint(a: CellPoint, b: CellPoint): number {
+export function comparePoint(a: CellPoint, b: CellPoint): number {
   if (a.row !== b.row) return a.row - b.row;
   return a.col - b.col;
 }
@@ -245,6 +263,116 @@ export function selectedTerminalText(
     chunks.push(text);
   }
   return chunks.join("\n");
+}
+
+/** Characters that terminate a double-click word selection. Mirrors
+ *  alacritty's default semantic_escape_chars (plus tab); `-_./~` stay word
+ *  characters so paths and URLs select as one word. */
+export const TERMINAL_WORD_SEPARATORS = ",│`|:\"' ()[]{}<>\t";
+
+/** Column span of the "word" at `col`. Wide-cell spacers (width 0) inherit
+ *  the glyph to their left so both columns of a CJK character classify the
+ *  same; clicking whitespace selects the whitespace run; clicking a
+ *  separator selects just that cell. Spans never cross the visual row — the
+ *  frame carries no line-wrap flag. */
+export function wordSpanAt(
+  line: TerminalCell[] | undefined,
+  col: number,
+  separators: string = TERMINAL_WORD_SEPARATORS,
+): { start: number; end: number } {
+  if (!line || line.length === 0) return { start: 0, end: 0 };
+  const max = line.length - 1;
+  const at = Math.max(0, Math.min(max, col));
+  const charAt = (index: number): string => {
+    for (let i = index; i >= 0; i -= 1) {
+      const cellAt = line[i];
+      if (!cellAt) break;
+      if (cellAt.width !== 0) return cellAt.ch || " ";
+    }
+    return " ";
+  };
+  const isSpace = (ch: string) => ch.trim().length === 0;
+  const target = charAt(at);
+  if (!isSpace(target) && separators.includes(target)) return { start: at, end: at };
+  const sameClass = (ch: string) =>
+    isSpace(target) ? isSpace(ch) : !isSpace(ch) && !separators.includes(ch);
+  let start = at;
+  while (start > 0 && sameClass(charAt(start - 1))) start -= 1;
+  let end = at;
+  while (end < max && sameClass(charAt(end + 1))) end += 1;
+  return { start, end };
+}
+
+/** Fold a pointerdown into the click chain: left-clicks within `windowMs`
+ *  on the same row (±`colTolerance` columns) count up, cycling 1→2→3→1;
+ *  anything else starts a fresh chain. */
+export function nextClickChain(
+  prev: ClickChain | null,
+  point: CellPoint,
+  button: number,
+  now: number,
+  windowMs = 500,
+  colTolerance = 1,
+): ClickChain {
+  if (
+    prev &&
+    button === 0 &&
+    prev.button === 0 &&
+    now - prev.at <= windowMs &&
+    point.row === prev.point.row &&
+    Math.abs(point.col - prev.point.col) <= colTolerance
+  ) {
+    return { at: now, point, button, count: prev.count >= 3 ? 1 : prev.count + 1 };
+  }
+  return { at: now, point, button, count: 1 };
+}
+
+/** Initial selection for a click of the given chain count: a single click
+ *  selects nothing until the pointer moves, a double click selects the word,
+ *  a triple click selects the visual row. */
+export function selectionForClickCount(
+  lines: TerminalCell[][],
+  point: CellPoint,
+  count: number,
+  cols: number,
+): CellSelection | null {
+  if (count <= 1) return null;
+  if (count === 2) {
+    const span = wordSpanAt(lines[point.row], point.col);
+    return {
+      anchor: { row: point.row, col: span.start },
+      focus: { row: point.row, col: span.end },
+    };
+  }
+  return {
+    anchor: { row: point.row, col: 0 },
+    focus: { row: point.row, col: Math.max(0, cols - 1) },
+  };
+}
+
+/** Selection for a drag at the gesture's granularity: plain drags track the
+ *  cell, word/line drags extend whole words/rows away from the original
+ *  anchor span. */
+export function selectionForSelectDrag(
+  lines: TerminalCell[][],
+  kind: SelectionKind,
+  anchor: CellPoint,
+  anchorSpan: CellRange | null,
+  point: CellPoint,
+  cols: number,
+): CellSelection {
+  if (kind === "cell") return { anchor, focus: point };
+  const base = anchorSpan ?? { start: anchor, end: anchor };
+  if (kind === "word") {
+    const span = wordSpanAt(lines[point.row], point.col);
+    return comparePoint(point, base.start) >= 0
+      ? { anchor: base.start, focus: { row: point.row, col: span.end } }
+      : { anchor: base.end, focus: { row: point.row, col: span.start } };
+  }
+  const lastCol = Math.max(0, cols - 1);
+  return point.row >= base.start.row
+    ? { anchor: { row: base.start.row, col: 0 }, focus: { row: point.row, col: lastCol } }
+    : { anchor: { row: base.end.row, col: lastCol }, focus: { row: point.row, col: 0 } };
 }
 
 export function terminalKeyEventToInput(
@@ -582,10 +710,12 @@ export const NativeTerminalView = memo(
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const rectRef = useRef<DOMRect | null>(null);
     const focusedRef = useRef(focused);
+    const wasFocusedRef = useRef(false);
     const mouseRef = useRef<TerminalMouseFlags | null>(null);
 
     // Pointer / selection state.
     const pointerStateRef = useRef<PointerState | null>(null);
+    const clickChainRef = useRef<ClickChain | null>(null);
     const lastMotionAtRef = useRef(0);
     const lastMotionCellRef = useRef<CellPoint | null>(null);
     const wheelAccumRef = useRef(0);
@@ -967,6 +1097,7 @@ export const NativeTerminalView = memo(
         event.currentTarget.setPointerCapture(event.pointerId);
         const useMouse = mouseModeActive(mouseRef.current) && !event.shiftKey;
         if (useMouse) {
+          clickChainRef.current = null;
           pointerStateRef.current = { mode: "mouse", button: event.button };
           onInput({
             type: "mouse",
@@ -980,8 +1111,47 @@ export const NativeTerminalView = memo(
           });
         } else {
           allSelectionTextRef.current = null;
-          pointerStateRef.current = { mode: "select", button: event.button };
-          setSelection({ anchor: point, focus: point });
+          // Shift+click extends an existing selection from its original
+          // anchor. (When a TUI owns the mouse, Shift already routed here
+          // via `useMouse`; extend still wins over starting a new drag.)
+          if (event.shiftKey && event.button === 0 && selectionRef.current) {
+            clickChainRef.current = null;
+            const anchor = selectionRef.current.anchor;
+            pointerStateRef.current = {
+              mode: "select",
+              button: event.button,
+              anchor,
+              moved: true,
+              kind: "cell",
+              anchorSpan: null,
+            };
+            setSelection({ anchor, focus: point });
+            return;
+          }
+          const chain = nextClickChain(
+            clickChainRef.current,
+            point,
+            event.button,
+            performance.now(),
+          );
+          clickChainRef.current = chain;
+          const initial = selectionForClickCount(
+            gridRef.current,
+            point,
+            chain.count,
+            dimsRef.current.cols,
+          );
+          pointerStateRef.current = {
+            mode: "select",
+            button: event.button,
+            anchor: point,
+            moved: false,
+            kind: chain.count >= 3 ? "line" : chain.count === 2 ? "word" : "cell",
+            anchorSpan: initial ? normalizeSelection(initial) : null,
+          };
+          // A plain click paints nothing (and clears any prior highlight);
+          // double/triple clicks select their word/line immediately.
+          setSelection(initial);
         }
       },
       [cellFromClient, onInput],
@@ -993,7 +1163,20 @@ export const NativeTerminalView = memo(
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;
         if (state?.mode === "select") {
-          setSelection((current) => (current ? { ...current, focus: point } : current));
+          if (!state.moved) {
+            if (point.row === state.anchor.row && point.col === state.anchor.col) return;
+            pointerStateRef.current = { ...state, moved: true };
+          }
+          setSelection(
+            selectionForSelectDrag(
+              gridRef.current,
+              state.kind,
+              state.anchor,
+              state.anchorSpan,
+              point,
+              dimsRef.current.cols,
+            ),
+          );
           return;
         }
         const mouse = mouseRef.current;
@@ -1044,18 +1227,60 @@ export const NativeTerminalView = memo(
             ctrlKey: event.ctrlKey,
           });
         } else {
-          setSelection((current) => {
-            if (!current) return current;
-            const next = { ...current, focus: point };
-            if (copyOnSelect && comparePoint(current.anchor, point) !== 0) {
-              const text = selectedTerminalText(gridRef.current, next);
-              if (text) onCopyOnSelect?.(text);
-            }
-            return next;
-          });
+          // No-move: a plain click leaves nothing selected; word/line clicks
+          // keep the span chosen at pointerdown (recomputed from anchorSpan
+          // so we don't depend on React state timing).
+          const next = !state.moved
+            ? state.anchorSpan
+              ? { anchor: state.anchorSpan.start, focus: state.anchorSpan.end }
+              : null
+            : selectionForSelectDrag(
+                gridRef.current,
+                state.kind,
+                state.anchor,
+                state.anchorSpan,
+                point,
+                dimsRef.current.cols,
+              );
+          setSelection(next);
+          if (copyOnSelect && next) {
+            const text = selectedTerminalText(gridRef.current, next);
+            if (text) onCopyOnSelect?.(text);
+          }
         }
       },
       [cellFromClient, copyOnSelect, onCopyOnSelect, onInput],
+    );
+
+    // Abort path: pointercancel / lostpointercapture must stop selection
+    // tracking, otherwise a stale "select" state makes bare hover keep
+    // extending the highlight. After a normal pointerup the state is already
+    // null, so the trailing lostpointercapture is a no-op.
+    const onPointerCancel = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        const state = pointerStateRef.current;
+        if (!state) return;
+        pointerStateRef.current = null;
+        clickChainRef.current = null;
+        if (state.mode !== "mouse") return;
+        // Synthesize a release so a TUI doesn't keep a stuck button after an
+        // aborted gesture. pointercancel coordinates are unreliable in
+        // WKWebView; prefer the last forwarded motion cell.
+        const point =
+          lastMotionCellRef.current ??
+          cellFromClient(event.clientX, event.clientY) ?? { row: 0, col: 0 };
+        onInput({
+          type: "mouse",
+          button: domButtonToTerminal(state.button),
+          col: point.col,
+          row: point.row,
+          action: "release",
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+        });
+      },
+      [cellFromClient, onInput],
     );
 
     // Wheel must be a native, non-passive listener: React attaches `onWheel`
@@ -1166,10 +1391,28 @@ export const NativeTerminalView = memo(
       enterHandledAtRef.current = 0;
     }, []);
 
+    // On window blur, remember whether this terminal's textarea owned focus;
+    // on window focus, restore it — WKWebView does not reliably restore the
+    // first responder after an app switch. Gated on the focused/active props
+    // (so a hidden tab or unfocused split pane never steals focus) and on
+    // wasFocusedRef (so non-terminal UI keeps its focus untouched).
     useEffect(() => {
-      window.addEventListener("blur", resetMods);
-      return () => window.removeEventListener("blur", resetMods);
-    }, [resetMods]);
+      const onWindowBlur = () => {
+        wasFocusedRef.current = document.activeElement === textareaRef.current;
+        resetMods();
+      };
+      const onWindowFocus = () => {
+        if (!wasFocusedRef.current) return;
+        wasFocusedRef.current = false;
+        if (focused && active) textareaRef.current?.focus();
+      };
+      window.addEventListener("blur", onWindowBlur);
+      window.addEventListener("focus", onWindowFocus);
+      return () => {
+        window.removeEventListener("blur", onWindowBlur);
+        window.removeEventListener("focus", onWindowFocus);
+      };
+    }, [active, focused, resetMods]);
 
     useEffect(() => {
       const focusedOnThisTerminal = () => document.activeElement === textareaRef.current;
@@ -1370,6 +1613,8 @@ export const NativeTerminalView = memo(
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onPointerCancel}
         onCopy={onCopy}
       >
         <canvas ref={canvasRef} className="native-terminal-canvas" aria-hidden="true" />

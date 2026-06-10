@@ -1,7 +1,7 @@
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi;
+use alacritty_terminal::vte::ansi::{self, ClearMode, Handler};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -209,6 +209,20 @@ impl TerminalModel {
         self.term.scroll_display(Scroll::Delta(delta));
     }
 
+    /// Clear the visible screen and scrollback history (Cmd+K, iTerm2-style).
+    /// Returns false without touching state while the alternate screen is
+    /// active (vim, TUIs) — alt screens have no scrollback and would stay
+    /// blank until the app's next full repaint.
+    pub fn clear(&mut self) -> bool {
+        if self.term.mode().contains(TermMode::ALT_SCREEN) {
+            return false;
+        }
+        self.term.scroll_display(Scroll::Bottom);
+        self.term.clear_screen(ClearMode::All);
+        self.term.clear_screen(ClearMode::Saved);
+        true
+    }
+
     pub fn text(&self) -> String {
         terminal_text(&self.term)
     }
@@ -396,6 +410,29 @@ mod tests {
         model.advance(b"alpha\r\nbeta\r\ngamma");
 
         assert_eq!(model.text(), "alpha\nbeta\ngamma");
+    }
+
+    #[test]
+    fn clear_wipes_screen_and_scrollback() {
+        let mut model = TerminalModel::new(20, 2, NullTerminalWriter);
+        model.advance(b"alpha\r\nbeta\r\ngamma");
+        // View scrollback first: clear must snap back to the live view.
+        model.scroll(1);
+
+        assert!(model.clear());
+        assert_eq!(model.text(), "");
+        let frame = model.snapshot("term-1");
+        assert_eq!(frame.display_offset, 0);
+        assert_eq!(frame.scrollback_len, 0);
+    }
+
+    #[test]
+    fn clear_is_noop_on_alt_screen() {
+        let mut model = TerminalModel::new(20, 4, NullTerminalWriter);
+        model.advance(b"\x1b[?1049htui");
+
+        assert!(!model.clear());
+        assert!(model.text().contains("tui"));
     }
 
     #[test]

@@ -20,12 +20,15 @@ import {
   keyModsFromEvent,
   lineBreakCommand,
   nativeShiftEnterCommand,
+  nextClickChain,
   normalizeSelection,
   normalizeTerminalInputText,
   recordTerminalKeyDown,
   recordTerminalKeyUp,
   resetTerminalModifierTracking,
   selectedTerminalText,
+  selectionForClickCount,
+  selectionForSelectDrag,
   selectionSpanForRow,
   terminalSearchSpanForRow,
   terminalBeforeInputToText,
@@ -35,6 +38,8 @@ import {
   terminalInputEventToText,
   terminalKeyEventToInput,
   terminalLineBreakCommand,
+  wordSpanAt,
+  type ClickChain,
   type NativeTerminalViewHandle,
 } from "./NativeTerminalView";
 
@@ -83,6 +88,13 @@ let canvasStub: CanvasStub;
 let roots: Root[] = [];
 let devicePixelRatioDescriptor: PropertyDescriptor | undefined;
 let actEnvironmentDescriptor: PropertyDescriptor | undefined;
+let pointerCaptureDescriptors: Record<string, PropertyDescriptor | undefined> = {};
+
+const POINTER_CAPTURE_METHODS = [
+  "setPointerCapture",
+  "releasePointerCapture",
+  "hasPointerCapture",
+] as const;
 
 function installDomStubs() {
   rectSize = { width: 800, height: 300 };
@@ -162,6 +174,19 @@ function installDomStubs() {
     disconnect = vi.fn();
   }
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
+
+  // jsdom's pointer-capture methods throw for synthetic pointer ids.
+  pointerCaptureDescriptors = {};
+  for (const method of POINTER_CAPTURE_METHODS) {
+    pointerCaptureDescriptors[method] = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      method,
+    );
+    Object.defineProperty(HTMLElement.prototype, method, {
+      configurable: true,
+      value: method === "hasPointerCapture" ? vi.fn(() => false) : vi.fn(),
+    });
+  }
 }
 
 function restoreProperty(
@@ -181,6 +206,10 @@ function restoreDomStubGlobals() {
   restoreProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironmentDescriptor);
   devicePixelRatioDescriptor = undefined;
   actEnvironmentDescriptor = undefined;
+  for (const method of POINTER_CAPTURE_METHODS) {
+    restoreProperty(HTMLElement.prototype, method, pointerCaptureDescriptors[method]);
+  }
+  pointerCaptureDescriptors = {};
 }
 
 function flushRaf() {
@@ -217,6 +246,33 @@ function renderNativeTerminalView(
     );
   });
   return { container, ref, onResize, onInput };
+}
+
+/** Dispatch a pointer event at the center of cell (row, col) using the
+ *  stubbed metrics: charWidth 10, lineHeight 15, padLeft 8, padTop 6. jsdom
+ *  lacks PointerEvent, so a MouseEvent with the pointer type is used — React
+ *  dispatches by event type. */
+function firePointer(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+  opts: { row: number; col: number; button?: number; shiftKey?: boolean },
+) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: 8 + opts.col * 10 + 5,
+    clientY: 6 + opts.row * 15 + 7,
+    button: opts.button ?? 0,
+    shiftKey: opts.shiftKey ?? false,
+  });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+}
+
+function rowOf(text: string): TerminalCell[] {
+  return [...text].map((ch) => cell(ch));
 }
 
 beforeEach(() => {
@@ -751,6 +807,274 @@ describe("NativeTerminalView helpers", () => {
     );
     // Out of range falls back.
     expect(terminalColorToCss({ kind: "indexed", index: 256 }, "#fff")).toBe("#fff");
+  });
+});
+
+describe("terminal word and click-chain helpers", () => {
+  it("selects whole words including path characters", () => {
+    const line = rowOf("cd ~/dev/my-app/file.test.ts now");
+    expect(wordSpanAt(line, 1)).toEqual({ start: 0, end: 1 });
+    // `~ / . - _` are word characters: the path is one word.
+    expect(wordSpanAt(line, 10)).toEqual({ start: 3, end: 27 });
+    expect(wordSpanAt(line, 30)).toEqual({ start: 29, end: 31 });
+  });
+
+  it("breaks words at separators and selects a lone separator cell", () => {
+    const line = rowOf("foo,bar|baz");
+    expect(wordSpanAt(line, 1)).toEqual({ start: 0, end: 2 });
+    expect(wordSpanAt(line, 3)).toEqual({ start: 3, end: 3 });
+    expect(wordSpanAt(line, 5)).toEqual({ start: 4, end: 6 });
+    expect(wordSpanAt(line, 7)).toEqual({ start: 7, end: 7 });
+    expect(wordSpanAt(line, 9)).toEqual({ start: 8, end: 10 });
+  });
+
+  it("selects whitespace runs and clamps out-of-range columns", () => {
+    const line = rowOf("a   b");
+    expect(wordSpanAt(line, 2)).toEqual({ start: 1, end: 3 });
+    expect(wordSpanAt(line, -5)).toEqual({ start: 0, end: 0 });
+    expect(wordSpanAt(line, 99)).toEqual({ start: 4, end: 4 });
+    expect(wordSpanAt(undefined, 3)).toEqual({ start: 0, end: 0 });
+    expect(wordSpanAt([], 3)).toEqual({ start: 0, end: 0 });
+  });
+
+  it("treats wide CJK glyphs and their spacers as one word", () => {
+    const line = [cell("안", 2), cell("", 0), cell("녕", 2), cell("", 0), cell(" ")];
+    for (const col of [0, 1, 2, 3]) {
+      expect(wordSpanAt(line, col)).toEqual({ start: 0, end: 3 });
+    }
+  });
+
+  it("chains left clicks within the window and tolerance, cycling 1→2→3→1", () => {
+    const point = { row: 2, col: 4 };
+    let chain: ClickChain | null = null;
+    chain = nextClickChain(chain, point, 0, 1000);
+    expect(chain.count).toBe(1);
+    chain = nextClickChain(chain, { row: 2, col: 5 }, 0, 1300);
+    expect(chain.count).toBe(2);
+    chain = nextClickChain(chain, point, 0, 1600);
+    expect(chain.count).toBe(3);
+    chain = nextClickChain(chain, point, 0, 1900);
+    expect(chain.count).toBe(1);
+  });
+
+  it("starts a fresh chain on timeout, distance, or non-left buttons", () => {
+    const point = { row: 2, col: 4 };
+    const first = nextClickChain(null, point, 0, 1000);
+    expect(nextClickChain(first, point, 0, 1600).count).toBe(1);
+    expect(nextClickChain(first, { row: 3, col: 4 }, 0, 1100).count).toBe(1);
+    expect(nextClickChain(first, { row: 2, col: 6 }, 0, 1100).count).toBe(1);
+    expect(nextClickChain(first, point, 2, 1100).count).toBe(1);
+    const right = nextClickChain(null, point, 2, 1000);
+    expect(nextClickChain(right, point, 2, 1100).count).toBe(1);
+  });
+
+  it("maps click counts to selections: none, word, line", () => {
+    const lines = [rowOf("hello world")];
+    expect(selectionForClickCount(lines, { row: 0, col: 2 }, 1, 11)).toBeNull();
+    expect(selectionForClickCount(lines, { row: 0, col: 2 }, 2, 11)).toEqual({
+      anchor: { row: 0, col: 0 },
+      focus: { row: 0, col: 4 },
+    });
+    expect(selectionForClickCount(lines, { row: 0, col: 2 }, 3, 11)).toEqual({
+      anchor: { row: 0, col: 0 },
+      focus: { row: 0, col: 10 },
+    });
+  });
+
+  it("resolves drags per granularity: cell tracks, word and line extend", () => {
+    const lines = [rowOf("hello world"), rowOf("second row!")];
+    expect(
+      selectionForSelectDrag(lines, "cell", { row: 0, col: 1 }, null, { row: 1, col: 5 }, 11),
+    ).toEqual({ anchor: { row: 0, col: 1 }, focus: { row: 1, col: 5 } });
+
+    const helloSpan = { start: { row: 0, col: 0 }, end: { row: 0, col: 4 } };
+    expect(
+      selectionForSelectDrag(lines, "word", { row: 0, col: 2 }, helloSpan, { row: 0, col: 8 }, 11),
+    ).toEqual({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 10 } });
+    const worldSpan = { start: { row: 0, col: 6 }, end: { row: 0, col: 10 } };
+    expect(
+      selectionForSelectDrag(lines, "word", { row: 0, col: 8 }, worldSpan, { row: 0, col: 2 }, 11),
+    ).toEqual({ anchor: { row: 0, col: 10 }, focus: { row: 0, col: 0 } });
+    expect(
+      selectionForSelectDrag(lines, "word", { row: 0, col: 2 }, helloSpan, { row: 0, col: 3 }, 11),
+    ).toEqual({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 4 } });
+
+    const lineSpan = { start: { row: 0, col: 0 }, end: { row: 0, col: 10 } };
+    expect(
+      selectionForSelectDrag(lines, "line", { row: 0, col: 2 }, lineSpan, { row: 1, col: 3 }, 11),
+    ).toEqual({ anchor: { row: 0, col: 0 }, focus: { row: 1, col: 10 } });
+    const secondSpan = { start: { row: 1, col: 0 }, end: { row: 1, col: 10 } };
+    expect(
+      selectionForSelectDrag(lines, "line", { row: 1, col: 2 }, secondSpan, { row: 0, col: 3 }, 11),
+    ).toEqual({ anchor: { row: 1, col: 10 }, focus: { row: 0, col: 0 } });
+  });
+});
+
+describe("NativeTerminalView pointer selection", () => {
+  function renderWithLines(
+    lines: TerminalCell[][],
+    props: Partial<React.ComponentProps<typeof NativeTerminalView>> = {},
+  ) {
+    const rendered = renderNativeTerminalView({ frame: frame(lines), ...props });
+    act(() => {
+      flushRaf();
+    });
+    const view = rendered.container.querySelector(".native-terminal-view");
+    if (!view) throw new Error("terminal view not rendered");
+    return { ...rendered, view };
+  }
+
+  it("leaves nothing selected after a plain click, clearing a prior drag selection", () => {
+    const { ref, view } = renderWithLines([rowOf("hello world")]);
+
+    firePointer(view, "pointerdown", { row: 0, col: 0 });
+    firePointer(view, "pointermove", { row: 0, col: 4 });
+    firePointer(view, "pointerup", { row: 0, col: 4 });
+    expect(ref.current?.copySelection()).toBe("hello");
+
+    firePointer(view, "pointerdown", { row: 0, col: 8 });
+    firePointer(view, "pointerup", { row: 0, col: 8 });
+    expect(ref.current?.copySelection()).toBeNull();
+  });
+
+  it("copies drag selections on release when copy-on-select is enabled", () => {
+    const onCopyOnSelect = vi.fn();
+    const { view } = renderWithLines([rowOf("hello world")], {
+      copyOnSelect: true,
+      onCopyOnSelect,
+    });
+
+    firePointer(view, "pointerdown", { row: 0, col: 6 });
+    firePointer(view, "pointermove", { row: 0, col: 10 });
+    firePointer(view, "pointerup", { row: 0, col: 10 });
+    expect(onCopyOnSelect).toHaveBeenCalledTimes(1);
+    expect(onCopyOnSelect).toHaveBeenCalledWith("world");
+  });
+
+  it("selects the word under a double click and the row under a triple click", () => {
+    const onCopyOnSelect = vi.fn();
+    const { ref, view } = renderWithLines([rowOf("cd /tmp/logs now")], {
+      copyOnSelect: true,
+      onCopyOnSelect,
+    });
+
+    firePointer(view, "pointerdown", { row: 0, col: 5 });
+    firePointer(view, "pointerup", { row: 0, col: 5 });
+    firePointer(view, "pointerdown", { row: 0, col: 5 });
+    firePointer(view, "pointerup", { row: 0, col: 5 });
+    expect(ref.current?.copySelection()).toBe("/tmp/logs");
+    expect(onCopyOnSelect).toHaveBeenLastCalledWith("/tmp/logs");
+
+    firePointer(view, "pointerdown", { row: 0, col: 5 });
+    firePointer(view, "pointerup", { row: 0, col: 5 });
+    expect(ref.current?.copySelection()).toBe("cd /tmp/logs now");
+    expect(onCopyOnSelect).toHaveBeenLastCalledWith("cd /tmp/logs now");
+  });
+
+  it("extends an existing selection with shift+click", () => {
+    const onCopyOnSelect = vi.fn();
+    const { ref, view } = renderWithLines([rowOf("hello world")], {
+      copyOnSelect: true,
+      onCopyOnSelect,
+    });
+
+    firePointer(view, "pointerdown", { row: 0, col: 0 });
+    firePointer(view, "pointermove", { row: 0, col: 2 });
+    firePointer(view, "pointerup", { row: 0, col: 2 });
+    expect(ref.current?.copySelection()).toBe("hel");
+
+    firePointer(view, "pointerdown", { row: 0, col: 8, shiftKey: true });
+    firePointer(view, "pointerup", { row: 0, col: 8, shiftKey: true });
+    expect(ref.current?.copySelection()).toBe("hello wor");
+    expect(onCopyOnSelect).toHaveBeenLastCalledWith("hello wor");
+  });
+
+  it("stops tracking after pointercancel so bare hover cannot change the selection", () => {
+    const { ref, view } = renderWithLines([rowOf("hello world")]);
+
+    firePointer(view, "pointerdown", { row: 0, col: 0 });
+    firePointer(view, "pointermove", { row: 0, col: 3 });
+    expect(ref.current?.copySelection()).toBe("hell");
+
+    firePointer(view, "pointercancel", { row: 0, col: 3 });
+    firePointer(view, "pointermove", { row: 0, col: 9 });
+    expect(ref.current?.copySelection()).toBe("hell");
+  });
+
+  it("forwards mouse-mode presses to the PTY and synthesizes a release on cancel", () => {
+    const lines = [rowOf("hello world")];
+    const tuiFrame = {
+      ...frame(lines),
+      mouse: { click: true, motion: false, drag: false, sgr: true },
+    };
+    const { ref, view, onInput } = renderWithLines(lines, { frame: tuiFrame });
+
+    firePointer(view, "pointerdown", { row: 0, col: 2 });
+    expect(onInput).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mouse", action: "press", row: 0, col: 2 }),
+    );
+
+    firePointer(view, "pointercancel", { row: 0, col: 2 });
+    expect(onInput).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mouse", action: "release", row: 0, col: 2 }),
+    );
+
+    // Shift overrides mouse mode: selection stays local.
+    onInput.mockClear();
+    firePointer(view, "pointerdown", { row: 0, col: 0, shiftKey: true });
+    firePointer(view, "pointermove", { row: 0, col: 4, shiftKey: true });
+    firePointer(view, "pointerup", { row: 0, col: 4, shiftKey: true });
+    expect(ref.current?.copySelection()).toBe("hello");
+    expect(onInput).not.toHaveBeenCalled();
+  });
+});
+
+describe("NativeTerminalView window focus restore", () => {
+  it("restores textarea focus after the window regains focus", () => {
+    const { container } = renderNativeTerminalView({ focused: true });
+    const textarea = container.querySelector(
+      ".native-terminal-input",
+    ) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(textarea);
+
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+      textarea.blur();
+    });
+    expect(document.activeElement).not.toBe(textarea);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it("does not grab focus when the terminal was not focused at blur time", () => {
+    const { container } = renderNativeTerminalView({ focused: false });
+    const textarea = container.querySelector(
+      ".native-terminal-input",
+    ) as HTMLTextAreaElement;
+    expect(document.activeElement).not.toBe(textarea);
+
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(document.activeElement).not.toBe(textarea);
+  });
+
+  it("does not restore focus into a terminal whose pane lost focus meanwhile", () => {
+    const { container } = renderNativeTerminalView({ focused: false });
+    const textarea = container.querySelector(
+      ".native-terminal-input",
+    ) as HTMLTextAreaElement;
+    act(() => {
+      textarea.focus();
+      window.dispatchEvent(new Event("blur"));
+      textarea.blur();
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(document.activeElement).not.toBe(textarea);
   });
 });
 

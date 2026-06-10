@@ -3,6 +3,7 @@ export type TerminalShortcutAction =
   | "copy"
   | "selectAll"
   | "find"
+  | "clear"
   | "closeTab"
   | "newTab"
   | "split"
@@ -23,6 +24,7 @@ export const TERMINAL_SHORTCUT_ACTIONS: TerminalShortcutAction[] = [
   "copy",
   "selectAll",
   "find",
+  "clear",
   "closeTab",
   "newTab",
   "split",
@@ -42,6 +44,7 @@ export const DEFAULT_TERMINAL_SHORTCUTS: TerminalShortcutMap = {
   copy: "mod+c",
   selectAll: "mod+a",
   find: "mod+f",
+  clear: "mod+k",
   closeTab: "mod+w",
   newTab: "mod+t",
   split: "mod+d",

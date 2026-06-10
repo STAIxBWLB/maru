@@ -1221,6 +1221,13 @@ export async function terminalScroll(sessionId: string, delta: number): Promise<
   await invoke("terminal_scroll", { sessionId, delta });
 }
 
+/** Clear the visible screen and scrollback (Cmd+K). No-op while the
+ *  alternate screen is active; the backend emits a fresh cleared frame. */
+export async function terminalClear(sessionId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_clear", { sessionId });
+}
+
 export async function terminalText(sessionId: string): Promise<string> {
   if (!isTauri()) return "";
   return invoke<string>("terminal_text", { sessionId });

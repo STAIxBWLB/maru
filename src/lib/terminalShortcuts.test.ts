@@ -41,12 +41,21 @@ describe("terminal shortcuts", () => {
         true,
       ),
     ).toBe("tab3");
+    // Cmd+K clears the terminal while it is focused (Warp/iTerm2 standard);
+    // the app command palette keeps mod+k everywhere else.
+    expect(
+      terminalShortcutActionForEvent(
+        key({ key: "k", metaKey: true }),
+        DEFAULT_TERMINAL_SHORTCUTS,
+        true,
+      ),
+    ).toBe("clear");
   });
 
   it("does not claim unrelated application shortcuts", () => {
     expect(
       terminalShortcutActionForEvent(
-        key({ key: "k", metaKey: true }),
+        key({ key: "p", metaKey: true }),
         DEFAULT_TERMINAL_SHORTCUTS,
         true,
       ),

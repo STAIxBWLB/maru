@@ -28,6 +28,7 @@ import {
 } from "react";
 import {
   terminalAvailable,
+  terminalClear,
   terminalInput,
   terminalKill,
   terminalResize,
@@ -41,6 +42,7 @@ import {
   type TerminalSearchDirection,
   type TerminalSearchMatch,
 } from "../lib/api";
+import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import type { AnchorSettings, TerminalDock } from "../lib/settings";
 import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
@@ -898,7 +900,7 @@ export const TerminalPanel = memo(
       async (text: string) => {
         if (!text) return;
         try {
-          await navigator.clipboard.writeText(text);
+          await clipboardWriteText(text);
         } catch {
           setError(t("terminal.clipboard.writeFailed"));
         }
@@ -908,7 +910,7 @@ export const TerminalPanel = memo(
 
     const readClipboardText = useCallback(async (): Promise<string> => {
       try {
-        return await navigator.clipboard.readText();
+        return await clipboardReadText();
       } catch {
         setError(t("terminal.clipboard.readFailed"));
         return "";
@@ -1009,6 +1011,16 @@ export const TerminalPanel = memo(
         }
         if (action === "find") {
           openSearch();
+          return;
+        }
+        if (action === "clear") {
+          const sessionId = getFocusedSessionId();
+          if (sessionId) {
+            setSearchMatchesBySession((current) => ({ ...current, [sessionId]: null }));
+            void terminalClear(sessionId).catch((err) =>
+              setError(err instanceof Error ? err.message : String(err)),
+            );
+          }
           return;
         }
         if (action === "closeTab") {

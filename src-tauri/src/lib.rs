@@ -160,8 +160,8 @@ use telegram_io::{
 };
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{
-    terminal_input, terminal_kill, terminal_resize, terminal_scroll, terminal_search,
-    terminal_spawn, terminal_text, terminal_write, TerminalState,
+    terminal_clear, terminal_input, terminal_kill, terminal_resize, terminal_scroll,
+    terminal_search, terminal_spawn, terminal_text, terminal_write, TerminalState,
 };
 use terminal_hooks::{
     remove_agent_context_hint, start_terminal_hook_watcher, terminal_hooks_install,
@@ -181,6 +181,7 @@ use workspace_files::{apply_file_queue, describe_file_queue_sources, scan_worksp
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -289,6 +290,7 @@ pub fn run() {
             terminal_spawn,
             terminal_write,
             terminal_resize,
+            terminal_clear,
             terminal_scroll,
             terminal_text,
             terminal_search,
