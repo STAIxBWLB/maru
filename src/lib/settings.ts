@@ -25,7 +25,8 @@ export type AnchorAppMode =
   | "catalog"
   | "studio"
   | "e2e"
-  | "diagram";
+  | "diagram"
+  | "sites";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export type RightPaneTab =
@@ -1062,7 +1063,7 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 function parseAnchorAppMode(value: unknown): AnchorAppMode | null {
   return value === "pkm" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "tasks" || value === "catalog" || value === "studio" || value === "e2e"
-    || value === "diagram"
+    || value === "diagram" || value === "sites"
     ? value
     : null;
 }

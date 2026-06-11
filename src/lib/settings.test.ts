@@ -293,6 +293,16 @@ describe("normalizeAnchorSettings", () => {
     expect(settings.ui.activeAppMode).toBe("e2e");
   });
 
+  it("round-trips the sites app mode", () => {
+    const settings = normalizeAnchorSettings({
+      ui: {
+        activeAppMode: "sites",
+      },
+    });
+
+    expect(settings.ui.activeAppMode).toBe("sites");
+  });
+
   it("normalizes diagram workspace state", () => {
     const settings = normalizeAnchorSettings({
       diagram: {
