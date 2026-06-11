@@ -41,6 +41,7 @@ const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
 const SETTINGS_FALLBACK_KEY = "anchor:settings:fallback:v1";
+const SITES_FALLBACK_KEY = "anchor:sites:fallback:v1";
 const MOCK_SECRET_TEXTS_KEY_PREFIX = "anchor:mock-secret-texts:";
 const GENERATED_SECRET_LEAF_FILES = new Set([
   ".ds_store",
@@ -448,6 +449,53 @@ export async function saveAnchorProjects(workPath: string, value: unknown): Prom
 export async function readAnchorSkills(workPath: string): Promise<unknown> {
   if (!isTauri()) return null;
   return invoke<unknown>("read_anchor_skills", { workPath });
+}
+
+// === Sites (raw JSON; normalized at the edge by parseSitesDocument) ===
+
+export async function readSites(): Promise<unknown> {
+  if (!isTauri()) {
+    try {
+      const raw = window.localStorage.getItem(SITES_FALLBACK_KEY);
+      return raw ? (JSON.parse(raw) as unknown) : null;
+    } catch {
+      return null;
+    }
+  }
+  return invoke<unknown>("read_sites");
+}
+
+export async function saveSites(value: unknown): Promise<void> {
+  if (!isTauri()) {
+    window.localStorage.setItem(SITES_FALLBACK_KEY, JSON.stringify(value));
+    return;
+  }
+  await invoke("save_sites", { value });
+}
+
+export async function scanWorkSites(dir: string): Promise<unknown> {
+  if (!isTauri()) {
+    // Browser-dev mock so the import dialog stays exercisable.
+    return [
+      {
+        dirName: "demo-site",
+        label: "Demo Site",
+        localPath: `${dir}/demo-site`,
+        url: "https://demo.example.com",
+        devUrl: "http://localhost:4321",
+        source: "mock",
+      },
+      {
+        dirName: "docs",
+        label: "Docs",
+        localPath: `${dir}/docs`,
+        url: null,
+        devUrl: "http://localhost:3000",
+        source: "mock",
+      },
+    ];
+  }
+  return invoke<unknown>("scan_work_sites", { dir });
 }
 
 export async function readAnchorSettings(workPath: string): Promise<AnchorSettings> {
