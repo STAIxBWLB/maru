@@ -1098,6 +1098,10 @@ export const NativeTerminalView = memo(
         const useMouse = mouseModeActive(mouseRef.current) && !event.shiftKey;
         if (useMouse) {
           clickChainRef.current = null;
+          // Seed the motion cell with this gesture's press point so a cancel
+          // without movement synthesizes its release here, not at a stale
+          // cell from a previous hover/gesture.
+          lastMotionCellRef.current = point;
           pointerStateRef.current = { mode: "mouse", button: event.button };
           onInput({
             type: "mouse",

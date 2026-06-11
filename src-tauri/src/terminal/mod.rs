@@ -283,7 +283,9 @@ pub fn terminal_clear(
         }
         model.snapshot(&session_id)
     };
-    write_shared(&session.writer, b"\x0c")?;
+    // Best-effort: the model is already cleared, so the frame must reach the
+    // renderer even if the PTY write fails (dead shell).
+    let _ = write_shared(&session.writer, b"\x0c");
     let _ = app.emit("terminal://frame", frame);
     Ok(())
 }

@@ -17,13 +17,17 @@ export async function clipboardWriteText(text: string): Promise<void> {
   await writeText(text);
 }
 
-/** Native clipboard read. The plugin rejects when the clipboard holds no
- *  text; treat that as empty rather than an error. */
+/** Native clipboard read. The plugin rejects with arboard's
+ *  ContentNotAvailable message when the clipboard holds no text — treat only
+ *  that as empty; real failures (permissions, OS errors) propagate so callers
+ *  can surface them. */
 export async function clipboardReadText(): Promise<string> {
   if (!isTauri()) return navigator.clipboard.readText();
   try {
     return await readText();
-  } catch {
-    return "";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("clipboard is empty")) return "";
+    throw err;
   }
 }

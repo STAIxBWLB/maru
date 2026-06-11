@@ -39,10 +39,20 @@ describe("clipboard helpers", () => {
     expect(navigatorClipboard.readText).not.toHaveBeenCalled();
   });
 
-  it("treats a plugin read rejection (empty clipboard) as empty text", async () => {
+  it("treats the plugin's empty-clipboard rejection as empty text", async () => {
     enterTauri();
-    pluginReadText.mockRejectedValueOnce(new Error("empty"));
+    // The plugin serializes arboard's ContentNotAvailable error as this
+    // plain string (tauri-plugin-clipboard-manager 2.x).
+    pluginReadText.mockRejectedValueOnce(
+      "The clipboard contents were not available in the requested format or the clipboard is empty.",
+    );
     await expect(clipboardReadText()).resolves.toBe("");
+  });
+
+  it("rethrows real clipboard failures so callers can surface them", async () => {
+    enterTauri();
+    pluginReadText.mockRejectedValueOnce(new Error("clipboard access denied"));
+    await expect(clipboardReadText()).rejects.toThrow("clipboard access denied");
   });
 
   it("writes through the Tauri plugin when running inside Tauri", async () => {

@@ -1027,6 +1027,28 @@ describe("NativeTerminalView pointer selection", () => {
     expect(ref.current?.copySelection()).toBe("hello");
     expect(onInput).not.toHaveBeenCalled();
   });
+
+  it("synthesizes the cancel release at this gesture's press cell, not a stale hover cell", () => {
+    const lines = [rowOf("hello world")];
+    const tuiFrame = {
+      ...frame(lines),
+      mouse: { click: true, motion: true, drag: false, sgr: true },
+    };
+    const { view, onInput } = renderWithLines(lines, { frame: tuiFrame });
+
+    // Bare hover (1003 any-motion) forwards a move and records its cell.
+    firePointer(view, "pointermove", { row: 0, col: 5 });
+    expect(onInput).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mouse", action: "move", col: 5 }),
+    );
+
+    onInput.mockClear();
+    firePointer(view, "pointerdown", { row: 0, col: 2 });
+    firePointer(view, "pointercancel", { row: 0, col: 2 });
+    expect(onInput).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "mouse", action: "release", row: 0, col: 2 }),
+    );
+  });
 });
 
 describe("NativeTerminalView window focus restore", () => {
