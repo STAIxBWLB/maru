@@ -16728,6 +16728,12 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+.sites-url .sites-url-title {
+  flex: none;
+  max-width: 45%;
+  color: var(--ink);
+}
+
 /* Placeholder spacer only — the native child webview is positioned over this
    rect by Rust. Keep it visually quiet so hide/show feels seamless. */
 .sites-surface {
