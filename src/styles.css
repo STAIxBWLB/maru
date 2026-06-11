@@ -337,6 +337,15 @@ a {
     "activity terminal terminal terminal";
 }
 
+.app-shell.sites-mode {
+  --documents-col: 0px;
+  --outline-col: 0px;
+  grid-template-areas:
+    "topbar topbar topbar topbar"
+    "activity sites sites sites"
+    "activity terminal terminal terminal";
+}
+
 .app-shell.terminal-dock-right {
   grid-template-rows: 44px minmax(0, 1fr);
   grid-template-columns:
@@ -395,6 +404,12 @@ a {
     "activity diagram diagram diagram terminal";
 }
 
+.app-shell.terminal-dock-right.sites-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity sites sites sites terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -410,7 +425,8 @@ a {
 .app-shell.terminal-maximized.e2e-mode,
 .app-shell.terminal-maximized.catalog-mode,
 .app-shell.terminal-maximized.studio-mode,
-.app-shell.terminal-maximized.diagram-mode {
+.app-shell.terminal-maximized.diagram-mode,
+.app-shell.terminal-maximized.sites-mode {
   grid-template-areas:
     "topbar topbar topbar topbar"
     "activity terminal terminal terminal"
@@ -432,6 +448,7 @@ a {
 .app-shell.terminal-maximized .comms-pane,
 .app-shell.terminal-maximized .meetings-pane,
 .app-shell.terminal-maximized .tasks-pane,
+.app-shell.terminal-maximized .sites-pane,
 .app-shell.terminal-maximized .catalog-pane,
 .app-shell.terminal-maximized .studio-pane,
 .app-shell.terminal-maximized .e2e-pane {
@@ -1355,6 +1372,7 @@ a {
 .comms-pane,
 .meetings-pane,
 .tasks-pane,
+.sites-pane,
 .e2e-pane,
 .terminal-panel {
   min-height: 0;
@@ -16525,4 +16543,276 @@ button.git-badge:hover {
 .share-outbox-recent-meta {
   font-size: 11px;
   color: var(--muted);
+}
+
+/* ─── Sites mode ───────────────────────────────────────────────────── */
+
+.sites-pane {
+  grid-area: sites;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.sites-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+  padding: 14px 12px;
+}
+
+.sites-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sites-sidebar-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.sites-sidebar-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.sites-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 5px 8px;
+  color: var(--muted);
+}
+
+.sites-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  outline: none;
+}
+
+.sites-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.sites-group {
+  display: grid;
+  gap: 2px;
+}
+
+.sites-group-label {
+  padding: 0 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.sites-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 0 8px;
+  text-align: left;
+  font-weight: 650;
+}
+
+.sites-item:hover {
+  background: var(--panel-2);
+}
+
+.sites-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.sites-item-favicon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex: none;
+  object-fit: contain;
+}
+
+.sites-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sites-item-actions {
+  display: none;
+  gap: 2px;
+  flex: none;
+}
+
+.sites-item:hover .sites-item-actions,
+.sites-item:focus-within .sites-item-actions {
+  display: inline-flex;
+}
+
+.sites-empty-hint {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sites-browser {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sites-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.sites-url {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--muted);
+  padding: 5px 10px;
+  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+}
+
+.sites-url span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Placeholder spacer only — the native child webview is positioned over this
+   rect by Rust. Keep it visually quiet so hide/show feels seamless. */
+.sites-surface {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.sites-surface-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: var(--muted);
+  text-align: center;
+  padding: 24px;
+}
+
+/* The native webview covers the normal bottom-right toast corner — anchor
+   toasts over the DOM sidebar instead while in sites mode. */
+.app-shell.sites-mode .toast-stack {
+  right: auto;
+  left: calc(var(--activity-col, 48px) + 16px);
+}
+
+.app-shell.sites-mode .toast {
+  width: min(300px, calc(100vw - 80px));
+}
+
+.site-dialog {
+  width: min(480px, calc(100vw - 48px));
+}
+
+.sites-import-dialog {
+  width: min(620px, calc(100vw - 48px));
+}
+
+.sites-import-candidates {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.sites-import-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 0.7fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.sites-import-candidate.already-added {
+  opacity: 0.55;
+}
+
+.sites-import-candidate input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.sites-import-candidate-meta {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .sites-pane {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sites-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+    max-height: 40dvh;
+  }
 }
