@@ -16,6 +16,7 @@ import {
   Code2,
   Command,
   FileText,
+  Globe,
   Inbox,
   LayoutGrid,
   ListTodo,
@@ -49,6 +50,7 @@ import { InboxPane } from "./components/InboxPane";
 import { DiagramMode } from "./components/diagram/DiagramMode";
 import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
+import { SitesPane } from "./components/sites/SitesPane";
 import { TasksPane } from "./components/tasks/TasksPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
@@ -5070,6 +5072,10 @@ function MainApp() {
     setPersistedAppMode("tasks");
   }, [setPersistedAppMode]);
 
+  const openSites = useCallback(() => {
+    setPersistedAppMode("sites");
+  }, [setPersistedAppMode]);
+
   const closeCommandPalette = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -6109,6 +6115,9 @@ function MainApp() {
         case "open-tasks":
           openTasks();
           break;
+        case "open-sites":
+          openSites();
+          break;
         case "open-docs":
           setPersistedAppMode("pkm");
           break;
@@ -6138,6 +6147,7 @@ function MainApp() {
       openComms,
       openMeetings,
       openTasks,
+      openSites,
       checkForUpdates,
       splitEditorRight,
       attachActiveItemToTerminal,
@@ -6170,6 +6180,7 @@ function MainApp() {
       "mod+i": openInboxAndFocus,
       "mod+shift+m": openComms,
       "mod+shift+t": openTasks,
+      "mod+shift+b": openSites,
       "mod+k": () => setCommandPaletteOpen((v) => !v),
       "mod+shift+k": () => openSkillCompose(null),
       "mod+p": () =>
@@ -6200,6 +6211,7 @@ function MainApp() {
       openInboxAndFocus,
       openComms,
       openTasks,
+      openSites,
       toggleLocale,
       refreshActiveSurface,
       navigateBack,
@@ -6375,6 +6387,7 @@ function MainApp() {
     studio: " studio-mode",
     e2e: " e2e-mode",
     diagram: " diagram-mode",
+    sites: " sites-mode",
   };
   const visibleAppMode: AppMode =
     appMode === "e2e" && !e2eFlowEnabled
@@ -6405,6 +6418,15 @@ function MainApp() {
     }
   }, [visibleAppMode, inboxShareablePaths.length]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
+  // In-DOM overlays that cover the content area; the native sites webview
+  // cannot stack under DOM modals, so SitesPane hides it while any is open.
+  const sitesOverlayOpen =
+    commandPaletteOpen ||
+    newDocumentOpen ||
+    addWorkspaceOpen ||
+    composeSeed !== null ||
+    commitDialog !== null ||
+    approvalGate.open;
   const terminalMaximizedClass =
     anchorSettings.ui.layout.terminalOpen && anchorSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -6831,6 +6853,15 @@ function MainApp() {
           >
             <Workflow size={20} strokeWidth={1.9} />
           </button>
+          <button
+            type="button"
+            className={visibleAppMode === "sites" ? "activity-button active" : "activity-button"}
+            onClick={openSites}
+            title={t("mode.sites")}
+            aria-label={t("mode.sites")}
+          >
+            <Globe size={20} strokeWidth={1.9} />
+          </button>
           {e2eFlowEnabled ? (
             <button
               type="button"
@@ -6913,6 +6944,8 @@ function MainApp() {
             workPath={inboxWorkspacePath ?? settingsWorkPath}
             onError={setError}
           />
+        ) : visibleAppMode === "sites" ? (
+          <SitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
         ) : visibleAppMode === "studio" ? (
           <StudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}

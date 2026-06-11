@@ -58,7 +58,7 @@ export function useApprovalGate() {
     [close, pending, rememberKind],
   );
 
-  return { confirmApproval, dialog };
+  return { confirmApproval, dialog, open: pending !== null };
 }
 
 function ApprovalDialog({

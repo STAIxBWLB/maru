@@ -76,6 +76,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "open-comms", label: t("cmdk.action.openComms"), shortcut: "⌘ ⇧ M" },
       { id: "open-meetings", label: t("cmdk.action.openMeetings") },
       { id: "open-tasks", label: t("cmdk.action.openTasks"), shortcut: "⌘ ⇧ T" },
+      { id: "open-sites", label: t("cmdk.action.openSites"), shortcut: "⌘ ⇧ B" },
       { id: "open-docs", label: t("cmdk.action.openDocs") },
       { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
       { id: "check-updates", label: t("cmdk.action.checkUpdates") },
