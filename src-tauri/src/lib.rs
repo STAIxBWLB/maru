@@ -34,6 +34,8 @@ mod outlook_mso;
 mod secrets;
 mod share_outbox;
 mod shelf;
+mod site_view;
+mod sites;
 mod skill_host;
 mod studio;
 mod sys_import;
@@ -133,6 +135,12 @@ use shelf::{
     delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
     store_shelf_files_as,
 };
+use site_view::{
+    site_view_back, site_view_close, site_view_forward, site_view_hide, site_view_navigate,
+    site_view_open, site_view_open_external, site_view_reload, site_view_set_bounds,
+    site_view_show,
+};
+use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{
     skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
     skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal, skills_doctor,
@@ -452,6 +460,20 @@ pub fn run() {
             diagram_list_snapshots,
             diagram_save_snapshot,
             diagram_restore_snapshot,
+            // Sites (in-app browser pane + global registry + scanner)
+            site_view_open,
+            site_view_navigate,
+            site_view_set_bounds,
+            site_view_show,
+            site_view_hide,
+            site_view_close,
+            site_view_reload,
+            site_view_back,
+            site_view_forward,
+            site_view_open_external,
+            read_sites,
+            save_sites,
+            scan_work_sites,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Anchor")
