@@ -23,6 +23,8 @@ skill. The user may scope processing with `inbox-process <channel>`.
 3. Load `inbox-intake/references/manifest-schema.md` before changing item
    state.
 4. Load `references/summary-schema.md` before creating a summary.
+5. Load `ssot.rules`/`folder-placement.md` before proposing a route — it governs
+   destination subfolder selection inside the target project.
 
 ## Workflow
 
@@ -56,8 +58,11 @@ skill. The user may scope processing with `inbox-process <channel>`.
    spec. When the top score is weak (< 3) and `hooks.enrichment` is set, run the
    context-enrichment §2 entity resolution and `search_notes` to disambiguate
    before leaving the item pending, and attach the matched `vault_note` /
-   `relatedMeetings` to the proposal. Write the decision to
-   `inbox.naming.route_file`.
+   `relatedMeetings` to the proposal. Resolve the destination **subfolder** (not
+   just the project) per `folder-placement.md` — map the item kind to the
+   project's matching subfolder (`<project>/.anchor/bu-config.yaml` `tree_map` →
+   existing `NN-`/`N-` subfolder → `_incoming/` fallback; never the bare project
+   root). Write the decision to `inbox.naming.route_file`.
 8. Ask for confirmation before moving originals or summaries outside the inbox.
    In Anchor review mode (see *Anchor Run Contract*), do not move anything
    yourself — defer the move to Anchor's confirmation step.
@@ -108,7 +113,7 @@ sets `reviewFlow: true`), process **every** selected item in one run and:
       "channel": "kakao",
       "classification": "action|schedule|info|ideation|noise",
       "project": "project id or null",
-      "destination": "workspace-relative folder for raw originals, or null",
+      "destination": "workspace-relative destination SUBFOLDER for raw originals (kind-matched per folder-placement.md; _incoming/ when ambiguous; never a bare project root), or null",
       "confidence": "high|medium|low",
       "summaryPreview": "2-3 sentence preview",
       "requiresConfirmation": true,
@@ -151,14 +156,23 @@ Hooks are optional and config-driven:
 
 ## Routing Rules
 
-- Use `project-registry.yaml` as the first source of truth.
-- If project confidence is weak, leave the item pending and ask for a route.
-- Do not create new project folder structures for one item.
+- Use `project-registry.yaml` as the first source of truth for the target project.
+- Resolve the destination **subfolder** per `folder-placement.md`: classify the
+  item's kind, then map kind → subfolder (`<project>/.anchor/bu-config.yaml`
+  `tree_map` → existing `NN-`/`N-` subfolder → default kind→category). Never drop
+  files at the bare project root.
+- If project confidence is weak (top score < 3) or the kind is ambiguous, route
+  to the project's `_incoming/` (create if missing) or leave pending and ask.
+- You MAY create one **standard** subfolder when the kind clearly maps and it
+  extends the project's structure; do NOT invent ad-hoc one-off folders, and
+  defer whole new business-unit trees to `business-unit-lifecycle`.
 - Do not overwrite existing destination files.
 
 ## References
 
 - `references/summary-schema.md` - required summary shape
 - `references/workspace-config.md` - processing config keys
+- `ssot.rules`/`folder-placement.md` - destination subfolder resolution
+  (kind→category→`tree_map`/`_incoming`); never route to a bare project root
 - `ssot.context_enrichment` (`_sys/rules/context-enrichment.md`) - entity
   resolution for weak routes + transcript handoff (when `hooks.enrichment` set)

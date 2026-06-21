@@ -1,0 +1,17 @@
+# Business-unit metadata (primary). The 00-readme/ copy is a user view.
+# Schema: _sys/rules/bu-lifecycle.md §4.
+bu_id:                              # snake-kebab id (see §1 enum)
+bu_name: ""                        # display name
+category: program                  # program | university-headquarters | external | personal
+hub_program_id: null               # "prg_<ulid>" | null
+mapping_mode: standard             # standard uses the literal tree (empty tree_map)
+tree_map: {}                       # standard mode resolves to standard paths directly
+default_workflows: {}              # <document-category>: "wf_<ulid>"
+contact_tree:
+  lead:                            # "[[<person-id>]]"
+  primary:                         # "[[<person-id>]]"
+  approvers: []
+guideline_refs: []
+migration_plan:
+  target_mode: standard
+  physical_migration: immediate

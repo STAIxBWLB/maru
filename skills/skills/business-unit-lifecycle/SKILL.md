@@ -3,9 +3,9 @@ name: business-unit-lifecycle
 description: >
   Create and manage standard business-unit project folders. Use when starting a
   new funded project, 사업단, government program, ODA program, research
-  program, or yearly project cycle; when adding a YYYY-YN year folder; or when
-  deciding where proposal, governance, reporting, evidence, settlement, and
-  closure materials belong.
+  program, or yearly project cycle; when adding a calendar-year partition; or
+  when deciding where reports, approvals, evidence, operations, and deck
+  materials belong.
 ---
 
 # Business Unit Lifecycle
@@ -39,32 +39,39 @@ script from the repo root:
 python3 skills/skills/business-unit-lifecycle/scripts/new_business_unit.py <domain> <slug> [--start-year YYYY]
 ```
 
-The script creates `projects/<domain>/<slug>/`, optionally creates
-`<YYYY>-Y1/`, writes a project README, and prints a registry stub. It does not
-edit `project-registry.yaml`; add the stub manually only when the user asks.
+The script creates `projects/<domain>/<slug>/`, and when `--start-year YYYY`
+is passed it seeds the calendar-year partition under each category
+(`01-formal-reports/<YYYY>/…`, `02-admin-approvals/<YYYY>/…`, etc.). It writes
+a project README and prints a registry stub. It does not edit
+`project-registry.yaml`; add the stub manually only when the user asks.
 
 ## Add A Year Cycle
 
 ```bash
-python3 ~/.anchor/skills/business-unit-lifecycle/scripts/new_year_cycle.py <slug> <year> [--domain DOMAIN] [--year-number N]
+python3 ~/.anchor/skills/business-unit-lifecycle/scripts/new_year_cycle.py <slug> <year> [--domain DOMAIN]
 ```
 
 The script finds `projects/*/<slug>` when `--domain` is omitted and only
-continues if there is exactly one match.
+continues if there is exactly one match. It seeds the calendar-year partition
+under each category and errors out if `01-formal-reports/<year>` already exists.
 
 ## Routing Guidance
 
-- Proposal and selection materials go under `00-initiation/`.
-- Organization, committees, consortium, policy, and compliance materials go
-  under `10-governance/`.
-- Cross-year references, meetings, communications, contacts, and reusable
-  assets go under `20-shared/`.
-- Year-specific execution, monitoring, reporting, evaluation, settlement, and
-  closeout materials go under the active `YYYY-YN/` folder.
-- Keep unresolved incoming material in `_inbox/` only temporarily.
-- Keep current canonical files out of `_archive/`.
+- README, bu-config, contact tree, and KPI targets go under `00-readme/`.
+- 정형보고 / formal reports go under `01-formal-reports/`.
+- 행정결재 / approvals / decisions / change requests go under
+  `02-admin-approvals/`.
+- 증빙·계약·인보이스·인증·감사 / evidence / contracts / certs go under
+  `03-evidence-cert/`.
+- meetings (local), trips, events, proposals, specs, and guides go under
+  `04-operations/`.
+- 발표 덱 / decks go under `05-decks/<slug>/`.
+- Keep unresolved incoming material in `_inbox/` only temporarily; keep old
+  versions in `_archive/`.
+- Runtime file placement into ANY project (incl. routed inbox items) follows
+  `_sys/rules/folder-placement.md`; this skill owns only NEW-BU tree creation.
 
 ## References
 
-- `references/lifecycle.md` - lifecycle v1 tree, fields, and routing rules
+- `references/lifecycle.md` - lifecycle v2 tree, fields, and routing rules
 - `templates/standard-business-unit/` - copied by the bundled scripts
