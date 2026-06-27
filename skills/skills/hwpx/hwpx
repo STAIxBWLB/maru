@@ -95,6 +95,10 @@ Commands:
   export-html HTML → HWPX (bundled Java → pypandoc cascade)
   validate   mimetype·manifest·XML 검증
   to-pdf     LibreOffice(+H2Orestart)로 PDF 변환
+  render-pdf hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx 모두)
+  to-html    HWP/HWPX → HTML (markdown 수준, hwp-cli)
+
+Note: read/render-pdf/to-html accept legacy binary .hwp (auto-delegates to hwp-cli).
 
 Templates (templates/):
   공문서_기본.hwpx        대외시행 공문 기본형

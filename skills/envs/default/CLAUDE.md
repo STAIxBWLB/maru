@@ -44,9 +44,10 @@ make verify        # 시스템 의존성 확인
 
 ## HWP 처리 전략
 
-- HWP v5 (.hwp): `libhwp` 우선, 실패 시 `olefile` 직접 파싱으로 폴백
-- HWPX (.hwpx): `zipfile` + `BeautifulSoup` (외부 의존성 최소화)
-- 표 추출: libhwp의 `find_all('table')` 또는 HWPX XML 직접 파싱
+- 1순위 엔진: **hwp-cli** (Rust 단일 바이너리 `hwp`, 외부 의존성 0). `.hwp`/`.hwpx` 모두 `hwp cat --format plain`으로 추출. stdout만 사용(경고는 stderr). 탐색: `$HWP_CLI` → `~/.cargo/bin/hwp` → `dev/hwp-cli/target/release/hwp` → 검증된 PATH `hwp`.
+- HWP v5 (.hwp) 폴백: `libhwp` → `pyhwp hwp5txt` → `olefile` 직접 파싱
+- HWPX (.hwpx) 폴백: `zipfile` + `BeautifulSoup` (외부 의존성 최소화)
+- 표 추출: libhwp의 `find_all('table')` 또는 HWPX XML 직접 파싱 (hwp-cli는 `--format markdown`이 표를 GFM 표로 변환)
 
 ## PDF 처리 전략
 

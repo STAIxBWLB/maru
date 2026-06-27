@@ -11,7 +11,7 @@ Usage:
     python build-graph.py --target <vault.path> --mode wiki
 
     # Code repo (AST graph)
-    python build-graph.py --target ~/dev/hwp-toolkit --mode code
+    python build-graph.py --target ~/dev/hwp-cli --mode code
 
     # Auto-detect
     python build-graph.py --target /path/to/repo

@@ -126,7 +126,7 @@ lxml에서는 `xpath(..., namespaces=...)` 형태가 가장 깔끔하다.
 
 | 증상 | 원인 | 해결 |
 |------|------|------|
-| `BadZipFile` | 파일이 실제로 HWP 바이너리 | file(1)로 확인 → hwp-toolkit 사용 |
+| `BadZipFile` | 파일이 실제로 HWP 바이너리 | file(1)로 확인 → hwp-cli (`hwp cat`) 사용 또는 `./hwpx read`(자동 위임) |
 | `XMLSyntaxError` on `content.hpf` | 파일이 잘림 | zip 무결성 확인 (`unzip -t`) |
 | 한글이 `&#xXXXX;`로 보임 | XML 선언 누락으로 UTF-8 가정 실패 | `xml_declaration=True, standalone=True`로 쓰기 |
 | mimetype 체크 실패 | 0바이트 또는 BOM 포함 | `b"application/hwp+zip"` 정확히 바이트 (공백·개행 금지) |

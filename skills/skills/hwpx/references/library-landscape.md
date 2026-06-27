@@ -14,7 +14,7 @@
 | **hwp-extract** (volexity) | `pip install hwp-extract` | HWP 내장 객체 추출 | 플랫폼 독립 | 보안연구용 | 포렌식·악성코드 분석 |
 | **hwpx** (ilco, PyPI) | `pip install hwpx` | **스텁** (2.5KB) | - | - | **사용하지 말 것** - 이름이 비슷해서 헷갈림 |
 | **H2Orestart** (ebandal) | LibreOffice 확장 | HWPX 읽기 (ODT/PDF 변환) | LibreOffice | LGPL | `./hwpx to-pdf`의 PDF 변환 엔진 |
-| **hwp-toolkit** (워크스페이스) | `dev/hwp-toolkit/` | HWP/HWPX 통합 CLI | macOS/Linux | - | 레거시 `.hwp` 읽기·변환 - 이 스킬이 위임 |
+| **hwp-cli** (워크스페이스, Rust) | `dev/hwp-cli/` (바이너리 `hwp`) | HWP5/HWPX 읽기·변환·렌더·편집·생성 (clean-room, 외부 의존성 0) | macOS/Linux/CI | MIT/Apache-2.0 | 레거시 `.hwp` 읽기·변환·렌더·편집 — 이 스킬이 위임 (구 hwp-toolkit 대체) |
 | **hwpx-owpml-model** (Hancom) | C++ | OWPML 공식 레퍼런스 | - | 오픈소스 | element 이름 ground truth 조회용 |
 
 ## 선택 가이드
@@ -28,8 +28,10 @@ HWPX 파일을 다뤄야 한다
 └─ LLM 파이프라인의 텍스트 추출 → airun-hwp 또는 `./hwpx to-md`
 
 HWP (바이너리) 파일을 다뤄야 한다
-├─ 텍스트 추출 → pyhwp (`hwp5txt`, `hwp5html`) 또는 hwp-toolkit
-├─ HWPX로 변환 → hwp2hwpx (neolord0) 또는 Hancom Office
+├─ 텍스트 추출 → hwp-cli (`hwp cat`, 1순위) → pyhwp (`hwp5txt`) 폴백
+├─ PDF/HTML 변환 → `./hwpx render-pdf` / `./hwpx to-html` (hwp-cli 경유)
+├─ HWPX로 변환 → `hwp convert -o out.hwpx --to hwpx` (hwp-cli) 또는 Hancom Office
+├─ 편집(.hwp 직접) → `hwp edit` (hwp-cli; 텍스트 치환·표 셀·필드)
 └─ 포렌식 → hwp-extract
 ```
 

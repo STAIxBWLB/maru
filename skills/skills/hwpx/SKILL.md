@@ -7,7 +7,7 @@ description: >
   MVP는 템플릿 채우기 중심.
   트리거: hwpx, 공문, 공문서, 기안문, 결재문서, 내부결재, 대외시행, 사업계획서, 보고서,
   회의록, 한글 문서 작성, .hwpx 생성/수정, 공문 써줘, 기안문 만들어줘, 한컴 문서
-  사용하지 않음: 바이너리 .hwp (→ hwp-toolkit), .docx (→ docx 스킬), .pdf
+  사용하지 않음: 바이너리 .hwp 직접 파싱 (→ hwp-cli; read는 자동 위임), .docx (→ docx 스킬), .pdf
 ---
 
 # hwpx — HWPX 공문서/기안문 authoring toolkit
@@ -30,7 +30,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 - **sec 직계자식 인덱스 기반** 섹션 경계 처리 (텍스트 검색 아님), **deepcopy 참조 단락 복제**, mimetype-first STORED 재패키징.
 - 의존성은 lxml + 번들 hwpxlib(JAR)뿐 (python-hwpx 미사용).
 
-바이너리 `.hwp`(v5 OLE2 포맷)은 별도 `hwp-toolkit` 스킬에서 처리한다. 이 스킬은 HWPX 전용.
+바이너리 `.hwp`(v5 OLE2 포맷)의 읽기·변환은 **hwp-cli**(Rust 단일 바이너리 `hwp`)로 처리한다 — `./hwpx read legacy.hwp`가 자동 위임. 이 스킬 자체는 HWPX 작성·편집 전용.
 
 ## Quick Reference
 
@@ -89,7 +89,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
   -o 최종_사업계획서.hwpx
 ```
 
-양식이 `.hwp` (바이너리)이면 먼저 Hancom Office에서 열어 `.hwpx`로 저장해달라 요청하거나, `hwp-toolkit convert --to hwpx`로 변환 후 사용.
+양식이 `.hwp` (바이너리)이면 먼저 Hancom Office에서 열어 `.hwpx`로 저장해달라 요청하거나, `hwp convert 양식.hwp -o 양식.hwpx --to hwpx`로 변환 후 사용.
 
 ### 1-B. 양식이 없는 경우 (`--preset`)
 
@@ -423,16 +423,19 @@ brew install --cask libreoffice
 
 ### 레거시 `.hwp` (바이너리)
 
-이 스킬은 HWPX 작성·편집 전용이나, **`./hwpx read legacy.hwp`는 자동으로 `hwp-toolkit`에 위임**하여 텍스트를 추출한다 (toolkit 탐색 순서: `$HWP_TOOLKIT` → `~/workspace/work/dev/hwp-toolkit/hwp` → PATH의 `hwp`). 변환·생성·편집은 hwp-toolkit을 직접 호출:
+이 스킬은 HWPX 작성·편집 전용이나, **`./hwpx read legacy.hwp`는 자동으로 `hwp-cli`(`hwp cat`)에 위임**하여 텍스트를 추출한다 (탐색 순서: `$HWP_CLI` → `~/.cargo/bin/hwp` → `~/workspace/work/dev/hwp-cli/target/release/hwp` → 검증된 PATH의 `hwp`). 변환·렌더·PDF도 hwp-cli 경유:
 
 ```bash
-./hwpx read legacy.hwp                              # → hwp-toolkit 자동 위임 (텍스트 추출)
-~/workspace/work/dev/hwp-toolkit/hwp convert legacy.hwp --to pdf
+./hwpx read legacy.hwp                              # → hwp-cli 자동 위임 (텍스트 추출)
+./hwpx render-pdf legacy.hwp -o legacy.pdf          # 레이아웃 정확 PDF (hwp render → img2pdf)
+./hwpx to-html legacy.hwp -o legacy.html            # markdown 수준 HTML
+hwp convert legacy.hwp -o legacy.hwpx --to hwpx     # .hwp → .hwpx (직접 hwp-cli)
+hwp edit legacy.hwp -o out.hwp --replace "구=>신"    # .hwp 직접 편집(hwp-cli만 가능)
 ```
 
 ## 8. 통합
 
-- **inbox-process**: `.hwpx` → `./hwpx read <file>`로 내용 추출. `.hwp`는 별도 HWP reader로 처리.
+- **inbox-process**: `.hwpx` → `./hwpx read <file>`로 내용 추출. `.hwp`는 hwp-cli(`hwp cat`)로 처리(자동 위임). 공유 env 추출기(`extract_all.py`)도 1순위 엔진으로 hwp-cli 사용.
 - **gaejosik 스킬**: 본문 생성 시 개조식 종결("~함", "~임") 적용. 이 스킬은 `--kv 본문="…"`으로 받은 텍스트를 그대로 치환만 한다.
 - **io-mso 스킬**: 생성된 HWPX를 Microsoft 365 mail/share workflow로 전송.
 - **meeting-notes 스킬**: 회의록 markdown → `./hwpx fill templates/회의록.hwpx` 경로 가능.
@@ -445,9 +448,10 @@ brew install --cask libreoffice
 | `{{anchor}}` 치환이 0건 | anchor 철자/공백 불일치 (run 분할은 이제 엔진이 처리) | `./hwpx slots`로 실제 앵커명 확인 후 정확히 지정 |
 | 채운 문서가 레퍼런스보다 쪽수 증가 | 본문이 원본 레이아웃 초과 | `./hwpx guard`로 드리프트 확인 → 본문 압축/조정 후 재빌드 |
 | 한글이 깨짐 | 생성 시 인코딩 | 입력 JSON/텍스트 UTF-8 확인 |
-| PDF 변환 실패 | LibreOffice에 H2Orestart 미설치 | 확장 설치 후 `soffice --headless` 1회 실행으로 캐시 빌드 |
+| PDF 변환 실패 (to-pdf) | LibreOffice에 H2Orestart 미설치 | 확장 설치 후 `soffice --headless` 1회 실행으로 캐시 빌드. 또는 `render-pdf`(hwp-cli, LibreOffice 불필요) 사용 |
+| render-pdf 빈/깨진 페이지 | 함초롬(HCR) 등 CJK 폰트 미해결 | `HWP_FONT_DIR=<폰트 디렉토리>` 지정 (`~/.anchor/env/fonts` 또는 `~/Library/Fonts`) |
 | 관인(직인)이 안 찍힘 | 스킬은 관인 삽입 안 함 | 정상 동작 — e-결재 시스템(온나라/K-Office)이 발송 시 자동 삽입 |
-| `.hwp` 파일 읽기 | 바이너리 HWP | `./hwpx read`가 hwp-toolkit에 자동 위임 (미발견 시 `HWP_TOOLKIT` 지정). 작성·편집은 hwpx 전용 |
+| `.hwp` 파일 읽기 | 바이너리 HWP | `./hwpx read`가 hwp-cli(`hwp cat`)에 자동 위임 (미발견 시 `cargo install --path crates/hwp-cli` 또는 `HWP_CLI` 지정). HWPX 작성·편집은 이 스킬 전용 |
 
 ## 10. 의존성
 

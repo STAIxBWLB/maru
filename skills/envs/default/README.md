@@ -93,5 +93,6 @@ make sync
 
 ## 연관 도구
 
-- **hwp-toolkit**: `~/.claude/skills/hwp-toolkit/hwp` CLI (이 venv의 python3 사용)
+- **hwp-cli**: `~/.cargo/bin/hwp` (Rust 단일 바이너리, 외부 의존성 0) — `.hwp`/`.hwpx` 읽기·변환·렌더·편집. `extract_all.py`가 1순위 추출 엔진으로 사용 (구 hwp-toolkit 대체)
+- **hwpx 스킬**: `~/.anchor/skills/hwpx` — HWPX 작성·편집 + `.hwp` 읽기 자동 위임(hwp-cli) + `render-pdf`/`to-html`
 - **skills**: `~/.anchor/skills/` (federation; inbox-process 등이 이 환경에 의존)

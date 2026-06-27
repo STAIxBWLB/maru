@@ -261,41 +261,56 @@ def _create_lines_from_args(args) -> list[str]:
 
 # subcommand implementations
 
-def _find_hwp_toolkit() -> str | None:
-    """Locate the hwp-toolkit CLI for legacy .hwp delegation. Order: $HWP_TOOLKIT,
-    workspace dev path, then `hwp` on PATH."""
-    candidates = [
-        os.environ.get("HWP_TOOLKIT"),
-        str(Path.home() / "workspace" / "work" / "dev" / "hwp-toolkit" / "hwp"),
-        shutil.which("hwp"),
+def _is_hwp_cli(binary: str) -> bool:
+    """True if `binary` is hwp-cli (has a `cat` subcommand). Excludes the legacy
+    hwp-toolkit wrapper, which shares the name `hwp` but has no `cat`."""
+    try:
+        proc = subprocess.run([binary, "cat", "--help"], capture_output=True, timeout=5)
+        return proc.returncode == 0
+    except OSError:
+        return False
+
+
+def _find_hwp_cli() -> str | None:
+    """Locate the hwp-cli (Rust) `hwp` binary for legacy .hwp delegation. Order:
+    $HWP_CLI, ~/.cargo/bin/hwp, the workspace dev release build, then a *validated*
+    `hwp` on PATH. The name `hwp` collides with the old hwp-toolkit wrapper, so a
+    PATH candidate is probed for the `cat` subcommand before use."""
+    explicit = [
+        os.environ.get("HWP_CLI"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace" / "work" / "dev" / "hwp-cli" / "target" / "release" / "hwp"),
     ]
-    for c in candidates:
-        if c and Path(c).is_file():
+    for c in explicit:
+        if c and Path(c).is_file() and os.access(c, os.X_OK):
             return c
+    path_hwp = shutil.which("hwp")
+    if path_hwp and _is_hwp_cli(path_hwp):
+        return path_hwp
     return None
 
 
 def _delegate_hwp_read(path: Path, fmt: str) -> int:
-    """Binary .hwp(v5 OLE2) is not parsed here — delegate read to hwp-toolkit."""
-    tool = _find_hwp_toolkit()
+    """Binary .hwp(v5 OLE2) is not parsed here — delegate read to hwp-cli (`hwp cat`)."""
+    tool = _find_hwp_cli()
     if not tool:
         _die(
             1,
-            ".hwp(바이너리)는 이 스킬이 직접 처리하지 않음. hwp-toolkit 미발견 — "
-            "Hancom에서 .hwpx로 저장하거나 HWP_TOOLKIT=<.../hwp> 지정",
+            ".hwp(바이너리)는 이 스킬이 직접 처리하지 않음. hwp-cli 미발견 — "
+            "`cargo install --path crates/hwp-cli`로 설치하거나 HWP_CLI=<.../hwp> 지정",
         )
-    toolkit_fmt = {"text": "txt", "md": "md", "json": "json"}.get(fmt, "md")
+    cli_fmt = {"text": "plain", "md": "markdown", "json": "json"}.get(fmt, "markdown")
     try:
         proc = subprocess.run(
-            [tool, "read", str(path), "--format", toolkit_fmt],
+            [tool, "cat", str(path), "--format", cli_fmt],
             capture_output=True, text=True, timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        _die(2, f"hwp-toolkit 위임 실패: {e}")
+        _die(2, f"hwp-cli 위임 실패: {e}")
     if proc.returncode != 0:
-        _die(2, f"hwp-toolkit read 실패: {(proc.stderr or proc.stdout).strip()}")
+        _die(2, f"hwp-cli cat 실패: {(proc.stderr or proc.stdout).strip()}")
     sys.stdout.write(proc.stdout)
-    print(f"[hwpx] .hwp → hwp-toolkit 위임 ({tool})", file=sys.stderr)
+    print(f"[hwpx] .hwp → hwp-cli 위임 ({tool})", file=sys.stderr)
     return 0
 
 
@@ -612,6 +627,38 @@ def cmd_to_pdf(args) -> int:
     return 0
 
 
+def cmd_render_pdf(args) -> int:
+    """Layout-accurate PDF via hwp-cli render → img2pdf (works on .hwp and .hwpx)."""
+    import hwp_export
+
+    src = _ensure_file(args.file)
+    out = Path(args.output) if args.output else src.with_suffix(".pdf")
+    try:
+        hwp_export.render_to_pdf(src, out, dpi=args.dpi)
+    except FileNotFoundError as e:
+        _die(1, str(e))
+    except Exception as e:  # noqa: BLE001
+        _die(2, f"render-pdf 실패: {e}")
+    print(f"[hwpx] render-pdf -> {out}", file=sys.stderr)
+    return 0
+
+
+def cmd_to_html(args) -> int:
+    """HWP/HWPX → HTML (markdown 수준) via hwp-cli."""
+    import hwp_export
+
+    src = _ensure_file(args.file)
+    out = Path(args.output) if args.output else src.with_suffix(".html")
+    try:
+        hwp_export.to_html(src, out, standalone=not args.fragment)
+    except FileNotFoundError as e:
+        _die(1, str(e))
+    except Exception as e:  # noqa: BLE001
+        _die(2, f"to-html 실패: {e}")
+    print(f"[hwpx] to-html -> {out}", file=sys.stderr)
+    return 0
+
+
 def cmd_analyze(args) -> int:
     """편집 청사진 출력: sec 직계자식 인덱스 맵 + 스타일 ID 인벤토리 + 표 shape.
 
@@ -895,6 +942,18 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("file")
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_to_pdf)
+
+    s = sub.add_parser("render-pdf", help="hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx)")
+    s.add_argument("file")
+    s.add_argument("-o", "--output")
+    s.add_argument("--dpi", type=int, default=150, help="렌더 해상도 (기본 150)")
+    s.set_defaults(func=cmd_render_pdf)
+
+    s = sub.add_parser("to-html", help="HWP/HWPX → HTML (markdown 수준, hwp-cli)")
+    s.add_argument("file")
+    s.add_argument("-o", "--output")
+    s.add_argument("--fragment", action="store_true", help="body fragment만 출력")
+    s.set_defaults(func=cmd_to_html)
 
     import write_java as _wj
     import export_html as _eh
