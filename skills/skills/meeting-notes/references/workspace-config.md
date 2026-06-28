@@ -3,7 +3,7 @@
 ```yaml
 meeting_notes:
   root: ~/workspace/work/meetings
-  filename_template: "MM-DD {type} - {topic} - {detail}.md"
+  filename_template: "YYMMDD-meeting-{slug}.md"
   guides:
     quick_start: _guides/QUICK_START.md
     glossary: _guides/GLOSSARY.md

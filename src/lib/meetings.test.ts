@@ -82,6 +82,70 @@ describe("parseMeetingFilename", () => {
       parseMeetingFilename("meetings/2026/2026-05/05-99 회의 - Anchor - KPI.md"),
     ).toBeNull();
   });
+
+  it("parses the new YYMMDD-meeting-<slug> convention from frontmatter", () => {
+    const relPath = "meetings/2026/2026-06/260601-meeting-academic-council-esg.md";
+    const entry = parseMeetingFilename(relPath, {
+      path: `/work/${relPath}`,
+      relPath,
+      fileName: "260601-meeting-academic-council-esg.md",
+      sizeBytes: 120,
+      updatedAt: "2026-06-01T10:00:00+09:00",
+      frontmatter: {
+        title: "교무위원회 - 글로벌 ESG 학위 심의",
+        type: "회의",
+        topic: "교무위원회",
+        date: "2026-06-01",
+      },
+    });
+
+    expect(entry).toMatchObject({
+      date: "2026-06-01",
+      year: 2026,
+      month: 6,
+      day: 1,
+      type: "회의",
+      // List rows render `topic` as the bold label — it carries the human title.
+      topic: "교무위원회 - 글로벌 ESG 학위 심의",
+      title: "교무위원회 - 글로벌 ESG 학위 심의",
+      detail: "",
+    });
+  });
+
+  it("derives a humanized-slug label and reads variant date keys when frontmatter is sparse", () => {
+    const relPath = "meetings/2026/2026-05/260504-meeting-jeju-space-mobility-schedule.md";
+    const entry = parseMeetingFilename(relPath, {
+      path: `/work/${relPath}`,
+      relPath,
+      fileName: "260504-meeting-jeju-space-mobility-schedule.md",
+      sizeBytes: 80,
+      updatedAt: null,
+      // Legacy variant schema: no `title`, uses `meeting_date` instead of `date`.
+      frontmatter: { meeting_date: "2026-05-04", venue: "전화통화" },
+    });
+
+    expect(entry).toMatchObject({
+      date: "2026-05-04",
+      type: "",
+      topic: "jeju space mobility schedule",
+      title: "jeju space mobility schedule",
+    });
+  });
+
+  it("falls back to the YYMMDD prefix when no frontmatter date is present", () => {
+    const relPath = "meetings/2026/2026-04/260420-meeting-anchor-weekly.md";
+    const entry = parseMeetingFilename(relPath, {
+      path: `/work/${relPath}`,
+      relPath,
+      fileName: "260420-meeting-anchor-weekly.md",
+      sizeBytes: 50,
+      updatedAt: null,
+      frontmatter: {},
+    });
+
+    expect(entry?.date).toBe("2026-04-20");
+    expect(entry?.topic).toBe("anchor weekly");
+  });
 });
 
 describe("meeting entry helpers", () => {
@@ -89,6 +153,28 @@ describe("meeting entry helpers", () => {
     const entries = rowsToMeetingEntries(rows);
 
     expect(entries.map((entry) => entry.date)).toEqual(["2026-05-04", "2026-04-20"]);
+  });
+
+  it("surfaces new-format files alongside legacy ones, newest first", () => {
+    const mixed: MeetingNoteRow[] = [
+      ...rows,
+      {
+        path: "/work/meetings/2026/2026-06/260601-meeting-academic-council-esg.md",
+        relPath: "meetings/2026/2026-06/260601-meeting-academic-council-esg.md",
+        fileName: "260601-meeting-academic-council-esg.md",
+        sizeBytes: 120,
+        updatedAt: "2026-06-01T10:00:00+09:00",
+        frontmatter: { title: "교무위원회 ESG", type: "회의" },
+      },
+    ];
+    const entries = rowsToMeetingEntries(mixed);
+
+    expect(entries.map((entry) => entry.date)).toEqual([
+      "2026-06-01",
+      "2026-05-04",
+      "2026-04-20",
+    ]);
+    expect(entries[0]).toMatchObject({ type: "회의", topic: "교무위원회 ESG" });
   });
 
   it("groups meetings by month with entries sorted in each group", () => {

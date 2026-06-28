@@ -138,7 +138,8 @@ unknown fields, so existing `anchor_meeting_review_v1` consumers are unaffected.
 - Do not transcribe raw audio unless a configured `io-*` or transcriber tool
   has already produced text.
 - Keep filename policy configurable; default to
-  `MM-DD <type> - <topic> - <detail>.md`.
+  `YYMMDD-meeting-<slug>.md` (English lowercase kebab-case slug, no spaces/Hangul).
+  The 회의유형/한글 제목 are preserved in frontmatter `type`/`title`, not the filename.
 - If date, participants, or topic cannot be recovered from the input, leave a
   visible placeholder and state what is missing.
 - Legal/accounting evidence meeting records are out of scope unless the user

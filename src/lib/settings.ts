@@ -368,7 +368,7 @@ export const DEFAULT_ANCHOR_SETTINGS: AnchorSettings = {
   meetings: {
     enabled: true,
     root: "meetings",
-    filenameTemplate: "MM-DD {type} - {topic} - {detail}.md",
+    filenameTemplate: "YYMMDD-meeting-{slug}.md",
     guides: {
       quickStart: null,
       glossary: null,

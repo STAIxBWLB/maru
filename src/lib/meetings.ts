@@ -53,6 +53,52 @@ export function parseMeetingFilename(
   if (!monthMatch) return null;
   const month = Number(monthMatch[1]);
 
+  const fm = row?.frontmatter ?? {};
+
+  // New convention: `YYMMDD-meeting-<slug>.md`. The date is a 6-digit prefix and
+  // the type/topic/title live in frontmatter (not the filename). Tried first;
+  // the two stem regexes are mutually exclusive so ordering is safe.
+  const newMatch = stem.match(/^(\d{2})(\d{2})(\d{2})-(.+)$/);
+  if (newMatch) {
+    const [, yy, mm, dd, slugRaw] = newMatch;
+    const fmDate =
+      scalarString(fm.date) ??
+      scalarString(fm.meeting_date) ??
+      scalarString(fm.created_at);
+    const isoMatch = fmDate?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const entryYear = isoMatch ? Number(isoMatch[1]) : 2000 + Number(yy);
+    const entryMonth = isoMatch ? Number(isoMatch[2]) : Number(mm);
+    const entryDay = isoMatch ? Number(isoMatch[3]) : Number(dd);
+    // Only drop on a genuinely invalid date; a folder/filename month mismatch
+    // still surfaces the note under its own date rather than vanishing.
+    if (!isValidDateParts(entryYear, entryMonth, entryDay)) return null;
+    const slug = slugRaw.replace(/^meeting-/, "");
+    const humanized = slug.replace(/-/g, " ").trim();
+    const label =
+      scalarString(fm.title) ??
+      scalarString(fm.name) ??
+      scalarString(fm.topic) ??
+      humanized;
+    return {
+      absPath,
+      relPath: row?.relPath ?? normalized,
+      fileName,
+      title: label,
+      date: `${entryYear}-${pad2(entryMonth)}-${pad2(entryDay)}`,
+      year: entryYear,
+      month: entryMonth,
+      day: entryDay,
+      type: scalarString(fm.type) ?? "",
+      // List rows render `topic` as the bold primary label, so carry the human
+      // title here (frontmatter title → name → topic → humanized slug).
+      topic: label,
+      detail: "",
+      size: row?.sizeBytes ?? 0,
+      modifiedAt: row?.updatedAt ?? null,
+    };
+  }
+
+  // Legacy convention: `MM-DD <type> - <topic> - <detail>.md` (Korean).
   const nameMatch = stem.match(/^(\d{1,2})-(\d{1,2})\s+(.+)$/);
   if (!nameMatch) return null;
   const fileMonth = Number(nameMatch[1]);
@@ -65,7 +111,6 @@ export function parseMeetingFilename(
   const [type, topic, ...rest] = parts;
   if (!type || !topic) return null;
   const date = `${year}-${pad2(month)}-${pad2(day)}`;
-  const fm = row?.frontmatter ?? {};
   const title =
     scalarString(fm.title) ?? scalarString(fm.name) ?? `${type} · ${topic}`;
   return {

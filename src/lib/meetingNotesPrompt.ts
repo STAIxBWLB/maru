@@ -64,6 +64,7 @@ export function buildMeetingNotesPrompt({
     "",
     `Root: ${settings.root ?? "meetings"}`,
     `Filename template: ${settings.filenameTemplate}`,
+    "Follow the filename template above. When it uses an English `<slug>`, the slug is lowercase ASCII kebab-case summarizing the meeting (no spaces, no Hangul). Always preserve the Korean human title in frontmatter `title` (with 회의유형 → `type`, 핵심주제 → `topic`, and `tags`) so the app displays the Korean label.",
     `Type: ${type}`,
     topic.trim() ? `Topic: ${topic.trim()}` : null,
     detail.trim() ? `Detail: ${detail.trim()}` : null,
