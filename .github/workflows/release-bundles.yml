@@ -152,7 +152,7 @@ jobs:
           if [ "$present" -eq 0 ]; then
             echo "Apple Developer ID secrets are not configured; macOS bundles will use ad-hoc signing."
           else
-            echo "Apple Developer ID secrets present; macOS bundles will be signed (notarization temporarily disabled)."
+            echo "Apple Developer ID secrets present; macOS bundles will be signed and notarized."
           fi
 
       - name: Prepare macOS signing
