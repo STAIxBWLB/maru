@@ -56,20 +56,6 @@ PYEOF
         ok=1
     fi
 
-    jre=""
-    for c in \
-        "$target/jre" \
-        "$HOME/.anchor/skills/_builtin/envs/default/jre" \
-        "$PROJECT_DIR/jre"; do
-        [[ -x "$c/bin/java" ]] && jre="$c" && break
-    done
-    if [[ -n "$jre" ]] && "$jre/bin/java" --list-modules 2>/dev/null | grep -q '^jdk.compiler@'; then
-        echo "  ✅ jre: $jre ($("$jre/bin/java" -version 2>&1 | head -1)) jdk.compiler 포함"
-    else
-        echo "  ❌ jre: jdk.compiler 미발견 (bash $PROJECT_DIR/setup.sh --target $target)"
-        ok=1
-    fi
-
     if [[ $ok -eq 0 ]]; then
         echo "✅ 모든 런타임 정상"
     else
@@ -165,22 +151,7 @@ else
     echo "⚠️  pnpm 미설치 — Node.js docx 패키지 사용 불가 (brew install pnpm)" >&2
 fi
 
-# 3b. Java 런타임 설치 (hwpx write-java/to-pdf/export-html 용)
-# 정규 env 와 함께 ~/.anchor/env/jre 에 둔다 (_builtin 재생성에도 보존).
-# 로컬 소스 jre 가 있으면 복사(다운로드 회피), 없으면 Temurin 다운로드.
-JRE_TARGET="${TARGET_DIR}/jre"
-if [[ -x "$JRE_TARGET/bin/java" ]]; then
-    echo "☕ JRE 이미 설치됨: $JRE_TARGET"
-elif [[ -x "${PROJECT_DIR}/jre/bin/java" ]]; then
-    echo "☕ 소스 JRE 복사 → $JRE_TARGET"
-    rm -rf "$JRE_TARGET"
-    mkdir -p "$(dirname "$JRE_TARGET")"
-    cp -R "${PROJECT_DIR}/jre" "$JRE_TARGET"
-else
-    echo "☕ Temurin JDK 다운로드 → $JRE_TARGET"
-    bash "${PROJECT_DIR}/scripts/setup-jre.sh" "$JRE_TARGET" || \
-        echo "⚠️  JRE 설치 실패 — hwpx Java 기능 비활성 (bash ${PROJECT_DIR}/scripts/setup-jre.sh $JRE_TARGET)" >&2
-fi
+# (3b. Java 런타임 설치 — 제거됨. hwpx는 hwp-cli로 전환되어 JRE 불필요.)
 
 # 3c. Node 런타임 설치 (md2docx docx-js 변환 실행용)
 # ~/.anchor/env/node 에 번들 — 실행 시 시스템 node(fnm/nvm) 의존 제거.
