@@ -14,7 +14,7 @@ description: >
 
 ## Overview
 
-HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부터 대한민국 정부 공문서의 법정 저장 형식이다. 내부 구조는 zip + OWPML(Open Word-Processor Markup Language, KS X 6101). 이 스킬은 raw ZIP/XML 처리와 bundled Java writer를 사용하여 네 가지 작업 경로를 지원한다:
+HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부터 대한민국 정부 공문서의 법정 저장 형식이다. 내부 구조는 zip + OWPML(Open Word-Processor Markup Language, KS X 6101). 이 스킬은 raw ZIP/XML 처리(lxml, 슬롯·구조 편집)와 hwp-cli(Rust) 네이티브 위임(생성·변환·렌더·검증)을 사용하여 다섯 가지 작업 경로를 지원한다:
 
 1. **양식 따라가기 (`styled --reference`)** — 주어진 공식 양식 파일의 폰트·여백·스타일을 그대로 사용하여 본문만 채움. 사업 공고 HWP 양식이 있을 때 최우선 경로.
 2. **보기 좋은 신규 생성 (`styled --preset`)** — 양식이 없을 때 공문서 표준에 맞춘 폰트·여백·줄간격·헤더/푸터·페이지번호로 깔끔한 문서를 생성.
@@ -24,7 +24,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 
 ### robust 편집 엔진 (`scripts/hwpx_xml.py`)
 
-`fill`/`edit`/`edit-section`은 직렬화 문자열 치환이 아니라 **lxml 트리 편집 엔진**을 쓴다. 핵심 보장:
+`edit`/`edit-section`/`fill-form`/`analyze`/`guard`/`styled --reference`는 직렬화 문자열 치환이 아니라 **lxml 트리 편집 엔진**을 쓴다(`fill`·`slots`는 충실도 보존을 위해 hwp-cli `fill`/`slots`에 위임). 핵심 보장:
 - **run 경계를 넘나드는 `{{anchor}}`도 매칭** (`<hp:t>` 텍스트를 연결해 치환, 앵커 밖 run·서식은 보존).
 - **`<hp:linesegarray>` 자동 삭제** — 텍스트 수정 후 줄배치 캐시를 지워 글자 겹침 방지(한글이 열 때 재계산).
 - **sec 직계자식 인덱스 기반** 섹션 경계 처리 (텍스트 검색 아님), **deepcopy 참조 단락 복제**, mimetype-first STORED 재패키징.
@@ -186,7 +186,7 @@ stdin으로도 가능: `... | ./hwpx styled --preset gongmun --stdin-json -o out
 1. **양식 따라가기** (권장): 기관의 정식 양식 `.hwpx`에 `{{본문}}`, `{{제목}}` 같은 slot을 넣고 `--reference`로 넘김
 2. **생성 후 수정**: Hancom Office에서 열어 `서식 → 글자 모양`으로 수정
 
-현재 bundled writer 경로는 단락 중심 MVP다. 정교한 표·이미지·기관별 폰트/여백은 기관 양식 파일을 기준으로 slot 치환하거나 Hancom Office에서 최종 검수한다.
+현재 hwp-cli `new` 생성 경로는 단락 중심 MVP다. 정교한 표·이미지·기관별 폰트/여백은 기관 양식 파일을 기준으로 slot 치환하거나 Hancom Office에서 최종 검수한다.
 
 ## 2. 템플릿 채우기 (`fill`)
 
@@ -389,7 +389,7 @@ brew install --cask libreoffice
 
 ```bash
 ./hwpx read legacy.hwp                              # → hwp-cli 자동 위임 (텍스트 추출)
-./hwpx render-pdf legacy.hwp -o legacy.pdf          # 레이아웃 정확 PDF (hwp render → img2pdf)
+./hwpx render-pdf legacy.hwp -o legacy.pdf          # 텍스트 선택가능 PDF (hwp-cli 네이티브, to-pdf --engine hwp 별칭)
 ./hwpx to-html legacy.hwp -o legacy.html            # markdown 수준 HTML
 hwp convert legacy.hwp -o legacy.hwpx --to hwpx     # .hwp → .hwpx (직접 hwp-cli)
 hwp edit legacy.hwp -o out.hwp --replace "구=>신"    # .hwp 직접 편집(hwp-cli만 가능)

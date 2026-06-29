@@ -1,8 +1,8 @@
 # 문서 처리 환경 (envs/default → ~/.anchor/env)
 
-HWP/HWPX/PDF 파일 처리를 위한 공유 Python 가상환경 + 번들 Node 런타임 + 번들 JRE.
+HWP/HWPX/PDF 파일 처리를 위한 공유 Python 가상환경 + 번들 Node 런타임.
 이 디렉토리(`envs/default`)는 source scaffold 이며, `setup.sh --target ~/.anchor/env`
-로 정규 런타임 `~/.anchor/env`(`.venv` + `node` + `node_modules` + `jre`)에 프로비저닝된다.
+로 정규 런타임 `~/.anchor/env`(`.venv` + `node` + `node_modules`)에 프로비저닝된다.
 번들 Node(`node/`)는 md2docx(docx-js) 변환기를 시스템 node 의존 없이 실행한다.
 Claude Code SessionStart hook(`init-env.sh`)이 세션에서 이 환경을 자동 활성화한다.
 
@@ -35,7 +35,7 @@ env/
 ## 설치된 패키지
 
 이 repo에는 재현 가능한 source scaffold만 추적한다(`pyproject.toml`/`uv.lock`,
-`package.json`/`pnpm-lock.yaml`). `.venv/`, `jre/`, `node/`, `node_modules/`,
+`package.json`/`pnpm-lock.yaml`). `.venv/`, `node/`, `node_modules/`,
 `input/`, `output/`, `temp/`, `logs/`는 로컬 runtime 산출물이다.
 
 | 카테고리 | 패키지 | 용도 |
@@ -49,10 +49,10 @@ env/
 ## 사용법
 
 ```bash
-# 정규 env 프로비저닝 / 복구 (venv + node_modules + jre)
+# 정규 env 프로비저닝 / 복구 (venv + node_modules)
 bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
 
-# 헬스체크 (venv/node/jre — 변경 없음)
+# 헬스체크 (venv/node — 변경 없음)
 bash ~/.anchor/skills/_builtin/envs/default/setup.sh --verify --target ~/.anchor/env
 
 # (dev-in-tree) 이 소스 디렉토리에서 직접

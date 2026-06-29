@@ -22,7 +22,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Honors $SKILL_PYTHON, then host-injected $ANCHOR_SKILLS_ENV,
 # then the canonical ~/.anchor/env, then a repo-local walk-up (dev-in-tree).
 # Canonical snippet — keep in sync with skills/envs/default/REFERENCE.md.
-# (Java is resolved separately by scripts/runtime_paths.py.)
 find_env_python() {
     local c dir
     if [ -n "${SKILL_PYTHON:-}" ] && [ -x "${SKILL_PYTHON}" ]; then

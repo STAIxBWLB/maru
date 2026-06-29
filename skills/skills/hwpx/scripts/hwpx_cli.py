@@ -2,17 +2,29 @@
 """hwpx-toolkit CLI dispatcher.
 
 Subcommands:
-  read <file.hwpx> [--format md|text|json] [--section N]
+  read <file.hwpx> [--format md|text|json] [--section N] [--engine auto|hwp|lxml]
   summary <file.hwpx>
-  to-md <file.hwpx> [-o out.md]
-  unpack <file.hwpx> <out_dir>
+  to-md <file.hwpx> [-o out.md] [--section N] [--engine auto|hwp|lxml]
+  unpack <file.hwpx> <out_dir> [-f]
   repack <dir> <out.hwpx>
   fill <template.hwpx> [--data json_file] [--kv key=value ...] [-o out.hwpx] [--stdin-json]
   slots <template.hwpx> [--format text|json]
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file]
+  styled -o <out.hwpx> [--preset gongmun|bogoseo] [--reference form.hwpx]
+         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F]
   validate <file.hwpx>
-  to-pdf <file.hwpx> [-o out.pdf]
+  analyze <file.hwpx> [--section-file section0.xml] [--format text|json]
+  guard --reference <ref.hwpx> --output <out.hwpx>
+  edit-section <file.hwpx> --start N --end M [--ref-index R] [--lines f | --stdin] [-o out.hwpx]
+  fill-form <form.hwpx> [--data json_file] [--kv label=value ...] [--stdin-json] [-o out.hwpx]
+  to-pdf <file.hwpx> [-o out.pdf] [--engine auto|hwp|soffice]
+  render-pdf <file.hwpx> [-o out.pdf]   (alias of `to-pdf --engine hwp`)
+  to-html <file.hwpx> [-o out.html]
+  write-java <out.hwpx> [--markdown md | --input txt]   (legacy alias → hwp-cli new)
+
+Generation/conversion/render/validate delegate to the Rust hwp-cli (`hwp`);
+slot/structure editing uses lxml. No bundled Java/JRE.
 
 All commands: exit 0 success, 1 arg/IO error, 2 parse failure, 3 not found.
 """
@@ -298,17 +310,29 @@ def _find_hwp_cli() -> str | None:
     return None
 
 
+def _hwp_cat(path: Path, fmt: str = "markdown") -> str:
+    """hwp-cli `cat` 텍스트 추출 (stdout만, 경고는 stderr). fmt: plain|markdown|json|html."""
+    tool = _find_hwp_cli()
+    if not tool:
+        raise FileNotFoundError("hwp-cli('hwp') 미발견")
+    proc = subprocess.run(
+        [tool, "cat", str(path), "--format", fmt], capture_output=True, timeout=120
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"hwp cat 실패: {proc.stderr.decode('utf-8', 'ignore').strip()}")
+    return proc.stdout.decode("utf-8", "ignore")
+
+
 def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
     """.hwpx 텍스트 추출을 hwp-cli `cat`으로 우선 시도. hwp-cli 미발견/실패 시
     None 을 돌려 호출부가 lxml 추출로 폴백하도록 함. cli_fmt: plain|markdown|json."""
+    if not _find_hwp_cli():
+        return None
     try:
-        import hwp_export
-
-        if hwp_export.find_hwp_cli():
-            return hwp_export.cat(path, cli_fmt)
+        return _hwp_cat(path, cli_fmt)
     except Exception as e:  # noqa: BLE001 — 어떤 실패든 lxml 폴백
         print(f"[hwpx] hwp-cli cat 폴백 → lxml: {e}", file=sys.stderr)
-    return None
+        return None
 
 
 def _hwp_cli_or_die() -> str:
@@ -491,8 +515,6 @@ def cmd_repack(args) -> int:
 
 
 def cmd_fill(args) -> int:
-    import hwpx_xml as hx
-
     src = _ensure_file(args.template)
     data = _load_kv_data(args)
     if not data:
@@ -517,8 +539,6 @@ def cmd_fill(args) -> int:
 
 
 def cmd_slots(args) -> int:
-    import hwpx_xml as hx
-
     input_path = _ensure_file(args.template)
     if input_path.suffix.lower() != ".hwpx":
         _die(1, f"slots는 .hwpx 파일만 지원: {input_path}")
@@ -805,14 +825,9 @@ def cmd_to_pdf(args) -> int:
 
 
 def cmd_render_pdf(args) -> int:
-    """hwp-cli 네이티브 PDF 렌더 (텍스트 선택가능, .hwp/.hwpx). `to-pdf --engine hwp` 별칭."""
-    src = _ensure_file(args.file)
-    out = Path(args.output) if args.output else src.with_suffix(".pdf")
-    proc = _run_hwp(["render", str(src), "--format", "pdf", "-o", str(out)])
-    if proc.returncode != 0:
-        _die(2, f"render-pdf 실패: {proc.stderr.strip()}")
-    print(f"[hwpx] render-pdf -> {out}", file=sys.stderr)
-    return 0
+    """`to-pdf --engine hwp` 별칭 — hwp-cli 네이티브 텍스트 선택가능 PDF (.hwp/.hwpx)."""
+    args.engine = "hwp"
+    return cmd_to_pdf(args)
 
 
 def cmd_to_html(args) -> int:
@@ -1111,25 +1126,22 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_fill_form)
 
-    s = sub.add_parser("to-pdf", help="PDF (기본 hwp-cli 이미지, --engine soffice 벡터)")
+    s = sub.add_parser("to-pdf", help="PDF (기본 hwp-cli 네이티브 텍스트 선택가능, --engine soffice 벡터)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
     s.add_argument("--engine", choices=["auto", "hwp", "soffice"], default="auto",
-                   help="auto(기본): hwp-cli 우선·soffice 폴백 / hwp: hwp-cli 강제(이미지) / "
+                   help="auto(기본): hwp-cli 우선·soffice 폴백 / hwp: hwp-cli 강제(텍스트 선택가능) / "
                         "soffice: LibreOffice 강제(벡터)")
-    s.add_argument("--dpi", type=int, default=150, help="hwp-cli 렌더 해상도 (기본 150)")
     s.set_defaults(func=cmd_to_pdf)
 
-    s = sub.add_parser("render-pdf", help="hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx)")
+    s = sub.add_parser("render-pdf", help="`to-pdf --engine hwp` 별칭 (hwp-cli 네이티브 PDF, .hwp/.hwpx)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
-    s.add_argument("--dpi", type=int, default=150, help="렌더 해상도 (기본 150)")
     s.set_defaults(func=cmd_render_pdf)
 
-    s = sub.add_parser("to-html", help="HWP/HWPX → HTML (markdown 수준, hwp-cli)")
+    s = sub.add_parser("to-html", help="HWP/HWPX → HTML (hwp-cli 네이티브 cat --format html)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
-    s.add_argument("--fragment", action="store_true", help="body fragment만 출력")
     s.set_defaults(func=cmd_to_html)
 
     s = sub.add_parser("write-java", help="markdown/텍스트 → HWPX (hwp-cli new 위임, 레거시 별칭)")
