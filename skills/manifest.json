@@ -114,6 +114,15 @@
       ]
     },
     {
+      "name": "md2docx",
+      "path": "skills/md2docx",
+      "tier": "core",
+      "tags": [
+        "document",
+        "docx"
+      ]
+    },
+    {
       "name": "meeting-notes",
       "path": "skills/meeting-notes",
       "tier": "core",
