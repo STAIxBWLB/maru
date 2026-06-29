@@ -10,6 +10,8 @@ Subcommands:
   fill <template.hwpx> [--data json_file] [--kv key=value ...] [-o out.hwpx] [--stdin-json]
   slots <template.hwpx> [--format text|json]
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
+  add-rows <file> --count N [--table T] [--template-row R] [--set-cell "T:row:col=val" ...] [-o out]
+  fill-table <file> --data tables.json [-o out]   (행 자동 증식 + 셀 채우기)
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file]
   styled -o <out.hwpx> [--preset gongmun|bogoseo] [--reference form.hwpx]
          [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F]
@@ -584,6 +586,52 @@ def cmd_edit(args) -> int:
     return 0
 
 
+def cmd_add_rows(args) -> int:
+    """표 행 추가 (양식 변형) → hwp edit --add-row 위임. .hwp/.hwpx 모두.
+
+    마지막의 병합 없는 행을 복제해 빈 행 N개를 추가하고, --set-cell 로 같은 호출에서
+    채울 수 있다(새 행 인덱스는 기존 행 수부터). 병합/부분 행은 --template-row 로
+    전 열을 채우는 행을 지정한다.
+    """
+    src = _ensure_file(args.in_file)
+    out = Path(args.output or _derive_output(args.in_file, suffix=f"-grown{Path(args.in_file).suffix}"))
+    spec = (
+        f"{args.table}:{args.template_row}:{args.count}"
+        if args.template_row is not None
+        else f"{args.table}:{args.count}"
+    )
+    cmd = ["edit", str(src), "-o", str(out), "--add-row", spec]
+    for sc in args.set_cell or []:
+        cmd += ["--set-cell", sc]
+    proc = _run_hwp(cmd)
+    if proc.returncode != 0:
+        _die(2, f"add-rows 실패: {proc.stderr.strip()}")
+    print(f"[hwpx] 표{args.table}에 {args.count}행 추가 -> {out}", file=sys.stderr)
+    return 0
+
+
+def cmd_fill_table(args) -> int:
+    """데이터 구동 표 채우기 (행 자동 증식) → hwp fill --data 위임.
+
+    --data JSON 의 `tables` 지시대로 표를 데이터 수만큼 늘리고 셀을 채운다(선택적
+    `fields` 로 {{키}} 치환). 자리표시자 전용 치환은 기존 `fill` 을 쓴다.
+    """
+    src = _ensure_file(args.in_file)
+    out = Path(args.output or _derive_output(args.in_file, suffix=f"-filled{Path(args.in_file).suffix}"))
+    proc = _run_hwp(["fill", str(src), "-o", str(out), "--data", str(_ensure_file(args.data)), "--json"])
+    if proc.returncode != 0:
+        _die(2, f"fill-table 실패: {proc.stderr.strip()}")
+    try:
+        summary = json.loads(proc.stdout)
+        print(
+            f"[hwpx] 표 채움 {summary.get('filled', 0)}건 (+{summary.get('rows_added', 0)}행) -> {out}",
+            file=sys.stderr,
+        )
+    except Exception:
+        print(f"[hwpx] 표 채움 -> {out}", file=sys.stderr)
+    return 0
+
+
 def cmd_create(args) -> int:
     out = Path(args.out_file)
     rc = _new_from_markdown(_create_markdown_from_args(args), out, "plain")
@@ -1060,6 +1108,21 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--replace", nargs=2, metavar=("OLD", "NEW"), required=True)
     s.add_argument("--limit", type=int, default=None)
     s.set_defaults(func=cmd_edit)
+
+    s = sub.add_parser("add-rows", help="표 행 추가 (양식 변형, 마지막 행 복제) + 선택 채움")
+    s.add_argument("in_file")
+    s.add_argument("--table", type=int, default=0, help="표 인덱스(0-기반, 기본 0)")
+    s.add_argument("--count", type=int, required=True, help="추가할 행 수")
+    s.add_argument("--template-row", type=int, default=None, help="복제 원본 행(0-기반, 기본 마지막 병합 없는 행)")
+    s.add_argument("--set-cell", action="append", help='새 행 채우기 "표:행:열=값" (반복 가능)')
+    s.add_argument("-o", "--output")
+    s.set_defaults(func=cmd_add_rows)
+
+    s = sub.add_parser("fill-table", help="데이터 구동 표 채우기 (행 자동 증식) — --data tables 지시")
+    s.add_argument("in_file")
+    s.add_argument("--data", required=True, help='JSON 파일 ({"tables":[{"table":0,"start_row":1,"rows":[[..]]}]})')
+    s.add_argument("-o", "--output")
+    s.set_defaults(func=cmd_fill_table)
 
     s = sub.add_parser("create", help="신규 HWPX 생성 (markdown/JSON/inline)")
     s.add_argument("out_file")

@@ -43,6 +43,8 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | **양식 따라가기** | `./hwpx styled --reference <양식.hwpx> --markdown <md> -o <out>` |
 | 템플릿 채우기 (run-aware) | `./hwpx fill <template> --kv key=value -o out.hwpx` |
 | find/replace (run-aware) | `./hwpx edit <in> <out> --replace OLD NEW` |
+| **표 행 추가 (양식 변형)** | `./hwpx add-rows <file> --table 0 --count 3 --set-cell "0:1:0=값" -o out` |
+| **데이터 구동 표 채우기 (행 자동 증식)** | `./hwpx fill-table <file> --data tables.json -o out` |
 | **편집 청사진 (sec 인덱스 맵)** | `./hwpx analyze <file.hwpx>` |
 | **본문 단락 범위 교체** | `./hwpx edit-section <file> --start N --end M --lines lines.txt -o out` |
 | **라벨-값 양식 채우기** | `./hwpx fill-form <form> --kv 성명=홍길동 --kv 소속=… -o out` |
