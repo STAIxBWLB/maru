@@ -290,6 +290,19 @@ def _find_hwp_cli() -> str | None:
     return None
 
 
+def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
+    """.hwpx 텍스트 추출을 hwp-cli `cat`으로 우선 시도. hwp-cli 미발견/실패 시
+    None 을 돌려 호출부가 lxml 추출로 폴백하도록 함. cli_fmt: plain|markdown|json."""
+    try:
+        import hwp_export
+
+        if hwp_export.find_hwp_cli():
+            return hwp_export.cat(path, cli_fmt)
+    except Exception as e:  # noqa: BLE001 — 어떤 실패든 lxml 폴백
+        print(f"[hwpx] hwp-cli cat 폴백 → lxml: {e}", file=sys.stderr)
+    return None
+
+
 def _delegate_hwp_read(path: Path, fmt: str) -> int:
     """Binary .hwp(v5 OLE2) is not parsed here — delegate read to hwp-cli (`hwp cat`)."""
     tool = _find_hwp_cli()
@@ -318,6 +331,16 @@ def cmd_read(args) -> int:
     path = _ensure_file(args.file)
     if path.suffix.lower() == ".hwp":
         return _delegate_hwp_read(path, args.format)
+    engine = getattr(args, "engine", "auto")
+    # .hwpx text/markdown: hwp-cli `cat` 우선 (섹션 선택 없을 때), 실패 시 lxml 폴백
+    if args.format in ("text", "md") and args.section is None and engine != "lxml":
+        cli_fmt = "plain" if args.format == "text" else "markdown"
+        text = _hwpx_text_via_cli(path, cli_fmt)
+        if text is not None:
+            sys.stdout.write(text)
+            return 0
+        if engine == "hwp":
+            _die(1, "hwp-cli('hwp') 미발견/실패 — cargo install --path crates/hwp-cli 또는 HWP_CLI 지정")
     structure = _extract_structure(path)
     if args.format == "text":
         sys.stdout.write(_text_from_structure(structure, args.section))
@@ -354,7 +377,15 @@ def cmd_summary(args) -> int:
 
 def cmd_to_md(args) -> int:
     path = _ensure_file(args.file)
-    md = _markdown_from_structure(_extract_structure(path), args.section)
+    engine = getattr(args, "engine", "auto")
+    md = None
+    # hwp-cli `cat` markdown 우선 (섹션 선택 없을 때), 실패 시 lxml 폴백
+    if args.section is None and engine != "lxml":
+        md = _hwpx_text_via_cli(path, "markdown")
+        if md is None and engine == "hwp":
+            _die(1, "hwp-cli('hwp') 미발견/실패 — cargo install --path crates/hwp-cli 또는 HWP_CLI 지정")
+    if md is None:
+        md = _markdown_from_structure(_extract_structure(path), args.section)
     if args.output:
         Path(args.output).write_text(md, encoding="utf-8")
         print(f"[hwpx] wrote {len(md)} chars -> {args.output}", file=sys.stderr)
@@ -598,18 +629,22 @@ def cmd_validate(args) -> int:
     return 0
 
 
-def cmd_to_pdf(args) -> int:
+def _to_pdf_soffice(args, out: Path) -> int:
+    """LibreOffice(soffice) 경유 벡터·텍스트선택 PDF (HWPX 읽기에 H2Orestart 확장 필요)."""
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if not soffice:
-        _die(1, "LibreOffice(soffice) 필요: brew install --cask libreoffice")
-
-    out = Path(args.output) if args.output else Path(args.file).with_suffix(".pdf")
+        _die(
+            1,
+            "LibreOffice(soffice) 미설치 — 벡터 PDF 불가. "
+            "기본 엔진(hwp-cli)으로 변환하려면 `--engine hwp`(또는 auto), "
+            "벡터·텍스트선택 PDF가 필요하면 `brew install --cask libreoffice`(+H2Orestart)",
+        )
     out_dir = out.parent.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         subprocess.run(
-            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), args.file],
+            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(args.file)],
             check=True,
             capture_output=True,
             text=True,
@@ -623,8 +658,39 @@ def cmd_to_pdf(args) -> int:
     produced = out_dir / (Path(args.file).stem + ".pdf")
     if produced.resolve() != out.resolve():
         produced.rename(out)
-    print(f"[hwpx] pdf -> {out}", file=sys.stderr)
+    print(f"[hwpx] to-pdf(soffice, 벡터) -> {out}", file=sys.stderr)
     return 0
+
+
+def cmd_to_pdf(args) -> int:
+    """HWP/HWPX → PDF. 기본 엔진은 hwp-cli(이미지, LibreOffice 불필요);
+    `--engine soffice`로 벡터·텍스트선택 PDF."""
+    import hwp_export
+
+    src = _ensure_file(args.file)
+    out = Path(args.output) if args.output else src.with_suffix(".pdf")
+    engine = getattr(args, "engine", "auto")
+    dpi = getattr(args, "dpi", 150)
+
+    # hwp-cli 경로 (render → PNG → img2pdf): 기본·우선
+    if engine in ("auto", "hwp"):
+        if hwp_export.find_hwp_cli():
+            try:
+                hwp_export.render_to_pdf(src, out, dpi=dpi)
+                print(f"[hwpx] to-pdf(hwp-cli, 이미지) -> {out}", file=sys.stderr)
+                return 0
+            except Exception as e:  # noqa: BLE001
+                if engine == "hwp":
+                    _die(2, f"hwp-cli PDF 변환 실패: {e}")
+                print(f"[hwpx] hwp-cli 실패 → soffice 폴백: {e}", file=sys.stderr)
+        elif engine == "hwp":
+            _die(
+                1,
+                "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI=<.../hwp> 지정",
+            )
+
+    # soffice 경로 (벡터): engine=soffice 또는 auto 폴백
+    return _to_pdf_soffice(args, out)
 
 
 def cmd_render_pdf(args) -> int:
@@ -826,20 +892,25 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hwpx", description="HWPX 공문서/결재문서 authoring toolkit")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("read", help="HWPX -> text/markdown/json")
+    s = sub.add_parser("read", help="HWPX -> text/markdown/json (.hwpx text/md는 hwp-cli 우선)")
     s.add_argument("file")
     s.add_argument("--format", choices=["md", "text", "json"], default="md")
     s.add_argument("--section", type=int, default=None)
+    s.add_argument("--engine", choices=["auto", "hwp", "lxml"], default="auto",
+                   help="auto(기본): text/md는 hwp-cli cat 우선·lxml 폴백 / hwp: hwp-cli 강제 / "
+                        "lxml: 순수 파이썬 (json·section 지정 시 항상 lxml)")
     s.set_defaults(func=cmd_read)
 
     s = sub.add_parser("summary", help="문서 메타 요약")
     s.add_argument("file")
     s.set_defaults(func=cmd_summary)
 
-    s = sub.add_parser("to-md", help="HWPX -> markdown")
+    s = sub.add_parser("to-md", help="HWPX -> markdown (hwp-cli 우선)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
     s.add_argument("--section", type=int, default=None)
+    s.add_argument("--engine", choices=["auto", "hwp", "lxml"], default="auto",
+                   help="auto(기본): hwp-cli cat 우선·lxml 폴백 / hwp: 강제 / lxml: 순수 파이썬 (section 지정 시 lxml)")
     s.set_defaults(func=cmd_to_md)
 
     s = sub.add_parser("unpack", help="HWPX zip -> 디렉토리")
@@ -938,9 +1009,13 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_fill_form)
 
-    s = sub.add_parser("to-pdf", help="LibreOffice(+H2Orestart) 경유 PDF")
+    s = sub.add_parser("to-pdf", help="PDF (기본 hwp-cli 이미지, --engine soffice 벡터)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
+    s.add_argument("--engine", choices=["auto", "hwp", "soffice"], default="auto",
+                   help="auto(기본): hwp-cli 우선·soffice 폴백 / hwp: hwp-cli 강제(이미지) / "
+                        "soffice: LibreOffice 강제(벡터)")
+    s.add_argument("--dpi", type=int, default=150, help="hwp-cli 렌더 해상도 (기본 150)")
     s.set_defaults(func=cmd_to_pdf)
 
     s = sub.add_parser("render-pdf", help="hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx)")
