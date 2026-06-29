@@ -30,6 +30,13 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Serialize matrix legs: all legs update the shared release asset
+      # `latest.json` (updater manifest) via tauri-action. Running them
+      # concurrently raced the update-release-asset call (one leg's PATCH 404s
+      # when another recreated the asset), failing a leg and skipping the
+      # gated homebrew-tap job. Sequential legs each merge their platform into
+      # latest.json with no race.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -118,9 +125,9 @@ jobs:
           HAS_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' }}
         run: |
           set -euo pipefail
-          # Notarization is temporarily disabled while Apple notary stalls
-          # on signed Anchor bundles. We still sign with Developer ID so
-          # Gatekeeper users can approve once via System Settings.
+          # Developer ID signing prerequisites. Notarization (re-enabled) runs
+          # later inside tauri-action via APPLE_ID/PASSWORD/TEAM_ID; it requires
+          # a Developer ID-signed bundle, so the cert config below must be complete.
           present=0
           missing=()
           check_secret() {
@@ -177,18 +184,21 @@ jobs:
           fi
           echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
 
-      # Notarization is temporarily disabled while Apple notary stalls on
-      # signed Anchor bundles (submissions stay "In Progress" indefinitely).
-      # Developer ID signing remains active when the cert is present, so
-      # Gatekeeper users approve once via System Settings on first launch.
-      # To re-enable: pass APPLE_API_ISSUER / APPLE_API_KEY / APPLE_API_KEY_PATH
-      # in env and restore the .p8 decode step in "Prepare macOS signing".
+      # Notarization re-enabled (2026-06): Apple notary now accepts signed
+      # Anchor bundles again (verified locally — submission Accepted in ~1 min).
+      # tauri-action notarizes macOS bundles when APPLE_ID + APPLE_PASSWORD
+      # (app-specific) + APPLE_TEAM_ID are present; non-macOS legs ignore them.
+      # If the notary stalls again, drop the three APPLE_ID/PASSWORD/TEAM_ID
+      # env lines below to fall back to Developer ID signing only.
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.platform == 'ubuntu-22.04' && '1' || '' }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
