@@ -2,17 +2,29 @@
 """hwpx-toolkit CLI dispatcher.
 
 Subcommands:
-  read <file.hwpx> [--format md|text|json] [--section N]
+  read <file.hwpx> [--format md|text|json] [--section N] [--engine auto|hwp|lxml]
   summary <file.hwpx>
-  to-md <file.hwpx> [-o out.md]
-  unpack <file.hwpx> <out_dir>
+  to-md <file.hwpx> [-o out.md] [--section N] [--engine auto|hwp|lxml]
+  unpack <file.hwpx> <out_dir> [-f]
   repack <dir> <out.hwpx>
   fill <template.hwpx> [--data json_file] [--kv key=value ...] [-o out.hwpx] [--stdin-json]
   slots <template.hwpx> [--format text|json]
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file]
+  styled -o <out.hwpx> [--preset gongmun|bogoseo] [--reference form.hwpx]
+         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F]
   validate <file.hwpx>
-  to-pdf <file.hwpx> [-o out.pdf]
+  analyze <file.hwpx> [--section-file section0.xml] [--format text|json]
+  guard --reference <ref.hwpx> --output <out.hwpx>
+  edit-section <file.hwpx> --start N --end M [--ref-index R] [--lines f | --stdin] [-o out.hwpx]
+  fill-form <form.hwpx> [--data json_file] [--kv label=value ...] [--stdin-json] [-o out.hwpx]
+  to-pdf <file.hwpx> [-o out.pdf] [--engine auto|hwp|soffice]
+  render-pdf <file.hwpx> [-o out.pdf]   (alias of `to-pdf --engine hwp`)
+  to-html <file.hwpx> [-o out.html]
+  write-java <out.hwpx> [--markdown md | --input txt]   (legacy alias → hwp-cli new)
+
+Generation/conversion/render/validate delegate to the Rust hwp-cli (`hwp`);
+slot/structure editing uses lxml. No bundled Java/JRE.
 
 All commands: exit 0 success, 1 arg/IO error, 2 parse failure, 3 not found.
 """
@@ -219,44 +231,52 @@ def _resolve_section_entry(requested: str | None, section_names: list[str]) -> s
     return None
 
 
-def _create_lines_from_args(args) -> list[str]:
-    import write_java as write_java_mod
-
-    lines: list[str] = []
+def _create_markdown_from_args(args) -> str:
+    """create 인자(title/body/markdown/json)를 markdown으로 합성 (hwp new 위임용)."""
+    parts: list[str] = []
     if args.title:
-        lines.append(f"H1:{args.title}")
+        parts.append(f"# {args.title}")
     if args.body:
-        lines.extend(write_java_mod.text_to_lines(args.body))
+        parts.extend(args.body.splitlines() or [args.body])
     if args.markdown:
-        lines.extend(write_java_mod.md_to_lines(Path(args.markdown).read_text(encoding="utf-8")))
+        parts.append(Path(args.markdown).read_text(encoding="utf-8"))
     if args.json:
         payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            if payload.get("title"):
-                lines.append(f"H1:{payload['title']}")
-            if payload.get("subtitle"):
-                lines.append(f"H2:{payload['subtitle']}")
-            for para in payload.get("paragraphs", []):
-                lines.extend(write_java_mod.text_to_lines(str(para)))
-            for block in payload.get("blocks", []):
-                if isinstance(block, str):
-                    lines.extend(write_java_mod.text_to_lines(block))
-                    continue
-                kind = block.get("kind", "para")
-                text = str(block.get("text", ""))
-                if kind == "title":
-                    lines.append(f"H1:{text}")
-                elif kind == "heading":
-                    level = max(1, min(6, int(block.get("level", 1))))
-                    lines.append(f"H{level}:{text}")
-                elif kind == "separator":
-                    lines.append("P:")
-                else:
-                    lines.extend(write_java_mod.text_to_lines(text))
-        elif isinstance(payload, list):
-            for para in payload:
-                lines.extend(write_java_mod.text_to_lines(str(para)))
-    return lines or ["P:"]
+        parts.extend(_json_payload_to_markdown(payload))
+    parts = [p for p in parts if p is not None]
+    return "\n\n".join(parts)
+
+
+def _json_payload_to_markdown(payload) -> list[str]:
+    """create/styled의 JSON 블록 스키마 → markdown 조각 리스트."""
+    out: list[str] = []
+    if isinstance(payload, dict):
+        if payload.get("title"):
+            out.append(f"# {payload['title']}")
+        if payload.get("subtitle"):
+            out.append(f"## {payload['subtitle']}")
+        for para in payload.get("paragraphs", []):
+            out.append(str(para))
+        for block in payload.get("blocks", []):
+            if isinstance(block, str):
+                out.append(block)
+                continue
+            kind = block.get("kind", "para")
+            text = str(block.get("text", ""))
+            if kind == "title":
+                out.append(f"# {text}")
+            elif kind == "subtitle":
+                out.append(f"## {text}")
+            elif kind == "heading":
+                level = max(1, min(6, int(block.get("level", 1))))
+                out.append("#" * level + " " + text)
+            elif kind == "separator":
+                out.append("")
+            else:
+                out.append(text)
+    elif isinstance(payload, list):
+        out.extend(str(p) for p in payload)
+    return out
 
 
 # subcommand implementations
@@ -290,17 +310,82 @@ def _find_hwp_cli() -> str | None:
     return None
 
 
+def _hwp_cat(path: Path, fmt: str = "markdown") -> str:
+    """hwp-cli `cat` 텍스트 추출 (stdout만, 경고는 stderr). fmt: plain|markdown|json|html."""
+    tool = _find_hwp_cli()
+    if not tool:
+        raise FileNotFoundError("hwp-cli('hwp') 미발견")
+    proc = subprocess.run(
+        [tool, "cat", str(path), "--format", fmt], capture_output=True, timeout=120
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"hwp cat 실패: {proc.stderr.decode('utf-8', 'ignore').strip()}")
+    return proc.stdout.decode("utf-8", "ignore")
+
+
 def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
     """.hwpx 텍스트 추출을 hwp-cli `cat`으로 우선 시도. hwp-cli 미발견/실패 시
     None 을 돌려 호출부가 lxml 추출로 폴백하도록 함. cli_fmt: plain|markdown|json."""
+    if not _find_hwp_cli():
+        return None
     try:
-        import hwp_export
-
-        if hwp_export.find_hwp_cli():
-            return hwp_export.cat(path, cli_fmt)
+        return _hwp_cat(path, cli_fmt)
     except Exception as e:  # noqa: BLE001 — 어떤 실패든 lxml 폴백
         print(f"[hwpx] hwp-cli cat 폴백 → lxml: {e}", file=sys.stderr)
-    return None
+        return None
+
+
+def _hwp_cli_or_die() -> str:
+    tool = _find_hwp_cli()
+    if not tool:
+        _die(1, "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI 지정")
+    return tool
+
+
+def _hwp_env() -> dict:
+    """hwp-cli 서브프로세스 환경 — PDF 폰트 임베드를 위해 HWP_FONT_DIR 보강."""
+    env = dict(os.environ)
+    if "HWP_FONT_DIR" not in env:
+        for cand in (Path.home() / ".anchor/env/fonts", Path.home() / "Library/Fonts"):
+            if cand.is_dir():
+                env["HWP_FONT_DIR"] = str(cand)
+                break
+    return env
+
+
+def _run_hwp(argv: list) -> subprocess.CompletedProcess:
+    """확장된 hwp-cli에 위임 실행 (capture)."""
+    tool = _hwp_cli_or_die()
+    return subprocess.run([tool, *argv], capture_output=True, text=True, env=_hwp_env())
+
+
+def _new_from_markdown(md_text: str, out: Path, preset: str = "plain") -> int:
+    """markdown을 임시 파일로 써서 hwp-cli `new`에 위임 (문서 생성 통합 경로)."""
+    import tempfile
+
+    tf = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+    try:
+        tf.write(md_text)
+        tf.close()
+        proc = _run_hwp(["new", "--preset", preset, "--from", tf.name, "-o", str(out)])
+    finally:
+        os.unlink(tf.name)
+    if proc.returncode != 0:
+        _die(2, f"hwp new 실패: {proc.stderr.strip()}")
+    return 0
+
+
+def _tagged_lines_to_markdown(text: str) -> str:
+    """레거시 write-java 태그 라인(H1:/P:)을 markdown으로 환원."""
+    out: list[str] = []
+    for line in text.splitlines():
+        if len(line) > 2 and line[0] == "H" and line[1].isdigit() and line[2] == ":":
+            out.append("#" * int(line[1]) + " " + line[3:])
+        elif line.startswith("P:"):
+            out.append(line[2:])
+        else:
+            out.append(line)
+    return "\n\n".join(out)
 
 
 def _delegate_hwp_read(path: Path, fmt: str) -> int:
@@ -430,19 +515,22 @@ def cmd_repack(args) -> int:
 
 
 def cmd_fill(args) -> int:
-    import hwpx_xml as hx
-
     src = _ensure_file(args.template)
     data = _load_kv_data(args)
     if not data:
         _die(1, "치환 데이터 없음 (--data / --kv / --stdin-json)")
 
-    replacements = {"{{" + str(key) + "}}": str(value) for key, value in data.items()}
     out = Path(args.output or _derive_output(args.template, suffix="-filled.hwpx"))
-    counts = hx.edit_text(src, out, replacements)
-    total = sum(counts.values())
-    for anchor, n in counts.items():
-        print(f"[hwpx] {anchor} -> {n}건", file=sys.stderr)
+    # hwp-cli 충실도 보존 fill (미리보기·compat·스타일 보존). --set name=value 로 전달.
+    sets: list = []
+    for key, value in data.items():
+        sets += ["--set", f"{key}={value}"]
+    proc = _run_hwp(["fill", str(src), "-o", str(out), *sets, "--json"])
+    if proc.returncode != 0:
+        _die(2, f"fill 실패: {proc.stderr.strip()}")
+    summary = json.loads(proc.stdout)
+    counts = summary.get("counts", {})
+    total = summary.get("replaced", 0)
     unfilled = [a for a, n in counts.items() if n == 0]
     if unfilled:
         print(f"[hwpx] ⚠️  미치환 anchor {len(unfilled)}건: {', '.join(unfilled)}", file=sys.stderr)
@@ -451,25 +539,22 @@ def cmd_fill(args) -> int:
 
 
 def cmd_slots(args) -> int:
-    import hwpx_xml as hx
-
     input_path = _ensure_file(args.template)
     if input_path.suffix.lower() != ".hwpx":
         _die(1, f"slots는 .hwpx 파일만 지원: {input_path}")
 
-    try:
-        counts = hx.scan_slots(input_path)
-    except (zipfile.BadZipFile, etree.XMLSyntaxError) as e:
-        _die(2, f"HWPX 슬롯 스캔 실패: {e}")
-
+    proc = _run_hwp(["slots", str(input_path), "--json"])
+    if proc.returncode != 0:
+        _die(2, f"슬롯 스캔 실패: {proc.stderr.strip()}")
+    placeholders = json.loads(proc.stdout).get("placeholders", [])
     fields = [
         {
-            "key": key,
-            "label": key,
+            "key": p["name"],
+            "label": p["name"],
             "required": True,
-            "occurrences": occurrences,
+            "occurrences": p["occurrences"],
         }
-        for key, occurrences in counts.items()
+        for p in placeholders
     ]
     payload = {"template": str(input_path), "fields": fields}
 
@@ -500,37 +585,73 @@ def cmd_edit(args) -> int:
 
 
 def cmd_create(args) -> int:
-    import write_java as write_java_mod
-
     out = Path(args.out_file)
-    try:
-        write_java_mod.write_java(out, _create_lines_from_args(args))
-    except RuntimeError as e:
-        _die(2, f"create 실패: {e}")
-    print(f"[hwpx] created -> {out}", file=sys.stderr)
-    return 0
+    rc = _new_from_markdown(_create_markdown_from_args(args), out, "plain")
+    if rc == 0:
+        print(f"[hwpx] created -> {out}", file=sys.stderr)
+    return rc
+
+
+def cmd_write_java(args) -> int:
+    """레거시 호환 별칭 — markdown/텍스트 → HWPX (이제 hwp-cli new 위임, Java 미사용)."""
+    out = Path(args.out_file)
+    if args.markdown:
+        md = Path(args.markdown).read_text(encoding="utf-8")
+    elif args.input:
+        md = "\n\n".join(Path(args.input).read_text(encoding="utf-8").splitlines())
+    else:
+        md = _tagged_lines_to_markdown(sys.stdin.read())
+    rc = _new_from_markdown(md, out, "plain")
+    if rc == 0:
+        print(f"[hwpx] created -> {out} (engine=hwp-cli)", file=sys.stderr)
+    return rc
 
 
 def cmd_styled(args) -> int:
-    """Generate a styled HWPX from markdown/JSON."""
-    import styled as styled_mod
+    """프리셋 생성은 hwp-cli `new --preset`에 위임; --reference(슬롯 채우기)·블록 JSON은 lxml 코어 유지."""
+    if not args.reference and (args.markdown or args.stdin_markdown):
+        md_path = args.markdown
+        tmp = None
+        if md_path is None:
+            import tempfile
 
-    if args.markdown:
-        md_text = Path(args.markdown).read_text(encoding="utf-8")
-        blocks = styled_mod.markdown_to_blocks(md_text)
-    elif args.json:
-        payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
-        blocks = _blocks_from_json(payload, styled_mod)
-    elif args.stdin_markdown:
-        blocks = styled_mod.markdown_to_blocks(sys.stdin.read())
-    elif args.stdin_json:
-        payload = json.load(sys.stdin)
-        blocks = _blocks_from_json(payload, styled_mod)
-    else:
-        _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
+            tf = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+            tf.write(sys.stdin.read())
+            tf.close()
+            md_path = tf.name
+            tmp = tf.name
+        preset = args.preset if args.preset in ("plain", "gongmun", "bogoseo") else "plain"
+        out = Path(args.output) if args.output else Path(_derive_output(md_path, suffix=".hwpx"))
+        try:
+            proc = _run_hwp(["new", "--preset", preset, "--from", str(md_path), "-o", str(out)])
+        finally:
+            if tmp:
+                os.unlink(tmp)
+        if proc.returncode != 0:
+            _die(2, f"styled 실패: {proc.stderr.strip()}")
+        print(f"[hwpx] styled(hwp-cli, preset={preset}) -> {out}", file=sys.stderr)
+        return 0
+    return _styled_legacy(args)
 
-    try:
-        if args.reference:
+
+def _styled_legacy(args) -> int:
+    """참조 템플릿 슬롯 채우기(lxml) + 비참조 JSON 생성(hwp-cli new). Java 미사용."""
+    if args.reference:
+        import styled as styled_mod
+
+        if args.markdown:
+            blocks = styled_mod.markdown_to_blocks(Path(args.markdown).read_text(encoding="utf-8"))
+        elif args.json:
+            blocks = _blocks_from_json(
+                json.loads(Path(args.json).read_text(encoding="utf-8")), styled_mod
+            )
+        elif args.stdin_markdown:
+            blocks = styled_mod.markdown_to_blocks(sys.stdin.read())
+        elif args.stdin_json:
+            blocks = _blocks_from_json(json.load(sys.stdin), styled_mod)
+        else:
+            _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
+        try:
             out = styled_mod.follow_template(
                 blocks,
                 reference=args.reference,
@@ -538,17 +659,22 @@ def cmd_styled(args) -> int:
                 header=args.header,
                 footer=args.footer,
             )
-        else:
-            out = styled_mod.from_preset(
-                blocks,
-                preset_name=args.preset,
-                output=args.output,
-                header=args.header,
-                footer=args.footer if args.footer is not None else "- # / ## -",
-            )
-    except Exception as e:
-        _die(2, f"styled 실패: {type(e).__name__}: {e}")
-    print(f"[hwpx] styled -> {out}", file=sys.stderr)
+        except Exception as e:
+            _die(2, f"styled --reference 실패: {type(e).__name__}: {e}")
+        print(f"[hwpx] styled(reference, lxml) -> {out}", file=sys.stderr)
+        return 0
+
+    # 비참조 JSON/stdin-json → hwp-cli new 위임
+    if args.json:
+        payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
+    elif args.stdin_json:
+        payload = json.load(sys.stdin)
+    else:
+        _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
+    md = "\n\n".join(_json_payload_to_markdown(payload))
+    preset = args.preset if args.preset in ("plain", "gongmun", "bogoseo") else "plain"
+    _new_from_markdown(md, Path(args.output), preset)
+    print(f"[hwpx] styled(hwp-cli, preset={preset}) -> {args.output}", file=sys.stderr)
     return 0
 
 
@@ -588,7 +714,18 @@ def cmd_validate(args) -> int:
     path = Path(args.file)
     if not path.is_file():
         _die(1, f"파일 없음: {path}")
+    # hwp-cli 네이티브 검증 우선 (mimetype/필수 엔트리/XML 파싱); 미발견 시 lxml 폴백.
+    if _find_hwp_cli():
+        proc = _run_hwp(["validate", str(path)])
+        if proc.stdout:
+            sys.stdout.write(proc.stdout)
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        return proc.returncode
+    return _validate_lxml(path)
 
+
+def _validate_lxml(path: Path) -> int:
     errors = []
     try:
         with zipfile.ZipFile(path) as zf:
@@ -663,64 +800,44 @@ def _to_pdf_soffice(args, out: Path) -> int:
 
 
 def cmd_to_pdf(args) -> int:
-    """HWP/HWPX → PDF. 기본 엔진은 hwp-cli(이미지, LibreOffice 불필요);
-    `--engine soffice`로 벡터·텍스트선택 PDF."""
-    import hwp_export
-
+    """HWP/HWPX → PDF. 기본 엔진은 hwp-cli 네이티브(텍스트 선택가능);
+    `--engine soffice`로 LibreOffice 벡터 PDF."""
     src = _ensure_file(args.file)
     out = Path(args.output) if args.output else src.with_suffix(".pdf")
     engine = getattr(args, "engine", "auto")
-    dpi = getattr(args, "dpi", 150)
 
-    # hwp-cli 경로 (render → PNG → img2pdf): 기본·우선
-    if engine in ("auto", "hwp"):
-        if hwp_export.find_hwp_cli():
-            try:
-                hwp_export.render_to_pdf(src, out, dpi=dpi)
-                print(f"[hwpx] to-pdf(hwp-cli, 이미지) -> {out}", file=sys.stderr)
-                return 0
-            except Exception as e:  # noqa: BLE001
-                if engine == "hwp":
-                    _die(2, f"hwp-cli PDF 변환 실패: {e}")
-                print(f"[hwpx] hwp-cli 실패 → soffice 폴백: {e}", file=sys.stderr)
-        elif engine == "hwp":
-            _die(
-                1,
-                "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI=<.../hwp> 지정",
-            )
+    if engine == "soffice":
+        return _to_pdf_soffice(args, out)
 
-    # soffice 경로 (벡터): engine=soffice 또는 auto 폴백
+    if _find_hwp_cli():
+        proc = _run_hwp(["convert", str(src), "--to", "pdf", "-o", str(out)])
+        if proc.returncode == 0:
+            print(f"[hwpx] to-pdf(hwp-cli, 선택가능) -> {out}", file=sys.stderr)
+            return 0
+        if engine == "hwp":
+            _die(2, f"hwp-cli PDF 변환 실패: {proc.stderr.strip()}")
+        print(f"[hwpx] hwp-cli 실패 → soffice 폴백: {proc.stderr.strip()}", file=sys.stderr)
+    elif engine == "hwp":
+        _die(1, "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI 지정")
+
+    # soffice 폴백 (벡터)
     return _to_pdf_soffice(args, out)
 
 
 def cmd_render_pdf(args) -> int:
-    """Layout-accurate PDF via hwp-cli render → img2pdf (works on .hwp and .hwpx)."""
-    import hwp_export
-
-    src = _ensure_file(args.file)
-    out = Path(args.output) if args.output else src.with_suffix(".pdf")
-    try:
-        hwp_export.render_to_pdf(src, out, dpi=args.dpi)
-    except FileNotFoundError as e:
-        _die(1, str(e))
-    except Exception as e:  # noqa: BLE001
-        _die(2, f"render-pdf 실패: {e}")
-    print(f"[hwpx] render-pdf -> {out}", file=sys.stderr)
-    return 0
+    """`to-pdf --engine hwp` 별칭 — hwp-cli 네이티브 텍스트 선택가능 PDF (.hwp/.hwpx)."""
+    args.engine = "hwp"
+    return cmd_to_pdf(args)
 
 
 def cmd_to_html(args) -> int:
-    """HWP/HWPX → HTML (markdown 수준) via hwp-cli."""
-    import hwp_export
-
+    """HWP/HWPX → HTML via hwp-cli 네이티브 (`hwp cat --format html`)."""
     src = _ensure_file(args.file)
     out = Path(args.output) if args.output else src.with_suffix(".html")
-    try:
-        hwp_export.to_html(src, out, standalone=not args.fragment)
-    except FileNotFoundError as e:
-        _die(1, str(e))
-    except Exception as e:  # noqa: BLE001
-        _die(2, f"to-html 실패: {e}")
+    proc = _run_hwp(["cat", str(src), "--format", "html"])
+    if proc.returncode != 0:
+        _die(2, f"to-html 실패: {proc.stderr.strip()}")
+    out.write_text(proc.stdout, encoding="utf-8")
     print(f"[hwpx] to-html -> {out}", file=sys.stderr)
     return 0
 
@@ -952,7 +1069,7 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", help="JSON 파일 (title + paragraphs[] or blocks[])")
     s.set_defaults(func=cmd_create)
 
-    s = sub.add_parser("styled", help="HWPX 생성 (bundled Java writer 기반)")
+    s = sub.add_parser("styled", help="HWPX 생성 (hwp-cli new --preset / --reference 슬롯 채우기)")
     s.add_argument("-o", "--output", required=True, help="출력 파일 경로")
     s.add_argument(
         "--preset",
@@ -1009,32 +1126,30 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_fill_form)
 
-    s = sub.add_parser("to-pdf", help="PDF (기본 hwp-cli 이미지, --engine soffice 벡터)")
+    s = sub.add_parser("to-pdf", help="PDF (기본 hwp-cli 네이티브 텍스트 선택가능, --engine soffice 벡터)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
     s.add_argument("--engine", choices=["auto", "hwp", "soffice"], default="auto",
-                   help="auto(기본): hwp-cli 우선·soffice 폴백 / hwp: hwp-cli 강제(이미지) / "
+                   help="auto(기본): hwp-cli 우선·soffice 폴백 / hwp: hwp-cli 강제(텍스트 선택가능) / "
                         "soffice: LibreOffice 강제(벡터)")
-    s.add_argument("--dpi", type=int, default=150, help="hwp-cli 렌더 해상도 (기본 150)")
     s.set_defaults(func=cmd_to_pdf)
 
-    s = sub.add_parser("render-pdf", help="hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx)")
+    s = sub.add_parser("render-pdf", help="`to-pdf --engine hwp` 별칭 (hwp-cli 네이티브 PDF, .hwp/.hwpx)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
-    s.add_argument("--dpi", type=int, default=150, help="렌더 해상도 (기본 150)")
     s.set_defaults(func=cmd_render_pdf)
 
-    s = sub.add_parser("to-html", help="HWP/HWPX → HTML (markdown 수준, hwp-cli)")
+    s = sub.add_parser("to-html", help="HWP/HWPX → HTML (hwp-cli 네이티브 cat --format html)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
-    s.add_argument("--fragment", action="store_true", help="body fragment만 출력")
     s.set_defaults(func=cmd_to_html)
 
-    import write_java as _wj
-    import export_html as _eh
-
-    _wj.add_subparser(sub)
-    _eh.add_subparser(sub)
+    s = sub.add_parser("write-java", help="markdown/텍스트 → HWPX (hwp-cli new 위임, 레거시 별칭)")
+    s.add_argument("out_file")
+    src = s.add_mutually_exclusive_group()
+    src.add_argument("--markdown", help="markdown 파일")
+    src.add_argument("--input", help="평문 텍스트 파일 (줄당 한 문단)")
+    s.set_defaults(func=cmd_write_java)
 
     return p
 

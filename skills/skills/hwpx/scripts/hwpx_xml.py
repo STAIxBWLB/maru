@@ -331,9 +331,9 @@ def apply_heading_styles(hwpx_path: Path, levels: list[str]) -> int:
     are already defined in header.xml, so there is zero OWPML-schema / Hancom
     compatibility risk (no new charPr inserted, no bold/centre surgery).
 
-    `levels` is aligned to the document's content paragraphs in order (same order
-    as the lines passed to the Java writer); each is "H1".."H6" or "P". 'P'/None
-    paragraphs keep their default charPr. Edits section0.xml in place.
+    `levels` is aligned to the document's content paragraphs in order; each is
+    "H1".."H6" or "P". 'P'/None paragraphs keep their default charPr. Edits
+    section0.xml in place.
     Returns the number of paragraphs restyled.
     """
     sec_names = section_entry_names(hwpx_path)

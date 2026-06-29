@@ -19,11 +19,11 @@ env/
     ├── extract_all.py
     ├── extract_pdf.py
     ├── ocr_pipeline.py
-    ├── setup-jre.sh
+    ├── setup-node.sh
     └── utils/file_detector.py
 ```
 
-Ignored runtime directories: `.venv/`, `jre/`, `node_modules/`, `input/`,
+Ignored runtime directories: `.venv/`, `node/`, `node_modules/`, `input/`,
 `output/`, `temp/`, and `logs/`.
 
 ## Processing Strategy
@@ -31,12 +31,12 @@ Ignored runtime directories: `.venv/`, `jre/`, `node_modules/`, `input/`,
 - HWP v5: `libhwp` first, then `hwp5txt`, then direct OLE parsing if needed.
 - HWPX: ZIP/XML parsing with `BeautifulSoup` and `lxml`.
 - PDF: `pymupdf` for fast text extraction, `pdfplumber` for tables, OCR tools for scanned PDFs.
-- HWPX writing: the `hwpx` skill uses the venv python (`~/.anchor/env/.venv`) and a bundled JRE, resolved by `scripts/runtime_paths.py`.
+- HWPX writing: the `hwpx` skill uses the venv python (`~/.anchor/env/.venv`) and delegates generation/conversion/render/validation to the Rust hwp-cli (`hwp`). No bundled JRE.
 
 ## Verification
 
 ```bash
-# Health-check the canonical env (venv / node / jre)
+# Health-check the canonical env (venv / node)
 bash ~/.anchor/skills/_builtin/envs/default/setup.sh --verify --target ~/.anchor/env
 
 # dev-in-tree system-dependency check
@@ -51,9 +51,9 @@ bash ~/.anchor/skills/_builtin/envs/default/setup.sh --target ~/.anchor/env
 
 ## Env resolution (canonical)
 
-Skill wrappers and `scripts/runtime_paths.py` resolve the python interpreter in
-this order — **this is the source of truth; keep the duplicated `find_env_python`
-copies in the wrappers in sync with it**:
+Skill wrappers resolve the python interpreter in this order — **this is the
+source of truth; keep the duplicated `find_env_python` copies in the wrappers in
+sync with it**:
 
 1. `$SKILL_PYTHON` (caller override)
 2. `$ANCHOR_SKILLS_ENV/.venv/bin/python3` (host-injected)
@@ -62,8 +62,6 @@ copies in the wrappers in sync with it**:
 5. system `python3` (warning)
 
 Ambient `$VIRTUAL_ENV` is intentionally ignored as an input so unrelated shell
-venvs cannot shadow the Anchor runtime. The JRE is resolved from
-`$ENV_ROOT/jre` first, which is `~/.anchor/env/jre` for canonical installs, then
-dev/source fallbacks. The Anchor host injects `ANCHOR_SKILLS_ENV`,
+venvs cannot shadow the Anchor runtime. The Anchor host injects `ANCHOR_SKILLS_ENV`,
 `VIRTUAL_ENV`, `PATH` (`+.venv/bin`), and `NODE_PATH` (`+node_modules`) for
 in-app runs; the shell wrappers export the same set so bare CLI sessions match.

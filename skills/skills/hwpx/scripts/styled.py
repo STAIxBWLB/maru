@@ -1,11 +1,7 @@
-"""Styled HWPX document builder.
+"""Styled HWPX reference-template filler.
 
-This module intentionally uses only repo-local code:
-  - bundled Java writer for fresh HWPX generation
-  - raw ZIP/XML slot replacement for reference templates
-
-The public CLI keeps the old `styled` shape, but no commercial-use-restricted
-Python HWPX package is imported at runtime.
+`--reference` 슬롯 채우기(raw ZIP/XML, lxml 엔진)만 담당한다. 프리셋 생성은
+hwp-cli `new --preset`로 위임됐고(hwpx_cli.cmd_styled), 번들 Java writer는 제거됨.
 """
 from __future__ import annotations
 
@@ -13,8 +9,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
-
-from write_java import write_java
 
 
 XML_SUFFIXES = (".xml", ".hpf")
@@ -49,31 +43,6 @@ def para(text: str, align: str = "LEFT") -> Block:
 
 def separator() -> Block:
     return Block("separator")
-
-
-def _block_lines(blocks: Iterable[Block], *, header: str | None = None, footer: str | None = None) -> list[str]:
-    lines: list[str] = []
-    if header:
-        lines.append(f"P:{header}")
-        lines.append("P:")
-    for block in blocks:
-        if block.kind == "title":
-            lines.append(f"H1:{block.text}")
-        elif block.kind == "subtitle":
-            lines.append(f"H2:{block.text}")
-        elif block.kind == "heading":
-            level = max(1, min(6, int(block.level or 1)))
-            lines.append(f"H{level}:{block.text}")
-        elif block.kind == "separator":
-            lines.append("P:")
-        else:
-            text = block.text or ""
-            split = text.splitlines() or [""]
-            lines.extend(f"P:{line}" if line else "P:" for line in split)
-    if footer and footer.lower() != "none":
-        lines.append("P:")
-        lines.append(f"P:{footer}")
-    return lines or ["P:"]
 
 
 def _block_title(blocks: list[Block]) -> str:
@@ -111,20 +80,6 @@ def _rewrite_template_slots(template: Path, output: Path, replacements: dict[str
     return sum(counts.values())
 
 
-def from_preset(
-    blocks: Iterable[Block],
-    preset_name: str = "gongmun",
-    output: str | Path = "out.hwpx",
-    header: str | None = None,
-    footer: str | None = "- # / ## -",
-) -> Path:
-    if preset_name not in {"gongmun", "bogoseo"}:
-        raise ValueError("unknown preset: " + preset_name)
-    out = Path(output)
-    write_java(out, _block_lines(list(blocks), header=header, footer=footer))
-    return out
-
-
 def follow_template(
     blocks: Iterable[Block],
     reference: str | Path,
@@ -154,7 +109,10 @@ def follow_template(
     out = Path(output)
     hits = _rewrite_template_slots(source, out, replacements)
     if hits == 0:
-        write_java(out, _block_lines(block_list, header=header, footer=footer))
+        raise RuntimeError(
+            f"참조 템플릿에서 일치하는 슬롯이 없음: {source} "
+            "(본문/제목 슬롯 {{본문}}/{{제목}} 등이 단일 런으로 있는지 확인)"
+        )
     return out
 
 
