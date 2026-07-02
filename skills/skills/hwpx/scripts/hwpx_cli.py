@@ -12,9 +12,10 @@ Subcommands:
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
   add-rows <file> --count N [--table T] [--set-cell "T:row:col=val" ...] [-o out]
   fill-table <file> --data tables.json [-o out]   (행 자동 증식 + 셀 채우기)
-  create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file]
+  create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file] [--plain]
   styled -o <out.hwpx> [--preset gongmun|bogoseo (no-op, 하위호환)] [--reference form.hwpx]
-         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F]
+         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F] [--plain]
+  beautify <in.hwpx> [-o out.hwpx] [--header-fill "#F2F2F2"] [--no-title-center]
   validate <file.hwpx>
   analyze <file.hwpx> [--section-file section0.xml] [--format text|json]
   guard --reference <ref.hwpx> --output <out.hwpx>
@@ -27,6 +28,10 @@ Subcommands:
 
 Generation/conversion/render/validate delegate to the Rust hwp-cli (`hwp`);
 slot/structure editing uses lxml. No bundled Java/JRE.
+
+템플릿 없는 생성(create/styled/write-java)은 공문서 기본 스타일 후처리(style_pass —
+표 칼럼 폭/헤더 음영/제목 가운데; 근거 references/style-patterns.md)를 자동 적용한다.
+--plain 으로 생략, 기존 파일엔 beautify.
 
 All commands: exit 0 success, 1 arg/IO error, 2 parse failure, 3 not found.
 """
@@ -361,11 +366,14 @@ def _run_hwp(argv: list) -> subprocess.CompletedProcess:
     return subprocess.run([tool, *argv], capture_output=True, text=True, env=_hwp_env())
 
 
-def _new_from_markdown(md_text: str, out: Path, preset: str = "plain") -> int:
+def _new_from_markdown(
+    md_text: str, out: Path, preset: str = "plain", *, plain: bool = False
+) -> int:
     """markdown을 임시 파일로 써서 hwp-cli `new`에 위임 (문서 생성 통합 경로).
 
-    preset은 하위호환용으로 받되 무시한다 — hwp-cli가 `new --preset`을 제거해 기본
-    스타일로만 생성한다.
+    생성 후 공문서 기본 스타일 후처리(style_pass — 표 칼럼 폭/헤더 음영/제목 가운데)를
+    적용한다. `plain=True`면 생략. preset은 하위호환용으로 받되 무시한다 — hwp-cli가
+    `new --preset`을 제거해 기본 스타일로만 생성한다.
     """
     import tempfile
 
@@ -379,6 +387,11 @@ def _new_from_markdown(md_text: str, out: Path, preset: str = "plain") -> int:
         os.unlink(tf.name)
     if proc.returncode != 0:
         _die(2, f"hwp new 실패: {proc.stderr.strip()}")
+    if not plain:
+        import style_pass
+
+        stats = style_pass.apply_default_style(out)
+        print(f"[hwpx] style-pass: {stats}", file=sys.stderr)
     return 0
 
 
@@ -644,7 +657,9 @@ def cmd_fill_table(args) -> int:
 
 def cmd_create(args) -> int:
     out = Path(args.out_file)
-    rc = _new_from_markdown(_create_markdown_from_args(args), out, "plain")
+    rc = _new_from_markdown(
+        _create_markdown_from_args(args), out, "plain", plain=args.plain
+    )
     if rc == 0:
         print(f"[hwpx] created -> {out}", file=sys.stderr)
     return rc
@@ -659,36 +674,26 @@ def cmd_write_java(args) -> int:
         md = "\n\n".join(Path(args.input).read_text(encoding="utf-8").splitlines())
     else:
         md = _tagged_lines_to_markdown(sys.stdin.read())
-    rc = _new_from_markdown(md, out, "plain")
+    rc = _new_from_markdown(md, out, "plain", plain=args.plain)
     if rc == 0:
         print(f"[hwpx] created -> {out} (engine=hwp-cli)", file=sys.stderr)
     return rc
 
 
 def cmd_styled(args) -> int:
-    """비참조 생성은 hwp-cli `new`에 위임(기본 스타일 — --preset은 hwp-cli에서 제거됨,
-    인자는 하위호환용 무시); --reference(슬롯 채우기)·블록 JSON은 lxml 코어 유지."""
+    """비참조 생성은 hwp-cli `new` + 공문서 스타일 후처리(--plain 시 생략);
+    --reference(슬롯 채우기)·블록 JSON은 lxml 코어 유지. --preset은 하위호환용 무시."""
     if not args.reference and (args.markdown or args.stdin_markdown):
-        md_path = args.markdown
-        tmp = None
-        if md_path is None:
-            import tempfile
-
-            tf = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
-            tf.write(sys.stdin.read())
-            tf.close()
-            md_path = tf.name
-            tmp = tf.name
-        out = Path(args.output) if args.output else Path(_derive_output(md_path, suffix=".hwpx"))
-        try:
-            proc = _run_hwp(["new", "--from", str(md_path), "-o", str(out)])
-        finally:
-            if tmp:
-                os.unlink(tmp)
-        if proc.returncode != 0:
-            _die(2, f"styled 실패: {proc.stderr.strip()}")
-        print(f"[hwpx] styled(hwp-cli) -> {out}", file=sys.stderr)
-        return 0
+        md_text = (
+            Path(args.markdown).read_text(encoding="utf-8")
+            if args.markdown
+            else sys.stdin.read()
+        )
+        out = Path(args.output)  # styled는 -o 필수
+        rc = _new_from_markdown(md_text, out, "plain", plain=args.plain)
+        if rc == 0:
+            print(f"[hwpx] styled(hwp-cli) -> {out}", file=sys.stderr)
+        return rc
     return _styled_legacy(args)
 
 
@@ -730,8 +735,25 @@ def _styled_legacy(args) -> int:
     else:
         _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
     md = "\n\n".join(_json_payload_to_markdown(payload))
-    _new_from_markdown(md, Path(args.output))
+    _new_from_markdown(md, Path(args.output), plain=getattr(args, "plain", False))
     print(f"[hwpx] styled(hwp-cli) -> {args.output}", file=sys.stderr)
+    return 0
+
+
+def cmd_beautify(args) -> int:
+    """기존 HWPX에 공문서 기본 스타일 패스 적용 (표 폭/헤더 음영/제목 가운데).
+
+    가드(균등 폭 아닌 표·borderFill 혼합 표 스킵) 덕에 임의 파일에 안전·멱등 —
+    이미 스타일된 표는 건드리지 않는다.
+    """
+    import style_pass
+
+    src = _ensure_file(args.in_file)
+    out = Path(args.output or _derive_output(args.in_file, suffix="-styled.hwpx"))
+    stats = style_pass.apply_default_style(
+        src, out, header_fill=args.header_fill, title_center=not args.no_title_center
+    )
+    print(f"[hwpx] beautify: {stats} -> {out}", file=sys.stderr)
     return 0
 
 
@@ -1139,15 +1161,16 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title")
     s.add_argument("--body")
     s.add_argument("--json", help="JSON 파일 (title + paragraphs[] or blocks[])")
+    s.add_argument("--plain", action="store_true", help="스타일 후처리(표/제목) 생략")
     s.set_defaults(func=cmd_create)
 
-    s = sub.add_parser("styled", help="HWPX 생성 (hwp-cli new --preset / --reference 슬롯 채우기)")
+    s = sub.add_parser("styled", help="HWPX 생성 (공문서 스타일 후처리 / --reference 슬롯 채우기)")
     s.add_argument("-o", "--output", required=True, help="출력 파일 경로")
     s.add_argument(
         "--preset",
         choices=list(["gongmun", "bogoseo"]),
         default="gongmun",
-        help="스타일 프리셋: gongmun | bogoseo",
+        help="하위호환 no-op (hwp-cli --preset 제거됨 — 출력 영향 없음)",
     )
     s.add_argument("--reference", help="양식 파일 (slot이 있으면 raw ZIP/XML 치환)")
     s.add_argument("--markdown", help="markdown 파일")
@@ -1160,7 +1183,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="바닥글 템플릿 (# = 현재 쪽, ## = 전체 쪽). 기본 '- # / ## -'. 'none' 또는 빈 값으로 비활성화",
     )
+    s.add_argument("--plain", action="store_true", help="스타일 후처리(표/제목) 생략")
     s.set_defaults(func=cmd_styled)
+
+    s = sub.add_parser(
+        "beautify", help="기존 HWPX에 공문서 스타일 패스 (표 폭/헤더 음영/제목 가운데)"
+    )
+    s.add_argument("in_file")
+    s.add_argument("-o", "--output", help="출력 (기본: <in>-styled.hwpx)")
+    s.add_argument("--header-fill", default="#F2F2F2", help="헤더행 음영색 (기본 #F2F2F2)")
+    s.add_argument("--no-title-center", action="store_true", help="제목 가운데/15pt 생략")
+    s.set_defaults(func=cmd_beautify)
 
     s = sub.add_parser("validate", help="mimetype/manifest/XML 검증")
     s.add_argument("file")
@@ -1221,6 +1254,7 @@ def _build_parser() -> argparse.ArgumentParser:
     src = s.add_mutually_exclusive_group()
     src.add_argument("--markdown", help="markdown 파일")
     src.add_argument("--input", help="평문 텍스트 파일 (줄당 한 문단)")
+    s.add_argument("--plain", action="store_true", help="스타일 후처리(표/제목) 생략")
     s.set_defaults(func=cmd_write_java)
 
     return p
