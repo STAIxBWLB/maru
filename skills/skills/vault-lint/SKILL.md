@@ -133,13 +133,16 @@ scope별 추가:
 **L07 — 명명 규칙**
 1. `Glob work/**/*` (서브모듈 제외, 예외 파일/경로 제외 — §Legacy Exemptions 참조)
 2. 파일명이 `YYMMDD-[a-z0-9][a-z0-9-]*\.[a-z]+` 패턴에 맞는지
-3. 예외: `README.md`, `CLAUDE.md`, `INDEX.md`, `.git*`, `_guides/*`, `_templates/*`, `templates/*`, 회의록(`MM-DD [회의유형]` 한글 패턴)
+3. 예외: `README.md`, `CLAUDE.md`, `INDEX.md`, `.git*`, `_guides/*`, `_templates/*`, `templates/*`, 회의록(`YYMMDD-meeting-<slug>.md` 영문 패턴)
 4. 패턴 위반 → 위반 (단 Legacy Exemptions 경로는 제외)
 
 **L08 — 한글 파일명**
 1. `Glob work/**/*` 결과에서 파일명 또는 경로에 `[가-힣]` 포함 여부
 2. 있으면 → 위반
-3. 예외 (§Legacy Exemptions 참조): `meetings/**`, `trips/**`, legacy 계약/MOU/연구 과제 경로
+3. 예외 (§Legacy Exemptions 참조): `trips/**`, legacy 계약/MOU/연구 과제 경로
+4. `meetings/**` 는 **무조건 면제하지 않는다**. 날짜 게이트 적용 (`_sys/rules/naming-policy.md` L66/L67 권위):
+   legacy 회의록(mtime/파일명 날짜가 2026-05-26 이전, 또는 신규 `YYMMDD-meeting-<slug>.md` 패턴에 맞지 않는 한글 파일)만 면제하고,
+   영문화 대상(2026-05-26 이후 신규 생성 또는 마이그레이션 대상)인 한글 회의록 파일명은 여전히 위반으로 플래그한다.
 
 ### Legacy Exemptions (L07, L08 공통)
 

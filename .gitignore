@@ -58,3 +58,7 @@ test-results/
 .omc/
 .omx/
 .gstack/
+
+# Python caches generated when skills run in place
+skills/**/__pycache__/
+skills/**/.pytest_cache/

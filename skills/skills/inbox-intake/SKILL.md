@@ -47,7 +47,10 @@ skill does not summarize, route, extract tasks, or write to a vault.
    `inbox.naming.item_id_template`; the default is `{date}-{channel}-{slug}`.
 7. Copy or move raw inputs into the item `inbox.naming.raw_dir` directory
    according to the caller's explicit request. For channel-root imports,
-   default to copy.
+   default to copy. When an inbound attachment filename is Korean, write the
+   Korean filename to manifest `source.original_name` (the raw copy MAY keep
+   the Korean name because `inbox/items/**` is exempt per
+   `_sys/rules/naming-policy.md` L63).
 8. Append one JSONL receipt to `_state/index.jsonl`.
 
 ## Rules
