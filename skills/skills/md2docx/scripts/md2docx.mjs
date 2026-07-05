@@ -252,6 +252,95 @@ function codeBlock(codeLines) {
   });
 }
 
+// ---------- mermaid flowchart → native docx flow diagram ----------
+// Handles `flowchart TD/LR` / `graph` with node labels, |edge labels|, and
+// dashed (-.text.->) edges. Renders a centered vertical stack of shaded boxes
+// joined by ▼ arrows; non-linear edges (branches, loops, dashed) become muted
+// annotations under their source box. Falls back to codeBlock on parse failure.
+function parseMermaid(codeLines) {
+  const nodes = {}, edges = [];
+  const stripLabel = (br) => br ? br.slice(1, -1).replace(/^["']|["']$/g, "") : null;
+  for (const raw of codeLines) {
+    const l = raw.trim();
+    if (!l || /^(flowchart|graph)\b/i.test(l) || /^%%/.test(l)) continue;
+    const m = /^([A-Za-z0-9_]+)\s*(\[[^\]]*\]|\([^)]*\)|\{[^}]*\})?\s*(-\.[^>]*?->|-->|---)\s*(?:\|([^|]*)\|)?\s*([A-Za-z0-9_]+)\s*(\[[^\]]*\]|\([^)]*\)|\{[^}]*\})?/.exec(l);
+    if (!m) continue;
+    const [, a, al, conn, elab, b, bl] = m;
+    if (al) nodes[a] = stripLabel(al);
+    if (bl) nodes[b] = stripLabel(bl);
+    const dashed = /^-\./.test(conn);
+    const dm = /^-\.(.*)\.->$/.exec(conn);
+    edges.push({ from: a, to: b, label: (dm && dm[1].trim()) || elab || null, dashed });
+  }
+  return { nodes, edges };
+}
+
+function mermaidFlow(codeLines) {
+  const { nodes, edges } = parseMermaid(codeLines);
+  if (!edges.length) return codeBlock(codeLines);
+
+  const order = [];
+  const see = (id) => { if (!order.includes(id)) order.push(id); };
+  edges.forEach((e) => { see(e.from); see(e.to); });
+  const idx = Object.fromEntries(order.map((id, k) => [id, k]));
+  const label = (id) => (nodes[id] || id);
+
+  const consec = {};   // k → arrow label between order[k] and order[k+1]
+  const annot = {};    // nodeId → [annotation strings]
+  edges.forEach((e) => {
+    const ka = idx[e.from], kb = idx[e.to];
+    if (kb === ka + 1) { consec[ka] = e.label || consec[ka] || ""; return; }
+    const arrow = e.dashed ? "↻" : (kb < ka ? "↺" : "⤷");
+    const lead = e.label ? `${e.label} → ` : "→ ";
+    (annot[e.from] = annot[e.from] || []).push(`${arrow} ${lead}${label(e.to)}`.replace(/<br\s*\/?>/gi, " "));
+  });
+
+  const NB = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const box = { style: BorderStyle.SINGLE, size: 8, color: T.hairlineStrong };
+  const nodeCell = (id) => {
+    const kids = [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 20, after: annot[id] ? 0 : 20 },
+      children: runsWithBreaks(label(id), { bold: true, color: T.ink }),
+    })];
+    (annot[id] || []).forEach((a) => kids.push(new Paragraph({
+      alignment: AlignmentType.CENTER, spacing: { before: 0, after: 20 },
+      children: inlineRuns(a, { italics: true, color: T.muted, size: 16 }),
+    })));
+    return new TableCell({
+      margins: { top: 80, bottom: 80, left: 160, right: 160 },
+      verticalAlign: VerticalAlign.CENTER,
+      shading: { type: ShadingType.CLEAR, fill: T.surface },
+      borders: { top: box, bottom: box, left: box, right: box },
+      children: kids,
+    });
+  };
+  const arrowCell = (lbl) => new TableCell({
+    margins: { top: 10, bottom: 10, left: 60, right: 60 },
+    borders: { top: NB, bottom: NB, left: NB, right: NB },
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0 },
+      children: [
+        new TextRun({ text: "▼", font: FONT, color: T.accent, size: 20 }),
+        ...(lbl ? [new TextRun({ text: "  " + lbl, font: FONT, color: T.muted, size: 16, italics: true })] : []),
+      ],
+    })],
+  });
+
+  const rows = [];
+  order.forEach((id, k) => {
+    rows.push(new TableRow({ children: [nodeCell(id)] }));
+    if (k < order.length - 1) rows.push(new TableRow({ children: [arrowCell(consec[k])] }));
+  });
+
+  return new Table({
+    width: { size: 74, type: WidthType.PERCENTAGE },
+    alignment: AlignmentType.CENTER,
+    borders: { top: NB, bottom: NB, left: NB, right: NB, insideHorizontal: NB, insideVertical: NB },
+    rows,
+  });
+}
+
 function leadIndent(raw) {
   const m = /^[\t ]*/.exec(raw)[0].replace(/\t/g, "  ");
   return Math.min(3, Math.floor(m.length / 2));
@@ -275,6 +364,7 @@ function mdToBlocks(md) {
   const lines = md.split(/\r?\n/);
   const blocks = [];
   let i = 0;
+  let numInstance = 0; // each ordered-list group gets its own instance so numbering restarts at 1
 
   const heading = (lvl) =>
     [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3,
@@ -286,11 +376,12 @@ function mdToBlocks(md) {
 
     // fenced code block
     if (/^\s*```/.test(line)) {
+      const lang = line.replace(/^\s*```/, "").trim().toLowerCase();
       const code = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) { code.push(lines[i]); i++; }
       i++; // skip closing fence
-      blocks.push(codeBlock(code));
+      blocks.push(lang === "mermaid" ? mermaidFlow(code) : codeBlock(code));
       continue;
     }
 
@@ -386,11 +477,12 @@ function mdToBlocks(md) {
 
     // numbered list (with nesting)
     if (/^\s*\d+\.\s+/.test(line)) {
+      numInstance++;
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         const level = leadIndent(lines[i]);
         const txt = lines[i].replace(/^\s*\d+\.\s+/, "");
         blocks.push(new Paragraph({
-          numbering: { reference: "num", level },
+          numbering: { reference: "num", level, instance: numInstance },
           spacing: { before: 20, after: 20 },
           children: inlineRuns(txt),
         }));
