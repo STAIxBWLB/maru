@@ -80,6 +80,9 @@ def _row_widths(tbl, row: int) -> list[int]:
 @requires_cli
 def test_widths_header_title_and_itemcnt(tmp_path):
     f = _new(tmp_path, "styled.hwpx")
+    # 순정 generator charPr 수(버전마다 달라짐) — style_pass는 여기서 늘리지 않아야.
+    raw_head = _entry(f, "Contents/header.xml")
+    raw_charpr = len(next(e for e in raw_head.iter() if hx.localname(e) == "charProperties"))
     stats = style_pass.apply_default_style(f)
     assert stats["tables"] == 3 and stats["title_centered"]
 
@@ -132,7 +135,8 @@ def test_widths_header_title_and_itemcnt(tmp_path):
     ]
     assert centers
     cps = next(e for e in head.iter() if hx.localname(e) == "charProperties")
-    assert cps.get("itemCnt") == str(len(cps)) == "10"  # 신규 charPr 없음(재사용)
+    # itemCnt 정합 + style_pass가 charPr을 새로 만들지 않음(제목 15pt = 기존 charPr 재사용).
+    assert cps.get("itemCnt") == str(len(cps)) == str(raw_charpr)
     title_p = next(p for p in sec if hx.localname(p) == "p")
     title_run = next(r for r in title_p if hx.localname(r) == "run")
     title_cp = next(c for c in cps if c.get("id") == title_run.get("charPrIDRef"))
