@@ -1,0 +1,208 @@
+/*
+ * Graph mode (maru-vault-graph-spec §F2). All rules scoped under .graph-view.
+ */
+
+.graph-view {
+  grid-area: graph;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--anchor-bg, #fafafa);
+  color: var(--anchor-fg, #1f2937);
+}
+
+.graph-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-soft, #e5e7eb);
+}
+
+.graph-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.graph-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft, #eef2ff);
+  color: var(--accent, #4f46e5);
+}
+
+.graph-hint {
+  font-size: 11px;
+  color: var(--fg-muted, #6b7280);
+}
+
+.graph-stats {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fg-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.graph-filter-panel {
+  width: 200px;
+  flex-shrink: 0;
+  padding: 12px;
+  border-right: 1px solid var(--line-soft, #e5e7eb);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.graph-filter-panel h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted, #6b7280);
+  text-transform: uppercase;
+}
+
+.graph-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line-soft, #d1d5db);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.graph-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.graph-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft, #d1d5db);
+  background: transparent;
+  cursor: pointer;
+}
+
+.graph-chip.active {
+  background: var(--accent, #4f46e5);
+  border-color: var(--accent, #4f46e5);
+  color: #fff;
+}
+
+.graph-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.graph-relayout {
+  margin-top: auto;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft, #d1d5db);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.graph-canvas {
+  flex: 1;
+  min-width: 0;
+  touch-action: none;
+  cursor: grab;
+}
+
+.graph-canvas:active {
+  cursor: grabbing;
+}
+
+.graph-canvas-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted, #6b7280);
+}
+
+.graph-edge {
+  stroke: var(--fg-muted, #9ca3af);
+  stroke-opacity: 0.5;
+  stroke-width: 1.2;
+}
+
+.graph-edge.wikilink {
+  stroke-width: 0.72; /* 40% thinner than frontmatter edges */
+}
+
+.graph-edge.dimmed {
+  stroke-opacity: 0.08;
+}
+
+.graph-node circle {
+  cursor: pointer;
+  stroke: var(--anchor-bg, #fff);
+  stroke-width: 1;
+}
+
+.graph-node.ghost circle {
+  fill: transparent;
+  stroke: #9ca3af;
+  stroke-dasharray: 3 2;
+}
+
+.graph-node.god circle {
+  stroke: var(--accent, #4f46e5);
+  stroke-width: 2.5;
+}
+
+.graph-node.focus circle {
+  stroke: #e45756;
+  stroke-width: 3;
+}
+
+.graph-node.dimmed {
+  opacity: 0.15;
+}
+
+.graph-node-label {
+  font-size: 10px;
+  text-anchor: middle;
+  fill: var(--anchor-fg, #374151);
+  pointer-events: none;
+  user-select: none;
+}
+
+.neighborhood-graph-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft, #d1d5db);
+  background: transparent;
+  cursor: pointer;
+  color: var(--fg-muted, #6b7280);
+}
+
+.neighborhood-graph-button:hover {
+  color: var(--accent, #4f46e5);
+  border-color: var(--accent, #4f46e5);
+}

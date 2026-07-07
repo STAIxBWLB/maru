@@ -211,10 +211,17 @@ fn public_specs_from_config(config: &WorkspaceConfig) -> Vec<PublicWorkspaceSpec
         .collect()
 }
 
-fn resolve_config_path(raw: Option<&str>) -> (Option<String>, bool) {
+fn resolve_config_path(raw: Option<&str>, base: &Path) -> (Option<String>, bool) {
     match raw {
         Some(raw) if !raw.trim().is_empty() => {
             let expanded = expand_tilde(raw.trim());
+            // Relative values (e.g. `vault`) are relative to the config file's
+            // directory, not the process cwd (maru-vault-graph-spec §5.1).
+            let expanded = if expanded.is_relative() {
+                base.join(expanded)
+            } else {
+                expanded
+            };
             let exists = expanded.exists();
             let canonical = if exists {
                 canonicalize_or_self(&expanded)
@@ -256,12 +263,14 @@ fn detect_at(work_path: &Path) -> Result<Option<WorkspaceDetect>, String> {
         .unwrap_or_else(|| work_path.to_string_lossy().to_string());
     let public_specs = public_specs_from_config(&config);
     let public_raw = public_specs.first().map(|spec| spec.path.clone());
-    let (resolved_private_path, resolved_private_exists) = resolve_config_path(Some(&private_raw));
-    let (resolved_public_path, resolved_public_exists) = resolve_config_path(public_raw.as_deref());
+    let (resolved_private_path, resolved_private_exists) =
+        resolve_config_path(Some(&private_raw), work_path);
+    let (resolved_public_path, resolved_public_exists) =
+        resolve_config_path(public_raw.as_deref(), work_path);
     let public_workspaces = public_specs
         .iter()
         .map(|spec| {
-            let (path, exists) = resolve_config_path(Some(&spec.path));
+            let (path, exists) = resolve_config_path(Some(&spec.path), work_path);
             let path = path.unwrap_or_else(|| spec.path.clone());
             let label = spec.label.clone().unwrap_or_else(|| {
                 Path::new(&path)
@@ -491,6 +500,29 @@ mod tests {
             work.display()
         );
         fs::write(work.join("workspace.config.yaml"), yaml).unwrap();
+    }
+
+    #[test]
+    fn detect_resolves_relative_vault_against_config_dir() {
+        // Post-Wave-0 config uses `vault:` relative to the workspace root
+        // (spec §5.1) — must join against the config-file dir, not cwd.
+        let work_tmp = TempDir::new().unwrap();
+        fs::create_dir_all(work_tmp.path().join("vault")).unwrap();
+        let yaml = format!(
+            "version: 1\npaths:\n  primary: {}\n  vault: vault\n",
+            work_tmp.path().display()
+        );
+        fs::write(work_tmp.path().join("workspace.config.yaml"), yaml).unwrap();
+        let detected = detect_workspace(work_tmp.path().to_string_lossy().to_string())
+            .unwrap()
+            .expect("config must be detected");
+        assert!(detected.resolved_public_exists);
+        let resolved = detected.resolved_public_path.expect("vault path resolved");
+        assert!(
+            resolved.ends_with("/vault") || resolved.ends_with("\\vault"),
+            "resolved {resolved} should end with /vault"
+        );
+        assert!(Path::new(&resolved).is_absolute());
     }
 
     #[test]

@@ -407,6 +407,18 @@ export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | 
   return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
 }
 
+/** Community-overlay JSON (`<workspace>/reports/vault-graph.json`, built by
+ *  the weekly /vault-graph ritual). null = absent or unavailable — the graph
+ *  mode degrades to the live layer. Corrupt file rejects with the reason. */
+export async function vaultGraphRead(
+  vaultPath: string,
+): Promise<import("./graph/model").VaultGraphFile | null> {
+  if (!isTauri()) return null;
+  return invoke<import("./graph/model").VaultGraphFile | null>("vault_graph_read", {
+    vaultPath,
+  });
+}
+
 export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
   return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath, scanOptions: scanOptions ?? null });

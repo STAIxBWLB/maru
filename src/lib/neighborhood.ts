@@ -38,8 +38,9 @@ const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 /** Walk a frontmatter value (string, list, nested map) collecting every
  *  `[[wikilink]]` target text it contains. Used so any frontmatter key with
  *  a wikilink — `project: [[X]]`, `related: [[A]] [[B]]`, custom keys — is
- *  surfaced in the upward section without hardcoding field names. */
-function collectWikilinkTargets(value: unknown): string[] {
+ *  surfaced in the upward section without hardcoding field names.
+ *  Exported for graph/model.ts (per-field edge relation tagging). */
+export function collectWikilinkTargets(value: unknown): string[] {
   if (value == null) return [];
   if (typeof value === "string") {
     const out: string[] = [];

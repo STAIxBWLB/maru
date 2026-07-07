@@ -32,6 +32,7 @@ import {
   SquareTerminal,
   UsersRound,
   WandSparkles,
+  Waypoints,
   Workflow,
   X,
 } from "lucide-react";
@@ -48,6 +49,7 @@ import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSi
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { InboxPane } from "./components/InboxPane";
 import { DiagramMode } from "./components/diagram/DiagramMode";
+import { GraphView } from "./components/graph/GraphView";
 import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
 import { MeetingsPane } from "./components/meetings/MeetingsPane";
 import { SitesPane } from "./components/sites/SitesPane";
@@ -1018,6 +1020,8 @@ function MainApp() {
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_ANCHOR_SETTINGS.ui.activeAppMode);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
+  // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
+  const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -1985,6 +1989,14 @@ function MainApp() {
       }));
     },
     [updateSettings],
+  );
+
+  const openGraphMode = useCallback(
+    (focusNodeId?: string) => {
+      setGraphFocusNodeId(focusNodeId ?? null);
+      setPersistedAppMode("graph");
+    },
+    [setPersistedAppMode],
   );
 
   useEffect(() => {
@@ -6388,6 +6400,7 @@ function MainApp() {
     e2e: " e2e-mode",
     diagram: " diagram-mode",
     sites: " sites-mode",
+    graph: " graph-mode",
   };
   const visibleAppMode: AppMode =
     appMode === "e2e" && !e2eFlowEnabled
@@ -6888,6 +6901,15 @@ function MainApp() {
           ) : null}
           <button
             type="button"
+            className={visibleAppMode === "graph" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("graph")}
+            title={t("mode.graph")}
+            aria-label={t("mode.graph")}
+          >
+            <Waypoints size={20} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
             className="activity-button"
             onClick={openCommandPalette}
             title={t("sidebar.commandPalette")}
@@ -6942,6 +6964,18 @@ function MainApp() {
         ) : visibleAppMode === "diagram" ? (
           <DiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}
+            onError={setError}
+          />
+        ) : visibleAppMode === "graph" ? (
+          <GraphView
+            workspacePath={activeDocumentWorkspacePath}
+            entries={activeDocumentEntries}
+            focusNodeId={graphFocusNodeId}
+            onClearFocus={() => setGraphFocusNodeId(null)}
+            onOpenEntry={(entry) => {
+              setPersistedAppMode("pkm");
+              void selectEntry(entry);
+            }}
             onError={setError}
           />
         ) : visibleAppMode === "sites" ? (
@@ -7344,6 +7378,7 @@ function MainApp() {
             onUpdateField={updateField}
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}
+            onOpenGraph={openGraphMode}
             fileQueue={fileQueue}
             canApplyFileQueue={canApplyFileQueue}
             onUpdateFileQueueItem={updateFileQueueItem}
