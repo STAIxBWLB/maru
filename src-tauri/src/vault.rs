@@ -424,10 +424,47 @@ pub fn parse_frontmatter(content: &str) -> FrontmatterParts {
     let yaml = &content[4..yaml_end];
     let body_start = yaml_end + 4;
     let body = content.get(body_start..).unwrap_or_default();
-    let meta = serde_yaml::from_str::<BTreeMap<String, Value>>(yaml).unwrap_or_default();
+    let meta = serde_yaml::from_str::<BTreeMap<String, Value>>(yaml)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, value)| (key, json_safe_value(value)))
+        .collect();
     FrontmatterParts {
         meta,
         body: body.trim_start_matches('\n').to_string(),
+    }
+}
+
+/// YAML mappings may carry non-string keys — template placeholders like
+/// `date: {{date}}` parse as a flow mapping keyed by another mapping. JSON
+/// (the Tauri IPC wire format) requires string keys, so one such entry made
+/// the whole `scan_vault` response fail with "key must be a string" and the
+/// document list render empty. Coerce every mapping key to a string (and
+/// unwrap tags) so frontmatter is always JSON-serializable.
+fn json_safe_value(value: Value) -> Value {
+    match value {
+        Value::Mapping(map) => {
+            let mut out = serde_yaml::Mapping::new();
+            for (key, val) in map {
+                let key = match key {
+                    Value::String(s) => s,
+                    Value::Bool(b) => b.to_string(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Null => "null".to_string(),
+                    other => serde_yaml::to_string(&other)
+                        .unwrap_or_else(|_| "invalid-key".to_string())
+                        .trim()
+                        .to_string(),
+                };
+                out.insert(Value::String(key), json_safe_value(val));
+            }
+            Value::Mapping(out)
+        }
+        Value::Sequence(seq) => {
+            Value::Sequence(seq.into_iter().map(json_safe_value).collect())
+        }
+        Value::Tagged(tagged) => json_safe_value(tagged.value),
+        other => other,
     }
 }
 
@@ -742,6 +779,20 @@ mod tests {
             1,
             "duplicate targets are deduped"
         );
+    }
+
+    #[test]
+    fn frontmatter_with_template_placeholders_is_json_serializable() {
+        // `{{date}}` parses as a YAML flow mapping keyed by a mapping —
+        // without sanitization the JSON IPC serialization of the whole scan
+        // failed with "key must be a string" (0 documents + error toast).
+        let content = "---\ntitle: \"{{title}}\"\ndate: {{date}}\nbu: {{bu}}\nnested:\n  1: one\n  true: yes\n---\n\n# 본문\n";
+        let parts = parse_frontmatter(content);
+        let json = serde_json::to_string(&parts.meta)
+            .expect("frontmatter must always be JSON-serializable");
+        assert!(json.contains("\"title\""));
+        // Non-string nested keys are coerced to strings.
+        assert!(json.contains("\"1\":\"one\""));
     }
 
     #[test]
