@@ -2,9 +2,9 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Maru desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status maru** — Updated through Phase 4 W12 (HWP field map + 개조식 inline lint) plus the 2026-05-27 Diagram hardening pass. See README's Status table for the canonical state column; this file is the deeper "what's next + how to continue" reference.
+> **Status maru** — Updated through Phase 8c (vault knowledge graph) + M0 Anchor → Maru rename (v0.3.0), 2026-07-08. Phases 0–5, Diagram mode, and Graph mode 8a/8b/8c are shipped. Phase 6/7 (W19–W26) remain planned. See README's Status table for the canonical state column and CHANGELOG.md for the release history; this file is the deeper "what's next + how to continue" reference.
 >
-> **Spec sources** — All design decisions trace back to `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`. The 26-week plan itself lives at `~/.claude/plans/flickering-seeking-engelbart.md` (work-repo internal) and is mirrored here from Maru's perspective.
+> **Spec sources** — All design decisions trace back to `~/workspace/work/_meta/rules/{frontmatter-schema,document-lifecycle,hub-contract,evidence-policy}.md` (formerly `_sys/rules`, with `bu-lifecycle`→`document-lifecycle` and `hub-sync`→`hub-contract`). The work-repo-internal 26-week plan file it was mirrored from has since been consolidated; this file is the live Maru-side reference.
 
 ## 1. The 7-module decomposition
 
@@ -14,7 +14,7 @@ Each module is owned by Maru desktop. Hub backs them where shared catalog data i
 |---|--------|---------|---------|--------|
 | M1 | Operations Catalog | "What needs my attention right now" — deadlines, in-flight approvals, unlinked evidence, inbox pending | Activity-rail `LayoutGrid` mode → 3-column pane | ✅ shipped |
 | M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W12 shipped |
-| M3 | Template / Form Filling | Unified template catalog (workspace + `_sys/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
+| M3 | Template / Form Filling | Unified template catalog (workspace + `_meta/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
 | M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · lightweight validators shipped · richer validators planned |
 | M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane Evidence tab | 🚧 W13 shipped · W14-W15 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
@@ -77,12 +77,12 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 ## 3. Test matrix (target growth)
 
-| Surface | W9 baseline | Phase 4 target | Phase 5 target | Phase 7 target |
-|---------|-------------|----------------|----------------|----------------|
-| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) |
-| Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ |
-| Hub pytest | 15 | 25 (sync endpoint + workflow seeds) | 40 | 60 |
-| E2E playwright | smoke only | + Studio flow | + binder + decks | + full bundle |
+| Surface | W9 baseline | Phase 4 target | Phase 5 target | Phase 7 target | Actual (2026-07-08) |
+|---------|-------------|----------------|----------------|----------------|---------------------|
+| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) | **577** across 71 test modules |
+| Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ | **84 test files** |
+| Hub pytest | 15 | 25 (sync endpoint + workflow seeds) | 40 | 60 | (Hub repo) |
+| E2E playwright | smoke only | + Studio flow | + binder + decks | + full bundle | **7 specs** (binary-viewer, comms, diagram, graph, maru-e2e-flow, smoke, startup) |
 
 ## 4. Conventions to keep
 
@@ -94,6 +94,10 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 6. **Korean filenames** — workspace path components stay in ASCII to avoid macOS NFD breakage. Templates handle Korean content; the file name doesn't.
 
 ## 5. Continuing work — concrete next steps
+
+> **Note (2026-07-08):** git ran ahead of the linear W-plan — the Phase 8 graph
+> mode (8a/8b/8c) and the M0 rename shipped before the remaining Phase 5
+> evidence work below. W14 is still the next backbone item.
 
 ### Immediate (W14 entry)
 
@@ -151,7 +155,7 @@ Outside the M1–M7 backbone, a self-contained **Diagram** mode ships alongside 
 | 6 — Perf + interop | ✅ | Viewport culling (visibleSubset), edge-route Map cache (5k entries, position-keyed), Mermaid round-trip export/import, 1000-node bench fixture (`pnpm vitest bench src/lib/diagram/perf.bench.ts`). |
 | 7 — Default-on | ✅ | Flag flips to opt-out. Hidden via `VITE_MARU_DIAGRAM=0`, `?maru-diagram=0`, or unchecking Settings → Preferences → "Diagram mode". Command palette opens Diagram when enabled; e2e covers flag visibility, ko/en labels, save/reload, templates, Mermaid, export dialog, filled tabs, and no `localhost:5500` / Google Fonts requests. |
 
-File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering past its broken `localhost:5500` boundary). Implementation lives under `src/lib/diagram/`, `src/components/diagram/`, and `src-tauri/src/diagram/mod.rs`. Plan reference: `~/.claude/plans/system-instruction-you-are-working-cozy-truffle.md`.
+File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering past its broken `localhost:5500` boundary). Implementation lives under `src/lib/diagram/`, `src/components/diagram/`, and `src-tauri/src/diagram/mod.rs`. Detailed usage doc: `docs/diagram.md`.
 
 ## 7. Glossary (Maru-internal)
 
@@ -162,20 +166,20 @@ File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering pas
 - **Studio** — The new Phase 4 W11+ multi-step authoring surface. Distinct from "Composer" view mode in the editor (W12+ work).
 - **Finalize** — Phase 6 W21 action that pushes an approved document's markdown body + rendered artifacts (docx/hwpx/pdf) + linked evidence binaries to Hub via `POST /api/v1/documents/{id}/finalize`. After a successful finalize, the local markdown's frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`; subsequent edits create a new draft that, on re-approval, becomes version `N+1` on Hub.
 
-## 8. Vault & Knowledge Graph (Phase 8)
+## 8. Vault & Knowledge Graph (Phase 8) — ✅ 8a/8b/8c shipped
 
-Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020). 그래프 소스 = 듀얼(라이브 VaultEntry.links + `<vault>/reports/vault-graph.json` community 오버레이, 우아한 강등). 렌더 = GraphCanvas SVG + d3-force worker(유일 신규 의존성). 쓰기 = `write_policy: "managed"` 신설(스키마 가드 + 스냅샷, delete는 MCP 전용 유지).
+Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020). 그래프 소스 = 듀얼(라이브 VaultEntry.links + `<vault>/reports/vault-graph.json` community 오버레이, 우아한 강등). 렌더 = GraphCanvas SVG + d3-force worker(유일 신규 의존성). 쓰기 = `write_policy: "managed"` 신설(스키마 가드 + 스냅샷, delete는 MCP 전용 유지). 구현: `src-tauri/src/{vault_graph,vault_guard}.rs`, `src/lib/graph/*`, `src/components/graph/*`, `e2e/graph.spec.ts`. 문서: `docs/graph.md`.
 
-### 8a — V1 read-only graph (W27–W29)
+### 8a — V1 read-only graph (W27–W29) ✅ (커밋 `cdf9ddb`, PR #61)
 
-`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas+뷰포트 컬링, 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1).
+`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas+뷰포트 컬링, 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1). (후속 `b42184e`: model.ts 리터럴 NUL 바이트 이스케이프, PR #64)
 
-### 8b — V2 managed writes (W30–W32)
+### 8b — V2 managed writes (W30–W32) ✅ (커밋 `96c7b44`, PR #62)
 
 `write_policy: "managed"` + WorkspaceSwitcher 토글, `vault_guard.rs`(validate_managed_write + vault_validate_note), EditorPane 검증 스트립 + OutlinePane frontmatter 폼(description 카운터·type/domain select·topics 칩), 스냅샷-before-write, vault/CLAUDE.md 쓰기 규칙 개정 lockstep.
 
-### 8c — V3 graph-driven (W33–W34+)
+### 8c — V3 graph-driven (W33–W34+) ✅ (커밋 `1030354`, PR #63)
 
 NewDocumentDialog 이웃 패널, 미해소 위키링크→CreateNoteDialog, 결정 체인 타임라인 레인(`decisionChains.ts`). (보류) Hub 그래프 메타 sync — Hub 소비자 생기기 전까지 범위 외.
 
-V1은 쓰기 리스크 0으로 가치 출하, V2가 capability 모델을 바꾸고, V3는 V1+V2 프리미티브 위의 순수 프론트다.
+V1은 쓰기 리스크 0으로 가치 출하, V2가 capability 모델을 바꾸고, V3는 V1+V2 프리미티브 위의 순수 프론트다. 세 단계 모두 출하되었으므로 Phase 8의 유일한 잔여 항목은 보류된 Hub 그래프 메타 sync이며, 이는 Hub 소비자가 생길 때까지 범위 외로 유지된다.
