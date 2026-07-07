@@ -18,6 +18,7 @@ import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
 import { Button } from "./ui/Button";
 import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
@@ -180,6 +181,22 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     () => (document && viewMode === "preview" ? renderMarkdown(draftContent) : ""),
     [draftContent, document, viewMode],
   );
+
+  // F3(b): mark unresolved wikilinks in the preview (red dotted) — clicking
+  // one routes to onWikilinkClick, which seeds the note-creation dialog.
+  // (The source tab is a plain textarea, so the preview surface hosts the
+  // visual marking.)
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const previewIndex = useMemo(() => buildEntryIndex(entries), [entries]);
+  useEffect(() => {
+    if (viewMode !== "preview" || !previewRef.current) return;
+    const anchors = previewRef.current.querySelectorAll<HTMLElement>("[data-wikilink]");
+    for (const anchor of anchors) {
+      const target = anchor.getAttribute("data-wikilink") ?? "";
+      const resolved = target ? resolveTargetIndexed(previewIndex, entries, target) : null;
+      anchor.classList.toggle("wikilink-missing", !resolved);
+    }
+  }, [previewHtml, viewMode, previewIndex, entries]);
 
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -522,6 +539,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="preview">
             <article
+              ref={previewRef}
               className="preview-surface"
               onClick={handlePreviewClick}
               dangerouslySetInnerHTML={{ __html: previewHtml }}

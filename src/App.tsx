@@ -7000,6 +7000,7 @@ function MainApp() {
               setPersistedAppMode("pkm");
               void selectEntry(entry);
             }}
+            onCreateNote={handleWikilinkClick}
             onError={setError}
           />
         ) : visibleAppMode === "sites" ? (
@@ -7668,6 +7669,7 @@ function MainApp() {
           initialRelPath={newDocumentSeed?.relPath ?? null}
           initialDocType={newDocumentSeed?.docType ?? "reference"}
           initialOpenLibrary={newDocumentSeed?.openLibrary ?? false}
+          entries={activeDocumentEntries}
           onOpenChange={(open) => {
             setNewDocumentOpen(open);
             if (!open) setNewDocumentSeed(null);

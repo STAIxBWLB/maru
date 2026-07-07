@@ -1,9 +1,12 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { FilePlus2, Library, X } from "lucide-react";
+import { FilePlus2, Library, Waypoints, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/Button";
 import { Field, TextArea, TextInput } from "./ui/Field";
+import { buildAdjacency, buildVaultGraph } from "../lib/graph/model";
 import { useTranslation } from "../lib/i18n";
+import type { VaultEntry } from "../lib/types";
+import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
 import {
   defaultAnchorDocType,
   fetchGuidelines,
@@ -22,6 +25,8 @@ interface NewDocumentDialogProps {
   initialRelPath?: string | null;
   initialDocType?: string;
   initialOpenLibrary?: boolean;
+  /** Workspace entries — powers the related-context neighbor panel (F3(a)). */
+  entries?: VaultEntry[];
   onOpenChange: (open: boolean) => void;
   onCreate: (
     title: string,
@@ -55,6 +60,7 @@ export function NewDocumentDialog({
   initialRelPath = null,
   initialDocType = "reference",
   initialOpenLibrary = false,
+  entries,
   onOpenChange,
   onCreate,
 }: NewDocumentDialogProps) {
@@ -128,6 +134,43 @@ export function NewDocumentDialog({
         : templates.filter((t) => t.document_type_category === category),
     [templates, category],
   );
+
+  // F3(a) related-context panel: resolve title tokens against the workspace,
+  // surface each resolved entity's 1-hop neighbors (degree desc, ≤8) as
+  // chips; clicking one inserts `[[target]]` into the draft body — the body
+  // wikilink becomes a live graph edge on the created note.
+  const relatedNeighbors = useMemo(() => {
+    if (!open || !entries || entries.length === 0 || !title.trim()) return [];
+    const index = buildEntryIndex(entries);
+    const model = buildVaultGraph(entries, index);
+    const adjacency = buildAdjacency(model);
+    const degreeById = new Map(model.nodes.map((n) => [n.id, n.degree]));
+    const labelById = new Map(model.nodes.map((n) => [n.id, n.label]));
+    const ghostIds = new Set(
+      model.nodes.filter((n) => n.type === "unresolved").map((n) => n.id),
+    );
+    const tokens = [title.trim(), ...title.trim().split(/\s+/).filter((w) => w.length >= 2)];
+    const neighborIds = new Set<string>();
+    for (const token of tokens) {
+      const resolved = resolveTargetIndexed(index, entries, token);
+      if (!resolved) continue;
+      const filename = resolved.relPath.split("/").pop() ?? "";
+      const stem = filename.replace(/\.(md|mdx|markdown)$/i, "").toLowerCase();
+      for (const neighbor of adjacency.get(stem) ?? []) {
+        if (!ghostIds.has(neighbor)) neighborIds.add(neighbor);
+      }
+    }
+    return [...neighborIds]
+      .sort((a, b) => (degreeById.get(b) ?? 0) - (degreeById.get(a) ?? 0))
+      .slice(0, 8)
+      .map((id) => ({ id, label: labelById.get(id) ?? id }));
+  }, [open, entries, title]);
+
+  function insertRelatedLink(id: string) {
+    const link = `[[${id}]]`;
+    if (body.includes(link)) return;
+    setBody((current) => (current ? `${current}\n${link}` : link));
+  }
 
   const filteredGuidelines = useMemo(() => {
     const tpl = templates.find((t) => t.slug === selectedTemplateSlug);
@@ -342,6 +385,27 @@ export function NewDocumentDialog({
               placeholder={t("newDoc.field.title.placeholder")}
             />
           </Field>
+
+          {relatedNeighbors.length > 0 ? (
+            <div className="new-doc-related" data-testid="new-doc-related">
+              <span className="new-doc-related-label">
+                <Waypoints size={12} /> {t("newDoc.related.label")}
+              </span>
+              <div className="new-doc-related-chips">
+                {relatedNeighbors.map((neighbor) => (
+                  <button
+                    key={neighbor.id}
+                    type="button"
+                    className="graph-chip"
+                    title={`[[${neighbor.id}]]`}
+                    onClick={() => insertRelatedLink(neighbor.id)}
+                  >
+                    {neighbor.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <Field label={t("newDoc.field.type")}>
             <TextInput
