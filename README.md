@@ -1,23 +1,54 @@
-# AI Workspace
+# Maru
 
-AI workspace desktop app. Tauri 2 + Rust + React 19 + TypeScript.
+Local-first AI workspace desktop app for Korean knowledge/document operations.
+Tauri 2 + Rust + React 19 + TypeScript. Current version **0.3.0**.
 
-## Status (2026-05-27)
+Maru is the author SSOT for a single user's `~/workspace/work/` — it edits
+markdown with byte-identical frontmatter, ingests an inbox, runs bundled Claude
+Code skills, drives Korean document (HWPX/DOCX/PDF) operations, and visualizes
+the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
+**Anchor**; the M0 rename (`kr.maru.desktop`, `~/.maru/`) landed in v0.3.0.
+
+## Status (2026-07-08)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
 | 0 — Hardening | ✅ shipped | Open existing workspaces safely. Frontmatter byte-identical round-trip. Multi-workspace registry. ko/en parity. |
 | 0.5 — UI polish | ✅ shipped | Topbar, sidebar with type filters + recents, command palette (⌘K), Pretendard Korean typography, light/dark. |
-| 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane (project / mentions / peers), in-memory nav history (⌘[ / ⌘]). |
-| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color + auto-refresh on focus). Workspace scan rayon parallelism plus cache-backed warm startup for `~/workspace/work`: cached entries + active document render first, then authoritative scan reconciles in the background. Multi-tab editor (per-workspace persistence, ⌘1..⌘8 select, ⌘W close, dirty stash). BlockNote rich + source + preview 3-way toggle (frontmatter line preserved). Browser smoke e2e is in place. **Deferred**: monorepo extraction. |
-| 2 — Inbox + AI | ✅ write loop live | Backend (polling, watcher, date parser, Claude CLI bridge, classifier, Gmail via `gws` CLI) + UI (`InboxPane` with Configured Entries / Processing / Processed Items / Files / Gmail sections, classify/accept/reject/process) all shipped. The primary local inbox flow now reads `workspace.config.yaml` `inbox:` settings, stages dropped files into the configured `inbox.file_drop` channel/path, scans `inbox/drop/<channel>/` plus `items/pending/*/manifest.yaml`, and reads processed history from `items/{done,failed,duplicate}` using configured artifact filenames; legacy `inbox/downloads/<source>` remains compatible. Accept/reject runs through an approval gate, Gmail decisions apply Maru labels, keyboard `a`/`r`/`p`, multi-select, bulk actions, dot folders are hidden unless allowlisted in Settings, and mission state/log/stop hooks are in place. |
-| 2.5 — Tree + Cursor shell + Terminal launchers | ✅ shipped | The Explorer pane now switches between Documents and Files. Documents keeps list/tree mode, type filters, filename/title labels, default-collapsed folders with persisted user-expanded folders, and Reveal in Finder. Files adds a VS Code-style workspace tree with workspace-safe scanning, All/Git tracked/Binary filters, search, multi-select, and add-to-queue actions; Binary is driven by configurable include patterns for artifact file types. The right Files pane is an explicit copy/move queue with destination selection, conflict-safe naming, Apply/Clear, and workspace capability gates. The shell now uses a Cursor-style activity rail, grouped Private/Public workspace switcher, split-right document and terminal panes (`⌘D`), clean-tab close-all, a right-edge utility rail, and bottom integrated terminal with maximize/restore. `~/.maru/settings.json` stores user/global theme/accent/layout/window/split/terminal defaults, Explorer display defaults, file-queue defaults, and future AI defaults; `<workspace>/.maru/workspace-state.json` stores workspace-only UI state and overrides. Claude, Codex, and Shell launch as real PTY tabs rendered by the Rust-native terminal model and React grid; first run starts with the terminal collapsed and restores the user's last layout afterward. Signed auto-update checks run at startup, and the native app menu exposes standard File/Edit/View/Go/Terminal/Workspace/Help commands. |
-| 3 — Unified document operations (7 modules) | ✅ W1-W6 + skills SSOT hardening | 사업단/대학본부조직 document operations 7-module 로드맵 (M1 Operations Catalog · M2 Document Studio · M3 Template/Form Filling · M4 Export Pipeline · M5 Evidence Binder · M6 Deck Studio · M7 Hub Connector). **W1**: rule SSOTs (frontmatter-schema, bu-lifecycle, hub-sync, evidence-policy) + Rust `ops_catalog` + `hub_client` scaffolds + 4 BU seeds. **W2 (maru-hub)**: 9 catalog REST endpoints + Alembic 0001_core schema (13 tables) + 21-template synthetic seed + 12 pytest. **W3**: real `ops_catalog::scan` indexing across BU configs / inbox manifests / tasks frontmatter / document frontmatter / evidence sidecars; `Catalog` mode + 3-column UI. **W4**: notify-based fs watcher with debounced `catalog://refresh`, real Hub HTTP read path (reqwest blocking + ETag + offline fallback), Catalog drilldown dialog + Reveal-in-Finder, verification gate (110 entries / 4 BUs / 986 ms on `~/workspace/work`). **W5**: `hubLibrary` typed fetchers + NewDocumentDialog Hub template/guideline pickers + CommandPalette "Hub 템플릿으로 새 문서" + Catalog open. **W6**: WritingGuidelineSidebar (right-pane tab, resolves frontmatter `guideline_ids` and `maru:guidelines` provenance trailer, multi-tab body viewer). **Skills SSOT**: Rust `skill_host` owns tiers (`core/public/private/imported/managed`), doctor validation, dirty/reconcile, and explicit external import/unmanage; bundled skills are normalized to `core`; invalid duplicate/misplaced records cannot install or dispatch. Test totals: cargo 381 / 2 ignored + vitest/typecheck path green on the current branch. |
-| 4 — Document Edit Mode (Studio + Templates) | ✅ W7-W12 done | Folds maru-editor into a 7-step Document Studio (source → template → guideline → sections → HWP fields → export → package) backed by M3 + M4. **W7**: `create_document` accepts `CreateDocumentExtras` and emits template/guideline/BU metadata as proper frontmatter. **W8-W10**: `src-tauri/src/export/` plans, validates, records transitions, and dispatches docx/hwpx/pdf bundles through the manifest lifecycle. **W11 (M2 Studio)**: new `Studio` activity-rail mode persists per-document state under `<workspace>/.maru/studio/<doc-id>/state.json`, reuses Hub template/guideline pickers, edits section drafts, dispatches exports, and freezes local version snapshots. **W12 (M3 + M2 lint)**: `hwpx slots` + `template_get_fields/template_fill_hwpx` expose real HWPX field maps in Studio Step 5; `kordoc_lite` adds HWPX structure checks, Korean public-form label detection, preserved form fill, and format-specific export checks; Step 4 runs debounced 개조식 lint with CodeMirror decorations, BlockNote marks, and workspace-state `composer.lintDismissals`. Latest verification: `pnpm typecheck`, targeted `cargo test --lib` filters (`kordoc_lite`, `template_fill`, `validate`), `hwpx slots` against bundled `사업계획서_기본.hwpx`. |
-| 5 — Evidence Binder + Deck Studio | 🚧 W13 shipped | Evidence Binder is now a right-pane tab keyed by the active document id. It persists state under `<workspace>/.maru/binder/<doc-id>.json`, seeds candidates from inbox-processed raw files and `<binary>.evidence.yaml` sidecars, scopes sidecar discovery to the active BU when possible, and uses `kordoc_lite` for local format detection, lightweight structure checks, and HWPX field previews. W14-W18 remain planned for section/KPI/checklist bindings and Deck Studio. |
-| D — Concept-map Diagram mode | ✅ shipped (Phase 0–7, hardened) | New top-level `diagram` mode in the activity rail and command palette (`Network` icon, enabled by default — opt out via Settings → Preferences). HWP-style 9-tab ribbon, 13 node kinds (simple / text / numbered / section / titled-box / split-box / diamond / oval / hexagon / cylinder / callout / table / image), 4-port edges with auto/straight routing + arrowheads + labels, smart-guide snap, align/distribute/equalize selection ops, drag-reorder layer panel, per-selection property editor, color presets, focus mode, find/replace, Tools/Infographic/Arrow/Table ribbon controls, memos + status chips + progress bars, 11 localized templates, PNG/PNG-transparent/JPG/SVG/JSON/PDF/Mermaid export via selected-path Tauri save dialog, Mermaid import, version history with 5-min auto-snapshots (cap 20 per doc), workspace-keyed unsaved state + persisted `diagram.lastDocument`, Radix confirmation dialogs, lock/hide enforcement, and viewport culling + edge-route cache for 1000-node smoothness. Documents live at `<workspace>/diagrams/<name>.cmd.json` (v:7). Latest gate: `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo test --manifest-path src-tauri/Cargo.toml --lib`, diagram bench, `pnpm test:e2e`. |
+| 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane, in-memory nav history (⌘[ / ⌘]). |
+| 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color). Rayon-parallel workspace scan + cache-backed warm startup. Multi-tab editor (⌘1..⌘8 / ⌘W, dirty stash). BlockNote rich + source + preview 3-way toggle. Browser smoke e2e. **Deferred**: monorepo extraction. |
+| 2 — Inbox + AI | ✅ write loop live | Polling scan + notify watcher + Korean date parser + Claude CLI bridge + classifier + Gmail via `gws`, plus `InboxPane` (classify/accept/reject/process, approval gate, Maru labels, `a`/`r`/`p`, bulk actions, mission log tails). |
+| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Documents/Files Explorer, VS Code-style file tree + copy/move queue, Cursor-style activity rail, split panes (⌘D), Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
+| 3 — Unified document ops (M1–M7) | ✅ W1–W6 + skills SSOT | Operations Catalog mode (`ops_catalog::scan`, fs watcher, Hub HTTP read + ETag/offline fallback, drilldown + Reveal), Hub Library client + template-aware new doc, Writing Guideline sidebar. Rust `skill_host` owns tiers (core/public/private/imported/managed), doctor validation, dirty/reconcile. maru-hub backs shared catalog (REST + Alembic + seeds). |
+| 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
+| 5 — Evidence Binder | ✅ W13 shipped | Right-pane Evidence Binder tab keyed by doc id, state under `<workspace>/.maru/binder/<doc-id>.json`, seeds from inbox-processed files + `<binary>.evidence.yaml` sidecars scoped to the active BU, `kordoc_lite` format detection + HWPX field previews. W14–W18 (section/KPI/checklist bindings + Deck Studio) planned. |
+| D — Concept-map Diagram mode | ✅ shipped (Phase 0–7, hardened) | `diagram` mode: HWP-style 9-tab ribbon, 13 node kinds, 4-port edges, smart-guide snap, 11 templates, PNG/JPG/SVG/JSON/PDF/Mermaid export + Mermaid import, version history, viewport culling for 1000-node smoothness. Docs at `<workspace>/diagrams/<name>.cmd.json` (v:7). See [docs/diagram.md](docs/diagram.md). |
+| 8 — Vault knowledge graph | ✅ 8a/8b/8c shipped | `graph` mode (8a read-only): dual-source model (live `VaultEntry.links` + `<vault>/reports/vault-graph.json` community overlay, graceful degrade), d3-force worker, GraphCanvas + culling, filter/search. Managed writes (8b): `write_policy: "managed"` + `vault_guard` schema gate + snapshot-before-write. Graph-driven authoring (8c): neighbor panel, unresolved-wikilink → create-note, decision-chain lanes. See [docs/graph.md](docs/graph.md). |
+| M0 — Anchor → Maru rename | ✅ shipped (v0.3.0) | Full rename across app id, dirs, CLI, tap. One-time on-disk migration (`~/.anchor → ~/.maru`, `com.anchor.app → com.maru.app`) with back-compat symlink; `.maruignore` preferred with `.anchorignore` fallback read. |
 
-Plan reference (work repo internal): `~/.claude/plans/flickering-seeking-engelbart.md`. Rule SSOTs at `~/workspace/work/_sys/rules/{frontmatter-schema,bu-lifecycle,hub-sync,evidence-policy}.md`.
+Rule SSOTs live in the work repo at
+`~/workspace/work/_meta/rules/{frontmatter-schema,document-lifecycle,hub-contract,evidence-policy}.md`.
+The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md).
+
+## Modes
+
+The activity rail exposes eleven top-level modes (Settings opens as a separate
+window, so it is not an app mode). Diagram and Graph default on; E2E Flow is
+flag-gated.
+
+| Mode | Label (ko / en) | What it does |
+|------|-----------------|--------------|
+| `pkm` | 문서 / Docs | Default. Markdown editor + Documents/Files Explorer + right utility rail. |
+| `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
+| `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
+| `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
+| `tasks` | 태스크 / Tasks | File-backed tasks with Google Tasks/Calendar links; edit details, month/week/day calendar. |
+| `catalog` | 카탈로그 / Catalog | M1 Operations Catalog — deadlines, in-flight approvals, unlinked evidence, inbox pending. |
+| `studio` | 스튜디오 / Studio | M2 Document Studio 7-step authoring wizard. See [docs/studio.md](docs/studio.md). |
+| `diagram` | 다이어그램 / Diagram | Concept-map editor. See [docs/diagram.md](docs/diagram.md). |
+| `graph` | 그래프 / Graph | Vault knowledge graph. See [docs/graph.md](docs/graph.md). |
+| `sites` | 사이트 / Sites | Left-rail site switcher with an embedded native browser pane. |
+| `e2e` | E2E 플로우 / E2E Flow | Hidden end-to-end flow console (flag-gated `e2eFlowEnabled`). |
 
 ## Install
 
@@ -47,8 +78,56 @@ For repo-local management shortcuts:
 make cli-install
 make cli-smoke
 make release-preflight
-make homebrew-update RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update RELEASE_TAG=v0.3.0 HOMEBREW_TAP_DIR=../homebrew-cask
 ```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Tauri Webview (src/)                                        │
+│   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
+│   d3-force graph worker · CodeMirror · alacritty canvas       │
+│                                                               │
+│   Activity rail (11 modes):                                  │
+│     Docs / Inbox / Messages / Meetings / Tasks /             │
+│     Catalog / Studio / Diagram / Graph / Sites / E2E         │
+│   Explorer + editor tabs + copy/move queue + terminal panel   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Tauri IPC
+┌──────────────────────────────▼──────────────────────────────┐
+│  Rust core (src-tauri/src/)                                  │
+│   workspace scan — walkdir + .maruignore + cached index      │
+│   frontmatter/   — line-by-line YAML edit (preserves order)  │
+│   document.rs    — read/save/create/version + field patch    │
+│   git.rs         — status/commit/diff via shell-out          │
+│   vault_list.rs / vault.rs / vault_graph.rs / vault_guard.rs │
+│   inbox.rs / inbox_watcher.rs / inbox_classifier.rs          │
+│   gmail_gws.rs / outlook_mso.rs / telegram_io.rs / ai_router │
+│   ops_catalog/ · hub_client/ · export/ · studio/ · diagram/  │
+│   skill_host/ · agent_host/ · terminal/ · linter/            │
+│   maru_dir.rs   — layered settings + .maru rules/templates   │
+│   maru_migration.rs — one-time Anchor → Maru on-disk rename  │
+└──────┬─────────────────────────────────────────────────────┘
+       │ stdio bridge
+┌──────▼────────┐ ┌────────────────────┐
+│ MCP server    │ │ User's Claude Code │
+│ (Node sidecar) │ │ CLI (~/.maru/skills)│
+└───────────────┘ └────────────────────┘
+```
+
+**Module boundary rules**:
+- Rust core **owns** workspace FS / cache / git / frontmatter / inbox
+  scan/watch/classification / Gmail `gws` + Outlook + Telegram bridges / layered
+  Maru settings / Claude inbox subprocess / integrated terminal PTY + screen
+  model / skills registry (`skill_host`) / agent proposal host (`agent_host`) /
+  ops catalog / export pipeline / Studio + Diagram + Graph backends.
+- React handles **only** BlockNote / command palette / neighborhood / graph
+  layout worker / diagram canvas. No business logic.
+- Node sidecar (`sidecars/maru-mcp/`) holds the local read-first MCP server.
+- **Deferred (Phase 4 original plan, on hold)**: a Whisper (Korean large-v3)
+  Python sidecar + MediaPipe voice/gesture editing. Not shipped — Phase 4 was
+  repurposed to Document Studio. Voice/gesture remains a future track.
 
 ## Phase 3 verification gates (passed)
 
@@ -56,7 +135,7 @@ make homebrew-update RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
 2. **Hub catalog read path** — `hub_client::http::fetch_with_cache` GETs `/api/v1/{templates,guidelines,glossary,...}` with ETag revalidation, falls back to `<workspace>/.maru/cache/hub/` on any network error.
 3. **Drilldown dialog + Reveal** — Catalog row → modal showing frontmatter + manifest + README excerpt + sibling paths + "Finder에서 보기".
 4. **Real-workspace timing** — `MARU_CATALOG_BENCH_WORKSPACE=~/workspace/work cargo test --lib -- --ignored catalog_real_workspace_smoke` indexed 110 entries across 4 BUs in 986 ms (30× under the 30-second budget).
-5. **Template-aware new doc** — `⌘ ⇧ N` / palette "Hub 템플릿으로 새 문서" → BU/category filter → template picker prefills body + title + docType → optional guideline multi-select → `maru:template` / `maru:business_unit` / `maru:guidelines` provenance trailer in body.
+5. **Template-aware new doc** — `⌘ ⇧ N` / palette "Hub 템플릿으로 새 문서" → BU/category filter → template picker prefills body + title + docType → optional guideline multi-select → `maru:template` / `maru:business_unit` / `maru:guidelines` provenance.
 6. **Guideline sidebar** — opening a doc created via the template flow surfaces its guideline bodies in the right-pane `BookOpen` tab.
 
 ### Live-Hub verification (operator procedure)
@@ -79,253 +158,35 @@ Then in Maru: open Catalog mode → footer "마지막 스캔" populates; ⌘ ⇧
 
 After Phase 6 W21 ships, the same operator procedure will also exercise the `POST /api/v1/documents/{id}/finalize` round-trip — Maru pushes the approved markdown body + rendered artifacts + linked evidence binaries to Hub, and the document then appears under the Hub Finalized tab inside Catalog mode.
 
-## Next up (Phase 5 W14)
-
-1. **Evidence-to-section binding model** — prepare the W14 frontmatter shape for section/KPI/submission-checklist bindings without moving binaries to Hub.
-2. **Evidence verification controls** — add Verify / Mark-as-submitted controls on top of the W13 Binder state.
-3. **Export dispatch hardening** — optional: move long-running converters behind background mission state; W12 already adds lightweight docx/hwpx/pdf structure checks without changing the manifest lifecycle.
-4. **Hub metadata sync caller** — planned M7 follow-up for `POST /api/v1/documents/sync`; Studio package remains local-only until the Phase 6 approval/finalize path.
-
-## Hub as published-document SSOT (local Studio + Phase 6 W21)
-
-Maru stays the **author SSOT** — drafting and editing always happen under `~/workspace/work/`. Maru Hub becomes the **published SSOT** the moment an approval route closes.
-
-Two write paths land on Hub from Maru:
-
-1. **`POST /api/v1/documents/sync`** (planned M7 follow-up) — drafting metadata only. Maru sends `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and to surface "이미 동기화된 초안" hints.
-2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Maru auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>` and any subsequent edit creates a new draft that, once re-approved, becomes version `N+1` on Hub.
-
-W12 leaves Studio package freeze local-only. Phase 6 W21 must add the matching `hub_client/safety.rs` pre-flight so `/documents/{id}/finalize` is the only Maru client path allowed to carry body/binary payloads, and only after the corresponding submission gate is approved.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Tauri Webview (src/)                                        │
-│   React 19 + Radix UI + marked (preview) + DOMPurify         │
-│   Phase 1B: + BlockNote rich editor + MediaPipe (Phase 4)    │
-│                                                               │
-│   Activity rail: Docs / Inbox / Settings                     │
-│   Documents/Files Explorer + editor + queue + terminal        │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Tauri IPC
-┌──────────────────────────────▼──────────────────────────────┐
-│  Rust core (src-tauri/src/)                                  │
-│   workspace scan — walkdir + .maruignore + cached index           │
-│   frontmatter/   — line-by-line YAML edit (preserves order)  │
-│   document.rs    — read/save/create/version + field patch    │
-│   git.rs         — status/commit/diff via shell-out          │
-│   vault_list.rs  — workspace registry + private/public active roots │
-│   filename_rules.rs — Korean NFC/NFD safety, Windows reserve │
-│                                                               │
-│   inbox.rs / inbox_watcher.rs / korean_date.rs               │
-│   inbox_classifier.rs / gmail_gws.rs / ai_router.rs / terminal.rs │
-│   maru_dir.rs  — layered settings + .maru rules/templates/catalogs │
-│   Phase 3+: + skill_host/ registry + standalone CLI dispatch │
-│   Phase 4+: + whisper bridge / mcp lifecycle                 │
-└──────┬─────────────────────────────────────────────────────┘
-       │ stdio bridge + future WS/MCP bridges
-┌──────▼────────┐ ┌────────────────────┐ ┌──────────────────┐
-│ MCP server    │ │ User's Claude Code │ │ Whisper sidecar  │
-│ (Node, Phase 3)│ │ CLI (~/.claude/skills/*)│ │ (Python, Phase 4)│
-└───────────────┘ └────────────────────┘ └──────────────────┘
-```
-
-**Module boundary rules**:
-- Rust core **owns** workspace FS / cache / git / frontmatter / inbox scan/watch/classification / Gmail `gws` bridge / layered Maru settings (`~/.maru/settings.json` + `.maru/workspace-state.json`) / Claude inbox subprocess / integrated terminal PTY sessions and terminal screen model.
-- React handles **only** BlockNote / command palette / neighborhood / gesture worker / AudioWorklet. No business logic.
-- Node sidecar holds the local MCP server + marketplace (Phase 3+).
-- Python sidecar holds Whisper only (Phase 4). HWPX is delegated to the user's `hwpx` Claude Code skill — not rewritten.
-
 ## Roadmap
 
-Each phase is defined in **outcomes the user actually exercises**. No phase exists just to grow infrastructure. The entry gate for each phase is the verification of the previous one.
+The active plan lives in [ROADMAP.md](ROADMAP.md) — a 7-module (M1–M7)
+decomposition with weekly deliverables (W1–W34+) plus the Diagram and Graph side
+tracks. Phases 0–5, the Diagram mode, and the Phase 8 graph mode (8a/8b/8c) are
+shipped. See [CHANGELOG.md](CHANGELOG.md) for the release-by-release history.
 
-### Phase 1B remaining (week 4–6)
+Each phase is defined in **outcomes the user actually exercises**. No phase
+exists just to grow infrastructure. The entry gate for each phase is the
+verification of the previous one.
 
-**Outcome**: maru is a first-class editor capable of carrying one project's meeting notes through a full week.
+### Next up
 
-- [x] **BlockNote rich editor + raw + preview 3-way toggle** — `RichMarkdownEditor` wraps `@blocknote/mantine`; frontmatter line is preserved across rich↔source by splitting on the leading `---…---\n` block before parsing. Source tab is the textarea (with Korean IME-aware `[[` autocomplete). Preview tab is `marked` + DOMPurify. Round-trip on real notes still needs the Phase 1A verification pass.
-- [x] **Single-window multi-tab editor** — shared editor tabs persist their workspace path and private/public visibility, with `EditorTab` discriminator, latest-wins selection, ⌘1..⌘8 select, ⌘W close. Closing a dirty tab stashes the draft into the existing Phase 1A `discardedEdit` toast.
-- [x] **Workspace cache** — lightweight JSON cache at `<workspace>/.maru/cache/workspace-index-v1.json`. Startup reads the disposable cache first, restores only the active tab before first paint, then runs the authoritative workspace scan in the background. Files tree scanning is lazy so it does not compete with cached document paint. Full scans also precompute version names once and reuse compiled regexes.
-- [ ] **Monorepo extraction** — `crates/maru-workspace`, `crates/maru-git`. Done at the seam between Phase 1B and Phase 2.
-- [x] **Playwright smoke + e2e** — browser smoke covers sample workspace boot, multi-tab open, source tab, and preview tab. Broader inbox/native Tauri e2e still belongs to Phase 2 verification.
+Git has run ahead of the linear W-plan: Phase 8 (graph mode) shipped before the
+remaining Phase 5 evidence work. The nearest pending items:
 
-**Verification gate**: a full week of multi-tab work with project + meeting + people open simultaneously, daily commits, frontmatter preserved.
+1. **W14–W15 Evidence bindings** — section/KPI/submission-checklist binding model on the W13 Binder (`evidence_links[].section_bindings`, `kpi_bindings`, checklist bindings), Verify / Mark-as-submitted controls, then Hub `evidence_index` sha256 reuse. Entry files: `src-tauri/src/evidence_binder.rs`, `src/components/evidence/*`, `src/lib/evidenceBinder.ts`.
+2. **W16–W18 Deck Studio (M6)** — a `Decks` mode wrapping the gpt-images-deck wizard with the bundled 14-style catalog (`skills/docs/slide-decks/`).
+3. **Phase 6 (W19–W22) Approval + Finalize-to-Hub** — submission gates, gate-state polling, and the approval-gated `POST /api/v1/documents/{id}/finalize` write path (the only Maru client path allowed to carry body/binary payloads). Requires a matching `hub_client/safety.rs` pre-flight.
+4. **Phase 7 (W23–W26) Certification & KPI bundle** — Hub-backed certification vault, KPI composer, and PDF bundle assembly.
 
-### Phase 2 — Inbox + AI (week 7–10)
+## Hub as published-document SSOT
 
-**Outcome**: a "Today's inbox" view that ingests local configured drop files (`inbox/drop/<channel>/`), pending item manifests, legacy `inbox/downloads/` files, and Gmail unread metadata. Claude classifies and proposes actions; the user accepts with `a` or starts `inbox-process <channel>` with `p`.
+Maru stays the **author SSOT** — drafting and editing always happen under
+`~/workspace/work/`. Maru Hub becomes the **published SSOT** the moment an
+approval route closes. Two write paths land on Hub from Maru:
 
-**Shipped read-only surface**:
-
-1. **Workspace polling scan (✓ shipped)** — `scan_inbox_entries(work_path)` reads `workspace.config.yaml` `inbox:` runtime config, scans configured `channels[*].drop_paths` and `paths.pending`, and returns `InboxEntry[]` for `dropFile` and `pendingItem` rows. `scan_inbox_drop(vault_path)` still walks legacy `<workspace>/inbox/downloads/{*}/...` and returns `InboxDropItem[]`.
-2. **Filesystem watcher (✓ shipped)** — `notify` watches all configured channel drop paths plus the pending path, falling back to legacy `inbox/downloads/`, and emits `inbox://file_event`; the frontend treats events as hints to re-run the cheap polling scan.
-3. **Korean NL date parser (✓ shipped)** — pure Rust parser for phrases such as "내일", "다음 주 금요일", "3월 15일", and "오늘 오후 3시".
-4. **Claude Code CLI subprocess bridge (✓ shipped)** — `start_claude_cli_invocation(prompt, cwd?, extra_args?)` spawns `claude -p --permission-mode plan` and streams `ai://output`, `ai://done`, and `ai://error`.
-5. **Inbox classifier (✓ shipped)** — `build_inbox_classification_prompt(item)` + `parse_inbox_classification(raw)` with a closed category set (`task`/`reference`/`meeting`/`admin`/`noise`) and tolerant JSON parsing.
-6. **Gmail via `gws` CLI (✓ shipped)** — Maru shells out to `gws gmail +triage --format json` and exposes `fetch_gmail_unread(max?, query?) -> GmailMessage[]`.
-7. **Inbox UI (✓ shipped)** — `InboxPane` shows Configured Entries / Processing / Processed Items / Files / Gmail sections, supports process/classify/accept/reject button actions, shows live `inbox-process` mission log tails, and uses the Files section as a local file drop target.
-8. **Settings-integrated inbox runtime (✓ shipped)** — Settings → Inbox Channels edits `workspace.config.yaml` `inbox.root`, `inbox.paths`, `inbox.naming`, `inbox.file_drop`, Gmail scan settings, and channels without rewriting unrelated top-level config. `.maru/inbox.json` is a read-only legacy fallback. Dot folders are excluded from Inbox/Files/Vault scans by default and can be included only through the Settings allowlist.
-9. **Approved write loop (✓ shipped)** — all new destructive inbox decisions require a Rust-backed approval id. File accept moves to the classifier folder or user-selected folder; file reject moves to the sibling rejected store. Gmail accept applies `maru-accepted` and removes `INBOX`; Gmail reject applies `maru-rejected` without archiving.
-10. **Keyboard + bulk loop (✓ shipped)** — Inbox supports focused rows, `⌘I`, `↑`/`↓`, `a`, `r`, `p`, `?`, checkboxes, shift range, cmd-toggle, and a bulk action footer.
-11. **AI mission lifecycle (✓ shipped)** — Claude and background skill runs mirror mission state to `~/.maru/state/missions/`, emit idle/update events, preserve optional origin metadata such as `inboxProcess`, expose log-tail reads, and expose a stop command with SIGTERM → SIGKILL escalation.
-12. **Processed item history (✓ shipped)** — `scan_inbox_processed_items` reads `items/done`, `items/failed`, and `items/duplicate` using configured `inbox.paths` and `inbox.naming`; detail reads expose Summary / Route / Manifest / Extracted tabs with extracted text capped for large files.
-13. **Browser smoke e2e (✓ shipped)** — Playwright verifies sample workspace boot, multi-tab editor open, source tab, and preview tab.
-
-**Tree + Cursor shell + integrated terminal add-on (✓ shipped)**:
-
-1. **Documents / Files Explorer** — the Explorer pane has a top Documents/Files switch. Documents keeps list/tree mode, folder-first sorting, default-collapsed folders, search/type-filter auto-expansion, per-visibility user-expanded folders, collapse/expand-all, and a Reveal in Finder context menu for files/folders. Files always uses a VS Code-style tree with workspace-safe scanning, `.maruignore`, All/Git tracked/Binary filters, search, collapse/expand, multi-select, path copy, reveal, and add-to-queue actions. Binary mode shows only files matching the workspace setting's include patterns by default.
-2. **Layered settings** — `~/.maru/settings.json` carries user/global UI defaults, theme/accent, panel/window/split layout state, terminal defaults, launcher preferences, Explorer display defaults, file-queue defaults, and AI defaults. `<workspace>/.maru/workspace-state.json` carries workspace-only state and overrides such as collapsed document/file folders, initialization flags, Binary include patterns, inbox channel overrides, and connector overrides. Existing `<workspace>/.maru/settings.json` is read as a legacy migration source only and is not created for new workspaces. `.maru/mcp.json` and `.maru/skills.json` remain their own SSOT files.
-3. **Cursor-style shell** — the main app uses a left activity rail for Docs / Inbox / Settings, a single tabbed Explorer pane, central editor tabs, and a collapsible bottom terminal panel.
-4. **Split panes and tab controls** — `⌘D` splits the active document pane to the right by reusing the same draft buffer, and splits the terminal by starting a fresh PTY with the same launcher profile. The document tab row can close all clean tabs while preserving dirty drafts.
-5. **Right utility pane** — the right pane now has a right-edge icon rail for Outline / Files / Memo / Skills / Guideline / Evidence / Info. Files is an operation queue: selections from the Files Explorer or external files are staged with copy/move, destination folder, conflict name/status, and an explicit Apply/Clear loop. Memos default to `.maru/memos/`, support plain text or markdown, expose a memo list, and can be saved elsewhere via Save As.
-6. **Integrated terminal** — `portable-pty` sessions feed an `alacritty_terminal` Rust model, which emits `terminal://frame` snapshots for the React canvas renderer and `terminal://exit` for process state (`terminal://status` carries agent-hook lifecycle). Launcher buttons start `claude`, `codex --cd <cwd>`, or the user's shell in independent PTY tabs; closing a tab kills its PTY process. First run keeps the terminal panel collapsed; later launches restore the previous panel height/open/maximized state and auto-start Shell only when the panel is open with no tabs.
-7. **Native menu bar** — the native app menu exposes File, Edit, View, Go, Terminal, Workspace, and Help commands. Menu commands reuse the same application command handlers as keyboard and command-palette actions.
-8. **Auto-updater** — signed GitHub Release updater artifacts are checked at startup and installed automatically when newer than the current app version. The native app menu also exposes `Check for Updates...` for an explicit check.
-9. **Settings window** — Settings opens in a separate Tauri window and edits Explorer default mode, Files default filter, file-queue default operation, document browser mode, document label mode, theme mode, accent color, terminal auto-launch, structured Inbox Channels, and raw JSON surfaces for AI, connectors, MCP, projects, and skills.
-
-**Remaining Phase 2 hardening**:
-
-1. **Native Tauri e2e** — cover watcher events, approved file moves, Gmail CLI failure taxonomy, Claude CLI success/failure, and mission stop.
-2. **Real-workspace smoke** — configured channel drop file + pending manifest + legacy dropped file + Gmail item + Claude classification + `a`/`r`/`p` loop in one native session.
-3. **KakaoTalk macOS notification watcher (optional)** — still deferred while the full-disk-access prompt is avoidable.
-
-**AI / terminal dispatch**:
-- Inbox classification: Claude Code CLI subprocess through `start_claude_cli_invocation`, streamed with the existing `ai://*` events.
-- General Claude/Codex use: integrated terminal PTY tabs, using each CLI's own auth, sandbox, and approval policy.
-- Future API fallback: Anthropic/OpenAI settings can be added in the Settings window once there is a write/apply workflow that needs it.
-
-**Skip in Phase 2**: iMessage DB, Slack, Outlook (Phase 3 wraps Outlook via the `ms-office` skill).
-
-**Verification gate**: a real unread mail item or configured dropped file arrives -> Maru classifies or starts `inbox-process <channel>` within 30 seconds -> user presses `a` or `p` -> item is moved, labelled, or handed to the background skill without leaving the inbox session.
-
-### Phase 3 — Built-in Skills + Hub Connector (week 11–14)
-
-**Outcome**: daily skill-backed ops move out of the terminal into Maru, and Maru can query a separate hub service for shared context without becoming a multi-user server.
-
-**Agent OS-lite implementation track**:
-- Maru-owned run contracts now wrap the imported Agent OS ideas instead of copying external contracts verbatim: `AgentRunRequest`, `AgentRunEvent`, `SkillProposal`, `ProviderAdapter`, and `ProtectedWriteClaim`.
-- Background skill dispatch creates an `AgentRunRequest`, uses a provider adapter seam for Claude/Codex CLI, and writes append-only events to `<workspace>/.maru/runs/skills/<invocationId>/events.jsonl`.
-- Background execution remains proposal-first. If provider output contains an `maru_skill_proposal_v1` JSON proposal, Maru records `proposal.created`; applying that proposal is a separate approval-gated `agent.proposal.apply` action.
-- Skill manifests/frontmatter are validated during registry scans. Invalid skills stay visible in the catalog but install and dispatch fail closed until the registry is clean.
-- Protected writes require operation, actor, reason, schema version, and current-hash matching. Autonomous writes are not default behavior.
-- The first 5-role loop contract is bounded: `lead -> planner -> worker -> reviewer`, optional `advisor` for ambiguity/high-risk, and one rework attempt before user-visible failure.
-
-**Skills SSOT control-plane track**:
-- Rust `src-tauri/src/skill_host/` is the canonical skills implementation. The standalone CLI (`maru doctor`, `maru skills ...`) reuses the same Rust command functions that Tauri calls; Node MCP remains focused on MCP tools.
-- `SkillRecord.tier` is one of `core`, `public`, `private`, `imported`, or `managed`. Bundled repo skills are placement-compatible `core`; `public` and `private` become valid only under `~/.maru/skills/_sources/skills-public` and `~/.maru/skills/_sources/skills-private`.
-- Doctor validation emits explicit `duplicate_source` and `tier_misplaced` issues, marks affected records invalid, and blocks install/dispatch for invalid records.
-- Dirty/reconcile flows are tier-aware: git-backed sources can accept by add/commit/push or discard by restoring the skill path; bundled skills refuse accept and discard by rematerializing the embedded bundle; managed/imported skills accept by updating the saved hash.
-- External skills become Maru-managed only through `maru skills import`, which writes `maru-imported` state at `~/.maru/skills/_imported/skills/<name>` and creates the runtime entrypoint at `~/.maru/skills/<name>`. `maru skills import-unmanage` removes registry/link state and can optionally delete imported files.
-- Operator docs: `docs/SSOT-TIERS.md` defines tier ownership, and `docs/maru-doctor.md` defines doctor issue codes and reconcile behavior.
-
-**Provider abstraction track**:
-- `ProviderAdapter` is now the internal boundary. V1 adapters are Claude CLI and Codex CLI wrappers; both are proposal-only and use the tools' native auth.
-- Future OpenAI/Anthropic API adapters must validate `maru_completion_request_v1` / `maru_completion_response_v1` and store credentials only in OS keychain or a user-managed secret store.
-
-**Local MCP + marketplace track**:
-- `sidecars/maru-mcp/` provides a dependency-light stdio MCP server. Initial tools are read-first: `workspace.search`, `document.read`, `skill.list`, `run.status`, `proposal.read`; the only write-shaped tool is `proposal.create`, which appends a proposal event and never edits workspace files.
-- Marketplace manifests are validated as signed, version-pinned `maru_marketplace_source_v1` metadata before they can sit on top of `~/.maru/skills`.
-
-**Cloud dashboard track**:
-- Dashboard export starts from local event replay. `agent_export_redacted_run_summary` emits redacted run metadata for opt-in sync: run history, proposal/write counts, provider IDs, and skill IDs.
-- Raw prompts, file bodies, credentials, and private paths are excluded from dashboard export payloads.
-
-**Autonomous write track**:
-- Stage 1 allows autonomous writes only in disposable run workspaces.
-- Stage 2 allows real workspace writes only through `ProtectedWriteClaim` with current hash checks and explicit approval policy.
-- Stage 3 can add user-defined low-risk session auto-approval. Every write path records `write.claimed`, `write.committed`, or `write.conflict`.
-
-The `runtime: claude-code` lane is the v1 core — the user's `~/.claude/skills/*` are invoked as-is. **Zero lines rewritten**.
-
-Built-in skill assets live in the repo root `skills/` directory. The bundle is
-embedded into the Tauri binary and materialized into `~/.maru/skills/_builtin`
-at runtime; `skills/envs/default/setup.sh` is the bootstrap source for
-`~/.maru/env`. Shared slide design catalogs live at
-`skills/docs/slide-decks/` and are also embedded with the bundle. The external
-`stai-public` source is not auto-created.
-
-**Slide deck catalog prep**:
-- V1 only bundles the shared style catalog and fixes its Maru-local SSOT path.
-- Future Slides work should let the user choose a draft document or free prompt,
-  choose a design deck from `skills/docs/slide-decks`, then generate a slide
-  presentation using that selected design system.
-- The future feature should reuse the catalog rather than duplicating prompts
-  into individual skills or workspace documents.
-
-Bundled core skill groups:
-1. **Inbox / IO** — `inbox-intake`, `inbox-process`, `io-gws`, `io-kakao`, `io-mso`, `io-telegram`.
-2. **Documents / decks** — `hwpx`, `pptx-toolkit`, `xlsx-toolkit`, `gpt-images-deck`, `canva-deck`, `notebooklm-deck`.
-3. **Vault operations** — `vault-connect`, `vault-extract`, `vault-graph`, `vault-learn`, `vault-lint`, `vault-next`, `vault-pipeline`, `vault-refactor`, `vault-remember`, `vault-rename`, `vault-rethink`, `vault-stats`, `vault-sync`, `vault-update`.
-4. **Workspace ops** — `business-unit-lifecycle`, `git-sync`, `meeting-notes`, `share-outbox`, `task-management`.
-5. **Writing / analysis** — `gaejosik`, `skill-mine`.
-
-**Verification gate**: in one day representative bundled skills run end-to-end without the terminal, with output equivalent to direct CLI execution. The user reports saving 30+ minutes.
-
-**Maru Hub connector**:
-- `maru-hub` is a separate private web/API service, not part of the desktop app. Maru remains the **author SSOT** for drafting; Hub is the **published SSOT** that owns shared catalog + draft metadata index + (post-approval) the canonical markdown body, rendered artifacts, and evidence binaries.
-- Maru remains local-first. It stores global connector defaults in `~/.maru/settings.json` and workspace connector overrides in `.maru/workspace-state.json` or `.maru/mcp.json`; tokens stay outside the repo in the OS keychain or a user-managed secret store.
-- Two write paths from Maru: `POST /documents/sync` (drafting metadata, Phase 4 W11) and `POST /documents/{id}/finalize` (approval-gated body + rendered artifacts + evidence binaries, Phase 6 W21).
-- Deployment is private only. Demo fixtures stay synthetic and live under the Hub repo's `tests/fixtures/demo/`; production seed is separate.
-
-**Hub connector verification gate**: a synthetic proposal note in Maru → query hub context → pick reusable evidence → create a pending submission gate → on approval, Maru calls finalize and the document appears in Hub's `finalized_documents` with rendered artifacts and evidence binaries attached.
-
-### Phase 4 — Document Edit Mode (week 15–18)
-
-**Outcome**: a dedicated mode inside maru where voice + gesture edit a long-form proposal. The standalone `dev/maru-editor` falls out of the loop.
-
-**Keep** (generalized):
-- Whisper sidecar (Korean large-v3) — lifted from maru-editor.
-- Intent fusion (voice command → edit intent).
-- One-Euro filter + gesture worker (prev/next, scroll, accept/reject diff).
-- PostToolUse → SSE diff stream (surgical edits, not chat).
-
-**Generalize** (domain-specific -> workspace-level):
-- Glossary enforcement → `.maru/glossary.yml` per workspace.
-- Templates → `.maru/templates/` per workspace.
-
-**Drop**: HoloBackground / R3F HUD (cute demo, no daily value). Hard-coded division/program lists. Next.js shell.
-
-**Verification gate**: a 30-minute voice + gesture editing session produces a clean git commit with glossary violations flagged, and the user did not launch maru-editor at all that week.
-
-### Phase 5+ (deferred)
-
-In likelihood order:
-- **Multi-window** — lift `tolaria/src-tauri/src/window_state.rs`.
-- **Conflict resolver** — when the first real merge conflict bites.
-- **Public marketplace hosting** — when external user count exceeds 10.
-- **Semantic search** — when keyword + relationships + git-grep are demonstrably insufficient.
-- **NotebookLM bridge** — low priority.
-
-## Open decisions (input needed)
-
-Items requiring the user's decision before further phases proceed:
-
-1. **Workspace cache threshold** — shipped as a lightweight JSON index because `~/workspace/work` startup latency is dominated by the full initial pipeline, not only the Rust scan. Keep measuring cold scan and warm cache paint before lifting to a heavier database cache.
-2. **BlockNote ↔ raw default** — rich for general notes; raw for precision-sensitive editing such as proposals and reports. Per-workspace setting vs per-doc setting?
-3. **Multi-tab UX** — close-with-dirty confirmation: Obsidian pattern (autosave) vs VS Code pattern (confirm)?
-4. **Unresolved-wikilink behavior** — Phase 1A surfaces a soft notice. Phase 1B should pick: (a) red underline + create-new dialog, or (b) auto-stub note then open it.
-5. **maru MCP port** — 9710 (matches tolaria) or fall back to 9712/9713?
-6. **maru-editor archive timing** — archive immediately after the Phase 4 verification gate, or keep around for six months as reference?
-7. **AI fallback API key storage** — Tauri stronghold plugin (macOS Keychain) is the recommendation; confirm operational fit.
-8. **History shortcuts (lock-in)** — ⌘[ back / ⌘] forward (no browser conflict). Already shipped in Phase 1A; lock unless changing.
-
-## Hard "No" list (v1)
-
-Out of scope for v1 by explicit decision:
-
-- Semantic / embedding search (keyword + wikilink + git-grep cover 10k notes).
-- Cloud sync, maru account, default telemetry (opt-in only).
-- Mobile (Tauri 2 mobile is unstable; Obsidian owns mobile for now).
-- Public marketplace server (no moderation policy).
-- iMessage / Slack ingestion (permission pain > value).
-- NotebookLM, podcast, slide export.
-- Multi-user collab, CRDT, realtime (single user, single device, git for history).
-- PDF annotation, OCR (file-extracted text is enough).
-- Agent-autonomous edits as default behavior. Autonomy is staged behind disposable workspaces, protected writes, approval policy, and audit events.
-- iCloud / Dropbox workspace awareness (user's responsibility).
-- Unsigned / ad-hoc auto-updater feeds (updates are accepted only through signed GitHub Release artifacts).
+1. **`POST /api/v1/documents/sync`** (planned M7 caller) — drafting metadata only: `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and "이미 동기화된 초안" hints.
+2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Maru auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`.
 
 ## Development
 
@@ -344,6 +205,9 @@ pnpm typecheck
 # Production build:
 pnpm build
 
+# Full verification (typecheck + vitest + cargo test --lib + build):
+make verify
+
 # Signed native release build:
 make tauri-build
 
@@ -352,45 +216,38 @@ export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/maru-updater.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/maru-updater.key.password)"
 pnpm tauri:build
 
-# If you need the raw Tauri CLI, clean stale local bundles first:
-pnpm clean:tauri-bundles
-pnpm tauri build
-
-# Prune oversized local Tauri debug artifacts:
+# Prune oversized local Tauri debug artifacts (also runs from tauri:dev/build):
 pnpm clean:tauri-debug
-# Also runs from pnpm tauri:dev and pnpm tauri:build. By default it checks once
-# every 24 hours and prunes src-tauri/target/debug when artifacts exceed 4GiB.
-# make release-preflight forces cleanup after its debug no-bundle build.
+# Checks once every 24h and prunes src-tauri/target/debug when artifacts exceed 4GiB.
 
-# Rust unit + integration tests:
+# Rust unit + integration tests (577 tests across 71 test modules):
 cd src-tauri && cargo test
+# or: make test-rust  (cargo test --lib)
+
+# Frontend unit tests (vitest, 84 test files):
+pnpm test
+# End-to-end (Playwright, 7 specs):
+pnpm test:e2e
 
 # Local Maru MCP sidecar smoke:
 MARU_MCP_WORKSPACE="$PWD" node sidecars/maru-mcp/index.mjs
 
 # Skills registry doctor / reconcile:
 cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- --version
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- doctor --quiet
 cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- doctor --json
 cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills dirty --json
 cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills reconcile <name-or-id> --accept --dry-run
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills reconcile <name-or-id> --discard
 cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills import /path/to/skill --copy
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills import /path/to/skill --link
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills import-unmanage <name> --delete-files
 
 # Bench workspace scan on a real workspace:
 cd src-tauri && cargo test --release bench_scan_real_workspace \
     -- --ignored --nocapture --test-threads=1
 # → MARU_BENCH_WORKSPACE=/some/path overrides the default ~/workspace/work
-
-# Cold/warm startup expectation:
-# 1. first scan creates <workspace>/.maru/cache/workspace-index-v1.json
-# 2. next app load renders cached entries + active document before the
-#    background scan refreshes the index
-# 3. Files tree scanning waits until the Files pane is visible, so it does
-#    not compete with cached document paint on warm startup
 ```
+
+CI runs `make verify` (typecheck + vitest + cargo test --lib + build) on every
+pull request and push to `main` via `.github/workflows/ci.yml`. The heavier
+`release-preflight` (adds CLI + e2e + a debug Tauri build) runs on version tags.
 
 ## Release Bundles
 
@@ -472,7 +329,7 @@ make macos-notarize-local TARGET=aarch64-apple-darwin
 
 Keep the Tauri updater secrets (`TAURI_SIGNING_PRIVATE_KEY`,
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) in place; they sign updater metadata and
-are separate from Apple Developer ID signing. The workflow now fails on partial
+are separate from Apple Developer ID signing. The workflow fails on partial
 Apple signing configuration instead of silently producing an unintended ad-hoc
 macOS release.
 
@@ -482,7 +339,7 @@ before tagging or publishing a release. After release assets exist, update the
 Homebrew tap with:
 
 ```bash
-make homebrew-update-commit RELEASE_TAG=v0.2.12 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update-commit RELEASE_TAG=v0.3.0 HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
@@ -536,10 +393,14 @@ Maru stores workspace-local state and resources at:
     cache/           # disposable workspace index for warm startup
     workspace-state.json # collapsed folders, initialization flags, binary patterns, overrides
     versions/        # snapshots created via the "Version" button
-  .maruignore      # optional, gitignore-style segment patterns
+    studio/          # per-document Studio wizard state
+    binder/          # per-document Evidence Binder state
+  .maruignore      # optional, gitignore-style segment patterns (falls back to legacy .anchorignore)
 ```
 
-`<workspace>/.maru/settings.json` is a legacy migration input only. Maru reads it when present to build effective settings, but new workspaces do not get that file.
+`<workspace>/.maru/settings.json` is a legacy migration input only. Maru reads
+it when present to build effective settings, but new workspaces do not get that
+file.
 
 `.maruignore` example for the user's `~/workspace/work`:
 
@@ -548,7 +409,6 @@ node_modules
 .venv
 dist
 build
-_sys/env
 target
 .next
 .turbo
@@ -559,10 +419,26 @@ target
 ## Critical invariants
 
 1. **Filesystem is authoritative.** The cache (`<workspace>/.maru/cache/workspace-index-v1.json`) is disposable. React state is derived.
-2. **Frontmatter key order + comments preserved.** A single-field patch must never disturb the order or comments of any other key (verified by cargo test).
-3. **Crash-safe rename.** `.maru-rename-txn/` staging dir + recovery on the next workspace scan (Phase 1B).
+2. **Frontmatter key order + comments preserved.** A single-field patch must never disturb the order or comments of any other key (verified by cargo test). `src-tauri/src/frontmatter/ops.rs` is the only allowed write path.
+3. **Crash-safe rename.** `.maru-rename-txn/` staging dir + recovery on the next workspace scan.
 4. **Dynamic relationship detection.** Any frontmatter field containing `[[wikilink]]` is treated as a relationship. No hard-coded field lists.
 5. **Symlinks inside the workspace are honored.** Deliberate user-created symlinks (e.g. `~/workspace/work/inbox/downloads → ~/gdrive-workspace/...`) are considered part of the workspace. Maru uses lexical containment, not `canonicalize()`.
+6. **Managed vault writes are schema-gated + snapshotted.** `write_policy: "managed"` writes pass `vault_guard::validate_managed_write` and take a snapshot before mutation; note deletion stays MCP-only.
+
+## Hard "No" list (v1)
+
+Out of scope for v1 by explicit decision:
+
+- Semantic / embedding search (keyword + wikilink + git-grep cover 10k notes).
+- Cloud sync, maru account, default telemetry (opt-in only).
+- Mobile (Tauri 2 mobile is unstable; Obsidian owns mobile for now).
+- Public marketplace server (manifest validation only; no server, no moderation policy).
+- iMessage / Slack ingestion (permission pain > value).
+- Multi-user collab, CRDT, realtime (single user, single device, git for history).
+- PDF annotation, OCR (file-extracted text is enough).
+- Agent-autonomous edits as default behavior. Autonomy is staged behind disposable workspaces, protected writes, approval policy, and audit events.
+- iCloud / Dropbox workspace awareness (user's responsibility).
+- Unsigned / ad-hoc auto-updater feeds (updates are accepted only through signed GitHub Release artifacts).
 
 ## License
 
