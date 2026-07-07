@@ -177,6 +177,9 @@ Accept: [a]ll, [1-5] select, [s]kip, [q]uit
 - Promote vault-relevant `TASK` events from the work-local `.anchor/tasks-log.md`
   to `vault/log.md` (ingest-chain TYPE `TASK`; task-management does not write the
   vault directly — context-enrichment §6)
+- **Graph freshness (DR-019 §6)**: run vault-lint L11/L11b (graph staleness). If the
+  vault or workspace graph is > 7 days stale, propose `/vault-graph build` (+ `--workspace`
+  for the work layer). Suggest only — do not auto-build.
 
 ## Scope Details
 
