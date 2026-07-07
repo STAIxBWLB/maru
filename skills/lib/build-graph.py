@@ -185,6 +185,16 @@ def _nfc(s: str) -> str:
     return unicodedata.normalize("NFC", s)
 
 
+def _node_label(rel: str) -> str:
+    """Human label from a relpath. Generic stems (readme/index) are qualified
+    with the parent dir so 33 README docs don't all collapse to 'Readme'."""
+    p = Path(rel)
+    stem = _nfc(p.stem)
+    if stem.lower() in ("readme", "index") and p.parent.name:
+        stem = f"{p.parent.name}-{stem}"
+    return stem.replace("-", " ").title()
+
+
 def _coerce(v):
     """Scalar-coerce a frontmatter value for JSON export (dates → str)."""
     if isinstance(v, (date, datetime)):
@@ -292,7 +302,8 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
         "work_docs": 0, "yaml_fail": 0, "template_skip": 0,
         "related_unresolved": 0, "related_ambiguous": 0, "related_dir_skip": 0,
         "related_root_escape": 0, "related_home_escape": 0,
-        "source_stub": 0, "source_dead": 0, "collisions": 0,
+        "source_stub": 0, "source_dead": 0, "source_nonmd": 0,
+        "source_skiproot": 0, "collisions": 0, "dup_edges": 0,
     }
     valid_bu = _load_bu_slugs(work_root)
 
@@ -325,7 +336,8 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
                 continue
             node_id = "work:" + rel[:-3]
             docs[node_id] = {"rel": rel, "fm": fm, "body": extract_body(text)}
-            stem_index.setdefault(_nfc(fp.stem).lower(), []).append(node_id)
+            # key matches _resolve_related's wikilink lookup (space→dash)
+            stem_index.setdefault(_nfc(fp.stem).lower().replace(" ", "-"), []).append(node_id)
             counters["work_docs"] += 1
 
     work_ids = set(docs)
@@ -347,10 +359,10 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
         fm = d["fm"]
         nodes.append({
             "id": node_id,
-            "label": _nfc(Path(d["rel"]).stem).replace("-", " ").title(),
-            "type": _coerce(fm.get("document_type") or "work-doc"),
+            "label": _node_label(d["rel"]),
+            "type": str(_coerce(fm.get("document_type") or "work-doc")),
             "domain": d["rel"].split("/", 1)[0],
-            "description": _coerce(fm.get("title") or fm.get("description") or "")[:200],
+            "description": str(_coerce(fm.get("title") or fm.get("description") or ""))[:200],
             "source_file": d["rel"],
         })
 
@@ -366,7 +378,8 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
             for e in entries:
                 tgt, rtype = _resolve_related(e, rel, work_root, stem_index, work_ids, counters)
                 if tgt:
-                    cand.append(("related", node_id, tgt, {"field": "related", "rel": _coerce(rtype)}))
+                    attrs = {"rel": str(_coerce(rtype))} if rtype else {}
+                    cand.append(("related", node_id, tgt, attrs))
         for field in WORK_WIKI_FIELDS:
             if field not in fm:
                 continue
@@ -389,25 +402,32 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
             continue
         src = fm.get("source")
         if isinstance(src, str) and src.strip():
-            norm = src.strip().strip('"').strip("'")
-            if norm and not norm.startswith(("http://", "https://")):
-                if norm.startswith("work/"):
-                    norm = norm[len("work/"):]
-                if norm.endswith(".md"):
-                    norm = norm[:-3]
-                norm = _nfc(norm)
-                tgt = "work:" + norm
-                if tgt in work_ids:
-                    cand.append(("source_ref", f.stem, tgt, {}))
-                elif (work_root / (norm + ".md")).is_file():
-                    if tgt not in stub_nodes:
-                        stub_nodes[tgt] = {"id": tgt, "type": "file",
-                                           "label": _nfc(Path(norm).stem).replace("-", " ").title(),
-                                           "domain": norm.split("/", 1)[0], "source_file": norm + ".md"}
-                        counters["source_stub"] += 1
-                    cand.append(("source_ref", f.stem, tgt, {}))
+            raw = src.strip().strip('"').strip("'")
+            if raw and not raw.startswith(("http://", "https://")):
+                if raw.startswith("work/"):
+                    raw = raw[len("work/"):]
+                raw = _nfc(raw)
+                ext = os.path.splitext(raw)[1]
+                if raw.endswith("/") or (ext and ext != ".md"):
+                    counters["source_nonmd"] += 1        # directory or non-.md target — unresolvable by design
                 else:
-                    counters["source_dead"] += 1
+                    norm = raw[:-3] if raw.endswith(".md") else raw
+                    tgt = "work:" + norm
+                    if tgt in work_ids:
+                        cand.append(("source_ref", f.stem, tgt, {}))
+                    elif set(Path(norm).parts) & WORK_SKIP_DIRS:
+                        counters["source_skiproot"] += 1  # C1: source into an excluded tree (sites/inbox/archive…)
+                    elif (work_root / (norm + ".md")).is_file():
+                        if tgt not in stub_nodes:
+                            stub_nodes[tgt] = {"id": tgt, "type": "file",
+                                               "label": _node_label(norm + ".md"),
+                                               "domain": norm.split("/", 1)[0], "source_file": norm + ".md"}
+                            counters["source_stub"] += 1
+                        cand.append(("source_ref", f.stem, tgt, {}))
+                    elif (work_root / norm).is_dir():
+                        counters["source_nonmd"] += 1     # extension-less directory
+                    else:
+                        counters["source_dead"] += 1
         for field in ("supersedes", "superseded_by"):
             val = fm.get(field)
             if val:
@@ -429,7 +449,11 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
         if cur is None:
             best[pair] = (prio, relation, src, tgt, attrs)
         else:
-            counters["collisions"] += 1
+            # C3: distinguish cross-relation precedence overrides from plain duplicates
+            if relation != cur[1]:
+                counters["collisions"] += 1
+            else:
+                counters["dup_edges"] += 1
             if prio > cur[0]:
                 best[pair] = (prio, relation, src, tgt, attrs)
     for prio, relation, src, tgt, attrs in best.values():
