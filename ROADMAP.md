@@ -1,4 +1,4 @@
-# Anchor Roadmap — Phase 3~7 (26 weeks)
+# Anchor Roadmap — Phase 3~8 (W1–W34+)
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Anchor desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
@@ -161,3 +161,21 @@ File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering pas
 - **Provenance trailer (deprecated W5→W7)** — `<!-- anchor:template ... -->` HTML comments. Replaced by proper frontmatter from Phase 4 W7 onward.
 - **Studio** — The new Phase 4 W11+ multi-step authoring surface. Distinct from "Composer" view mode in the editor (W12+ work).
 - **Finalize** — Phase 6 W21 action that pushes an approved document's markdown body + rendered artifacts (docx/hwpx/pdf) + linked evidence binaries to Hub via `POST /api/v1/documents/{id}/finalize`. After a successful finalize, the local markdown's frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`; subsequent edits create a new draft that, on re-approval, becomes version `N+1` on Hub.
+
+## 8. Vault & Knowledge Graph (Phase 8)
+
+Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020). 그래프 소스 = 듀얼(라이브 VaultEntry.links + `<vault>/reports/vault-graph.json` community 오버레이, 우아한 강등). 렌더 = GraphCanvas SVG + d3-force worker(유일 신규 의존성). 쓰기 = `write_policy: "managed"` 신설(스키마 가드 + 스냅샷, delete는 MCP 전용 유지).
+
+### 8a — V1 read-only graph (W27–W29)
+
+`"graph"` AnchorAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas+뷰포트 컬링, 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1).
+
+### 8b — V2 managed writes (W30–W32)
+
+`write_policy: "managed"` + WorkspaceSwitcher 토글, `vault_guard.rs`(validate_managed_write + vault_validate_note), EditorPane 검증 스트립 + OutlinePane frontmatter 폼(description 카운터·type/domain select·topics 칩), 스냅샷-before-write, vault/CLAUDE.md 쓰기 규칙 개정 lockstep.
+
+### 8c — V3 graph-driven (W33–W34+)
+
+NewDocumentDialog 이웃 패널, 미해소 위키링크→CreateNoteDialog, 결정 체인 타임라인 레인(`decisionChains.ts`). (보류) Hub 그래프 메타 sync — Hub 소비자 생기기 전까지 범위 외.
+
+V1은 쓰기 리스크 0으로 가치 출하, V2가 capability 모델을 바꾸고, V3는 V1+V2 프리미티브 위의 순수 프론트다.

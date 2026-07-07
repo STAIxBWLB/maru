@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, Link2, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Link2, Users, Waypoints } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "../lib/i18n";
 import {
@@ -15,6 +15,8 @@ interface NeighborhoodPaneProps {
   entries: VaultEntry[];
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingTarget?: (target: string) => void;
+  /** Opens graph mode focused on this note (maru-vault-graph-spec §2.3). */
+  onOpenGraph?: (focusNodeId?: string) => void;
 }
 
 export function NeighborhoodPane({
@@ -23,6 +25,7 @@ export function NeighborhoodPane({
   entries,
   onSelectEntry,
   onMissingTarget,
+  onOpenGraph,
 }: NeighborhoodPaneProps) {
   const { t } = useTranslation();
   // Index is stable across draftContent typing — only rebuilds when the
@@ -51,6 +54,21 @@ export function NeighborhoodPane({
     <section className="neighborhood">
       <header className="neighborhood-header">
         <h3>{t("neighborhood.title")}</h3>
+        {onOpenGraph ? (
+          <button
+            type="button"
+            className="neighborhood-graph-button"
+            onClick={() => {
+              const filename = document.relPath.split("/").pop() ?? document.relPath;
+              const stem = filename.replace(/\.(md|mdx|markdown)$/i, "").toLowerCase();
+              onOpenGraph(stem);
+            }}
+            title={t("neighborhood.openGraph")}
+          >
+            <Waypoints size={12} />
+            <span>{t("neighborhood.openGraph")}</span>
+          </button>
+        ) : null}
       </header>
 
       {data.upward.length > 0 ? (

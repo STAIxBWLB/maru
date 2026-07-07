@@ -337,6 +337,15 @@ a {
     "activity terminal terminal terminal";
 }
 
+.app-shell.graph-mode {
+  --documents-col: 0px;
+  --outline-col: 0px;
+  grid-template-areas:
+    "topbar topbar topbar topbar"
+    "activity graph graph graph"
+    "activity terminal terminal terminal";
+}
+
 .app-shell.sites-mode {
   --documents-col: 0px;
   --outline-col: 0px;

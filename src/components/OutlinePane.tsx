@@ -99,6 +99,7 @@ interface OutlinePaneProps {
   ) => Promise<void>;
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingWikilink?: (target: string) => void;
+  onOpenGraph?: (focusNodeId?: string) => void;
   fileQueue: FileQueueItem[];
   canApplyFileQueue: boolean;
   onUpdateFileQueueItem: (
@@ -218,6 +219,7 @@ export function OutlinePane({
   onUpdateField,
   onSelectEntry,
   onMissingWikilink,
+  onOpenGraph,
   fileQueue,
   canApplyFileQueue,
   onUpdateFileQueueItem,
@@ -454,6 +456,7 @@ export function OutlinePane({
                   entries={entries}
                   onSelectEntry={onSelectEntry}
                   onMissingTarget={onMissingWikilink}
+                  onOpenGraph={onOpenGraph}
                 />
               ) : null}
             </>

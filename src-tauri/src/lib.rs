@@ -46,6 +46,7 @@ mod template_fill;
 mod terminal;
 mod terminal_hooks;
 mod vault;
+mod vault_graph;
 mod vault_list;
 mod win_process;
 mod workspace;
@@ -177,6 +178,7 @@ use terminal_hooks::{
     TerminalHookWatcherState,
 };
 use vault::{default_vault_path, read_vault_cache, sample_workspace_path, scan_vault};
+use vault_graph::vault_graph_read;
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
@@ -218,6 +220,7 @@ pub fn run() {
             sample_workspace_path,
             scan_vault,
             read_vault_cache,
+            vault_graph_read,
             read_document,
             save_document,
             create_document,
