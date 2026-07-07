@@ -86,14 +86,16 @@ description: |
 
 ### 5단계 - ChatGPT Images 2.0로 페이지 이미지 생성
 
-Codex native image generation을 사용한다. 커스텀 OpenAI SDK runner를 만들지 않는다.
+Codex built-in `image_gen` 기반 native generation을 사용한다. API 키, OpenAI SDK runner, 커스텀 이미지 생성 스크립트를 기본 경로로 쓰지 않는다.
 
 1. `DESIGN.md`와 `slide_prompts.json`을 다시 읽고 slide count를 확인한다.
-2. `slide_number` 순서대로 한 장씩 생성한다.
+2. `slide_number` 순서대로 한 장씩 built-in `image_gen`으로 생성한다.
 3. 각 페이지 생성 직후 이미지를 inspect한다.
 4. major composition, header/body/footer, 텍스트 가독성, style consistency를 확인한다.
-5. 통과한 이미지를 workspace output folder에 `page_N.png`로 저장한다.
-6. 실패한 페이지는 다음 페이지로 넘어가기 전에 regenerate한다.
+5. 통과한 이미지의 실제 파일을 `$CODEX_HOME/generated_images/...` 또는 Codex native generated-image cache에서 찾는다.
+6. 선택한 cache 파일을 workspace output folder에 `page_N.png`로 복사하거나 이동한다.
+7. 복사한 `page_N.png`가 열리는 valid PNG인지 확인하고, 필요한 normalization은 해당 페이지에서 순차 처리한다.
+8. 실패한 페이지는 다음 페이지로 넘어가기 전에 regenerate한다.
 
 기본 output folder는 사용자가 지정한 폴더다. 지정이 없으면 현재 작업 위치 아래 `gpt-images-deck-output/`을 사용한다. 기존 `page_N.png`가 있으면 사용자가 regeneration을 요청한 해당 번호만 덮어쓴다.
 
