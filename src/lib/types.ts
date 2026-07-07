@@ -62,7 +62,7 @@ export type WorkspaceExternalWriter =
   | "sharepoint"
   | "nextcloud"
   | "mcp-obsidian";
-export type WorkspaceWritePolicy = "direct" | "delegated" | "readOnly";
+export type WorkspaceWritePolicy = "direct" | "delegated" | "managed" | "readOnly";
 export type ProviderPermissionSource = "manual" | "filesystem" | "api" | "unknown";
 
 export interface WorkspaceCapabilities {

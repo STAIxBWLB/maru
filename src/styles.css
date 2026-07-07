@@ -16831,3 +16831,86 @@ button.git-badge:hover {
     max-height: 40dvh;
   }
 }
+
+/* === Managed vault (Phase 8b) — schema strip · inspector form · switcher toggle === */
+
+.schema-strip {
+  padding: 4px 16px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.schema-strip.valid {
+  color: #15803d;
+  background: color-mix(in srgb, #22c55e 8%, transparent);
+}
+
+.schema-strip.invalid {
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+}
+
+.schema-strip-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.schema-strip-issues {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.inspector-select {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+}
+
+.inspector-description {
+  position: relative;
+  width: 100%;
+}
+
+.inspector-description-input {
+  width: 100%;
+  font-size: 12px;
+  padding: 4px 6px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  resize: vertical;
+}
+
+.inspector-description-count {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 10px;
+  color: var(--fg-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-description-count.over {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.workspace-menu-managed {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted, #6b7280);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 5px;
+}
+
+.workspace-menu-managed.active {
+  color: var(--accent, #4f46e5);
+  background: color-mix(in srgb, var(--accent, #4f46e5) 12%, transparent);
+}

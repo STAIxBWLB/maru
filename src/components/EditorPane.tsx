@@ -11,11 +11,13 @@ import {
   X,
 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
 import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { Button } from "./ui/Button";
 import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
@@ -76,6 +78,9 @@ interface EditorPaneProps {
   onViewModeChange: (mode: EditorViewMode) => void;
   onWikilinkClick: (target: string) => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** Managed vault note (write_policy managed + notes/**\/*.md) — arms the
+   *  schema validation strip (maru-vault-graph-spec §3 F1). */
+  isManagedVaultNote?: boolean;
 }
 
 export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
@@ -121,6 +126,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onViewModeChange,
     onWikilinkClick,
     textareaRef,
+    isManagedVaultNote,
   },
   ref,
 ) {
@@ -128,6 +134,28 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const stats = documentStats(document, draftContent);
   const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const taRef = textareaRef ?? localTextareaRef;
+
+  // Managed-vault schema strip: debounce the draft 500ms → vault_validate_note
+  // (spec §3 F1). Only armed for managed notes/**/*.md.
+  const debouncedDraft = useDebouncedValue(draftContent, 500);
+  const [schemaReport, setSchemaReport] = useState<VaultSchemaReport | null>(null);
+  useEffect(() => {
+    if (!isManagedVaultNote || !document) {
+      setSchemaReport(null);
+      return;
+    }
+    let cancelled = false;
+    vaultValidateNote(debouncedDraft, document.relPath)
+      .then((report) => {
+        if (!cancelled) setSchemaReport(report);
+      })
+      .catch(() => {
+        if (!cancelled) setSchemaReport(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isManagedVaultNote, document, debouncedDraft]);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -431,6 +459,28 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           </button>
         </div>
       </header>
+
+      {schemaReport ? (
+        <div
+          className={schemaReport.valid ? "schema-strip valid" : "schema-strip invalid"}
+          data-testid="schema-strip"
+          role="status"
+        >
+          {schemaReport.valid ? (
+            <span className="schema-strip-ok">
+              <Check size={12} /> {t("editor.schema.ok")}
+            </span>
+          ) : (
+            <ul className="schema-strip-issues">
+              {schemaReport.issues.map((issue) => (
+                <li key={`${issue.field}:${issue.code}`}>
+                  <strong>{issue.field}</strong> — {issue.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
 
       {bodyOverride ? (
         <div className="editor-body editor-body--override">{bodyOverride}</div>
