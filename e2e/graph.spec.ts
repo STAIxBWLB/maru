@@ -79,3 +79,29 @@ test("type filter narrows nodes and node click opens the note in pkm", async ({ 
 
   expect(forbidden).toEqual([]);
 });
+
+test("ghost node click seeds the note-creation dialog (F3b) and chain view toggles (F3c)", async ({
+  page,
+}) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Decision-chain view — mock vault has no decisions → empty lanes message.
+  await page.getByTestId("graph-chain-toggle").click();
+  await expect(page.getByTestId("decision-chains")).toBeVisible();
+  await expect(page.getByText("supersedes 연결이 있는 결정이 없습니다")).toBeVisible();
+  await page.getByTestId("graph-chain-toggle").click();
+
+  // Ghost click → NewDocumentDialog opens seeded with the unresolved target.
+  await page.getByLabel("미해소 링크 표시").check();
+  await expect(page.locator(".graph-node.ghost circle")).toHaveCount(1);
+  await page.locator(".graph-node.ghost circle").click();
+  const dialog = page.locator(".dialog-content", { hasText: "새 Anchor 문서" });
+  await expect(dialog).toBeVisible();
+  // Seeded with the unresolved wikilink target as the title prefill.
+  await expect(dialog.getByRole("textbox").first()).toHaveValue(/Anchor Project/i);
+
+  expect(forbidden).toEqual([]);
+});

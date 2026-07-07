@@ -19,6 +19,7 @@ import type {
 import { useTranslation } from "../../lib/i18n";
 import type { VaultEntry } from "../../lib/types";
 import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
+import { DecisionChainLanes } from "./DecisionChainLanes";
 import { GraphCanvas, nodeRadius } from "./GraphCanvas";
 import {
   DEFAULT_GRAPH_FILTERS,
@@ -32,6 +33,8 @@ interface GraphViewProps {
   focusNodeId: string | null;
   onClearFocus: () => void;
   onOpenEntry: (entry: VaultEntry) => void;
+  /** Ghost (unresolved wikilink) click → note-creation flow (F3(b)). */
+  onCreateNote?: (target: string) => void;
   onError: (message: string) => void;
 }
 
@@ -41,9 +44,11 @@ export function GraphView({
   focusNodeId,
   onClearFocus,
   onOpenEntry,
+  onCreateNote,
   onError,
 }: GraphViewProps) {
   const { t } = useTranslation();
+  const [chainView, setChainView] = useState(false);
   const [filters, setFilters] = useState<GraphFilters>(DEFAULT_GRAPH_FILTERS);
   const [search, setSearch] = useState("");
   const [enrichment, setEnrichment] = useState<{
@@ -169,15 +174,17 @@ export function GraphView({
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
       if (node.type === "unresolved") {
-        // Ghost → note creation lands in V3 (8c); hint only for V1.
-        onError(t("graph.hint.ghostNode"));
+        // Ghost → seed the note-creation dialog with the unresolved target
+        // (F3(b) — README future-work 4 해소).
+        if (onCreateNote) onCreateNote(node.label);
+        else onError(t("graph.hint.ghostNode"));
         return;
       }
       if (!node.relPath) return;
       const entry = entries.find((e) => e.relPath === node.relPath);
       if (entry) onOpenEntry(entry);
     },
-    [entries, onOpenEntry, onError],
+    [entries, onOpenEntry, onCreateNote, onError, t],
   );
 
   const searchMatch = useMemo(() => {
@@ -207,10 +214,21 @@ export function GraphView({
             {t("graph.focus.exit")}: {focusNodeId}
           </button>
         ) : null}
+        <button
+          type="button"
+          className={chainView ? "graph-chip active" : "graph-chip"}
+          data-testid="graph-chain-toggle"
+          onClick={() => setChainView((value) => !value)}
+        >
+          {t("graph.decisions.toggle")}
+        </button>
         <span className="graph-stats">
           {filtered.nodes.length} · {filtered.edges.length}
         </span>
       </header>
+      {chainView ? (
+        <DecisionChainLanes model={model} onNodeClick={handleNodeClick} />
+      ) : (
       <div className="graph-body">
         <GraphFilterPanel
           filters={filters}
@@ -239,6 +257,7 @@ export function GraphView({
           onNodeUnpin={(nodeIndex) => post({ type: "unpin", index: nodeIndex })}
         />
       </div>
+      )}
     </div>
   );
 }

@@ -206,3 +206,132 @@
   color: var(--accent, #4f46e5);
   border-color: var(--accent, #4f46e5);
 }
+
+/* === F3(c) decision-chain lanes === */
+
+.decision-chains {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+  padding: 12px 16px;
+  overflow: auto;
+}
+
+.decision-chains h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--fg-muted, #6b7280);
+}
+
+.decision-chains-lanes {
+  flex: 1;
+  min-width: 0;
+}
+
+.decision-lane {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line-soft, #e5e7eb);
+  overflow-x: auto;
+}
+
+.decision-lane-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.decision-lane-arrow {
+  color: var(--fg-muted, #9ca3af);
+  flex-shrink: 0;
+}
+
+.decision-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft, #d1d5db);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+}
+
+.decision-chip:hover {
+  border-color: var(--accent, #4f46e5);
+}
+
+.decision-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.decision-chip-date {
+  font-size: 9px;
+  color: var(--fg-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.decision-chains-rail {
+  width: 260px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--line-soft, #e5e7eb);
+  padding-left: 16px;
+  overflow-y: auto;
+}
+
+.decision-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decision-chains-empty {
+  font-size: 12px;
+  color: var(--fg-muted, #6b7280);
+}
+
+/* === F3(a) new-document related-context panel === */
+
+.new-doc-related {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.new-doc-related-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted, #6b7280);
+  white-space: nowrap;
+  padding-top: 3px;
+}
+
+.new-doc-related-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* === F3(b) unresolved wikilink marking (preview surface) === */
+
+.preview-surface a.wikilink.wikilink-missing {
+  color: #b91c1c;
+  text-decoration: underline dotted #ef4444;
+  text-underline-offset: 3px;
+}
