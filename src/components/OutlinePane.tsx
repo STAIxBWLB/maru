@@ -100,6 +100,9 @@ interface OutlinePaneProps {
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingWikilink?: (target: string) => void;
   onOpenGraph?: (focusNodeId?: string) => void;
+  /** Managed vault note — swaps the free-form type input for the schema form
+   *  (description 카운터·type/domain select·topics 칩, spec §3 F1). */
+  isManagedVaultNote?: boolean;
   fileQueue: FileQueueItem[];
   canApplyFileQueue: boolean;
   onUpdateFileQueueItem: (
@@ -220,6 +223,7 @@ export function OutlinePane({
   onSelectEntry,
   onMissingWikilink,
   onOpenGraph,
+  isManagedVaultNote,
   fileQueue,
   canApplyFileQueue,
   onUpdateFileQueueItem,
@@ -299,6 +303,23 @@ export function OutlinePane({
   const tagList: string[] = Array.isArray(fmTags)
     ? (fmTags as unknown[]).filter((tag): tag is string => typeof tag === "string")
     : [];
+  // Managed vault schema fields (spec §3 F1).
+  const fmDescription = frontmatterScalar(meta, "description") ?? "";
+  const fmDomain = frontmatterScalar(meta, "domain");
+  const fmTopics = (meta as Record<string, unknown>)["topics"];
+  const topicsList: string[] = Array.isArray(fmTopics)
+    ? (fmTopics as unknown[]).filter((item): item is string => typeof item === "string")
+    : [];
+  // MOC-first suggestions for the topics chips.
+  const mocStems = useMemo(
+    () =>
+      entries
+        .filter((entry) => frontmatterScalar(entry.frontmatter, "type") === "moc")
+        .map((entry) => (entry.relPath.split("/").pop() ?? "").replace(/\.md$/i, ""))
+        .filter(Boolean)
+        .sort(),
+    [entries],
+  );
 
   // Distinct types observed in this workspace, used to seed type-input suggestions.
   const observedTypes = useMemo(() => {
@@ -534,16 +555,72 @@ export function OutlinePane({
                 <h3>{t("inspector.title")}</h3>
               </div>
 
-              <InspectorRow label="type">
-                <ComboInput
-                  value={fmType ?? ""}
-                  suggestions={observedTypes}
-                  onCommit={(next) => onUpdateField("type", next || null)}
-                  placeholder={t("inspector.empty")}
-                  datalistId="anchor-type-list"
-                  readOnly={readOnly}
-                />
-              </InspectorRow>
+              {isManagedVaultNote ? (
+                <>
+                  <InspectorRow label="description">
+                    <DescriptionInput
+                      value={fmDescription}
+                      readOnly={readOnly}
+                      onCommit={(next) => onUpdateField("description", next || null)}
+                    />
+                  </InspectorRow>
+                  <InspectorRow label="type">
+                    <select
+                      className="inspector-select"
+                      value={fmType ?? ""}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        void onUpdateField("type", event.target.value || null)
+                      }
+                    >
+                      <option value="">{t("inspector.empty")}</option>
+                      {VAULT_NOTE_TYPES.map((noteType) => (
+                        <option key={noteType} value={noteType}>
+                          {noteType}
+                        </option>
+                      ))}
+                    </select>
+                  </InspectorRow>
+                  <InspectorRow label="domain">
+                    <select
+                      className="inspector-select"
+                      value={fmDomain ?? ""}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        void onUpdateField("domain", event.target.value || null)
+                      }
+                    >
+                      <option value="">{t("inspector.empty")}</option>
+                      {VAULT_NOTE_DOMAINS.map((domain) => (
+                        <option key={domain} value={domain}>
+                          {domain}
+                        </option>
+                      ))}
+                    </select>
+                  </InspectorRow>
+                  <InspectorRow label="topics">
+                    <TopicsInput
+                      value={topicsList}
+                      suggestions={mocStems}
+                      readOnly={readOnly}
+                      onCommit={(next) =>
+                        onUpdateField("topics", next.length === 0 ? null : next)
+                      }
+                    />
+                  </InspectorRow>
+                </>
+              ) : (
+                <InspectorRow label="type">
+                  <ComboInput
+                    value={fmType ?? ""}
+                    suggestions={observedTypes}
+                    onCommit={(next) => onUpdateField("type", next || null)}
+                    placeholder={t("inspector.empty")}
+                    datalistId="anchor-type-list"
+                    readOnly={readOnly}
+                  />
+                </InspectorRow>
+              )}
 
               <InspectorRow label="status">
                 <ComboInput
@@ -1411,6 +1488,134 @@ function ComboInput({
         </datalist>
       ) : null}
     </>
+  );
+}
+
+// V2 schema contract — mirrors src-tauri/src/vault_guard.rs.
+const VAULT_NOTE_TYPES = [
+  "insight", "decision", "observation", "person",
+  "project", "method", "moc", "reference",
+] as const;
+const VAULT_NOTE_DOMAINS = [
+  "research", "projects", "teaching", "operations", "people", "ai-practice",
+] as const;
+const DESCRIPTION_MAX = 200;
+
+interface DescriptionInputProps {
+  value: string;
+  readOnly?: boolean;
+  onCommit: (next: string) => void | Promise<void>;
+}
+
+/** description textarea with the 200-char counter (spec §3 F1). Commits on
+ *  blur through update_frontmatter_field like every inspector editor. */
+function DescriptionInput({ value, readOnly = false, onCommit }: DescriptionInputProps) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  const count = [...draft].length;
+  return (
+    <div className="inspector-description">
+      <textarea
+        className="inspector-description-input"
+        value={draft}
+        rows={3}
+        maxLength={DESCRIPTION_MAX * 2}
+        disabled={readOnly}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft !== value) void onCommit(draft.trim());
+        }}
+      />
+      <span
+        className={
+          count > DESCRIPTION_MAX
+            ? "inspector-description-count over"
+            : "inspector-description-count"
+        }
+      >
+        {count}/{DESCRIPTION_MAX}
+      </span>
+    </div>
+  );
+}
+
+interface TopicsInputProps {
+  value: string[];
+  suggestions: string[];
+  readOnly?: boolean;
+  onCommit: (next: string[]) => void | Promise<void>;
+}
+
+/** topics chips — values are `[[MOC]]` wikilinks; suggestions list MOC stems
+ *  first (native datalist). Enter/comma adds, Backspace removes the last. */
+function TopicsInput({ value, suggestions, readOnly = false, onCommit }: TopicsInputProps) {
+  const [topics, setTopics] = useState<string[]>(value);
+  const [draft, setDraft] = useState("");
+  useEffect(() => {
+    setTopics(value);
+  }, [value]);
+
+  function applyNext(next: string[]) {
+    if (readOnly) return;
+    setTopics(next);
+    void onCommit(next);
+  }
+
+  function pushTopic() {
+    const cleaned = draft.trim().replace(/^\[\[/, "").replace(/\]\]$/, "");
+    if (!cleaned) return;
+    const wikilink = `[[${cleaned}]]`;
+    if (topics.includes(wikilink)) {
+      setDraft("");
+      return;
+    }
+    applyNext([...topics, wikilink]);
+    setDraft("");
+  }
+
+  return (
+    <div className="tag-chips">
+      {topics.map((topic) => (
+        <span key={topic} className="tag-chip">
+          {topic.replace(/^\[\[/, "").replace(/\]\]$/, "")}
+          <button
+            type="button"
+            className="tag-chip-x"
+            aria-label={`remove ${topic}`}
+            title={`remove ${topic}`}
+            disabled={readOnly}
+            onClick={() => applyNext(topics.filter((item) => item !== topic))}
+          >
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+      <input
+        className="tag-chip-input"
+        value={draft}
+        list="anchor-topics-moc-list"
+        onChange={(event) => setDraft(event.target.value)}
+        disabled={readOnly}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === ",") {
+            event.preventDefault();
+            pushTopic();
+          } else if (event.key === "Backspace" && draft === "" && topics.length > 0) {
+            event.preventDefault();
+            applyNext(topics.slice(0, -1));
+          }
+        }}
+        onBlur={pushTopic}
+        placeholder={topics.length === 0 ? "[[moc]]" : "+"}
+      />
+      <datalist id="anchor-topics-moc-list">
+        {suggestions.map((stem) => (
+          <option key={stem} value={stem} />
+        ))}
+      </datalist>
+    </div>
   );
 }
 

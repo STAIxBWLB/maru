@@ -407,6 +407,28 @@ export async function readVaultCache(vaultPath: string): Promise<VaultEntry[] | 
   return invoke<VaultEntry[] | null>("read_vault_cache", { vaultPath });
 }
 
+export interface VaultSchemaIssue {
+  field: string;
+  code: string;
+  message: string;
+}
+
+export interface VaultSchemaReport {
+  valid: boolean;
+  issues: VaultSchemaIssue[];
+}
+
+/** Stateless frontmatter schema check for managed-vault notes (V2 contract:
+ *  description ≤200 · type 8종 · domain 6종 · topics wikilink 배열). Paths
+ *  outside notes/**\/*.md always report valid. */
+export async function vaultValidateNote(
+  content: string,
+  relPath: string,
+): Promise<VaultSchemaReport> {
+  if (!isTauri()) return { valid: true, issues: [] };
+  return invoke<VaultSchemaReport>("vault_validate_note", { content, relPath });
+}
+
 /** Community-overlay JSON (`<workspace>/reports/vault-graph.json`, built by
  *  the weekly /vault-graph ritual). null = absent or unavailable — the graph
  *  mode degrades to the live layer. Corrupt file rejects with the reason. */

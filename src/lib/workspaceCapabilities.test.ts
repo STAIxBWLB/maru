@@ -87,6 +87,24 @@ describe("workspace capability helpers", () => {
     expect(workspaceCan(entry, "modify")).toBe(false);
   });
 
+  it("managed policy grants create+modify but not delete/renameMove, despite externalWriter", () => {
+    // Mirrors vault_list.rs::compute_permission_summary (spec §5.3 matrix).
+    const entry = workspace({
+      visibility: "public",
+      provider: "obsidian",
+      externalWriter: "mcp-obsidian",
+      writePolicy: "managed",
+    });
+
+    const caps = workspaceCapabilities(entry);
+    expect(caps.canRead).toBe(true);
+    expect(caps.canCreate).toBe(true);
+    expect(caps.canModify).toBe(true);
+    expect(caps.canDelete).toBe(false); // delete stays MCP-only
+    expect(caps.canRenameMove).toBe(false); // out of V2 scope
+    expect(workspaceWriteStatus(entry)).toBe("limited");
+  });
+
   it("treats stale public provider summaries as read-only", () => {
     const entry = workspace({
       visibility: "public",

@@ -286,6 +286,7 @@ import type {
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
+  WorkspaceWritePolicy,
 } from "./lib/types";
 import {
   isSameParentMove,
@@ -3989,6 +3990,22 @@ function MainApp() {
     }
   }, []);
 
+  const handleSetWorkspaceWritePolicy = useCallback(
+    async (path: string, policy: WorkspaceWritePolicy) => {
+      const existing = workspaceRegistry.workspaces.find((w) => w.path === path);
+      if (!existing) return;
+      try {
+        // add_workspace_root upserts by path — the registry normalization
+        // keeps "managed" intact (vault_list.rs, spec §2.4).
+        const registry = await addWorkspaceRoot({ ...existing, writePolicy: policy });
+        setWorkspaceRegistry(registry);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [workspaceRegistry],
+  );
+
   const handleRemoveWorkspace = useCallback(
     async (path: string) => {
       const confirmation = window.confirm(`${path}\n\n${t("workspace.remove.confirm")}`);
@@ -6626,6 +6643,11 @@ function MainApp() {
         : editorTabSummaries;
     const docTab = isBinaryTab(tab) ? null : (tab as EditorTab | null);
     const binaryTab = isBinaryTab(tab) ? (tab as BinaryTab) : null;
+    const isManagedVaultNote = Boolean(
+      workspace?.writePolicy === "managed" &&
+        docTab?.document.relPath.startsWith("notes/") &&
+        docTab.document.relPath.toLowerCase().endsWith(".md"),
+    );
     const binaryBody = binaryTab ? (
       <BinaryViewerPane
         entry={binaryTab.fileEntry}
@@ -6651,6 +6673,7 @@ function MainApp() {
         readOnly={!caps.canModify || Boolean(binaryTab)}
         canSnapshot={caps.canCreate && !binaryTab}
         readOnlyReason={readOnlyReason}
+        isManagedVaultNote={isManagedVaultNote}
         viewMode={editorViewMode}
         tabs={groupTabs}
         activeTabId={tabId}
@@ -6741,6 +6764,7 @@ function MainApp() {
             onAddWorkspace={openAddWorkspaceDialog}
             onRemoveWorkspace={handleRemoveWorkspace}
             onRefreshCapabilities={handleRefreshWorkspaceCapabilities}
+            onSetWritePolicy={handleSetWorkspaceWritePolicy}
             onUseSample={useSampleWorkspace}
           />
           <GitStatusBadge
@@ -7379,6 +7403,11 @@ function MainApp() {
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}
             onOpenGraph={openGraphMode}
+            isManagedVaultNote={Boolean(
+              activeDocumentWorkspace?.writePolicy === "managed" &&
+                document?.relPath.startsWith("notes/") &&
+                document.relPath.toLowerCase().endsWith(".md"),
+            )}
             fileQueue={fileQueue}
             canApplyFileQueue={canApplyFileQueue}
             onUpdateFileQueueItem={updateFileQueueItem}

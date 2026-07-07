@@ -1,7 +1,7 @@
-import { Check, ChevronDown, FolderOpen, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, FolderOpen, PenLine, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../lib/i18n";
-import type { WorkspaceRegistry, WorkspaceVisibility } from "../lib/types";
+import type { WorkspaceRegistry, WorkspaceVisibility, WorkspaceWritePolicy } from "../lib/types";
 import {
   providerLabel,
   workspaceWriteStatus,
@@ -15,6 +15,8 @@ interface WorkspaceSwitcherProps {
   onAddWorkspace: (visibility: WorkspaceVisibility) => void;
   onRemoveWorkspace: (path: string) => void;
   onRefreshCapabilities: (path: string) => void;
+  /** Managed-write opt-in toggle (obsidian vaults only — spec §2.4). */
+  onSetWritePolicy?: (path: string, policy: WorkspaceWritePolicy) => void;
   onUseSample: () => void;
 }
 
@@ -26,6 +28,7 @@ export function WorkspaceSwitcher({
   onAddWorkspace,
   onRemoveWorkspace,
   onRefreshCapabilities,
+  onSetWritePolicy,
   onUseSample,
 }: WorkspaceSwitcherProps) {
   const { t } = useTranslation();
@@ -124,6 +127,30 @@ export function WorkspaceSwitcher({
                         <em>{t(`workspace.writeStatus.${workspaceWriteStatus(workspace)}`)}</em>
                       </div>
                     </div>
+                    {onSetWritePolicy && workspace.provider === "obsidian" ? (
+                      <button
+                        type="button"
+                        className={
+                          workspace.writePolicy === "managed"
+                            ? "workspace-menu-managed active"
+                            : "workspace-menu-managed"
+                        }
+                        title={t("workspace.managedToggle")}
+                        aria-label={t("workspace.managedToggle.label", {
+                          label: workspace.label,
+                        })}
+                        aria-pressed={workspace.writePolicy === "managed"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSetWritePolicy(
+                            workspace.path,
+                            workspace.writePolicy === "managed" ? "delegated" : "managed",
+                          );
+                        }}
+                      >
+                        <PenLine size={13} />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="workspace-menu-refresh"

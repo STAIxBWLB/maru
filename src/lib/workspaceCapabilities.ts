@@ -44,10 +44,24 @@ export type WorkspaceAction =
   | "share"
   | "manageMembers";
 
+/** Managed vault (maru-vault-graph-spec §2.4): create+modify through the
+ *  Rust vault_guard schema gate; delete stays MCP-only, rename/move out of
+ *  V2 scope. Mirrors vault_list.rs::compute_permission_summary. */
+export const MANAGED_CAPABILITIES: WorkspaceCapabilities = {
+  canRead: true,
+  canCreate: true,
+  canModify: true,
+  canDelete: false,
+  canRenameMove: false,
+  canShare: false,
+  canManageMembers: false,
+};
+
 export function workspaceCapabilities(
   workspace: WorkspaceRootEntry | null | undefined,
 ): WorkspaceCapabilities {
   if (!workspace) return EMPTY_CAPABILITIES;
+  if (workspace.writePolicy === "managed") return MANAGED_CAPABILITIES;
   if (workspace.writePolicy === "readOnly" || workspace.writePolicy === "delegated") {
     return READONLY_CAPABILITIES;
   }
@@ -115,6 +129,8 @@ export function writePolicyLabel(policy: WorkspaceWritePolicy | string | null | 
       return "Direct";
     case "delegated":
       return "Delegated";
+    case "managed":
+      return "Managed";
     case "readOnly":
       return "Read-only";
     default:

@@ -1,6 +1,7 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
+use crate::vault_guard::{is_managed_root, validate_managed_write};
 use crate::vault_list::{assert_anchor_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -112,7 +113,25 @@ pub fn save_document(
     content: String,
 ) -> Result<DocumentPayload, String> {
     assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
+    validate_managed_write(&vault_path, &document_path, &content)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
+    // Managed roots snapshot the on-disk content before every overwrite
+    // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
+    if is_managed_root(&vault_path) && path.is_file() {
+        if let Ok(previous) = fs::read_to_string(&path) {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("document");
+            write_version_snapshot(
+                &vault_path,
+                &document_path,
+                stem,
+                &previous,
+                "managed-write auto snapshot",
+            )?;
+        }
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create parent directory: {err}"))?;
@@ -138,6 +157,20 @@ pub fn update_frontmatter_field(
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
+        validate_managed_write(&vault_path, &document_path, &updated)?;
+        if is_managed_root(&vault_path) {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("document");
+            write_version_snapshot(
+                &vault_path,
+                &document_path,
+                stem,
+                &original,
+                "managed-write auto snapshot",
+            )?;
+        }
         fs::write(&path, &updated).map_err(|err| format!("Cannot save document: {err}"))?;
     }
     read_document(vault_path, path.to_string_lossy().to_string())
@@ -243,6 +276,7 @@ pub fn create_document(
 
     let body_with_heading = format!("# {title}\n\n{body}\n");
     let content = build_frontmatter(&fields, &body_with_heading);
+    validate_managed_write(&vault_path, &rel_path, &content)?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -331,6 +365,12 @@ pub fn duplicate_document(
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     ensure_existing_document(&source_path)?;
     let target_path = unique_duplicate_path(&source_path);
+    if is_managed_root(&vault_path) {
+        let vault = resolve_inside_vault(&vault_path, ".")?;
+        let content = fs::read_to_string(&source_path)
+            .map_err(|err| format!("Cannot read document: {err}"))?;
+        validate_managed_write(&vault_path, &relative(&target_path, &vault), &content)?;
+    }
     fs::copy(&source_path, &target_path)
         .map_err(|err| format!("Cannot duplicate document: {err}"))?;
     read_document(vault_path, target_path.to_string_lossy().to_string())
@@ -451,8 +491,22 @@ pub fn create_version(
     summary: String,
 ) -> Result<VersionSnapshot, String> {
     assert_anchor_can_write(&vault_path, WorkspaceWriteAction::Create)?;
-    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
-    let vault = resolve_inside_vault(&vault_path, ".")?;
+    write_version_snapshot(&vault_path, &document_path, &title, &content, &summary)
+}
+
+/// Snapshot-writing body of create_version, shared with the managed-write
+/// path (which snapshots the on-disk content before every overwrite —
+/// maru-vault-graph-spec §2.4 가드 불변식). No capability assert here; the
+/// command wrapper and the managed gate each own their own checks.
+pub(crate) fn write_version_snapshot(
+    vault_path: &str,
+    document_path: &str,
+    title: &str,
+    content: &str,
+    summary: &str,
+) -> Result<VersionSnapshot, String> {
+    let source_path = resolve_inside_vault(vault_path, document_path)?;
+    let vault = resolve_inside_vault(vault_path, ".")?;
     let stem = source_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -465,9 +519,9 @@ pub fn create_version(
     let version_path = version_dir.join(file_name);
 
     let body = if content.trim_start().starts_with("---\n") {
-        parse_frontmatter(&content).body
+        parse_frontmatter(content).body
     } else {
-        content
+        content.to_string()
     };
     let snapshot_title = format!("{title} - {}", timestamp.format("%Y.%m.%d %H:%M"));
 
@@ -478,7 +532,7 @@ pub fn create_version(
             "version_of",
             FrontmatterValue::String(relative(&source_path, &vault)),
         ),
-        ("summary", FrontmatterValue::String(summary)),
+        ("summary", FrontmatterValue::String(summary.to_string())),
         (
             "created_at",
             FrontmatterValue::String(timestamp.to_rfc3339()),

@@ -221,7 +221,7 @@ fn save_registry_at(path: &Path, registry: &WorkspaceRegistry) -> Result<(), Str
     fs::write(path, json).map_err(|e| format!("Failed to write workspace list: {e}"))
 }
 
-fn load_registry() -> Result<WorkspaceRegistry, String> {
+pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
@@ -285,6 +285,11 @@ fn provider_from_external_writer(writer: &Option<String>) -> Option<String> {
 }
 
 fn normalize_write_policy(value: &str, external_writer: &Option<String>) -> String {
+    // "managed" survives an external_writer (maru-vault-graph-spec §2.4):
+    // Anchor writes through the schema guard while MCP remains a co-writer.
+    if value == "managed" {
+        return "managed".to_string();
+    }
     if external_writer.is_some() {
         return "delegated".to_string();
     }
@@ -309,7 +314,10 @@ fn normalize_registry(registry: &mut WorkspaceRegistry) {
         entry.permission_summary = Some(compute_permission_summary(entry, false));
         if entry.provider == "obsidian" && entry.external_writer.is_none() {
             entry.external_writer = Some("mcp-obsidian".to_string());
-            entry.write_policy = "delegated".to_string();
+            // The managed opt-in (WorkspaceSwitcher toggle) is not demoted.
+            if entry.write_policy != "managed" {
+                entry.write_policy = "delegated".to_string();
+            }
             entry.permission_summary = Some(compute_permission_summary(entry, false));
         }
     }
@@ -591,7 +599,20 @@ fn compute_permission_summary(
         capabilities = WorkspaceCapabilities::read_only(local_caps.can_read);
         warning = Some("Capabilities are stale; refresh before direct writes.".to_string());
     }
-    if entry.write_policy == "readOnly"
+    if entry.write_policy == "managed" {
+        // Managed vault (maru-vault-graph-spec §2.4 / capability matrix §5.3):
+        // create + modify through the vault_guard schema gate; delete stays
+        // MCP-only, rename/move out of V2 scope.
+        capabilities = WorkspaceCapabilities {
+            can_read: local_caps.can_read,
+            can_create: true,
+            can_modify: true,
+            can_delete: false,
+            can_rename_move: false,
+            can_share: false,
+            can_manage_members: false,
+        };
+    } else if entry.write_policy == "readOnly"
         || entry.write_policy == "delegated"
         || entry.external_writer.is_some()
     {
@@ -842,6 +863,48 @@ mod tests {
         assert!(summary.capabilities.can_read);
         assert!(!summary.capabilities.can_modify);
         assert!(!summary.capabilities.can_create);
+    }
+
+    #[test]
+    fn managed_policy_grants_create_modify_but_not_delete_or_move() {
+        // maru-vault-graph-spec §5.3 capability matrix: managed keeps its
+        // write caps even with an external_writer (MCP becomes a co-writer).
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.external_writer = Some("mcp-obsidian".to_string());
+        workspace.write_policy = "managed".to_string();
+        workspace.provider = "obsidian".to_string();
+
+        let summary = compute_permission_summary(&workspace, false);
+
+        assert!(summary.capabilities.can_read);
+        assert!(summary.capabilities.can_create);
+        assert!(summary.capabilities.can_modify);
+        assert!(!summary.capabilities.can_delete, "delete stays MCP-only");
+        assert!(!summary.capabilities.can_rename_move, "rename/move out of V2 scope");
+    }
+
+    #[test]
+    fn managed_policy_survives_registry_normalization() {
+        // normalize_write_policy must not demote managed to delegated, and
+        // normalize_registry's obsidian branch must not force delegated.
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut workspace = entry("Public", &dir.path().to_string_lossy(), "public");
+        workspace.write_policy = "managed".to_string();
+        workspace.provider = "obsidian".to_string();
+
+        let mut registry = WorkspaceRegistry {
+            workspaces: vec![workspace],
+            ..Default::default()
+        };
+        normalize_registry(&mut registry);
+
+        let entry = &registry.workspaces[0];
+        assert_eq!(entry.write_policy, "managed");
+        assert_eq!(entry.external_writer.as_deref(), Some("mcp-obsidian"));
+        let caps = &entry.permission_summary.as_ref().unwrap().capabilities;
+        assert!(caps.can_create && caps.can_modify);
+        assert!(!caps.can_delete && !caps.can_rename_move);
     }
 
     #[test]
