@@ -38,6 +38,8 @@ Knowledge graph build, query, report, and Graphify MCP setup for vault notes and
 - **build**: Run community detection + analysis pipeline. Outputs:
   - `vault/reports/vault-graph.json` (NetworkX graph)
   - `vault/reports/graph-report-YYMMDD.md` (audit report)
+- **build --workspace**: Add the work operational layer → `vault/reports/workspace-graph.json` (vault-graph.json untouched; no report written). See below.
+- **neighbors [note]**: 1-hop neighborhood + community of a note from `vault-graph.json` (jq, no build).
 - **report**: Read the latest graph report (if < 7 days old)
 - **communities**: List detected communities from latest build
 - **surprises**: List cross-community surprising connections
@@ -48,11 +50,13 @@ Knowledge graph build, query, report, and Graphify MCP setup for vault notes and
 Options:
 - `--vault`: build `<vault.path>` in wiki mode
 - `--code <path>`: build a code repository in AST mode
+- `--workspace`: build the vault wiki layer **plus** the work operational layer (DR-019 §2) → `workspace-graph.json`
 - `<target>`: auto-detect wiki/code mode from a target directory
 
 1. Resolve target and mode:
    - `--vault` → `<vault.path>`, `--mode wiki`
    - `--code <path>` → `<path>`, `--mode code`
+   - `--workspace` → `<vault.path>` (target) + `--work-root <workspace-root>`, `--mode wiki`
    - no option → current directory, `--mode auto`
 2. For code mode, ensure `.graphifyignore` exists. If missing, offer to copy `<workspace-root>/_sys/templates/graphifyignore`.
 3. Execute:
@@ -60,15 +64,33 @@ Options:
    ~/.anchor/skills/vault-graph/scripts/run.sh \
      ~/.anchor/skills/_builtin/lib/build-graph.py \
      --target <path> --mode <wiki|code|auto>
+   # --workspace adds the second layer (vault-graph.json is NOT touched):
+   ~/.anchor/skills/vault-graph/scripts/run.sh \
+     ~/.anchor/skills/_builtin/lib/build-graph.py \
+     --target <vault.path> --work-root <workspace-root>
    ```
 4. Pipeline: read notes/code → extract graph → build NetworkX graph → Leiden/Louvain community detection → god node analysis → surprising connections → report.
 5. Outputs:
    - vault: `<vault.path>/reports/vault-graph.json`, `<vault.path>/reports/graph-report-YYMMDD.md`
+   - workspace: `<vault.path>/reports/workspace-graph.json` (report suppressed — DR-023 §6; counts printed to stdout)
    - code: `<target>/graphify-out/graph.json`, `<target>/graphify-out/graph-report-YYMMDD.md`
 6. For vault builds, append `GRAPH` event to `vault/log.md` via Obsidian MCP:
    ```
    YYYY-MM-DD HH:MM  GRAPH  -  vault/reports/graph-report-YYMMDD.md  — N notes, M communities, K surprises
    ```
+   The weekly ritual builds **both** layers (DR-019 §5): plain vault build, then `--workspace`, each logged. Order: build×2 → lint → vault push → work pointer bump.
+
+## Neighbors Process (`/vault-graph neighbors <note>`)
+
+1-hop neighborhood + community of a note, read directly from `vault-graph.json` (no rebuild, no new lib — DR-019 §4). Used by context-enrichment §3 Graph Neighborhood injection.
+
+```bash
+jq --arg id "<stem>" '{node: (.nodes[]|select(.id==$id)),
+  neighbors: [(.edges // .links)[]|select(.source==$id or .target==$id)]}' \
+  <vault.path>/reports/vault-graph.json
+```
+
+Report the node's `community`, its degree-ranked neighbors (≤10), and same-community co-members. If the graph is missing or its `graph-report` is > 7 days old, skip and surface the staleness (never block).
 
 ## Report Process (`/vault-graph report [target]`)
 

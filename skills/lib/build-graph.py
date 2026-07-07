@@ -25,7 +25,8 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 
 import networkx as nx
@@ -40,6 +41,34 @@ CODE_EXTENSIONS = {
     ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".c", ".cpp",
     ".h", ".hpp", ".cs", ".kt", ".rb", ".php", ".swift", ".lua", ".zig",
     ".ex", ".exs", ".jl", ".scala", ".m", ".ps1", ".vue", ".svelte",
+}
+
+# ── Workspace (--work-root) constants — DR-023 ─────────────────────────
+# Keep aligned with migrate_tree.py SKIP_DIRS (work repo, _meta/scripts/).
+# Cross-repo import is impossible (this file ships in the anchor app bundle),
+# so the set is replicated literally. If migrate_tree.py SKIP_DIRS changes,
+# update this too. Additions beyond that set (DR-023 §2): inbox/sites/dev
+# (submodules + runtime), shared (share-outbox staging), _templates/templates
+# (scaffold dirs). Files whose frontmatter contains "{{" are template stubs
+# and are skipped separately (avoids minting bu:{{bu}} hubs).
+WORK_SKIP_DIRS = {
+    ".git", "node_modules", ".venv", ".sync-conflicts", "temp", ".anchor",
+    ".pnpm-store", ".conductor", ".dotfiles", ".omx", ".omc", ".gstack",
+    ".frontend-slides", ".claude", ".archive", "archive", "vault",
+    "inbox", "sites", "dev", "shared", "_templates", "templates",
+}
+# Wiki-link-bearing frontmatter fields on work docs → fm_ref edges to vault
+# stems (DR-019 §2 node-adoption criterion ② / edge type fm_ref).
+WORK_WIKI_FIELDS = (
+    "projects", "project", "vault_note", "topics",
+    "attendees", "relatedMeetings", "relatedTasks",
+)
+BU_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]*$")
+# Edge precedence for the simple undirected workspace graph (DR-023 §5).
+# Higher index wins when two relations land on the same node pair.
+EDGE_PRIORITY = {
+    "wiki_link": 0, "fm_ref": 1, "bu_member": 2,
+    "source_ref": 3, "related": 4, "supersedes": 5,
 }
 
 
@@ -138,6 +167,281 @@ def extract_wiki(target: Path) -> list[dict]:
     return [{"nodes": nodes, "edges": edges}]
 
 
+# ── Workspace (work-layer) extraction — DR-019 §2 / DR-023 ────────────
+#
+# Adds a second operational layer on top of the vault wiki graph:
+#   nodes  work:<relpath-noext>  (qualifying work docs)
+#          bu:<slug>             (business-unit hubs)
+#          work:<relpath-noext>  type=file  (source_ref stub targets)
+#   edges  wiki_link  work body [[..]] → vault stem
+#          source_ref vault note source: → work doc / stub
+#          related    work → work (related[] frontmatter)
+#          fm_ref     work wiki-link field → vault stem (field attr)
+#          bu_member  work → bu:<slug>
+#          supersedes vault decision note supersedes/superseded_by
+# The vault layer (extract_wiki) is untouched; this only *adds*.
+
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+
+def _coerce(v):
+    """Scalar-coerce a frontmatter value for JSON export (dates → str)."""
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()
+    if isinstance(v, (list, dict)):
+        return str(v)
+    return v if isinstance(v, (str, int, float, bool)) or v is None else str(v)
+
+
+def _safe_load_fm(text: str) -> dict:
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return {}
+    try:
+        import yaml
+        data = yaml.safe_load(m.group(1))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _wikilinks_in(value) -> list[str]:
+    """Resolve wiki-link targets in a frontmatter value to vault-stem keys."""
+    return [
+        _nfc(t.strip()).lower().replace(" ", "-")
+        for t in WIKILINK_RE.findall(str(value))
+    ]
+
+
+def _resolve_related(entry, doc_rel: str, work_root: Path, stem_index: dict,
+                     work_ids: set, counters: dict):
+    """Resolve one related[] entry → target work node id or None (DR-023 §3)."""
+    rel = None
+    if isinstance(entry, dict):
+        rel = entry.get("rel")
+        entry = entry.get("doc", "")
+    s = str(entry).strip()
+    if not s:
+        return None, rel
+    # strip trailing Korean/annotation parenthetical: "... (상위 결정)"
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    wl = WIKILINK_RE.findall(s)
+    if wl:
+        key = _nfc(wl[0].strip()).lower().replace(" ", "-")
+        targets = stem_index.get(key)
+        if not targets:
+            counters["related_unresolved"] += 1
+            return None, rel
+        if len(targets) > 1:
+            counters["related_ambiguous"] += 1
+            return None, rel
+        return targets[0], rel
+    # path form
+    if s.startswith("~"):
+        counters["related_home_escape"] += 1
+        return None, rel
+    doc_dir = os.path.dirname(doc_rel)
+    joined = os.path.normpath(os.path.join(doc_dir, s))
+    if joined.startswith(".."):
+        counters["related_root_escape"] += 1
+        return None, rel
+    if s.endswith("/") or not joined.endswith(".md"):
+        counters["related_dir_skip"] += 1
+        return None, rel
+    node_id = "work:" + joined[:-3]
+    if node_id in work_ids:
+        return node_id, rel
+    counters["related_unresolved"] += 1
+    return None, rel
+
+
+_CFG_SKIP = {".git", "node_modules", ".venv", ".sync-conflicts", "archive",
+             ".archive", "vault", "temp"}
+
+
+def _load_bu_slugs(work_root: Path) -> set:
+    """Valid bu_id slugs from bu-config.yaml files (DR-023 §7).
+
+    bu-config.yaml lives under `.anchor/` (or 00-readme/), so the full
+    WORK_SKIP_DIRS (which skips `.anchor`) is NOT applied here — only truly
+    irrelevant trees are pruned.
+    """
+    slugs = set()
+    try:
+        import yaml
+    except Exception:
+        return slugs
+    for cfg in work_root.rglob("bu-config.yaml"):
+        if any(part in _CFG_SKIP for part in cfg.relative_to(work_root).parts):
+            continue
+        try:
+            data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            bid = str(data.get("bu_id", "")).replace("[[", "").replace("]]", "").strip()
+            if BU_SLUG_RE.fullmatch(bid):
+                slugs.add(bid)
+    return slugs
+
+
+def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[dict]:
+    work_root = work_root.expanduser().resolve()
+    counters = {
+        "work_docs": 0, "yaml_fail": 0, "template_skip": 0,
+        "related_unresolved": 0, "related_ambiguous": 0, "related_dir_skip": 0,
+        "related_root_escape": 0, "related_home_escape": 0,
+        "source_stub": 0, "source_dead": 0, "collisions": 0,
+    }
+    valid_bu = _load_bu_slugs(work_root)
+
+    # Pass 1 — collect qualifying work docs (nodes + stem index).
+    docs = {}          # node_id -> {rel, fm, body}
+    stem_index = {}    # basename-stem -> [node_id, ...]
+    for dirpath, dirnames, filenames in os.walk(work_root):
+        dirnames[:] = [d for d in dirnames if d not in WORK_SKIP_DIRS]
+        for fn in filenames:
+            if not fn.endswith(".md"):
+                continue
+            fp = Path(dirpath) / fn
+            rel = _nfc(str(fp.relative_to(work_root)))
+            text = fp.read_text(encoding="utf-8", errors="replace")
+            m = FRONTMATTER_RE.match(text)
+            if not m:
+                continue
+            raw_fm = m.group(1)
+            if "{{" in raw_fm:                      # template stub — DR-023 §2
+                counters["template_skip"] += 1
+                continue
+            fm = _safe_load_fm(text)
+            if not fm:
+                if raw_fm.strip():
+                    counters["yaml_fail"] += 1
+                continue
+            has_dt = bool(fm.get("document_type"))
+            has_wl = any(fm.get(f) for f in WORK_WIKI_FIELDS) or bool(fm.get("related"))
+            if not (has_dt or has_wl):
+                continue
+            node_id = "work:" + rel[:-3]
+            docs[node_id] = {"rel": rel, "fm": fm, "body": extract_body(text)}
+            stem_index.setdefault(_nfc(fp.stem).lower(), []).append(node_id)
+            counters["work_docs"] += 1
+
+    work_ids = set(docs)
+    nodes, edges = [], []
+
+    # bu hubs — business_unit values that are known bu_ids (DR-023 §7)
+    used_bu = set()
+    for node_id, d in docs.items():
+        bu = str(d["fm"].get("business_unit", "")).replace("[[", "").replace("]]", "").strip()
+        if bu and bu in valid_bu:
+            used_bu.add(bu)
+    for slug in sorted(used_bu):
+        nodes.append({"id": "bu:" + slug, "type": "bu", "domain": "bu",
+                      "label": slug, "source_file": ""})
+    bu_ids = {"bu:" + s for s in used_bu}
+
+    # work doc nodes
+    for node_id, d in docs.items():
+        fm = d["fm"]
+        nodes.append({
+            "id": node_id,
+            "label": _nfc(Path(d["rel"]).stem).replace("-", " ").title(),
+            "type": _coerce(fm.get("document_type") or "work-doc"),
+            "domain": d["rel"].split("/", 1)[0],
+            "description": _coerce(fm.get("title") or fm.get("description") or "")[:200],
+            "source_file": d["rel"],
+        })
+
+    known = set(vault_stems) | work_ids | bu_ids   # stubs added below
+
+    # Pass 2 — work-doc edges (related / fm_ref / wiki_link / bu_member).
+    cand = []   # (relation, src, tgt, attrs)
+    for node_id, d in docs.items():
+        fm, rel = d["fm"], d["rel"]
+        related = fm.get("related")
+        if related is not None:
+            entries = related if isinstance(related, list) else [related]
+            for e in entries:
+                tgt, rtype = _resolve_related(e, rel, work_root, stem_index, work_ids, counters)
+                if tgt:
+                    cand.append(("related", node_id, tgt, {"field": "related", "rel": _coerce(rtype)}))
+        for field in WORK_WIKI_FIELDS:
+            if field not in fm:
+                continue
+            for key in _wikilinks_in(fm[field]):
+                if key in vault_stems:
+                    cand.append(("fm_ref", node_id, key, {"field": field}))
+        for key in [_nfc(l.strip()).lower().replace(" ", "-") for l in WIKILINK_RE.findall(d["body"])]:
+            if key in vault_stems:
+                cand.append(("wiki_link", node_id, key, {}))
+        bu = str(fm.get("business_unit", "")).replace("[[", "").replace("]]", "").strip()
+        if "bu:" + bu in bu_ids:
+            cand.append(("bu_member", node_id, "bu:" + bu, {}))
+
+    # Pass 3 — vault notes: source_ref (+ stub nodes) and supersedes.
+    notes_dir = vault_target / "notes" if (vault_target / "notes").is_dir() else vault_target
+    stub_nodes = {}
+    for f in sorted(notes_dir.glob("*.md")):
+        fm = _safe_load_fm(f.read_text(encoding="utf-8", errors="replace"))
+        if not fm:
+            continue
+        src = fm.get("source")
+        if isinstance(src, str) and src.strip():
+            norm = src.strip().strip('"').strip("'")
+            if norm and not norm.startswith(("http://", "https://")):
+                if norm.startswith("work/"):
+                    norm = norm[len("work/"):]
+                if norm.endswith(".md"):
+                    norm = norm[:-3]
+                norm = _nfc(norm)
+                tgt = "work:" + norm
+                if tgt in work_ids:
+                    cand.append(("source_ref", f.stem, tgt, {}))
+                elif (work_root / (norm + ".md")).is_file():
+                    if tgt not in stub_nodes:
+                        stub_nodes[tgt] = {"id": tgt, "type": "file",
+                                           "label": _nfc(Path(norm).stem).replace("-", " ").title(),
+                                           "domain": norm.split("/", 1)[0], "source_file": norm + ".md"}
+                        counters["source_stub"] += 1
+                    cand.append(("source_ref", f.stem, tgt, {}))
+                else:
+                    counters["source_dead"] += 1
+        for field in ("supersedes", "superseded_by"):
+            val = fm.get(field)
+            if val:
+                for key in _wikilinks_in(val):
+                    if key in vault_stems:
+                        cand.append(("supersedes", f.stem, key, {"field": field}))
+
+    nodes.extend(stub_nodes.values())
+    known |= set(stub_nodes)
+
+    # Edge assembly — ghost-node filter + precedence dedupe (DR-023 §5).
+    best = {}   # frozenset(pair) -> (priority, relation, src, tgt, attrs)
+    for relation, src, tgt, attrs in cand:
+        if src not in known or tgt not in known or src == tgt:
+            continue
+        pair = frozenset((src, tgt))
+        prio = EDGE_PRIORITY.get(relation, 0)
+        cur = best.get(pair)
+        if cur is None:
+            best[pair] = (prio, relation, src, tgt, attrs)
+        else:
+            counters["collisions"] += 1
+            if prio > cur[0]:
+                best[pair] = (prio, relation, src, tgt, attrs)
+    for prio, relation, src, tgt, attrs in best.values():
+        edges.append({"source": src, "target": tgt, "relation": relation,
+                      "confidence_tag": "EXTRACTED", "confidence": 1.0, **attrs})
+
+    extract_work.counters = counters
+    print(f"  work: {counters['work_docs']} docs, {len(used_bu)} bu hubs, "
+          f"{counters['source_stub']} stubs, {len(edges)} edges", file=sys.stderr)
+    return [{"nodes": nodes, "edges": edges}]
+
+
 # ── Code extraction (AST via Graphify) ─────────────────────────────────
 
 def extract_code(target: Path) -> list[dict]:
@@ -177,8 +481,12 @@ def build_graph(extractions: list[dict]) -> nx.Graph:
 # ── Community detection ────────────────────────────────────────────────
 
 def get_hub_nodes(G: nx.Graph) -> set[str]:
-    """Identify structural hub nodes to exclude from clustering."""
-    return {n for n, d in G.nodes(data=True) if d.get("type") == "moc"}
+    """Identify structural hub nodes to exclude from clustering.
+
+    `bu` added for the workspace layer (DR-023 §8) — vault-only graphs have no
+    type=bu nodes, so vault runs are unaffected (byte-stable).
+    """
+    return {n for n, d in G.nodes(data=True) if d.get("type") in ("moc", "bu")}
 
 
 def detect_communities(G: nx.Graph, exclude_hubs: bool = True) -> dict[int, list[str]]:
@@ -209,7 +517,7 @@ def detect_communities(G: nx.Graph, exclude_hubs: bool = True) -> dict[int, list
 # ── Analysis ───────────────────────────────────────────────────────────
 
 def find_god_nodes(G: nx.Graph, top_n: int = 10) -> list[dict]:
-    hub_types = {"moc", "file"}
+    hub_types = {"moc", "file", "bu"}
     candidates = [
         (n, d) for n, d in G.degree()
         if G.nodes[n].get("type", "") not in hub_types
@@ -346,6 +654,9 @@ def main():
     parser.add_argument("--mode", choices=["auto", "wiki", "code"], default="auto", help="Extraction mode")
     parser.add_argument("--out-dir", type=Path, default=None, help="Output directory (default: target/graphify-out or vault/reports)")
     parser.add_argument("--no-hubs", action="store_true", help="Exclude hub nodes from clustering")
+    parser.add_argument("--work-root", type=Path, default=None,
+                        help="Add work operational layer → workspace-graph.json (DR-019 §2). "
+                             "--target stays the vault; report write is suppressed.")
     args = parser.parse_args()
 
     target = args.target.expanduser().resolve()
@@ -372,6 +683,9 @@ def main():
     print(f"Building graph for {target} (mode: {mode}) ...")
     if mode == "wiki":
         extractions = extract_wiki(target)
+        if args.work_root:
+            vault_stems = {n["id"] for e in extractions for n in e.get("nodes", [])}
+            extractions = extractions + extract_work(args.work_root, target, vault_stems)
     else:
         extractions = extract_code(target)
 
@@ -410,21 +724,25 @@ def main():
 
     # Export
     today = datetime.now().strftime("%y%m%d")
-    project_name = target.name
-    graph_path = out_dir / "graph.json"
-    report_path = out_dir / f"graph-report-{today}.md"
-
-    # For vault backwards compat
-    if mode == "wiki" and out_dir.name == "reports":
-        graph_path = out_dir / "vault-graph.json"
+    if args.work_root:
+        # DR-023 §6: workspace layer writes ONLY workspace-graph.json and
+        # suppresses the report (else it clobbers today's vault graph-report).
+        graph_path = out_dir / "workspace-graph.json"
+        report_path = None
+    elif mode == "wiki" and out_dir.name == "reports":
+        graph_path = out_dir / "vault-graph.json"       # vault backwards compat
+        report_path = out_dir / f"graph-report-{today}.md"
+    else:
+        graph_path = out_dir / "graph.json"
         report_path = out_dir / f"graph-report-{today}.md"
 
     export_graph_json(G, graph_path)
-    export_report(report, report_path)
+    if report_path is not None:
+        export_report(report, report_path)
 
     print(f"\nOutputs:")
     print(f"  Graph: {graph_path}")
-    print(f"  Report: {report_path}")
+    print(f"  Report: {report_path if report_path else '(suppressed — workspace layer)'}")
     print(f"\nSummary:")
     print(f"  Nodes: {G.number_of_nodes()}")
     print(f"  Edges: {G.number_of_edges()}")
@@ -432,6 +750,12 @@ def main():
     if gn:
         print(f"  God nodes: {', '.join(g['id'] for g in gn[:5])}")
     print(f"  Cross-community edges: {len(surprises)}")
+    if args.work_root:
+        rels = {}
+        for _, _, d in G.edges(data=True):
+            rels[d.get("relation", "?")] = rels.get(d.get("relation", "?"), 0) + 1
+        print(f"  Edge relations: {rels}")
+        print(f"  Work counters: {getattr(extract_work, 'counters', {})}")
 
     # Print MCP server hint
     print(f"\nTo serve as MCP:")
