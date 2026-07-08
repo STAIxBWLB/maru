@@ -441,6 +441,52 @@ export async function vaultGraphRead(
   });
 }
 
+export interface GraphLayoutCache {
+  version: number;
+  positions: Record<string, [number, number]>;
+}
+
+const GRAPH_LAYOUT_FALLBACK_KEY = "maru:graph-layout";
+
+/** Read the disposable graph-layout warm-start cache. Non-Tauri (browser dev /
+ *  e2e) falls back to localStorage; any read failure degrades to null. */
+export async function vaultGraphLayoutRead(
+  workspace: string,
+): Promise<GraphLayoutCache | null> {
+  if (!isTauri()) {
+    try {
+      const raw = localStorage.getItem(`${GRAPH_LAYOUT_FALLBACK_KEY}:${workspace}`);
+      return raw ? (JSON.parse(raw) as GraphLayoutCache) : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return await invoke<GraphLayoutCache | null>("vault_graph_layout_read", { workspace });
+  } catch {
+    return null;
+  }
+}
+
+export async function vaultGraphLayoutSave(
+  workspace: string,
+  cache: GraphLayoutCache,
+): Promise<void> {
+  if (!isTauri()) {
+    try {
+      localStorage.setItem(`${GRAPH_LAYOUT_FALLBACK_KEY}:${workspace}`, JSON.stringify(cache));
+    } catch {
+      /* best-effort cache; ignore quota errors */
+    }
+    return;
+  }
+  try {
+    await invoke("vault_graph_layout_save", { workspace, cache });
+  } catch {
+    /* disposable cache — never surface a write failure */
+  }
+}
+
 export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions): Promise<InboxDropItem[]> {
   if (!isTauri()) return mockInboxDropItems();
   return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath, scanOptions: scanOptions ?? null });

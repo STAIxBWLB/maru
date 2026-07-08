@@ -25,6 +25,8 @@ export interface GraphNode {
   isGodNode: boolean;
   /** frontmatter created/decided_date/date — decision-chain lane ordering. */
   date: string | null;
+  /** file mtime (VaultEntry.updatedAt) — stale-note detection; null for ghosts. */
+  updatedAt: string | null;
 }
 
 export interface GraphEdge {
@@ -116,6 +118,7 @@ export function buildVaultGraph(
         (typeof meta.created === "object" || typeof meta.date === "object"
           ? String(meta.created ?? meta.date ?? "") || null
           : null),
+      updatedAt: entry.updatedAt,
     });
   }
 
@@ -153,6 +156,7 @@ export function buildVaultGraph(
         community: null,
         isGodNode: false,
         date: null,
+        updatedAt: null,
       });
     }
     return ghostId;

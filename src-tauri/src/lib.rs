@@ -180,7 +180,7 @@ use terminal_hooks::{
     TerminalHookWatcherState,
 };
 use vault::{default_vault_path, read_vault_cache, sample_workspace_path, scan_vault};
-use vault_graph::vault_graph_read;
+use vault_graph::{vault_graph_layout_read, vault_graph_layout_save, vault_graph_read};
 use vault_guard::vault_validate_note;
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
@@ -228,6 +228,8 @@ pub fn run() {
             scan_vault,
             read_vault_cache,
             vault_graph_read,
+            vault_graph_layout_read,
+            vault_graph_layout_save,
             vault_validate_note,
             read_document,
             save_document,

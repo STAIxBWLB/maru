@@ -1,7 +1,10 @@
 // Filter side panel for graph mode (spec §F2 필터): domain / type / community /
-// show-ghosts (default off) / min-degree slider, plus search.
+// show-ghosts / min-degree, each chip carrying a count and color swatch, plus
+// a reset action.
 
+import { RotateCcw } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import { communityColor, domainColor } from "./GraphCanvas";
 
 export interface GraphFilters {
   domains: Set<string>;
@@ -19,16 +22,28 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilters = {
   minDegree: 0,
 };
 
+export interface FacetItem<T> {
+  value: T;
+  count: number;
+}
+
+export function filtersAreDefault(filters: GraphFilters): boolean {
+  return (
+    filters.domains.size === 0 &&
+    filters.types.size === 0 &&
+    filters.community == null &&
+    !filters.showGhosts &&
+    filters.minDegree === 0
+  );
+}
+
 interface GraphFilterPanelProps {
   filters: GraphFilters;
-  domains: string[];
-  types: string[];
-  communities: number[];
-  search: string;
+  domains: FacetItem<string>[];
+  types: FacetItem<string>[];
+  communities: FacetItem<number>[];
   maxDegree: number;
   onFiltersChange: (next: GraphFilters) => void;
-  onSearchChange: (next: string) => void;
-  onRelayout: () => void;
 }
 
 function toggle(set: Set<string>, value: string): Set<string> {
@@ -43,106 +58,113 @@ export function GraphFilterPanel({
   domains,
   types,
   communities,
-  search,
   maxDegree,
   onFiltersChange,
-  onSearchChange,
-  onRelayout,
 }: GraphFilterPanelProps) {
   const { t } = useTranslation();
+  const dirty = !filtersAreDefault(filters);
+
   return (
     <aside className="graph-filter-panel" data-testid="graph-filter-panel">
-      <input
-        type="search"
-        className="graph-search"
-        placeholder={t("graph.searchPlaceholder")}
-        value={search}
-        onChange={(event) => onSearchChange(event.target.value)}
-      />
-      <section>
+      <div className="graph-filter-head">
+        <span>{t("graph.filter.title")}</span>
+        <button
+          type="button"
+          className="graph-filter-reset"
+          disabled={!dirty}
+          onClick={() => onFiltersChange(DEFAULT_GRAPH_FILTERS)}
+          title={t("graph.filter.reset")}
+        >
+          <RotateCcw size={12} /> {t("graph.filter.reset")}
+        </button>
+      </div>
+
+      <section className="graph-filter-section">
         <h4>{t("graph.filter.domain")}</h4>
         <div className="graph-chip-row">
-          {domains.map((domain) => (
+          {domains.map(({ value, count }) => (
             <button
-              key={domain}
+              key={value}
               type="button"
-              className={filters.domains.has(domain) ? "graph-chip active" : "graph-chip"}
-              onClick={() =>
-                onFiltersChange({ ...filters, domains: toggle(filters.domains, domain) })
-              }
+              className={filters.domains.has(value) ? "graph-chip active" : "graph-chip"}
+              onClick={() => onFiltersChange({ ...filters, domains: toggle(filters.domains, value) })}
             >
-              {domain}
+              <span className="graph-swatch" style={{ background: domainColor(value) }} />
+              {value}
+              <span className="graph-chip-count" aria-hidden>{count}</span>
             </button>
           ))}
         </div>
       </section>
-      <section>
+
+      <section className="graph-filter-section">
         <h4>{t("graph.filter.type")}</h4>
         <div className="graph-chip-row">
-          {types.map((type) => (
+          {types.map(({ value, count }) => (
             <button
-              key={type}
+              key={value}
               type="button"
-              className={filters.types.has(type) ? "graph-chip active" : "graph-chip"}
-              onClick={() =>
-                onFiltersChange({ ...filters, types: toggle(filters.types, type) })
-              }
+              className={filters.types.has(value) ? "graph-chip active" : "graph-chip"}
+              onClick={() => onFiltersChange({ ...filters, types: toggle(filters.types, value) })}
             >
-              {type}
+              {value}
+              <span className="graph-chip-count" aria-hidden>{count}</span>
             </button>
           ))}
         </div>
       </section>
+
       {communities.length > 0 ? (
-        <section>
+        <section className="graph-filter-section">
           <h4>{t("graph.filter.community")}</h4>
-          <select
-            value={filters.community ?? ""}
-            onChange={(event) =>
-              onFiltersChange({
-                ...filters,
-                community: event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
-          >
-            <option value="">{t("graph.filter.allCommunities")}</option>
-            {communities.map((community) => (
-              <option key={community} value={community}>
-                #{community}
-              </option>
+          <div className="graph-community-list">
+            <button
+              type="button"
+              className={filters.community == null ? "graph-community active" : "graph-community"}
+              onClick={() => onFiltersChange({ ...filters, community: null })}
+            >
+              {t("graph.filter.allCommunities")}
+            </button>
+            {communities.map(({ value, count }) => (
+              <button
+                key={value}
+                type="button"
+                className={filters.community === value ? "graph-community active" : "graph-community"}
+                onClick={() => onFiltersChange({ ...filters, community: value })}
+              >
+                <span className="graph-swatch" style={{ background: communityColor(value) }} />
+                #{value}
+                <span className="graph-chip-count" aria-hidden>{count}</span>
+              </button>
             ))}
-          </select>
+          </div>
         </section>
       ) : null}
-      <section>
+
+      <section className="graph-filter-section">
         <label className="graph-toggle">
           <input
             type="checkbox"
             checked={filters.showGhosts}
-            onChange={(event) =>
-              onFiltersChange({ ...filters, showGhosts: event.target.checked })
-            }
+            onChange={(event) => onFiltersChange({ ...filters, showGhosts: event.target.checked })}
           />
           {t("graph.filter.showGhosts")}
         </label>
       </section>
-      <section>
+
+      <section className="graph-filter-section">
         <h4>
-          {t("graph.filter.minDegree")}: {filters.minDegree}
+          {t("graph.filter.minDegree")}
+          <span className="graph-slider-value">{filters.minDegree}</span>
         </h4>
         <input
           type="range"
           min={0}
           max={Math.max(maxDegree, 1)}
           value={filters.minDegree}
-          onChange={(event) =>
-            onFiltersChange({ ...filters, minDegree: Number(event.target.value) })
-          }
+          onChange={(event) => onFiltersChange({ ...filters, minDegree: Number(event.target.value) })}
         />
       </section>
-      <button type="button" className="graph-relayout" onClick={onRelayout}>
-        {t("graph.relayout")}
-      </button>
     </aside>
   );
 }
