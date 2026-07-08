@@ -13,6 +13,7 @@ function decision(id: string, date: string | null): GraphNode {
     community: null,
     isGodNode: false,
     date,
+    updatedAt: null,
   };
 }
 

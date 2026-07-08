@@ -20,6 +20,7 @@ import {
 import { bench, describe } from "vitest";
 import type { VaultEntry } from "../types";
 import { buildVaultGraph } from "./model";
+import { findBridges, findHiddenLinks, findOrphans } from "./insights";
 
 const NODE_COUNT = 2000;
 const EDGE_COUNT = 10_000;
@@ -111,5 +112,13 @@ describe(`graph 2k nodes / ${model.edges.length} edges`, () => {
       const y = positions[i * 2 + 1];
       if (x >= minX && x <= maxX && y >= minY && y <= maxY) visible.add(i);
     }
+  });
+
+  bench("insight pass — hidden links + bridges + orphans (<200ms budget)", () => {
+    // Runs on demand (not per frame); this guards the O(Σd²) hidden-link scan
+    // against blow-up at 2k nodes.
+    findHiddenLinks(model);
+    findBridges(model);
+    findOrphans(model);
   });
 });

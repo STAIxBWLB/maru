@@ -54,7 +54,7 @@ test("enters graph mode, shows degraded hint, and renders the live graph", async
   expect(forbidden).toEqual([]);
 });
 
-test("type filter narrows nodes and node click opens the note in pkm", async ({ page }) => {
+test("type filter narrows nodes; click selects, double-click opens the note", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");
   await page.getByRole("button", { name: "그래프", exact: true }).click();
@@ -68,12 +68,17 @@ test("type filter narrows nodes and node click opens the note in pkm", async ({ 
   await panel.getByRole("button", { name: "reference", exact: true }).click();
   await expect(page.locator(".graph-node circle")).toHaveCount(2);
 
-  // Search focuses the matching node.
-  await panel.getByRole("searchbox").fill("용어집");
+  // Search (in the toolbar) focuses the matching node.
+  await page.getByTestId("graph-search").fill("용어집");
   await expect(page.locator(".graph-node.focus circle")).toHaveCount(1);
 
-  // Node click → pkm opens the note.
+  // Single click selects (stays in graph, inspector shows the node).
   await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".graph-node.selected circle")).toHaveCount(1);
+
+  // Double click opens the note in pkm.
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').dblclick();
   await expect(page.getByTestId("graph-mode")).toHaveCount(0);
   await expect(page.getByText("Maru 용어집").first()).toBeVisible();
 
@@ -92,16 +97,44 @@ test("ghost node click seeds the note-creation dialog (F3b) and chain view toggl
   await page.getByTestId("graph-chain-toggle").click();
   await expect(page.getByTestId("decision-chains")).toBeVisible();
   await expect(page.getByText("supersedes 연결이 있는 결정이 없습니다")).toBeVisible();
-  await page.getByTestId("graph-chain-toggle").click();
+  await page.getByTestId("graph-view-graph").click();
 
-  // Ghost click → NewDocumentDialog opens seeded with the unresolved target.
+  // Ghost double-click → NewDocumentDialog opens seeded with the unresolved target.
   await page.getByLabel("미해소 링크 표시").check();
   await expect(page.locator(".graph-node.ghost circle")).toHaveCount(1);
-  await page.locator(".graph-node.ghost circle").click();
+  await page.locator(".graph-node.ghost circle").dblclick();
   const dialog = page.locator(".dialog-content", { hasText: "새 Maru 문서" });
   await expect(dialog).toBeVisible();
   // Seeded with the unresolved wikilink target as the title prefill.
   await expect(dialog.getByRole("textbox").first()).toHaveValue(/Maru Project/i);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Toolbar + zoom cluster.
+  await expect(page.getByTestId("graph-toolbar")).toBeVisible();
+  const zoom = page.getByTestId("graph-zoom-value");
+  await expect(zoom).toBeVisible();
+  await page.getByRole("button", { name: "확대" }).click();
+  await expect(zoom).toBeVisible();
+
+  // Insights panel is the default right-pane tab.
+  await expect(page.getByTestId("graph-insights")).toBeVisible();
+
+  // Selecting a node flips the right pane to the inspector.
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click();
+  await expect(page.getByTestId("graph-inspector")).toBeVisible();
+  await expect(page.getByTestId("graph-inspector")).toContainText("Maru 용어집");
+
+  // Switch back to insights.
+  await page.getByRole("tab", { name: "인사이트" }).click();
+  await expect(page.getByTestId("graph-insights")).toBeVisible();
 
   expect(forbidden).toEqual([]);
 });
