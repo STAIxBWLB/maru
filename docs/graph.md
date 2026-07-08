@@ -26,15 +26,62 @@ overlay is produced out-of-band by the `vault-graph` skill
 
 ## Rendering
 
-- `src/components/graph/GraphView.tsx` — mode shell.
-- `src/components/graph/GraphCanvas.tsx` — SVG canvas with viewport culling
-  (only visible nodes/edges are drawn; benched at 2k synthetic nodes).
+- `src/components/graph/GraphView.tsx` — mode shell; owns the model, filters,
+  selection/path/insight state, and one reused layout worker.
+- `src/components/graph/GraphCanvas.tsx` — SVG canvas. Nodes/edges are memoized
+  child components (`NodeView`/`EdgeView`), so pan/zoom updates only the
+  container `<g transform>` — zero child reconciliation once the layout settles.
+  A `ResizeObserver` caches the canvas size (no per-frame `getBoundingClientRect`).
+- `src/components/graph/GraphToolbar.tsx` — search, graph/chains view switch,
+  zoom cluster, re-layout, community-overlay refresh, stats.
+- `src/components/graph/GraphFilterPanel.tsx` — domain/type/community chips with
+  counts + color swatches, min-degree slider, reset.
+- `src/components/graph/GraphInspector.tsx` — selected-node metadata + typed
+  in/out neighbors (click to walk) + actions (open / focus / start path).
 - `src/lib/graph/layout.worker.ts` — d3-force layout in a Web Worker (the only
   new frontend dependency introduced by Phase 8).
-- `src/components/graph/GraphFilterPanel.tsx` — filter by type/domain, text
-  search, hover highlight, click → open the note in the editor.
 - `NeighborhoodPane` gains a "그래프에서 보기" (view in graph) button that focuses
   the graph on the active document.
+
+### Interaction
+
+- **Click = select** (metadata in the right-pane inspector), **double-click =
+  open** the note in the editor, **drag = move + pin**, **alt-click = unpin**,
+  **shift-click = path target**, **Esc = clear** selection/path/focus.
+- Wheel scroll pans; **ctrl/⌘ + wheel zooms** at the cursor. ⌘F focuses search;
+  `+`/`-`/`0` zoom in/out/fit.
+- Hover highlights a node's 1-hop neighborhood and dims the rest.
+
+### Performance (V2)
+
+The layout worker is created once per mount and reused across filter changes via
+`update` messages (no terminate/recreate). It keeps a per-id position store so
+surviving nodes **warm-start** from their last position instead of
+re-randomizing — filtering nudges the layout instead of exploding it. Each
+request carries an `epoch` that round-trips so the main thread discards stale
+frames (no blank-and-reflow). Settled positions persist to
+`<workspace>/.maru/cache/graph-layout.json` (`vault_graph_layout_{read,save}`)
+and prime the first layout on re-entry.
+
+## Insight / ideation (V2)
+
+The right pane's **Insights** tab (`GraphInsightsPanel` +
+`src/lib/graph/insights.ts`) turns the read-only graph into an ideation surface.
+All analyses run client-side over the in-memory model (no dependency on the
+weekly `build-graph.py` report):
+
+- **Hidden link candidates** — non-adjacent note pairs sharing ≥2 neighbors
+  (common-neighbor link prediction); the "derive new relationships" core.
+- **Surprising connections** — existing edges that cross community boundaries,
+  ranked by combined degree (requires the community overlay).
+- **Bridge notes** — nodes whose neighbors span the most distinct communities
+  (a cheap betweenness proxy; requires the overlay).
+- **Neglected notes** — orphans (≤1 link) and stale well-connected notes.
+- **Path finding** — `shortestPath` (BFS) between two nodes: start a path from
+  the inspector, shift-click a target, and the chain highlights on the canvas.
+
+Clicking an insight row highlights the pair (dashed virtual edge) or centers the
+node on the canvas.
 
 ## Managed writes (8b)
 
@@ -62,9 +109,12 @@ Pure-frontend features built on the 8a + 8b primitives:
 
 ## Tests
 
-- vitest: `src/lib/graph/model.test.ts`, `decisionChains.test.ts`,
-  perf bench `src/lib/graph/perf.bench.ts`.
-- e2e: `e2e/graph.spec.ts`. **Scope note** — the enrichment path
+- vitest: `src/lib/graph/model.test.ts`, `insights.test.ts`,
+  `decisionChains.test.ts`; perf bench `src/lib/graph/perf.bench.ts` (adds an
+  insight-pass budget alongside build/layout/cull).
+- cargo: `vault_graph` — overlay read + layout-cache round-trip.
+- e2e: `e2e/graph.spec.ts` (mode entry, filter, select/double-click, chain view,
+  toolbar + insights + inspector surfaces). **Scope note** — the enrichment path
   (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies the
   *degraded* live-layer path; the enriched overlay path is covered by
   vitest + cargo fixtures.
