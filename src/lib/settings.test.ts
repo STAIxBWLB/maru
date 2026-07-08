@@ -83,6 +83,38 @@ describe("normalizeMaruSettings", () => {
             color: "invalid",
           },
         ],
+        favorites: [
+          {
+            kind: "file",
+            relPath: "projects/rise/plan.md",
+            label: "RISE Plan",
+            addedAt: "2026-07-08T00:00:00Z",
+          },
+          {
+            kind: "file",
+            relPath: "projects/rise/plan.md",
+            label: "Duplicate",
+            addedAt: "2026-07-08T01:00:00Z",
+          },
+          {
+            kind: "directory",
+            relPath: "projects/rise/",
+            label: "",
+            addedAt: "",
+          },
+          {
+            kind: "file",
+            relPath: "../escape.md",
+            label: "Bad",
+            addedAt: "2026-07-08T02:00:00Z",
+          },
+          {
+            kind: "file",
+            relPath: "/absolute.md",
+            label: "Bad",
+            addedAt: "2026-07-08T03:00:00Z",
+          },
+        ],
         collapsedTreeFolders: ["projects/rise"],
         collapsedFileFolders: ["assets"],
         documentTreeStateInitialized: true,
@@ -135,6 +167,20 @@ describe("normalizeMaruSettings", () => {
         status: "active",
         pathPrefix: "projects/rise",
         query: "grant",
+      },
+    ]);
+    expect(settings.ui.favorites).toEqual([
+      {
+        kind: "file",
+        relPath: "projects/rise/plan.md",
+        label: "RISE Plan",
+        addedAt: "2026-07-08T00:00:00Z",
+      },
+      {
+        kind: "directory",
+        relPath: "projects/rise",
+        label: "rise",
+        addedAt: "",
       },
     ]);
     expect(settings.ui.collapsedTreeFolders).toEqual(["projects/rise"]);
@@ -482,6 +528,7 @@ describe("normalizeMaruSettings", () => {
       DEFAULT_MARU_SETTINGS.ui.binaryFileIncludePatterns,
     );
     expect(settings.ui.documentViews).toEqual([]);
+    expect(settings.ui.favorites).toEqual([]);
     expect(settings.ui.fileQueueDefaultOperation).toBe("copy");
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.ui.layout.terminalDock).toBe("bottom");

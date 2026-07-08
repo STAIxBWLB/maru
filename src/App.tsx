@@ -71,6 +71,7 @@ import {
 } from "./lib/terminal";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
+import type { FavoriteTarget } from "./components/FavoritesSection";
 import { useApprovalGate } from "./approval/ApprovalDialog";
 import { markStartup, measureStartup, scheduleStartupIdle } from "./lib/startupProfile";
 import {
@@ -307,6 +308,8 @@ import {
   type DocumentViewDefinition,
   type EditorViewModeSetting,
   type ExplorerPaneMode,
+  type FavoriteItem,
+  type FavoriteKind,
   type FilesBrowserMode,
   type FilesListAttribute,
   type FilesSortKey,
@@ -495,6 +498,26 @@ function isBinaryTab(tab: AnyTab | null | undefined): tab is BinaryTab {
 
 function tabIdForWorkspaceFile(entry: WorkspaceFileEntry): string {
   return `binary:${entry.path}`;
+}
+
+function favoriteKey(kind: FavoriteKind, relPath: string): string {
+  return `${kind}:${relPath.toLowerCase()}`;
+}
+
+function normalizeFavoriteTargetRelPath(value: string): string | null {
+  const trimmed = value.replace(/\\/g, "/").trim().replace(/\/+$/g, "");
+  if (!trimmed || trimmed.startsWith("/") || /^[A-Za-z]:\//.test(trimmed)) return null;
+  const parts = trimmed.split("/");
+  if (parts.some((part) => !part || part === "." || part === "..")) return null;
+  return parts.join("/");
+}
+
+function favoriteLabelFromRelPath(relPath: string): string {
+  return relPath.split("/").filter(Boolean).pop() ?? relPath;
+}
+
+function joinWorkspaceRelPath(workspacePath: string, relPath: string): string {
+  return `${workspacePath.replace(/\/+$/, "")}/${relPath.replace(/^\/+/, "")}`;
 }
 
 interface StoredTabs {
@@ -4202,26 +4225,12 @@ function MainApp() {
     [explorerWorkspacePath],
   );
 
-  const openWorkspaceFile = useCallback(
-    (entry: WorkspaceFileEntry) => {
-      if (isOpenableDocumentFile(entry)) {
-        const docEntry =
-          entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
-          null;
-        if (!docEntry) {
-          setError(t("files.openUnavailable"));
-          return;
-        }
-        void selectEntry(docEntry);
-        return;
-      }
-      if (!explorerWorkspacePath) {
-        setError(t("files.openUnavailable"));
-        return;
-      }
+  const openBinaryWorkspaceFile = useCallback(
+    (entry: WorkspaceFileEntry, workspacePath: string, visibility: WorkspaceVisibility) => {
       const tabId = tabIdForWorkspaceFile(entry);
       const existing = binaryTabs.find((tab) => tab.id === tabId);
       const targetGroup = editorSplitOpen ? focusedEditorGroup : "left";
+      setExplorerVisibility(visibility);
       if (existing) {
         activateEditorTab(existing.id, targetGroup);
         return;
@@ -4229,15 +4238,15 @@ function MainApp() {
       void (async () => {
         setError(null);
         try {
-          const classification = await binaryViewerClassify(explorerWorkspacePath, entry.path);
+          const classification = await binaryViewerClassify(workspacePath, entry.path);
           const assetPath = usesAssetProtocol(classification.category)
-            ? await binaryViewerPrepareAsset(explorerWorkspacePath, entry.path)
+            ? await binaryViewerPrepareAsset(workspacePath, entry.path)
             : entry.path;
           const newTab: BinaryTab = {
             kind: "binary",
             id: tabId,
-            workspacePath: explorerWorkspacePath,
-            visibility: explorerVisibility,
+            workspacePath,
+            visibility,
             fileEntry: {
               ...entry,
               path: assetPath,
@@ -4267,12 +4276,239 @@ function MainApp() {
       binaryViewerClassify,
       binaryViewerPrepareAsset,
       editorSplitOpen,
+      focusedEditorGroup,
+    ],
+  );
+
+  const openWorkspaceFile = useCallback(
+    (entry: WorkspaceFileEntry) => {
+      if (isOpenableDocumentFile(entry)) {
+        const docEntry =
+          entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
+          null;
+        if (!docEntry) {
+          setError(t("files.openUnavailable"));
+          return;
+        }
+        void selectEntry(docEntry);
+        return;
+      }
+      if (!explorerWorkspacePath) {
+        setError(t("files.openUnavailable"));
+        return;
+      }
+      openBinaryWorkspaceFile(entry, explorerWorkspacePath, explorerVisibility);
+    },
+    [
       entries,
       explorerVisibility,
       explorerWorkspacePath,
-      focusedEditorGroup,
+      openBinaryWorkspaceFile,
       selectEntry,
       t,
+    ],
+  );
+
+  const isFavorite = useCallback(
+    (kind: FavoriteKind, relPath: string) => {
+      const normalizedRelPath = normalizeFavoriteTargetRelPath(relPath);
+      if (!normalizedRelPath) return false;
+      const key = favoriteKey(kind, normalizedRelPath);
+      return maruSettings.ui.favorites.some(
+        (favorite) => favoriteKey(favorite.kind, favorite.relPath) === key,
+      );
+    },
+    [maruSettings.ui.favorites],
+  );
+
+  const removeFavorite = useCallback(
+    (favorite: FavoriteItem) => {
+      const key = favoriteKey(favorite.kind, favorite.relPath);
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          favorites: current.ui.favorites.filter(
+            (item) => favoriteKey(item.kind, item.relPath) !== key,
+          ),
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const toggleFavorite = useCallback(
+    (target: FavoriteTarget) => {
+      const relPath = normalizeFavoriteTargetRelPath(target.relPath);
+      if (!relPath) return;
+      const key = favoriteKey(target.kind, relPath);
+      updateSettings((current) => {
+        const exists = current.ui.favorites.some(
+          (favorite) => favoriteKey(favorite.kind, favorite.relPath) === key,
+        );
+        const label = target.label.trim();
+        const favorites = exists
+          ? current.ui.favorites.filter(
+              (favorite) => favoriteKey(favorite.kind, favorite.relPath) !== key,
+            )
+          : [
+              {
+                kind: target.kind,
+                relPath,
+                label: label && label !== relPath ? label : favoriteLabelFromRelPath(relPath),
+                addedAt: new Date().toISOString(),
+              },
+              ...current.ui.favorites,
+            ];
+        return {
+          ...current,
+          ui: {
+            ...current.ui,
+            favorites,
+          },
+        };
+      });
+    },
+    [updateSettings],
+  );
+
+  const isFavoriteMissing = useCallback(
+    (favorite: FavoriteItem) => {
+      const workspacePath = settingsWorkPath ?? explorerWorkspacePath;
+      if (!workspacePath) return true;
+      const relPath = normalizeFavoriteTargetRelPath(favorite.relPath);
+      if (!relPath) return true;
+      const targetPath = joinWorkspaceRelPath(workspacePath, relPath);
+      const docEntries = workspaceStates[workspacePath]?.entries ?? [];
+      const workspaceFileState = workspaceFileStates[workspacePath] ?? EMPTY_WORKSPACE_FILES_STATE;
+      const knownFiles = workspaceFileState.entries;
+      if (favorite.kind === "file") {
+        if (docEntries.some((entry) => entry.relPath === relPath || entry.path === targetPath)) {
+          return false;
+        }
+        if (knownFiles.some((entry) => entry.relPath === relPath || entry.path === targetPath)) {
+          return false;
+        }
+        return knownFiles.length > 0;
+      }
+      const prefix = `${relPath}/`;
+      if (docEntries.some((entry) => entry.relPath.startsWith(prefix))) return false;
+      if (knownFiles.some((entry) => entry.relPath.startsWith(prefix))) return false;
+      return knownFiles.length > 0;
+    },
+    [explorerWorkspacePath, settingsWorkPath, workspaceFileStates, workspaceStates],
+  );
+
+  const openFavorite = useCallback(
+    (favorite: FavoriteItem) => {
+      const relPath = normalizeFavoriteTargetRelPath(favorite.relPath);
+      const workspacePath = settingsWorkPath ?? explorerWorkspacePath;
+      if (!relPath || !workspacePath) {
+        setError(t("workspace.error.noneActive"));
+        return;
+      }
+      const workspace =
+        workspaceRegistry.workspaces.find((item) => item.path === workspacePath) ?? null;
+      const visibility = workspace?.visibility ?? explorerVisibility;
+      const targetPath = joinWorkspaceRelPath(workspacePath, relPath);
+
+      void (async () => {
+        setPersistedAppMode("pkm");
+        if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
+        setExplorerVisibility(visibility);
+
+        let scannedFiles = workspaceFileStates[workspacePath]?.entries ?? [];
+        const scanFilesIfNeeded = async () => {
+          if (scannedFiles.length > 0) return scannedFiles;
+          updateWorkspaceFileState(workspacePath, { loading: true, refreshing: true });
+          try {
+            scannedFiles = await scanWorkspaceFiles(workspacePath, scanOptions);
+            updateWorkspaceFileState(workspacePath, {
+              entries: scannedFiles,
+              loading: false,
+              refreshing: false,
+            });
+          } catch (err) {
+            updateWorkspaceFileState(workspacePath, { loading: false, refreshing: false });
+            throw err;
+          }
+          return scannedFiles;
+        };
+
+        try {
+          if (favorite.kind === "directory") {
+            const docEntries = workspaceStates[workspacePath]?.entries ?? [];
+            const files = await scanFilesIfNeeded();
+            const prefix = `${relPath}/`;
+            const exists =
+              docEntries.some((entry) => entry.relPath.startsWith(prefix)) ||
+              files.some((entry) => entry.relPath.startsWith(prefix));
+            if (!exists) {
+              setError(t("favorites.openMissing", { path: relPath }));
+              return;
+            }
+            setExplorerPaneMode("files");
+            setFilesBrowserMode("tree");
+            setWorkspaceFileFilter("all");
+            setFileQueryByVisibility((current) => ({
+              ...current,
+              [visibility]: "",
+            }));
+            setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
+            setCollapsedFileFoldersByVisibility((current) => {
+              const existing = current[visibility] ?? [];
+              return {
+                ...current,
+                [visibility]: expandWorkspaceFileAncestors(existing, `${relPath}/__favorite__`),
+              };
+            });
+            setPendingExplorerReveal({ pane: "files", targetPath });
+            return;
+          }
+
+          const docEntries = workspaceStates[workspacePath]?.entries ?? [];
+          const docEntry =
+            docEntries.find((entry) => entry.relPath === relPath || entry.path === targetPath) ??
+            null;
+          if (docEntry) {
+            void selectEntry(docEntry);
+            return;
+          }
+          const files = await scanFilesIfNeeded();
+          const fileEntry =
+            files.find((entry) => entry.relPath === relPath || entry.path === targetPath) ?? null;
+          if (!fileEntry) {
+            setError(t("favorites.openMissing", { path: relPath }));
+            return;
+          }
+          setSelectedFilePathsByWorkspace((current) => ({
+            ...current,
+            [workspacePath]: [fileEntry.path],
+          }));
+          openBinaryWorkspaceFile(fileEntry, workspacePath, visibility);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [
+      documentsPaneOpen,
+      explorerVisibility,
+      explorerWorkspacePath,
+      openBinaryWorkspaceFile,
+      scanOptions,
+      selectEntry,
+      setExplorerPaneMode,
+      setFilesBrowserMode,
+      setPersistedAppMode,
+      setWorkspaceFileFilter,
+      settingsWorkPath,
+      t,
+      updateLayoutSettings,
+      updateWorkspaceFileState,
+      workspaceFileStates,
+      workspaceRegistry.workspaces,
+      workspaceStates,
     ],
   );
 
@@ -7238,6 +7474,12 @@ function MainApp() {
                     : null
                 }
                 onRevealHandled={() => setPendingExplorerReveal(null)}
+                favorites={maruSettings.ui.favorites}
+                onOpenFavorite={openFavorite}
+                onRemoveFavorite={removeFavorite}
+                onToggleFavorite={toggleFavorite}
+                isFavorite={isFavorite}
+                isFavoriteMissing={isFavoriteMissing}
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
                 onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
                   void applySelectedFileQueueToDestination(
@@ -7312,6 +7554,12 @@ function MainApp() {
                     : null
                 }
                 onRevealHandled={() => setPendingExplorerReveal(null)}
+                favorites={maruSettings.ui.favorites}
+                onOpenFavorite={openFavorite}
+                onRemoveFavorite={removeFavorite}
+                onToggleFavorite={toggleFavorite}
+                isFavorite={isFavorite}
+                isFavoriteMissing={isFavoriteMissing}
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
                 onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
                   void applySelectedFileQueueToDestination(

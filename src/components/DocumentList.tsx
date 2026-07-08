@@ -53,8 +53,14 @@ import {
 import { useTranslation } from "../lib/i18n";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
-import type { DocumentBrowserMode, DocumentLabelMode, DocumentViewDefinition } from "../lib/settings";
+import type {
+  DocumentBrowserMode,
+  DocumentLabelMode,
+  DocumentViewDefinition,
+  FavoriteItem,
+} from "../lib/settings";
 import type { ExplorerPaneMode } from "../lib/settings";
+import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 
 const GROUP_ROW_HEIGHT = 28;
 const ENTRY_ROW_HEIGHT = 156;
@@ -102,6 +108,12 @@ interface DocumentListProps {
   onPaneModeChange: (mode: ExplorerPaneMode) => void;
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
+  favorites: FavoriteItem[];
+  onOpenFavorite: (favorite: FavoriteItem) => void;
+  onRemoveFavorite: (favorite: FavoriteItem) => void;
+  onToggleFavorite: (target: FavoriteTarget) => void;
+  isFavorite: (kind: FavoriteItem["kind"], relPath: string) => boolean;
+  isFavoriteMissing: (favorite: FavoriteItem) => boolean;
   selectedFileQueueCount?: number;
   onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
@@ -142,6 +154,12 @@ export const DocumentList = memo(function DocumentList({
   onPaneModeChange,
   pendingRevealTargetPath = null,
   onRevealHandled,
+  favorites,
+  onOpenFavorite,
+  onRemoveFavorite,
+  onToggleFavorite,
+  isFavorite,
+  isFavoriteMissing,
   selectedFileQueueCount = 0,
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
@@ -543,6 +561,13 @@ export const DocumentList = memo(function DocumentList({
         </div>
       ) : null}
 
+      <FavoritesSection
+        favorites={favorites}
+        onOpen={onOpenFavorite}
+        onRemove={onRemoveFavorite}
+        isMissing={isFavoriteMissing}
+      />
+
       <label className="search-box" title={t("list.searchPlaceholder")}>
         <Search size={14} />
         <input
@@ -748,6 +773,26 @@ export const DocumentList = memo(function DocumentList({
                   {t("context.openFile")}
                 </button>
               ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const kind = contextMenu.targetKind === "directory" ? "directory" : "file";
+                  onToggleFavorite({
+                    kind,
+                    relPath: contextMenu.relPath,
+                    label: contextMenu.title,
+                  });
+                  setContextMenu(null);
+                }}
+              >
+                {isFavorite(
+                  contextMenu.targetKind === "directory" ? "directory" : "file",
+                  contextMenu.relPath,
+                )
+                  ? t("favorites.remove")
+                  : t("favorites.add")}
+              </button>
               <button
                 type="button"
                 role="menuitem"

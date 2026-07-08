@@ -59,6 +59,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
 const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["ui", "binaryFileIncludePatterns"],
     &["ui", "documentViews"],
+    &["ui", "favorites"],
     &["ui", "collapsedTreeFolders"],
     &["ui", "collapsedFileFolders"],
     &["ui", "inboxCollapsedSections"],
@@ -1470,6 +1471,14 @@ mod tests {
                         "type": "project",
                         "status": "active"
                     }
+                ],
+                "favorites": [
+                    {
+                        "kind": "directory",
+                        "relPath": "projects/rise",
+                        "label": "RISE",
+                        "addedAt": "2026-07-08T00:00:00Z"
+                    }
                 ]
             },
             "terminal": {
@@ -1521,6 +1530,7 @@ mod tests {
         );
         assert!(global_value.pointer("/ui/collapsedTreeFolders").is_none());
         assert!(global_value.pointer("/ui/documentViews").is_none());
+        assert!(global_value.pointer("/ui/favorites").is_none());
         let state_value = read_json(&tmp.path().join(".maru/workspace-state.json")).unwrap();
         assert_eq!(
             state_value
@@ -1533,6 +1543,12 @@ mod tests {
                 .pointer("/ui/documentViews/0/id")
                 .and_then(JsonValue::as_str),
             Some("rise-active")
+        );
+        assert_eq!(
+            state_value
+                .pointer("/ui/favorites/0/relPath")
+                .and_then(JsonValue::as_str),
+            Some("projects/rise")
         );
         assert!(state_value.pointer("/terminal").is_none());
         assert!(state_value.pointer("/connectors").is_none());

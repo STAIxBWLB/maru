@@ -44,12 +44,14 @@ import {
 } from "../lib/fileDrag";
 import type {
   ExplorerPaneMode,
+  FavoriteItem,
   FilesBrowserMode,
   FilesListAttribute,
   FilesSortKey,
   WorkspaceFileFilter,
 } from "../lib/settings";
 import { ALL_FILES_LIST_ATTRIBUTES } from "../lib/settings";
+import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 import type {
   FileStoreOperation,
   WorkspaceFileEntry,
@@ -122,6 +124,12 @@ interface WorkspaceFilesPaneProps {
   paneRef?: React.RefObject<HTMLElement | null>;
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
+  favorites: FavoriteItem[];
+  onOpenFavorite: (favorite: FavoriteItem) => void;
+  onRemoveFavorite: (favorite: FavoriteItem) => void;
+  onToggleFavorite: (target: FavoriteTarget) => void;
+  isFavorite: (kind: FavoriteItem["kind"], relPath: string) => boolean;
+  isFavoriteMissing: (favorite: FavoriteItem) => boolean;
   selectedFileQueueCount?: number;
   onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
@@ -172,6 +180,12 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   paneRef,
   pendingRevealTargetPath = null,
   onRevealHandled,
+  favorites,
+  onOpenFavorite,
+  onRemoveFavorite,
+  onToggleFavorite,
+  isFavorite,
+  isFavoriteMissing,
   selectedFileQueueCount = 0,
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
@@ -380,9 +394,13 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
       });
       return;
     }
-    const index = treeRows.findIndex(
-      (row) => row.kind === "file" && row.entry.path === pendingRevealTargetPath,
-    );
+    const index = treeRows.findIndex((row) => {
+      if (row.kind === "file") return row.entry.path === pendingRevealTargetPath;
+      const folderTarget = workspacePath
+        ? joinWorkspacePath(workspacePath, row.path)
+        : row.path;
+      return folderTarget === pendingRevealTargetPath;
+    });
     if (index < 0) {
       if (!loading) onRevealHandled?.();
       return;
@@ -400,7 +418,15 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         onRevealHandled?.();
       });
     });
-  }, [browserMode, listRows, loading, onRevealHandled, pendingRevealTargetPath, treeRows]);
+  }, [
+    browserMode,
+    listRows,
+    loading,
+    onRevealHandled,
+    pendingRevealTargetPath,
+    treeRows,
+    workspacePath,
+  ]);
 
   const copyText = (value: string) => {
     if (!value) return;
@@ -622,6 +648,13 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
         </div>
       )}
 
+      <FavoritesSection
+        favorites={favorites}
+        onOpen={onOpenFavorite}
+        onRemove={onRemoveFavorite}
+        isMissing={isFavoriteMissing}
+      />
+
       <label className="search-box" title={t("files.searchPlaceholder")}>
         <Search size={14} />
         <input
@@ -778,6 +811,26 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
                   {t("context.openFile")}
                 </button>
               ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const kind = contextMenu.targetKind === "directory" ? "directory" : "file";
+                  onToggleFavorite({
+                    kind,
+                    relPath: contextMenu.relPath,
+                    label: contextMenu.title,
+                  });
+                  setContextMenu(null);
+                }}
+              >
+                {isFavorite(
+                  contextMenu.targetKind === "directory" ? "directory" : "file",
+                  contextMenu.relPath,
+                )
+                  ? t("favorites.remove")
+                  : t("favorites.add")}
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -1080,6 +1133,7 @@ const FileFolderRow = memo(function FileFolderRow({
       }
       title={row.path}
       onContextMenu={(event) => onContextMenu(event, row)}
+      data-tree-target-path={folderTarget}
       onDragStart={(event) => {
         if (!workspacePath) return;
         writeExplorerDragPayload(event, {

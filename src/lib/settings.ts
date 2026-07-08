@@ -12,6 +12,7 @@ export type FileQueueDefaultOperation = "copy" | "move";
 export type FilesBrowserMode = "list" | "tree";
 export type FilesSortKey = "name" | "modifiedDesc" | "modifiedAsc";
 export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git" | "binary";
+export type FavoriteKind = "file" | "directory";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type TerminalDock = "bottom" | "right";
 export type TerminalAttachMentionStyle = "mention" | "path" | "read";
@@ -54,6 +55,13 @@ export interface DocumentViewDefinition {
   status?: string | null;
   pathPrefix?: string | null;
   query?: string | null;
+}
+
+export interface FavoriteItem {
+  kind: FavoriteKind;
+  relPath: string;
+  label: string;
+  addedAt: string;
 }
 
 export const DEFAULT_BINARY_FILE_INCLUDE_PATTERNS = [
@@ -154,6 +162,7 @@ export interface MaruSettings {
     filesListAttributes: FilesListAttribute[];
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
+    favorites: FavoriteItem[];
     collapsedTreeFolders: string[];
     collapsedFileFolders: string[];
     documentTreeStateInitialized: boolean;
@@ -290,6 +299,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
+    favorites: [],
     collapsedTreeFolders: [],
     collapsedFileFolders: [],
     documentTreeStateInitialized: false,
@@ -439,6 +449,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
         ui.binaryFileIncludePatterns,
       ),
       documentViews: normalizeDocumentViews(ui.documentViews),
+      favorites: normalizeFavoriteItems(ui.favorites),
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
       documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
@@ -765,6 +776,7 @@ function cloneDefaultSettings(): MaruSettings {
       ],
       filesListAttributes: [...DEFAULT_MARU_SETTINGS.ui.filesListAttributes],
       documentViews: DEFAULT_MARU_SETTINGS.ui.documentViews.map((view) => ({ ...view })),
+      favorites: DEFAULT_MARU_SETTINGS.ui.favorites.map((favorite) => ({ ...favorite })),
       collapsedTreeFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedFileFolders],
       documentTreeStateInitialized: DEFAULT_MARU_SETTINGS.ui.documentTreeStateInitialized,
@@ -1244,6 +1256,41 @@ function normalizeDocumentViews(value: unknown): DocumentViewDefinition[] {
     views.push(view);
   }
   return views;
+}
+
+function normalizeFavoriteItems(value: unknown): FavoriteItem[] {
+  if (!Array.isArray(value)) return [];
+  const favorites: FavoriteItem[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const kind = item.kind === "file" || item.kind === "directory" ? item.kind : null;
+    const relPath = normalizeFavoriteRelPath(item.relPath);
+    if (!kind || !relPath) continue;
+    const key = `${kind}:${relPath.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label =
+      typeof item.label === "string" && item.label.trim()
+        ? item.label.trim()
+        : relPath.split("/").pop() ?? relPath;
+    favorites.push({
+      kind,
+      relPath,
+      label,
+      addedAt: typeof item.addedAt === "string" && item.addedAt.trim() ? item.addedAt.trim() : "",
+    });
+  }
+  return favorites;
+}
+
+function normalizeFavoriteRelPath(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (!normalized || normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) return null;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) return null;
+  return parts.join("/");
 }
 
 function normalizeViewToken(value: unknown): string | null {
