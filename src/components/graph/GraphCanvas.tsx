@@ -93,7 +93,7 @@ const EdgeView = memo(function EdgeView({
 });
 
 const NodeView = memo(function NodeView({
-  index, id, r, fill, className, label,
+  index, id, r, fill, className, label, favorite,
 }: {
   index: number;
   id: string;
@@ -101,10 +101,16 @@ const NodeView = memo(function NodeView({
   fill: string;
   className: string;
   label: string;
+  favorite: boolean;
 }) {
   return (
     <g className={className}>
       <circle r={r} data-node-index={index} data-node-id={id} fill={fill} />
+      {favorite ? (
+        <text className="graph-node-star" dy={-(r + 4)}>
+          ★
+        </text>
+      ) : null}
       {/* Always mounted; visibility is CSS-toggled (label LOD + state) so
           zoom/hover threshold crossings need zero reconciliation. */}
       <text className="graph-node-label" dy={r + 12}>
@@ -142,6 +148,9 @@ interface GraphCanvasProps {
   onPathTarget: (node: GraphNode) => void;
   onNodeDrag: (index: number, phase: "start" | "move" | "end", x: number, y: number) => void;
   onNodeUnpin: (index: number) => void;
+  onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
+  /** Node ids currently favorited — rendered with a ★ marker. */
+  favoriteIds?: Set<string>;
   onViewportReport?: (zoom: number) => void;
 }
 
@@ -164,6 +173,8 @@ export function GraphCanvas({
   onPathTarget,
   onNodeDrag,
   onNodeUnpin,
+  onNodeContextMenu,
+  favoriteIds,
   onViewportReport,
 }: GraphCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -176,6 +187,10 @@ export function GraphCanvas({
   // id → last written position; lets a structural change keep surviving nodes
   // in place instead of flashing to the origin before the next frame arrives.
   const lastPos = useRef<Map<string, [number, number]>>(new Map());
+  // Previous nodes array identity — positionsRef is index-aligned only while it
+  // is unchanged, so a same-cardinality filter swap must not write the stale
+  // frame by index.
+  const prevNodesRef = useRef<GraphNode[] | null>(null);
 
   const [viewport, setViewport] = useState<GraphViewport>({ zoom: 1, px: 0, py: 0 });
   const [size, setSize] = useState({ width: 1200, height: 800 });
@@ -410,10 +425,26 @@ export function GraphCanvas({
     nodeEls.current = Array.from(nodesGroupRef.current?.children ?? []) as SVGGElement[];
     edgeEls.current = Array.from(edgesGroupRef.current?.children ?? []) as SVGLineElement[];
     const p = positionsRef.current;
-    if (p && p.length === nodes.length * 2) writeFrameRef.current?.(p);
+    // positionsRef is index-aligned only while node identity is unchanged; a
+    // same-cardinality filter swap leaves it stale, so fall back to the id-keyed
+    // placeFromLastKnown until the worker's frame for the new set arrives.
+    const aligned = prevNodesRef.current === nodes;
+    prevNodesRef.current = nodes;
+    if (aligned && p && p.length === nodes.length * 2) writeFrameRef.current?.(p);
     else placeFromLastKnown();
     applyHoverRef.current?.(hoverIdRef.current);
   }, [nodes, drawnEdges, pairEndpoints, placeFromLastKnown, positionsRef]);
+
+  // React rewrites a node's class attribute when its computed cls changes
+  // (select / focus / path-source / highlight), silently dropping the
+  // imperatively-added .hovered/.hl while .has-hover still dims the rest — and a
+  // path overlay (pairEndpoints stays null) never re-runs the structural effect.
+  // Re-assert hover on exactly those triggers; applyHover recomputes its `active`
+  // guard against the fresh `highlight`, so it also clears .has-hover under an
+  // overlay. Keyed narrowly (not every commit) so pan/zoom stays untouched.
+  useLayoutEffect(() => {
+    applyHoverRef.current?.(hoverIdRef.current);
+  }, [selectedId, focusNodeId, pathSourceId, highlight]);
 
   // Subscribe the worker frame stream to a rAF-coalesced DOM write.
   useEffect(() => {
@@ -517,6 +548,9 @@ export function GraphCanvas({
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
+      // Only the primary button pans/drags; right-click is reserved for the
+      // context menu (onContextMenu), so it must not start a gesture.
+      if (event.button !== 0) return;
       const target = event.target as SVGElement;
       const nodeIndexAttr = target.getAttribute("data-node-index");
       if (nodeIndexAttr != null) {
@@ -612,6 +646,75 @@ export function GraphCanvas({
     if (hoverIdRef.current != null) applyHoverRef.current?.(null);
   }, []);
 
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent<SVGSVGElement>) => {
+      const attr = (event.target as SVGElement).getAttribute("data-node-index");
+      if (attr == null) return; // let the browser menu show over empty canvas
+      event.preventDefault();
+      const index = Number(attr);
+      const node = nodes[index];
+      if (node) onNodeContextMenu?.(node, index, event.clientX, event.clientY);
+    },
+    [nodes, onNodeContextMenu],
+  );
+
+  // Memoize the child subtrees on their viewport-invariant deps so a pan/zoom
+  // (viewport-only render) reuses the same element arrays and React bails the
+  // ~2.4k-element subtree — only the outer <g transform> updates.
+  const edgeChildren = useMemo(
+    () =>
+      drawnEdges.map(({ edge }) => {
+        const key = edge.source < edge.target
+          ? `${edge.source} ${edge.target}`
+          : `${edge.target} ${edge.source}`;
+        let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
+        if (highlightEdgeKeys) {
+          cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
+        } else if (highlightNodes) {
+          cls += " dimmed";
+        }
+        const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
+        return (
+          <EdgeView
+            key={`${edge.source} ${edge.target} ${edge.relation}`}
+            className={cls}
+            marker={isSupersedes}
+          />
+        );
+      }),
+    [drawnEdges, highlightEdgeKeys, highlightNodes],
+  );
+
+  const nodeChildren = useMemo(
+    () =>
+      nodes.map((node, i) => {
+        const inHighlight = highlightNodes?.has(node.id) ?? false;
+        const dimmed = highlightNodes ? !inHighlight : false;
+        const cls =
+          "graph-node" +
+          (node.type === "unresolved" ? " ghost" : "") +
+          (node.isGodNode ? " god" : "") +
+          (node.id === focusNodeId ? " focus" : "") +
+          (node.id === selectedId ? " selected" : "") +
+          (node.id === pathSourceId ? " path-source" : "") +
+          (inHighlight ? " highlight" : "") +
+          (dimmed ? " dimmed" : "");
+        return (
+          <NodeView
+            key={node.id}
+            index={i}
+            id={node.id}
+            r={nodeRadius(node.degree)}
+            fill={nodeColor(node, enriched)}
+            className={cls}
+            label={node.label}
+            favorite={favoriteIds?.has(node.id) ?? false}
+          />
+        );
+      }),
+    [nodes, highlightNodes, focusNodeId, selectedId, pathSourceId, enriched, favoriteIds],
+  );
+
   return (
     <div className="graph-canvas-wrap">
       <svg
@@ -624,6 +727,7 @@ export function GraphCanvas({
         onPointerUp={handlePointerUp}
         onPointerOver={handlePointerOver}
         onPointerLeave={handlePointerLeave}
+        onContextMenu={handleContextMenu}
       >
         <defs>
           <marker
@@ -640,54 +744,13 @@ export function GraphCanvas({
         </defs>
         <g transform={`translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`}>
           <g className="graph-edges" ref={edgesGroupRef}>
-            {drawnEdges.map(({ edge }) => {
-              const key = edge.source < edge.target
-                ? `${edge.source} ${edge.target}`
-                : `${edge.target} ${edge.source}`;
-              let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
-              if (highlightEdgeKeys) {
-                cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
-              } else if (highlightNodes) {
-                cls += " dimmed";
-              }
-              const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
-              return (
-                <EdgeView
-                  key={`${edge.source} ${edge.target} ${edge.relation}`}
-                  className={cls}
-                  marker={isSupersedes}
-                />
-              );
-            })}
+            {edgeChildren}
           </g>
           {pairEndpoints ? (
             <line ref={pairLineRef} className="graph-edge suggested" />
           ) : null}
           <g className={"graph-nodes" + (showLabels ? " labels-on" : "")} ref={nodesGroupRef}>
-            {nodes.map((node, i) => {
-              const inHighlight = highlightNodes?.has(node.id) ?? false;
-              const dimmed = highlightNodes ? !inHighlight : false;
-              const cls =
-                "graph-node" +
-                (node.type === "unresolved" ? " ghost" : "") +
-                (node.isGodNode ? " god" : "") +
-                (node.id === focusNodeId ? " focus" : "") +
-                (node.id === selectedId ? " selected" : "") +
-                (node.id === pathSourceId ? " path-source" : "") +
-                (inHighlight ? " highlight" : "") +
-                (dimmed ? " dimmed" : "");
-              return (
-                <NodeView
-                  key={node.id}
-                  index={i}
-                  id={node.id}
-                  r={nodeRadius(node.degree)}
-                  fill={nodeColor(node, enriched)}
-                  className={cls}
-                  label={node.label}
-                />
-              );
-            })}
+            {nodeChildren}
           </g>
         </g>
       </svg>

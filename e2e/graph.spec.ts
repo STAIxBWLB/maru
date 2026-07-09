@@ -178,6 +178,83 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   expect(forbidden).toEqual([]);
 });
 
+test("search-as-filter narrows the graph to matches", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // Off: search only highlights, count unchanged.
+  await page.getByTestId("graph-search").fill("용어집");
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // On: the graph narrows to the match (glossary is an orphan, so no neighbors).
+  await page.getByTestId("graph-search-filter-toggle").click();
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".graph-node circle")).toHaveCount(1);
+  await expect(page.locator('.graph-node circle[data-node-id="maru-glossary"]')).toBeVisible();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("graph view/filter settings persist across a mode switch", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  await page.getByTestId("graph-search-filter-toggle").click();
+  await page.getByLabel("미해소 링크 표시").check();
+
+  // Leave graph (open a note), then return via the activity rail.
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').dblclick();
+  await expect(page.getByTestId("graph-mode")).toHaveCount(0);
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Both settings survived (seeded from persisted MaruSettings).
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("미해소 링크 표시")).toBeChecked();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("right-click opens the node context menu; Escape closes it", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click({ button: "right" });
+  const menu = page.getByTestId("graph-node-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu).toContainText("Maru 용어집");
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("favoriting a node from the inspector marks it with a star", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click();
+  await expect(page.getByTestId("graph-inspector")).toBeVisible();
+  await expect(page.locator(".graph-node-star")).toHaveCount(0);
+
+  await page.getByTestId("graph-inspector-favorite").click();
+  await expect(page.locator(".graph-node-star")).toHaveCount(1);
+
+  await page.getByTestId("graph-inspector-favorite").click();
+  await expect(page.locator(".graph-node-star")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
 test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");

@@ -4,6 +4,7 @@
 
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import type { GraphSettings } from "../../lib/settings";
 import { communityColor, domainColor } from "./GraphCanvas";
 
 export interface GraphFilters {
@@ -21,6 +22,27 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilters = {
   showGhosts: false,
   minDegree: 0,
 };
+
+/** Persisted (JSON-friendly, array-based) ↔ runtime (Set-based) filter shape. */
+export function filtersFromSettings(f: GraphSettings["filters"]): GraphFilters {
+  return {
+    domains: new Set(f.domains),
+    types: new Set(f.types),
+    community: f.community,
+    showGhosts: f.showGhosts,
+    minDegree: f.minDegree,
+  };
+}
+
+export function filtersToSettings(f: GraphFilters): GraphSettings["filters"] {
+  return {
+    domains: [...f.domains],
+    types: [...f.types],
+    community: f.community,
+    showGhosts: f.showGhosts,
+    minDegree: f.minDegree,
+  };
+}
 
 export interface FacetItem<T> {
   value: T;

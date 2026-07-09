@@ -2,7 +2,7 @@
 // neighbors (outgoing / incoming, click to walk), and node actions
 // (open note / focus subgraph / start path).
 
-import { ExternalLink, GitBranch, Route } from "lucide-react";
+import { ExternalLink, GitBranch, Route, Star } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { GraphModel, GraphNode } from "../../lib/graph/model";
@@ -17,8 +17,10 @@ interface Neighbor {
 interface GraphInspectorProps {
   node: GraphNode | null;
   model: GraphModel;
+  isFavorite: boolean;
   onSelectNode: (id: string) => void;
   onOpen: (node: GraphNode) => void;
+  onToggleFavorite: (node: GraphNode) => void;
   onFocus: (node: GraphNode) => void;
   onStartPath: (node: GraphNode) => void;
 }
@@ -26,8 +28,10 @@ interface GraphInspectorProps {
 export function GraphInspector({
   node,
   model,
+  isFavorite,
   onSelectNode,
   onOpen,
+  onToggleFavorite,
   onFocus,
   onStartPath,
 }: GraphInspectorProps) {
@@ -94,6 +98,17 @@ export function GraphInspector({
         <button type="button" className="graph-action" onClick={() => onStartPath(node)}>
           <Route size={13} /> {t("graph.inspector.startPath")}
         </button>
+        {node.relPath ? (
+          <button
+            type="button"
+            className={isFavorite ? "graph-action active" : "graph-action"}
+            aria-pressed={isFavorite}
+            data-testid="graph-inspector-favorite"
+            onClick={() => onToggleFavorite(node)}
+          >
+            <Star size={13} /> {isFavorite ? t("graph.menu.unfavorite") : t("graph.menu.favorite")}
+          </button>
+        ) : null}
       </div>
 
       {outgoing.length > 0 ? (

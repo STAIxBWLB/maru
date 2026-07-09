@@ -28,12 +28,16 @@ import {
   matchesShortcut,
   useScopedKeyboardShortcuts,
 } from "../../lib/diagram/shortcuts";
+import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
+import type { FavoriteKind, GraphSettings } from "../../lib/settings";
+import type { FavoriteTarget } from "../FavoritesSection";
 import type { VaultEntry } from "../../lib/types";
 import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
 import { DecisionChainLanes } from "./DecisionChainLanes";
 import { GraphCanvas, nodeRadius, type GraphHighlight } from "./GraphCanvas";
 import {
-  DEFAULT_GRAPH_FILTERS,
+  filtersFromSettings,
+  filtersToSettings,
   GraphFilterPanel,
   type FacetItem,
   type GraphFilters,
@@ -49,6 +53,10 @@ interface GraphViewProps {
   onClearFocus: () => void;
   onOpenEntry: (entry: VaultEntry) => void;
   onCreateNote?: (target: string) => void;
+  graphSettings: GraphSettings;
+  onGraphSettingsChange: (next: GraphSettings) => void;
+  isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
+  onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
 }
 
@@ -62,12 +70,42 @@ export function GraphView({
   onClearFocus,
   onOpenEntry,
   onCreateNote,
+  graphSettings,
+  onGraphSettingsChange,
+  isFavorite,
+  onToggleFavorite,
   onError,
 }: GraphViewProps) {
   const { t } = useTranslation();
-  const [view, setView] = useState<GraphViewKind>("graph");
-  const [filters, setFilters] = useState<GraphFilters>(DEFAULT_GRAPH_FILTERS);
+  // Seeded from persisted settings; changes are written back (skip-first) below.
+  const [view, setView] = useState<GraphViewKind>(graphSettings.view);
+  const [filters, setFilters] = useState<GraphFilters>(() =>
+    filtersFromSettings(graphSettings.filters),
+  );
+  const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
   const [search, setSearch] = useState("");
+  // Right-click node context menu (spec §F2 usability).
+  const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const handleMenuKeyDown = useContextMenuKeyboard(menuRef, !!menu, () => setMenu(null));
+
+  // Persist view / filter / search-mode changes (skip the initial seed render).
+  // The callback is held in a ref so App re-renders (which re-create it inline)
+  // don't re-fire persistence — only real state changes do.
+  const onGraphSettingsChangeRef = useRef(onGraphSettingsChange);
+  onGraphSettingsChangeRef.current = onGraphSettingsChange;
+  const persistSkipRef = useRef(true);
+  useEffect(() => {
+    if (persistSkipRef.current) {
+      persistSkipRef.current = false;
+      return;
+    }
+    onGraphSettingsChangeRef.current({
+      view,
+      searchAsFilter,
+      filters: filtersToSettings(filters),
+    });
+  }, [view, searchAsFilter, filters]);
   const [enrichment, setEnrichment] = useState<{ model: GraphModel | null; hint: string | null }>({
     model: null,
     hint: null,
@@ -151,7 +189,7 @@ export function GraphView({
     return { domains, types, communities, maxDegree };
   }, [model]);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     let base = model;
     if (focus) base = focusSubgraph(model, focus, 2);
     const keep = new Set<string>();
@@ -169,6 +207,28 @@ export function GraphView({
       edges: base.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
     };
   }, [model, filters, focus]);
+
+  // Search-as-filter narrows the facet-filtered set to matches + their 1-hop
+  // neighbors (matches alone would render as disconnected dots). Off → returns
+  // baseFiltered by identity, so plain search typing doesn't re-layout.
+  const filtered = useMemo(() => {
+    const q = searchAsFilter ? search.trim().toLowerCase() : "";
+    if (!q) return baseFiltered;
+    const matched = new Set<string>();
+    for (const node of baseFiltered.nodes) {
+      if (node.label.toLowerCase().includes(q)) matched.add(node.id);
+    }
+    const visible = new Set(matched);
+    for (const e of baseFiltered.edges) {
+      if (matched.has(e.source)) visible.add(e.target);
+      if (matched.has(e.target)) visible.add(e.source);
+    }
+    return {
+      ...baseFiltered,
+      nodes: baseFiltered.nodes.filter((n) => visible.has(n.id)),
+      edges: baseFiltered.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
+    };
+  }, [baseFiltered, search, searchAsFilter]);
 
   // --- worker lifecycle: one worker, reused across filter changes ---------
 
@@ -270,6 +330,17 @@ export function GraphView({
     workerRef.current?.postMessage(message);
   }, []);
 
+  // Index-based worker messages (drag/unpin) assume the worker's simNodes match
+  // the DOM's data-node-index. After a filter change the DOM updates
+  // synchronously but the worker `update` is debounced, so flush it first.
+  const flushPendingUpdate = useCallback(() => {
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = null;
+      sendUpdate();
+    }
+  }, [sendUpdate]);
+
   // --- interactions -------------------------------------------------------
 
   const handleOpen = useCallback(
@@ -300,6 +371,70 @@ export function GraphView({
   const handleSelect = useCallback(
     (node: GraphNode | null) => selectById(node?.id ?? null),
     [selectById],
+  );
+
+  const nodeById = useMemo(() => new Map(model.nodes.map((n) => [n.id, n])), [model]);
+
+  // Insight → action: copy the [[wikilink]] to paste into a note, or open the
+  // source note in the editor (reuses handleOpen's mode switch).
+  const copyWikilink = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id);
+      if (node) {
+        void navigator.clipboard
+          .writeText(`[[${node.label}]]`)
+          .catch((err: unknown) => onError(String(err)));
+      }
+    },
+    [nodeById, onError],
+  );
+  const openNodeById = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id);
+      if (node) handleOpen(node);
+    },
+    [nodeById, handleOpen],
+  );
+
+  // Favorites integration: a node maps to its file relPath (ghosts have none).
+  const favoriteIds = useMemo(
+    () =>
+      new Set(
+        model.nodes
+          .filter((n) => n.relPath && isFavorite("file", n.relPath))
+          .map((n) => n.id),
+      ),
+    [model, isFavorite],
+  );
+  const toggleNodeFavorite = useCallback(
+    (node: GraphNode) => {
+      if (!node.relPath) return;
+      onToggleFavorite({ kind: "file", relPath: node.relPath, label: node.label });
+    },
+    [onToggleFavorite],
+  );
+
+  // Context-menu lifecycle: close on any outside interaction / Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  const runMenuAction = useCallback(
+    (fn: (node: GraphNode, index: number) => void) => {
+      const m = menu;
+      setMenu(null);
+      if (m) fn(m.node, m.index);
+    },
+    [menu],
   );
 
   const handlePathTarget = useCallback(
@@ -366,6 +501,13 @@ export function GraphView({
       if (isInEditable(event.target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
+        // The scoped shortcut runs capture-phase and stops propagation, so it
+        // must close the context menu itself (the menu's own Esc handler and the
+        // window listener never see the event).
+        if (menu) {
+          setMenu(null);
+          return;
+        }
         clearOverlays();
       } else if (event.key === "=" || event.key === "+") {
         event.preventDefault();
@@ -378,7 +520,7 @@ export function GraphView({
         setFitSignal((s) => s + 1);
       }
     },
-    [clearOverlays],
+    [clearOverlays, menu],
   );
   useScopedKeyboardShortcuts(shortcutPredicate, shortcutHandler);
 
@@ -409,6 +551,8 @@ export function GraphView({
         search={search}
         onSearchChange={setSearch}
         searchInputRef={searchRef}
+        searchAsFilter={searchAsFilter}
+        onSearchAsFilterChange={setSearchAsFilter}
         view={view}
         onViewChange={setView}
         zoomPercent={zoomPercent}
@@ -477,11 +621,18 @@ export function GraphView({
             onOpen={handleOpen}
             onPathTarget={handlePathTarget}
             onNodeDrag={(nodeIndex, phase, x, y) => {
-              if (phase === "start") post({ type: "dragStart", index: nodeIndex });
-              else if (phase === "move") post({ type: "dragMove", index: nodeIndex, x, y });
+              if (phase === "start") {
+                flushPendingUpdate();
+                post({ type: "dragStart", index: nodeIndex });
+              } else if (phase === "move") post({ type: "dragMove", index: nodeIndex, x, y });
               else post({ type: "dragEnd", index: nodeIndex });
             }}
-            onNodeUnpin={(nodeIndex) => post({ type: "unpin", index: nodeIndex })}
+            onNodeUnpin={(nodeIndex) => {
+              flushPendingUpdate();
+              post({ type: "unpin", index: nodeIndex });
+            }}
+            onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
+            favoriteIds={favoriteIds}
             onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
           />
           <div className="graph-right" data-testid="graph-right">
@@ -511,13 +662,19 @@ export function GraphView({
                 now={nowRef.current}
                 onHighlightPair={handleHighlightPair}
                 onSelectNode={handleInsightNode}
+                onCopyWikilink={copyWikilink}
+                onOpenNode={openNodeById}
               />
             ) : (
               <GraphInspector
                 node={selectedNode}
                 model={model}
+                isFavorite={
+                  selectedNode?.relPath ? isFavorite("file", selectedNode.relPath) : false
+                }
                 onSelectNode={handleInsightNode}
                 onOpen={handleOpen}
+                onToggleFavorite={toggleNodeFavorite}
                 onFocus={(node) => {
                   setFocus(node.id);
                   selectById(node.id);
@@ -531,6 +688,59 @@ export function GraphView({
           </div>
         </div>
       )}
+
+      {menu ? (
+        <div
+          ref={menuRef}
+          className="context-menu graph-node-context-menu"
+          data-testid="graph-node-context-menu"
+          role="menu"
+          tabIndex={-1}
+          style={{ left: menu.x, top: menu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleMenuKeyDown}
+        >
+          <div className="context-menu-title" title={menu.node.relPath ?? menu.node.label}>
+            {menu.node.label}
+          </div>
+          <button type="button" role="menuitem" onClick={() => runMenuAction((n) => handleOpen(n))}>
+            <span>{t("graph.inspector.open")}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runMenuAction((n) => { setFocus(n.id); selectById(n.id); })}
+          >
+            <span>{t("graph.inspector.focus")}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runMenuAction((n) => { setPathSourceId(n.id); setSelectedId(n.id); })}
+          >
+            <span>{t("graph.inspector.startPath")}</span>
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runMenuAction((n) => copyWikilink(n.id))}>
+            <span>{t("graph.action.copyWikilink")}</span>
+          </button>
+          {menu.node.relPath ? (
+            <button type="button" role="menuitem" onClick={() => runMenuAction((n) => toggleNodeFavorite(n))}>
+              <span>{favoriteIds.has(menu.node.id) ? t("graph.menu.unfavorite") : t("graph.menu.favorite")}</span>
+            </button>
+          ) : null}
+          <div className="context-menu-separator" role="separator" />
+          {/* ponytail: no "pin" item — pinned state lives only in the worker, so
+              a pin toggle couldn't honestly render its own on/off state. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runMenuAction((_n, index) => post({ type: "unpin", index }))}
+          >
+            <span>{t("graph.menu.unpin")}</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

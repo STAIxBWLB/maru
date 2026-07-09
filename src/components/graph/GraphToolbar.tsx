@@ -3,7 +3,7 @@
 // the app's segmented-control (.cal-view-toggle) and search-with-icon
 // (.cal-search) conventions.
 
-import { Maximize2, Minus, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { ListFilter, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 
 export type GraphViewKind = "graph" | "chains";
@@ -12,6 +12,8 @@ interface GraphToolbarProps {
   search: string;
   onSearchChange: (next: string) => void;
   searchInputRef?: React.Ref<HTMLInputElement>;
+  searchAsFilter: boolean;
+  onSearchAsFilterChange: (next: boolean) => void;
   view: GraphViewKind;
   onViewChange: (next: GraphViewKind) => void;
   zoomPercent: number;
@@ -31,6 +33,8 @@ export function GraphToolbar({
   search,
   onSearchChange,
   searchInputRef,
+  searchAsFilter,
+  onSearchAsFilterChange,
   view,
   onViewChange,
   zoomPercent,
@@ -59,6 +63,17 @@ export function GraphToolbar({
           data-testid="graph-search"
         />
       </label>
+
+      <button
+        type="button"
+        className={searchAsFilter ? "graph-icon-button active" : "graph-icon-button"}
+        aria-pressed={searchAsFilter}
+        title={t("graph.search.filterToggle")}
+        data-testid="graph-search-filter-toggle"
+        onClick={() => onSearchAsFilterChange(!searchAsFilter)}
+      >
+        <ListFilter size={14} />
+      </button>
 
       <div className="graph-view-toggle" role="tablist" aria-label={t("graph.view.label")}>
         <button
