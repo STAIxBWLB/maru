@@ -119,6 +119,20 @@ export function GraphView({
       filters: filtersToSettings(filters),
     });
   }, [view, searchAsFilter, showHulls, filters]);
+
+  // Re-seed from external (cross-window) settings changes. Deps are only
+  // [graphSettings], and each setState is gated on a real diff, so a local
+  // edit's own persist round-trip (prop catches up to local) is a no-op — no
+  // reset of the in-flight local change and no feedback loop.
+  useEffect(() => {
+    if (graphSettings.view !== view) setView(graphSettings.view);
+    if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
+    if (graphSettings.showHulls !== showHulls) setShowHulls(graphSettings.showHulls);
+    if (JSON.stringify(graphSettings.filters) !== JSON.stringify(filtersToSettings(filters))) {
+      setFilters(filtersFromSettings(graphSettings.filters));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphSettings]);
   const [enrichment, setEnrichment] = useState<{ model: GraphModel | null; hint: string | null }>({
     model: null,
     hint: null,
@@ -130,6 +144,11 @@ export function GraphView({
   const [settled, setSettled] = useState<Float64Array | null>(null);
   const latestPositionsRef = useRef<Float64Array | null>(null);
   const applyFrameRef = useRef<((p: Float64Array) => void) | null>(null);
+  // The node set the pending update was posted for, and the set `settled`
+  // actually corresponds to — so hull/disk-save consumers can guard on identity
+  // (not just cardinality) and never map a stale frame onto a reordered set.
+  const pendingNodesRef = useRef<GraphNode[] | null>(null);
+  const settledNodesRef = useRef<GraphNode[] | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
@@ -247,7 +266,9 @@ export function GraphView({
   // filtered.nodes) so they stay put during drag and snap on settle.
   const hulls = useMemo(() => {
     if (!showHulls || !model.enriched || !settled) return [];
-    if (settled.length !== filtered.nodes.length * 2) return [];
+    // Identity guard: skip while `settled` belongs to a different node set (a
+    // same-cardinality filter/search swap would otherwise draw from wrong points).
+    if (settledNodesRef.current !== filtered.nodes) return [];
     const byCommunity = new Map<number, Point[]>();
     filtered.nodes.forEach((node, i) => {
       if (node.community == null) return;
@@ -279,7 +300,10 @@ export function GraphView({
       // Settled frame → one React render (refreshes the disk-cache dep and,
       // in PR-3, feeds hull rendering). The canvas mounts itself off the first
       // frame via its own applyFrame gate, so this need not fire per tick.
-      if (msg.type === "done") setSettled(msg.positions);
+      if (msg.type === "done") {
+        settledNodesRef.current = pendingNodesRef.current;
+        setSettled(msg.positions);
+      }
     };
     if (workspacePath) {
       vaultGraphLayoutRead(workspacePath)
@@ -302,6 +326,8 @@ export function GraphView({
     const worker = workerRef.current;
     if (!worker) return;
     frameEpochRef.current += 1;
+    // Tag the frame we're about to request with its node set (see refs above).
+    pendingNodesRef.current = filtered.nodes;
     const indexById = new Map(filtered.nodes.map((n, i) => [n.id, i]));
     const seed = seedAppliedRef.current ? undefined : seedRef.current;
     seedAppliedRef.current = true;
@@ -340,9 +366,9 @@ export function GraphView({
 
   useEffect(() => {
     if (!workspacePath || !settled) return;
-    // Skip while `settled` is stale relative to the current filter set (a done
-    // frame for the new set arrives within a tick and re-runs this effect).
-    if (settled.length !== filtered.nodes.length * 2) return;
+    // Skip while `settled` belongs to a different node set (identity, not just
+    // cardinality — a same-cardinality swap would persist wrong coordinates).
+    if (settledNodesRef.current !== filtered.nodes) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const map: Record<string, [number, number]> = {};
@@ -454,7 +480,8 @@ export function GraphView({
       if (!el) return;
       try {
         const result = format === "png" ? await exportGraphPng(el) : exportGraphSvg(el);
-        const name = `graph-${new Date().toISOString().slice(0, 10)}.${result.extension}`;
+        // Local calendar date (en-CA → YYYY-MM-DD); toISOString would stamp UTC.
+        const name = `graph-${new Date().toLocaleDateString("en-CA")}.${result.extension}`;
         const target = workspacePath
           ? await chooseSaveFile(
               t("graph.export.saveTitle"),
@@ -814,7 +841,17 @@ export function GraphView({
           <button
             type="button"
             role="menuitem"
-            onClick={() => runMenuAction((_n, index) => post({ type: "unpin", index }))}
+            onClick={() =>
+              runMenuAction((n) => {
+                // Re-resolve the live index by id and flush like the alt-click
+                // path — the menu's captured index may be stale if the filtered
+                // set changed while the menu was open.
+                const index = filtered.nodes.findIndex((fn) => fn.id === n.id);
+                if (index < 0) return;
+                flushPendingUpdate();
+                post({ type: "unpin", index });
+              })
+            }
           >
             <span>{t("graph.menu.unpin")}</span>
           </button>
