@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 use crate::agent_host::contracts::{
     CompletionRequest, CompletionResponse, COMPLETION_RESPONSE_SCHEMA_VERSION,
@@ -203,7 +203,7 @@ impl ProviderAdapter for CliProviderAdapter {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .no_window();
-        let mut child = cmd.spawn().map_err(|err| spawn_error_kind(&err))?;
+        let mut child = spawn_with_retry(&mut cmd).map_err(|err| spawn_error_kind(&err))?;
         if let Some(payload) = stdin_payload {
             if let Some(mut stdin) = child.stdin.take() {
                 use std::io::Write;
@@ -239,6 +239,25 @@ impl ProviderAdapter for CliProviderAdapter {
             stream: "stdout".to_string(),
             line: response.content,
         }])
+    }
+}
+
+/// Spawn a command, retrying briefly on `ETXTBSY` (os error 26). That error is a
+/// transient race in a multithreaded process that writes an executable and
+/// fork/execs concurrently: a fork in another thread can hold the just-written
+/// file's writable fd across our exec. The other child execs microseconds later
+/// (closing the fd), so a short bounded retry clears it. Non-`ETXTBSY` errors
+/// (and success) return immediately.
+fn spawn_with_retry(cmd: &mut Command) -> std::io::Result<Child> {
+    let mut attempts = 0u32;
+    loop {
+        match cmd.spawn() {
+            Err(err) if err.raw_os_error() == Some(26) && attempts < 5 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
     }
 }
 
