@@ -3,7 +3,10 @@
 The `graph` activity-rail mode (label 그래프 / Graph) renders the vault as a
 knowledge graph and, with managed writes enabled, lets you edit note frontmatter
 under a schema gate. It ships in three layers — 8a (read-only), 8b (managed
-writes), 8c (graph-driven authoring) — all landed and default-on.
+writes), 8c (graph-driven authoring) — all landed and default-on, then refined
+by **V2** (warm-start worker, design-token UI, client-side insights) and **V3**
+(imperative rendering, persisted usability affordances, legend/hull
+visualization, PNG/SVG export).
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -28,10 +31,15 @@ overlay is produced out-of-band by the `vault-graph` skill
 
 - `src/components/graph/GraphView.tsx` — mode shell; owns the model, filters,
   selection/path/insight state, and one reused layout worker.
-- `src/components/graph/GraphCanvas.tsx` — SVG canvas. Nodes/edges are memoized
-  child components (`NodeView`/`EdgeView`), so pan/zoom updates only the
-  container `<g transform>` — zero child reconciliation once the layout settles.
-  A `ResizeObserver` caches the canvas size (no per-frame `getBoundingClientRect`).
+- `src/components/graph/GraphCanvas.tsx` — SVG canvas. **React owns structure,
+  the DOM owns geometry** (V3): node `<g>` transforms and edge endpoints are
+  written imperatively via `setAttribute` straight from worker frames, so
+  simulation ticks, drags, pan/zoom and hover never reconcile the ~2.4k child
+  elements. `NodeView`/`EdgeView` carry no coordinates, and the two child
+  subtrees are memoized on their non-viewport props, so pan/zoom touches only
+  the container `<g transform>`. A `ResizeObserver` caches the canvas size.
+- `src/components/graph/GraphLegend.tsx` — collapsible color key overlay
+  (communities when enriched, else domains); each swatch toggles the filter.
 - `src/components/graph/GraphToolbar.tsx` — search, graph/chains view switch,
   zoom cluster, re-layout, community-overlay refresh, stats.
 - `src/components/graph/GraphFilterPanel.tsx` — domain/type/community chips with
@@ -47,21 +55,52 @@ overlay is produced out-of-band by the `vault-graph` skill
 
 - **Click = select** (metadata in the right-pane inspector), **double-click =
   open** the note in the editor, **drag = move + pin**, **alt-click = unpin**,
-  **shift-click = path target**, **Esc = clear** selection/path/focus.
+  **shift-click = path target**, **right-click = context menu** (open / focus /
+  start path / copy `[[wikilink]]` / favorite / unpin), **Esc = clear**
+  selection/path/focus (or close the menu).
 - Wheel scroll pans; **ctrl/⌘ + wheel zooms** at the cursor. ⌘F focuses search;
   `+`/`-`/`0` zoom in/out/fit.
-- Hover highlights a node's 1-hop neighborhood and dims the rest.
+- Hover highlights a node's 1-hop neighborhood and dims the rest (O(neighbors),
+  imperative — no reconciliation).
+- **Search-as-filter** (toolbar toggle): narrow the graph to matches + their
+  1-hop neighbors, instead of only highlighting the first match.
+- **Favorites**: favorite a node from the context menu or inspector; favorited
+  nodes carry a ★ marker (shares `settings.ui.favorites` with the Explorer).
+- Filters, view, search-mode and hull toggle **persist** in
+  `MaruSettings.graph` and survive mode switches / restart; command palette has
+  an **open-graph** action.
 
-### Performance (V2)
+### Performance (V3)
 
-The layout worker is created once per mount and reused across filter changes via
-`update` messages (no terminate/recreate). It keeps a per-id position store so
-surviving nodes **warm-start** from their last position instead of
-re-randomizing — filtering nudges the layout instead of exploding it. Each
-request carries an `epoch` that round-trips so the main thread discards stale
-frames (no blank-and-reflow). Settled positions persist to
-`<workspace>/.maru/cache/graph-layout.json` (`vault_graph_layout_{read,save}`)
-and prime the first layout on re-entry.
+React drives *structure* (mount/unmount, class changes); the DOM owns
+*geometry*. Worker frames are pushed through `applyFrameRef` to a rAF-coalesced
+`writeFrame` that mutates `transform`/`x1..y2` directly — only the settled
+(`done`) frame reaches React state (for the disk cache and hull rendering).
+Hover toggles a container `.has-hover` class plus per-element `.hl`/`.hovered`
+via `classList`, so hovering across the graph reconciles nothing.
+`buildAdjacency` is memoized per model (WeakMap), shared by the insight/focus
+callers.
+
+The layout worker (V2, unchanged protocol) is created once per mount and reused
+across filter changes via `update` messages. A per-id position store
+**warm-starts** surviving nodes; each request carries an `epoch` that round-trips
+so the main thread discards stale frames. `settled` frames are tagged with their
+node set, so hulls and the disk cache
+(`<workspace>/.maru/cache/graph-layout.json`, `vault_graph_layout_{read,save}`)
+never map a stale frame onto a reordered set.
+
+## Visualization & export (V3)
+
+- **Legend** — bottom-left overlay keying community (enriched) or domain colors
+  with counts; clicking a swatch drives the corresponding filter.
+- **Community areas** — translucent convex hulls per community
+  (`src/lib/graph/hull.ts`, monotone-chain, no deps), drawn behind the edges
+  from settled positions only. Toggled in the filter panel (enriched only).
+- **Export** — PNG / SVG of the current view (`src/lib/graph/export.ts`): the
+  live `<svg>` is cloned, computed styles inlined (`display` included, so the
+  label LOD state is preserved), a `getBBox` viewBox is fitted, and PNG reuses
+  the diagram rasteriser. Saves via the Tauri dialog with a browser-download
+  fallback. Toolbar buttons; filename `graph-YYYY-MM-DD.{png,svg}`.
 
 ## Insight / ideation (V2)
 
@@ -81,7 +120,8 @@ weekly `build-graph.py` report):
   the inspector, shift-click a target, and the chain highlights on the canvas.
 
 Clicking an insight row highlights the pair (dashed virtual edge) or centers the
-node on the canvas.
+node on the canvas. Hidden-link rows also carry **actions** (V3): copy the
+target's `[[wikilink]]` to paste, or open the source note in the editor.
 
 ## Managed writes (8b)
 
@@ -110,14 +150,17 @@ Pure-frontend features built on the 8a + 8b primitives:
 ## Tests
 
 - vitest: `src/lib/graph/model.test.ts`, `insights.test.ts`,
-  `decisionChains.test.ts`; perf bench `src/lib/graph/perf.bench.ts` (adds an
-  insight-pass budget alongside build/layout/cull).
+  `decisionChains.test.ts`, `hull.test.ts`; `src/lib/settings.test.ts` (graph
+  settings round-trip); perf bench `src/lib/graph/perf.bench.ts` (build / layout
+  / insight-pass / cold `buildAdjacency` budgets).
 - cargo: `vault_graph` — overlay read + layout-cache round-trip.
 - e2e: `e2e/graph.spec.ts` (mode entry, filter, select/double-click, chain view,
-  toolbar + insights + inspector surfaces). **Scope note** — the enrichment path
-  (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies the
-  *degraded* live-layer path; the enriched overlay path is covered by
-  vitest + cargo fixtures.
+  toolbar + insights + inspector; V3: hover highlight, drag-pin/unpin,
+  search-as-filter, settings persistence across a mode switch, context menu,
+  inspector favorite ★, SVG export download). **Scope note** — the enrichment
+  path (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies
+  the *degraded* live-layer path (no communities → legend/hulls covered by
+  vitest); the enriched overlay path is covered by vitest + cargo fixtures.
 
 ## Deferred
 
