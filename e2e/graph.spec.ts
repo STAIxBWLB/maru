@@ -271,6 +271,33 @@ test("exports the current graph view as an SVG download", async ({ page }) => {
   expect(forbidden).toEqual([]);
 });
 
+test("enriched overlay renders the communities badge, legend, and hulls", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  // Opt into the mock community overlay (web mode has no vault-graph.json).
+  // Registered after the beforeEach localStorage clear, so the flag survives.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("maru:e2e:graph-overlay", "1");
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Enriched → communities badge shown, no degraded hint.
+  await expect(page.getByTestId("graph-enriched-badge")).toBeVisible();
+  await expect(page.getByTestId("graph-degraded-hint")).toHaveCount(0);
+
+  // Legend lists the two mock communities.
+  const legend = page.getByTestId("graph-legend");
+  await expect(legend).toBeVisible();
+  await expect(legend.locator(".graph-legend-item")).toHaveCount(2);
+
+  // Hull toggle appears (enriched + communities) and draws one area per community.
+  await page.getByTestId("graph-hulls-toggle").check();
+  await expect(page.locator(".graph-hull")).toHaveCount(2);
+
+  expect(forbidden).toEqual([]);
+});
+
 test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");

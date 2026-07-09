@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   chooseSaveFile,
+  isTauri,
   vaultGraphLayoutRead,
   vaultGraphLayoutSave,
   vaultGraphRead,
@@ -62,7 +63,7 @@ interface GraphViewProps {
   focusNodeId: string | null;
   onClearFocus: () => void;
   onOpenEntry: (entry: VaultEntry) => void;
-  onCreateNote?: (target: string) => void;
+  onCreateNote: (target: string) => void;
   graphSettings: GraphSettings;
   onGraphSettingsChange: (next: GraphSettings) => void;
   isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
@@ -172,7 +173,6 @@ export function GraphView({
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const nowRef = useRef<number>(Date.now());
 
   const index = useMemo(() => buildEntryIndex(entries), [entries]);
   const liveModel = useMemo(() => buildVaultGraph(entries, index), [entries, index]);
@@ -197,6 +197,9 @@ export function GraphView({
   }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
+  // "now" for stale-note detection — recomputed whenever the model changes
+  // (i.e. on vault edits) so it doesn't stay frozen at mount time.
+  const now = useMemo(() => Date.now(), [model]);
 
   const facets = useMemo(() => {
     const domain = new Map<string, number>();
@@ -404,15 +407,14 @@ export function GraphView({
   const handleOpen = useCallback(
     (node: GraphNode) => {
       if (node.type === "unresolved") {
-        if (onCreateNote) onCreateNote(node.label);
-        else onError(t("graph.hint.ghostNode"));
+        onCreateNote(node.label);
         return;
       }
       if (!node.relPath) return;
       const entry = entries.find((e) => e.relPath === node.relPath);
       if (entry) onOpenEntry(entry);
     },
-    [entries, onOpenEntry, onCreateNote, onError, t],
+    [entries, onOpenEntry, onCreateNote],
   );
 
   const selectById = useCallback(
@@ -438,11 +440,16 @@ export function GraphView({
   const copyWikilink = useCallback(
     (id: string) => {
       const node = nodeById.get(id);
-      if (node) {
-        void navigator.clipboard
-          .writeText(`[[${node.label}]]`)
-          .catch((err: unknown) => onError(String(err)));
-      }
+      if (!node) return;
+      // Canonical target: relPath-sans-ext (what the editor autocomplete emits;
+      // resolves unambiguously via byRelPathNoExt even on duplicate titles).
+      // Ghosts have no relPath — their label IS the raw wikilink target.
+      const target = node.relPath
+        ? node.relPath.replace(/\.(md|mdx|markdown)$/i, "")
+        : node.label;
+      void navigator.clipboard
+        .writeText(`[[${target}]]`)
+        .catch((err: unknown) => onError(String(err)));
     },
     [nodeById, onError],
   );
@@ -472,8 +479,9 @@ export function GraphView({
     [onToggleFavorite],
   );
 
-  // Export the current view as PNG/SVG. chooseSaveFile returns null outside
-  // Tauri, so the browser path falls through to a direct download.
+  // Export the current view as PNG/SVG. In Tauri we route through the native
+  // save dialog (canceling aborts — no silent fallback); in the browser we
+  // download the blob directly.
   const handleExport = useCallback(
     async (format: "png" | "svg") => {
       const el = exportElRef.current;
@@ -482,13 +490,12 @@ export function GraphView({
         const result = format === "png" ? await exportGraphPng(el) : exportGraphSvg(el);
         // Local calendar date (en-CA → YYYY-MM-DD); toISOString would stamp UTC.
         const name = `graph-${new Date().toLocaleDateString("en-CA")}.${result.extension}`;
-        const target = workspacePath
-          ? await chooseSaveFile(
-              t("graph.export.saveTitle"),
-              `${workspacePath.replace(/[/\\]+$/, "")}/reports/${name}`,
-            )
-          : null;
-        if (target) {
+        if (workspacePath && isTauri()) {
+          const target = await chooseSaveFile(
+            t("graph.export.saveTitle"),
+            `${workspacePath.replace(/[/\\]+$/, "")}/reports/${name}`,
+          );
+          if (!target) return; // user canceled the native dialog → abort
           await diagramExportBlobToPath(
             target,
             result.extension as "png" | "svg",
@@ -765,7 +772,7 @@ export function GraphView({
             {rightTab === "insights" ? (
               <GraphInsightsPanel
                 model={model}
-                now={nowRef.current}
+                now={now}
                 onHighlightPair={handleHighlightPair}
                 onSelectNode={handleInsightNode}
                 onCopyWikilink={copyWikilink}

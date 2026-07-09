@@ -94,6 +94,20 @@ export function mockEntries(rootPath = MOCK_VAULT_PATH): VaultEntry[] {
   }));
 }
 
+/** Mock community overlay for e2e — lets the enriched graph path run in web mode
+ *  (opt-in via a localStorage flag; see api.vaultGraphRead). Communities are
+ *  keyed by the live-graph node ids (lowercase stem / ghost target). */
+export function mockVaultGraphFile(): import("./graph/model").VaultGraphFile {
+  return {
+    nodes: [
+      { id: "maru-weekly-meeting", community: 0 },
+      { id: "maru-glossary", community: 1 },
+      { id: "maru-project", community: 1 },
+    ],
+    edges: [],
+  };
+}
+
 export function mockWorkspaceFiles(rootPath = MOCK_VAULT_PATH): WorkspaceFileEntry[] {
   const docs = mockDocuments.map((doc, index) => ({
     path: `${rootPath}/${doc.relPath}`,
