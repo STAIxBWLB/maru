@@ -21,6 +21,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { clamp } from "../../lib/diagram/geometry";
@@ -151,6 +152,12 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   /** Node ids currently favorited — rendered with a ★ marker. */
   favoriteIds?: Set<string>;
+  /** Mirrors the live <svg> element so GraphView can serialize it for export. */
+  exportRef?: RefObject<SVGSVGElement | null>;
+  /** Translucent community areas (settled positions only), drawn behind edges. */
+  hulls?: { community: number; path: string }[];
+  /** Absolutely-positioned overlay inside the canvas (e.g. the legend). */
+  overlay?: ReactNode;
   onViewportReport?: (zoom: number) => void;
 }
 
@@ -175,6 +182,9 @@ export function GraphCanvas({
   onNodeUnpin,
   onNodeContextMenu,
   favoriteIds,
+  exportRef,
+  hulls,
+  overlay,
   onViewportReport,
 }: GraphCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -715,10 +725,28 @@ export function GraphCanvas({
     [nodes, highlightNodes, focusNodeId, selectedId, pathSourceId, enriched, favoriteIds],
   );
 
+  // Community areas — React-rendered from settled positions (stable across pan),
+  // so they never contend with the imperative geometry writes.
+  const hullChildren = useMemo(
+    () =>
+      (hulls ?? []).map((h) => (
+        <path
+          key={h.community}
+          className="graph-hull"
+          style={{ fill: communityColor(h.community) }}
+          d={h.path}
+        />
+      )),
+    [hulls],
+  );
+
   return (
     <div className="graph-canvas-wrap">
       <svg
-        ref={svgRef}
+        ref={(el) => {
+          svgRef.current = el;
+          if (exportRef) exportRef.current = el;
+        }}
         className="graph-canvas"
         data-testid="graph-canvas"
         onWheel={handleWheel}
@@ -743,6 +771,11 @@ export function GraphCanvas({
           </marker>
         </defs>
         <g transform={`translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`}>
+          {hullChildren.length > 0 ? (
+            <g className="graph-hulls" aria-hidden="true">
+              {hullChildren}
+            </g>
+          ) : null}
           <g className="graph-edges" ref={edgesGroupRef}>
             {edgeChildren}
           </g>
@@ -759,6 +792,7 @@ export function GraphCanvas({
           …
         </div>
       ) : null}
+      {overlay}
     </div>
   );
 }

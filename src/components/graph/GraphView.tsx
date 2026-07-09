@@ -5,11 +5,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  chooseSaveFile,
   vaultGraphLayoutRead,
   vaultGraphLayoutSave,
   vaultGraphRead,
 } from "../../lib/api";
+import { diagramExportBlobToPath } from "../../lib/diagram";
 import "./graph.css";
+import {
+  blobToUint8Array,
+  downloadGraphBlob,
+  exportGraphPng,
+  exportGraphSvg,
+} from "../../lib/graph/export";
+import { hullPath, type Point } from "../../lib/graph/hull";
 import {
   buildVaultGraph,
   enrichGraph,
@@ -44,6 +53,7 @@ import {
 } from "./GraphFilterPanel";
 import { GraphInspector } from "./GraphInspector";
 import { GraphInsightsPanel } from "./GraphInsightsPanel";
+import { GraphLegend } from "./GraphLegend";
 import { GraphToolbar, type GraphViewKind } from "./GraphToolbar";
 
 interface GraphViewProps {
@@ -83,7 +93,9 @@ export function GraphView({
     filtersFromSettings(graphSettings.filters),
   );
   const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
+  const [showHulls, setShowHulls] = useState(graphSettings.showHulls);
   const [search, setSearch] = useState("");
+  const exportElRef = useRef<SVGSVGElement | null>(null);
   // Right-click node context menu (spec §F2 usability).
   const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -103,9 +115,10 @@ export function GraphView({
     onGraphSettingsChangeRef.current({
       view,
       searchAsFilter,
+      showHulls,
       filters: filtersToSettings(filters),
     });
-  }, [view, searchAsFilter, filters]);
+  }, [view, searchAsFilter, showHulls, filters]);
   const [enrichment, setEnrichment] = useState<{ model: GraphModel | null; hint: string | null }>({
     model: null,
     hint: null,
@@ -229,6 +242,25 @@ export function GraphView({
       edges: baseFiltered.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
     };
   }, [baseFiltered, search, searchAsFilter]);
+
+  // Community areas, computed from the settled frame only (index-aligned with
+  // filtered.nodes) so they stay put during drag and snap on settle.
+  const hulls = useMemo(() => {
+    if (!showHulls || !model.enriched || !settled) return [];
+    if (settled.length !== filtered.nodes.length * 2) return [];
+    const byCommunity = new Map<number, Point[]>();
+    filtered.nodes.forEach((node, i) => {
+      if (node.community == null) return;
+      let pts = byCommunity.get(node.community);
+      if (!pts) byCommunity.set(node.community, (pts = []));
+      pts.push([settled[i * 2], settled[i * 2 + 1]]);
+    });
+    const out: { community: number; path: string }[] = [];
+    for (const [community, pts] of byCommunity) {
+      out.push({ community, path: hullPath(pts) });
+    }
+    return out;
+  }, [showHulls, model.enriched, settled, filtered.nodes]);
 
   // --- worker lifecycle: one worker, reused across filter changes ---------
 
@@ -414,6 +446,37 @@ export function GraphView({
     [onToggleFavorite],
   );
 
+  // Export the current view as PNG/SVG. chooseSaveFile returns null outside
+  // Tauri, so the browser path falls through to a direct download.
+  const handleExport = useCallback(
+    async (format: "png" | "svg") => {
+      const el = exportElRef.current;
+      if (!el) return;
+      try {
+        const result = format === "png" ? await exportGraphPng(el) : exportGraphSvg(el);
+        const name = `graph-${new Date().toISOString().slice(0, 10)}.${result.extension}`;
+        const target = workspacePath
+          ? await chooseSaveFile(
+              t("graph.export.saveTitle"),
+              `${workspacePath.replace(/[/\\]+$/, "")}/reports/${name}`,
+            )
+          : null;
+        if (target) {
+          await diagramExportBlobToPath(
+            target,
+            result.extension as "png" | "svg",
+            await blobToUint8Array(result.blob),
+          );
+        } else {
+          downloadGraphBlob(result.blob, name);
+        }
+      } catch (err: unknown) {
+        onError(String(err));
+      }
+    },
+    [workspacePath, onError, t],
+  );
+
   // Context-menu lifecycle: close on any outside interaction / Escape.
   useEffect(() => {
     if (!menu) return;
@@ -566,6 +629,8 @@ export function GraphView({
         onRefreshOverlay={() => {
           if (workspacePath) loadOverlay(workspacePath, liveModel);
         }}
+        onExportPng={() => void handleExport("png")}
+        onExportSvg={() => void handleExport("svg")}
         refreshing={refreshing}
         enriched={model.enriched}
         communityCount={enrichedCount}
@@ -602,6 +667,9 @@ export function GraphView({
             communities={facets.communities}
             maxDegree={facets.maxDegree}
             onFiltersChange={setFilters}
+            hullsAvailable={model.enriched && facets.communities.length > 0}
+            showHulls={showHulls}
+            onShowHullsChange={setShowHulls}
           />
           <GraphCanvas
             nodes={filtered.nodes}
@@ -633,6 +701,17 @@ export function GraphView({
             }}
             onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
             favoriteIds={favoriteIds}
+            exportRef={exportElRef}
+            hulls={hulls}
+            overlay={
+              <GraphLegend
+                enriched={model.enriched}
+                domains={facets.domains}
+                communities={facets.communities}
+                filters={filters}
+                onFiltersChange={setFilters}
+              />
+            }
             onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
           />
           <div className="graph-right" data-testid="graph-right">

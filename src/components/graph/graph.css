@@ -363,6 +363,88 @@
   background: var(--bg);
 }
 
+/* Community areas — translucent convex hulls behind the graph. */
+.graph-hull {
+  fill-opacity: 0.06;
+  stroke: none;
+  pointer-events: none;
+  transition: fill-opacity 200ms ease;
+}
+
+/* Legend overlay (bottom-left of the canvas). */
+.graph-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: 190px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
+  font-size: 11px;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.graph-legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2, var(--ink));
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.graph-legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 4px 4px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2, var(--ink));
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.graph-legend-item:hover {
+  background: var(--accent-tint, transparent);
+}
+
+.graph-legend-item.active {
+  background: var(--accent-tint, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.graph-legend-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.graph-legend-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .graph-edge {
   stroke: var(--line-strong, var(--muted));
   stroke-opacity: 0.45;

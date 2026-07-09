@@ -255,6 +255,22 @@ test("favoriting a node from the inspector marks it with a star", async ({ page 
   expect(forbidden).toEqual([]);
 });
 
+test("exports the current graph view as an SVG download", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-canvas")).toBeVisible();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // Web mode → chooseSaveFile returns null → direct blob download.
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("graph-export-svg").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^graph-\d{4}-\d{2}-\d{2}\.svg$/);
+
+  expect(forbidden).toEqual([]);
+});
+
 test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");

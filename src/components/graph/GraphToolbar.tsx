@@ -3,7 +3,17 @@
 // the app's segmented-control (.cal-view-toggle) and search-with-icon
 // (.cal-search) conventions.
 
-import { ListFilter, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
+import {
+  FileDown,
+  ImageDown,
+  ListFilter,
+  Maximize2,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+} from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 
 export type GraphViewKind = "graph" | "chains";
@@ -22,6 +32,8 @@ interface GraphToolbarProps {
   onFit: () => void;
   onRelayout: () => void;
   onRefreshOverlay: () => void;
+  onExportPng: () => void;
+  onExportSvg: () => void;
   refreshing: boolean;
   enriched: boolean;
   communityCount: number;
@@ -43,6 +55,8 @@ export function GraphToolbar({
   onFit,
   onRelayout,
   onRefreshOverlay,
+  onExportPng,
+  onExportSvg,
   refreshing,
   enriched,
   communityCount,
@@ -130,6 +144,29 @@ export function GraphToolbar({
       >
         <RefreshCw size={14} className={refreshing ? "spin" : ""} />
       </button>
+
+      {view === "graph" ? (
+        <>
+          <button
+            type="button"
+            className="graph-icon-button"
+            title={t("graph.export.png")}
+            onClick={onExportPng}
+            data-testid="graph-export-png"
+          >
+            <ImageDown size={14} />
+          </button>
+          <button
+            type="button"
+            className="graph-icon-button"
+            title={t("graph.export.svg")}
+            onClick={onExportSvg}
+            data-testid="graph-export-svg"
+          >
+            <FileDown size={14} />
+          </button>
+        </>
+      ) : null}
 
       {enriched ? (
         <span className="graph-badge" data-testid="graph-enriched-badge">
