@@ -192,6 +192,7 @@ export interface MaruSettings {
   meetings: MeetingsSettings;
   tasks: TasksSettings;
   diagram: DiagramSettings;
+  graph: GraphSettings;
   inboxChannels: Record<string, unknown>;
   composer: ComposerSettings;
   connectors: Record<string, unknown>;
@@ -272,6 +273,19 @@ export interface AiSettings {
 
 export interface DiagramSettings {
   lastDocument: string | null;
+}
+
+export interface GraphSettings {
+  view: "graph" | "chains";
+  searchAsFilter: boolean;
+  showHulls: boolean;
+  filters: {
+    domains: string[];
+    types: string[];
+    community: number | null;
+    showGhosts: boolean;
+    minDegree: number;
+  };
 }
 
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
@@ -414,6 +428,18 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
   diagram: {
     lastDocument: null,
   },
+  graph: {
+    view: "graph",
+    searchAsFilter: false,
+    showHulls: false,
+    filters: {
+      domains: [],
+      types: [],
+      community: null,
+      showGhosts: false,
+      minDegree: 0,
+    },
+  },
   inboxChannels: {},
   composer: {
     lintDismissals: {},
@@ -501,6 +527,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
     meetings: normalizeMeetingsSettings(value.meetings),
     tasks: normalizeTasksSettings(value.tasks),
     diagram: normalizeDiagramSettings(value.diagram),
+    graph: normalizeGraphSettings(value.graph),
     inboxChannels: isRecord(value.inboxChannels) ? value.inboxChannels : {},
     composer: normalizeComposerSettings(value.composer),
     connectors: isRecord(value.connectors) ? value.connectors : {},
@@ -817,6 +844,14 @@ function cloneDefaultSettings(): MaruSettings {
     diagram: {
       ...DEFAULT_MARU_SETTINGS.diagram,
     },
+    graph: {
+      ...DEFAULT_MARU_SETTINGS.graph,
+      filters: {
+        ...DEFAULT_MARU_SETTINGS.graph.filters,
+        domains: [...DEFAULT_MARU_SETTINGS.graph.filters.domains],
+        types: [...DEFAULT_MARU_SETTINGS.graph.filters.types],
+      },
+    },
     inboxChannels: {},
     composer: {
       lintDismissals: {},
@@ -844,6 +879,26 @@ function normalizeDiagramSettings(value: unknown): DiagramSettings {
       ["lastDocument", "last_document", "activeName", "active_name"],
       DEFAULT_MARU_SETTINGS.diagram.lastDocument,
     ),
+  };
+}
+
+function normalizeGraphSettings(value: unknown): GraphSettings {
+  const graph = isRecord(value) ? value : {};
+  const filters = isRecord(graph.filters) ? graph.filters : {};
+  const community = filters.community;
+  const minDegree = Number(filters.minDegree);
+  return {
+    view: graph.view === "chains" ? "chains" : "graph",
+    searchAsFilter: graph.searchAsFilter === true,
+    showHulls: graph.showHulls === true,
+    filters: {
+      domains: parseStringArray(filters.domains),
+      types: parseStringArray(filters.types),
+      community:
+        typeof community === "number" && Number.isFinite(community) ? community : null,
+      showGhosts: filters.showGhosts === true,
+      minDegree: Number.isFinite(minDegree) && minDegree > 0 ? Math.floor(minDegree) : 0,
+    },
   };
 }
 

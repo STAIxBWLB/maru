@@ -6320,6 +6320,9 @@ function MainApp() {
         case "open-diagram":
           if (diagramEnabled) setPersistedAppMode("diagram");
           break;
+        case "open-graph":
+          setPersistedAppMode("graph");
+          break;
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -7237,6 +7240,12 @@ function MainApp() {
               void selectEntry(entry);
             }}
             onCreateNote={handleWikilinkClick}
+            graphSettings={maruSettings.graph}
+            onGraphSettingsChange={(graph) =>
+              updateSettings((current) => ({ ...current, graph }))
+            }
+            isFavorite={isFavorite}
+            onToggleFavorite={toggleFavorite}
             onError={setError}
           />
         ) : visibleAppMode === "sites" ? (

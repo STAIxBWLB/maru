@@ -3,7 +3,17 @@
 // the app's segmented-control (.cal-view-toggle) and search-with-icon
 // (.cal-search) conventions.
 
-import { Maximize2, Minus, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
+import {
+  FileDown,
+  ImageDown,
+  ListFilter,
+  Maximize2,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+} from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 
 export type GraphViewKind = "graph" | "chains";
@@ -12,6 +22,8 @@ interface GraphToolbarProps {
   search: string;
   onSearchChange: (next: string) => void;
   searchInputRef?: React.Ref<HTMLInputElement>;
+  searchAsFilter: boolean;
+  onSearchAsFilterChange: (next: boolean) => void;
   view: GraphViewKind;
   onViewChange: (next: GraphViewKind) => void;
   zoomPercent: number;
@@ -20,6 +32,8 @@ interface GraphToolbarProps {
   onFit: () => void;
   onRelayout: () => void;
   onRefreshOverlay: () => void;
+  onExportPng: () => void;
+  onExportSvg: () => void;
   refreshing: boolean;
   enriched: boolean;
   communityCount: number;
@@ -31,6 +45,8 @@ export function GraphToolbar({
   search,
   onSearchChange,
   searchInputRef,
+  searchAsFilter,
+  onSearchAsFilterChange,
   view,
   onViewChange,
   zoomPercent,
@@ -39,6 +55,8 @@ export function GraphToolbar({
   onFit,
   onRelayout,
   onRefreshOverlay,
+  onExportPng,
+  onExportSvg,
   refreshing,
   enriched,
   communityCount,
@@ -59,6 +77,17 @@ export function GraphToolbar({
           data-testid="graph-search"
         />
       </label>
+
+      <button
+        type="button"
+        className={searchAsFilter ? "graph-icon-button active" : "graph-icon-button"}
+        aria-pressed={searchAsFilter}
+        title={t("graph.search.filterToggle")}
+        data-testid="graph-search-filter-toggle"
+        onClick={() => onSearchAsFilterChange(!searchAsFilter)}
+      >
+        <ListFilter size={14} />
+      </button>
 
       <div className="graph-view-toggle" role="tablist" aria-label={t("graph.view.label")}>
         <button
@@ -115,6 +144,29 @@ export function GraphToolbar({
       >
         <RefreshCw size={14} className={refreshing ? "spin" : ""} />
       </button>
+
+      {view === "graph" ? (
+        <>
+          <button
+            type="button"
+            className="graph-icon-button"
+            title={t("graph.export.png")}
+            onClick={onExportPng}
+            data-testid="graph-export-png"
+          >
+            <ImageDown size={14} />
+          </button>
+          <button
+            type="button"
+            className="graph-icon-button"
+            title={t("graph.export.svg")}
+            onClick={onExportSvg}
+            data-testid="graph-export-svg"
+          >
+            <FileDown size={14} />
+          </button>
+        </>
+      ) : null}
 
       {enriched ? (
         <span className="graph-badge" data-testid="graph-enriched-badge">

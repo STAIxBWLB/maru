@@ -172,7 +172,7 @@ Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-
 
 ### 8a — V1 read-only graph (W27–W29) ✅ (커밋 `cdf9ddb`, PR #61)
 
-`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas+뷰포트 컬링, 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1). (후속 `b42184e`: model.ts 리터럴 NUL 바이트 이스케이프, PR #64)
+`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas SVG 렌더(V3에서 imperative 파이프라인으로 전환, 컬링 폐지), 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1). (후속 `b42184e`: model.ts 리터럴 NUL 바이트 이스케이프, PR #64)
 
 ### 8b — V2 managed writes (W30–W32) ✅ (커밋 `96c7b44`, PR #62)
 

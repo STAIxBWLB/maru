@@ -3,7 +3,7 @@
 // prediction), surprising cross-community connections, community bridges, and
 // neglected notes (orphans + stale). Rows highlight on the canvas.
 
-import { ArrowLeftRight, Lightbulb, Sparkles, Waypoints } from "lucide-react";
+import { ArrowLeftRight, Copy, ExternalLink, Lightbulb, Sparkles, Waypoints } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -22,6 +22,8 @@ interface GraphInsightsPanelProps {
   now: number;
   onHighlightPair: (a: string, b: string) => void;
   onSelectNode: (id: string) => void;
+  onCopyWikilink: (id: string) => void;
+  onOpenNode: (id: string) => void;
 }
 
 export function GraphInsightsPanel({
@@ -29,6 +31,8 @@ export function GraphInsightsPanel({
   now,
   onHighlightPair,
   onSelectNode,
+  onCopyWikilink,
+  onOpenNode,
 }: GraphInsightsPanelProps) {
   const { t } = useTranslation();
   const labelById = useMemo(
@@ -52,19 +56,38 @@ export function GraphInsightsPanel({
         count={hidden.length}
       >
         {hidden.map((link) => (
-          <button
-            key={`${link.source}-${link.target}`}
-            type="button"
-            className="graph-insight-row"
-            onClick={() => onHighlightPair(link.source, link.target)}
-          >
-            <span className="graph-insight-pair">
-              {label(link.source)} <ArrowLeftRight size={11} /> {label(link.target)}
-            </span>
-            <span className="graph-insight-meta">
-              {t("graph.insight.shared", { count: link.shared })}
-            </span>
-          </button>
+          <div className="graph-insight-rowgroup" key={`${link.source}-${link.target}`}>
+            <button
+              type="button"
+              className="graph-insight-row"
+              onClick={() => onHighlightPair(link.source, link.target)}
+            >
+              <span className="graph-insight-pair">
+                {label(link.source)} <ArrowLeftRight size={11} /> {label(link.target)}
+              </span>
+              <span className="graph-insight-meta">
+                {t("graph.insight.shared", { count: link.shared })}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="graph-insight-action"
+              title={t("graph.action.copyWikilink")}
+              data-testid="graph-insight-copy"
+              onClick={() => onCopyWikilink(link.target)}
+            >
+              <Copy size={11} />
+            </button>
+            <button
+              type="button"
+              className="graph-insight-action"
+              title={t("graph.insight.openSource")}
+              data-testid="graph-insight-open"
+              onClick={() => onOpenNode(link.source)}
+            >
+              <ExternalLink size={11} />
+            </button>
+          </div>
         ))}
       </InsightSection>
 

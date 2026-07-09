@@ -4,6 +4,7 @@
 
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import type { GraphSettings } from "../../lib/settings";
 import { communityColor, domainColor } from "./GraphCanvas";
 
 export interface GraphFilters {
@@ -21,6 +22,27 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilters = {
   showGhosts: false,
   minDegree: 0,
 };
+
+/** Persisted (JSON-friendly, array-based) ↔ runtime (Set-based) filter shape. */
+export function filtersFromSettings(f: GraphSettings["filters"]): GraphFilters {
+  return {
+    domains: new Set(f.domains),
+    types: new Set(f.types),
+    community: f.community,
+    showGhosts: f.showGhosts,
+    minDegree: f.minDegree,
+  };
+}
+
+export function filtersToSettings(f: GraphFilters): GraphSettings["filters"] {
+  return {
+    domains: [...f.domains],
+    types: [...f.types],
+    community: f.community,
+    showGhosts: f.showGhosts,
+    minDegree: f.minDegree,
+  };
+}
 
 export interface FacetItem<T> {
   value: T;
@@ -44,6 +66,10 @@ interface GraphFilterPanelProps {
   communities: FacetItem<number>[];
   maxDegree: number;
   onFiltersChange: (next: GraphFilters) => void;
+  /** Community-area toggle: only meaningful when the overlay supplies them. */
+  hullsAvailable: boolean;
+  showHulls: boolean;
+  onShowHullsChange: (next: boolean) => void;
 }
 
 function toggle(set: Set<string>, value: string): Set<string> {
@@ -60,6 +86,9 @@ export function GraphFilterPanel({
   communities,
   maxDegree,
   onFiltersChange,
+  hullsAvailable,
+  showHulls,
+  onShowHullsChange,
 }: GraphFilterPanelProps) {
   const { t } = useTranslation();
   const dirty = !filtersAreDefault(filters);
@@ -150,6 +179,17 @@ export function GraphFilterPanel({
           />
           {t("graph.filter.showGhosts")}
         </label>
+        {hullsAvailable ? (
+          <label className="graph-toggle">
+            <input
+              type="checkbox"
+              checked={showHulls}
+              data-testid="graph-hulls-toggle"
+              onChange={(event) => onShowHullsChange(event.target.checked)}
+            />
+            {t("graph.filter.showHulls")}
+          </label>
+        ) : null}
       </section>
 
       <section className="graph-filter-section">

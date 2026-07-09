@@ -15,6 +15,7 @@ import {
   mockMoveDocument,
   mockSetActiveWorkspaceRoot,
   mockTrashDocument,
+  mockVaultGraphFile,
   mockWorkspaceFiles,
   mockWorkspaceRegistry,
   readMockDocument,
@@ -100,7 +101,7 @@ declare global {
   }
 }
 
-const isTauri = () => typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+export const isTauri = () => typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
 export const DEFAULT_INBOX_SETTINGS: InboxSettings = {
   inboxRoot: "inbox/downloads",
@@ -435,7 +436,20 @@ export async function vaultValidateNote(
 export async function vaultGraphRead(
   vaultPath: string,
 ): Promise<import("./graph/model").VaultGraphFile | null> {
-  if (!isTauri()) return null;
+  if (!isTauri()) {
+    // e2e opt-in: exercise the enriched path in web mode without a backend.
+    try {
+      if (
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("maru:e2e:graph-overlay") === "1"
+      ) {
+        return mockVaultGraphFile();
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
   return invoke<import("./graph/model").VaultGraphFile | null>("vault_graph_read", {
     vaultPath,
   });

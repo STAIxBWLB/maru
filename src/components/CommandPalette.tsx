@@ -56,6 +56,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "open-catalog", label: t("cmdk.action.openCatalog") },
       { id: "open-studio", label: t("cmdk.action.openStudio") },
       ...(diagramEnabled ? [{ id: "open-diagram", label: t("cmdk.action.openDiagram") }] : []),
+      { id: "open-graph", label: t("cmdk.action.openGraph") },
       { id: "export-bundle", label: t("cmdk.action.exportBundle") },
       { id: "export-validate", label: t("cmdk.action.exportValidate") },
       { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },

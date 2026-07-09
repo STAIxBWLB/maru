@@ -360,6 +360,55 @@ describe("normalizeMaruSettings", () => {
     expect(normalizeMaruSettings({ diagram: { lastDocument: "" } }).diagram.lastDocument).toBeNull();
   });
 
+  it("round-trips graph view/filter settings", () => {
+    const settings = normalizeMaruSettings({
+      graph: {
+        view: "chains",
+        searchAsFilter: true,
+        filters: {
+          domains: ["research", "projects"],
+          types: ["decision"],
+          community: 3,
+          showGhosts: true,
+          minDegree: 2,
+        },
+      },
+    });
+
+    expect(settings.graph.view).toBe("chains");
+    expect(settings.graph.searchAsFilter).toBe(true);
+    expect(settings.graph.filters).toEqual({
+      domains: ["research", "projects"],
+      types: ["decision"],
+      community: 3,
+      showGhosts: true,
+      minDegree: 2,
+    });
+  });
+
+  it("defaults garbage graph settings to safe values", () => {
+    const settings = normalizeMaruSettings({
+      graph: {
+        view: "nonsense",
+        searchAsFilter: "yes",
+        filters: {
+          domains: "not-an-array",
+          types: [1, "decision", null],
+          community: "3",
+          minDegree: -5,
+        },
+      },
+    });
+
+    expect(settings.graph.view).toBe("graph");
+    expect(settings.graph.searchAsFilter).toBe(false);
+    expect(settings.graph.filters.domains).toEqual([]);
+    expect(settings.graph.filters.types).toEqual(["decision"]);
+    expect(settings.graph.filters.community).toBeNull();
+    expect(settings.graph.filters.showGhosts).toBe(false);
+    expect(settings.graph.filters.minDegree).toBe(0);
+  });
+
   it("parses catalog and studio modes for document operations", () => {
     expect(
       normalizeMaruSettings({

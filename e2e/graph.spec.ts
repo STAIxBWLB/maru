@@ -111,6 +111,193 @@ test("ghost node click seeds the note-creation dialog (F3b) and chain view toggl
   expect(forbidden).toEqual([]);
 });
 
+test("hover highlights the 1-hop neighborhood and dims the rest (imperative path)", async ({
+  page,
+}) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // The only edge in the mock vault runs meeting → ghost, so show ghosts to
+  // give the meeting note a visible neighbor to highlight.
+  await page.getByLabel("미해소 링크 표시").check();
+  await expect(page.locator(".graph-node circle")).toHaveCount(3);
+
+  // Hover the meeting node: it gets .hovered, its ghost neighbor gets .hl, and
+  // the container gets .has-hover; the unrelated glossary node dims to 0.12.
+  await page.locator('.graph-node circle[data-node-id="maru-weekly-meeting"]').hover();
+  await expect(page.locator("svg.graph-canvas")).toHaveClass(/has-hover/);
+  await expect(page.locator(".graph-node.hovered")).toHaveCount(1);
+  await expect(page.locator(".graph-node.hl")).toHaveCount(1);
+  await expect(
+    page.locator('.graph-node:has(circle[data-node-id="maru-glossary"])'),
+  ).toHaveCSS("opacity", "0.12");
+
+  // Leaving the canvas clears the highlight (no lingering classes).
+  await page.getByTestId("graph-filter-panel").hover();
+  await expect(page.locator("svg.graph-canvas")).not.toHaveClass(/has-hover/);
+  await expect(page.locator(".graph-node.hl")).toHaveCount(0);
+  await expect(page.locator(".graph-node.hovered")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("dragging a node moves it (pin) without selecting; alt-click unpins", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  const circle = page.locator('.graph-node circle[data-node-id="maru-glossary"]');
+  const group = page.locator('.graph-node:has(circle[data-node-id="maru-glossary"])');
+  // Wait for the worker's first frame to position the node.
+  await expect(group).toHaveAttribute("transform", /translate/);
+  const before = await group.getAttribute("transform");
+
+  const box = await circle.boundingBox();
+  if (!box) throw new Error("node has no bounding box");
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 90, cy + 40, { steps: 6 });
+  await page.mouse.up();
+
+  // Moved > 3px ⇒ a drag, not a click: the node relocates and is not selected.
+  await expect(group).not.toHaveAttribute("transform", before ?? "");
+  await expect(page.locator(".graph-node.selected")).toHaveCount(0);
+
+  // Alt-click unpins (releases fx/fy) — smoke: it stays interactive, no crash.
+  await page.keyboard.down("Alt");
+  await circle.click();
+  await page.keyboard.up("Alt");
+  await expect(page.locator(".graph-node.selected")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("search-as-filter narrows the graph to matches", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // Off: search only highlights, count unchanged.
+  await page.getByTestId("graph-search").fill("용어집");
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // On: the graph narrows to the match (glossary is an orphan, so no neighbors).
+  await page.getByTestId("graph-search-filter-toggle").click();
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".graph-node circle")).toHaveCount(1);
+  await expect(page.locator('.graph-node circle[data-node-id="maru-glossary"]')).toBeVisible();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("graph view/filter settings persist across a mode switch", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  await page.getByTestId("graph-search-filter-toggle").click();
+  await page.getByLabel("미해소 링크 표시").check();
+
+  // Leave graph (open a note), then return via the activity rail.
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').dblclick();
+  await expect(page.getByTestId("graph-mode")).toHaveCount(0);
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Both settings survived (seeded from persisted MaruSettings).
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("미해소 링크 표시")).toBeChecked();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("right-click opens the node context menu; Escape closes it", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click({ button: "right" });
+  const menu = page.getByTestId("graph-node-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu).toContainText("Maru 용어집");
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("favoriting a node from the inspector marks it with a star", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  await page.locator('.graph-node circle[data-node-id="maru-glossary"]').click();
+  await expect(page.getByTestId("graph-inspector")).toBeVisible();
+  await expect(page.locator(".graph-node-star")).toHaveCount(0);
+
+  await page.getByTestId("graph-inspector-favorite").click();
+  await expect(page.locator(".graph-node-star")).toHaveCount(1);
+
+  await page.getByTestId("graph-inspector-favorite").click();
+  await expect(page.locator(".graph-node-star")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("exports the current graph view as an SVG download", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-canvas")).toBeVisible();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  // Web mode → chooseSaveFile returns null → direct blob download.
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("graph-export-svg").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^graph-\d{4}-\d{2}-\d{2}\.svg$/);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("enriched overlay renders the communities badge, legend, and hulls", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  // Opt into the mock community overlay (web mode has no vault-graph.json).
+  // Registered after the beforeEach localStorage clear, so the flag survives.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("maru:e2e:graph-overlay", "1");
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // Enriched → communities badge shown, no degraded hint.
+  await expect(page.getByTestId("graph-enriched-badge")).toBeVisible();
+  await expect(page.getByTestId("graph-degraded-hint")).toHaveCount(0);
+
+  // Legend lists the two mock communities.
+  const legend = page.getByTestId("graph-legend");
+  await expect(legend).toBeVisible();
+  await expect(legend.locator(".graph-legend-item")).toHaveCount(2);
+
+  // Hull toggle appears (enriched + communities) and draws one area per community.
+  await page.getByTestId("graph-hulls-toggle").check();
+  await expect(page.locator(".graph-hull")).toHaveCount(2);
+
+  expect(forbidden).toEqual([]);
+});
+
 test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");

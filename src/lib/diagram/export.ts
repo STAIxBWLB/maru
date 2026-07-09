@@ -104,7 +104,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function rasterise(
+export async function rasterise(
   svg: SVGSVGElement,
   mime: "image/png" | "image/jpeg",
   background: string | null,

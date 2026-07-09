@@ -5,11 +5,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  chooseSaveFile,
+  isTauri,
   vaultGraphLayoutRead,
   vaultGraphLayoutSave,
   vaultGraphRead,
 } from "../../lib/api";
+import { diagramExportBlobToPath } from "../../lib/diagram";
 import "./graph.css";
+import {
+  blobToUint8Array,
+  downloadGraphBlob,
+  exportGraphPng,
+  exportGraphSvg,
+} from "../../lib/graph/export";
+import { hullPath, type Point } from "../../lib/graph/hull";
 import {
   buildVaultGraph,
   enrichGraph,
@@ -28,18 +38,23 @@ import {
   matchesShortcut,
   useScopedKeyboardShortcuts,
 } from "../../lib/diagram/shortcuts";
+import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
+import type { FavoriteKind, GraphSettings } from "../../lib/settings";
+import type { FavoriteTarget } from "../FavoritesSection";
 import type { VaultEntry } from "../../lib/types";
 import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
 import { DecisionChainLanes } from "./DecisionChainLanes";
 import { GraphCanvas, nodeRadius, type GraphHighlight } from "./GraphCanvas";
 import {
-  DEFAULT_GRAPH_FILTERS,
+  filtersFromSettings,
+  filtersToSettings,
   GraphFilterPanel,
   type FacetItem,
   type GraphFilters,
 } from "./GraphFilterPanel";
 import { GraphInspector } from "./GraphInspector";
 import { GraphInsightsPanel } from "./GraphInsightsPanel";
+import { GraphLegend } from "./GraphLegend";
 import { GraphToolbar, type GraphViewKind } from "./GraphToolbar";
 
 interface GraphViewProps {
@@ -48,7 +63,11 @@ interface GraphViewProps {
   focusNodeId: string | null;
   onClearFocus: () => void;
   onOpenEntry: (entry: VaultEntry) => void;
-  onCreateNote?: (target: string) => void;
+  onCreateNote: (target: string) => void;
+  graphSettings: GraphSettings;
+  onGraphSettingsChange: (next: GraphSettings) => void;
+  isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
+  onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
 }
 
@@ -62,18 +81,75 @@ export function GraphView({
   onClearFocus,
   onOpenEntry,
   onCreateNote,
+  graphSettings,
+  onGraphSettingsChange,
+  isFavorite,
+  onToggleFavorite,
   onError,
 }: GraphViewProps) {
   const { t } = useTranslation();
-  const [view, setView] = useState<GraphViewKind>("graph");
-  const [filters, setFilters] = useState<GraphFilters>(DEFAULT_GRAPH_FILTERS);
+  // Seeded from persisted settings; changes are written back (skip-first) below.
+  const [view, setView] = useState<GraphViewKind>(graphSettings.view);
+  const [filters, setFilters] = useState<GraphFilters>(() =>
+    filtersFromSettings(graphSettings.filters),
+  );
+  const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
+  const [showHulls, setShowHulls] = useState(graphSettings.showHulls);
   const [search, setSearch] = useState("");
+  const exportElRef = useRef<SVGSVGElement | null>(null);
+  // Right-click node context menu (spec §F2 usability).
+  const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const handleMenuKeyDown = useContextMenuKeyboard(menuRef, !!menu, () => setMenu(null));
+
+  // Persist view / filter / search-mode changes (skip the initial seed render).
+  // The callback is held in a ref so App re-renders (which re-create it inline)
+  // don't re-fire persistence — only real state changes do.
+  const onGraphSettingsChangeRef = useRef(onGraphSettingsChange);
+  onGraphSettingsChangeRef.current = onGraphSettingsChange;
+  const persistSkipRef = useRef(true);
+  useEffect(() => {
+    if (persistSkipRef.current) {
+      persistSkipRef.current = false;
+      return;
+    }
+    onGraphSettingsChangeRef.current({
+      view,
+      searchAsFilter,
+      showHulls,
+      filters: filtersToSettings(filters),
+    });
+  }, [view, searchAsFilter, showHulls, filters]);
+
+  // Re-seed from external (cross-window) settings changes. Deps are only
+  // [graphSettings], and each setState is gated on a real diff, so a local
+  // edit's own persist round-trip (prop catches up to local) is a no-op — no
+  // reset of the in-flight local change and no feedback loop.
+  useEffect(() => {
+    if (graphSettings.view !== view) setView(graphSettings.view);
+    if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
+    if (graphSettings.showHulls !== showHulls) setShowHulls(graphSettings.showHulls);
+    if (JSON.stringify(graphSettings.filters) !== JSON.stringify(filtersToSettings(filters))) {
+      setFilters(filtersFromSettings(graphSettings.filters));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphSettings]);
   const [enrichment, setEnrichment] = useState<{ model: GraphModel | null; hint: string | null }>({
     model: null,
     hint: null,
   });
   const [refreshing, setRefreshing] = useState(false);
-  const [positions, setPositions] = useState<Float64Array | null>(null);
+  // Only the settled ("done") frame lands in React state — it drives the disk
+  // cache and (PR-3) hull rendering. Intermediate simulation frames are pushed
+  // straight to the DOM via applyFrameRef, bypassing reconciliation.
+  const [settled, setSettled] = useState<Float64Array | null>(null);
+  const latestPositionsRef = useRef<Float64Array | null>(null);
+  const applyFrameRef = useRef<((p: Float64Array) => void) | null>(null);
+  // The node set the pending update was posted for, and the set `settled`
+  // actually corresponds to — so hull/disk-save consumers can guard on identity
+  // (not just cardinality) and never map a stale frame onto a reordered set.
+  const pendingNodesRef = useRef<GraphNode[] | null>(null);
+  const settledNodesRef = useRef<GraphNode[] | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
@@ -97,7 +173,6 @@ export function GraphView({
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const nowRef = useRef<number>(Date.now());
 
   const index = useMemo(() => buildEntryIndex(entries), [entries]);
   const liveModel = useMemo(() => buildVaultGraph(entries, index), [entries, index]);
@@ -122,6 +197,9 @@ export function GraphView({
   }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
+  // "now" for stale-note detection — recomputed whenever the model changes
+  // (i.e. on vault edits) so it doesn't stay frozen at mount time.
+  const now = useMemo(() => Date.now(), [model]);
 
   const facets = useMemo(() => {
     const domain = new Map<string, number>();
@@ -146,7 +224,7 @@ export function GraphView({
     return { domains, types, communities, maxDegree };
   }, [model]);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     let base = model;
     if (focus) base = focusSubgraph(model, focus, 2);
     const keep = new Set<string>();
@@ -165,6 +243,49 @@ export function GraphView({
     };
   }, [model, filters, focus]);
 
+  // Search-as-filter narrows the facet-filtered set to matches + their 1-hop
+  // neighbors (matches alone would render as disconnected dots). Off → returns
+  // baseFiltered by identity, so plain search typing doesn't re-layout.
+  const filtered = useMemo(() => {
+    const q = searchAsFilter ? search.trim().toLowerCase() : "";
+    if (!q) return baseFiltered;
+    const matched = new Set<string>();
+    for (const node of baseFiltered.nodes) {
+      if (node.label.toLowerCase().includes(q)) matched.add(node.id);
+    }
+    const visible = new Set(matched);
+    for (const e of baseFiltered.edges) {
+      if (matched.has(e.source)) visible.add(e.target);
+      if (matched.has(e.target)) visible.add(e.source);
+    }
+    return {
+      ...baseFiltered,
+      nodes: baseFiltered.nodes.filter((n) => visible.has(n.id)),
+      edges: baseFiltered.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
+    };
+  }, [baseFiltered, search, searchAsFilter]);
+
+  // Community areas, computed from the settled frame only (index-aligned with
+  // filtered.nodes) so they stay put during drag and snap on settle.
+  const hulls = useMemo(() => {
+    if (!showHulls || !model.enriched || !settled) return [];
+    // Identity guard: skip while `settled` belongs to a different node set (a
+    // same-cardinality filter/search swap would otherwise draw from wrong points).
+    if (settledNodesRef.current !== filtered.nodes) return [];
+    const byCommunity = new Map<number, Point[]>();
+    filtered.nodes.forEach((node, i) => {
+      if (node.community == null) return;
+      let pts = byCommunity.get(node.community);
+      if (!pts) byCommunity.set(node.community, (pts = []));
+      pts.push([settled[i * 2], settled[i * 2 + 1]]);
+    });
+    const out: { community: number; path: string }[] = [];
+    for (const [community, pts] of byCommunity) {
+      out.push({ community, path: hullPath(pts) });
+    }
+    return out;
+  }, [showHulls, model.enriched, settled, filtered.nodes]);
+
   // --- worker lifecycle: one worker, reused across filter changes ---------
 
   useEffect(() => {
@@ -173,8 +294,19 @@ export function GraphView({
     });
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<LayoutResponse>) => {
+      const msg = event.data;
       // Discard frames from a superseded layout request.
-      if (event.data.epoch === frameEpochRef.current) setPositions(event.data.positions);
+      if (msg.epoch !== frameEpochRef.current) return;
+      latestPositionsRef.current = msg.positions;
+      // Fast path: write geometry to the DOM without a React render.
+      applyFrameRef.current?.(msg.positions);
+      // Settled frame → one React render (refreshes the disk-cache dep and,
+      // in PR-3, feeds hull rendering). The canvas mounts itself off the first
+      // frame via its own applyFrame gate, so this need not fire per tick.
+      if (msg.type === "done") {
+        settledNodesRef.current = pendingNodesRef.current;
+        setSettled(msg.positions);
+      }
     };
     if (workspacePath) {
       vaultGraphLayoutRead(workspacePath)
@@ -197,6 +329,8 @@ export function GraphView({
     const worker = workerRef.current;
     if (!worker) return;
     frameEpochRef.current += 1;
+    // Tag the frame we're about to request with its node set (see refs above).
+    pendingNodesRef.current = filtered.nodes;
     const indexById = new Map(filtered.nodes.map((n, i) => [n.id, i]));
     const seed = seedAppliedRef.current ? undefined : seedRef.current;
     seedAppliedRef.current = true;
@@ -219,7 +353,12 @@ export function GraphView({
   useEffect(() => {
     if (!seedReady) return;
     if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
-    updateTimerRef.current = setTimeout(sendUpdate, UPDATE_DEBOUNCE_MS);
+    updateTimerRef.current = setTimeout(() => {
+      // Null the ref once fired so flushPendingUpdate (drag/unpin) only posts a
+      // fresh update when one is genuinely still pending, not after every settle.
+      updateTimerRef.current = null;
+      sendUpdate();
+    }, UPDATE_DEBOUNCE_MS);
     return () => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
     };
@@ -234,12 +373,15 @@ export function GraphView({
   // --- disk layout cache: debounced save of current positions -------------
 
   useEffect(() => {
-    if (!workspacePath || !positions) return;
+    if (!workspacePath || !settled) return;
+    // Skip while `settled` belongs to a different node set (identity, not just
+    // cardinality — a same-cardinality swap would persist wrong coordinates).
+    if (settledNodesRef.current !== filtered.nodes) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const map: Record<string, [number, number]> = {};
       filtered.nodes.forEach((node, i) => {
-        map[node.id] = [positions[i * 2], positions[i * 2 + 1]];
+        map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
       });
       void vaultGraphLayoutSave(workspacePath, { version: 1, positions: map });
     }, SAVE_DEBOUNCE_MS);
@@ -248,26 +390,36 @@ export function GraphView({
     };
     // ponytail: saves only the currently-filtered nodes' positions — enough to
     // warm-start the common case; a full-model save would need the worker store.
-  }, [positions, filtered, workspacePath]);
+  }, [settled, filtered, workspacePath]);
 
   const post = useCallback((message: LayoutRequest) => {
     workerRef.current?.postMessage(message);
   }, []);
+
+  // Index-based worker messages (drag/unpin) assume the worker's simNodes match
+  // the DOM's data-node-index. After a filter change the DOM updates
+  // synchronously but the worker `update` is debounced, so flush it first.
+  const flushPendingUpdate = useCallback(() => {
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = null;
+      sendUpdate();
+    }
+  }, [sendUpdate]);
 
   // --- interactions -------------------------------------------------------
 
   const handleOpen = useCallback(
     (node: GraphNode) => {
       if (node.type === "unresolved") {
-        if (onCreateNote) onCreateNote(node.label);
-        else onError(t("graph.hint.ghostNode"));
+        onCreateNote(node.label);
         return;
       }
       if (!node.relPath) return;
       const entry = entries.find((e) => e.relPath === node.relPath);
       if (entry) onOpenEntry(entry);
     },
-    [entries, onOpenEntry, onCreateNote, onError, t],
+    [entries, onOpenEntry, onCreateNote],
   );
 
   const selectById = useCallback(
@@ -284,6 +436,107 @@ export function GraphView({
   const handleSelect = useCallback(
     (node: GraphNode | null) => selectById(node?.id ?? null),
     [selectById],
+  );
+
+  const nodeById = useMemo(() => new Map(model.nodes.map((n) => [n.id, n])), [model]);
+
+  // Insight → action: copy the [[wikilink]] to paste into a note, or open the
+  // source note in the editor (reuses handleOpen's mode switch).
+  const copyWikilink = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id);
+      if (!node) return;
+      // Canonical target: relPath-sans-ext (what the editor autocomplete emits;
+      // resolves unambiguously via byRelPathNoExt even on duplicate titles).
+      // Ghosts have no relPath — their label IS the raw wikilink target.
+      const target = node.relPath
+        ? node.relPath.replace(/\.(md|mdx|markdown)$/i, "")
+        : node.label;
+      void navigator.clipboard
+        .writeText(`[[${target}]]`)
+        .catch((err: unknown) => onError(String(err)));
+    },
+    [nodeById, onError],
+  );
+  const openNodeById = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id);
+      if (node) handleOpen(node);
+    },
+    [nodeById, handleOpen],
+  );
+
+  // Favorites integration: a node maps to its file relPath (ghosts have none).
+  const favoriteIds = useMemo(
+    () =>
+      new Set(
+        model.nodes
+          .filter((n) => n.relPath && isFavorite("file", n.relPath))
+          .map((n) => n.id),
+      ),
+    [model, isFavorite],
+  );
+  const toggleNodeFavorite = useCallback(
+    (node: GraphNode) => {
+      if (!node.relPath) return;
+      onToggleFavorite({ kind: "file", relPath: node.relPath, label: node.label });
+    },
+    [onToggleFavorite],
+  );
+
+  // Export the current view as PNG/SVG. In Tauri we route through the native
+  // save dialog (canceling aborts — no silent fallback); in the browser we
+  // download the blob directly.
+  const handleExport = useCallback(
+    async (format: "png" | "svg") => {
+      const el = exportElRef.current;
+      if (!el) return;
+      try {
+        const result = format === "png" ? await exportGraphPng(el) : exportGraphSvg(el);
+        // Local calendar date (en-CA → YYYY-MM-DD); toISOString would stamp UTC.
+        const name = `graph-${new Date().toLocaleDateString("en-CA")}.${result.extension}`;
+        if (workspacePath && isTauri()) {
+          const target = await chooseSaveFile(
+            t("graph.export.saveTitle"),
+            `${workspacePath.replace(/[/\\]+$/, "")}/reports/${name}`,
+          );
+          if (!target) return; // user canceled the native dialog → abort
+          await diagramExportBlobToPath(
+            target,
+            result.extension as "png" | "svg",
+            await blobToUint8Array(result.blob),
+          );
+        } else {
+          downloadGraphBlob(result.blob, name);
+        }
+      } catch (err: unknown) {
+        onError(String(err));
+      }
+    },
+    [workspacePath, onError, t],
+  );
+
+  // Context-menu lifecycle: close on any outside interaction / Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  const runMenuAction = useCallback(
+    (fn: (node: GraphNode, index: number) => void) => {
+      const m = menu;
+      setMenu(null);
+      if (m) fn(m.node, m.index);
+    },
+    [menu],
   );
 
   const handlePathTarget = useCallback(
@@ -350,6 +603,13 @@ export function GraphView({
       if (isInEditable(event.target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
+        // The scoped shortcut runs capture-phase and stops propagation, so it
+        // must close the context menu itself (the menu's own Esc handler and the
+        // window listener never see the event).
+        if (menu) {
+          setMenu(null);
+          return;
+        }
         clearOverlays();
       } else if (event.key === "=" || event.key === "+") {
         event.preventDefault();
@@ -362,7 +622,7 @@ export function GraphView({
         setFitSignal((s) => s + 1);
       }
     },
-    [clearOverlays],
+    [clearOverlays, menu],
   );
   useScopedKeyboardShortcuts(shortcutPredicate, shortcutHandler);
 
@@ -393,6 +653,8 @@ export function GraphView({
         search={search}
         onSearchChange={setSearch}
         searchInputRef={searchRef}
+        searchAsFilter={searchAsFilter}
+        onSearchAsFilterChange={setSearchAsFilter}
         view={view}
         onViewChange={setView}
         zoomPercent={zoomPercent}
@@ -406,6 +668,8 @@ export function GraphView({
         onRefreshOverlay={() => {
           if (workspacePath) loadOverlay(workspacePath, liveModel);
         }}
+        onExportPng={() => void handleExport("png")}
+        onExportSvg={() => void handleExport("svg")}
         refreshing={refreshing}
         enriched={model.enriched}
         communityCount={enrichedCount}
@@ -442,11 +706,15 @@ export function GraphView({
             communities={facets.communities}
             maxDegree={facets.maxDegree}
             onFiltersChange={setFilters}
+            hullsAvailable={model.enriched && facets.communities.length > 0}
+            showHulls={showHulls}
+            onShowHullsChange={setShowHulls}
           />
           <GraphCanvas
             nodes={filtered.nodes}
             edges={filtered.edges}
-            positions={positions}
+            positionsRef={latestPositionsRef}
+            applyFrameRef={applyFrameRef}
             layoutEpoch={layoutEpoch}
             enriched={model.enriched}
             selectedId={selectedId}
@@ -460,11 +728,29 @@ export function GraphView({
             onOpen={handleOpen}
             onPathTarget={handlePathTarget}
             onNodeDrag={(nodeIndex, phase, x, y) => {
-              if (phase === "start") post({ type: "dragStart", index: nodeIndex });
-              else if (phase === "move") post({ type: "dragMove", index: nodeIndex, x, y });
+              if (phase === "start") {
+                flushPendingUpdate();
+                post({ type: "dragStart", index: nodeIndex });
+              } else if (phase === "move") post({ type: "dragMove", index: nodeIndex, x, y });
               else post({ type: "dragEnd", index: nodeIndex });
             }}
-            onNodeUnpin={(nodeIndex) => post({ type: "unpin", index: nodeIndex })}
+            onNodeUnpin={(nodeIndex) => {
+              flushPendingUpdate();
+              post({ type: "unpin", index: nodeIndex });
+            }}
+            onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
+            favoriteIds={favoriteIds}
+            exportRef={exportElRef}
+            hulls={hulls}
+            overlay={
+              <GraphLegend
+                enriched={model.enriched}
+                domains={facets.domains}
+                communities={facets.communities}
+                filters={filters}
+                onFiltersChange={setFilters}
+              />
+            }
             onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
           />
           <div className="graph-right" data-testid="graph-right">
@@ -491,16 +777,22 @@ export function GraphView({
             {rightTab === "insights" ? (
               <GraphInsightsPanel
                 model={model}
-                now={nowRef.current}
+                now={now}
                 onHighlightPair={handleHighlightPair}
                 onSelectNode={handleInsightNode}
+                onCopyWikilink={copyWikilink}
+                onOpenNode={openNodeById}
               />
             ) : (
               <GraphInspector
                 node={selectedNode}
                 model={model}
+                isFavorite={
+                  selectedNode?.relPath ? isFavorite("file", selectedNode.relPath) : false
+                }
                 onSelectNode={handleInsightNode}
                 onOpen={handleOpen}
+                onToggleFavorite={toggleNodeFavorite}
                 onFocus={(node) => {
                   setFocus(node.id);
                   selectById(node.id);
@@ -514,6 +806,69 @@ export function GraphView({
           </div>
         </div>
       )}
+
+      {menu ? (
+        <div
+          ref={menuRef}
+          className="context-menu graph-node-context-menu"
+          data-testid="graph-node-context-menu"
+          role="menu"
+          tabIndex={-1}
+          style={{ left: menu.x, top: menu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleMenuKeyDown}
+        >
+          <div className="context-menu-title" title={menu.node.relPath ?? menu.node.label}>
+            {menu.node.label}
+          </div>
+          <button type="button" role="menuitem" onClick={() => runMenuAction((n) => handleOpen(n))}>
+            <span>{t("graph.inspector.open")}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runMenuAction((n) => { setFocus(n.id); selectById(n.id); })}
+          >
+            <span>{t("graph.inspector.focus")}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runMenuAction((n) => { setPathSourceId(n.id); setSelectedId(n.id); })}
+          >
+            <span>{t("graph.inspector.startPath")}</span>
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => runMenuAction((n) => copyWikilink(n.id))}>
+            <span>{t("graph.action.copyWikilink")}</span>
+          </button>
+          {menu.node.relPath ? (
+            <button type="button" role="menuitem" onClick={() => runMenuAction((n) => toggleNodeFavorite(n))}>
+              <span>{favoriteIds.has(menu.node.id) ? t("graph.menu.unfavorite") : t("graph.menu.favorite")}</span>
+            </button>
+          ) : null}
+          <div className="context-menu-separator" role="separator" />
+          {/* ponytail: no "pin" item — pinned state lives only in the worker, so
+              a pin toggle couldn't honestly render its own on/off state. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() =>
+              runMenuAction((n) => {
+                // Re-resolve the live index by id and flush like the alt-click
+                // path — the menu's captured index may be stale if the filtered
+                // set changed while the menu was open.
+                const index = filtered.nodes.findIndex((fn) => fn.id === n.id);
+                if (index < 0) return;
+                flushPendingUpdate();
+                post({ type: "unpin", index });
+              })
+            }
+          >
+            <span>{t("graph.menu.unpin")}</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

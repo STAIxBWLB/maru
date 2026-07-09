@@ -235,8 +235,15 @@ export function enrichGraph(
   };
 }
 
-/** Precomputed 1-hop adjacency for hover highlighting. */
+/** Precomputed 1-hop adjacency for hover highlighting. Cached per model so
+ *  the 3-4 callers in a render cycle (insights + focusSubgraph) share one build
+ *  instead of each rebuilding O(E). A new model identity (vault edit / enrich)
+ *  misses and rebuilds; keyed weakly so old models get collected. */
+const adjacencyCache = new WeakMap<GraphModel, Map<string, Set<string>>>();
+
 export function buildAdjacency(model: GraphModel): Map<string, Set<string>> {
+  const cached = adjacencyCache.get(model);
+  if (cached) return cached;
   const adjacency = new Map<string, Set<string>>();
   const add = (a: string, b: string) => {
     let set = adjacency.get(a);
@@ -250,6 +257,7 @@ export function buildAdjacency(model: GraphModel): Map<string, Set<string>> {
     add(edge.source, edge.target);
     add(edge.target, edge.source);
   }
+  adjacencyCache.set(model, adjacency);
   return adjacency;
 }
 
