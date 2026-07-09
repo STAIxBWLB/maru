@@ -111,6 +111,73 @@ test("ghost node click seeds the note-creation dialog (F3b) and chain view toggl
   expect(forbidden).toEqual([]);
 });
 
+test("hover highlights the 1-hop neighborhood and dims the rest (imperative path)", async ({
+  page,
+}) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+
+  // The only edge in the mock vault runs meeting → ghost, so show ghosts to
+  // give the meeting note a visible neighbor to highlight.
+  await page.getByLabel("미해소 링크 표시").check();
+  await expect(page.locator(".graph-node circle")).toHaveCount(3);
+
+  // Hover the meeting node: it gets .hovered, its ghost neighbor gets .hl, and
+  // the container gets .has-hover; the unrelated glossary node dims to 0.12.
+  await page.locator('.graph-node circle[data-node-id="maru-weekly-meeting"]').hover();
+  await expect(page.locator("svg.graph-canvas")).toHaveClass(/has-hover/);
+  await expect(page.locator(".graph-node.hovered")).toHaveCount(1);
+  await expect(page.locator(".graph-node.hl")).toHaveCount(1);
+  await expect(
+    page.locator('.graph-node:has(circle[data-node-id="maru-glossary"])'),
+  ).toHaveCSS("opacity", "0.12");
+
+  // Leaving the canvas clears the highlight (no lingering classes).
+  await page.getByTestId("graph-filter-panel").hover();
+  await expect(page.locator("svg.graph-canvas")).not.toHaveClass(/has-hover/);
+  await expect(page.locator(".graph-node.hl")).toHaveCount(0);
+  await expect(page.locator(".graph-node.hovered")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("dragging a node moves it (pin) without selecting; alt-click unpins", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "그래프", exact: true }).click();
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".graph-node circle")).toHaveCount(2);
+
+  const circle = page.locator('.graph-node circle[data-node-id="maru-glossary"]');
+  const group = page.locator('.graph-node:has(circle[data-node-id="maru-glossary"])');
+  // Wait for the worker's first frame to position the node.
+  await expect(group).toHaveAttribute("transform", /translate/);
+  const before = await group.getAttribute("transform");
+
+  const box = await circle.boundingBox();
+  if (!box) throw new Error("node has no bounding box");
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 90, cy + 40, { steps: 6 });
+  await page.mouse.up();
+
+  // Moved > 3px ⇒ a drag, not a click: the node relocates and is not selected.
+  await expect(group).not.toHaveAttribute("transform", before ?? "");
+  await expect(page.locator(".graph-node.selected")).toHaveCount(0);
+
+  // Alt-click unpins (releases fx/fy) — smoke: it stays interactive, no crash.
+  await page.keyboard.down("Alt");
+  await circle.click();
+  await page.keyboard.up("Alt");
+  await expect(page.locator(".graph-node.selected")).toHaveCount(0);
+
+  expect(forbidden).toEqual([]);
+});
+
 test("toolbar, insights panel, and inspector surfaces render and respond", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");

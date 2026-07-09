@@ -2,15 +2,27 @@
 // runs in layout.worker.ts. This owns viewport (zoom/pan), hover highlight,
 // and the select / double-click-open / drag-pin / path-target interactions.
 //
-// Perf: nodes and edges are memoized child components (diagram NodeView/EdgeView
-// pattern), so pan/zoom updates only the container <g transform> — zero child
-// reconciliation once the layout has settled. No viewport culling at this scale
-// (≤~2k nodes render fine); a ResizeObserver caches the canvas size instead of
-// reading getBoundingClientRect() every frame.
-// ponytail: no cull is deliberate for vault scale — if a vault exceeds ~3k
-// nodes, reintroduce hysteretic culling or a canvas renderer.
+// Perf: React owns *structure* (which nodes/edges/classes exist); the DOM owns
+// *geometry*. Node transforms and edge endpoints are written imperatively via
+// setAttribute (writeFrame) straight from worker frames, so simulation ticks,
+// drags, pan/zoom and hover never trigger React reconciliation of the ~2.4k
+// child elements. NodeView/EdgeView carry no coordinates, so their memo is
+// near-perfect; the once-per-settle render reconciles almost nothing.
+// ponytail: imperative geometry lifts the practical SVG ceiling well past the
+// ~383-node vault; a Canvas/WebGL renderer stays the escape hatch above ~3-5k
+// nodes (switching would forfeit CSS tokens, free hit-testing, and these
+// e2e selectors — not worth it at this scale).
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { clamp } from "../../lib/diagram/geometry";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
 
@@ -66,54 +78,38 @@ export function domainColor(domain: string | null): string {
 }
 
 // --- memoized primitives -------------------------------------------------
+// Coordinates are written imperatively (see writeFrame), never via props, so
+// these reconcile only when class/label/fill actually change.
 
 const EdgeView = memo(function EdgeView({
-  x1, y1, x2, y2, className, marker,
+  className, marker,
 }: {
-  x1: number; y1: number; x2: number; y2: number; className: string; marker: boolean;
+  className: string;
+  marker: boolean;
 }) {
   return (
-    <line
-      x1={x1}
-      y1={y1}
-      x2={x2}
-      y2={y2}
-      className={className}
-      markerEnd={marker ? "url(#graph-arrow)" : undefined}
-    />
+    <line className={className} markerEnd={marker ? "url(#graph-arrow)" : undefined} />
   );
 });
 
 const NodeView = memo(function NodeView({
-  index, id, x, y, r, fill, className, label, showLabel, onEnter, onLeave,
+  index, id, r, fill, className, label,
 }: {
   index: number;
   id: string;
-  x: number;
-  y: number;
   r: number;
   fill: string;
   className: string;
   label: string;
-  showLabel: boolean;
-  onEnter: (id: string) => void;
-  onLeave: () => void;
 }) {
   return (
-    <g className={className} transform={`translate(${x}, ${y})`}>
-      <circle
-        r={r}
-        data-node-index={index}
-        data-node-id={id}
-        fill={fill}
-        onMouseEnter={() => onEnter(id)}
-        onMouseLeave={onLeave}
-      />
-      {showLabel ? (
-        <text className="graph-node-label" dy={r + 12}>
-          {label}
-        </text>
-      ) : null}
+    <g className={className}>
+      <circle r={r} data-node-index={index} data-node-id={id} fill={fill} />
+      {/* Always mounted; visibility is CSS-toggled (label LOD + state) so
+          zoom/hover threshold crossings need zero reconciliation. */}
+      <text className="graph-node-label" dy={r + 12}>
+        {label}
+      </text>
     </g>
   );
 });
@@ -123,7 +119,12 @@ const NodeView = memo(function NodeView({
 interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  positions: Float64Array | null;
+  /** Latest positions (flat x,y interleaved), index-aligned with `nodes`.
+   *  Owned by GraphView; read here for fit/center and structural placement. */
+  positionsRef: RefObject<Float64Array | null>;
+  /** GraphView populates this with the canvas's per-frame DOM writer so worker
+   *  frames bypass React. */
+  applyFrameRef: RefObject<((p: Float64Array) => void) | null>;
   /** Bumped by GraphView on each worker re-init — triggers a fit-view. */
   layoutEpoch: number;
   enriched: boolean;
@@ -147,7 +148,8 @@ interface GraphCanvasProps {
 export function GraphCanvas({
   nodes,
   edges,
-  positions,
+  positionsRef,
+  applyFrameRef,
   layoutEpoch,
   enriched,
   selectedId,
@@ -165,13 +167,36 @@ export function GraphCanvas({
   onViewportReport,
 }: GraphCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const nodesGroupRef = useRef<SVGGElement | null>(null);
+  const edgesGroupRef = useRef<SVGGElement | null>(null);
+  const pairLineRef = useRef<SVGLineElement | null>(null);
+  // Element caches — rebuilt on structural change; DOM order == node/edge order.
+  const nodeEls = useRef<SVGGElement[]>([]);
+  const edgeEls = useRef<SVGLineElement[]>([]);
+  // id → last written position; lets a structural change keep surviving nodes
+  // in place instead of flashing to the origin before the next frame arrives.
+  const lastPos = useRef<Map<string, [number, number]>>(new Map());
+
   const [viewport, setViewport] = useState<GraphViewport>({ zoom: 1, px: 0, py: 0 });
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [size, setSize] = useState({ width: 1200, height: 800 });
+  const [ready, setReady] = useState(false);
   const fittedEpochRef = useRef(-1);
   const lastClickRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
 
-  // Cache the canvas size via ResizeObserver instead of reading layout each frame.
+  // rAF coalescing for the worker frame stream.
+  const rafRef = useRef(0);
+  const pendingRef = useRef<Float64Array | null>(null);
+  const writeFrameRef = useRef<((p: Float64Array) => void) | null>(null);
+
+  // Imperative hover bookkeeping — never touches React state, so hovering
+  // across the graph reconciles nothing.
+  const hoverIdRef = useRef<string | null>(null);
+  const hoverElsRef = useRef<Element[]>([]);
+  const applyHoverRef = useRef<((id: string | null) => void) | null>(null);
+
+  // Cache the canvas size via ResizeObserver instead of reading layout each
+  // frame. The <svg> is always mounted (loading is an overlay), so this
+  // attaches on the first commit.
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
@@ -195,41 +220,225 @@ export function GraphCanvas({
     return map;
   }, [nodes]);
 
+  // Edges with both endpoints resolved, in render/DOM order — keeps edgeEls
+  // index-aligned with the <line> children even if one is defensively dropped.
+  const drawnEdges = useMemo(() => {
+    const out: { si: number; ti: number; edge: GraphEdge }[] = [];
+    for (const edge of edges) {
+      const si = indexById.get(edge.source);
+      const ti = indexById.get(edge.target);
+      if (si != null && ti != null) out.push({ si, ti, edge });
+    }
+    return out;
+  }, [edges, indexById]);
+
+  // node id → indices into drawnEdges (incident edges), for hover highlight.
+  const incidentEdges = useMemo(() => {
+    const map = new Map<string, number[]>();
+    drawnEdges.forEach((d, j) => {
+      let a = map.get(d.edge.source);
+      if (!a) map.set(d.edge.source, (a = []));
+      a.push(j);
+      let b = map.get(d.edge.target);
+      if (!b) map.set(d.edge.target, (b = []));
+      b.push(j);
+    });
+    return map;
+  }, [drawnEdges]);
+
   const adjacency = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const edge of edges) {
-      (map.get(edge.source) ?? map.set(edge.source, new Set()).get(edge.source)!).add(edge.target);
-      (map.get(edge.target) ?? map.set(edge.target, new Set()).get(edge.target)!).add(edge.source);
+      let s = map.get(edge.source);
+      if (!s) map.set(edge.source, (s = new Set()));
+      s.add(edge.target);
+      let t = map.get(edge.target);
+      if (!t) map.set(edge.target, (t = new Set()));
+      t.add(edge.source);
     }
     return map;
   }, [edges]);
 
-  const fitView = useCallback(() => {
-    if (!positions || positions.length === 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (let i = 0; i < positions.length; i += 2) {
-      if (positions[i] < minX) minX = positions[i];
-      if (positions[i] > maxX) maxX = positions[i];
-      if (positions[i + 1] < minY) minY = positions[i + 1];
-      if (positions[i + 1] > maxY) maxY = positions[i + 1];
+  // Highlight overlay → sets consulted per node/edge for dimming (React path).
+  const { highlightNodes, highlightEdgeKeys, pairEndpoints } = useMemo(() => {
+    if (!highlight) {
+      return { highlightNodes: null as Set<string> | null, highlightEdgeKeys: null as Set<string> | null, pairEndpoints: null as [string, string] | null };
     }
-    const bw = Math.max(maxX - minX, 1) + 120;
-    const bh = Math.max(maxY - minY, 1) + 120;
-    const zoom = clamp(Math.min(size.width / bw, size.height / bh), MIN_ZOOM, MAX_ZOOM);
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    setViewport({ zoom, px: size.width / 2 - cx * zoom, py: size.height / 2 - cy * zoom });
-  }, [positions, size]);
+    if (highlight.kind === "pair") {
+      return {
+        highlightNodes: new Set([highlight.a, highlight.b]),
+        highlightEdgeKeys: null,
+        pairEndpoints: [highlight.a, highlight.b] as [string, string],
+      };
+    }
+    const nodeSet = new Set(highlight.ids);
+    const edgeSet = new Set<string>();
+    for (let i = 0; i + 1 < highlight.ids.length; i += 1) {
+      const a = highlight.ids[i];
+      const b = highlight.ids[i + 1];
+      edgeSet.add(a < b ? `${a} ${b}` : `${b} ${a}`);
+    }
+    return { highlightNodes: nodeSet, highlightEdgeKeys: edgeSet, pairEndpoints: null };
+  }, [highlight]);
 
-  // Fit once per layout epoch, on the first frame that has positions.
+  const showLabels = viewport.zoom > LABEL_ZOOM_THRESHOLD;
+
+  const fitView = useCallback(
+    (p?: Float64Array | null) => {
+      const pos = p ?? positionsRef.current;
+      if (!pos || pos.length === 0) return;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < pos.length; i += 2) {
+        if (pos[i] < minX) minX = pos[i];
+        if (pos[i] > maxX) maxX = pos[i];
+        if (pos[i + 1] < minY) minY = pos[i + 1];
+        if (pos[i + 1] > maxY) maxY = pos[i + 1];
+      }
+      const bw = Math.max(maxX - minX, 1) + 120;
+      const bh = Math.max(maxY - minY, 1) + 120;
+      const zoom = clamp(Math.min(size.width / bw, size.height / bh), MIN_ZOOM, MAX_ZOOM);
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      setViewport({ zoom, px: size.width / 2 - cx * zoom, py: size.height / 2 - cy * zoom });
+    },
+    [positionsRef, size],
+  );
+
+  // Write geometry straight to the DOM from a positions frame. Called from the
+  // rAF stream and from the structural commit hook.
+  const writeFrame = useCallback(
+    (p: Float64Array) => {
+      // Stale-epoch guard: a frame whose length doesn't match the mounted node
+      // set is from a superseded layout; the next matching frame corrects it.
+      if (p.length !== nodes.length * 2) return;
+      const nEls = nodeEls.current;
+      for (let i = 0; i < nEls.length; i += 1) {
+        const x = p[i * 2];
+        const y = p[i * 2 + 1];
+        nEls[i].setAttribute("transform", `translate(${x}, ${y})`);
+        lastPos.current.set(nodes[i].id, [x, y]);
+      }
+      const eEls = edgeEls.current;
+      for (let j = 0; j < drawnEdges.length; j += 1) {
+        const el = eEls[j];
+        if (!el) continue;
+        const { si, ti } = drawnEdges[j];
+        el.setAttribute("x1", String(p[si * 2]));
+        el.setAttribute("y1", String(p[si * 2 + 1]));
+        el.setAttribute("x2", String(p[ti * 2]));
+        el.setAttribute("y2", String(p[ti * 2 + 1]));
+      }
+      if (pairLineRef.current && pairEndpoints) {
+        const a = indexById.get(pairEndpoints[0]);
+        const b = indexById.get(pairEndpoints[1]);
+        if (a != null && b != null) {
+          pairLineRef.current.setAttribute("x1", String(p[a * 2]));
+          pairLineRef.current.setAttribute("y1", String(p[a * 2 + 1]));
+          pairLineRef.current.setAttribute("x2", String(p[b * 2]));
+          pairLineRef.current.setAttribute("y2", String(p[b * 2 + 1]));
+        }
+      }
+      if (!ready) setReady(true);
+      if (fittedEpochRef.current !== layoutEpoch) {
+        fittedEpochRef.current = layoutEpoch;
+        fitView(p);
+      }
+    },
+    [nodes, drawnEdges, pairEndpoints, indexById, ready, layoutEpoch, fitView],
+  );
+
+  // Structural fallback: no fresh frame yet (e.g. just after a filter change).
+  // Place surviving nodes at their last-known position; brand-new nodes stay at
+  // the origin for the ~120ms until the worker's warm-started frame arrives.
+  const placeFromLastKnown = useCallback(() => {
+    const nEls = nodeEls.current;
+    for (let i = 0; i < nEls.length; i += 1) {
+      const prev = lastPos.current.get(nodes[i].id);
+      if (prev) nEls[i].setAttribute("transform", `translate(${prev[0]}, ${prev[1]})`);
+    }
+    const eEls = edgeEls.current;
+    for (let j = 0; j < drawnEdges.length; j += 1) {
+      const el = eEls[j];
+      if (!el) continue;
+      const a = lastPos.current.get(drawnEdges[j].edge.source);
+      const b = lastPos.current.get(drawnEdges[j].edge.target);
+      if (a) { el.setAttribute("x1", String(a[0])); el.setAttribute("y1", String(a[1])); }
+      if (b) { el.setAttribute("x2", String(b[0])); el.setAttribute("y2", String(b[1])); }
+    }
+  }, [nodes, drawnEdges]);
+
+  // O(neighbors) hover: toggle a container class for the all-but-neighbors dim
+  // (one CSS style recalc), and add per-element classes only to the hovered
+  // node + its neighbors + incident edges. No React reconciliation.
+  const applyHover = useCallback(
+    (id: string | null) => {
+      for (const el of hoverElsRef.current) el.classList.remove("hl", "hovered");
+      hoverElsRef.current = [];
+      hoverIdRef.current = id;
+      // Inert while a pair/path overlay owns the dimming (parity with V2).
+      const active = id != null && !highlight && indexById.has(id);
+      svgRef.current?.classList.toggle("has-hover", active);
+      if (!active) return;
+      const i = indexById.get(id!);
+      if (i == null) return;
+      const els: Element[] = [];
+      const hovered = nodeEls.current[i];
+      if (hovered) { hovered.classList.add("hovered"); els.push(hovered); }
+      for (const neighborId of adjacency.get(id!) ?? []) {
+        const ni = indexById.get(neighborId);
+        const el = ni != null ? nodeEls.current[ni] : undefined;
+        if (el) { el.classList.add("hl"); els.push(el); }
+      }
+      for (const j of incidentEdges.get(id!) ?? []) {
+        const el = edgeEls.current[j];
+        if (el) { el.classList.add("hl"); els.push(el); }
+      }
+      hoverElsRef.current = els;
+    },
+    [highlight, indexById, adjacency, incidentEdges],
+  );
+
+  // Keep the imperative closures fresh for the rAF stream and structural hook.
+  useLayoutEffect(() => {
+    writeFrameRef.current = writeFrame;
+    applyHoverRef.current = applyHover;
+  });
+
+  // Structural commit: rebuild element caches (DOM changed), then re-place
+  // geometry and re-assert hover classes React may have dropped.
+  useLayoutEffect(() => {
+    nodeEls.current = Array.from(nodesGroupRef.current?.children ?? []) as SVGGElement[];
+    edgeEls.current = Array.from(edgesGroupRef.current?.children ?? []) as SVGLineElement[];
+    const p = positionsRef.current;
+    if (p && p.length === nodes.length * 2) writeFrameRef.current?.(p);
+    else placeFromLastKnown();
+    applyHoverRef.current?.(hoverIdRef.current);
+  }, [nodes, drawnEdges, pairEndpoints, placeFromLastKnown, positionsRef]);
+
+  // Subscribe the worker frame stream to a rAF-coalesced DOM write.
   useEffect(() => {
-    if (!positions || positions.length === 0) return;
-    if (fittedEpochRef.current === layoutEpoch) return;
-    fittedEpochRef.current = layoutEpoch;
-    fitView();
-  }, [positions, layoutEpoch, fitView]);
+    const ref = applyFrameRef;
+    ref.current = (p: Float64Array) => {
+      pendingRef.current = p;
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const frame = pendingRef.current;
+        pendingRef.current = null;
+        if (frame) writeFrameRef.current?.(frame);
+      });
+    };
+    return () => {
+      ref.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+  }, [applyFrameRef]);
 
-  // Toolbar "fit" button.
+  // Fit once per layout epoch is handled inside writeFrame; the toolbar "fit"
+  // button and keyboard 0 drive an explicit refit.
   useEffect(() => {
     if (fitSignal > 0) fitView();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -250,11 +459,13 @@ export function GraphCanvas({
 
   // Pan to center a node when an insight row is clicked (keeps current zoom).
   useEffect(() => {
-    if (!centerSignal || !positions) return;
+    if (!centerSignal) return;
+    const p = positionsRef.current;
+    if (!p) return;
     const i = indexById.get(centerSignal.id);
-    if (i == null) return;
-    const cx = positions[i * 2];
-    const cy = positions[i * 2 + 1];
+    if (i == null || i * 2 + 1 >= p.length) return;
+    const cx = p[i * 2];
+    const cy = p[i * 2 + 1];
     setViewport((current) => ({
       ...current,
       px: size.width / 2 - cx * current.zoom,
@@ -388,145 +599,103 @@ export function GraphCanvas({
     [nodes, onNodeDrag, onNodeUnpin, onOpen, onPathTarget, onSelect, screenPoint],
   );
 
-  // Highlight overlay → sets consulted per node/edge for dimming.
-  const { highlightNodes, highlightEdgeKeys, pairEndpoints } = useMemo(() => {
-    if (!highlight) {
-      return { highlightNodes: null as Set<string> | null, highlightEdgeKeys: null as Set<string> | null, pairEndpoints: null as [string, string] | null };
-    }
-    if (highlight.kind === "pair") {
-      return {
-        highlightNodes: new Set([highlight.a, highlight.b]),
-        highlightEdgeKeys: null,
-        pairEndpoints: [highlight.a, highlight.b] as [string, string],
-      };
-    }
-    const nodeSet = new Set(highlight.ids);
-    const edgeSet = new Set<string>();
-    for (let i = 0; i + 1 < highlight.ids.length; i += 1) {
-      const a = highlight.ids[i];
-      const b = highlight.ids[i + 1];
-      edgeSet.add(a < b ? `${a} ${b}` : `${b} ${a}`);
-    }
-    return { highlightNodes: nodeSet, highlightEdgeKeys: edgeSet, pairEndpoints: null };
-  }, [highlight]);
+  // Delegated hover: one listener on the <svg> instead of 2×N per-circle
+  // handlers. pointerover bubbles up carrying the entered element as target.
+  const handlePointerOver = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+    if (gesture.current) return; // don't fight an active pan/drag
+    const id = (event.target as SVGElement).getAttribute("data-node-id");
+    if (id === hoverIdRef.current) return;
+    applyHoverRef.current?.(id);
+  }, []);
 
-  const hoverNeighbors = hoveredId ? (adjacency.get(hoveredId) ?? new Set<string>()) : null;
-  const showLabels = viewport.zoom > LABEL_ZOOM_THRESHOLD;
-
-  const onEnter = useCallback((id: string) => setHoveredId(id), []);
-  const onLeave = useCallback(() => setHoveredId(null), []);
-
-  if (!positions) {
-    return (
-      <div className="graph-canvas-loading" data-testid="graph-canvas-loading">
-        …
-      </div>
-    );
-  }
+  const handlePointerLeave = useCallback(() => {
+    if (hoverIdRef.current != null) applyHoverRef.current?.(null);
+  }, []);
 
   return (
-    <svg
-      ref={svgRef}
-      className="graph-canvas"
-      data-testid="graph-canvas"
-      onWheel={handleWheel}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-    >
-      <defs>
-        <marker
-          id="graph-arrow"
-          viewBox="0 0 10 10"
-          refX="10"
-          refY="5"
-          markerWidth="6"
-          markerHeight="6"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
-        </marker>
-      </defs>
-      <g transform={`translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`}>
-        <g className="graph-edges">
-          {edges.map((edge, i) => {
-            const si = indexById.get(edge.source);
-            const ti = indexById.get(edge.target);
-            if (si == null || ti == null) return null;
-            const key = edge.source < edge.target
-              ? `${edge.source} ${edge.target}`
-              : `${edge.target} ${edge.source}`;
-            let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
-            if (highlightEdgeKeys) {
-              cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
-            } else if (highlightNodes) {
-              cls += " dimmed";
-            } else if (hoveredId != null && edge.source !== hoveredId && edge.target !== hoveredId) {
-              cls += " dimmed";
-            }
-            const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
-            return (
-              <EdgeView
-                key={i}
-                x1={positions[si * 2]}
-                y1={positions[si * 2 + 1]}
-                x2={positions[ti * 2]}
-                y2={positions[ti * 2 + 1]}
-                className={cls}
-                marker={isSupersedes}
-              />
-            );
-          })}
-          {pairEndpoints && indexById.has(pairEndpoints[0]) && indexById.has(pairEndpoints[1]) ? (
-            <line
-              className="graph-edge suggested"
-              x1={positions[indexById.get(pairEndpoints[0])! * 2]}
-              y1={positions[indexById.get(pairEndpoints[0])! * 2 + 1]}
-              x2={positions[indexById.get(pairEndpoints[1])! * 2]}
-              y2={positions[indexById.get(pairEndpoints[1])! * 2 + 1]}
-            />
+    <div className="graph-canvas-wrap">
+      <svg
+        ref={svgRef}
+        className="graph-canvas"
+        data-testid="graph-canvas"
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerOver={handlePointerOver}
+        onPointerLeave={handlePointerLeave}
+      >
+        <defs>
+          <marker
+            id="graph-arrow"
+            viewBox="0 0 10 10"
+            refX="10"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+          </marker>
+        </defs>
+        <g transform={`translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`}>
+          <g className="graph-edges" ref={edgesGroupRef}>
+            {drawnEdges.map(({ edge }) => {
+              const key = edge.source < edge.target
+                ? `${edge.source} ${edge.target}`
+                : `${edge.target} ${edge.source}`;
+              let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
+              if (highlightEdgeKeys) {
+                cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
+              } else if (highlightNodes) {
+                cls += " dimmed";
+              }
+              const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
+              return (
+                <EdgeView
+                  key={`${edge.source} ${edge.target} ${edge.relation}`}
+                  className={cls}
+                  marker={isSupersedes}
+                />
+              );
+            })}
+          </g>
+          {pairEndpoints ? (
+            <line ref={pairLineRef} className="graph-edge suggested" />
           ) : null}
+          <g className={"graph-nodes" + (showLabels ? " labels-on" : "")} ref={nodesGroupRef}>
+            {nodes.map((node, i) => {
+              const inHighlight = highlightNodes?.has(node.id) ?? false;
+              const dimmed = highlightNodes ? !inHighlight : false;
+              const cls =
+                "graph-node" +
+                (node.type === "unresolved" ? " ghost" : "") +
+                (node.isGodNode ? " god" : "") +
+                (node.id === focusNodeId ? " focus" : "") +
+                (node.id === selectedId ? " selected" : "") +
+                (node.id === pathSourceId ? " path-source" : "") +
+                (inHighlight ? " highlight" : "") +
+                (dimmed ? " dimmed" : "");
+              return (
+                <NodeView
+                  key={node.id}
+                  index={i}
+                  id={node.id}
+                  r={nodeRadius(node.degree)}
+                  fill={nodeColor(node, enriched)}
+                  className={cls}
+                  label={node.label}
+                />
+              );
+            })}
+          </g>
         </g>
-        <g className="graph-nodes">
-          {nodes.map((node, i) => {
-            const x = positions[i * 2];
-            const y = positions[i * 2 + 1];
-            const isHover = node.id === hoveredId;
-            const isNeighbor = hoverNeighbors?.has(node.id) ?? false;
-            const inHighlight = highlightNodes?.has(node.id) ?? false;
-            let dimmed = false;
-            if (highlightNodes) dimmed = !inHighlight;
-            else if (hoveredId != null) dimmed = !isHover && !isNeighbor;
-            const cls =
-              "graph-node" +
-              (node.type === "unresolved" ? " ghost" : "") +
-              (node.isGodNode ? " god" : "") +
-              (node.id === focusNodeId ? " focus" : "") +
-              (node.id === selectedId ? " selected" : "") +
-              (node.id === pathSourceId ? " path-source" : "") +
-              (inHighlight ? " highlight" : "") +
-              (dimmed ? " dimmed" : "");
-            const showLabel =
-              showLabels || isHover || node.id === selectedId || node.id === focusNodeId || inHighlight || node.isGodNode;
-            return (
-              <NodeView
-                key={node.id}
-                index={i}
-                id={node.id}
-                x={x}
-                y={y}
-                r={nodeRadius(node.degree)}
-                fill={nodeColor(node, enriched)}
-                className={cls}
-                label={node.label}
-                showLabel={showLabel}
-                onEnter={onEnter}
-                onLeave={onLeave}
-              />
-            );
-          })}
-        </g>
-      </g>
-    </svg>
+      </svg>
+      {!ready ? (
+        <div className="graph-canvas-loading" data-testid="graph-canvas-loading">
+          …
+        </div>
+      ) : null}
+    </div>
   );
 }

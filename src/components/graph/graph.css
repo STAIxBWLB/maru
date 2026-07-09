@@ -327,6 +327,14 @@
 
 /* === Canvas === */
 
+.graph-canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+
 .graph-canvas {
   flex: 1;
   min-width: 0;
@@ -340,7 +348,8 @@
 }
 
 .graph-canvas-loading {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -360,6 +369,13 @@
 }
 
 .graph-edge.dimmed {
+  stroke-opacity: 0.06;
+}
+
+/* Hover: a single container class drives the all-but-neighbors dim (one style
+   recalc); the hovered node, its neighbors and incident edges carry
+   .hovered/.hl, applied imperatively so hovering reconciles nothing. */
+.graph-canvas.has-hover .graph-edge:not(.hl) {
   stroke-opacity: 0.06;
 }
 
@@ -410,16 +426,34 @@
   stroke-width: 3.5;
 }
 
-.graph-node.dimmed {
+.graph-node {
+  transition: opacity 120ms ease;
+}
+
+.graph-node.dimmed,
+.graph-canvas.has-hover .graph-node:not(.hovered):not(.hl) {
   opacity: 0.12;
 }
 
 .graph-node-label {
+  display: none;
   font-size: 10px;
   text-anchor: middle;
   fill: var(--ink-2, var(--ink));
   pointer-events: none;
   user-select: none;
+}
+
+/* Label LOD: shown above the zoom threshold (group class) or when a node is in
+   a state that always warrants a label. Replaces the old per-node showLabel
+   prop so threshold/hover crossings cost zero reconciliation. */
+.graph-nodes.labels-on .graph-node-label,
+.graph-node.god .graph-node-label,
+.graph-node.selected .graph-node-label,
+.graph-node.focus .graph-node-label,
+.graph-node.highlight .graph-node-label,
+.graph-node.hovered .graph-node-label {
+  display: block;
 }
 
 /* === Right pane (insights / inspector) === */

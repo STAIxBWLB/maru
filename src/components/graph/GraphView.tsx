@@ -73,7 +73,12 @@ export function GraphView({
     hint: null,
   });
   const [refreshing, setRefreshing] = useState(false);
-  const [positions, setPositions] = useState<Float64Array | null>(null);
+  // Only the settled ("done") frame lands in React state — it drives the disk
+  // cache and (PR-3) hull rendering. Intermediate simulation frames are pushed
+  // straight to the DOM via applyFrameRef, bypassing reconciliation.
+  const [settled, setSettled] = useState<Float64Array | null>(null);
+  const latestPositionsRef = useRef<Float64Array | null>(null);
+  const applyFrameRef = useRef<((p: Float64Array) => void) | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
@@ -173,8 +178,16 @@ export function GraphView({
     });
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<LayoutResponse>) => {
+      const msg = event.data;
       // Discard frames from a superseded layout request.
-      if (event.data.epoch === frameEpochRef.current) setPositions(event.data.positions);
+      if (msg.epoch !== frameEpochRef.current) return;
+      latestPositionsRef.current = msg.positions;
+      // Fast path: write geometry to the DOM without a React render.
+      applyFrameRef.current?.(msg.positions);
+      // Settled frame → one React render (refreshes the disk-cache dep and,
+      // in PR-3, feeds hull rendering). The canvas mounts itself off the first
+      // frame via its own applyFrame gate, so this need not fire per tick.
+      if (msg.type === "done") setSettled(msg.positions);
     };
     if (workspacePath) {
       vaultGraphLayoutRead(workspacePath)
@@ -234,12 +247,15 @@ export function GraphView({
   // --- disk layout cache: debounced save of current positions -------------
 
   useEffect(() => {
-    if (!workspacePath || !positions) return;
+    if (!workspacePath || !settled) return;
+    // Skip while `settled` is stale relative to the current filter set (a done
+    // frame for the new set arrives within a tick and re-runs this effect).
+    if (settled.length !== filtered.nodes.length * 2) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const map: Record<string, [number, number]> = {};
       filtered.nodes.forEach((node, i) => {
-        map[node.id] = [positions[i * 2], positions[i * 2 + 1]];
+        map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
       });
       void vaultGraphLayoutSave(workspacePath, { version: 1, positions: map });
     }, SAVE_DEBOUNCE_MS);
@@ -248,7 +264,7 @@ export function GraphView({
     };
     // ponytail: saves only the currently-filtered nodes' positions — enough to
     // warm-start the common case; a full-model save would need the worker store.
-  }, [positions, filtered, workspacePath]);
+  }, [settled, filtered, workspacePath]);
 
   const post = useCallback((message: LayoutRequest) => {
     workerRef.current?.postMessage(message);
@@ -446,7 +462,8 @@ export function GraphView({
           <GraphCanvas
             nodes={filtered.nodes}
             edges={filtered.edges}
-            positions={positions}
+            positionsRef={latestPositionsRef}
+            applyFrameRef={applyFrameRef}
             layoutEpoch={layoutEpoch}
             enriched={model.enriched}
             selectedId={selectedId}
