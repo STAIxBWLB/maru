@@ -353,7 +353,12 @@ export function GraphView({
   useEffect(() => {
     if (!seedReady) return;
     if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
-    updateTimerRef.current = setTimeout(sendUpdate, UPDATE_DEBOUNCE_MS);
+    updateTimerRef.current = setTimeout(() => {
+      // Null the ref once fired so flushPendingUpdate (drag/unpin) only posts a
+      // fresh update when one is genuinely still pending, not after every settle.
+      updateTimerRef.current = null;
+      sendUpdate();
+    }, UPDATE_DEBOUNCE_MS);
     return () => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
     };

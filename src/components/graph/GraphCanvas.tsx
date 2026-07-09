@@ -78,6 +78,14 @@ export function domainColor(domain: string | null): string {
   return domain ? (DOMAIN_COLORS[domain] ?? FALLBACK_COLOR) : FALLBACK_COLOR;
 }
 
+/** Order-independent edge key with a NUL delimiter. Node ids are file
+ *  stems that may contain spaces, so a plain-space join could collide
+ *  (e.g. "x" + "y z" vs "x y" + "z" both -> "x y z"); NUL cannot appear
+ *  in an id, matching the model.ts dedup key. */
+export function edgeKey(a: string, b: string): string {
+  return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+}
+
 // --- memoized primitives -------------------------------------------------
 // Coordinates are written imperatively (see writeFrame), never via props, so
 // these reconcile only when class/label/fill actually change.
@@ -301,7 +309,7 @@ export function GraphCanvas({
     for (let i = 0; i + 1 < highlight.ids.length; i += 1) {
       const a = highlight.ids[i];
       const b = highlight.ids[i + 1];
-      edgeSet.add(a < b ? `${a} ${b}` : `${b} ${a}`);
+      edgeSet.add(edgeKey(a, b));
     }
     return { highlightNodes: nodeSet, highlightEdgeKeys: edgeSet, pairEndpoints: null };
   }, [highlight]);
@@ -674,9 +682,7 @@ export function GraphCanvas({
   const edgeChildren = useMemo(
     () =>
       drawnEdges.map(({ edge }) => {
-        const key = edge.source < edge.target
-          ? `${edge.source} ${edge.target}`
-          : `${edge.target} ${edge.source}`;
+        const key = edgeKey(edge.source, edge.target);
         let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
         if (highlightEdgeKeys) {
           cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
@@ -686,7 +692,7 @@ export function GraphCanvas({
         const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
         return (
           <EdgeView
-            key={`${edge.source} ${edge.target} ${edge.relation}`}
+            key={`${edge.source}\u0000${edge.target}\u0000${edge.relation}`}
             className={cls}
             marker={isSupersedes}
           />
@@ -779,7 +785,9 @@ export function GraphCanvas({
           <g className="graph-edges" ref={edgesGroupRef}>
             {edgeChildren}
           </g>
-          {pairEndpoints ? (
+          {pairEndpoints &&
+          indexById.has(pairEndpoints[0]) &&
+          indexById.has(pairEndpoints[1]) ? (
             <line ref={pairLineRef} className="graph-edge suggested" />
           ) : null}
           <g className={"graph-nodes" + (showLabels ? " labels-on" : "")} ref={nodesGroupRef}>
