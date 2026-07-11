@@ -1,46 +1,26 @@
 #!/usr/bin/env python3
-"""Add a calendar-year partition to an existing business unit (Tree B)."""
+"""Add a calendar-year partition to an existing business unit (Tree C L3).
+
+Seeds year leaves only for categories that already exist on disk
+(naming-and-placement §B2: no empty scaffolds). Activating a brand-new
+category is `new_business_unit.py --with`'s job at creation time, or a plain
+mkdir when the first obligation appears.
+"""
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
-
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-YEAR_RE = re.compile(r"^[0-9]{4}$")
-
-# Calendar-year leaves nested inside each category (Tree B).
-# Duplicated from new_business_unit.py so each script stays standalone.
-YEAR_LEAVES = [
-    "01-formal-reports/{year}/monthly",
-    "01-formal-reports/{year}/quarterly",
-    "01-formal-reports/{year}/annual",
-    "01-formal-reports/{year}/interim",
-    "02-admin-approvals/{year}/internal-approval",
-    "02-admin-approvals/{year}/external-dispatch",
-    "02-admin-approvals/{year}/proposal",
-    "02-admin-approvals/{year}/expense",
-    "03-evidence-cert/{year}/receipts",
-    "03-evidence-cert/{year}/contracts",
-    "03-evidence-cert/{year}/invoices",
-    "03-evidence-cert/{year}/payments",
-    "03-evidence-cert/{year}/attendance",
-    "03-evidence-cert/{year}/certificates",
-    "04-operations/meetings/{year}",
-    "04-operations/trips/{year}",
-    "04-operations/events/{year}",
-]
-
-
-def find_workspace_root(start: Path) -> Path:
-    for candidate in [start, *start.parents]:
-        if (candidate / "workspace.config.yaml").is_file():
-            return candidate
-    raise SystemExit("ERROR: workspace.config.yaml not found in ancestors")
+from lifecycle_common import (
+    DOMAIN_RE,
+    SLUG_RE,
+    YEAR_LEAVES,
+    YEAR_RE,
+    create_year_partition,
+    find_workspace_root,
+)
 
 
 def find_business_unit(workspace: Path, slug: str, domain: str | None) -> Path:
@@ -66,14 +46,6 @@ def find_business_unit(workspace: Path, slug: str, domain: str | None) -> Path:
     return matches[0]
 
 
-def create_year_partition(target: Path, year: str) -> None:
-    """Create the calendar-year leaves under each category; seed each with .gitkeep."""
-    for leaf in YEAR_LEAVES:
-        leaf_dir = target / leaf.format(year=year)
-        leaf_dir.mkdir(parents=True, exist_ok=True)
-        (leaf_dir / ".gitkeep").touch()
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("slug", help="business-unit slug")
@@ -97,14 +69,21 @@ def main() -> int:
     year_marker = target / "01-formal-reports" / args.year
     if year_marker.exists():
         raise SystemExit(f"ERROR: year partition already exists: {year_marker}")
+    if not any((target / leaf.split("/", 1)[0]).is_dir() for leaf in YEAR_LEAVES):
+        raise SystemExit(
+            f"ERROR: no active spine categories under {target}; "
+            "activate one first (first obligation, or new_business_unit.py --with)")
 
-    create_year_partition(target, args.year)
+    made = create_year_partition(target, args.year, only_existing=True)
     print(f"created year partition: {target} ({args.year})")
+    for leaf in made:
+        print(f"  {leaf}")
     print()
     print("Update project-registry.yaml manually when ready:")
-    print("  lifecycle_schema: business-unit-lifecycle-v2")
     print("  lifecycle_stage: implementing")
     print(f"  current_year: {args.year}")
+    print("Then regenerate the structure index (same commit):")
+    print("  python3 _meta/scripts/gen_structure.py --project <id>")
     return 0
 
 
