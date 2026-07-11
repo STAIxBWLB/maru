@@ -174,6 +174,16 @@ export function GraphView({
   // 보기") but can also be set locally from the inspector.
   const [focus, setFocus] = useState<string | null>(focusNodeId ?? null);
   useEffect(() => setFocus(focusNodeId ?? null), [focusNodeId]);
+  // Focus hides the siblings via visibility (no relayout), so recenter the
+  // camera on the focused node when it changes — otherwise the neighborhood can
+  // sit off-screen at its full-graph position.
+  const prevFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (focus && focus !== prevFocusRef.current) {
+      setCenterSignal({ id: focus, nonce: Date.now() });
+    }
+    prevFocusRef.current = focus;
+  }, [focus]);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -326,7 +336,9 @@ export function GraphView({
     if (settledNodesRef.current !== model.nodes) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      const map: Record<string, [number, number]> = { ...seedPositions };
+      // `settled` is index-aligned with the full model, so this is the complete
+      // current node set — no seed spread (that would re-accrete deleted ids).
+      const map: Record<string, [number, number]> = {};
       model.nodes.forEach((node, i) => {
         map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
       });
@@ -334,15 +346,12 @@ export function GraphView({
         version: 2,
         positions: map,
         pinnedIds,
-        graphKey: `vault:${model.builtAt}`,
       });
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-    // ponytail: saves only the currently-filtered nodes' positions — enough to
-    // warm-start the common case; a full-model save would need the worker store.
-  }, [settled, model, workspacePath, seedPositions, pinnedIds]);
+  }, [settled, model, workspacePath, pinnedIds]);
 
   // --- interactions -------------------------------------------------------
 

@@ -283,6 +283,10 @@ export function GraphCanvas({
   const [ready, setReady] = useState(false);
   const [webglFailed, setWebglFailed] = useState(false);
   const fittedEpochRef = useRef(-1);
+  // Node/edge-count signature of the last built graph — lets a rebuild whose
+  // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
+  // reuse the cached positions instead of re-annealing the whole layout.
+  const prevTopoSigRef = useRef<string | null>(null);
   const draggedRef = useRef<{ id: string; index: number; moved: boolean } | null>(null);
   const pinnedIdsRef = useRef(new Set(initialPinnedIds));
   const onLayoutSettledRef = useRef(onLayoutSettled);
@@ -570,7 +574,19 @@ export function GraphCanvas({
       mouse.on("mouseup", onUp);
       renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
       renderer.once("afterRender", () => setReady(true));
-      startLayout(false);
+      // Only re-run the (expensive) force layout when the topology actually
+      // changed. A same-count rebuild with valid cached positions was seeded
+      // straight from them, so paint and keep the viewport instead of shuffling.
+      // ponytail: count signature, not a full edge-set compare — a swap that
+      // keeps both counts identical warm-starts slightly stale until a relayout.
+      const topoSig = `${nodes.length}:${edges.length}`;
+      const positionsValid = positionsRef.current?.length === graph.order * 2;
+      if (prevTopoSigRef.current === topoSig && positionsValid) {
+        snapshotPositions();
+      } else {
+        startLayout(false);
+      }
+      prevTopoSigRef.current = topoSig;
       if (exportControllerRef) {
         exportControllerRef.current = {
           png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: "#f7f7f5" }),

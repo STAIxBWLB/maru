@@ -84,18 +84,6 @@ pub struct GraphLayoutCache {
     pub positions: BTreeMap<String, [f64; 2]>,
     #[serde(default)]
     pub pinned_ids: BTreeSet<String>,
-    #[serde(default)]
-    pub camera: Option<GraphCameraState>,
-    #[serde(default)]
-    pub graph_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GraphCameraState {
-    pub x: f64,
-    pub y: f64,
-    pub ratio: f64,
-    pub angle: f64,
 }
 
 fn layout_cache_path(workspace: &str) -> PathBuf {
@@ -135,11 +123,9 @@ pub fn vault_graph_layout_save(
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create graph layout cache directory: {err}"))?;
     }
-    if let Ok(Some(existing)) = vault_graph_layout_read(workspace.clone()) {
-        for (id, position) in existing.positions {
-            cache.positions.entry(id).or_insert(position);
-        }
-    }
+    // The client sends every current node's position (V4 filters by visibility,
+    // not topology), so the map is already complete — merging the prior on-disk
+    // positions would only re-accrete ids for deleted/renamed notes forever.
     cache.version = 2;
     let serialized = serde_json::to_string(&cache)
         .map_err(|err| format!("Cannot serialize graph layout cache: {err}"))?;
@@ -220,13 +206,6 @@ mod tests {
             version: 1,
             positions,
             pinned_ids: BTreeSet::from(["a-note".to_string()]),
-            camera: Some(GraphCameraState {
-                x: 0.5,
-                y: 0.4,
-                ratio: 1.2,
-                angle: 0.0,
-            }),
-            graph_key: Some("vault".to_string()),
         };
         vault_graph_layout_save(root.clone(), cache).unwrap();
 
@@ -235,7 +214,40 @@ mod tests {
         assert_eq!(read.positions.get("a-note"), Some(&[12.5, -4.0]));
         assert_eq!(read.positions.len(), 2);
         assert!(read.pinned_ids.contains("a-note"));
-        assert_eq!(read.camera.unwrap().ratio, 1.2);
+    }
+
+    #[test]
+    fn layout_cache_save_prunes_stale_ids() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let mut first = BTreeMap::new();
+        first.insert("gone".to_string(), [1.0, 1.0]);
+        first.insert("kept".to_string(), [2.0, 2.0]);
+        vault_graph_layout_save(
+            root.clone(),
+            GraphLayoutCache {
+                version: 2,
+                positions: first,
+                pinned_ids: BTreeSet::new(),
+            },
+        )
+        .unwrap();
+
+        let mut second = BTreeMap::new();
+        second.insert("kept".to_string(), [3.0, 3.0]);
+        vault_graph_layout_save(
+            root.clone(),
+            GraphLayoutCache {
+                version: 2,
+                positions: second,
+                pinned_ids: BTreeSet::new(),
+            },
+        )
+        .unwrap();
+
+        let read = vault_graph_layout_read(root).unwrap().unwrap();
+        assert_eq!(read.positions.len(), 1, "deleted-note id must not linger");
+        assert_eq!(read.positions.get("kept"), Some(&[3.0, 3.0]));
     }
 
     #[test]

@@ -471,8 +471,6 @@ export interface GraphLayoutCache {
   version: number;
   positions: Record<string, [number, number]>;
   pinnedIds?: string[];
-  camera?: { x: number; y: number; ratio: number; angle: number } | null;
-  graphKey?: string | null;
 }
 
 const GRAPH_LAYOUT_FALLBACK_KEY = "maru:graph-layout";

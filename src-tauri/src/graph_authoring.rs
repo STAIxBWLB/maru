@@ -137,6 +137,14 @@ fn build_proposal(
     let relation = validate_relation(&request.relation)?;
     let mut normalized = request;
     normalized.relation = relation.clone();
+    // A note relating to itself renders no edge (model.ts drops source==target)
+    // and, when reciprocal, would issue two writes against one file where the
+    // second clobbers the first. Reject it outright.
+    if normalized.source_workspace == normalized.target_workspace
+        && normalized.source_document == normalized.target_document
+    {
+        return Err("graph_relation_self".to_string());
+    }
     let mut previews = Vec::new();
     let mut contents = Vec::new();
     let (source_preview, source_original, source_updated) = patch_preview(
@@ -284,5 +292,24 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "graph_relation_invalid");
+    }
+
+    #[test]
+    fn rejects_self_relation() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("a.md"), "# A\n").unwrap();
+
+        let error = graph_link_preview(GraphLinkRequest {
+            source_workspace: root.clone(),
+            source_document: "a.md".to_string(),
+            target_workspace: root,
+            target_document: "a.md".to_string(),
+            relation: "related".to_string(),
+            reciprocal: true,
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "graph_relation_self");
     }
 }
