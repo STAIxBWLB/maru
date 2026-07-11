@@ -1,29 +1,23 @@
 /**
  * Graph perf bench — `pnpm vitest bench src/lib/graph/perf.bench.ts`.
  *
- * Spec budgets (maru-vault-graph-spec §6, synthetic 2,000 nodes / 10k edges):
- *   - buildVaultGraph < 100ms
- *   - d3-force pre-run (300 ticks, same forces as layout.worker) ≤ 3s
- *   - viewport culling pass < 5ms (viewport showing ~20%)
+ * V4 budgets (synthetic 10,000 nodes / 50k edges):
+ *   - buildVaultGraph < 500ms
+ *   - ForceAtlas2 warm layout (20 worker-equivalent iterations) ≤ 3s
+ *   - visibility-mask update < 5ms
  *
  * Numbers vary by hardware; the bench catches order-of-magnitude regressions.
  */
 
-import {
-  forceCollide,
-  forceLink,
-  forceManyBody,
-  forceSimulation,
-  type SimulationLinkDatum,
-  type SimulationNodeDatum,
-} from "d3-force";
+import { MultiDirectedGraph } from "graphology";
+import forceAtlas2, { inferSettings } from "graphology-layout-forceatlas2";
 import { bench, describe } from "vitest";
 import type { VaultEntry } from "../types";
 import { buildAdjacency, buildVaultGraph } from "./model";
 import { findBridges, findHiddenLinks, findOrphans } from "./insights";
 
-const NODE_COUNT = 2000;
-const EDGE_COUNT = 10_000;
+const NODE_COUNT = 10_000;
+const EDGE_COUNT = 50_000;
 
 function syntheticEntries(): VaultEntry[] {
   const entries: VaultEntry[] = [];
@@ -70,53 +64,43 @@ function syntheticEntries(): VaultEntry[] {
 const entries = syntheticEntries();
 const model = buildVaultGraph(entries);
 
-describe(`graph 2k nodes / ${model.edges.length} edges`, () => {
-  bench("buildVaultGraph (<100ms budget)", () => {
+describe(`graph 10k nodes / ${model.edges.length} edges`, () => {
+  bench("buildVaultGraph (<500ms budget)", () => {
     buildVaultGraph(entries);
   });
 
-  bench("d3-force 300-tick pre-run (≤3s budget)", () => {
-    interface N extends SimulationNodeDatum {
-      r: number;
-    }
-    const nodes: N[] = model.nodes.map(() => ({ r: 6 }));
-    const indexById = new Map(model.nodes.map((n, i) => [n.id, i]));
-    const links: SimulationLinkDatum<N>[] = model.edges
-      .map((e) => ({
-        source: indexById.get(e.source)!,
-        target: indexById.get(e.target)!,
-      }))
-      .filter((l) => l.source != null && l.target != null);
-    const sim = forceSimulation<N>(nodes)
-      .force("link", forceLink<N, SimulationLinkDatum<N>>(links).distance(60))
-      .force("charge", forceManyBody().strength(-80))
-      .force("collide", forceCollide<N>().radius((n) => n.r + 2))
-      .stop();
-    for (let i = 0; i < 300 && sim.alpha() > 0.01; i += 1) sim.tick();
+  bench("ForceAtlas2 20-iteration warm layout (≤3s budget)", () => {
+    const graph = new MultiDirectedGraph();
+    model.nodes.forEach((node, i) => graph.addNode(node.id, {
+      x: Math.cos(i) * Math.sqrt(i + 1),
+      y: Math.sin(i) * Math.sqrt(i + 1),
+      size: 6,
+    }));
+    model.edges.forEach((edge, i) => {
+      if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+        graph.addDirectedEdgeWithKey(`e:${i}`, edge.source, edge.target);
+      }
+    });
+    forceAtlas2.assign(graph, {
+      iterations: 20,
+      settings: {
+        ...inferSettings(graph.order),
+        adjustSizes: true,
+        barnesHutOptimize: true,
+      },
+    });
   });
 
-  bench("viewport culling pass (<5ms budget)", () => {
-    // 1px-rect adaptation of viewportCulling.visibleSubset — mirrors GraphCanvas.
-    const positions = new Float64Array(model.nodes.length * 2);
+  bench("visibility-mask update (<5ms budget)", () => {
+    const visible = new Uint8Array(model.nodes.length);
     for (let i = 0; i < model.nodes.length; i += 1) {
-      positions[i * 2] = (i % 100) * 40;
-      positions[i * 2 + 1] = Math.floor(i / 100) * 40;
-    }
-    const minX = 0;
-    const minY = 0;
-    const maxX = 800; // ~20% of the 4000px layout extent
-    const maxY = 800;
-    const visible = new Set<number>();
-    for (let i = 0; i < model.nodes.length; i += 1) {
-      const x = positions[i * 2];
-      const y = positions[i * 2 + 1];
-      if (x >= minX && x <= maxX && y >= minY && y <= maxY) visible.add(i);
+      visible[i] = model.nodes[i].degree >= 3 && model.nodes[i].type !== "unresolved" ? 1 : 0;
     }
   });
 
   bench("insight pass — hidden links + bridges + orphans (<200ms budget)", () => {
     // Runs on demand (not per frame); this guards the O(Σd²) hidden-link scan
-    // against blow-up at 2k nodes. Adjacency is now shared via a per-model
+    // against blow-up at 10k nodes. Adjacency is shared via a per-model
     // WeakMap, so the second+ builders in this pass hit the cache.
     findHiddenLinks(model);
     findBridges(model);

@@ -1,5 +1,6 @@
 pub mod agent_host;
 mod ai_router;
+mod atomic_file;
 mod maru_dir;
 mod app_menu;
 mod approval;
@@ -17,6 +18,7 @@ mod filename_rules;
 mod frontmatter;
 mod git;
 mod gmail_gws;
+mod graph_authoring;
 mod hub_client;
 mod inbox;
 mod inbox_classifier;
@@ -50,6 +52,7 @@ mod vault;
 mod vault_graph;
 mod vault_guard;
 mod vault_list;
+mod vault_watcher;
 mod win_process;
 mod workspace;
 mod workspace_files;
@@ -98,6 +101,7 @@ use git::{
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
+use graph_authoring::{graph_link_apply, graph_link_preview};
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
@@ -186,6 +190,7 @@ use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
 };
+use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
@@ -206,6 +211,7 @@ pub fn run() {
             }
         })
         .manage(InboxWatcherState::default())
+        .manage(VaultWatcherState::default())
         .manage(TelegramIoState::default())
         .manage(TerminalState::default())
         .manage(TerminalHookWatcherState::default())
@@ -227,9 +233,13 @@ pub fn run() {
             sample_workspace_path,
             scan_vault,
             read_vault_cache,
+            start_vault_watcher,
+            stop_vault_watcher,
             vault_graph_read,
             vault_graph_layout_read,
             vault_graph_layout_save,
+            graph_link_preview,
+            graph_link_apply,
             vault_validate_note,
             read_document,
             save_document,

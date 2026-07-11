@@ -96,14 +96,17 @@ describe("buildVaultGraph", () => {
     expect(ghost.isGodNode).toBe(false);
   });
 
-  it("falls back to relPath id on stem collision", () => {
+  it("uses stable relPath ids for every member of a stem collision", () => {
     const one = entry({ relPath: "notes/same.md" });
     const two = entry({ relPath: "ops/same.md" });
     const model = buildVaultGraph([one, two]);
     const ids = model.nodes.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain("same");
+    expect(ids).toContain("notes/same");
     expect(ids).toContain("ops/same");
+
+    const reversedIds = buildVaultGraph([two, one]).nodes.map((node) => node.id);
+    expect(new Set(reversedIds)).toEqual(new Set(ids));
   });
 });
 

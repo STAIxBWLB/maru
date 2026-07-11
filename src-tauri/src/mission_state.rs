@@ -84,6 +84,7 @@ pub fn read_ai_mission_log(
     read_mission_log_tail(&invocation_id, max_lines.unwrap_or(160).clamp(1, 1000))
 }
 
+#[allow(dead_code)]
 pub fn register_mission(app: &AppHandle, id: &str, kind: &str, pid: u32) -> Result<(), String> {
     register_mission_with_metadata(app, id, kind, pid, None)
 }

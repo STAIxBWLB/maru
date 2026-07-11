@@ -252,6 +252,16 @@ export async function scanVault(vaultPath: string, scanOptions?: ScanOptions): P
   return invoke<VaultEntry[]>("scan_vault", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
+export async function startVaultWatcher(workspacePath: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("start_vault_watcher", { workspacePath });
+}
+
+export async function stopVaultWatcher(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("stop_vault_watcher");
+}
+
 export async function scanWorkspaceFiles(
   vaultPath: string,
   scanOptions?: ScanOptions,
@@ -435,6 +445,7 @@ export async function vaultValidateNote(
  *  mode degrades to the live layer. Corrupt file rejects with the reason. */
 export async function vaultGraphRead(
   vaultPath: string,
+  source: "vault" | "workspace" | "all" = "vault",
 ): Promise<import("./graph/model").VaultGraphFile | null> {
   if (!isTauri()) {
     // e2e opt-in: exercise the enriched path in web mode without a backend.
@@ -452,12 +463,14 @@ export async function vaultGraphRead(
   }
   return invoke<import("./graph/model").VaultGraphFile | null>("vault_graph_read", {
     vaultPath,
+    source,
   });
 }
 
 export interface GraphLayoutCache {
   version: number;
   positions: Record<string, [number, number]>;
+  pinnedIds?: string[];
 }
 
 const GRAPH_LAYOUT_FALLBACK_KEY = "maru:graph-layout";
@@ -499,6 +512,57 @@ export async function vaultGraphLayoutSave(
   } catch {
     /* disposable cache — never surface a write failure */
   }
+}
+
+export interface GraphLinkRequest {
+  sourceWorkspace: string;
+  sourceDocument: string;
+  targetWorkspace: string;
+  targetDocument: string;
+  relation: string;
+  reciprocal: boolean;
+}
+
+export interface GraphLinkPatchPreview {
+  workspace: string;
+  document: string;
+  field: string;
+  wikilink: string;
+  expectedRevision: string;
+  beforeValues: string[];
+  afterValues: string[];
+  changed: boolean;
+}
+
+export interface GraphLinkProposal {
+  request: GraphLinkRequest;
+  patches: GraphLinkPatchPreview[];
+  changed: boolean;
+}
+
+export async function graphLinkPreview(request: GraphLinkRequest): Promise<GraphLinkProposal> {
+  if (!isTauri()) {
+    return {
+      request,
+      changed: true,
+      patches: [{
+        workspace: request.sourceWorkspace,
+        document: request.sourceDocument,
+        field: request.relation,
+        wikilink: `[[${request.targetDocument.replace(/\.(md|markdown|mdx)$/i, "")}]]`,
+        expectedRevision: "browser-preview",
+        beforeValues: [],
+        afterValues: [`[[${request.targetDocument.replace(/\.(md|markdown|mdx)$/i, "")}]]`],
+        changed: true,
+      }],
+    };
+  }
+  return invoke<GraphLinkProposal>("graph_link_preview", { request });
+}
+
+export async function graphLinkApply(proposal: GraphLinkProposal): Promise<{ documents: DocumentPayload[] }> {
+  if (!isTauri()) return { documents: [] };
+  return invoke<{ documents: DocumentPayload[] }>("graph_link_apply", { proposal });
 }
 
 export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions): Promise<InboxDropItem[]> {
@@ -761,6 +825,7 @@ export async function saveDocument(
   vaultPath: string,
   documentPath: string,
   content: string,
+  expectedRevision?: string | null,
 ): Promise<DocumentPayload> {
   if (!isTauri()) {
     const doc = readMockDocument(documentPath);
@@ -768,7 +833,12 @@ export async function saveDocument(
     doc.body = content.replace(/^---[\s\S]*?---\n/, "");
     return doc;
   }
-  return invoke<DocumentPayload>("save_document", { vaultPath, documentPath, content });
+  return invoke<DocumentPayload>("save_document", {
+    vaultPath,
+    documentPath,
+    content,
+    expectedRevision: expectedRevision ?? null,
+  });
 }
 
 /** Patch a single frontmatter field while preserving order + comments of
@@ -778,6 +848,7 @@ export async function updateFrontmatterField(
   documentPath: string,
   key: string,
   value: string | string[] | number | boolean | null,
+  expectedRevision?: string | null,
 ): Promise<DocumentPayload> {
   if (!isTauri()) {
     const doc = readMockDocument(documentPath);
@@ -788,6 +859,7 @@ export async function updateFrontmatterField(
     documentPath,
     key,
     value,
+    expectedRevision: expectedRevision ?? null,
   });
 }
 

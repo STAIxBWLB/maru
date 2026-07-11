@@ -39,21 +39,12 @@ import {
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
-import { CommsPane } from "./components/CommsPane";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPane, type EditorViewMode } from "./components/EditorPane";
 import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
-import { CatalogPane } from "./components/catalog/CatalogPane";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
-import { InboxPane } from "./components/InboxPane";
-import { DiagramMode } from "./components/diagram/DiagramMode";
-import { GraphView } from "./components/graph/GraphView";
-import { E2EFlowPane } from "./components/e2e/E2EFlowPane";
-import { MeetingsPane } from "./components/meetings/MeetingsPane";
-import { SitesPane } from "./components/sites/SitesPane";
-import { TasksPane } from "./components/tasks/TasksPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
@@ -81,7 +72,6 @@ import {
 import { SkillEditorWindowRoot } from "./components/skills/SkillEditorWindow";
 import { SkillRunsPanel } from "./components/skills/SkillRunsPanel";
 import { SkillsQuickPane } from "./components/skills/SkillsQuickPane";
-import { StudioMode } from "./components/studio/StudioMode";
 import {
   applyFileQueue,
   addWorkspaceRoot,
@@ -138,9 +128,11 @@ import {
   stageOutlookItems,
   stageTelegramItems,
   startInboxWatcher,
+  startVaultWatcher,
   startTelegramPolling,
   stopAiMission,
   stopInboxWatcher,
+  stopVaultWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
   removeAgentContextHint,
@@ -377,6 +369,17 @@ const LazyTerminalPanel = lazy(async () => {
   markStartup("terminal:module-import:end");
   return { default: module.TerminalPanel };
 });
+
+const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((module) => ({ default: module.GraphView })));
+const LazyDiagramMode = lazy(() => import("./components/diagram/DiagramMode").then((module) => ({ default: module.DiagramMode })));
+const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
+const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
+const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
+const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
+const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
+const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
+const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
+const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
 
 function preloadTerminalPanel(): void {
   markStartup("terminal:module-preload");
@@ -3783,7 +3786,10 @@ function MainApp() {
         });
         pushRecent(candidate.path);
 
-        const rest = tabEntries.slice(1);
+        // Hydrate only the primary tab plus one possible split companion.
+        // Remaining restored tabs are opened lazily on demand instead of
+        // reading up to seven full document bodies during startup.
+        const rest = tabEntries.slice(1, 2);
         if (rest.length > 0) {
           void (async () => {
             const loaded = await Promise.allSettled(
@@ -4888,6 +4894,7 @@ function MainApp() {
         target.workspacePath,
         target.document.path,
         target.draftContent,
+        target.document.revision ?? null,
       );
       const fresh = await scanVault(target.workspacePath, scanOptions);
       updateWorkspaceState(target.workspacePath, { entries: fresh });
@@ -5165,6 +5172,7 @@ function MainApp() {
           document.path,
           key,
           value,
+          document.revision ?? null,
         );
         // Refresh draft only when there are no unsaved body edits — never
         // clobber the textarea with an inspector-driven write.
@@ -6664,6 +6672,73 @@ function MainApp() {
       : appMode === "diagram" && !diagramEnabled
         ? "pkm"
         : appMode;
+  const graphVaultPath =
+    workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
+  const graphWorkspacePath =
+    workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
+  const graphDataPath =
+    maruSettings.graph.source === "vault"
+      ? graphVaultPath ?? activeDocumentWorkspacePath
+      : graphWorkspacePath ?? activeDocumentWorkspacePath;
+  const graphOverlayPath =
+    maruSettings.graph.source === "all" ? graphDataPath : graphVaultPath ?? graphDataPath;
+  const graphEntries = graphDataPath
+    ? workspaceStates[graphDataPath]?.entries ?? []
+    : activeDocumentEntries;
+  const vaultWatchPath = visibleAppMode === "graph" ? graphDataPath : activeDocumentWorkspacePath;
+  useEffect(() => {
+    if (visibleAppMode !== "graph" || !graphDataPath) return;
+    const current = workspaceStates[graphDataPath];
+    if (current?.startupIoReady || current?.loading || current?.refreshing) return;
+    let cancelled = false;
+    updateWorkspaceState(graphDataPath, { loading: true });
+    void (async () => {
+      try {
+        const cached = await readVaultCache(graphDataPath);
+        if (!cancelled && cached) updateWorkspaceState(graphDataPath, { entries: cached, loading: false, refreshing: true });
+        const fresh = await scanVault(graphDataPath, scanOptions);
+        if (!cancelled) updateWorkspaceState(graphDataPath, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
+      } catch (err) {
+        if (!cancelled) {
+          updateWorkspaceState(graphDataPath, { loading: false, refreshing: false });
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [graphDataPath, scanOptions, updateWorkspaceState, visibleAppMode, workspaceStates]);
+  useEffect(() => {
+    if (visibleAppMode !== "graph" || !graphDataPath || !vaultWatchPath) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    void startVaultWatcher(vaultWatchPath).catch(() => undefined);
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<{ workspacePath: string; paths: string[] }>("vault://index-delta", (event) => {
+          if (event.payload.workspacePath !== vaultWatchPath) return;
+          if (refreshTimer) clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => {
+            void scanVault(vaultWatchPath, scanOptions).then((fresh) => {
+              if (!disposed) updateWorkspaceState(vaultWatchPath, { entries: fresh });
+            });
+          }, 150);
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unlisten?.();
+      void stopVaultWatcher().catch(() => undefined);
+    };
+  }, [scanOptions, updateWorkspaceState, vaultWatchPath]);
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -7216,8 +7291,9 @@ function MainApp() {
           ) : null}
         </nav>
 
+        <Suspense fallback={<div className="mode-loading" role="status">…</div>}>
         {visibleAppMode === "e2e" ? (
-          <E2EFlowPane
+          <LazyE2EFlowPane
             workPath={inboxWorkspacePath}
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
@@ -7225,14 +7301,16 @@ function MainApp() {
             onError={setError}
           />
         ) : visibleAppMode === "diagram" ? (
-          <DiagramMode
+          <LazyDiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}
             onError={setError}
           />
         ) : visibleAppMode === "graph" ? (
-          <GraphView
-            workspacePath={activeDocumentWorkspacePath}
-            entries={activeDocumentEntries}
+          <LazyGraphView
+            key={`${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
+            workspacePath={graphDataPath}
+            overlayPath={graphOverlayPath}
+            entries={graphEntries}
             focusNodeId={graphFocusNodeId}
             onClearFocus={() => setGraphFocusNodeId(null)}
             onOpenEntry={(entry) => {
@@ -7247,11 +7325,17 @@ function MainApp() {
             isFavorite={isFavorite}
             onToggleFavorite={toggleFavorite}
             onError={setError}
+            onGraphChanged={() => {
+              if (!graphDataPath) return;
+              void scanVault(graphDataPath, scanOptions).then((fresh) =>
+                updateWorkspaceState(graphDataPath, { entries: fresh }),
+              );
+            }}
           />
         ) : visibleAppMode === "sites" ? (
-          <SitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
+          <LazySitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
         ) : visibleAppMode === "studio" ? (
-          <StudioMode
+          <LazyStudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
             activeDocument={document}
             canCreateDocument={activeWorkspaceCanCreate}
@@ -7279,7 +7363,7 @@ function MainApp() {
             onError={setError}
           />
         ) : visibleAppMode === "catalog" ? (
-          <CatalogPane
+          <LazyCatalogPane
             workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
             onReveal={(path) => {
               const root = inboxWorkspacePath ?? settingsWorkPath;
@@ -7287,7 +7371,7 @@ function MainApp() {
             }}
           />
         ) : visibleAppMode === "inbox" ? (
-          <InboxPane
+          <LazyInboxPane
             items={inboxItems}
             entries={inboxEntries}
             loading={inboxLoading}
@@ -7351,7 +7435,7 @@ function MainApp() {
             onShareSelectionChange={setInboxShareablePaths}
           />
         ) : visibleAppMode === "comms" ? (
-          <CommsPane
+          <LazyCommsPane
             runtimeConfig={inboxRuntimeConfig}
             sourceRuns={sourceRuns}
             processedCounts={processedCounts}
@@ -7391,7 +7475,7 @@ function MainApp() {
             onUnloadMigration={unloadMigrationService}
           />
         ) : visibleAppMode === "meetings" ? (
-          <MeetingsPane
+          <LazyMeetingsPane
             workPath={inboxWorkspacePath}
             settings={maruSettings.meetings}
             effectiveSettings={effectiveMeetingsSettings}
@@ -7417,7 +7501,7 @@ function MainApp() {
             onViewConsumed={() => setMeetingsRequestedView(null)}
           />
         ) : visibleAppMode === "tasks" ? (
-          <TasksPane
+          <LazyTasksPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
             labelMode={maruSettings.ui.documentLabelMode}
@@ -7629,6 +7713,7 @@ function MainApp() {
 
           </>
         )}
+        </Suspense>
 
         {outlineOpen ? (
           <div

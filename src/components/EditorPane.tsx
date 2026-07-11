@@ -10,20 +10,32 @@ import {
   Save,
   X,
 } from "lucide-react";
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  lazy,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
-import { renderMarkdown } from "../lib/markdown";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
 import { Button } from "./ui/Button";
-import { RichMarkdownEditor } from "./RichMarkdownEditor";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
 
 export type EditorViewMode = "rich" | "source" | "preview";
+
+const LazyRichMarkdownEditor = lazy(() =>
+  import("./RichMarkdownEditor").then((module) => ({ default: module.RichMarkdownEditor })),
+);
 
 export interface EditorTabSummary {
   id: string;
@@ -132,7 +144,11 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   ref,
 ) {
   const { t, locale } = useTranslation();
-  const stats = documentStats(document, draftContent);
+  const deferredStatsDraft = useDeferredValue(draftContent);
+  const stats = useMemo(
+    () => documentStats(document, deferredStatsDraft),
+    [document, deferredStatsDraft],
+  );
   const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const taRef = textareaRef ?? localTextareaRef;
 
@@ -177,10 +193,20 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       onChange,
     });
 
-  const previewHtml = useMemo(
-    () => (document && viewMode === "preview" ? renderMarkdown(draftContent) : ""),
-    [draftContent, document, viewMode],
-  );
+  const [previewHtml, setPreviewHtml] = useState("");
+  useEffect(() => {
+    if (!document || viewMode !== "preview") {
+      setPreviewHtml("");
+      return;
+    }
+    let cancelled = false;
+    void import("../lib/markdown").then(({ renderMarkdown }) => {
+      if (!cancelled) setPreviewHtml(renderMarkdown(draftContent));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftContent, document, viewMode]);
 
   // F3(b): mark unresolved wikilinks in the preview (red dotted) — clicking
   // one routes to onWikilinkClick, which seeds the note-creation dialog.
@@ -519,7 +545,9 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             </Tabs.Trigger>
           </Tabs.List>
           <Tabs.Content className="tab-panel" value="rich">
-            <RichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
+            <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
+              <LazyRichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
+            </Suspense>
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="source">
             <textarea

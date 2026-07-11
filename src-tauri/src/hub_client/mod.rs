@@ -6,14 +6,13 @@
 // Spec: ~/workspace/work/_sys/rules/hub-sync.md + plan §M7
 
 pub mod cache;
+#[allow(dead_code)]
 pub mod catalog;
 pub mod http;
 pub mod safety;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-pub use catalog::{HubCatalog, HubGlossaryTerm, HubGuideline, HubTemplate};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubConfig {

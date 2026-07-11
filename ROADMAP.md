@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Maru desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status maru** — Updated through Phase 8c (vault knowledge graph) + M0 Anchor → Maru rename (v0.3.0), 2026-07-08. Phases 0–5, Diagram mode, and Graph mode 8a/8b/8c are shipped. Phase 6/7 (W19–W26) remain planned. See README's Status table for the canonical state column and CHANGELOG.md for the release history; this file is the deeper "what's next + how to continue" reference.
+> **Status maru** — Updated through Graph V4 performance/authoring hardening + M0 Anchor → Maru rename (v0.3.3), 2026-07-11. Phases 0–5, Diagram mode, and Graph mode 8a/8b/8c are shipped. Phase 6/7 (W19–W26) remain planned. See README's Status table for the canonical state column and CHANGELOG.md for the release history; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_meta/rules/{frontmatter-schema,document-lifecycle,hub-contract,evidence-policy}.md` (formerly `_sys/rules`, with `bu-lifecycle`→`document-lifecycle` and `hub-sync`→`hub-contract`). The work-repo-internal 26-week plan file it was mirrored from has since been consolidated; this file is the live Maru-side reference.
 
@@ -79,8 +79,8 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 | Surface | W9 baseline | Phase 4 target | Phase 5 target | Phase 7 target | Actual (2026-07-08) |
 |---------|-------------|----------------|----------------|----------------|---------------------|
-| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) | **577** across 71 test modules |
-| Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ | **84 test files** |
+| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) | **587 declarations** (2 ignored benchmarks) |
+| Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ | **638 tests / 87 files** |
 | Hub pytest | 15 | 25 (sync endpoint + workflow seeds) | 40 | 60 | (Hub repo) |
 | E2E playwright | smoke only | + Studio flow | + binder + decks | + full bundle | **7 specs** (binary-viewer, comms, diagram, graph, maru-e2e-flow, smoke, startup) |
 
@@ -168,11 +168,11 @@ File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering pas
 
 ## 8. Vault & Knowledge Graph (Phase 8) — ✅ 8a/8b/8c shipped
 
-Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020). 그래프 소스 = 듀얼(라이브 VaultEntry.links + `<vault>/reports/vault-graph.json` community 오버레이, 우아한 강등). 렌더 = GraphCanvas SVG + d3-force worker(유일 신규 의존성). 쓰기 = `write_policy: "managed"` 신설(스키마 가드 + 스냅샷, delete는 MCP 전용 유지). 구현: `src-tauri/src/{vault_graph,vault_guard}.rs`, `src/lib/graph/*`, `src/components/graph/*`, `e2e/graph.spec.ts`. 문서: `docs/graph.md`.
+Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020). V4는 Sigma WebGL + Graphology MultiDirectedGraph, ForceAtlas2 worker, visibility reducer, layout cache v2, incremental workspace cache v3/watcher, source·scope·local-depth controls, analysis worker, revision-checked relationship review/apply로 강화됨. 쓰기는 `write_policy: "managed"` 스키마 가드 + 고유 스냅샷 + atomic replace를 유지하며 delete는 MCP 전용임. 문서: `docs/graph.md`.
 
 ### 8a — V1 read-only graph (W27–W29) ✅ (커밋 `cdf9ddb`, PR #61)
 
-`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), d3-force layout worker, GraphCanvas SVG 렌더(V3에서 imperative 파이프라인으로 전환, 컬링 폐지), 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 2k 합성 벤치. `resolve_config_path` 상대경로 join 선행(spec §5.1). (후속 `b42184e`: model.ts 리터럴 NUL 바이트 이스케이프, PR #64)
+`"graph"` MaruAppMode, GraphModel 어댑터(`src/lib/graph/model.ts`)+vitest, `vault_graph_read`(edges/links 관용), Sigma WebGL GraphCanvas, Graphology ForceAtlas2 worker, 필터·검색·hover·클릭→노트 열기, NeighborhoodPane "그래프에서 보기" 버튼, 10k node/약 60k edge 합성 벤치. Playwright는 production DOM 대신 dev/E2E 전용 graph bridge를 사용함.
 
 ### 8b — V2 managed writes (W30–W32) ✅ (커밋 `96c7b44`, PR #62)
 

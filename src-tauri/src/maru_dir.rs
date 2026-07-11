@@ -21,6 +21,7 @@
 // scan_vault skips `.` directories, and a stale schema version triggers
 // migration via `ensure_maru_dir`.
 
+use crate::atomic_file::write_atomic;
 use crate::frontmatter::{build_frontmatter, FrontmatterValue};
 use crate::vault::{lexical_normalize, parse_frontmatter, title_from_content};
 use chrono::Utc;
@@ -53,7 +54,9 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["terminal"],
     &["ai"],
     &["connectors"],
+    &["comms"],
     &["meetings"],
+    &["tasks"],
 ];
 
 const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
@@ -69,6 +72,7 @@ const WORKSPACE_STATE_PATHS: &[&[&str]] = &[
     &["inboxChannels"],
     &["composer"],
     &["diagram"],
+    &["graph"],
 ];
 
 const MARUIGNORE_DEFAULTS: &[&str] = &[
@@ -315,7 +319,7 @@ fn write_json_pretty(path: &Path, value: &JsonValue) -> Result<(), String> {
         serde_json::to_string_pretty(value).map_err(|err| format!("Cannot serialize: {err}"))?;
     let mut content = serialized;
     content.push('\n');
-    fs::write(path, content).map_err(|err| format!("Cannot write {}: {err}", path.display()))
+    write_atomic(path, content.as_bytes())
 }
 
 fn read_json(path: &Path) -> Result<JsonValue, String> {
@@ -1514,8 +1518,7 @@ mod tests {
             raw.contains('\n') && raw.ends_with('\n'),
             "global settings should be pretty JSON with trailing newline"
         );
-        let state_raw =
-            fs::read_to_string(tmp.path().join(".maru/workspace-state.json")).unwrap();
+        let state_raw = fs::read_to_string(tmp.path().join(".maru/workspace-state.json")).unwrap();
         assert!(
             state_raw.contains('\n') && state_raw.ends_with('\n'),
             "workspace state should be pretty JSON with trailing newline"
@@ -1636,6 +1639,52 @@ mod tests {
             .unwrap()
             .unwrap_or_else(|| json!({}));
         assert!(state_value.pointer("/connectors").is_none());
+    }
+
+    #[test]
+    fn graph_is_workspace_scoped_while_comms_and_tasks_are_global() {
+        let work = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".maru/settings.json");
+        let base = read_maru_settings_internal(work.path(), &global).unwrap();
+        let mut next = base.clone();
+        insert_path(
+            &mut next,
+            &["graph"],
+            json!({ "source": "workspace", "scope": "all" }),
+        );
+        insert_path(
+            &mut next,
+            &["comms"],
+            json!({ "telegram": { "enabled": false } }),
+        );
+        insert_path(&mut next, &["tasks"], json!({ "enabled": false }));
+
+        save_maru_settings_internal_with_base(work.path(), &global, next, Some(base)).unwrap();
+
+        let global_value = read_json(&global).unwrap();
+        let workspace_value = read_json(&workspace_state_json_path(work.path())).unwrap();
+        assert!(global_value.pointer("/graph").is_none());
+        assert_eq!(
+            workspace_value
+                .pointer("/graph/source")
+                .and_then(JsonValue::as_str),
+            Some("workspace")
+        );
+        assert_eq!(
+            global_value
+                .pointer("/comms/telegram/enabled")
+                .and_then(JsonValue::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            global_value
+                .pointer("/tasks/enabled")
+                .and_then(JsonValue::as_bool),
+            Some(false)
+        );
+        assert!(workspace_value.pointer("/comms").is_none());
+        assert!(workspace_value.pointer("/tasks").is_none());
     }
 
     #[test]

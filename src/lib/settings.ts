@@ -276,6 +276,10 @@ export interface DiagramSettings {
 }
 
 export interface GraphSettings {
+  source: "vault" | "workspace" | "all";
+  scope: "connected" | "all";
+  localDepth: 1 | 2 | 3;
+  localDirection: "both" | "incoming" | "outgoing";
   view: "graph" | "chains";
   searchAsFilter: boolean;
   showHulls: boolean;
@@ -429,6 +433,10 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     lastDocument: null,
   },
   graph: {
+    source: "vault",
+    scope: "connected",
+    localDepth: 2,
+    localDirection: "both",
     view: "graph",
     searchAsFilter: false,
     showHulls: false,
@@ -888,6 +896,13 @@ function normalizeGraphSettings(value: unknown): GraphSettings {
   const community = filters.community;
   const minDegree = Number(filters.minDegree);
   return {
+    source: graph.source === "workspace" || graph.source === "all" ? graph.source : "vault",
+    scope: graph.scope === "all" ? "all" : "connected",
+    localDepth: graph.localDepth === 1 || graph.localDepth === 3 ? graph.localDepth : 2,
+    localDirection:
+      graph.localDirection === "incoming" || graph.localDirection === "outgoing"
+        ? graph.localDirection
+        : "both",
     view: graph.view === "chains" ? "chains" : "graph",
     searchAsFilter: graph.searchAsFilter === true,
     showHulls: graph.showHulls === true,

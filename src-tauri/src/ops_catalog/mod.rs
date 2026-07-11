@@ -14,7 +14,7 @@ pub mod watcher;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub use index::{CatalogEntry, CatalogIndex, CatalogQuery};
+pub use index::{CatalogEntry, CatalogQuery};
 pub use scan::{scan_catalog_impl, CatalogScanReport};
 
 /// Operations Catalog 캐시 경로 헬퍼.

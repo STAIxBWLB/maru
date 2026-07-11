@@ -19,6 +19,10 @@ import { useTranslation } from "../../lib/i18n";
 export type GraphViewKind = "graph" | "chains";
 
 interface GraphToolbarProps {
+  source: "vault" | "workspace" | "all";
+  onSourceChange: (next: "vault" | "workspace" | "all") => void;
+  scope: "connected" | "all";
+  onScopeChange: (next: "connected" | "all") => void;
   search: string;
   onSearchChange: (next: string) => void;
   searchInputRef?: React.Ref<HTMLInputElement>;
@@ -42,6 +46,10 @@ interface GraphToolbarProps {
 }
 
 export function GraphToolbar({
+  source,
+  onSourceChange,
+  scope,
+  onScopeChange,
   search,
   onSearchChange,
   searchInputRef,
@@ -66,6 +74,25 @@ export function GraphToolbar({
   const { t } = useTranslation();
   return (
     <div className="graph-toolbar" data-testid="graph-toolbar">
+      <select
+        className="graph-source-select"
+        aria-label={t("graph.source.label")}
+        value={source}
+        onChange={(event) => onSourceChange(event.target.value as "vault" | "workspace" | "all")}
+      >
+        <option value="vault">{t("graph.source.vault")}</option>
+        <option value="workspace">{t("graph.source.workspace")}</option>
+        <option value="all">{t("graph.source.all")}</option>
+      </select>
+      <button
+        type="button"
+        className={scope === "all" ? "graph-icon-button active" : "graph-icon-button"}
+        aria-pressed={scope === "all"}
+        title={t("graph.scope.toggle")}
+        onClick={() => onScopeChange(scope === "all" ? "connected" : "all")}
+      >
+        {scope === "all" ? t("graph.scope.all") : t("graph.scope.connected")}
+      </button>
       <label className="graph-search-field">
         <Search size={14} aria-hidden />
         <input

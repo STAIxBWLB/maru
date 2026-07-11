@@ -6,7 +6,8 @@ under a schema gate. It ships in three layers — 8a (read-only), 8b (managed
 writes), 8c (graph-driven authoring) — all landed and default-on, then refined
 by **V2** (warm-start worker, design-token UI, client-side insights) and **V3**
 (imperative rendering, persisted usability affordances, legend/hull
-visualization, PNG/SVG export).
+visualization, PNG/SVG export), and **V4** (Sigma WebGL, Graphology
+ForceAtlas2 worker, incremental index refresh, reviewed relationship writes).
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -27,17 +28,14 @@ layer alone — the graph still renders, just without community coloring. The
 overlay is produced out-of-band by the `vault-graph` skill
 (`skills/lib/build-graph.py`), not by the app.
 
-## Rendering
+## Rendering (V4)
 
 - `src/components/graph/GraphView.tsx` — mode shell; owns the model, filters,
   selection/path/insight state, and one reused layout worker.
-- `src/components/graph/GraphCanvas.tsx` — SVG canvas. **React owns structure,
-  the DOM owns geometry** (V3): node `<g>` transforms and edge endpoints are
-  written imperatively via `setAttribute` straight from worker frames, so
-  simulation ticks, drags, pan/zoom and hover never reconcile the ~2.4k child
-  elements. `NodeView`/`EdgeView` carry no coordinates, and the two child
-  subtrees are memoized on their non-viewport props, so pan/zoom touches only
-  the container `<g transform>`. A `ResizeObserver` caches the canvas size.
+- `src/components/graph/GraphCanvas.tsx` — Sigma WebGL renderer over a
+  Graphology `MultiDirectedGraph`. GPU picking owns hit testing; reducers own
+  hover, path, selection and visibility. Filters never rebuild topology or
+  restart layout.
 - `src/components/graph/GraphLegend.tsx` — collapsible color key overlay
   (communities when enriched, else domains); each swatch toggles the filter.
 - `src/components/graph/GraphToolbar.tsx` — search, graph/chains view switch,
@@ -46,8 +44,9 @@ overlay is produced out-of-band by the `vault-graph` skill
   counts + color swatches, min-degree slider, reset.
 - `src/components/graph/GraphInspector.tsx` — selected-node metadata + typed
   in/out neighbors (click to walk) + actions (open / focus / start path).
-- `src/lib/graph/layout.worker.ts` — d3-force layout in a Web Worker (the only
-  new frontend dependency introduced by Phase 8).
+- `graphology-layout-forceatlas2/worker` — Barnes-Hut ForceAtlas2 worker.
+  Cached coordinates paint immediately, layout stops after three stable
+  samples or five seconds, and drag stops layout before pinning the node.
 - `NeighborhoodPane` gains a "그래프에서 보기" (view in graph) button that focuses
   the graph on the active document.
 
@@ -70,24 +69,17 @@ overlay is produced out-of-band by the `vault-graph` skill
   `MaruSettings.graph` and survive mode switches / restart; command palette has
   an **open-graph** action.
 
-### Performance (V3)
+### Performance (V4)
 
-React drives *structure* (mount/unmount, class changes); the DOM owns
-*geometry*. Worker frames are pushed through `applyFrameRef` to a rAF-coalesced
-`writeFrame` that mutates `transform`/`x1..y2` directly — only the settled
-(`done`) frame reaches React state (for the disk cache and hull rendering).
-Hover toggles a container `.has-hover` class plus per-element `.hl`/`.hovered`
-via `classList`, so hovering across the graph reconciles nothing.
-`buildAdjacency` is memoized per model (WeakMap), shared by the insight/focus
-callers.
+Sigma batches nodes and edges into WebGL programs, so the former per-frame SVG
+attribute writes are gone. Search and facets update hidden attributes through
+reducers. Insights run in `analysis.worker.ts`; the main thread remains
+interactive while hidden-link, bridge, stale and orphan analyses run.
 
-The layout worker (V2, unchanged protocol) is created once per mount and reused
-across filter changes via `update` messages. A per-id position store
-**warm-starts** surviving nodes; each request carries an `epoch` that round-trips
-so the main thread discards stale frames. `settled` frames are tagged with their
-node set, so hulls and the disk cache
-(`<workspace>/.maru/cache/graph-layout.json`, `vault_graph_layout_{read,save}`)
-never map a stale frame onto a reordered set.
+Layout cache v2 stores the full position map and pinned ids, migrates v1 on
+read, merges partial updates, and uses atomic replacement. WebGL context loss
+gets a restore attempt, then degrades to a static SVG graph at 2k nodes or a
+searchable inspector/list for larger models.
 
 ## Visualization & export (V3)
 
@@ -153,11 +145,15 @@ Pure-frontend features built on the 8a + 8b primitives:
   `decisionChains.test.ts`, `hull.test.ts`; `src/lib/settings.test.ts` (graph
   settings round-trip); perf bench `src/lib/graph/perf.bench.ts` (build / layout
   / insight-pass / cold `buildAdjacency` budgets).
+- 2026-07-11 local baseline at 10,000 nodes / 59,994 edges: model build 47ms,
+  ForceAtlas2 20 iterations 694ms, visibility update 0.021ms, insight pass
+  129ms, cold adjacency build 9.7ms (benchmark means; hardware-dependent).
 - cargo: `vault_graph` — overlay read + layout-cache round-trip.
 - e2e: `e2e/graph.spec.ts` (mode entry, filter, select/double-click, chain view,
-  toolbar + insights + inspector; V3: hover highlight, drag-pin/unpin,
+  toolbar + insights + inspector; hover highlight, drag-pin/unpin,
   search-as-filter, settings persistence across a mode switch, context menu,
-  inspector favorite ★, SVG export download). **Scope note** — the enrichment
+  inspector favorite ★, PNG/SVG export download). Interaction selectors are
+  exposed only by the dev/E2E graph bridge, not production DOM. **Scope note** — the enrichment
   path (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies
   the *degraded* live-layer path (no communities → legend/hulls covered by
   vitest); the enriched overlay path is covered by vitest + cargo fixtures.

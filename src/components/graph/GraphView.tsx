@@ -16,8 +16,6 @@ import "./graph.css";
 import {
   blobToUint8Array,
   downloadGraphBlob,
-  exportGraphPng,
-  exportGraphSvg,
 } from "../../lib/graph/export";
 import { hullPath, type Point } from "../../lib/graph/hull";
 import {
@@ -28,10 +26,6 @@ import {
   type GraphNode,
 } from "../../lib/graph/model";
 import { shortestPath } from "../../lib/graph/insights";
-import type {
-  LayoutRequest,
-  LayoutResponse,
-} from "../../lib/graph/layout.worker";
 import { useTranslation } from "../../lib/i18n";
 import {
   isInEditable,
@@ -44,7 +38,11 @@ import type { FavoriteTarget } from "../FavoritesSection";
 import type { VaultEntry } from "../../lib/types";
 import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
 import { DecisionChainLanes } from "./DecisionChainLanes";
-import { GraphCanvas, nodeRadius, type GraphHighlight } from "./GraphCanvas";
+import {
+  GraphCanvas,
+  type GraphExportController,
+  type GraphHighlight,
+} from "./GraphCanvas";
 import {
   filtersFromSettings,
   filtersToSettings,
@@ -55,10 +53,12 @@ import {
 import { GraphInspector } from "./GraphInspector";
 import { GraphInsightsPanel } from "./GraphInsightsPanel";
 import { GraphLegend } from "./GraphLegend";
+import { GraphRelationReviewDialog } from "./GraphRelationReviewDialog";
 import { GraphToolbar, type GraphViewKind } from "./GraphToolbar";
 
 interface GraphViewProps {
   workspacePath: string | null;
+  overlayPath?: string | null;
   entries: VaultEntry[];
   focusNodeId: string | null;
   onClearFocus: () => void;
@@ -69,13 +69,14 @@ interface GraphViewProps {
   isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
   onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
+  onGraphChanged?: () => void;
 }
 
-const UPDATE_DEBOUNCE_MS = 120;
 const SAVE_DEBOUNCE_MS = 1500;
 
 export function GraphView({
   workspacePath,
+  overlayPath,
   entries,
   focusNodeId,
   onClearFocus,
@@ -86,8 +87,13 @@ export function GraphView({
   isFavorite,
   onToggleFavorite,
   onError,
+  onGraphChanged,
 }: GraphViewProps) {
   const { t } = useTranslation();
+  const [source, setSource] = useState<GraphSettings["source"]>(graphSettings.source);
+  const [scope, setScope] = useState<GraphSettings["scope"]>(graphSettings.scope);
+  const [localDepth, setLocalDepth] = useState<GraphSettings["localDepth"]>(graphSettings.localDepth);
+  const [localDirection, setLocalDirection] = useState<GraphSettings["localDirection"]>(graphSettings.localDirection);
   // Seeded from persisted settings; changes are written back (skip-first) below.
   const [view, setView] = useState<GraphViewKind>(graphSettings.view);
   const [filters, setFilters] = useState<GraphFilters>(() =>
@@ -96,7 +102,7 @@ export function GraphView({
   const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
   const [showHulls, setShowHulls] = useState(graphSettings.showHulls);
   const [search, setSearch] = useState("");
-  const exportElRef = useRef<SVGSVGElement | null>(null);
+  const exportControllerRef = useRef<GraphExportController | null>(null);
   // Right-click node context menu (spec §F2 usability).
   const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -114,18 +120,26 @@ export function GraphView({
       return;
     }
     onGraphSettingsChangeRef.current({
+      source,
+      scope,
+      localDepth,
+      localDirection,
       view,
       searchAsFilter,
       showHulls,
       filters: filtersToSettings(filters),
     });
-  }, [view, searchAsFilter, showHulls, filters]);
+  }, [source, scope, localDepth, localDirection, view, searchAsFilter, showHulls, filters]);
 
   // Re-seed from external (cross-window) settings changes. Deps are only
   // [graphSettings], and each setState is gated on a real diff, so a local
   // edit's own persist round-trip (prop catches up to local) is a no-op — no
   // reset of the in-flight local change and no feedback loop.
   useEffect(() => {
+    if (graphSettings.source !== source) setSource(graphSettings.source);
+    if (graphSettings.scope !== scope) setScope(graphSettings.scope);
+    if (graphSettings.localDepth !== localDepth) setLocalDepth(graphSettings.localDepth);
+    if (graphSettings.localDirection !== localDirection) setLocalDirection(graphSettings.localDirection);
     if (graphSettings.view !== view) setView(graphSettings.view);
     if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
     if (graphSettings.showHulls !== showHulls) setShowHulls(graphSettings.showHulls);
@@ -139,19 +153,16 @@ export function GraphView({
     hint: null,
   });
   const [refreshing, setRefreshing] = useState(false);
-  // Only the settled ("done") frame lands in React state — it drives the disk
-  // cache and (PR-3) hull rendering. Intermediate simulation frames are pushed
-  // straight to the DOM via applyFrameRef, bypassing reconciliation.
   const [settled, setSettled] = useState<Float64Array | null>(null);
   const latestPositionsRef = useRef<Float64Array | null>(null);
-  const applyFrameRef = useRef<((p: Float64Array) => void) | null>(null);
-  // The node set the pending update was posted for, and the set `settled`
-  // actually corresponds to — so hull/disk-save consumers can guard on identity
-  // (not just cardinality) and never map a stale frame onto a reordered set.
-  const pendingNodesRef = useRef<GraphNode[] | null>(null);
+  const latestPositionNodeIdsRef = useRef<string[] | null>(null);
   const settledNodesRef = useRef<GraphNode[] | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
+  const [seedPositions, setSeedPositions] = useState<Record<string, [number, number]>>({});
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [unpinSignal, setUnpinSignal] = useState<{ id: string; nonce: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [relationPair, setRelationPair] = useState<{ source: GraphNode; target: GraphNode } | null>(null);
   const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
   const [pathSourceId, setPathSourceId] = useState<string | null>(null);
   const [pathIds, setPathIds] = useState<string[]>([]);
@@ -164,13 +175,17 @@ export function GraphView({
   // 보기") but can also be set locally from the inspector.
   const [focus, setFocus] = useState<string | null>(focusNodeId ?? null);
   useEffect(() => setFocus(focusNodeId ?? null), [focusNodeId]);
+  // Focus hides the siblings via visibility (no relayout), so recenter the
+  // camera on the focused node when it changes — otherwise the neighborhood can
+  // sit off-screen at its full-graph position.
+  const prevFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (focus && focus !== prevFocusRef.current) {
+      setCenterSignal({ id: focus, nonce: Date.now() });
+    }
+    prevFocusRef.current = focus;
+  }, [focus]);
 
-  const [seedReady, setSeedReady] = useState(false);
-  const workerRef = useRef<Worker | null>(null);
-  const frameEpochRef = useRef(0);
-  const seedRef = useRef<Record<string, [number, number]> | undefined>(undefined);
-  const seedAppliedRef = useRef(false);
-  const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -180,7 +195,7 @@ export function GraphView({
   const loadOverlay = useCallback(
     (path: string, live: GraphModel) => {
       setRefreshing(true);
-      vaultGraphRead(path)
+      vaultGraphRead(path, source)
         .then((file) => {
           if (file) setEnrichment({ model: enrichGraph(live, file), hint: null });
           else setEnrichment({ model: null, hint: t("graph.hint.noEnrichment") });
@@ -188,13 +203,14 @@ export function GraphView({
         .catch((err: unknown) => setEnrichment({ model: null, hint: String(err) }))
         .finally(() => setRefreshing(false));
     },
-    [t],
+    [t, source],
   );
 
   useEffect(() => {
     setEnrichment({ model: null, hint: null });
-    if (workspacePath) loadOverlay(workspacePath, liveModel);
-  }, [workspacePath, liveModel, loadOverlay]);
+    const root = overlayPath ?? workspacePath;
+    if (root) loadOverlay(root, liveModel);
+  }, [workspacePath, overlayPath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
   // "now" for stale-note detection — recomputed whenever the model changes
@@ -226,10 +242,11 @@ export function GraphView({
 
   const baseFiltered = useMemo(() => {
     let base = model;
-    if (focus) base = focusSubgraph(model, focus, 2);
+    if (focus) base = focusSubgraph(model, focus, localDepth, localDirection);
     const keep = new Set<string>();
     for (const node of base.nodes) {
       if (!filters.showGhosts && node.type === "unresolved") continue;
+      if (scope === "connected" && node.degree === 0) continue;
       if (filters.domains.size > 0 && (!node.domain || !filters.domains.has(node.domain))) continue;
       if (filters.types.size > 0 && !filters.types.has(node.type)) continue;
       if (filters.community != null && node.community !== filters.community) continue;
@@ -241,7 +258,7 @@ export function GraphView({
       nodes: base.nodes.filter((n) => keep.has(n.id)),
       edges: base.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
     };
-  }, [model, filters, focus]);
+  }, [model, filters, focus, localDepth, localDirection, scope]);
 
   // Search-as-filter narrows the facet-filtered set to matches + their 1-hop
   // neighbors (matches alone would render as disconnected dots). Off → returns
@@ -264,6 +281,10 @@ export function GraphView({
       edges: baseFiltered.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
     };
   }, [baseFiltered, search, searchAsFilter]);
+  const visibleNodeIds = useMemo(
+    () => new Set(filtered.nodes.map((node) => node.id)),
+    [filtered.nodes],
+  );
 
   // Community areas, computed from the settled frame only (index-aligned with
   // filtered.nodes) so they stay put during drag and snap on settle.
@@ -271,9 +292,10 @@ export function GraphView({
     if (!showHulls || !model.enriched || !settled) return [];
     // Identity guard: skip while `settled` belongs to a different node set (a
     // same-cardinality filter/search swap would otherwise draw from wrong points).
-    if (settledNodesRef.current !== filtered.nodes) return [];
+    if (settledNodesRef.current !== model.nodes) return [];
     const byCommunity = new Map<number, Point[]>();
-    filtered.nodes.forEach((node, i) => {
+    model.nodes.forEach((node, i) => {
+      if (!visibleNodeIds.has(node.id)) return;
       if (node.community == null) return;
       let pts = byCommunity.get(node.community);
       if (!pts) byCommunity.set(node.community, (pts = []));
@@ -284,91 +306,27 @@ export function GraphView({
       out.push({ community, path: hullPath(pts) });
     }
     return out;
-  }, [showHulls, model.enriched, settled, filtered.nodes]);
-
-  // --- worker lifecycle: one worker, reused across filter changes ---------
+  }, [showHulls, model, settled, visibleNodeIds]);
 
   useEffect(() => {
-    const worker = new Worker(new URL("../../lib/graph/layout.worker.ts", import.meta.url), {
-      type: "module",
+    if (!workspacePath) return;
+    let cancelled = false;
+    void vaultGraphLayoutRead(workspacePath).then((cache) => {
+      if (cancelled || !cache) return;
+      setSeedPositions(cache.positions);
+      setPinnedIds(cache.pinnedIds ?? []);
     });
-    workerRef.current = worker;
-    worker.onmessage = (event: MessageEvent<LayoutResponse>) => {
-      const msg = event.data;
-      // Discard frames from a superseded layout request.
-      if (msg.epoch !== frameEpochRef.current) return;
-      latestPositionsRef.current = msg.positions;
-      // Fast path: write geometry to the DOM without a React render.
-      applyFrameRef.current?.(msg.positions);
-      // Settled frame → one React render (refreshes the disk-cache dep and,
-      // in PR-3, feeds hull rendering). The canvas mounts itself off the first
-      // frame via its own applyFrame gate, so this need not fire per tick.
-      if (msg.type === "done") {
-        settledNodesRef.current = pendingNodesRef.current;
-        setSettled(msg.positions);
-      }
-    };
-    if (workspacePath) {
-      vaultGraphLayoutRead(workspacePath)
-        .then((cache) => {
-          if (cache) seedRef.current = cache.positions;
-        })
-        .finally(() => setSeedReady(true));
-    } else {
-      setSeedReady(true);
-    }
     return () => {
-      worker.terminate();
-      workerRef.current = null;
+      cancelled = true;
     };
-    // Worker is created once per mount; workspacePath is stable within a mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [workspacePath]);
 
-  const sendUpdate = useCallback(() => {
-    const worker = workerRef.current;
-    if (!worker) return;
-    frameEpochRef.current += 1;
-    // Tag the frame we're about to request with its node set (see refs above).
-    pendingNodesRef.current = filtered.nodes;
-    const indexById = new Map(filtered.nodes.map((n, i) => [n.id, i]));
-    const seed = seedAppliedRef.current ? undefined : seedRef.current;
-    seedAppliedRef.current = true;
-    const request: LayoutRequest = {
-      type: "update",
-      epoch: frameEpochRef.current,
-      nodes: filtered.nodes.map((n) => ({ id: n.id, radius: nodeRadius(n.degree), community: n.community })),
-      edges: filtered.edges
-        .map((e) => ({ source: indexById.get(e.source), target: indexById.get(e.target), fromFrontmatter: e.fromFrontmatter }))
-        .filter((e): e is { source: number; target: number; fromFrontmatter: boolean } => e.source != null && e.target != null),
-      width: 1600,
-      height: 1000,
-      seed,
-    };
-    worker.postMessage(request);
-  }, [filtered]);
-
-  // Debounced update on filter changes (coalesces min-degree slider ticks).
-  // Gated on the disk-cache seed so the first layout can warm-start from it.
-  useEffect(() => {
-    if (!seedReady) return;
-    if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
-    updateTimerRef.current = setTimeout(() => {
-      // Null the ref once fired so flushPendingUpdate (drag/unpin) only posts a
-      // fresh update when one is genuinely still pending, not after every settle.
-      updateTimerRef.current = null;
-      sendUpdate();
-    }, UPDATE_DEBOUNCE_MS);
-    return () => {
-      if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
-    };
-  }, [sendUpdate, seedReady]);
-
-  // Refit the viewport on focus enter/exit (a structural change), not on
-  // ordinary filter tweaks.
-  useEffect(() => {
-    setLayoutEpoch((e) => e + 1);
-  }, [focus]);
+  const handleLayoutSettled = useCallback((positions: Float64Array, nextPinnedIds: string[]) => {
+    latestPositionsRef.current = positions;
+    settledNodesRef.current = model.nodes;
+    setPinnedIds(nextPinnedIds);
+    setSettled(positions);
+  }, [model.nodes]);
 
   // --- disk layout cache: debounced save of current positions -------------
 
@@ -376,36 +334,25 @@ export function GraphView({
     if (!workspacePath || !settled) return;
     // Skip while `settled` belongs to a different node set (identity, not just
     // cardinality — a same-cardinality swap would persist wrong coordinates).
-    if (settledNodesRef.current !== filtered.nodes) return;
+    if (settledNodesRef.current !== model.nodes) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      // `settled` is index-aligned with the full model, so this is the complete
+      // current node set — no seed spread (that would re-accrete deleted ids).
       const map: Record<string, [number, number]> = {};
-      filtered.nodes.forEach((node, i) => {
+      model.nodes.forEach((node, i) => {
         map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
       });
-      void vaultGraphLayoutSave(workspacePath, { version: 1, positions: map });
+      void vaultGraphLayoutSave(workspacePath, {
+        version: 2,
+        positions: map,
+        pinnedIds,
+      });
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-    // ponytail: saves only the currently-filtered nodes' positions — enough to
-    // warm-start the common case; a full-model save would need the worker store.
-  }, [settled, filtered, workspacePath]);
-
-  const post = useCallback((message: LayoutRequest) => {
-    workerRef.current?.postMessage(message);
-  }, []);
-
-  // Index-based worker messages (drag/unpin) assume the worker's simNodes match
-  // the DOM's data-node-index. After a filter change the DOM updates
-  // synchronously but the worker `update` is debounced, so flush it first.
-  const flushPendingUpdate = useCallback(() => {
-    if (updateTimerRef.current) {
-      clearTimeout(updateTimerRef.current);
-      updateTimerRef.current = null;
-      sendUpdate();
-    }
-  }, [sendUpdate]);
+  }, [settled, model, workspacePath, pinnedIds]);
 
   // --- interactions -------------------------------------------------------
 
@@ -489,10 +436,13 @@ export function GraphView({
   // download the blob directly.
   const handleExport = useCallback(
     async (format: "png" | "svg") => {
-      const el = exportElRef.current;
-      if (!el) return;
+      const controller = exportControllerRef.current;
+      if (!controller) return;
       try {
-        const result = format === "png" ? await exportGraphPng(el) : exportGraphSvg(el);
+        const result = {
+          blob: format === "png" ? await controller.png() : controller.svg(),
+          extension: format,
+        };
         // Local calendar date (en-CA → YYYY-MM-DD); toISOString would stamp UTC.
         const name = `graph-${new Date().toLocaleDateString("en-CA")}.${result.extension}`;
         if (workspacePath && isTauri()) {
@@ -576,6 +526,12 @@ export function GraphView({
     },
     [],
   );
+  const handleConnect = useCallback((sourceId: string, targetId: string) => {
+    const sourceNode = nodeById.get(sourceId);
+    const targetNode = nodeById.get(targetId);
+    if (!sourceNode?.relPath || !targetNode?.relPath) return;
+    setRelationPair({ source: sourceNode, target: targetNode });
+  }, [nodeById]);
 
   const clearFocus = useCallback(() => {
     setFocus(null);
@@ -650,6 +606,10 @@ export function GraphView({
   return (
     <div className="graph-view" data-testid="graph-mode">
       <GraphToolbar
+        source={source}
+        onSourceChange={setSource}
+        scope={scope}
+        onScopeChange={setScope}
         search={search}
         onSearchChange={setSearch}
         searchInputRef={searchRef}
@@ -661,12 +621,10 @@ export function GraphView({
         onZoomIn={() => setZoomSignal({ dir: 1, nonce: Date.now() })}
         onZoomOut={() => setZoomSignal({ dir: -1, nonce: Date.now() })}
         onFit={() => setFitSignal((s) => s + 1)}
-        onRelayout={() => {
-          post({ type: "reheat" });
-          setLayoutEpoch((e) => e + 1);
-        }}
+        onRelayout={() => setLayoutEpoch((e) => e + 1)}
         onRefreshOverlay={() => {
-          if (workspacePath) loadOverlay(workspacePath, liveModel);
+          const root = overlayPath ?? workspacePath;
+          if (root) loadOverlay(root, liveModel);
         }}
         onExportPng={() => void handleExport("png")}
         onExportSvg={() => void handleExport("svg")}
@@ -685,6 +643,22 @@ export function GraphView({
       {focus ? (
         <div className="graph-focus-bar" data-testid="graph-focus-bar">
           <span>{t("graph.focus.active")}: {focus}</span>
+          <label>
+            {t("graph.focus.depth")}
+            <select value={localDepth} onChange={(event) => setLocalDepth(Number(event.target.value) as 1 | 2 | 3)}>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          </label>
+          <label>
+            {t("graph.focus.direction")}
+            <select value={localDirection} onChange={(event) => setLocalDirection(event.target.value as GraphSettings["localDirection"])}>
+              <option value="both">{t("graph.focus.both")}</option>
+              <option value="incoming">{t("graph.focus.incoming")}</option>
+              <option value="outgoing">{t("graph.focus.outgoing")}</option>
+            </select>
+          </label>
           <button type="button" onClick={clearFocus}>{t("graph.focus.exit")}</button>
         </div>
       ) : null}
@@ -711,10 +685,13 @@ export function GraphView({
             onShowHullsChange={setShowHulls}
           />
           <GraphCanvas
-            nodes={filtered.nodes}
-            edges={filtered.edges}
+            nodes={model.nodes}
+            edges={model.edges}
             positionsRef={latestPositionsRef}
-            applyFrameRef={applyFrameRef}
+            positionNodeIdsRef={latestPositionNodeIdsRef}
+            seedPositions={seedPositions}
+            initialPinnedIds={pinnedIds}
+            visibleNodeIds={visibleNodeIds}
             layoutEpoch={layoutEpoch}
             enriched={model.enriched}
             selectedId={selectedId}
@@ -727,20 +704,13 @@ export function GraphView({
             onSelect={handleSelect}
             onOpen={handleOpen}
             onPathTarget={handlePathTarget}
-            onNodeDrag={(nodeIndex, phase, x, y) => {
-              if (phase === "start") {
-                flushPendingUpdate();
-                post({ type: "dragStart", index: nodeIndex });
-              } else if (phase === "move") post({ type: "dragMove", index: nodeIndex, x, y });
-              else post({ type: "dragEnd", index: nodeIndex });
-            }}
-            onNodeUnpin={(nodeIndex) => {
-              flushPendingUpdate();
-              post({ type: "unpin", index: nodeIndex });
-            }}
+            onNodeDrag={() => undefined}
+            onNodeUnpin={() => undefined}
+            unpinSignal={unpinSignal}
+            onLayoutSettled={handleLayoutSettled}
             onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
             favoriteIds={favoriteIds}
-            exportRef={exportElRef}
+            exportControllerRef={exportControllerRef}
             hulls={hulls}
             overlay={
               <GraphLegend
@@ -782,6 +752,7 @@ export function GraphView({
                 onSelectNode={handleInsightNode}
                 onCopyWikilink={copyWikilink}
                 onOpenNode={openNodeById}
+                onConnect={handleConnect}
               />
             ) : (
               <GraphInspector
@@ -855,13 +826,9 @@ export function GraphView({
             role="menuitem"
             onClick={() =>
               runMenuAction((n) => {
-                // Re-resolve the live index by id and flush like the alt-click
-                // path — the menu's captured index may be stale if the filtered
-                // set changed while the menu was open.
-                const index = filtered.nodes.findIndex((fn) => fn.id === n.id);
+                const index = model.nodes.findIndex((fn) => fn.id === n.id);
                 if (index < 0) return;
-                flushPendingUpdate();
-                post({ type: "unpin", index });
+                setUnpinSignal({ id: n.id, nonce: Date.now() });
               })
             }
           >
@@ -869,6 +836,16 @@ export function GraphView({
           </button>
         </div>
       ) : null}
+      <GraphRelationReviewDialog
+        open={relationPair != null}
+        source={relationPair?.source ?? null}
+        target={relationPair?.target ?? null}
+        workspacePath={workspacePath}
+        onOpenChange={(open) => {
+          if (!open) setRelationPair(null);
+        }}
+        onApplied={() => onGraphChanged?.()}
+      />
     </div>
   );
 }

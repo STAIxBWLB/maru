@@ -6,7 +6,7 @@ import { ExternalLink, GitBranch, Route, Star } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { GraphModel, GraphNode } from "../../lib/graph/model";
-import { communityColor, domainColor } from "./GraphCanvas";
+import { communityColor, domainColor } from "./graphStyle";
 
 interface Neighbor {
   id: string;

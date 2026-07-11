@@ -5,7 +5,7 @@
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { GraphSettings } from "../../lib/settings";
-import { communityColor, domainColor } from "./GraphCanvas";
+import { communityColor, domainColor } from "./graphStyle";
 
 export interface GraphFilters {
   domains: Set<string>;

@@ -363,6 +363,10 @@ describe("normalizeMaruSettings", () => {
   it("round-trips graph view/filter settings", () => {
     const settings = normalizeMaruSettings({
       graph: {
+        source: "workspace",
+        scope: "all",
+        localDepth: 3,
+        localDirection: "incoming",
         view: "chains",
         searchAsFilter: true,
         filters: {
@@ -376,6 +380,10 @@ describe("normalizeMaruSettings", () => {
     });
 
     expect(settings.graph.view).toBe("chains");
+    expect(settings.graph.source).toBe("workspace");
+    expect(settings.graph.scope).toBe("all");
+    expect(settings.graph.localDepth).toBe(3);
+    expect(settings.graph.localDirection).toBe("incoming");
     expect(settings.graph.searchAsFilter).toBe(true);
     expect(settings.graph.filters).toEqual({
       domains: ["research", "projects"],
@@ -401,6 +409,10 @@ describe("normalizeMaruSettings", () => {
     });
 
     expect(settings.graph.view).toBe("graph");
+    expect(settings.graph.source).toBe("vault");
+    expect(settings.graph.scope).toBe("connected");
+    expect(settings.graph.localDepth).toBe(2);
+    expect(settings.graph.localDirection).toBe("both");
     expect(settings.graph.searchAsFilter).toBe(false);
     expect(settings.graph.filters.domains).toEqual([]);
     expect(settings.graph.filters.types).toEqual(["decision"]);

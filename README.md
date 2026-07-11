@@ -1,7 +1,7 @@
 # Maru
 
 Local-first AI workspace desktop app for Korean knowledge/document operations.
-Tauri 2 + Rust + React 19 + TypeScript. Current version **0.3.0**.
+Tauri 2 + Rust + React 19 + TypeScript. Current version **0.3.3**.
 
 Maru is the author SSOT for a single user's `~/workspace/work/` — it edits
 markdown with byte-identical frontmatter, ingests an inbox, runs bundled Claude
@@ -9,7 +9,7 @@ Code skills, drives Korean document (HWPX/DOCX/PDF) operations, and visualizes
 the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 **Anchor**; the M0 rename (`kr.maru.desktop`, `~/.maru/`) landed in v0.3.0.
 
-## Status (2026-07-08)
+## Status (2026-07-11)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -23,7 +23,7 @@ the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 | 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
 | 5 — Evidence Binder | ✅ W13 shipped | Right-pane Evidence Binder tab keyed by doc id, state under `<workspace>/.maru/binder/<doc-id>.json`, seeds from inbox-processed files + `<binary>.evidence.yaml` sidecars scoped to the active BU, `kordoc_lite` format detection + HWPX field previews. W14–W18 (section/KPI/checklist bindings + Deck Studio) planned. |
 | D — Concept-map Diagram mode | ✅ shipped (Phase 0–7, hardened) | `diagram` mode: HWP-style 9-tab ribbon, 13 node kinds, 4-port edges, smart-guide snap, 11 templates, PNG/JPG/SVG/JSON/PDF/Mermaid export + Mermaid import, version history, viewport culling for 1000-node smoothness. Docs at `<workspace>/diagrams/<name>.cmd.json` (v:7). See [docs/diagram.md](docs/diagram.md). |
-| 8 — Vault knowledge graph | ✅ 8a/8b/8c shipped | `graph` mode (8a read-only): dual-source model (live `VaultEntry.links` + `<vault>/reports/vault-graph.json` community overlay, graceful degrade), d3-force worker, imperative GraphCanvas rendering (React owns structure, the DOM owns geometry — V3), filter/search. Managed writes (8b): `write_policy: "managed"` + `vault_guard` schema gate + snapshot-before-write. Graph-driven authoring (8c): neighbor panel, unresolved-wikilink → create-note, decision-chain lanes. See [docs/graph.md](docs/graph.md). |
+| 8 — Knowledge graph | ✅ 8a/8b/8c + V4 shipped | `graph` mode: stable Sigma WebGL + Graphology multi-directed model, Barnes-Hut ForceAtlas2 worker, visibility reducers, 10k+ node target, knowledge/workspace/all-files sources, local depth/direction controls, background insights, reviewed relationship writes, incremental cache/watch refresh. Managed writes remain schema-gated, revision-checked, snapshotted, and atomic. See [docs/graph.md](docs/graph.md). |
 | M0 — Anchor → Maru rename | ✅ shipped (v0.3.0) | Full rename across app id, dirs, CLI, tap. One-time on-disk migration (`~/.anchor → ~/.maru`, `com.anchor.app → com.maru.app`) with back-compat symlink; `.maruignore` preferred with `.anchorignore` fallback read. |
 
 Rule SSOTs live in the work repo at
@@ -78,7 +78,7 @@ For repo-local management shortcuts:
 make cli-install
 make cli-smoke
 make release-preflight
-make homebrew-update RELEASE_TAG=v0.3.0 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update RELEASE_TAG=v0.3.3 HOMEBREW_TAP_DIR=../homebrew-cask
 ```
 
 ## Architecture
@@ -87,7 +87,7 @@ make homebrew-update RELEASE_TAG=v0.3.0 HOMEBREW_TAP_DIR=../homebrew-cask
 ┌─────────────────────────────────────────────────────────────┐
 │  Tauri Webview (src/)                                        │
 │   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
-│   d3-force graph worker · CodeMirror · alacritty canvas       │
+│   Sigma WebGL + Graphology · CodeMirror · alacritty canvas    │
 │                                                               │
 │   Activity rail (11 modes):                                  │
 │     Docs / Inbox / Messages / Meetings / Tasks /             │
@@ -220,11 +220,11 @@ pnpm tauri:build
 pnpm clean:tauri-debug
 # Checks once every 24h and prunes src-tauri/target/debug when artifacts exceed 4GiB.
 
-# Rust unit + integration tests (577 tests across 71 test modules):
+# Rust unit + integration tests (587 declarations; 2 ignored benchmarks):
 cd src-tauri && cargo test
 # or: make test-rust  (cargo test --lib)
 
-# Frontend unit tests (vitest, 84 test files):
+# Frontend unit tests (vitest, 87 test files / 638 tests):
 pnpm test
 # End-to-end (Playwright, 7 specs):
 pnpm test:e2e
@@ -339,7 +339,7 @@ before tagging or publishing a release. After release assets exist, update the
 Homebrew tap with:
 
 ```bash
-make homebrew-update-commit RELEASE_TAG=v0.3.0 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update-commit RELEASE_TAG=v0.3.3 HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
@@ -418,7 +418,7 @@ target
 
 ## Critical invariants
 
-1. **Filesystem is authoritative.** The cache (`<workspace>/.maru/cache/workspace-index-v1.json`) is disposable. React state is derived.
+1. **Filesystem is authoritative.** The fingerprinted cache (`<workspace>/.maru/cache/workspace-index-v3.json`) is disposable. Warm reconciliation reuses unchanged entries and reparses changed files only; React state remains derived.
 2. **Frontmatter key order + comments preserved.** A single-field patch must never disturb the order or comments of any other key (verified by cargo test). `src-tauri/src/frontmatter/ops.rs` is the only allowed write path.
 3. **Crash-safe rename.** `.maru-rename-txn/` staging dir + recovery on the next workspace scan.
 4. **Dynamic relationship detection.** Any frontmatter field containing `[[wikilink]]` is treated as a relationship. No hard-coded field lists.

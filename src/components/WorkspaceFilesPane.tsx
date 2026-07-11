@@ -215,6 +215,8 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
   const [, startSearchTransition] = useTransition();
   const deferredQuery = useDeferredValue(query);
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
+  const selectedPathsRef = useRef(selectedPaths);
+  selectedPathsRef.current = selectedPaths;
 
   useEffect(() => {
     if (query === lastSentQueryRef.current) return;
@@ -331,6 +333,21 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
     () => entries.filter((entry) => selectedSet.has(entry.path)),
     [entries, selectedSet],
   );
+  const selectedEntriesRef = useRef(selectedEntries);
+  selectedEntriesRef.current = selectedEntries;
+  const handleSelectFile = (entry: WorkspaceFileEntry, additive: boolean) => {
+    const current = new Set(selectedPathsRef.current);
+    if (additive) {
+      if (current.has(entry.path)) current.delete(entry.path);
+      else current.add(entry.path);
+    } else {
+      current.clear();
+      current.add(entry.path);
+    }
+    selectedPathsRef.current = [...current];
+    selectedEntriesRef.current = entries.filter((candidate) => current.has(candidate.path));
+    onSelectFile(entry, additive);
+  };
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -703,11 +720,11 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             totalHeight={virtualTreeLayout.totalHeight}
             rowHeight={FILE_TREE_ROW_HEIGHT}
             selectedSet={selectedSet}
-            selectedEntries={selectedEntries}
+            selectedEntriesRef={selectedEntriesRef}
             collapsedFileFolders={collapsedFileFolders}
             forceExpand={forceExpandTree}
             onCollapsedFileFoldersChange={onCollapsedFileFoldersChange}
-            onSelectFile={onSelectFile}
+            onSelectFile={handleSelectFile}
             onOpenFile={onOpenFile}
             onContextMenu={(event, entry) => {
               event.preventDefault();
@@ -753,10 +770,10 @@ export const WorkspaceFilesPane = memo(function WorkspaceFilesPane({
             rows={virtualListLayout.rows}
             totalHeight={virtualListLayout.totalHeight}
             selectedSet={selectedSet}
-            selectedEntries={selectedEntries}
+            selectedEntriesRef={selectedEntriesRef}
             queuedPathSet={queuedPathSet}
             attributes={filesListAttributes}
-            onSelectFile={onSelectFile}
+            onSelectFile={handleSelectFile}
             onOpenFile={onOpenFile}
             onContextMenu={(event, entry) => {
               event.preventDefault();
@@ -971,7 +988,7 @@ interface WorkspaceFileTreeProps {
   totalHeight: number;
   rowHeight: number;
   selectedSet: Set<string>;
-  selectedEntries: WorkspaceFileEntry[];
+  selectedEntriesRef: React.RefObject<WorkspaceFileEntry[]>;
   collapsedFileFolders: string[];
   forceExpand: boolean;
   onCollapsedFileFoldersChange: (paths: string[]) => void;
@@ -999,7 +1016,7 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
   totalHeight,
   rowHeight,
   selectedSet,
-  selectedEntries,
+  selectedEntriesRef,
   collapsedFileFolders,
   forceExpand,
   onCollapsedFileFoldersChange,
@@ -1054,7 +1071,7 @@ const WorkspaceFileTree = memo(function WorkspaceFileTree({
                 onSelectFile={onSelectFile}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
-                selectedEntries={selectedEntries}
+                selectedEntriesRef={selectedEntriesRef}
                 selectedFileQueueCount={selectedFileQueueCount}
                 onApplyFileQueueToDestination={onApplyFileQueueToDestination}
                 onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
@@ -1210,7 +1227,7 @@ const FileRow = memo(function FileRow({
   onSelectFile,
   onOpenFile,
   onContextMenu,
-  selectedEntries,
+  selectedEntriesRef,
   selectedFileQueueCount,
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
@@ -1225,7 +1242,7 @@ const FileRow = memo(function FileRow({
   onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
   onOpenFile: (entry: WorkspaceFileEntry) => void;
   onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
-  selectedEntries: WorkspaceFileEntry[];
+  selectedEntriesRef: React.RefObject<WorkspaceFileEntry[]>;
   selectedFileQueueCount?: number;
   onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
@@ -1245,7 +1262,6 @@ const FileRow = memo(function FileRow({
         (onApplyFileQueueToDestination &&
           (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
-  const dragEntries = selected && selectedEntries.length > 0 ? selectedEntries : [row.entry];
   return (
     <button
       type="button"
@@ -1263,6 +1279,10 @@ const FileRow = memo(function FileRow({
       onContextMenu={(event) => onContextMenu(event, row.entry)}
       onDragStart={(event) => {
         if (!workspacePath) return;
+        const currentSelection = selectedEntriesRef.current;
+        const dragEntries = currentSelection.some((entry) => entry.path === row.entry.path)
+          ? currentSelection
+          : [row.entry];
         writeExplorerDragPayload(event, {
           origin: "files",
           workspacePath,
@@ -1392,7 +1412,7 @@ interface WorkspaceFileListProps {
   rows: VirtualWorkspaceFileListRow[];
   totalHeight: number;
   selectedSet: Set<string>;
-  selectedEntries: WorkspaceFileEntry[];
+  selectedEntriesRef: React.RefObject<WorkspaceFileEntry[]>;
   queuedPathSet: Set<string>;
   attributes: FilesListAttribute[];
   onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
@@ -1417,7 +1437,7 @@ const WorkspaceFileList = memo(function WorkspaceFileList({
   rows,
   totalHeight,
   selectedSet,
-  selectedEntries,
+  selectedEntriesRef,
   queuedPathSet,
   attributes,
   onSelectFile,
@@ -1466,7 +1486,7 @@ const WorkspaceFileList = memo(function WorkspaceFileList({
               onSelectFile={onSelectFile}
               onOpenFile={onOpenFile}
               onContextMenu={onContextMenu}
-              selectedEntries={selectedEntries}
+              selectedEntriesRef={selectedEntriesRef}
               selectedFileQueueCount={selectedFileQueueCount}
               onApplyFileQueueToDestination={onApplyFileQueueToDestination}
               onApplyExplorerDragToDestination={onApplyExplorerDragToDestination}
@@ -1491,7 +1511,7 @@ interface FileListRowProps {
   onSelectFile: (entry: WorkspaceFileEntry, additive: boolean) => void;
   onOpenFile: (entry: WorkspaceFileEntry) => void;
   onContextMenu: (event: React.MouseEvent, entry: WorkspaceFileEntry) => void;
-  selectedEntries: WorkspaceFileEntry[];
+  selectedEntriesRef: React.RefObject<WorkspaceFileEntry[]>;
   selectedFileQueueCount?: number;
   onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
   onApplyExplorerDragToDestination?: (
@@ -1515,7 +1535,7 @@ const FileListRow = memo(function FileListRow({
   onSelectFile,
   onOpenFile,
   onContextMenu,
-  selectedEntries,
+  selectedEntriesRef,
   selectedFileQueueCount,
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
@@ -1531,7 +1551,6 @@ const FileListRow = memo(function FileListRow({
         (onApplyFileQueueToDestination &&
           (hasFileQueueDragPayload(event.dataTransfer) || (selectedFileQueueCount ?? 0) > 0)),
     );
-  const dragEntries = selected && selectedEntries.length > 0 ? selectedEntries : [entry];
   const parentDir = entry.relPath.includes("/")
     ? entry.relPath.slice(0, entry.relPath.lastIndexOf("/"))
     : "";
@@ -1564,6 +1583,10 @@ const FileListRow = memo(function FileListRow({
       onContextMenu={(event) => onContextMenu(event, entry)}
       onDragStart={(event) => {
         if (!workspacePath) return;
+        const currentSelection = selectedEntriesRef.current;
+        const dragEntries = currentSelection.some((candidate) => candidate.path === entry.path)
+          ? currentSelection
+          : [entry];
         writeExplorerDragPayload(event, {
           origin: "files",
           workspacePath,

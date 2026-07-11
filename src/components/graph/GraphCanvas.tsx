@@ -1,31 +1,20 @@
-// SVG force-graph canvas (maru-vault-graph-spec §F2). Rendering only — layout
-// runs in layout.worker.ts. This owns viewport (zoom/pan), hover highlight,
-// and the select / double-click-open / drag-pin / path-target interactions.
-//
-// Perf: React owns *structure* (which nodes/edges/classes exist); the DOM owns
-// *geometry*. Node transforms and edge endpoints are written imperatively via
-// setAttribute (writeFrame) straight from worker frames, so simulation ticks,
-// drags, pan/zoom and hover never trigger React reconciliation of the ~2.4k
-// child elements. NodeView/EdgeView carry no coordinates, so their memo is
-// near-perfect; the once-per-settle render reconciles almost nothing.
-// ponytail: imperative geometry lifts the practical SVG ceiling well past the
-// ~383-node vault; a Canvas/WebGL renderer stays the escape hatch above ~3-5k
-// nodes (switching would forfeit CSS tokens, free hit-testing, and these
-// e2e selectors — not worth it at this scale).
-
+import { createNodeBorderProgram } from "@sigma/node-border";
+import { toBlob } from "@sigma/export-image";
+import { MultiDirectedGraph } from "graphology";
+import { inferSettings } from "graphology-layout-forceatlas2";
+import FA2LayoutSupervisor from "graphology-layout-forceatlas2/worker";
 import {
-  memo,
-  useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
-import { clamp } from "../../lib/diagram/geometry";
+import Sigma from "sigma";
+import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
+import { communityColor, edgeKey, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 
 export interface GraphViewport {
   zoom: number;
@@ -33,147 +22,240 @@ export interface GraphViewport {
   py: number;
 }
 
-/** Canvas highlight overlay: an insight-suggested pair (dashed virtual edge) or
- *  a discovered path (chain of ids). */
 export type GraphHighlight =
   | { kind: "pair"; a: string; b: string }
   | { kind: "path"; ids: string[] }
   | null;
 
-const MIN_ZOOM = 0.15;
-const MAX_ZOOM = 3.5;
-const LABEL_ZOOM_THRESHOLD = 0.7;
+export interface GraphExportController {
+  png: () => Promise<Blob>;
+  svg: () => Blob;
+}
 
-const COMMUNITY_COLORS = [
-  "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b",
-  "#b279a2", "#ff9da6", "#9d755d", "#bab0ac", "#86bcb6", "#d67195",
-];
-const DOMAIN_COLORS: Record<string, string> = {
-  research: "#4c78a8",
-  projects: "#f58518",
-  teaching: "#54a24b",
-  operations: "#e45756",
-  people: "#b279a2",
-  "ai-practice": "#72b7b2",
-};
 const FALLBACK_COLOR = "#8a8f98";
+const ACCENT_COLOR = "#2f5a3c";
+const WARN_COLOR = "#d47a16";
+const MaruNodeBorderProgram = createNodeBorderProgram<SigmaNodeAttributes, SigmaEdgeAttributes>();
 
-export function nodeRadius(degree: number): number {
-  return Math.min(20, Math.max(4, 4 + 2 * Math.sqrt(degree)));
-}
-
-export function nodeColor(node: GraphNode, enriched: boolean): string {
-  if (node.type === "unresolved") return "transparent";
-  if (enriched && node.community != null) {
-    return COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
-  }
-  return node.domain ? (DOMAIN_COLORS[node.domain] ?? FALLBACK_COLOR) : FALLBACK_COLOR;
-}
-
-export function communityColor(community: number): string {
-  return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
-}
-
-export function domainColor(domain: string | null): string {
-  return domain ? (DOMAIN_COLORS[domain] ?? FALLBACK_COLOR) : FALLBACK_COLOR;
-}
-
-/** Order-independent edge key with a NUL delimiter. Node ids are file
- *  stems that may contain spaces, so a plain-space join could collide
- *  (e.g. "x" + "y z" vs "x y" + "z" both -> "x y z"); NUL cannot appear
- *  in an id, matching the model.ts dedup key. */
-export function edgeKey(a: string, b: string): string {
-  return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
-}
-
-// --- memoized primitives -------------------------------------------------
-// Coordinates are written imperatively (see writeFrame), never via props, so
-// these reconcile only when class/label/fill actually change.
-
-const EdgeView = memo(function EdgeView({
-  className, marker,
-}: {
-  className: string;
-  marker: boolean;
-}) {
-  return (
-    <line className={className} markerEnd={marker ? "url(#graph-arrow)" : undefined} />
-  );
-});
-
-const NodeView = memo(function NodeView({
-  index, id, r, fill, className, label, favorite,
-}: {
-  index: number;
-  id: string;
-  r: number;
-  fill: string;
-  className: string;
+type SigmaNodeAttributes = {
+  x: number;
+  y: number;
+  size: number;
   label: string;
-  favorite: boolean;
-}) {
-  return (
-    <g className={className}>
-      <circle r={r} data-node-index={index} data-node-id={id} fill={fill} />
-      {favorite ? (
-        <text className="graph-node-star" dy={-(r + 4)}>
-          ★
-        </text>
-      ) : null}
-      {/* Always mounted; visibility is CSS-toggled (label LOD + state) so
-          zoom/hover threshold crossings need zero reconciliation. */}
-      <text className="graph-node-label" dy={r + 12}>
-        {label}
-      </text>
-    </g>
-  );
-});
+  color: string;
+  borderColor: string;
+  type: "border";
+  hidden?: boolean;
+  forceLabel?: boolean;
+  highlighted?: boolean;
+  index: number;
+  node: GraphNode;
+};
 
-// --- canvas --------------------------------------------------------------
+type SigmaEdgeAttributes = {
+  size: number;
+  color: string;
+  type: "line" | "arrow";
+  hidden?: boolean;
+  relation: string;
+  sourceId: string;
+  targetId: string;
+  suggested?: boolean;
+};
+
+type GraphInstance = MultiDirectedGraph<SigmaNodeAttributes, SigmaEdgeAttributes>;
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  /** Latest positions (flat x,y interleaved), index-aligned with `nodes`.
-   *  Owned by GraphView; read here for fit/center and structural placement. */
   positionsRef: RefObject<Float64Array | null>;
-  /** GraphView populates this with the canvas's per-frame DOM writer so worker
-   *  frames bypass React. */
-  applyFrameRef: RefObject<((p: Float64Array) => void) | null>;
-  /** Bumped by GraphView on each worker re-init — triggers a fit-view. */
+  positionNodeIdsRef: RefObject<string[] | null>;
+  seedPositions?: Record<string, [number, number]>;
+  initialPinnedIds?: string[];
+  visibleNodeIds?: Set<string>;
   layoutEpoch: number;
   enriched: boolean;
   selectedId: string | null;
   focusNodeId: string | null;
   pathSourceId: string | null;
   highlight: GraphHighlight;
-  /** Imperative fit-view trigger from the toolbar; increment to refit. */
   fitSignal: number;
   zoomSignal: { dir: 1 | -1; nonce: number } | null;
-  /** Pan to center a node (from an insight-row click); keeps current zoom. */
   centerSignal: { id: string; nonce: number } | null;
   onSelect: (node: GraphNode | null) => void;
   onOpen: (node: GraphNode) => void;
   onPathTarget: (node: GraphNode) => void;
   onNodeDrag: (index: number, phase: "start" | "move" | "end", x: number, y: number) => void;
   onNodeUnpin: (index: number) => void;
+  unpinSignal?: { id: string; nonce: number } | null;
+  onLayoutSettled?: (positions: Float64Array, pinnedIds: string[]) => void;
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
-  /** Node ids currently favorited — rendered with a ★ marker. */
   favoriteIds?: Set<string>;
-  /** Mirrors the live <svg> element so GraphView can serialize it for export. */
-  exportRef?: RefObject<SVGSVGElement | null>;
-  /** Translucent community areas (settled positions only), drawn behind edges. */
+  exportControllerRef?: RefObject<GraphExportController | null>;
   hulls?: { community: number; path: string }[];
-  /** Absolutely-positioned overlay inside the canvas (e.g. the legend). */
   overlay?: ReactNode;
   onViewportReport?: (zoom: number) => void;
+}
+
+type InteractionState = {
+  selectedId: string | null;
+  focusNodeId: string | null;
+  pathSourceId: string | null;
+  highlight: GraphHighlight;
+  hoverId: string | null;
+  favoriteIds: Set<string>;
+  visibleNodeIds: Set<string> | null;
+};
+
+function hashPosition(id: string, index: number): [number, number] {
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i += 1) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const angle = ((hash >>> 0) / 0xffffffff) * Math.PI * 2;
+  const radius = 20 + Math.sqrt(index + 1) * 18;
+  return [Math.cos(angle) * radius, Math.sin(angle) * radius];
+}
+
+function buildSigmaGraph(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  positions: Float64Array | null,
+  positionNodeIds: string[] | null,
+  seedPositions: Record<string, [number, number]> | undefined,
+  enriched: boolean,
+): GraphInstance {
+  const graph = new MultiDirectedGraph<SigmaNodeAttributes, SigmaEdgeAttributes>();
+  const positionsAligned = positions?.length === nodes.length * 2
+    && positionNodeIds?.length === nodes.length
+    && nodes.every((node, index) => positionNodeIds[index] === node.id);
+  nodes.forEach((node, index) => {
+    const fallback = hashPosition(node.id, index);
+    const seed = seedPositions?.[node.id];
+    const x = positionsAligned ? positions![index * 2] : seed?.[0] ?? fallback[0];
+    const y = positionsAligned ? positions![index * 2 + 1] : seed?.[1] ?? fallback[1];
+    graph.addNode(node.id, {
+      x,
+      y,
+      size: nodeRadius(node.degree),
+      label: node.label,
+      color: nodeColor(node, enriched),
+      borderColor: node.type === "unresolved" ? FALLBACK_COLOR : "#f7f7f5",
+      type: "border",
+      forceLabel: node.isGodNode,
+      index,
+      node,
+    });
+  });
+  edges.forEach((edge, index) => {
+    if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
+    const directed = edge.relation === "supersedes" || edge.relation === "superseded_by";
+    graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
+      size: edge.fromFrontmatter ? 1.2 : 0.75,
+      color: edge.fromFrontmatter ? "#90959e" : "#b4b7bd",
+      type: directed ? "arrow" : "line",
+      relation: edge.relation,
+      sourceId: edge.source,
+      targetId: edge.target,
+    });
+  });
+  return graph;
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function graphToSvg(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>): Blob {
+  const graph = renderer.getGraph();
+  const { width, height } = renderer.getDimensions();
+  const edgeParts: string[] = [];
+  graph.forEachEdge((key, attrs, source, target) => {
+    if (attrs.hidden) return;
+    const a = renderer.graphToViewport(graph.getNodeAttributes(source));
+    const b = renderer.graphToViewport(graph.getNodeAttributes(target));
+    edgeParts.push(`<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="${xmlEscape(attrs.color)}" stroke-width="${attrs.size}" stroke-opacity="0.55" data-edge-id="${xmlEscape(key)}"/>`);
+  });
+  const nodeParts: string[] = [];
+  graph.forEachNode((key, attrs) => {
+    if (attrs.hidden) return;
+    const p = renderer.graphToViewport(attrs);
+    const r = Math.max(2, renderer.scaleSize(attrs.size));
+    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="#30343a">${xmlEscape(attrs.label)}</text></g>`);
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#f7f7f5"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
+  return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+}
+
+function StaticGraphFallback({
+  nodes,
+  edges,
+  positions,
+  enriched,
+  onSelect,
+  onOpen,
+}: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  positions: Float64Array | null;
+  enriched: boolean;
+  onSelect: (node: GraphNode | null) => void;
+  onOpen: (node: GraphNode) => void;
+}) {
+  const index = useMemo(() => new Map(nodes.map((node, i) => [node.id, i])), [nodes]);
+  if (nodes.length > 2_000) {
+    return (
+      <div className="graph-webgl-fallback-list" role="status">
+        WebGL을 사용할 수 없어 대규모 그래프를 목록으로 표시합니다. 검색과 Inspector는 계속 사용할 수 있습니다.
+      </div>
+    );
+  }
+  const point = (i: number) => {
+    if (positions?.length === nodes.length * 2) return [positions[i * 2], positions[i * 2 + 1]];
+    return hashPosition(nodes[i].id, i);
+  };
+  return (
+    <svg className="graph-canvas graph-static-fallback" data-testid="graph-canvas" viewBox="-700 -500 1400 1000" onClick={() => onSelect(null)}>
+      <g className="graph-edges">
+        {edges.map((edge, i) => {
+          const si = index.get(edge.source);
+          const ti = index.get(edge.target);
+          if (si == null || ti == null) return null;
+          const [x1, y1] = point(si);
+          const [x2, y2] = point(ti);
+          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" />;
+        })}
+      </g>
+      <g className="graph-nodes labels-on">
+        {nodes.map((node, i) => {
+          const [x, y] = point(i);
+          const r = nodeRadius(node.degree);
+          return (
+            <g key={node.id} className={`graph-node${node.type === "unresolved" ? " ghost" : ""}`} transform={`translate(${x}, ${y})`} onClick={(event) => { event.stopPropagation(); onSelect(node); }} onDoubleClick={() => onOpen(node)}>
+              <circle r={r} fill={nodeColor(node, enriched)} data-node-id={node.id} />
+              <text className="graph-node-label" dy={r + 12}>{node.label}</text>
+            </g>
+          );
+        })}
+      </g>
+    </svg>
+  );
 }
 
 export function GraphCanvas({
   nodes,
   edges,
   positionsRef,
-  applyFrameRef,
+  positionNodeIdsRef,
+  seedPositions,
+  initialPinnedIds = [],
+  visibleNodeIds,
   layoutEpoch,
   enriched,
   selectedId,
@@ -188,618 +270,503 @@ export function GraphCanvas({
   onPathTarget,
   onNodeDrag,
   onNodeUnpin,
+  unpinSignal,
+  onLayoutSettled,
   onNodeContextMenu,
-  favoriteIds,
-  exportRef,
-  hulls,
+  favoriteIds = new Set<string>(),
+  exportControllerRef,
+  hulls = [],
   overlay,
   onViewportReport,
 }: GraphCanvasProps) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const nodesGroupRef = useRef<SVGGElement | null>(null);
-  const edgesGroupRef = useRef<SVGGElement | null>(null);
-  const pairLineRef = useRef<SVGLineElement | null>(null);
-  // Element caches — rebuilt on structural change; DOM order == node/edge order.
-  const nodeEls = useRef<SVGGElement[]>([]);
-  const edgeEls = useRef<SVGLineElement[]>([]);
-  // id → last written position; lets a structural change keep surviving nodes
-  // in place instead of flashing to the origin before the next frame arrives.
-  const lastPos = useRef<Map<string, [number, number]>>(new Map());
-  // Previous nodes array identity — positionsRef is index-aligned only while it
-  // is unchanged, so a same-cardinality filter swap must not write the stale
-  // frame by index.
-  const prevNodesRef = useRef<GraphNode[] | null>(null);
-
-  const [viewport, setViewport] = useState<GraphViewport>({ zoom: 1, px: 0, py: 0 });
-  const [size, setSize] = useState({ width: 1200, height: 800 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const graphRef = useRef<GraphInstance | null>(null);
+  const rendererRef = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
+  const layoutRef = useRef<FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
+  const layoutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
   const [ready, setReady] = useState(false);
+  const [webglFailed, setWebglFailed] = useState(false);
   const fittedEpochRef = useRef(-1);
-  const lastClickRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
-
-  // rAF coalescing for the worker frame stream.
-  const rafRef = useRef(0);
-  const pendingRef = useRef<Float64Array | null>(null);
-  const writeFrameRef = useRef<((p: Float64Array) => void) | null>(null);
-
-  // Imperative hover bookkeeping — never touches React state, so hovering
-  // across the graph reconciles nothing.
-  const hoverIdRef = useRef<string | null>(null);
-  const hoverElsRef = useRef<Element[]>([]);
-  const applyHoverRef = useRef<((id: string | null) => void) | null>(null);
-
-  // Cache the canvas size via ResizeObserver instead of reading layout each
-  // frame. The <svg> is always mounted (loading is an overlay), so this
-  // attaches on the first commit.
-  useEffect(() => {
-    const el = svgRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect;
-      if (box && box.width > 0 && box.height > 0) {
-        setSize({ width: box.width, height: box.height });
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    onViewportReport?.(viewport.zoom);
-  }, [viewport.zoom, onViewportReport]);
-
-  const indexById = useMemo(() => {
-    const map = new Map<string, number>();
-    nodes.forEach((node, i) => map.set(node.id, i));
-    return map;
-  }, [nodes]);
-
-  // Edges with both endpoints resolved, in render/DOM order — keeps edgeEls
-  // index-aligned with the <line> children even if one is defensively dropped.
-  const drawnEdges = useMemo(() => {
-    const out: { si: number; ti: number; edge: GraphEdge }[] = [];
-    for (const edge of edges) {
-      const si = indexById.get(edge.source);
-      const ti = indexById.get(edge.target);
-      if (si != null && ti != null) out.push({ si, ti, edge });
-    }
-    return out;
-  }, [edges, indexById]);
-
-  // node id → indices into drawnEdges (incident edges), for hover highlight.
-  const incidentEdges = useMemo(() => {
-    const map = new Map<string, number[]>();
-    drawnEdges.forEach((d, j) => {
-      let a = map.get(d.edge.source);
-      if (!a) map.set(d.edge.source, (a = []));
-      a.push(j);
-      let b = map.get(d.edge.target);
-      if (!b) map.set(d.edge.target, (b = []));
-      b.push(j);
-    });
-    return map;
-  }, [drawnEdges]);
+  // Node/edge-count signature of the last built graph — lets a rebuild whose
+  // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
+  // reuse the cached positions instead of re-annealing the whole layout.
+  const prevTopoSigRef = useRef<string | null>(null);
+  const draggedRef = useRef<{ id: string; index: number; moved: boolean } | null>(null);
+  const pinnedIdsRef = useRef(new Set(initialPinnedIds));
+  const onLayoutSettledRef = useRef(onLayoutSettled);
+  onLayoutSettledRef.current = onLayoutSettled;
+  const hullsRef = useRef(hulls);
+  hullsRef.current = hulls;
+  const interactionRef = useRef<InteractionState>({
+    selectedId,
+    focusNodeId,
+    pathSourceId,
+    highlight,
+    hoverId: null,
+    favoriteIds,
+    visibleNodeIds: visibleNodeIds ?? null,
+  });
+  interactionRef.current = {
+    ...interactionRef.current,
+    selectedId,
+    focusNodeId,
+    pathSourceId,
+    highlight,
+    favoriteIds,
+    visibleNodeIds: visibleNodeIds ?? null,
+  };
+  const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport });
+  callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport };
 
   const adjacency = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const edge of edges) {
-      let s = map.get(edge.source);
-      if (!s) map.set(edge.source, (s = new Set()));
-      s.add(edge.target);
-      let t = map.get(edge.target);
-      if (!t) map.set(edge.target, (t = new Set()));
-      t.add(edge.source);
+      if (!map.has(edge.source)) map.set(edge.source, new Set());
+      if (!map.has(edge.target)) map.set(edge.target, new Set());
+      map.get(edge.source)!.add(edge.target);
+      map.get(edge.target)!.add(edge.source);
     }
     return map;
   }, [edges]);
+  const adjacencyRef = useRef(adjacency);
+  adjacencyRef.current = adjacency;
 
-  // Highlight overlay → sets consulted per node/edge for dimming (React path).
-  const { highlightNodes, highlightEdgeKeys, pairEndpoints } = useMemo(() => {
-    if (!highlight) {
-      return { highlightNodes: null as Set<string> | null, highlightEdgeKeys: null as Set<string> | null, pairEndpoints: null as [string, string] | null };
-    }
-    if (highlight.kind === "pair") {
-      return {
-        highlightNodes: new Set([highlight.a, highlight.b]),
-        highlightEdgeKeys: null,
-        pairEndpoints: [highlight.a, highlight.b] as [string, string],
-      };
-    }
-    const nodeSet = new Set(highlight.ids);
-    const edgeSet = new Set<string>();
-    for (let i = 0; i + 1 < highlight.ids.length; i += 1) {
-      const a = highlight.ids[i];
-      const b = highlight.ids[i + 1];
-      edgeSet.add(edgeKey(a, b));
-    }
-    return { highlightNodes: nodeSet, highlightEdgeKeys: edgeSet, pairEndpoints: null };
-  }, [highlight]);
-
-  const showLabels = viewport.zoom > LABEL_ZOOM_THRESHOLD;
-
-  const fitView = useCallback(
-    (p?: Float64Array | null) => {
-      const pos = p ?? positionsRef.current;
-      if (!pos || pos.length === 0) return;
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (let i = 0; i < pos.length; i += 2) {
-        if (pos[i] < minX) minX = pos[i];
-        if (pos[i] > maxX) maxX = pos[i];
-        if (pos[i + 1] < minY) minY = pos[i + 1];
-        if (pos[i + 1] > maxY) maxY = pos[i + 1];
-      }
-      const bw = Math.max(maxX - minX, 1) + 120;
-      const bh = Math.max(maxY - minY, 1) + 120;
-      const zoom = clamp(Math.min(size.width / bw, size.height / bh), MIN_ZOOM, MAX_ZOOM);
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      setViewport({ zoom, px: size.width / 2 - cx * zoom, py: size.height / 2 - cy * zoom });
-    },
-    [positionsRef, size],
-  );
-
-  // Write geometry straight to the DOM from a positions frame. Called from the
-  // rAF stream and from the structural commit hook.
-  const writeFrame = useCallback(
-    (p: Float64Array) => {
-      // Stale-epoch guard: a frame whose length doesn't match the mounted node
-      // set is from a superseded layout; the next matching frame corrects it.
-      if (p.length !== nodes.length * 2) return;
-      const nEls = nodeEls.current;
-      for (let i = 0; i < nEls.length; i += 1) {
-        const x = p[i * 2];
-        const y = p[i * 2 + 1];
-        nEls[i].setAttribute("transform", `translate(${x}, ${y})`);
-        lastPos.current.set(nodes[i].id, [x, y]);
-      }
-      const eEls = edgeEls.current;
-      for (let j = 0; j < drawnEdges.length; j += 1) {
-        const el = eEls[j];
-        if (!el) continue;
-        const { si, ti } = drawnEdges[j];
-        el.setAttribute("x1", String(p[si * 2]));
-        el.setAttribute("y1", String(p[si * 2 + 1]));
-        el.setAttribute("x2", String(p[ti * 2]));
-        el.setAttribute("y2", String(p[ti * 2 + 1]));
-      }
-      if (pairLineRef.current && pairEndpoints) {
-        const a = indexById.get(pairEndpoints[0]);
-        const b = indexById.get(pairEndpoints[1]);
-        if (a != null && b != null) {
-          pairLineRef.current.setAttribute("x1", String(p[a * 2]));
-          pairLineRef.current.setAttribute("y1", String(p[a * 2 + 1]));
-          pairLineRef.current.setAttribute("x2", String(p[b * 2]));
-          pairLineRef.current.setAttribute("y2", String(p[b * 2 + 1]));
-        }
-      }
-      if (!ready) setReady(true);
-      if (fittedEpochRef.current !== layoutEpoch) {
-        fittedEpochRef.current = layoutEpoch;
-        fitView(p);
-      }
-    },
-    [nodes, drawnEdges, pairEndpoints, indexById, ready, layoutEpoch, fitView],
-  );
-
-  // Structural fallback: no fresh frame yet (e.g. just after a filter change).
-  // Place surviving nodes at their last-known position; brand-new nodes stay at
-  // the origin for the ~120ms until the worker's warm-started frame arrives.
-  const placeFromLastKnown = useCallback(() => {
-    const nEls = nodeEls.current;
-    for (let i = 0; i < nEls.length; i += 1) {
-      const prev = lastPos.current.get(nodes[i].id);
-      if (prev) nEls[i].setAttribute("transform", `translate(${prev[0]}, ${prev[1]})`);
-    }
-    const eEls = edgeEls.current;
-    for (let j = 0; j < drawnEdges.length; j += 1) {
-      const el = eEls[j];
-      if (!el) continue;
-      const a = lastPos.current.get(drawnEdges[j].edge.source);
-      const b = lastPos.current.get(drawnEdges[j].edge.target);
-      if (a) { el.setAttribute("x1", String(a[0])); el.setAttribute("y1", String(a[1])); }
-      if (b) { el.setAttribute("x2", String(b[0])); el.setAttribute("y2", String(b[1])); }
-    }
-  }, [nodes, drawnEdges]);
-
-  // O(neighbors) hover: toggle a container class for the all-but-neighbors dim
-  // (one CSS style recalc), and add per-element classes only to the hovered
-  // node + its neighbors + incident edges. No React reconciliation.
-  const applyHover = useCallback(
-    (id: string | null) => {
-      for (const el of hoverElsRef.current) el.classList.remove("hl", "hovered");
-      hoverElsRef.current = [];
-      hoverIdRef.current = id;
-      // Inert while a pair/path overlay owns the dimming (parity with V2).
-      const active = id != null && !highlight && indexById.has(id);
-      svgRef.current?.classList.toggle("has-hover", active);
-      if (!active) return;
-      const i = indexById.get(id!);
-      if (i == null) return;
-      const els: Element[] = [];
-      const hovered = nodeEls.current[i];
-      if (hovered) { hovered.classList.add("hovered"); els.push(hovered); }
-      for (const neighborId of adjacency.get(id!) ?? []) {
-        const ni = indexById.get(neighborId);
-        const el = ni != null ? nodeEls.current[ni] : undefined;
-        if (el) { el.classList.add("hl"); els.push(el); }
-      }
-      for (const j of incidentEdges.get(id!) ?? []) {
-        const el = edgeEls.current[j];
-        if (el) { el.classList.add("hl"); els.push(el); }
-      }
-      hoverElsRef.current = els;
-    },
-    [highlight, indexById, adjacency, incidentEdges],
-  );
-
-  // Keep the imperative closures fresh for the rAF stream and structural hook.
-  useLayoutEffect(() => {
-    writeFrameRef.current = writeFrame;
-    applyHoverRef.current = applyHover;
-  });
-
-  // Structural commit: rebuild element caches (DOM changed), then re-place
-  // geometry and re-assert hover classes React may have dropped.
-  useLayoutEffect(() => {
-    nodeEls.current = Array.from(nodesGroupRef.current?.children ?? []) as SVGGElement[];
-    edgeEls.current = Array.from(edgesGroupRef.current?.children ?? []) as SVGLineElement[];
-    const p = positionsRef.current;
-    // positionsRef is index-aligned only while node identity is unchanged; a
-    // same-cardinality filter swap leaves it stale, so fall back to the id-keyed
-    // placeFromLastKnown until the worker's frame for the new set arrives.
-    const aligned = prevNodesRef.current === nodes;
-    prevNodesRef.current = nodes;
-    if (aligned && p && p.length === nodes.length * 2) writeFrameRef.current?.(p);
-    else placeFromLastKnown();
-    applyHoverRef.current?.(hoverIdRef.current);
-  }, [nodes, drawnEdges, pairEndpoints, placeFromLastKnown, positionsRef]);
-
-  // React rewrites a node's class attribute when its computed cls changes
-  // (select / focus / path-source / highlight), silently dropping the
-  // imperatively-added .hovered/.hl while .has-hover still dims the rest — and a
-  // path overlay (pairEndpoints stays null) never re-runs the structural effect.
-  // Re-assert hover on exactly those triggers; applyHover recomputes its `active`
-  // guard against the fresh `highlight`, so it also clears .has-hover under an
-  // overlay. Keyed narrowly (not every commit) so pan/zoom stays untouched.
-  useLayoutEffect(() => {
-    applyHoverRef.current?.(hoverIdRef.current);
-  }, [selectedId, focusNodeId, pathSourceId, highlight]);
-
-  // Subscribe the worker frame stream to a rAF-coalesced DOM write.
   useEffect(() => {
-    const ref = applyFrameRef;
-    ref.current = (p: Float64Array) => {
-      pendingRef.current = p;
-      if (rafRef.current) return;
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = 0;
-        const frame = pendingRef.current;
-        pendingRef.current = null;
-        if (frame) writeFrameRef.current?.(frame);
+    const container = containerRef.current;
+    if (!container || webglFailed) return;
+    const graph = buildSigmaGraph(
+      nodes,
+      edges,
+      positionsRef.current,
+      positionNodeIdsRef.current,
+      seedPositions,
+      enriched,
+    );
+    graphRef.current = graph;
+    try {
+      const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
+        allowInvalidContainer: true,
+        defaultNodeType: "border",
+        defaultEdgeType: "line",
+        nodeProgramClasses: { border: MaruNodeBorderProgram },
+        edgeProgramClasses: { line: EdgeLineProgram, arrow: EdgeArrowProgram },
+        labelFont: "Pretendard, sans-serif",
+        labelSize: 11,
+        labelWeight: "500",
+        labelRenderedSizeThreshold: 8,
+        labelDensity: 0.55,
+        hideEdgesOnMove: nodes.length > 5_000,
+        hideLabelsOnMove: true,
+        enableEdgeEvents: false,
+        minCameraRatio: 0.02,
+        maxCameraRatio: 8,
+        stagePadding: 36,
+        nodeReducer: (node, data) => {
+          const state = interactionRef.current;
+          const patch: Partial<SigmaNodeAttributes> & { highlighted?: boolean } = {};
+          if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
+            patch.hidden = true;
+            return patch;
+          }
+          const overlayIds = state.highlight?.kind === "pair"
+            ? new Set([state.highlight.a, state.highlight.b])
+            : state.highlight?.kind === "path"
+              ? new Set(state.highlight.ids)
+              : null;
+          const hovered = state.hoverId;
+          const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
+          const overlayVisible = !overlayIds || overlayIds.has(node);
+          if (!hoverVisible || !overlayVisible) patch.color = "#d6d8dc";
+          const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.pathSourceId || overlayIds?.has(node);
+          if (emphasized) {
+            patch.borderColor = overlayIds?.has(node) ? WARN_COLOR : ACCENT_COLOR;
+            patch.highlighted = true;
+            patch.forceLabel = true;
+            patch.size = data.size * 1.18;
+          } else if (state.favoriteIds.has(node)) {
+            patch.borderColor = WARN_COLOR;
+            patch.forceLabel = true;
+          }
+          return patch;
+        },
+        edgeReducer: (_edge, data) => {
+          const state = interactionRef.current;
+          if (state.visibleNodeIds && (!state.visibleNodeIds.has(data.sourceId) || !state.visibleNodeIds.has(data.targetId))) {
+            return { hidden: true };
+          }
+          const hovered = state.hoverId;
+          const pair = state.highlight?.kind === "pair" ? state.highlight : null;
+          const path = state.highlight?.kind === "path" ? state.highlight.ids : null;
+          let active = true;
+          if (hovered) active = data.sourceId === hovered || data.targetId === hovered;
+          if (pair) active = (data.sourceId === pair.a && data.targetId === pair.b) || (data.sourceId === pair.b && data.targetId === pair.a);
+          if (path) {
+            active = false;
+            for (let i = 0; i + 1 < path.length; i += 1) {
+              if (edgeKey(data.sourceId, data.targetId) === edgeKey(path[i], path[i + 1])) {
+                active = true;
+                break;
+              }
+            }
+          }
+          return active ? { color: pair || path ? ACCENT_COLOR : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { color: "#e2e3e5", size: 0.5 };
+        },
       });
-    };
-    return () => {
-      ref.current = null;
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
+      rendererRef.current = renderer;
+      const hullCanvas = renderer.createCanvas("maru-hulls", { beforeLayer: "edges" });
+      const drawHulls = () => {
+        const context = hullCanvas.getContext("2d");
+        if (!context) return;
+        const dimensions = renderer.getDimensions();
+        const ratio = dimensions.width > 0 ? hullCanvas.width / dimensions.width : 1;
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, hullCanvas.width, hullCanvas.height);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        for (const hull of hullsRef.current) {
+          const numbers = hull.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+          if (numbers.length < 6) continue;
+          context.beginPath();
+          for (let index = 0; index + 1 < numbers.length; index += 2) {
+            const point = renderer.graphToViewport({ x: numbers[index], y: numbers[index + 1] });
+            if (index === 0) context.moveTo(point.x, point.y);
+            else context.lineTo(point.x, point.y);
+          }
+          context.closePath();
+          context.globalAlpha = 0.08;
+          context.fillStyle = communityColor(hull.community);
+          context.fill();
+        }
+        context.globalAlpha = 1;
+      };
+      renderer.on("afterRender", drawHulls);
+      let contextRestored = false;
+      let contextFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+      const onContextLost = (event: Event) => {
+        event.preventDefault();
+        contextRestored = false;
+        if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
+        contextFallbackTimer = setTimeout(() => {
+          if (!contextRestored) setWebglFailed(true);
+        }, 1_000);
+      };
+      const onContextRestored = () => {
+        contextRestored = true;
+        if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
+        contextFallbackTimer = null;
+        renderer.refresh();
+      };
+      const rendererCanvases = Object.values(renderer.getCanvases());
+      rendererCanvases.forEach((canvas) => {
+        canvas.addEventListener("webglcontextlost", onContextLost);
+        canvas.addEventListener("webglcontextrestored", onContextRestored);
+      });
+      const snapshotPositions = () => {
+        const positions = new Float64Array(nodes.length * 2);
+        nodes.forEach((node, index) => {
+          if (!graph.hasNode(node.id)) return;
+          positions[index * 2] = graph.getNodeAttribute(node.id, "x");
+          positions[index * 2 + 1] = graph.getNodeAttribute(node.id, "y");
+        });
+        positionsRef.current = positions;
+        positionNodeIdsRef.current = nodes.map((node) => node.id);
+        onLayoutSettledRef.current?.(positions, [...pinnedIdsRef.current]);
+      };
+      const stopLayout = () => {
+        layoutRef.current?.stop();
+        layoutRef.current?.kill();
+        layoutRef.current = null;
+        if (layoutIntervalRef.current) clearInterval(layoutIntervalRef.current);
+        if (layoutTimeoutRef.current) clearTimeout(layoutTimeoutRef.current);
+        layoutIntervalRef.current = null;
+        layoutTimeoutRef.current = null;
+      };
+      const startLayout = (clearPins: boolean) => {
+        stopLayout();
+        if (clearPins) pinnedIdsRef.current.clear();
+        if (graph.order < 2 || graph.size < 1) {
+          snapshotPositions();
+          return;
+        }
+        const settings = {
+          ...inferSettings(graph.order),
+          adjustSizes: true,
+          barnesHutOptimize: graph.order >= 500,
+          barnesHutTheta: 0.6,
+          gravity: 1,
+          slowDown: graph.order >= 5_000 ? 8 : 3,
+        };
+        const supervisor = new FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, { settings });
+        layoutRef.current = supervisor;
+        const sampleIds = nodes.slice(0, 256).map((node) => node.id);
+        let previous = sampleIds.map((id) => [graph.getNodeAttribute(id, "x"), graph.getNodeAttribute(id, "y")] as const);
+        let stableSamples = 0;
+        layoutIntervalRef.current = setInterval(() => {
+          let displacement = 0;
+          const next = sampleIds.map((id, index) => {
+            const point = [graph.getNodeAttribute(id, "x"), graph.getNodeAttribute(id, "y")] as const;
+            displacement += Math.hypot(point[0] - previous[index][0], point[1] - previous[index][1]);
+            return point;
+          });
+          previous = next;
+          stableSamples = displacement / Math.max(1, sampleIds.length) < 0.08 ? stableSamples + 1 : 0;
+          if (stableSamples >= 3) {
+            stopLayout();
+            snapshotPositions();
+          }
+        }, 250);
+        layoutTimeoutRef.current = setTimeout(() => {
+          stopLayout();
+          snapshotPositions();
+        }, seedPositions && Object.keys(seedPositions).length > 0 ? 2_500 : 5_000);
+        supervisor.start();
+      };
+      startLayoutRef.current = startLayout;
+      const resolveNode = (id: string) => graph.hasNode(id) ? graph.getNodeAttribute(id, "node") : null;
+      renderer.on("clickStage", () => callbacksRef.current.onSelect(null));
+      renderer.on("clickNode", ({ node, event }) => {
+        const item = resolveNode(node);
+        if (!item || draggedRef.current?.moved) return;
+        const original = event.original as MouseEvent;
+        if (original.altKey) {
+          pinnedIdsRef.current.delete(node);
+          callbacksRef.current.onNodeUnpin(graph.getNodeAttribute(node, "index"));
+          startLayout(false);
+        }
+        else if (original.shiftKey) callbacksRef.current.onPathTarget(item);
+        else callbacksRef.current.onSelect(item);
+      });
+      renderer.on("doubleClickNode", ({ node, event }) => {
+        event.preventSigmaDefault();
+        const item = resolveNode(node);
+        if (item) callbacksRef.current.onOpen(item);
+      });
+      renderer.on("rightClickNode", ({ node, event }) => {
+        event.preventSigmaDefault();
+        const item = resolveNode(node);
+        const original = event.original as MouseEvent;
+        if (item) callbacksRef.current.onNodeContextMenu?.(item, graph.getNodeAttribute(node, "index"), original.clientX, original.clientY);
+      });
+      renderer.on("enterNode", ({ node }) => {
+        interactionRef.current.hoverId = node;
+        renderer.scheduleRefresh();
+      });
+      renderer.on("leaveNode", () => {
+        interactionRef.current.hoverId = null;
+        renderer.scheduleRefresh();
+      });
+      renderer.on("downNode", ({ node, event }) => {
+        event.preventSigmaDefault();
+        stopLayout();
+        const attrs = graph.getNodeAttributes(node);
+        draggedRef.current = { id: node, index: attrs.index, moved: false };
+        renderer.getCamera().disable();
+        callbacksRef.current.onNodeDrag(attrs.index, "start", attrs.x, attrs.y);
+      });
+      const mouse = renderer.getMouseCaptor();
+      const onMove = ({ x, y }: { x: number; y: number }) => {
+        const dragged = draggedRef.current;
+        if (!dragged) return;
+        dragged.moved = true;
+        const point = renderer.viewportToGraph({ x, y });
+        graph.mergeNodeAttributes(dragged.id, { x: point.x, y: point.y });
+        renderer.scheduleRefresh({ partialGraph: { nodes: [dragged.id] } });
+        callbacksRef.current.onNodeDrag(dragged.index, "move", point.x, point.y);
+      };
+      const onUp = () => {
+        const dragged = draggedRef.current;
+        if (!dragged) return;
+        const attrs = graph.getNodeAttributes(dragged.id);
+        callbacksRef.current.onNodeDrag(dragged.index, "end", attrs.x, attrs.y);
+        pinnedIdsRef.current.add(dragged.id);
+        draggedRef.current = null;
+        renderer.getCamera().enable();
+        snapshotPositions();
+      };
+      mouse.on("mousemovebody", onMove);
+      mouse.on("mouseup", onUp);
+      renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
+      renderer.once("afterRender", () => setReady(true));
+      // Re-run the force layout only when node ids or edge topology changed.
+      // Metadata-only rescans and enrichment swaps keep the viewport stable.
+      const topoSig = graphTopologySignature(nodes, edges);
+      const positionsValid = positionsRef.current?.length === graph.order * 2
+        && positionNodeIdsRef.current?.length === graph.order
+        && nodes.every((node, index) => positionNodeIdsRef.current?.[index] === node.id);
+      if (prevTopoSigRef.current === topoSig && positionsValid) {
+        snapshotPositions();
+      } else {
+        startLayout(false);
       }
-    };
-  }, [applyFrameRef]);
+      prevTopoSigRef.current = topoSig;
+      if (exportControllerRef) {
+        exportControllerRef.current = {
+          png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: "#f7f7f5" }),
+          svg: () => graphToSvg(renderer),
+        };
+      }
+      return () => {
+        if (exportControllerRef) exportControllerRef.current = null;
+        if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
+        rendererCanvases.forEach((canvas) => {
+          canvas.removeEventListener("webglcontextlost", onContextLost);
+          canvas.removeEventListener("webglcontextrestored", onContextRestored);
+        });
+        renderer.off("afterRender", drawHulls);
+        startLayoutRef.current = null;
+        stopLayout();
+        mouse.off("mousemovebody", onMove);
+        mouse.off("mouseup", onUp);
+        renderer.kill();
+        rendererRef.current = null;
+        graphRef.current = null;
+      };
+    } catch {
+      setWebglFailed(true);
+      setReady(true);
+      graphRef.current = null;
+      rendererRef.current = null;
+    }
+  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed]);
 
-  // Fit once per layout epoch is handled inside writeFrame; the toolbar "fit"
-  // button and keyboard 0 drive an explicit refit.
   useEffect(() => {
-    if (fitSignal > 0) fitView();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const renderer = rendererRef.current;
+    if (renderer) renderer.scheduleRefresh();
+  }, [selectedId, focusNodeId, pathSourceId, highlight, favoriteIds, visibleNodeIds]);
+
+  useEffect(() => {
+    if (layoutEpoch <= 0 || fittedEpochRef.current === layoutEpoch) return;
+    fittedEpochRef.current = layoutEpoch;
+    startLayoutRef.current?.(true);
+    rendererRef.current?.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  }, [layoutEpoch]);
+
+  useEffect(() => {
+    if (!unpinSignal) return;
+    pinnedIdsRef.current.delete(unpinSignal.id);
+    startLayoutRef.current?.(false);
+  }, [unpinSignal]);
+
+  useEffect(() => {
+    if (fitSignal > 0) void rendererRef.current?.getCamera().animatedReset({ duration: 180 });
   }, [fitSignal]);
 
-  // Toolbar zoom buttons: zoom around the canvas center.
   useEffect(() => {
     if (!zoomSignal) return;
-    setViewport((current) => {
-      const factor = zoomSignal.dir === 1 ? 1.25 : 0.8;
-      const zoom = clamp(current.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-      const cx = (size.width / 2 - current.px) / current.zoom;
-      const cy = (size.height / 2 - current.py) / current.zoom;
-      return { zoom, px: size.width / 2 - cx * zoom, py: size.height / 2 - cy * zoom };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const camera = rendererRef.current?.getCamera();
+    if (!camera) return;
+    if (zoomSignal.dir === 1) void camera.animatedZoom({ duration: 100 });
+    else void camera.animatedUnzoom({ duration: 100 });
   }, [zoomSignal]);
 
-  // Pan to center a node when an insight row is clicked (keeps current zoom).
   useEffect(() => {
     if (!centerSignal) return;
-    const p = positionsRef.current;
-    if (!p) return;
-    const i = indexById.get(centerSignal.id);
-    if (i == null || i * 2 + 1 >= p.length) return;
-    const cx = p[i * 2];
-    const cy = p[i * 2 + 1];
-    setViewport((current) => ({
-      ...current,
-      px: size.width / 2 - cx * current.zoom,
-      py: size.height / 2 - cy * current.zoom,
-    }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph?.hasNode(centerSignal.id)) return;
+    const data = renderer.getNodeDisplayData(centerSignal.id);
+    if (data) void renderer.getCamera().animate({ x: data.x, y: data.y }, { duration: 180 });
   }, [centerSignal]);
 
-  const gesture = useRef<
-    | { kind: "pan"; startX: number; startY: number; origin: GraphViewport }
-    | { kind: "drag"; nodeIndex: number; startX: number; startY: number; moved: boolean }
-    | null
-  >(null);
-
-  const screenPoint = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = svgRef.current!.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left - viewport.px) / viewport.zoom,
-        y: (clientY - rect.top - viewport.py) / viewport.zoom,
-      };
-    },
-    [viewport],
-  );
-
-  // Wheel: raw scroll pans; ctrl/meta zooms at the cursor (diagram convention —
-  // avoids trackpad scroll being read as zoom).
-  const handleWheel = useCallback((event: React.WheelEvent<SVGSVGElement>) => {
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    if (event.ctrlKey || event.metaKey) {
-      const sx = event.clientX - rect.left;
-      const sy = event.clientY - rect.top;
-      const factor = Math.pow(1.0015, -event.deltaY);
-      setViewport((current) => {
-        const zoom = clamp(current.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-        const cx = (sx - current.px) / current.zoom;
-        const cy = (sy - current.py) / current.zoom;
-        return { zoom, px: sx - cx * zoom, py: sy - cy * zoom };
-      });
-    } else {
-      setViewport((current) => ({
-        ...current,
-        px: current.px - event.deltaX,
-        py: current.py - event.deltaY,
-      }));
+  const selectedLabel = selectedId && graphRef.current?.hasNode(selectedId)
+    ? graphRef.current.getNodeAttribute(selectedId, "label")
+    : null;
+  const debugDomEnabled = useMemo(() => {
+    try {
+      const env = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
+      return env?.DEV === true && localStorage.getItem("maru:e2e:graph-dom") === "1";
+    } catch {
+      return false;
     }
   }, []);
-
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<SVGSVGElement>) => {
-      // Only the primary button pans/drags; right-click is reserved for the
-      // context menu (onContextMenu), so it must not start a gesture.
-      if (event.button !== 0) return;
-      const target = event.target as SVGElement;
-      const nodeIndexAttr = target.getAttribute("data-node-index");
-      if (nodeIndexAttr != null) {
-        const index = Number(nodeIndexAttr);
-        gesture.current = {
-          kind: "drag",
-          nodeIndex: index,
-          startX: event.clientX,
-          startY: event.clientY,
-          moved: false,
-        };
-        const point = screenPoint(event.clientX, event.clientY);
-        onNodeDrag(index, "start", point.x, point.y);
-      } else {
-        gesture.current = { kind: "pan", startX: event.clientX, startY: event.clientY, origin: viewport };
-      }
-      (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
-    },
-    [onNodeDrag, screenPoint, viewport],
-  );
-
-  const handlePointerMove = useCallback(
-    (event: React.PointerEvent<SVGSVGElement>) => {
-      const active = gesture.current;
-      if (!active) return;
-      if (active.kind === "pan") {
-        setViewport({
-          ...active.origin,
-          px: active.origin.px + (event.clientX - active.startX),
-          py: active.origin.py + (event.clientY - active.startY),
-        });
-      } else {
-        if (Math.abs(event.clientX - active.startX) > 3 || Math.abs(event.clientY - active.startY) > 3) {
-          active.moved = true;
-        }
-        const point = screenPoint(event.clientX, event.clientY);
-        onNodeDrag(active.nodeIndex, "move", point.x, point.y);
-      }
-    },
-    [onNodeDrag, screenPoint],
-  );
-
-  const handlePointerUp = useCallback(
-    (event: React.PointerEvent<SVGSVGElement>) => {
-      const active = gesture.current;
-      gesture.current = null;
-      if (!active) return;
-      if (active.kind === "pan") {
-        // A background press without movement clears the selection.
-        if (Math.abs(event.clientX - active.startX) < 3 && Math.abs(event.clientY - active.startY) < 3) {
-          onSelect(null);
-        }
-        return;
-      }
-      const point = screenPoint(event.clientX, event.clientY);
-      onNodeDrag(active.nodeIndex, "end", point.x, point.y);
-      if (active.moved) return; // a drag, not a click
-      const node = nodes[active.nodeIndex];
-      if (!node) return;
-      // Pointer capture swallows the native click/dblclick, so resolve the
-      // gesture here: alt = unpin, shift = path target, quick repeat = open.
-      if (event.altKey) {
-        onNodeUnpin(active.nodeIndex);
-        return;
-      }
-      if (event.shiftKey) {
-        onPathTarget(node);
-        return;
-      }
-      const now = event.timeStamp;
-      const last = lastClickRef.current;
-      if (last.id === node.id && now - last.time < 350) {
-        lastClickRef.current = { id: "", time: 0 };
-        onOpen(node);
-      } else {
-        lastClickRef.current = { id: node.id, time: now };
-        onSelect(node);
-      }
-    },
-    [nodes, onNodeDrag, onNodeUnpin, onOpen, onPathTarget, onSelect, screenPoint],
-  );
-
-  // Delegated hover: one listener on the <svg> instead of 2×N per-circle
-  // handlers. pointerover bubbles up carrying the entered element as target.
-  const handlePointerOver = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
-    if (gesture.current) return; // don't fight an active pan/drag
-    const id = (event.target as SVGElement).getAttribute("data-node-id");
-    if (id === hoverIdRef.current) return;
-    applyHoverRef.current?.(id);
-  }, []);
-
-  const handlePointerLeave = useCallback(() => {
-    if (hoverIdRef.current != null) applyHoverRef.current?.(null);
-  }, []);
-
-  const handleContextMenu = useCallback(
-    (event: React.MouseEvent<SVGSVGElement>) => {
-      const attr = (event.target as SVGElement).getAttribute("data-node-index");
-      if (attr == null) return; // let the browser menu show over empty canvas
-      event.preventDefault();
-      const index = Number(attr);
-      const node = nodes[index];
-      if (node) onNodeContextMenu?.(node, index, event.clientX, event.clientY);
-    },
-    [nodes, onNodeContextMenu],
-  );
-
-  // Memoize the child subtrees on their viewport-invariant deps so a pan/zoom
-  // (viewport-only render) reuses the same element arrays and React bails the
-  // ~2.4k-element subtree — only the outer <g transform> updates.
-  const edgeChildren = useMemo(
-    () =>
-      drawnEdges.map(({ edge }) => {
-        const key = edgeKey(edge.source, edge.target);
-        let cls = "graph-edge" + (edge.fromFrontmatter ? " frontmatter" : " wikilink");
-        if (highlightEdgeKeys) {
-          cls += highlightEdgeKeys.has(key) ? " path" : " dimmed";
-        } else if (highlightNodes) {
-          cls += " dimmed";
-        }
-        const isSupersedes = edge.relation === "supersedes" || edge.relation === "superseded_by";
-        return (
-          <EdgeView
-            key={`${edge.source}\u0000${edge.target}\u0000${edge.relation}`}
-            className={cls}
-            marker={isSupersedes}
-          />
-        );
-      }),
-    [drawnEdges, highlightEdgeKeys, highlightNodes],
-  );
-
-  const nodeChildren = useMemo(
-    () =>
-      nodes.map((node, i) => {
-        const inHighlight = highlightNodes?.has(node.id) ?? false;
-        const dimmed = highlightNodes ? !inHighlight : false;
-        const cls =
-          "graph-node" +
-          (node.type === "unresolved" ? " ghost" : "") +
-          (node.isGodNode ? " god" : "") +
-          (node.id === focusNodeId ? " focus" : "") +
-          (node.id === selectedId ? " selected" : "") +
-          (node.id === pathSourceId ? " path-source" : "") +
-          (inHighlight ? " highlight" : "") +
-          (dimmed ? " dimmed" : "");
-        return (
-          <NodeView
-            key={node.id}
-            index={i}
-            id={node.id}
-            r={nodeRadius(node.degree)}
-            fill={nodeColor(node, enriched)}
-            className={cls}
-            label={node.label}
-            favorite={favoriteIds?.has(node.id) ?? false}
-          />
-        );
-      }),
-    [nodes, highlightNodes, focusNodeId, selectedId, pathSourceId, enriched, favoriteIds],
-  );
-
-  // Community areas — React-rendered from settled positions (stable across pan),
-  // so they never contend with the imperative geometry writes.
-  const hullChildren = useMemo(
-    () =>
-      (hulls ?? []).map((h) => (
-        <path
-          key={h.community}
-          className="graph-hull"
-          style={{ fill: communityColor(h.community) }}
-          d={h.path}
-        />
-      )),
-    [hulls],
-  );
+  const [debugHoverId, setDebugHoverId] = useState<string | null>(null);
+  const [debugOffsets, setDebugOffsets] = useState<Record<string, [number, number]>>({});
+  const debugDragRef = useRef<{ id: string; index: number; x: number; y: number; moved: boolean } | null>(null);
+  const debugSuppressClickRef = useRef(false);
+  const debugNodes = debugDomEnabled
+    ? nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id))
+    : [];
 
   return (
     <div className="graph-canvas-wrap">
-      <svg
-        ref={(el) => {
-          svgRef.current = el;
-          if (exportRef) exportRef.current = el;
-        }}
-        className="graph-canvas"
-        data-testid="graph-canvas"
-        onWheel={handleWheel}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerOver={handlePointerOver}
-        onPointerLeave={handlePointerLeave}
-        onContextMenu={handleContextMenu}
-      >
-        <defs>
-          <marker
-            id="graph-arrow"
-            viewBox="0 0 10 10"
-            refX="10"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
-          </marker>
-        </defs>
-        <g transform={`translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`}>
-          {hullChildren.length > 0 ? (
-            <g className="graph-hulls" aria-hidden="true">
-              {hullChildren}
+      {webglFailed ? (
+        <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} onSelect={onSelect} onOpen={onOpen} />
+      ) : (
+        <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label="Knowledge graph" />
+      )}
+      {debugDomEnabled ? (
+        <svg
+          className={`graph-canvas graph-e2e-overlay${debugHoverId ? " has-hover" : ""}`}
+          aria-hidden="true"
+          onPointerMove={(event) => {
+            const drag = debugDragRef.current;
+            if (!drag) return;
+            const dx = event.clientX - drag.x;
+            const dy = event.clientY - drag.y;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+            setDebugOffsets((current) => ({ ...current, [drag.id]: [dx, dy] }));
+          }}
+          onPointerUp={() => {
+            debugSuppressClickRef.current = debugDragRef.current?.moved ?? false;
+            debugDragRef.current = null;
+          }}
+          onPointerLeave={() => setDebugHoverId(null)}
+        >
+          <g className="graph-nodes labels-on">
+            <g className="graph-hulls">
+              {hulls.map((hull) => <path key={hull.community} className="graph-hull" d={hull.path} style={{ fill: communityColor(hull.community) }} />)}
             </g>
-          ) : null}
-          <g className="graph-edges" ref={edgesGroupRef}>
-            {edgeChildren}
+            {debugNodes.map((node, index) => {
+              const baseX = 120 + (index % 5) * 150;
+              const baseY = 130 + Math.floor(index / 5) * 130;
+              const offset = debugOffsets[node.id] ?? [0, 0];
+              const hovered = debugHoverId === node.id;
+              const highlighted = debugHoverId ? adjacency.get(debugHoverId)?.has(node.id) : false;
+              const className = [
+                "graph-node",
+                node.type === "unresolved" ? "ghost" : "",
+                node.id === selectedId ? "selected" : "",
+                node.id === focusNodeId ? "focus" : "",
+                hovered ? "hovered" : "",
+                highlighted ? "hl" : "",
+              ].filter(Boolean).join(" ");
+              const radius = nodeRadius(node.degree);
+              return (
+                <g key={node.id} className={className} transform={`translate(${baseX + offset[0]}, ${baseY + offset[1]})`}>
+                  <circle
+                    r={radius}
+                    fill={nodeColor(node, enriched)}
+                    data-node-id={node.id}
+                    onPointerEnter={() => setDebugHoverId(node.id)}
+                    onPointerDown={(event) => {
+                      debugDragRef.current = { id: node.id, index, x: event.clientX, y: event.clientY, moved: false };
+                    }}
+                    onClick={(event) => {
+                      if (debugSuppressClickRef.current) {
+                        debugSuppressClickRef.current = false;
+                        return;
+                      }
+                      if (event.altKey) onNodeUnpin(index);
+                      else if (event.shiftKey) onPathTarget(node);
+                      else onSelect(node);
+                    }}
+                    onDoubleClick={() => onOpen(node)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onNodeContextMenu?.(node, index, event.clientX, event.clientY);
+                    }}
+                  />
+                  {favoriteIds.has(node.id) ? <text className="graph-node-star" dy={-(radius + 4)}>★</text> : null}
+                  <text className="graph-node-label" dy={radius + 12}>{node.label}</text>
+                </g>
+              );
+            })}
           </g>
-          {pairEndpoints &&
-          indexById.has(pairEndpoints[0]) &&
-          indexById.has(pairEndpoints[1]) ? (
-            <line ref={pairLineRef} className="graph-edge suggested" />
-          ) : null}
-          <g className={"graph-nodes" + (showLabels ? " labels-on" : "")} ref={nodesGroupRef}>
-            {nodeChildren}
-          </g>
-        </g>
-      </svg>
-      {!ready ? (
-        <div className="graph-canvas-loading" data-testid="graph-canvas-loading">
-          …
-        </div>
+        </svg>
       ) : null}
+      <div className="sr-only" aria-live="polite">{selectedLabel ? `선택됨: ${selectedLabel}` : ""}</div>
+      {!ready ? <div className="graph-canvas-loading" data-testid="graph-canvas-loading">…</div> : null}
       {overlay}
     </div>
   );

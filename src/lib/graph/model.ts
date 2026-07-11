@@ -18,6 +18,7 @@ export interface GraphNode {
   label: string;
   /** null = ghost (unresolved wikilink target — F3(b)'s input). */
   relPath: string | null;
+  ownerWorkspacePath?: string | null;
   type: string;
   domain: string | null;
   degree: number;
@@ -75,8 +76,8 @@ function frontmatterString(value: unknown): string | null {
 }
 
 /** Build the live graph from scanned entries. Node id = lowercase stem
- *  (matches build-graph.py `f.stem`); stem collisions fall back to the
- *  rel-path-without-extension so ids stay unique. */
+ *  (matches build-graph.py `f.stem`); every member of a stem collision uses
+ *  its rel-path-without-extension so ids stay unique and scan-order stable. */
 export function buildVaultGraph(
   entries: VaultEntry[],
   index?: EntryIndex,
@@ -86,15 +87,21 @@ export function buildVaultGraph(
     MARKDOWN_KINDS.has(entry.fileKind.toLowerCase()),
   );
 
-  // Assign unique node ids (stem first, relPath fallback on collision).
-  const idByPath = new Map<string, string>();
-  const taken = new Set<string>();
+  // Resolve all collisions before assigning ids. Giving only the second note
+  // a path id makes cached positions and deep links depend on scan order.
+  const stemCounts = new Map<string, number>();
   for (const entry of docs) {
-    let id = stemOf(entry.relPath);
-    if (taken.has(id)) {
-      id = entry.relPath.replace(/\.(md|mdx|markdown)$/i, "").toLowerCase();
-    }
-    taken.add(id);
+    const stem = stemOf(entry.relPath);
+    stemCounts.set(stem, (stemCounts.get(stem) ?? 0) + 1);
+  }
+
+  const idByPath = new Map<string, string>();
+  for (const entry of docs) {
+    const stem = stemOf(entry.relPath);
+    const id =
+      stemCounts.get(stem) === 1
+        ? stem
+        : entry.relPath.replace(/\.(md|mdx|markdown)$/i, "").toLowerCase();
     idByPath.set(entry.path, id);
   }
 
@@ -106,6 +113,7 @@ export function buildVaultGraph(
       id,
       label: entry.title,
       relPath: entry.relPath,
+      ownerWorkspacePath: entry.ownerWorkspacePath ?? null,
       type: frontmatterString(meta.type) ?? "unknown",
       domain: frontmatterString(meta.domain),
       degree: 0,
@@ -150,6 +158,7 @@ export function buildVaultGraph(
         id: ghostId,
         label: target.trim(),
         relPath: null,
+        ownerWorkspacePath: null,
         type: "unresolved",
         domain: null,
         degree: 0,
@@ -266,8 +275,17 @@ export function focusSubgraph(
   model: GraphModel,
   focusId: string,
   k: number = 2,
+  direction: "both" | "incoming" | "outgoing" = "both",
 ): GraphModel {
-  const adjacency = buildAdjacency(model);
+  const adjacency = direction === "both" ? buildAdjacency(model) : new Map<string, Set<string>>();
+  if (direction !== "both") {
+    for (const edge of model.edges) {
+      const from = direction === "outgoing" ? edge.source : edge.target;
+      const to = direction === "outgoing" ? edge.target : edge.source;
+      if (!adjacency.has(from)) adjacency.set(from, new Set());
+      adjacency.get(from)!.add(to);
+    }
+  }
   const keep = new Set<string>([focusId]);
   let frontier = [focusId];
   for (let hop = 0; hop < k; hop += 1) {

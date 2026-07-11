@@ -1,18 +1,12 @@
 // Insight / ideation panel — the "derive new relationships" layer over the
-// read-only graph. Four groups: hidden-link candidates (common-neighbor link
+// graph. Four groups: hidden-link candidates (common-neighbor link
 // prediction), surprising cross-community connections, community bridges, and
 // neglected notes (orphans + stale). Rows highlight on the canvas.
 
-import { ArrowLeftRight, Copy, ExternalLink, Lightbulb, Sparkles, Waypoints } from "lucide-react";
-import { useMemo } from "react";
+import { ArrowLeftRight, Copy, ExternalLink, Lightbulb, Link2, Sparkles, Waypoints } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import {
-  findBridges,
-  findHiddenLinks,
-  findOrphans,
-  findStale,
-  findSurprisingConnections,
-} from "../../lib/graph/insights";
+import type { InsightBundle } from "../../lib/graph/analysis.worker";
 import type { GraphModel } from "../../lib/graph/model";
 
 const STALE_DAYS = 120;
@@ -24,6 +18,7 @@ interface GraphInsightsPanelProps {
   onSelectNode: (id: string) => void;
   onCopyWikilink: (id: string) => void;
   onOpenNode: (id: string) => void;
+  onConnect: (source: string, target: string) => void;
 }
 
 export function GraphInsightsPanel({
@@ -33,6 +28,7 @@ export function GraphInsightsPanel({
   onSelectNode,
   onCopyWikilink,
   onOpenNode,
+  onConnect,
 }: GraphInsightsPanelProps) {
   const { t } = useTranslation();
   const labelById = useMemo(
@@ -40,12 +36,23 @@ export function GraphInsightsPanel({
     [model],
   );
   const label = (id: string) => labelById.get(id) ?? id;
-
-  const hidden = useMemo(() => findHiddenLinks(model), [model]);
-  const surprising = useMemo(() => findSurprisingConnections(model), [model]);
-  const bridges = useMemo(() => findBridges(model), [model]);
-  const orphans = useMemo(() => findOrphans(model), [model]);
-  const stale = useMemo(() => findStale(model, STALE_DAYS, now), [model, now]);
+  const [bundle, setBundle] = useState<InsightBundle | null>(null);
+  const epochRef = useRef(0);
+  useEffect(() => {
+    const worker = new Worker(new URL("../../lib/graph/analysis.worker.ts", import.meta.url), { type: "module" });
+    const epoch = ++epochRef.current;
+    setBundle(null);
+    worker.onmessage = (event: MessageEvent<{ epoch: number; bundle: InsightBundle }>) => {
+      if (event.data.epoch === epochRef.current) setBundle(event.data.bundle);
+    };
+    worker.postMessage({ epoch, model, now, staleDays: STALE_DAYS });
+    return () => worker.terminate();
+  }, [model, now]);
+  const hidden = bundle?.hidden ?? [];
+  const surprising = bundle?.surprising ?? [];
+  const bridges = bundle?.bridges ?? [];
+  const orphans = bundle?.orphans ?? [];
+  const stale = bundle?.stale ?? [];
 
   return (
     <div className="graph-insights" data-testid="graph-insights">
@@ -57,6 +64,15 @@ export function GraphInsightsPanel({
       >
         {hidden.map((link) => (
           <div className="graph-insight-rowgroup" key={`${link.source}-${link.target}`}>
+            <button
+              type="button"
+              className="graph-insight-action"
+              title={t("graph.relation.apply")}
+              data-testid="graph-insight-connect"
+              onClick={() => onConnect(link.source, link.target)}
+            >
+              <Link2 size={11} />
+            </button>
             <button
               type="button"
               className="graph-insight-row"

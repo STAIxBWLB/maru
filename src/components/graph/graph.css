@@ -341,6 +341,52 @@
   display: flex;
 }
 
+.graph-source-select {
+  height: 28px;
+  max-width: 132px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0 24px 0 8px;
+  font: inherit;
+}
+
+.graph-relation-dialog {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.graph-relation-pair {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg);
+}
+
+.graph-relation-preview {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.graph-relation-preview section {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.graph-relation-preview code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .graph-canvas {
   flex: 1;
   min-width: 0;
@@ -351,6 +397,13 @@
 
 .graph-canvas:active {
   cursor: grabbing;
+}
+
+.graph-e2e-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
 }
 
 .graph-canvas-loading {
@@ -449,7 +502,7 @@
   stroke: var(--line-strong, var(--muted));
   stroke-opacity: 0.45;
   stroke-width: 1.2;
-  transition: stroke-opacity 120ms ease;
+  transition: none;
 }
 
 .graph-edge.wikilink {
@@ -484,7 +537,7 @@
   cursor: pointer;
   stroke: var(--bg);
   stroke-width: 1;
-  transition: opacity 120ms ease;
+  transition: none;
 }
 
 .graph-node.ghost circle {
@@ -514,9 +567,7 @@
   stroke-width: 3.5;
 }
 
-.graph-node {
-  transition: opacity 120ms ease;
-}
+.graph-node { transition: none; }
 
 .graph-node.dimmed,
 .graph-canvas.has-hover .graph-node:not(.hovered):not(.hl) {

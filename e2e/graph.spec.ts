@@ -10,6 +10,11 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     if (window.sessionStorage.getItem("maru:graph-e2e:storage-cleared") === "true") return;
     window.localStorage.clear();
+    window.localStorage.setItem("maru:e2e:graph-dom", "1");
+    window.localStorage.setItem(
+      "maru:settings:fallback:v1",
+      JSON.stringify({ graph: { source: "all", scope: "all" } }),
+    );
     window.sessionStorage.setItem("maru:graph-e2e:storage-cleared", "true");
   });
 });

@@ -1,6 +1,7 @@
 export interface VaultEntry {
   path: string;
   relPath: string;
+  ownerWorkspacePath?: string | null;
   title: string;
   /** Raw YAML frontmatter as parsed from disk. Phase 0 surfaces all keys
    *  unmodified; Phase 1 will derive typed lenses (type, project, etc.)
@@ -25,6 +26,7 @@ export interface DocumentPayload {
   body: string;
   meta: Record<string, unknown>;
   fileKind: string;
+  revision?: string;
 }
 
 export interface VersionSnapshot {

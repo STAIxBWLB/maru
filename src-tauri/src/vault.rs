@@ -3,17 +3,21 @@ use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 use include_dir::{include_dir, Dir};
 
+use crate::atomic_file::write_atomic;
 use crate::skill_host::fs as host_fs;
+use crate::vault_list::registered_nested_roots;
 
-const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v2.json"];
+const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v3.json"];
+const LEGACY_VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v2.json"];
 const GENERATED_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -111,12 +115,52 @@ pub struct VaultEntry {
     pub snippet: String,
     pub file_kind: String,
     pub version_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_workspace_path: Option<String>,
     /// Raw `[[wikilink]]` targets found in the body + frontmatter. Lets the
     /// frontend compute backlinks (which notes point here) without re-reading
     /// every file. `#[serde(default)]` keeps deserialization tolerant of cache
     /// files or test fixtures that predate this field.
     #[serde(default)]
     pub links: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct FileFingerprint {
+    size: u64,
+    modified_nanos: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VaultCacheEnvelope {
+    version: u32,
+    entries: Vec<VaultEntry>,
+    #[serde(default)]
+    fingerprints: BTreeMap<String, FileFingerprint>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum VaultCacheOnDisk {
+    Envelope(VaultCacheEnvelope),
+    Legacy(Vec<VaultEntry>),
+}
+
+fn file_fingerprint(path: &Path) -> Option<FileFingerprint> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified_nanos = metadata
+        .modified()
+        .ok()?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos()
+        .min(u64::MAX as u128) as u64;
+    Some(FileFingerprint {
+        size: metadata.len(),
+        modified_nanos,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +307,20 @@ pub fn scan_vault(
     let scan_filter = ScanFilter::from_options(scan_options)?;
     let ignore_patterns = load_maruignore(&vault);
     let version_names = collect_version_names(&vault);
+    let nested_roots = registered_nested_roots(&vault);
+    let cached = read_vault_cache_envelope(&vault).ok().flatten();
+    let cached_entries: HashMap<String, VaultEntry> = cached
+        .as_ref()
+        .map(|cache| {
+            cache
+                .entries
+                .iter()
+                .cloned()
+                .map(|entry| (entry.rel_path.clone(), entry))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cached_fingerprints = cached.map(|cache| cache.fingerprints).unwrap_or_default();
 
     // Collect candidate paths sequentially (walkdir isn't thread-safe and
     // benefits little from parallelism — directory traversal is I/O bound),
@@ -280,6 +338,9 @@ pub fn scan_vault(
             let path = e.path();
             if path == vault {
                 return true;
+            }
+            if nested_roots.iter().any(|root| path == root) {
+                return false;
             }
             if scan_filter.is_excluded_path(path, &vault, GENERATED_DIRS) {
                 return false;
@@ -304,7 +365,20 @@ pub fn scan_vault(
 
     let mut entries: Vec<VaultEntry> = candidates
         .par_iter()
-        .filter_map(|path| read_entry(path, &vault, &version_names).ok())
+        .filter_map(|path| {
+            let rel = path
+                .strip_prefix(&vault)
+                .ok()?
+                .to_string_lossy()
+                .to_string();
+            let fingerprint = file_fingerprint(path);
+            if fingerprint.as_ref() == cached_fingerprints.get(&rel) {
+                if let Some(entry) = cached_entries.get(&rel) {
+                    return Some(entry.clone());
+                }
+            }
+            read_entry(path, &vault, &version_names).ok()
+        })
         .collect();
 
     entries.sort_by(|a, b| {
@@ -321,7 +395,19 @@ pub fn scan_vault(
 #[tauri::command]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
-    let path = vault_cache_path(&vault);
+    Ok(read_vault_cache_envelope(&vault)?.map(|cache| cache.entries))
+}
+
+fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
+    let preferred = vault_cache_path(vault);
+    let legacy = LEGACY_VAULT_CACHE_REL
+        .iter()
+        .fold(vault.to_path_buf(), |acc, part| acc.join(part));
+    let path = if preferred.exists() {
+        preferred
+    } else {
+        legacy
+    };
     if !path.exists() {
         return Ok(None);
     }
@@ -331,8 +417,13 @@ pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, S
     if content.trim().is_empty() {
         return Ok(None);
     }
-    match serde_json::from_str::<Vec<VaultEntry>>(&content) {
-        Ok(entries) => Ok(Some(entries)),
+    match serde_json::from_str::<VaultCacheOnDisk>(&content) {
+        Ok(VaultCacheOnDisk::Envelope(cache)) => Ok(Some(cache)),
+        Ok(VaultCacheOnDisk::Legacy(entries)) => Ok(Some(VaultCacheEnvelope {
+            version: 2,
+            entries,
+            fingerprints: BTreeMap::new(),
+        })),
         Err(_) => Ok(None),
     }
 }
@@ -460,9 +551,7 @@ fn json_safe_value(value: Value) -> Value {
             }
             Value::Mapping(out)
         }
-        Value::Sequence(seq) => {
-            Value::Sequence(seq.into_iter().map(json_safe_value).collect())
-        }
+        Value::Sequence(seq) => Value::Sequence(seq.into_iter().map(json_safe_value).collect()),
         Value::Tagged(tagged) => json_safe_value(tagged.value),
         other => other,
     }
@@ -562,6 +651,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         snippet,
         file_kind,
         version_count: count_versions_from_names(path, version_names),
+        owner_workspace_path: Some(vault.to_string_lossy().to_string()),
         links,
     })
 }
@@ -569,8 +659,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
 /// Built-in patterns that any workspace should ignore even without an
 /// explicit `.maruignore`. macOS / Windows / git noise that has
 /// nothing to do with the user's notes.
-pub const DEFAULT_MARU_IGNORE: &[&str] =
-    &[".DS_Store", ".gitkeep", ".keep", "Thumbs.db", "Icon\r"];
+pub const DEFAULT_MARU_IGNORE: &[&str] = &[".DS_Store", ".gitkeep", ".keep", "Thumbs.db", "Icon\r"];
 
 /// Load `.maruignore` patterns from the workspace root, merged with the
 /// built-in defaults. Each non-comment, non-empty line is a pattern.
@@ -676,9 +765,21 @@ fn write_vault_cache(vault: &Path, entries: &[VaultEntry]) -> Result<(), String>
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create workspace cache directory: {err}"))?;
     }
-    let serialized = serde_json::to_string(entries)
+    let fingerprints = entries
+        .iter()
+        .filter_map(|entry| {
+            file_fingerprint(Path::new(&entry.path))
+                .map(|fingerprint| (entry.rel_path.clone(), fingerprint))
+        })
+        .collect();
+    let envelope = VaultCacheEnvelope {
+        version: 3,
+        entries: entries.to_vec(),
+        fingerprints,
+    };
+    let serialized = serde_json::to_string(&envelope)
         .map_err(|err| format!("Cannot serialize workspace cache: {err}"))?;
-    fs::write(&path, serialized).map_err(|err| format!("Cannot write workspace cache: {err}"))
+    write_atomic(&path, serialized.as_bytes())
 }
 
 #[cfg(test)]

@@ -225,6 +225,68 @@ pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
+fn comparable_root(path: &str) -> PathBuf {
+    let raw = PathBuf::from(path);
+    raw.canonicalize().unwrap_or(raw)
+}
+
+fn longest_registered_owner<'a>(
+    registry: &'a WorkspaceRegistry,
+    target: &Path,
+) -> Option<&'a WorkspaceRootEntry> {
+    registry
+        .workspaces
+        .iter()
+        .filter(|workspace| target.starts_with(comparable_root(&workspace.path)))
+        .max_by_key(|workspace| comparable_root(&workspace.path).components().count())
+}
+
+/// Reject a document mutation routed through a parent workspace when the
+/// target belongs to a more-specific registered root. This is deliberately a
+/// lexical/registered-root check: symlinks intentionally mounted inside a
+/// workspace remain part of that workspace unless their lexical path is also
+/// registered as a nested root (README invariant #5).
+pub fn assert_document_owner(caller_root: &str, target: &Path) -> Result<(), String> {
+    let registry = load_registry()?;
+    assert_document_owner_in_registry(&registry, caller_root, target)
+}
+
+fn assert_document_owner_in_registry(
+    registry: &WorkspaceRegistry,
+    caller_root: &str,
+    target: &Path,
+) -> Result<(), String> {
+    let caller = comparable_root(caller_root);
+    let target = target.to_path_buf();
+    let Some(owner) = longest_registered_owner(registry, &target) else {
+        return Ok(());
+    };
+    let owner_root = comparable_root(&owner.path);
+    if owner_root == caller {
+        return Ok(());
+    }
+    Err(format!(
+        "Document belongs to registered workspace '{}'; reopen it through that workspace before writing.",
+        owner.path
+    ))
+}
+
+pub fn registered_nested_roots(workspace_root: &Path) -> Vec<PathBuf> {
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    load_registry()
+        .map(|registry| {
+            registry
+                .workspaces
+                .iter()
+                .map(|workspace| comparable_root(&workspace.path))
+                .filter(|candidate| candidate != &root && candidate.starts_with(&root))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn save_registry(registry: &WorkspaceRegistry) -> Result<(), String> {
     save_registry_at(&workspace_registry_path()?, registry)
 }
@@ -753,6 +815,32 @@ mod tests {
     }
 
     #[test]
+    fn nested_registered_workspace_owns_its_documents() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let parent = tmp.path().join("work");
+        let nested = parent.join("vault");
+        fs::create_dir_all(nested.join("notes")).unwrap();
+        let target = nested.canonicalize().unwrap().join("notes/a.md");
+        fs::write(&target, "# A\n").unwrap();
+        let registry = WorkspaceRegistry {
+            workspaces: vec![
+                entry("Work", &parent.to_string_lossy(), "private"),
+                entry("Vault", &nested.to_string_lossy(), "public"),
+            ],
+            ..Default::default()
+        };
+
+        assert!(
+            assert_document_owner_in_registry(&registry, &parent.to_string_lossy(), &target)
+                .is_err()
+        );
+        assert!(
+            assert_document_owner_in_registry(&registry, &nested.to_string_lossy(), &target)
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn roundtrip_preserves_workspace_data() {
         let registry = WorkspaceRegistry {
             workspaces: vec![
@@ -881,7 +969,10 @@ mod tests {
         assert!(summary.capabilities.can_create);
         assert!(summary.capabilities.can_modify);
         assert!(!summary.capabilities.can_delete, "delete stays MCP-only");
-        assert!(!summary.capabilities.can_rename_move, "rename/move out of V2 scope");
+        assert!(
+            !summary.capabilities.can_rename_move,
+            "rename/move out of V2 scope"
+        );
     }
 
     #[test]

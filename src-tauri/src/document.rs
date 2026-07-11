@@ -2,14 +2,17 @@ use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
 use crate::vault_guard::{is_managed_root, validate_managed_write};
-use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
+use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+use crate::atomic_file::write_atomic;
 
 /// Frontend-supplied value for a single frontmatter field. Untagged so React
 /// can send a bare string / array / number / boolean and we figure it out.
@@ -44,6 +47,7 @@ pub struct DocumentPayload {
     pub body: String,
     pub meta: BTreeMap<String, Value>,
     pub file_kind: String,
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +98,7 @@ pub fn read_document(vault_path: String, document_path: String) -> Result<Docume
         .and_then(|e| e.to_str())
         .unwrap_or("md")
         .to_string();
+    let revision = revision_for(&content);
 
     Ok(DocumentPayload {
         path: path.to_string_lossy().to_string(),
@@ -103,7 +108,24 @@ pub fn read_document(vault_path: String, document_path: String) -> Result<Docume
         body: parts.body,
         meta: parts.meta,
         file_kind,
+        revision,
     })
+}
+
+pub(crate) fn revision_for(content: &str) -> String {
+    format!("{:x}", Sha256::digest(content.as_bytes()))
+}
+
+fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(), String> {
+    if let Some(expected) = expected {
+        let actual = revision_for(current);
+        if actual != expected {
+            return Err(format!(
+                "document_conflict: expected revision {expected}, found {actual}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -111,10 +133,17 @@ pub fn save_document(
     vault_path: String,
     document_path: String,
     content: String,
+    expected_revision: Option<String>,
 ) -> Result<DocumentPayload, String> {
+    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     validate_managed_write(&vault_path, &document_path, &content)?;
-    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    if path.is_file() {
+        let current =
+            fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
+        assert_expected_revision(&current, expected_revision.as_deref())?;
+    }
     // Managed roots snapshot the on-disk content before every overwrite
     // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
     if is_managed_root(&vault_path) && path.is_file() {
@@ -132,11 +161,7 @@ pub fn save_document(
             )?;
         }
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create parent directory: {err}"))?;
-    }
-    fs::write(&path, content).map_err(|err| format!("Cannot save document: {err}"))?;
+    write_atomic(&path, content.as_bytes())?;
     read_document(vault_path, path.to_string_lossy().to_string())
 }
 
@@ -149,11 +174,14 @@ pub fn update_frontmatter_field(
     document_path: String,
     key: String,
     value: Option<FieldInput>,
+    expected_revision: Option<String>,
 ) -> Result<DocumentPayload, String> {
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &path)?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
+    assert_expected_revision(&original, expected_revision.as_deref())?;
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
@@ -171,7 +199,7 @@ pub fn update_frontmatter_field(
                 "managed-write auto snapshot",
             )?;
         }
-        fs::write(&path, &updated).map_err(|err| format!("Cannot save document: {err}"))?;
+        write_atomic(&path, updated.as_bytes())?;
     }
     read_document(vault_path, path.to_string_lossy().to_string())
 }
@@ -206,7 +234,6 @@ pub fn create_document(
     target_rel_path: Option<String>,
     #[allow(non_snake_case)] extras: Option<CreateDocumentExtras>,
 ) -> Result<CreatedDocument, String> {
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let now = Utc::now().to_rfc3339();
     let rel_path = match target_rel_path
         .as_deref()
@@ -221,6 +248,8 @@ pub fn create_document(
         }
     };
     let path = resolve_inside_vault(&vault_path, &rel_path)?;
+    assert_document_owner(&vault_path, &path)?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     if path.exists() {
         return Err("A document with that generated file name already exists".to_string());
     }
@@ -282,7 +311,7 @@ pub fn create_document(
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create parent directory: {err}"))?;
     }
-    fs::write(&path, content).map_err(|err| format!("Cannot create document: {err}"))?;
+    write_atomic(&path, content.as_bytes())?;
 
     Ok(CreatedDocument {
         path: path.to_string_lossy().to_string(),
@@ -329,13 +358,15 @@ pub fn move_document(
     document_path: String,
     target_rel_path: String,
 ) -> Result<DocumentPayload, String> {
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::RenameMove)?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     ensure_existing_document(&source_path)?;
 
     let rel_path = validate_target_rel_path(&target_rel_path)?;
     let target_path = resolve_inside_vault(&vault_path, &rel_path)?;
+    assert_document_owner(&vault_path, &source_path)?;
+    assert_document_owner(&vault_path, &target_path)?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::RenameMove)?;
     if paths_match(&source_path, &target_path) {
         return read_document(vault_path, source_path.to_string_lossy().to_string());
     }
@@ -361,8 +392,9 @@ pub fn duplicate_document(
     vault_path: String,
     document_path: String,
 ) -> Result<DocumentPayload, String> {
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &source_path)?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     ensure_existing_document(&source_path)?;
     let target_path = unique_duplicate_path(&source_path);
     if is_managed_root(&vault_path) {
@@ -381,8 +413,9 @@ pub fn trash_document(
     vault_path: String,
     document_path: String,
 ) -> Result<DeletedDocument, String> {
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Delete)?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &source_path)?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Delete)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     ensure_existing_document(&source_path)?;
     let original_rel_path = relative(&source_path, &vault);
@@ -490,6 +523,8 @@ pub fn create_version(
     content: String,
     summary: String,
 ) -> Result<VersionSnapshot, String> {
+    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &source_path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     write_version_snapshot(&vault_path, &document_path, &title, &content, &summary)
 }
@@ -515,7 +550,11 @@ pub(crate) fn write_version_snapshot(
     let version_dir = vault.join(".maru").join("versions");
     fs::create_dir_all(&version_dir)
         .map_err(|err| format!("Cannot create version directory: {err}"))?;
-    let file_name = format!("{stem}-{}.md", timestamp.format("%Y%m%d-%H%M%S"));
+    let file_name = format!(
+        "{stem}-{}-{}.md",
+        timestamp.format("%Y%m%d-%H%M%S%.3f"),
+        Uuid::new_v4().simple()
+    );
     let version_path = version_dir.join(file_name);
 
     let body = if content.trim_start().starts_with("---\n") {
@@ -541,7 +580,7 @@ pub(crate) fn write_version_snapshot(
     let body_with_heading = format!("# {snapshot_title}\n\n{body}");
     let snapshot = build_frontmatter(&fields, &body_with_heading);
 
-    fs::write(&version_path, snapshot).map_err(|err| format!("Cannot write version: {err}"))?;
+    write_atomic(&version_path, snapshot.as_bytes())?;
 
     Ok(VersionSnapshot {
         path: version_path.to_string_lossy().to_string(),
@@ -593,12 +632,41 @@ mod tests {
             "read_document.content must match disk byte-for-byte"
         );
 
-        save_document(root.clone(), payload.path.clone(), payload.content.clone()).unwrap();
+        save_document(
+            root.clone(),
+            payload.path.clone(),
+            payload.content.clone(),
+            Some(payload.revision.clone()),
+        )
+        .unwrap();
 
         let after = fs::read_to_string(tmp.path().join("note.md")).unwrap();
         assert_eq!(
             after, original,
             "read→save with unchanged content must be byte-identical (frontmatter order, comments, trailing newline all preserved)"
+        );
+    }
+
+    #[test]
+    fn save_rejects_stale_revision() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("note.md"), "# Original\n").unwrap();
+        let opened = read_document(root.clone(), "note.md".to_string()).unwrap();
+        fs::write(tmp.path().join("note.md"), "# External edit\n").unwrap();
+
+        let error = save_document(
+            root,
+            "note.md".to_string(),
+            "# Maru edit\n".to_string(),
+            Some(opened.revision),
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("document_conflict:"));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("note.md")).unwrap(),
+            "# External edit\n"
         );
     }
 
@@ -624,6 +692,7 @@ mod tests {
             "note.md".to_string(),
             "status".to_string(),
             Some(FieldInput::Str("완료".to_string())),
+            None,
         )
         .unwrap();
 
@@ -665,6 +734,7 @@ mod tests {
                 "alpha".to_string(),
                 "beta".to_string(),
             ])),
+            None,
         )
         .unwrap();
 
@@ -682,9 +752,14 @@ mod tests {
         let original = "---\ntitle: keep\nephemeral: drop\nstatus: keep\n---\n# X\n";
         fs::write(tmp.path().join("note.md"), original).unwrap();
 
-        let payload =
-            update_frontmatter_field(root, "note.md".to_string(), "ephemeral".to_string(), None)
-                .unwrap();
+        let payload = update_frontmatter_field(
+            root,
+            "note.md".to_string(),
+            "ephemeral".to_string(),
+            None,
+            None,
+        )
+        .unwrap();
 
         assert!(!payload.content.contains("ephemeral"));
         assert!(payload.content.contains("title: keep"));

@@ -5,7 +5,7 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import { communityColor, domainColor } from "./GraphCanvas";
+import { communityColor, domainColor } from "./graphStyle";
 import type { FacetItem, GraphFilters } from "./GraphFilterPanel";
 
 interface GraphLegendProps {
