@@ -363,12 +363,13 @@ export function GraphCanvas({
         minCameraRatio: 0.02,
         maxCameraRatio: 8,
         stagePadding: 36,
+        // Sigma reducers REPLACE display data — the return value must carry
+        // x/y/size/color, so every branch merges over `data`.
         nodeReducer: (node, data) => {
           const state = interactionRef.current;
           const patch: Partial<SigmaNodeAttributes> & { highlighted?: boolean } = {};
           if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
-            patch.hidden = true;
-            return patch;
+            return { ...data, hidden: true };
           }
           const overlayIds = state.highlight?.kind === "pair"
             ? new Set([state.highlight.a, state.highlight.b])
@@ -389,12 +390,12 @@ export function GraphCanvas({
             patch.borderColor = WARN_COLOR;
             patch.forceLabel = true;
           }
-          return patch;
+          return { ...data, ...patch };
         },
         edgeReducer: (_edge, data) => {
           const state = interactionRef.current;
           if (state.visibleNodeIds && (!state.visibleNodeIds.has(data.sourceId) || !state.visibleNodeIds.has(data.targetId))) {
-            return { hidden: true };
+            return { ...data, hidden: true };
           }
           const hovered = state.hoverId;
           const pair = state.highlight?.kind === "pair" ? state.highlight : null;
@@ -411,7 +412,7 @@ export function GraphCanvas({
               }
             }
           }
-          return active ? { color: pair || path ? ACCENT_COLOR : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { color: "#e2e3e5", size: 0.5 };
+          return active ? { ...data, color: pair || path ? ACCENT_COLOR : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: "#e2e3e5", size: 0.5 };
         },
       });
       rendererRef.current = renderer;
@@ -622,7 +623,11 @@ export function GraphCanvas({
         rendererRef.current = null;
         graphRef.current = null;
       };
-    } catch {
+    } catch (err) {
+      console.error("[graph] WebGL renderer init failed — falling back to static render", err);
+      // Sigma appends its canvases before validating — drop any orphans so
+      // they can't sit above the fallback/overlay and swallow pointer events.
+      container.replaceChildren();
       setWebglFailed(true);
       setReady(true);
       graphRef.current = null;
@@ -690,7 +695,9 @@ export function GraphCanvas({
 
   return (
     <div className="graph-canvas-wrap">
-      {webglFailed ? (
+      {/* When the e2e DOM overlay is active it is the only surface allowed to
+          render .graph-node elements — the static fallback would double them. */}
+      {webglFailed && !debugDomEnabled ? (
         <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} onSelect={onSelect} onOpen={onOpen} />
       ) : (
         <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label="Knowledge graph" />

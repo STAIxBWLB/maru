@@ -921,9 +921,16 @@ test("drags multi-selected Files rows and folder rows", async ({ page }) => {
     modifiers: ["Meta"],
   });
 
-  await page
-    .locator(".document-list .tree-row.file", { hasText: "maru-weekly-meeting.md" })
-    .dragTo(page.locator(".document-list .tree-row.folder", { hasText: "attachments" }));
+  // dispatchDrag instead of dragTo: dragTo scrolls the drop target into view
+  // while the button is down, which shifts the virtualized rows under the
+  // pointer and starts the drag from the wrong row.
+  await dispatchDrag(
+    page,
+    ".document-list .tree-row.file",
+    "maru-weekly-meeting.md",
+    ".document-list .tree-row.folder",
+    "attachments",
+  );
 
   const rightPane = page.locator(".outline-pane");
   await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);

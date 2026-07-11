@@ -11,8 +11,10 @@ test.beforeEach(async ({ page }) => {
     if (window.sessionStorage.getItem("maru:graph-e2e:storage-cleared") === "true") return;
     window.localStorage.clear();
     window.localStorage.setItem("maru:e2e:graph-dom", "1");
+    // readMaruSettings namespaces the web-mode fallback key by workPath
+    // (mock://maru-sample-workspace in web mode — see fixtures.MOCK_WORKSPACE_PATH).
     window.localStorage.setItem(
-      "maru:settings:fallback:v1",
+      "maru:settings:fallback:v1:mock://maru-sample-workspace",
       JSON.stringify({ graph: { source: "all", scope: "all" } }),
     );
     window.sessionStorage.setItem("maru:graph-e2e:storage-cleared", "true");
