@@ -8,6 +8,37 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.2 — 2026-07-12 — Graph UI refresh (Obsidian-benchmark) + business-unit lifecycle Tree C
+
+**Graph UI refresh**, benchmarking Obsidian's graph view:
+
+- All canvas colors (labels, node borders, edges, dim states, ghost fill,
+  export backgrounds) now derive from the app's theme tokens; the graph
+  follows dark mode live, including the legend/filter/inspector swatches.
+- Added two 12-color, CVD-validated community palettes (light/dark, stable
+  slot order across themes).
+- Replaced binary label-threshold popping with a zoom-linked fade (custom
+  Sigma drawers) and added a hover-grow affordance.
+- Removed community hulls entirely (`feat!`); communities are now
+  Obsidian-style color groups keyed by the legend. Stored `showHulls`
+  settings are silently dropped.
+- Quieter, theme-derived edge weights.
+- Unified panel/toolbar typography on one type scale with tabular numerals.
+- Fixed a pre-existing accessibility bug where the graph's screen-reader
+  selection live region had no CSS rule and rendered visibly over the canvas.
+
+**Business-unit lifecycle (Tree C alignment):**
+
+- Aligned the `business-unit-lifecycle` skill template with the workspace
+  Tree C grammar: proposal-first scaffold (dropped empty 01-05 scaffolds),
+  `_inbox` renamed to `_incoming`, added a bare `06-proposal` README.
+- Single-sourced `YEAR_LEAVES` and fixed two contract mismatches
+  (`external-dispatch` -> `official-documents`; dropped stray
+  `02-admin-approvals` leaves).
+- `new_business_unit.py` gained `--with <category>` activation and
+  `--profile cycle`; added `graduate_unit.py`, emitting a
+  `migrate_tree.py`-compatible manifest for cycle -> L3 graduation.
+
 ## v0.4.1 — 2026-07-11 — Graph V4 hotfix
 
 - Fixed the Sigma node/edge reducers to merge over the incoming display data
