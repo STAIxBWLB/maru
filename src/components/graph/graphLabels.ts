@@ -1,3 +1,4 @@
+import type { Attributes } from "graphology-types";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { graphTheme } from "./graphStyle";
@@ -16,10 +17,14 @@ export function labelAlpha(renderedSize: number, forced: boolean): number {
   return (renderedSize - FADE_START) / (FADE_END - FADE_START);
 }
 
-function drawLabelText(
+function drawLabelText<
+  N extends Attributes = Attributes,
+  E extends Attributes = Attributes,
+  G extends Attributes = Attributes,
+>(
   context: CanvasRenderingContext2D,
   data: NodeLabelData,
-  settings: Settings<any, any>,
+  settings: Settings<N, E, G>,
   alpha: number,
   sizePx: number,
   weight: string,
@@ -43,20 +48,20 @@ function drawLabelText(
   context.restore();
 }
 
-export const drawMaruNodeLabel = ((
-  context: CanvasRenderingContext2D,
-  data: NodeLabelData,
-  settings: Settings<any, any>,
-): void => {
+export function drawMaruNodeLabel<
+  N extends Attributes = Attributes,
+  E extends Attributes = Attributes,
+  G extends Attributes = Attributes,
+>(context: CanvasRenderingContext2D, data: NodeLabelData, settings: Settings<N, E, G>): void {
   const forced = data.forceLabel === true || data.highlighted === true;
   drawLabelText(context, data, settings, labelAlpha(data.size, forced), settings.labelSize, settings.labelWeight);
-}) as any;
+}
 
-export const drawMaruNodeHover = ((
-  context: CanvasRenderingContext2D,
-  data: NodeLabelData,
-  settings: Settings<any, any>,
-): void => {
+export function drawMaruNodeHover<
+  N extends Attributes = Attributes,
+  E extends Attributes = Attributes,
+  G extends Attributes = Attributes,
+>(context: CanvasRenderingContext2D, data: NodeLabelData, settings: Settings<N, E, G>): void {
   // Hovered node: always-on, slightly larger label; no white box (Obsidian look).
   drawLabelText(context, data, settings, 1, settings.labelSize + 1, "600");
-}) as any;
+}
