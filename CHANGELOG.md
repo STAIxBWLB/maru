@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.1 — 2026-07-11 — Graph V4 hotfix
+
+- Fixed the Sigma node/edge reducers to merge over the incoming display data
+  instead of replacing it. The bare-patch returns dropped node `x`/`y`, so the
+  Sigma constructor threw on every mount and v0.4.0 silently fell back to the
+  static renderer; the WebGL pipeline, ForceAtlas2 layout (community hulls),
+  and PNG/SVG export never initialized.
+- Renderer init failures are now logged and the container is cleared, so a
+  failed constructor can't leave dead canvases stacked above the fallback
+  swallowing pointer events.
+- e2e hardening: the DOM overlay is the only `.graph-node` surface while
+  active, stretches to the full canvas, and settings fallbacks write to the
+  workPath-namespaced key; the multi-select Files drag uses synthesized drag
+  events so virtualized row recycling can't shift the drag source mid-gesture.
+
 ## v0.4.0 — 2026-07-11 — Graph V4 (WebGL) + skills sync
 
 - Replaced the SVG/d3-force hot path with lazy-loaded Sigma WebGL,
