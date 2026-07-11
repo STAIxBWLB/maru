@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased — Graph V4 performance and authoring hardening
+## v0.4.0 — 2026-07-11 — Graph V4 (WebGL) + skills sync
 
 - Replaced the SVG/d3-force hot path with lazy-loaded Sigma WebGL,
   Graphology `MultiDirectedGraph`, and a Barnes-Hut ForceAtlas2 worker.
@@ -25,6 +25,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   hydrated only the visible startup tabs.
 - Fixed native graph/comms/tasks settings persistence and the multi-selection
   drag payload race. Removed an embedded NUL byte from this changelog.
+- Added `maru skills sync --check|--apply --tools claude,codex`, five source
+  ownership classes (bundled, owned catalog, imported, external-managed,
+  tool-native; the last two inventory-only), and a strictly read-only `maru
+  doctor`; hardened manifest/import path traversal and symlink handling.
 
 ## v0.3.3 — 2026-07-09
 

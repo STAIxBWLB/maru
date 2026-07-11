@@ -1,7 +1,7 @@
 # Maru
 
 Local-first AI workspace desktop app for Korean knowledge/document operations.
-Tauri 2 + Rust + React 19 + TypeScript. Current version **0.3.3**.
+Tauri 2 + Rust + React 19 + TypeScript. Current version **0.4.0**.
 
 Maru is the author SSOT for a single user's `~/workspace/work/` — it edits
 markdown with byte-identical frontmatter, ingests an inbox, runs bundled Claude
@@ -78,7 +78,7 @@ For repo-local management shortcuts:
 make cli-install
 make cli-smoke
 make release-preflight
-make homebrew-update RELEASE_TAG=v0.3.3 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
 ```
 
 ## Architecture
@@ -339,7 +339,7 @@ before tagging or publishing a release. After release assets exist, update the
 Homebrew tap with:
 
 ```bash
-make homebrew-update-commit RELEASE_TAG=v0.3.3 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update-commit RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
