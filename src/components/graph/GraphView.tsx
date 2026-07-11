@@ -25,6 +25,7 @@ import {
   type GraphNode,
 } from "../../lib/graph/model";
 import { shortestPath } from "../../lib/graph/insights";
+import { refreshGraphTheme } from "./graphStyle";
 import { useTranslation } from "../../lib/i18n";
 import {
   isInEditable,
@@ -100,6 +101,28 @@ export function GraphView({
   );
   const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
   const [search, setSearch] = useState("");
+  // Theme subscription lives here (not GraphCanvas) so GraphLegend/GraphFilterPanel/
+  // GraphInspector — which read the module-level theme cache at render time — also
+  // re-render on a theme flip instead of showing a stale palette.
+  const [themeEpoch, setThemeEpoch] = useState(() => {
+    // Refresh during first render so children (canvas + panels) mount with live tokens.
+    refreshGraphTheme();
+    return 0;
+  });
+  useEffect(() => {
+    const apply = () => {
+      refreshGraphTheme();
+      setThemeEpoch((epoch) => epoch + 1);
+    };
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", apply);
+    return () => {
+      observer.disconnect();
+      media.removeEventListener("change", apply);
+    };
+  }, []);
   const exportControllerRef = useRef<GraphExportController | null>(null);
   // Right-click node context menu (spec §F2 usability).
   const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
@@ -664,6 +687,7 @@ export function GraphView({
             initialPinnedIds={pinnedIds}
             visibleNodeIds={visibleNodeIds}
             layoutEpoch={layoutEpoch}
+            themeEpoch={themeEpoch}
             enriched={model.enriched}
             selectedId={selectedId}
             focusNodeId={searchMatch?.id ?? focus ?? null}

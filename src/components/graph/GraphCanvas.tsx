@@ -14,7 +14,7 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, refreshGraphTheme } from "./graphStyle";
+import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
 
 export interface GraphViewport {
@@ -72,6 +72,7 @@ interface GraphCanvasProps {
   initialPinnedIds?: string[];
   visibleNodeIds?: Set<string>;
   layoutEpoch: number;
+  themeEpoch: number;
   enriched: boolean;
   selectedId: string | null;
   focusNodeId: string | null;
@@ -254,6 +255,7 @@ export function GraphCanvas({
   initialPinnedIds = [],
   visibleNodeIds,
   layoutEpoch,
+  themeEpoch,
   enriched,
   selectedId,
   focusNodeId,
@@ -284,22 +286,6 @@ export function GraphCanvas({
   const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
   const [ready, setReady] = useState(false);
   const [webglFailed, setWebglFailed] = useState(false);
-  const [themeEpoch, setThemeEpoch] = useState(0);
-  useEffect(() => {
-    refreshGraphTheme();
-    const apply = () => {
-      refreshGraphTheme();
-      setThemeEpoch((epoch) => epoch + 1);
-    };
-    const observer = new MutationObserver(apply);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener("change", apply);
-    return () => {
-      observer.disconnect();
-      media.removeEventListener("change", apply);
-    };
-  }, []);
   const fittedEpochRef = useRef(-1);
   // Node/edge-count signature of the last built graph — lets a rebuild whose
   // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
