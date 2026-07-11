@@ -155,6 +155,7 @@ export function GraphView({
   const [refreshing, setRefreshing] = useState(false);
   const [settled, setSettled] = useState<Float64Array | null>(null);
   const latestPositionsRef = useRef<Float64Array | null>(null);
+  const latestPositionNodeIdsRef = useRef<string[] | null>(null);
   const settledNodesRef = useRef<GraphNode[] | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [seedPositions, setSeedPositions] = useState<Record<string, [number, number]>>({});
@@ -687,6 +688,7 @@ export function GraphView({
             nodes={model.nodes}
             edges={model.edges}
             positionsRef={latestPositionsRef}
+            positionNodeIdsRef={latestPositionNodeIdsRef}
             seedPositions={seedPositions}
             initialPinnedIds={pinnedIds}
             visibleNodeIds={visibleNodeIds}

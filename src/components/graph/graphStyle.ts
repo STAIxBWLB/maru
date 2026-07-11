@@ -1,4 +1,4 @@
-import type { GraphNode } from "../../lib/graph/model";
+import type { GraphEdge, GraphNode } from "../../lib/graph/model";
 
 const COMMUNITY_COLORS = [
   "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b",
@@ -36,4 +36,23 @@ export function domainColor(domain: string | null): string {
 
 export function edgeKey(a: string, b: string): string {
   return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+}
+
+export function graphTopologySignature(nodes: GraphNode[], edges: GraphEdge[]): string {
+  let hash = 2166136261;
+  const add = (value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    hash ^= 0xff;
+    hash = Math.imul(hash, 16777619);
+  };
+  for (const node of nodes) add(node.id);
+  for (const edge of edges) {
+    add(edge.source);
+    add(edge.target);
+    add(edge.relation);
+  }
+  return `${nodes.length}:${edges.length}:${hash >>> 0}`;
 }

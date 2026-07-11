@@ -14,7 +14,7 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { communityColor, edgeKey, nodeColor, nodeRadius } from "./graphStyle";
+import { communityColor, edgeKey, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 
 export interface GraphViewport {
   zoom: number;
@@ -69,6 +69,7 @@ interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   positionsRef: RefObject<Float64Array | null>;
+  positionNodeIdsRef: RefObject<string[] | null>;
   seedPositions?: Record<string, [number, number]>;
   initialPinnedIds?: string[];
   visibleNodeIds?: Set<string>;
@@ -121,15 +122,19 @@ function buildSigmaGraph(
   nodes: GraphNode[],
   edges: GraphEdge[],
   positions: Float64Array | null,
+  positionNodeIds: string[] | null,
   seedPositions: Record<string, [number, number]> | undefined,
   enriched: boolean,
 ): GraphInstance {
   const graph = new MultiDirectedGraph<SigmaNodeAttributes, SigmaEdgeAttributes>();
+  const positionsAligned = positions?.length === nodes.length * 2
+    && positionNodeIds?.length === nodes.length
+    && nodes.every((node, index) => positionNodeIds[index] === node.id);
   nodes.forEach((node, index) => {
     const fallback = hashPosition(node.id, index);
     const seed = seedPositions?.[node.id];
-    const x = positions?.length === nodes.length * 2 ? positions[index * 2] : seed?.[0] ?? fallback[0];
-    const y = positions?.length === nodes.length * 2 ? positions[index * 2 + 1] : seed?.[1] ?? fallback[1];
+    const x = positionsAligned ? positions![index * 2] : seed?.[0] ?? fallback[0];
+    const y = positionsAligned ? positions![index * 2 + 1] : seed?.[1] ?? fallback[1];
     graph.addNode(node.id, {
       x,
       y,
@@ -247,6 +252,7 @@ export function GraphCanvas({
   nodes,
   edges,
   positionsRef,
+  positionNodeIdsRef,
   seedPositions,
   initialPinnedIds = [],
   visibleNodeIds,
@@ -330,7 +336,14 @@ export function GraphCanvas({
   useEffect(() => {
     const container = containerRef.current;
     if (!container || webglFailed) return;
-    const graph = buildSigmaGraph(nodes, edges, positionsRef.current, seedPositions, enriched);
+    const graph = buildSigmaGraph(
+      nodes,
+      edges,
+      positionsRef.current,
+      positionNodeIdsRef.current,
+      seedPositions,
+      enriched,
+    );
     graphRef.current = graph;
     try {
       const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
@@ -457,6 +470,7 @@ export function GraphCanvas({
           positions[index * 2 + 1] = graph.getNodeAttribute(node.id, "y");
         });
         positionsRef.current = positions;
+        positionNodeIdsRef.current = nodes.map((node) => node.id);
         onLayoutSettledRef.current?.(positions, [...pinnedIdsRef.current]);
       };
       const stopLayout = () => {
@@ -574,13 +588,12 @@ export function GraphCanvas({
       mouse.on("mouseup", onUp);
       renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
       renderer.once("afterRender", () => setReady(true));
-      // Only re-run the (expensive) force layout when the topology actually
-      // changed. A same-count rebuild with valid cached positions was seeded
-      // straight from them, so paint and keep the viewport instead of shuffling.
-      // ponytail: count signature, not a full edge-set compare — a swap that
-      // keeps both counts identical warm-starts slightly stale until a relayout.
-      const topoSig = `${nodes.length}:${edges.length}`;
-      const positionsValid = positionsRef.current?.length === graph.order * 2;
+      // Re-run the force layout only when node ids or edge topology changed.
+      // Metadata-only rescans and enrichment swaps keep the viewport stable.
+      const topoSig = graphTopologySignature(nodes, edges);
+      const positionsValid = positionsRef.current?.length === graph.order * 2
+        && positionNodeIdsRef.current?.length === graph.order
+        && nodes.every((node, index) => positionNodeIdsRef.current?.[index] === node.id);
       if (prevTopoSigRef.current === topoSig && positionsValid) {
         snapshotPositions();
       } else {
@@ -615,7 +628,7 @@ export function GraphCanvas({
       graphRef.current = null;
       rendererRef.current = null;
     }
-  }, [nodes, edges, enriched, positionsRef, seedPositions, exportControllerRef, webglFailed]);
+  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
