@@ -150,7 +150,7 @@ function buildSigmaGraph(
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
     const directed = edge.relation === "supersedes" || edge.relation === "superseded_by";
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
-      size: edge.fromFrontmatter ? 1.2 : 0.75,
+      size: edge.fromFrontmatter ? 1 : 0.6,
       color: edge.fromFrontmatter ? graphTheme().edgeStrong : graphTheme().edge,
       type: directed ? "arrow" : "line",
       relation: edge.relation,
