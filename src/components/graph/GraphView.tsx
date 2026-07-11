@@ -17,7 +17,6 @@ import {
   blobToUint8Array,
   downloadGraphBlob,
 } from "../../lib/graph/export";
-import { hullPath, type Point } from "../../lib/graph/hull";
 import {
   buildVaultGraph,
   enrichGraph,
@@ -100,7 +99,6 @@ export function GraphView({
     filtersFromSettings(graphSettings.filters),
   );
   const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
-  const [showHulls, setShowHulls] = useState(graphSettings.showHulls);
   const [search, setSearch] = useState("");
   const exportControllerRef = useRef<GraphExportController | null>(null);
   // Right-click node context menu (spec §F2 usability).
@@ -126,10 +124,9 @@ export function GraphView({
       localDirection,
       view,
       searchAsFilter,
-      showHulls,
       filters: filtersToSettings(filters),
     });
-  }, [source, scope, localDepth, localDirection, view, searchAsFilter, showHulls, filters]);
+  }, [source, scope, localDepth, localDirection, view, searchAsFilter, filters]);
 
   // Re-seed from external (cross-window) settings changes. Deps are only
   // [graphSettings], and each setState is gated on a real diff, so a local
@@ -142,7 +139,6 @@ export function GraphView({
     if (graphSettings.localDirection !== localDirection) setLocalDirection(graphSettings.localDirection);
     if (graphSettings.view !== view) setView(graphSettings.view);
     if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
-    if (graphSettings.showHulls !== showHulls) setShowHulls(graphSettings.showHulls);
     if (JSON.stringify(graphSettings.filters) !== JSON.stringify(filtersToSettings(filters))) {
       setFilters(filtersFromSettings(graphSettings.filters));
     }
@@ -285,28 +281,6 @@ export function GraphView({
     () => new Set(filtered.nodes.map((node) => node.id)),
     [filtered.nodes],
   );
-
-  // Community areas, computed from the settled frame only (index-aligned with
-  // filtered.nodes) so they stay put during drag and snap on settle.
-  const hulls = useMemo(() => {
-    if (!showHulls || !model.enriched || !settled) return [];
-    // Identity guard: skip while `settled` belongs to a different node set (a
-    // same-cardinality filter/search swap would otherwise draw from wrong points).
-    if (settledNodesRef.current !== model.nodes) return [];
-    const byCommunity = new Map<number, Point[]>();
-    model.nodes.forEach((node, i) => {
-      if (!visibleNodeIds.has(node.id)) return;
-      if (node.community == null) return;
-      let pts = byCommunity.get(node.community);
-      if (!pts) byCommunity.set(node.community, (pts = []));
-      pts.push([settled[i * 2], settled[i * 2 + 1]]);
-    });
-    const out: { community: number; path: string }[] = [];
-    for (const [community, pts] of byCommunity) {
-      out.push({ community, path: hullPath(pts) });
-    }
-    return out;
-  }, [showHulls, model, settled, visibleNodeIds]);
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -680,9 +654,6 @@ export function GraphView({
             communities={facets.communities}
             maxDegree={facets.maxDegree}
             onFiltersChange={setFilters}
-            hullsAvailable={model.enriched && facets.communities.length > 0}
-            showHulls={showHulls}
-            onShowHullsChange={setShowHulls}
           />
           <GraphCanvas
             nodes={model.nodes}
@@ -711,7 +682,6 @@ export function GraphView({
             onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
             favoriteIds={favoriteIds}
             exportControllerRef={exportControllerRef}
-            hulls={hulls}
             overlay={
               <GraphLegend
                 enriched={model.enriched}

@@ -420,14 +420,6 @@
   background: var(--bg);
 }
 
-/* Community areas — translucent convex hulls behind the graph. */
-.graph-hull {
-  fill-opacity: 0.06;
-  stroke: none;
-  pointer-events: none;
-  transition: fill-opacity 200ms ease;
-}
-
 /* Legend overlay (bottom-left of the canvas). */
 .graph-legend {
   position: absolute;

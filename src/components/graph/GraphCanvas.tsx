@@ -14,7 +14,7 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { communityColor, edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, refreshGraphTheme } from "./graphStyle";
+import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, refreshGraphTheme } from "./graphStyle";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
 
 export interface GraphViewport {
@@ -90,7 +90,6 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
-  hulls?: { community: number; path: string }[];
   overlay?: ReactNode;
   onViewportReport?: (zoom: number) => void;
 }
@@ -273,7 +272,6 @@ export function GraphCanvas({
   onNodeContextMenu,
   favoriteIds = new Set<string>(),
   exportControllerRef,
-  hulls = [],
   overlay,
   onViewportReport,
 }: GraphCanvasProps) {
@@ -311,8 +309,6 @@ export function GraphCanvas({
   const pinnedIdsRef = useRef(new Set(initialPinnedIds));
   const onLayoutSettledRef = useRef(onLayoutSettled);
   onLayoutSettledRef.current = onLayoutSettled;
-  const hullsRef = useRef(hulls);
-  hullsRef.current = hulls;
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -435,32 +431,6 @@ export function GraphCanvas({
         },
       });
       rendererRef.current = renderer;
-      const hullCanvas = renderer.createCanvas("maru-hulls", { beforeLayer: "edges" });
-      const drawHulls = () => {
-        const context = hullCanvas.getContext("2d");
-        if (!context) return;
-        const dimensions = renderer.getDimensions();
-        const ratio = dimensions.width > 0 ? hullCanvas.width / dimensions.width : 1;
-        context.setTransform(1, 0, 0, 1, 0, 0);
-        context.clearRect(0, 0, hullCanvas.width, hullCanvas.height);
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        for (const hull of hullsRef.current) {
-          const numbers = hull.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-          if (numbers.length < 6) continue;
-          context.beginPath();
-          for (let index = 0; index + 1 < numbers.length; index += 2) {
-            const point = renderer.graphToViewport({ x: numbers[index], y: numbers[index + 1] });
-            if (index === 0) context.moveTo(point.x, point.y);
-            else context.lineTo(point.x, point.y);
-          }
-          context.closePath();
-          context.globalAlpha = 0.08;
-          context.fillStyle = communityColor(hull.community);
-          context.fill();
-        }
-        context.globalAlpha = 1;
-      };
-      renderer.on("afterRender", drawHulls);
       let contextRestored = false;
       let contextFallbackTimer: ReturnType<typeof setTimeout> | null = null;
       const onContextLost = (event: Event) => {
@@ -633,7 +603,6 @@ export function GraphCanvas({
           canvas.removeEventListener("webglcontextlost", onContextLost);
           canvas.removeEventListener("webglcontextrestored", onContextRestored);
         });
-        renderer.off("afterRender", drawHulls);
         startLayoutRef.current = null;
         stopLayout();
         mouse.off("mousemovebody", onMove);
@@ -740,9 +709,6 @@ export function GraphCanvas({
           onPointerLeave={() => setDebugHoverId(null)}
         >
           <g className="graph-nodes labels-on">
-            <g className="graph-hulls">
-              {hulls.map((hull) => <path key={hull.community} className="graph-hull" d={hull.path} style={{ fill: communityColor(hull.community) }} />)}
-            </g>
             {debugNodes.map((node, index) => {
               const baseX = 120 + (index % 5) * 150;
               const baseY = 130 + Math.floor(index / 5) * 130;
