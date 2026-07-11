@@ -1296,10 +1296,17 @@ pub fn skills_sync_tools(
     } else {
         let mut registry = load_registry_readonly_unlocked()?;
         add_default_sources_readonly(&mut registry, work_path.as_deref())?;
+        add_embedded_builtin_readonly(&mut registry)?;
         registry
     };
 
     for source_id in source_ids(&registry) {
+        if !apply
+            && source_id == BUILTIN_SOURCE_ID
+            && !builtin_materialized_root()?.join("manifest.json").is_file()
+        {
+            continue;
+        }
         if let Err(error) = rescan_source_in_registry_with_progress(
             &mut registry,
             &source_id,
@@ -1353,11 +1360,20 @@ pub fn skills_sync_tools(
             })
             .cloned()
             .collect();
+        let retained_stale_copy_keys: BTreeSet<(String, String)> = stale_installs
+            .iter()
+            .filter(|install| {
+                install.mode == "copy" && !stale_copy_has_exact_owned_install(install)
+            })
+            .map(|install| (install.target.clone(), install.installed_as.clone()))
+            .collect();
         remove_exact_stale_install_links(&registry, &stale_installs, &desired_keys)?;
         registry.installs.retain(|install| {
             install.managed_by != "maru"
                 || !selected_tools.contains(&install.target)
                 || desired_keys.contains(&(install.target.clone(), install.installed_as.clone()))
+                || retained_stale_copy_keys
+                    .contains(&(install.target.clone(), install.installed_as.clone()))
         });
 
         for skill in &desired {
@@ -1526,11 +1542,36 @@ fn stale_install_has_exact_owned_chain(install: &SkillInstall) -> bool {
         && symlink_target_path_equals(&expected_target, &expected_entry)
 }
 
+fn stale_copy_has_exact_owned_install(install: &SkillInstall) -> bool {
+    if install.managed_by != "maru" || install.mode != "copy" {
+        return false;
+    }
+    let Ok(installed_as) = host_fs::safe_entry_name(&install.installed_as) else {
+        return false;
+    };
+    let Ok(expected_target) = install_target_path(&install.target, &installed_as) else {
+        return false;
+    };
+    Path::new(&install.target_path) == expected_target
+        && copy_install_is_maru_managed(&expected_target, &installed_as)
+}
+
 fn remove_exact_stale_install_links(
     registry: &SkillsRegistry,
     stale_installs: &[SkillInstall],
     desired_keys: &BTreeSet<(String, String)>,
 ) -> Result<(), String> {
+    for install in stale_installs
+        .iter()
+        .filter(|install| stale_copy_has_exact_owned_install(install))
+    {
+        fs::remove_dir_all(&install.target_path).map_err(|err| {
+            format!(
+                "Cannot remove stale Maru copy install {}: {err}",
+                install.target_path
+            )
+        })?;
+    }
     let removable: Vec<&SkillInstall> = stale_installs
         .iter()
         .filter(|install| stale_install_has_exact_owned_chain(install))
@@ -1629,10 +1670,14 @@ fn plan_tool_sync(
             && tools.contains(&install.target)
             && !desired_keys.contains(&(install.target.clone(), install.installed_as.clone()))
     }) {
-        let exact_owned = stale_install_has_exact_owned_chain(install);
+        let exact_owned = stale_install_has_exact_owned_chain(install)
+            || stale_copy_has_exact_owned_install(install);
+        let keep_unverified_copy = install.mode == "copy" && !exact_owned;
         actions.push(SkillToolSyncAction {
             action: if exact_owned {
                 "remove-stale-install"
+            } else if keep_unverified_copy {
+                "keep-stale-record"
             } else {
                 "remove-stale-record"
             }
@@ -1641,7 +1686,9 @@ fn plan_tool_sync(
             target: Some(install.target.clone()),
             path: install.target_path.clone(),
             reason: if exact_owned {
-                "exact Maru-owned symlink chain is outside the current catalog".to_string()
+                "exact Maru-owned install is outside the current catalog".to_string()
+            } else if keep_unverified_copy {
+                "registry retained: copy install is not marker-verified".to_string()
             } else {
                 "registry-only: filesystem chain is not exactly Maru-owned".to_string()
             },
@@ -2686,6 +2733,8 @@ fn ensure_inventory_sources(registry: &mut SkillsRegistry) {
     ];
     for (id, kind, path, skills_subdir) in inventories {
         if !path.is_dir() {
+            registry.sources.retain(|source| source.id != id);
+            registry.skills.retain(|skill| skill.source_id != id);
             continue;
         }
         clear_removed_source(registry, id);
@@ -2705,6 +2754,102 @@ fn ensure_inventory_sources(registry: &mut SkillsRegistry) {
             registry.sources.push(source);
         }
     }
+}
+
+fn add_embedded_builtin_readonly(registry: &mut SkillsRegistry) -> Result<(), String> {
+    let root = builtin_materialized_root()?;
+    if root.join("manifest.json").is_file() || is_removed_source(registry, BUILTIN_SOURCE_ID) {
+        return Ok(());
+    }
+
+    let source = SkillSource {
+        id: BUILTIN_SOURCE_ID.to_string(),
+        kind: "builtin".to_string(),
+        ownership_class: source_ownership_class(BUILTIN_SOURCE_ID, "builtin"),
+        path: Some(host_fs::display_path(&root)),
+        repo_url: None,
+        skills_subdir: "skills".to_string(),
+        branch: None,
+        last_synced_at: None,
+    };
+    if let Some(existing) = registry
+        .sources
+        .iter_mut()
+        .find(|source| source.id == BUILTIN_SOURCE_ID)
+    {
+        *existing = source.clone();
+    } else {
+        registry.sources.push(source.clone());
+    }
+
+    let manifest = BUILTIN_DIR
+        .get_file("manifest.json")
+        .ok_or_else(|| "embedded_builtin_manifest_missing".to_string())?;
+    let manifest: serde_json::Value = serde_json::from_slice(manifest.contents())
+        .map_err(|err| format!("embedded_builtin_manifest_invalid: {err}"))?;
+    let entries = manifest
+        .get("skills")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "embedded_builtin_manifest_skills_missing".to_string())?;
+
+    registry
+        .skills
+        .retain(|skill| skill.source_id != BUILTIN_SOURCE_ID);
+    for entry in entries {
+        let name = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "embedded_builtin_name_missing".to_string())?;
+        let name = host_fs::safe_entry_name(name)?;
+        let rel_path = entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("embedded_builtin_path_missing: {name}"))?;
+        let dir = BUILTIN_DIR
+            .get_dir(rel_path)
+            .ok_or_else(|| format!("embedded_builtin_dir_missing: {rel_path}"))?;
+        let skill_md = BUILTIN_DIR
+            .get_file(format!("{rel_path}/SKILL.md"))
+            .ok_or_else(|| format!("embedded_builtin_skill_missing: {name}"))?;
+        let content = skill_md
+            .contents_utf8()
+            .ok_or_else(|| format!("embedded_builtin_skill_not_utf8: {name}"))?;
+        let parts = parse_frontmatter(content);
+        let validation_errors = validate_skill_frontmatter(content, &parts.meta);
+        let current_hash = hash_include_dir(dir);
+        let manifest_tier = entry
+            .get("tier")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string);
+        let frontmatter_tier = yaml_meta_string(&parts.meta, "tier");
+        let tier = manifest_tier
+            .as_deref()
+            .or(frontmatter_tier.as_deref())
+            .and_then(normalize_skill_tier)
+            .unwrap_or_else(|| infer_skill_tier(&source));
+        registry.skills.push(SkillRecord {
+            id: format!("{BUILTIN_SOURCE_ID}::{name}"),
+            source_id: BUILTIN_SOURCE_ID.to_string(),
+            name: name.clone(),
+            rel_path: rel_path.to_string(),
+            abs_path: host_fs::display_path(&root.join(rel_path)),
+            title: yaml_meta_string(&parts.meta, "name")
+                .or_else(|| yaml_meta_string(&parts.meta, "title"))
+                .unwrap_or_else(|| title_from_content(content, &name)),
+            description: yaml_meta_string(&parts.meta, "description"),
+            runtime: yaml_meta_string(&parts.meta, "runtime"),
+            category: yaml_meta_string(&parts.meta, "category"),
+            tier,
+            valid: validation_errors.is_empty(),
+            validation_errors,
+            editable: true,
+            dirty: false,
+            content_hash: Some(current_hash.clone()),
+            saved_hash: Some(current_hash),
+        });
+    }
+    registry.skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(())
 }
 
 fn add_default_sources_readonly(
@@ -4770,8 +4915,11 @@ mod tests {
         let reloaded = load_registry_readonly_unlocked().unwrap();
         assert_eq!(reloaded.sources[0].ownership_class, "external-managed");
         let report = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
-        assert_eq!(report.desired_skills, 0);
-        assert!(report.actions.is_empty());
+        assert_eq!(report.desired_skills, embedded_builtin_skill_count());
+        assert!(report
+            .actions
+            .iter()
+            .all(|action| action.skill_name != "adopted-only"));
     }
 
     #[test]
@@ -5179,6 +5327,53 @@ mod tests {
     }
 
     #[test]
+    fn readonly_tool_sync_includes_embedded_builtins_without_materializing() {
+        let _home = test_home();
+        let builtin_root = builtin_materialized_root().unwrap();
+        let registry_path = registry_path().unwrap();
+        assert!(!builtin_root.exists());
+        assert!(!registry_path.exists());
+
+        let checked = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
+
+        assert!(!checked.applied);
+        assert_eq!(checked.desired_skills, embedded_builtin_skill_count());
+        assert_eq!(checked.desired_installs, checked.desired_skills);
+        assert!(!checked.actions.is_empty());
+        assert!(!builtin_root.exists());
+        assert!(!registry_path.exists());
+    }
+
+    #[test]
+    fn missing_inventory_source_is_pruned_before_rescan() {
+        let home = test_home();
+        let agents_root = home._dir.path().join(".agents");
+        write_skill(&agents_root, "external-fixture");
+        let mut registry = SkillsRegistry::default();
+        ensure_inventory_sources(&mut registry);
+        rescan_source_in_registry_with_progress(
+            &mut registry,
+            AGENTS_EXTERNAL_SOURCE_ID,
+            ProgressReporter::noop(),
+        )
+        .unwrap();
+        assert!(has_source(&registry.sources, AGENTS_EXTERNAL_SOURCE_ID));
+        assert!(registry
+            .skills
+            .iter()
+            .any(|skill| skill.source_id == AGENTS_EXTERNAL_SOURCE_ID));
+
+        fs::remove_dir_all(&agents_root).unwrap();
+        ensure_inventory_sources(&mut registry);
+
+        assert!(!has_source(&registry.sources, AGENTS_EXTERNAL_SOURCE_ID));
+        assert!(registry
+            .skills
+            .iter()
+            .all(|skill| skill.source_id != AGENTS_EXTERNAL_SOURCE_ID));
+    }
+
+    #[test]
     fn tool_sync_apply_is_idempotent_and_records_both_tools() {
         let _home = test_home();
         let tools = vec!["claude".to_string(), "codex".to_string()];
@@ -5382,6 +5577,70 @@ mod tests {
         assert!(registry.installs.iter().all(|install| {
             !matches!(install.installed_as.as_str(), "stale-safe" | "stale-unsafe")
         }));
+    }
+
+    #[test]
+    fn stale_sync_removes_owned_copy_but_retains_unverified_copy_record() {
+        let _home = test_home();
+        let sources = TempDir::new().unwrap();
+        let safe_source = write_skill(sources.path(), "stale-copy-safe");
+        let unsafe_source = write_skill(sources.path(), "stale-copy-unsafe");
+        let safe_target = install_target_path("claude", "stale-copy-safe").unwrap();
+        let unsafe_target = install_target_path("claude", "stale-copy-unsafe").unwrap();
+        install_copy(
+            &safe_target,
+            &safe_source,
+            "fixture::stale-copy-safe",
+            "stale-copy-safe",
+        )
+        .unwrap();
+        fs::create_dir_all(&unsafe_target).unwrap();
+        fs::write(unsafe_target.join("SKILL.md"), "# foreign\n").unwrap();
+
+        let mut registry = SkillsRegistry::default();
+        registry.installs.push(SkillInstall {
+            skill_id: "fixture::stale-copy-safe".to_string(),
+            target: "claude".to_string(),
+            installed_as: "stale-copy-safe".to_string(),
+            managed_by: "maru".to_string(),
+            entrypoint_path: path_string(&safe_source),
+            target_path: path_string(&safe_target),
+            mode: "copy".to_string(),
+            created_at: None,
+        });
+        registry.installs.push(SkillInstall {
+            skill_id: "fixture::stale-copy-unsafe".to_string(),
+            target: "claude".to_string(),
+            installed_as: "stale-copy-unsafe".to_string(),
+            managed_by: "maru".to_string(),
+            entrypoint_path: path_string(&unsafe_source),
+            target_path: path_string(&unsafe_target),
+            mode: "copy".to_string(),
+            created_at: None,
+        });
+        save_registry_unlocked(&registry).unwrap();
+
+        let checked = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
+        assert!(checked.actions.iter().any(|action| {
+            action.skill_name == "stale-copy-safe" && action.action == "remove-stale-install"
+        }));
+        assert!(checked.actions.iter().any(|action| {
+            action.skill_name == "stale-copy-unsafe" && action.action == "keep-stale-record"
+        }));
+
+        skills_sync_tools(None, vec!["claude".to_string()], true).unwrap();
+
+        assert!(!safe_target.exists());
+        assert!(unsafe_target.is_dir());
+        let registry = load_registry().unwrap();
+        assert!(registry
+            .installs
+            .iter()
+            .all(|install| install.installed_as != "stale-copy-safe"));
+        assert!(registry
+            .installs
+            .iter()
+            .any(|install| install.installed_as == "stale-copy-unsafe"));
     }
 
     #[test]
