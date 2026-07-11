@@ -1,64 +1,63 @@
 #!/usr/bin/env python3
-"""Create a standard business-unit project tree (Tree B)."""
+"""Create a business-unit project tree (Tree C, proposal-first).
+
+Default scaffold is minimal per naming-and-placement §B: README + 00-readme
+charter + 06-proposal + aux (_incoming/_archive). Categories 01~05 are never
+pre-created empty; activate them with --with when a real obligation exists.
+
+Modes:
+  new_business_unit.py <domain> <slug>                      # L3 seed (proposal-first)
+  new_business_unit.py <domain> <slug> --with 01,04 --start-year 2027
+  new_business_unit.py <domain> <slug> --profile cycle      # cycle unit (§B6)
+"""
 
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 import sys
 from datetime import date
 from pathlib import Path
 
-
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-YEAR_RE = re.compile(r"^[0-9]{4}$")
-
-# Calendar-year leaves nested inside each category (Tree B).
-# Each entry is a path template; `{year}` is filled with the 4-digit year.
-YEAR_LEAVES = [
-    "01-formal-reports/{year}/monthly",
-    "01-formal-reports/{year}/quarterly",
-    "01-formal-reports/{year}/annual",
-    "01-formal-reports/{year}/interim",
-    "02-admin-approvals/{year}/internal-approval",
-    "02-admin-approvals/{year}/external-dispatch",
-    "02-admin-approvals/{year}/proposal",
-    "02-admin-approvals/{year}/expense",
-    "03-evidence-cert/{year}/receipts",
-    "03-evidence-cert/{year}/contracts",
-    "03-evidence-cert/{year}/invoices",
-    "03-evidence-cert/{year}/payments",
-    "03-evidence-cert/{year}/attendance",
-    "03-evidence-cert/{year}/certificates",
-    "04-operations/meetings/{year}",
-    "04-operations/trips/{year}",
-    "04-operations/events/{year}",
-]
-
-
-def find_workspace_root(start: Path) -> Path:
-    for candidate in [start, *start.parents]:
-        if (candidate / "workspace.config.yaml").is_file():
-            return candidate
-    raise SystemExit("ERROR: workspace.config.yaml not found in ancestors")
+from lifecycle_common import (
+    CATEGORIES,
+    CYCLE_STAGES,
+    DOMAIN_RE,
+    SLUG_RE,
+    YEAR_RE,
+    create_year_partition,
+    find_workspace_root,
+)
 
 
 def skill_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def create_year_partition(target: Path, year: str) -> None:
-    """Create the calendar-year leaves under each category; seed each with .gitkeep."""
-    for leaf in YEAR_LEAVES:
-        leaf_dir = target / leaf.format(year=year)
-        leaf_dir.mkdir(parents=True, exist_ok=True)
-        (leaf_dir / ".gitkeep").touch()
-
-
-def write_readme(target: Path, domain: str, slug: str, start_year: str | None) -> None:
+def write_readme(target: Path, domain: str, slug: str, start_year: str | None,
+                 profile: str) -> None:
     current_year = start_year or ""
+    if profile == "cycle":
+        folders = "\n".join(
+            f"| `{s}/` | (create on demand) |" for s in CYCLE_STAGES[:4]
+        )
+        folders_note = (
+            "Cycle unit (§B6): numbered stage dirs, order-only numbering, gaps OK.\n"
+            "On selection, graduate to L3 with `graduate_unit.py` (emits a\n"
+            "migrate_tree.py manifest)."
+        )
+    else:
+        folders = (
+            "| `00-readme/` | README, bu-config (view), contact tree, KPI targets |\n"
+            "| `06-proposal/` | pre-selection space (announcement/drafts/final/review/contracting) |\n"
+            "| `01-formal-reports/` | activate on first formal report (`--with 01`) |\n"
+            "| `02-admin-approvals/` | activate on first approval |\n"
+            "| `03-evidence-cert/` | activate on first evidence/contract |\n"
+            "| `04-operations/` | activate on first operational content |\n"
+            "| `_incoming/` | temporary intake before routing |\n"
+            "| `_archive/` | old versions, discarded drafts |"
+        )
+        folders_note = "Proposal-first (Tree C §B): no empty category scaffolds."
     readme = f"""---
 id: {domain}-{slug}
 name: "{slug}"
@@ -66,14 +65,8 @@ slug: {slug}
 domain: {domain}
 status: active
 lifecycle_schema: business-unit-lifecycle-v2
-lifecycle_stage: initiation
+lifecycle_stage: {"proposal" if profile == "cycle" else "initiation"}
 current_year: {current_year}
-start_date:
-end_date:
-funding_source:
-total_budget:
-headquarters_director:
-migrated: true
 created: {date.today().isoformat()}
 ---
 
@@ -81,32 +74,20 @@ created: {date.today().isoformat()}
 
 > One-line description
 
-## Overview
-
-- **Program name**:
-- **Funding source**:
-- **Period**:
-- **Total budget**:
-- **Director**:
+{folders_note}
 
 ## Folders
 
 | Path | Purpose |
 |------|---------|
-| `00-readme/` | README, bu-config (view), contact tree, KPI targets |
-| `01-formal-reports/` | 정형보고 ({{YYYY}}/monthly,quarterly,annual,interim) |
-| `02-admin-approvals/` | 행정결재, change requests |
-| `03-evidence-cert/` | 증빙·계약·인보이스·인증·감사 |
-| `04-operations/` | meetings/trips/events ({{YYYY}}), proposals, specs, guides |
-| `05-decks/` | 발표 덱 (per-slug deck job) |
-| `_inbox/` | Temporary intake before routing |
-| `_archive/` | Old versions, discarded drafts, outgoing packages |
+{folders}
 """
     (target / "README.md").write_text(readme, encoding="utf-8")
 
 
-def registry_stub(domain: str, slug: str, start_year: str | None) -> str:
-    current_year = start_year or ""
+def registry_stub(domain: str, slug: str, profile: str) -> str:
+    profile_line = "    profile: cycle   # §B6, pin required for cycle units\n" \
+        if profile == "cycle" else ""
     return f"""
 Add this stub to project-registry.yaml when ready:
 
@@ -114,17 +95,8 @@ Add this stub to project-registry.yaml when ready:
     name: "{slug}"
     name_en: ""
     path: "projects/{domain}/{slug}/"
-    vault_note: ""
+{profile_line}    vault_note: ""
     status: active
-    lifecycle_schema: business-unit-lifecycle-v2
-    lifecycle_stage: initiation
-    current_year: {current_year}
-    start_date:
-    end_date:
-    funding_source: ""
-    total_budget:
-    headquarters_director: ""
-    migrated: true
     keywords:
       ko: []
       en: []
@@ -132,6 +104,9 @@ Add this stub to project-registry.yaml when ready:
     tags: []
     people: []
     orgs: []
+
+Then regenerate the structure index:
+  python3 _meta/scripts/gen_structure.py --project {domain}-{slug}
 """
 
 
@@ -140,6 +115,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("domain", help="projects/<domain>/<slug>")
     parser.add_argument("slug", help="lowercase hyphenated business-unit slug")
     parser.add_argument("--start-year", help="4-digit first operating year")
+    parser.add_argument("--with", dest="with_categories", default="",
+                        help="comma list of categories to activate now, e.g. 01,04")
+    parser.add_argument("--profile", choices=["l3", "cycle"], default="l3",
+                        help="cycle scaffolds a §B6 application-cycle unit")
+    parser.add_argument("--stages", default="01-announcement",
+                        help="cycle mode: comma list of stage dirs to create")
     return parser.parse_args()
 
 
@@ -153,24 +134,38 @@ def main() -> int:
         raise SystemExit(f"ERROR: --start-year must be 4 digits: {args.start_year}")
 
     workspace = find_workspace_root(Path.cwd())
-    template = skill_root() / "templates" / "standard-business-unit"
-    if not template.is_dir():
-        raise SystemExit(f"ERROR: template not found: {template}")
-
     target = workspace / "projects" / args.domain / args.slug
     if target.exists():
         raise SystemExit(f"ERROR: target already exists: {target}")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(template, target)
-    write_readme(target, args.domain, args.slug, args.start_year)
-    print(f"created business-unit tree: {target}")
+    if args.profile == "cycle":
+        target.mkdir(parents=True)
+        for aux in ("_incoming", "_archive"):
+            (target / aux).mkdir()
+        for stage in [s.strip() for s in args.stages.split(",") if s.strip()]:
+            (target / stage).mkdir()
+        write_readme(target, args.domain, args.slug, args.start_year, "cycle")
+        print(f"created cycle unit: {target}")
+        print(f"recommended stage vocabulary (§B6): {', '.join(CYCLE_STAGES)}")
+    else:
+        template = skill_root() / "templates" / "standard-business-unit"
+        if not template.is_dir():
+            raise SystemExit(f"ERROR: template not found: {template}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(template, target)
+        write_readme(target, args.domain, args.slug, args.start_year, "l3")
+        for token in [t.strip() for t in args.with_categories.split(",") if t.strip()]:
+            category = CATEGORIES.get(token)
+            if not category:
+                raise SystemExit(f"ERROR: unknown category token: {token}")
+            (target / category).mkdir(exist_ok=True)
+        print(f"created business-unit tree: {target}")
+        if args.start_year:
+            made = create_year_partition(target, args.start_year, only_existing=True)
+            print(f"created year partition ({args.start_year}): "
+                  f"{', '.join(made) if made else 'no active categories to seed'}")
 
-    if args.start_year:
-        create_year_partition(target, args.start_year)
-        print(f"created year partition: {args.start_year}")
-
-    print(registry_stub(args.domain, args.slug, args.start_year))
+    print(registry_stub(args.domain, args.slug, args.profile))
     return 0
 
 

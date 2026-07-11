@@ -1,5 +1,5 @@
 # Business-unit metadata (primary). The 00-readme/ copy is a user view.
-# Schema: _sys/rules/bu-lifecycle.md §4.
+# Schema: _meta/rules/naming-and-placement.md §B3.
 bu_id:                              # snake-kebab id (see §1 enum)
 bu_name: ""                        # display name
 category: program                  # program | university-headquarters | external | personal
