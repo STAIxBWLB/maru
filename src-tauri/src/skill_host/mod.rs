@@ -14,5 +14,5 @@ pub use store::{
     skills_list_dirty, skills_list_installs, skills_list_skills, skills_list_sources,
     skills_read_skill, skills_read_skill_file, skills_reconcile_skill, skills_remove_source,
     skills_rescan_source, skills_reset_registry, skills_save_skill_as, skills_save_skill_file,
-    skills_sync_all_sources, skills_sync_source, skills_uninstall_skill,
+    skills_sync_all_sources, skills_sync_source, skills_sync_tools, skills_uninstall_skill,
 };

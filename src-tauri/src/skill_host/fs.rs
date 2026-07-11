@@ -1,8 +1,11 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -62,11 +65,43 @@ pub fn write_json_pretty<T: serde::Serialize>(path: &Path, value: &T) -> Result<
         .parent()
         .ok_or_else(|| format!("Cannot resolve parent for {}", display_path(path)))?;
     ensure_dir(parent)?;
-    let tmp = path.with_extension("tmp");
     let data = serde_json::to_vec_pretty(value)
         .map_err(|err| format!("Cannot serialize {}: {err}", display_path(path)))?;
-    fs::write(&tmp, data).map_err(|err| format!("Cannot write {}: {err}", display_path(&tmp)))?;
-    fs::rename(&tmp, path).map_err(|err| format!("Cannot replace {}: {err}", display_path(path)))
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("registry.json");
+    let prefix = format!(".{file_name}.maru-tmp-");
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(&prefix);
+    #[cfg(unix)]
+    builder.permissions(fs::Permissions::from_mode(0o666));
+    let mut tmp = builder.tempfile_in(parent).map_err(|err| {
+        format!(
+            "Cannot create temporary file in {}: {err}",
+            display_path(parent)
+        )
+    })?;
+    tmp.write_all(&data).map_err(|err| {
+        format!(
+            "Cannot write temporary file for {}: {err}",
+            display_path(path)
+        )
+    })?;
+    if let Ok(metadata) = fs::metadata(path) {
+        tmp.as_file()
+            .set_permissions(metadata.permissions())
+            .map_err(|err| format!("Cannot preserve {} permissions: {err}", display_path(path)))?;
+    }
+    tmp.as_file().sync_all().map_err(|err| {
+        format!(
+            "Cannot sync temporary file for {}: {err}",
+            display_path(path)
+        )
+    })?;
+    tmp.persist(path)
+        .map(|_| ())
+        .map_err(|err| format!("Cannot replace {}: {}", display_path(path), err.error))
 }
 
 pub fn read_link_target(path: &Path) -> Option<PathBuf> {
@@ -154,4 +189,24 @@ pub(crate) fn test_maru_home_lock() -> MutexGuard<'static, ()> {
 #[cfg(not(test))]
 fn test_maru_home_override() -> Option<PathBuf> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    #[test]
+    fn pretty_json_atomically_replaces_an_existing_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("registry.json");
+        fs::write(&path, b"{\"old\":true}").unwrap();
+
+        write_json_pretty(&path, &json!({ "new": true })).unwrap();
+
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value, json!({ "new": true }));
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+    }
 }

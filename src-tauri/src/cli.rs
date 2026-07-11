@@ -3,7 +3,7 @@ use std::env;
 use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 use crate::skill_host::{
     skills_doctor, skills_import_external, skills_import_unmanage, skills_list_dirty,
-    skills_reconcile_skill,
+    skills_reconcile_skill, skills_sync_tools,
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
@@ -324,6 +324,7 @@ fn run_skills(args: &[String]) -> i32 {
         return 2;
     };
     match subcommand {
+        "sync" => run_skills_sync(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
         "reconcile" => run_skills_reconcile(&args[1..]),
         "import" => run_skills_import(&args[1..]),
@@ -331,6 +332,100 @@ fn run_skills(args: &[String]) -> i32 {
         _ => {
             eprintln!("{}", skills_usage());
             2
+        }
+    }
+}
+
+fn run_skills_sync(args: &[String]) -> i32 {
+    let mut apply: Option<bool> = None;
+    let mut tools: Option<Vec<String>> = None;
+    let mut json = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--check" => {
+                if apply == Some(true) {
+                    eprintln!("conflicting options: --check and --apply");
+                    return 2;
+                }
+                apply = Some(false);
+            }
+            "--apply" => {
+                if apply == Some(false) {
+                    eprintln!("conflicting options: --check and --apply");
+                    return 2;
+                }
+                apply = Some(true);
+            }
+            "--tools" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    eprintln!("--tools requires a comma-separated value");
+                    return 2;
+                };
+                let parsed: Vec<String> = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
+                if parsed.is_empty() {
+                    eprintln!("--tools requires at least one tool");
+                    return 2;
+                }
+                tools = Some(parsed);
+            }
+            "--json" => json = true,
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("usage: maru skills sync --check|--apply --tools claude,codex [--json]");
+                return 2;
+            }
+        }
+        index += 1;
+    }
+    let Some(apply) = apply else {
+        eprintln!("--check or --apply required");
+        return 2;
+    };
+    let Some(tools) = tools else {
+        eprintln!("--tools required");
+        return 2;
+    };
+    match skills_sync_tools(current_work_path(), tools, apply) {
+        Ok(report) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "skills sync: {} skill(s), {} install(s), {} action(s) {}",
+                    report.desired_skills,
+                    report.desired_installs,
+                    report.actions.len(),
+                    if report.applied { "applied" } else { "planned" }
+                );
+                for action in &report.actions {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        action.action,
+                        action.target.as_deref().unwrap_or("maru"),
+                        action.skill_name,
+                        action.path
+                    );
+                }
+            }
+            if !apply && !report.actions.is_empty() {
+                1
+            } else {
+                0
+            }
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
         }
     }
 }
@@ -539,7 +634,7 @@ fn current_work_path() -> Option<String> {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills dirty|reconcile|import|import-unmanage"
+    "usage: maru skills sync|dirty|reconcile|import|import-unmanage"
 }
 
 fn secrets_usage() -> &'static str {
@@ -547,7 +642,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]"
 }
 
 #[cfg(test)]
@@ -605,6 +700,34 @@ mod tests {
                 "/tmp/example".to_string(),
                 "--copy".to_string(),
                 "--link".to_string(),
+            ]),
+            2
+        );
+    }
+
+    #[test]
+    fn skills_sync_requires_explicit_mode_and_tools() {
+        assert_eq!(run_cli(vec!["skills".to_string(), "sync".to_string()]), 2);
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "sync".to_string(),
+                "--check".to_string(),
+            ]),
+            2
+        );
+    }
+
+    #[test]
+    fn skills_sync_rejects_conflicting_modes() {
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "sync".to_string(),
+                "--check".to_string(),
+                "--apply".to_string(),
+                "--tools".to_string(),
+                "claude,codex".to_string(),
             ]),
             2
         );

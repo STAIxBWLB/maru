@@ -2,6 +2,24 @@
 
 Maru treats skills as a federated catalog with one owner per skill name.
 
+## Source ownership classes
+
+| Class | Registry kind / source | Ownership | Maru sync behavior |
+|------|-------------------------|-----------|--------------------|
+| Bundled | `builtin` / `maru-builtin` | Maru release | Installable |
+| Owned catalog | `linked` or `cloned` / public, private, managed | Catalog repository or local Maru owner | Installable |
+| Imported | `imported` / `maru-imported` | Explicit local import | Installable |
+| External managed | `external-managed` | `~/.agents` or another manager | Inventory only, never copied or installed |
+| Tool native | `tool-native` | Claude/Codex plugin or built-in runtime | Inventory only, never copied or installed |
+
+The default owned catalog is 43 skills: 34 bundled, 5 public, and 4 private.
+Synchronizing it to Claude and Codex produces 86 Maru install records. Tool
+native/plugin skills remain owned by their tool and are excluded from that
+count. Maru nevertheless inventories `~/.agents/skills` as `external-managed`
+and `~/.codex/skills/.system` as `tool-native` registry sources when those
+directories exist. These inventory-only skill counts appear in the registry
+and doctor output, but never increase the 43 managed skills or 86 installs.
+
 | Tier | Location | Identity | Change Path |
 |------|----------|----------|-------------|
 | T1 Core | `dev/maru/skills/skills/<name>/` | Maru-bundled skill embedded in the app | `dev/maru` PR |
@@ -31,6 +49,8 @@ Maru treats skills as a federated catalog with one owner per skill name.
 
 ```bash
 maru doctor --quiet
+maru skills sync --check --tools claude,codex
+maru skills sync --apply --tools claude,codex
 maru skills dirty --json
 maru skills reconcile <name-or-id> --accept --message "maru: reconcile <name>"
 maru skills reconcile <name-or-id> --discard

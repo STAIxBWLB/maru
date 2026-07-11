@@ -4,6 +4,11 @@
 It is intentionally limited to Maru-managed state; legacy external skill
 links outside Maru are ignored unless imported.
 
+The command is strictly read-only. It scans sources and validates registry and
+symlink state in memory, but never writes `registry.json`, materializes the
+bundled catalog, creates directories, or repairs links. Use `maru skills sync
+--apply` for explicit mutation.
+
 ## Commands
 
 ```bash
@@ -12,7 +17,14 @@ maru doctor --json
 maru doctor --quiet
 maru skills dirty
 maru skills dirty --json
+maru skills sync --check --tools claude,codex
+maru skills sync --apply --tools claude,codex
 ```
+
+`skills sync --check` is also read-only and exits `1` when changes are needed.
+`skills sync --apply` creates canonical `~/.maru/skills/<name>` links, points
+the selected tool runtimes at those canonical links, and updates install
+records. It refuses to overwrite non-symlink tool content.
 
 `--quiet` exits `0` when no error issue exists and exits `1` when a critical
 skills issue exists.
