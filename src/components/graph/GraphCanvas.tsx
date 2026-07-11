@@ -14,7 +14,7 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { communityColor, edgeKey, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
+import { communityColor, edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, refreshGraphTheme } from "./graphStyle";
 
 export interface GraphViewport {
   zoom: number;
@@ -32,9 +32,6 @@ export interface GraphExportController {
   svg: () => Blob;
 }
 
-const FALLBACK_COLOR = "#8a8f98";
-const ACCENT_COLOR = "#2f5a3c";
-const WARN_COLOR = "#d47a16";
 const MaruNodeBorderProgram = createNodeBorderProgram<SigmaNodeAttributes, SigmaEdgeAttributes>();
 
 type SigmaNodeAttributes = {
@@ -141,7 +138,7 @@ function buildSigmaGraph(
       size: nodeRadius(node.degree),
       label: node.label,
       color: nodeColor(node, enriched),
-      borderColor: node.type === "unresolved" ? FALLBACK_COLOR : "#f7f7f5",
+      borderColor: node.type === "unresolved" ? graphTheme().muted : graphTheme().nodeBorder,
       type: "border",
       forceLabel: node.isGodNode,
       index,
@@ -153,7 +150,7 @@ function buildSigmaGraph(
     const directed = edge.relation === "supersedes" || edge.relation === "superseded_by";
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
       size: edge.fromFrontmatter ? 1.2 : 0.75,
-      color: edge.fromFrontmatter ? "#90959e" : "#b4b7bd",
+      color: edge.fromFrontmatter ? graphTheme().edgeStrong : graphTheme().edge,
       type: directed ? "arrow" : "line",
       relation: edge.relation,
       sourceId: edge.source,
@@ -187,9 +184,9 @@ function graphToSvg(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>): 
     if (attrs.hidden) return;
     const p = renderer.graphToViewport(attrs);
     const r = Math.max(2, renderer.scaleSize(attrs.size));
-    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="#30343a">${xmlEscape(attrs.label)}</text></g>`);
+    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(attrs.label)}</text></g>`);
   });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#f7f7f5"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
   return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
 }
 
@@ -288,6 +285,22 @@ export function GraphCanvas({
   const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
   const [ready, setReady] = useState(false);
   const [webglFailed, setWebglFailed] = useState(false);
+  const [themeEpoch, setThemeEpoch] = useState(0);
+  useEffect(() => {
+    refreshGraphTheme();
+    const apply = () => {
+      refreshGraphTheme();
+      setThemeEpoch((epoch) => epoch + 1);
+    };
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", apply);
+    return () => {
+      observer.disconnect();
+      media.removeEventListener("change", apply);
+    };
+  }, []);
   const fittedEpochRef = useRef(-1);
   // Node/edge-count signature of the last built graph — lets a rebuild whose
   // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
@@ -379,15 +392,15 @@ export function GraphCanvas({
           const hovered = state.hoverId;
           const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
           const overlayVisible = !overlayIds || overlayIds.has(node);
-          if (!hoverVisible || !overlayVisible) patch.color = "#d6d8dc";
+          if (!hoverVisible || !overlayVisible) patch.color = graphTheme().dimNode;
           const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.pathSourceId || overlayIds?.has(node);
           if (emphasized) {
-            patch.borderColor = overlayIds?.has(node) ? WARN_COLOR : ACCENT_COLOR;
+            patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
             patch.highlighted = true;
             patch.forceLabel = true;
             patch.size = data.size * 1.18;
           } else if (state.favoriteIds.has(node)) {
-            patch.borderColor = WARN_COLOR;
+            patch.borderColor = graphTheme().warn;
             patch.forceLabel = true;
           }
           return { ...data, ...patch };
@@ -412,7 +425,7 @@ export function GraphCanvas({
               }
             }
           }
-          return active ? { ...data, color: pair || path ? ACCENT_COLOR : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: "#e2e3e5", size: 0.5 };
+          return active ? { ...data, color: pair || path ? graphTheme().accent : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
         },
       });
       rendererRef.current = renderer;
@@ -603,7 +616,7 @@ export function GraphCanvas({
       prevTopoSigRef.current = topoSig;
       if (exportControllerRef) {
         exportControllerRef.current = {
-          png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: "#f7f7f5" }),
+          png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: graphTheme().bg }),
           svg: () => graphToSvg(renderer),
         };
       }
@@ -633,7 +646,7 @@ export function GraphCanvas({
       graphRef.current = null;
       rendererRef.current = null;
     }
-  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed]);
+  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed, themeEpoch]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
