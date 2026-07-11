@@ -278,7 +278,7 @@ test("exports the current graph view as an SVG download", async ({ page }) => {
   expect(forbidden).toEqual([]);
 });
 
-test("enriched overlay renders the communities badge, legend, and hulls", async ({ page }) => {
+test("enriched overlay renders the communities badge, legend, and color groups", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   // Opt into the mock community overlay (web mode has no vault-graph.json).
   // Registered after the beforeEach localStorage clear, so the flag survives.
@@ -298,9 +298,17 @@ test("enriched overlay renders the communities badge, legend, and hulls", async 
   await expect(legend).toBeVisible();
   await expect(legend.locator(".graph-legend-item")).toHaveCount(2);
 
-  // Hull toggle appears (enriched + communities) and draws one area per community.
-  await page.getByTestId("graph-hulls-toggle").check();
-  await expect(page.locator(".graph-hull")).toHaveCount(2);
+  // Communities are color groups: the two mock notes sit in different
+  // communities and must render with different node fills.
+  const meetingFill = await page
+    .locator('.graph-node circle[data-node-id="maru-weekly-meeting"]')
+    .getAttribute("fill");
+  const glossaryFill = await page
+    .locator('.graph-node circle[data-node-id="maru-glossary"]')
+    .getAttribute("fill");
+  expect(meetingFill).toBeTruthy();
+  expect(glossaryFill).toBeTruthy();
+  expect(meetingFill).not.toBe(glossaryFill);
 
   expect(forbidden).toEqual([]);
 });

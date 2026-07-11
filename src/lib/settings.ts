@@ -282,7 +282,6 @@ export interface GraphSettings {
   localDirection: "both" | "incoming" | "outgoing";
   view: "graph" | "chains";
   searchAsFilter: boolean;
-  showHulls: boolean;
   filters: {
     domains: string[];
     types: string[];
@@ -439,7 +438,6 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     localDirection: "both",
     view: "graph",
     searchAsFilter: false,
-    showHulls: false,
     filters: {
       domains: [],
       types: [],
@@ -905,7 +903,6 @@ function normalizeGraphSettings(value: unknown): GraphSettings {
         : "both",
     view: graph.view === "chains" ? "chains" : "graph",
     searchAsFilter: graph.searchAsFilter === true,
-    showHulls: graph.showHulls === true,
     filters: {
       domains: parseStringArray(filters.domains),
       types: parseStringArray(filters.types),

@@ -65,9 +65,9 @@ overlay is produced out-of-band by the `vault-graph` skill
   1-hop neighbors, instead of only highlighting the first match.
 - **Favorites**: favorite a node from the context menu or inspector; favorited
   nodes carry a ★ marker (shares `settings.ui.favorites` with the Explorer).
-- Filters, view, search-mode and hull toggle **persist** in
-  `MaruSettings.graph` and survive mode switches / restart; command palette has
-  an **open-graph** action.
+- Filters, view and search-mode **persist** in `MaruSettings.graph` and
+  survive mode switches / restart; command palette has an **open-graph**
+  action.
 
 ### Performance (V4)
 
@@ -84,10 +84,21 @@ searchable inspector/list for larger models.
 ## Visualization & export (V3)
 
 - **Legend** — bottom-left overlay keying community (enriched) or domain colors
-  with counts; clicking a swatch drives the corresponding filter.
-- **Community areas** — translucent convex hulls per community
-  (`src/lib/graph/hull.ts`, monotone-chain, no deps), drawn behind the edges
-  from settled positions only. Toggled in the filter panel (enriched only).
+  with counts; clicking a swatch drives the corresponding filter. It is the
+  only color key (no separate area overlay).
+- **Color groups**: communities are color groups, not shapes; each node is
+  colored by community (enriched) or domain (degraded) via theme-aware
+  12-slot palettes, one palette for light and one for dark, with a fixed
+  hue-per-slot mapping so colors stay CVD-safe and consistent across theme
+  flips (`src/components/graph/graphStyle.ts`).
+- **Label fade**: Obsidian-style zoom-linked label fade via custom drawers
+  (`src/components/graph/graphLabels.ts`); labels ramp in as a node grows on
+  screen (zoom-in or high degree) instead of an all-or-nothing cutoff.
+- **Live theming**: all canvas colors read from CSS theme tokens (`--bg`,
+  `--ink`, `--accent`, etc.); `GraphView` subscribes to `data-theme` mutations
+  and `prefers-color-scheme` changes, refreshes the token cache, and
+  re-renders the canvas together with the legend, filter panel and inspector
+  so swatches never go stale on a theme flip.
 - **Export** — PNG / SVG of the current view (`src/lib/graph/export.ts`): the
   live `<svg>` is cloned, computed styles inlined (`display` included, so the
   label LOD state is preserved), a `getBBox` viewBox is fitted, and PNG reuses
@@ -142,7 +153,7 @@ Pure-frontend features built on the 8a + 8b primitives:
 ## Tests
 
 - vitest: `src/lib/graph/model.test.ts`, `insights.test.ts`,
-  `decisionChains.test.ts`, `hull.test.ts`; `src/lib/settings.test.ts` (graph
+  `decisionChains.test.ts`; `src/lib/settings.test.ts` (graph
   settings round-trip); perf bench `src/lib/graph/perf.bench.ts` (build / layout
   / insight-pass / cold `buildAdjacency` budgets).
 - 2026-07-11 local baseline at 10,000 nodes / 59,994 edges: model build 47ms,
@@ -155,7 +166,7 @@ Pure-frontend features built on the 8a + 8b primitives:
   inspector favorite ★, PNG/SVG export download). Interaction selectors are
   exposed only by the dev/E2E graph bridge, not production DOM. **Scope note** — the enrichment
   path (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies
-  the *degraded* live-layer path (no communities → legend/hulls covered by
+  the *degraded* live-layer path (no communities → legend covered by
   vitest); the enriched overlay path is covered by vitest + cargo fixtures.
 
 ## Deferred

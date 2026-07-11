@@ -6,6 +6,9 @@
  * NewDocumentDialog, editor preview) and must be preserved.
  */
 
+/* Graph screen type scale: titles 12/600, body 12.5/400, meta 11.5/400.
+   Counts and metrics align with tabular numerals. Spacing on an 8px grid. */
+
 .graph-view {
   grid-area: graph;
   display: flex;
@@ -24,7 +27,7 @@
 .graph-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -54,7 +57,8 @@
   outline: none;
   background: transparent;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
   width: 100%;
 }
 
@@ -72,8 +76,9 @@
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
-  padding: 3px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 3px 8px;
   border-radius: 5px;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
@@ -93,7 +98,7 @@
 }
 
 .graph-zoom-value {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   min-width: 38px;
@@ -145,16 +150,17 @@
 }
 
 .graph-badge {
-  font-size: 11px;
+  font-size: 11.5px;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--accent-soft, color-mix(in srgb, var(--accent) 15%, var(--panel)));
   color: var(--accent);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .graph-stats {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -211,7 +217,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   font-size: 12px;
   background: var(--panel);
 }
@@ -220,10 +226,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
@@ -234,7 +240,7 @@
   border: none;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 11.5px;
   cursor: pointer;
   text-transform: none;
   letter-spacing: 0;
@@ -247,8 +253,9 @@
 
 .graph-filter-section h4 {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -266,7 +273,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
   padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -289,7 +297,7 @@
 }
 
 .graph-chip-count {
-  font-size: 10px;
+  font-size: 11.5px;
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
@@ -339,6 +347,19 @@
   min-height: 0;
   position: relative;
   display: flex;
+}
+
+/* Screen-reader-only live region (selection announcements) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .graph-source-select {
@@ -420,14 +441,6 @@
   background: var(--bg);
 }
 
-/* Community areas — translucent convex hulls behind the graph. */
-.graph-hull {
-  fill-opacity: 0.06;
-  stroke: none;
-  pointer-events: none;
-  transition: fill-opacity 200ms ease;
-}
-
 /* Legend overlay (bottom-left of the canvas). */
 .graph-legend {
   position: absolute;
@@ -438,7 +451,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-sm, 6px);
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
-  font-size: 11px;
+  font-size: 11.5px;
   overflow: hidden;
   z-index: 2;
 }
@@ -454,7 +467,9 @@
   background: transparent;
   color: var(--ink-2, var(--ink));
   cursor: pointer;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .graph-legend-list {
@@ -632,7 +647,7 @@
 .graph-insights,
 .graph-inspector {
   overflow-y: auto;
-  padding: 0 10px 12px;
+  padding: 0 8px 12px;
   flex: 1;
   min-height: 0;
 }
@@ -640,7 +655,7 @@
 /* Insights */
 
 .graph-insight-section {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .graph-insight-header {
@@ -654,15 +669,15 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
 .graph-insight-count {
-  font-size: 10px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   color: var(--on-accent, #fff);
   background: var(--accent);
@@ -674,7 +689,7 @@
 
 .graph-insight-hint {
   margin: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--faint, var(--muted));
   line-height: 1.4;
 }
@@ -740,9 +755,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--ink);
-  line-height: 1.3;
+  line-height: 1.45;
 }
 
 .graph-insight-pair svg {
@@ -751,7 +766,8 @@
 }
 
 .graph-insight-label {
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -760,7 +776,7 @@
 }
 
 .graph-insight-meta {
-  font-size: 10px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -773,7 +789,7 @@
 
 .graph-inspector-empty {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
   padding: 16px 12px;
 }
 
@@ -796,7 +812,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11.5px;
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--panel-2, var(--bg));
@@ -809,10 +825,10 @@
 }
 
 .graph-inspector-date {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .graph-inspector-actions {
@@ -826,7 +842,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm, 6px);
@@ -853,8 +870,9 @@
 
 .graph-neighbor-section h4 {
   margin: 0 0 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
@@ -886,7 +904,7 @@
 }
 
 .graph-neighbor-relation {
-  font-size: 9px;
+  font-size: 11.5px;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -895,7 +913,8 @@
 }
 
 .graph-neighbor-label {
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--ink-2, var(--ink));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -903,7 +922,7 @@
 }
 
 .graph-inspector-note {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
 }
 

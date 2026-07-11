@@ -14,7 +14,8 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { communityColor, edgeKey, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
+import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
+import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
 
 export interface GraphViewport {
   zoom: number;
@@ -32,9 +33,6 @@ export interface GraphExportController {
   svg: () => Blob;
 }
 
-const FALLBACK_COLOR = "#8a8f98";
-const ACCENT_COLOR = "#2f5a3c";
-const WARN_COLOR = "#d47a16";
 const MaruNodeBorderProgram = createNodeBorderProgram<SigmaNodeAttributes, SigmaEdgeAttributes>();
 
 type SigmaNodeAttributes = {
@@ -74,6 +72,7 @@ interface GraphCanvasProps {
   initialPinnedIds?: string[];
   visibleNodeIds?: Set<string>;
   layoutEpoch: number;
+  themeEpoch: number;
   enriched: boolean;
   selectedId: string | null;
   focusNodeId: string | null;
@@ -92,7 +91,6 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
-  hulls?: { community: number; path: string }[];
   overlay?: ReactNode;
   onViewportReport?: (zoom: number) => void;
 }
@@ -141,7 +139,7 @@ function buildSigmaGraph(
       size: nodeRadius(node.degree),
       label: node.label,
       color: nodeColor(node, enriched),
-      borderColor: node.type === "unresolved" ? FALLBACK_COLOR : "#f7f7f5",
+      borderColor: node.type === "unresolved" ? graphTheme().muted : graphTheme().nodeBorder,
       type: "border",
       forceLabel: node.isGodNode,
       index,
@@ -152,8 +150,8 @@ function buildSigmaGraph(
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
     const directed = edge.relation === "supersedes" || edge.relation === "superseded_by";
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
-      size: edge.fromFrontmatter ? 1.2 : 0.75,
-      color: edge.fromFrontmatter ? "#90959e" : "#b4b7bd",
+      size: edge.fromFrontmatter ? 1 : 0.6,
+      color: edge.fromFrontmatter ? graphTheme().edgeStrong : graphTheme().edge,
       type: directed ? "arrow" : "line",
       relation: edge.relation,
       sourceId: edge.source,
@@ -187,9 +185,9 @@ function graphToSvg(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>): 
     if (attrs.hidden) return;
     const p = renderer.graphToViewport(attrs);
     const r = Math.max(2, renderer.scaleSize(attrs.size));
-    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="#30343a">${xmlEscape(attrs.label)}</text></g>`);
+    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(attrs.label)}</text></g>`);
   });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#f7f7f5"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
   return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
 }
 
@@ -257,6 +255,7 @@ export function GraphCanvas({
   initialPinnedIds = [],
   visibleNodeIds,
   layoutEpoch,
+  themeEpoch,
   enriched,
   selectedId,
   focusNodeId,
@@ -275,7 +274,6 @@ export function GraphCanvas({
   onNodeContextMenu,
   favoriteIds = new Set<string>(),
   exportControllerRef,
-  hulls = [],
   overlay,
   onViewportReport,
 }: GraphCanvasProps) {
@@ -297,8 +295,6 @@ export function GraphCanvas({
   const pinnedIdsRef = useRef(new Set(initialPinnedIds));
   const onLayoutSettledRef = useRef(onLayoutSettled);
   onLayoutSettledRef.current = onLayoutSettled;
-  const hullsRef = useRef(hulls);
-  hullsRef.current = hulls;
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -355,8 +351,10 @@ export function GraphCanvas({
         labelFont: "Pretendard, sans-serif",
         labelSize: 11,
         labelWeight: "500",
-        labelRenderedSizeThreshold: 8,
+        labelRenderedSizeThreshold: 3,
         labelDensity: 0.55,
+        defaultDrawNodeLabel: drawMaruNodeLabel,
+        defaultDrawNodeHover: drawMaruNodeHover,
         hideEdgesOnMove: nodes.length > 5_000,
         hideLabelsOnMove: true,
         enableEdgeEvents: false,
@@ -379,15 +377,18 @@ export function GraphCanvas({
           const hovered = state.hoverId;
           const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
           const overlayVisible = !overlayIds || overlayIds.has(node);
-          if (!hoverVisible || !overlayVisible) patch.color = "#d6d8dc";
+          if (!hoverVisible || !overlayVisible) patch.color = graphTheme().dimNode;
+          if (node === state.hoverId) {
+            patch.size = data.size * 1.15;
+          }
           const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.pathSourceId || overlayIds?.has(node);
           if (emphasized) {
-            patch.borderColor = overlayIds?.has(node) ? WARN_COLOR : ACCENT_COLOR;
+            patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
             patch.highlighted = true;
             patch.forceLabel = true;
             patch.size = data.size * 1.18;
           } else if (state.favoriteIds.has(node)) {
-            patch.borderColor = WARN_COLOR;
+            patch.borderColor = graphTheme().warn;
             patch.forceLabel = true;
           }
           return { ...data, ...patch };
@@ -412,36 +413,10 @@ export function GraphCanvas({
               }
             }
           }
-          return active ? { ...data, color: pair || path ? ACCENT_COLOR : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: "#e2e3e5", size: 0.5 };
+          return active ? { ...data, color: pair || path ? graphTheme().accent : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
         },
       });
       rendererRef.current = renderer;
-      const hullCanvas = renderer.createCanvas("maru-hulls", { beforeLayer: "edges" });
-      const drawHulls = () => {
-        const context = hullCanvas.getContext("2d");
-        if (!context) return;
-        const dimensions = renderer.getDimensions();
-        const ratio = dimensions.width > 0 ? hullCanvas.width / dimensions.width : 1;
-        context.setTransform(1, 0, 0, 1, 0, 0);
-        context.clearRect(0, 0, hullCanvas.width, hullCanvas.height);
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        for (const hull of hullsRef.current) {
-          const numbers = hull.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-          if (numbers.length < 6) continue;
-          context.beginPath();
-          for (let index = 0; index + 1 < numbers.length; index += 2) {
-            const point = renderer.graphToViewport({ x: numbers[index], y: numbers[index + 1] });
-            if (index === 0) context.moveTo(point.x, point.y);
-            else context.lineTo(point.x, point.y);
-          }
-          context.closePath();
-          context.globalAlpha = 0.08;
-          context.fillStyle = communityColor(hull.community);
-          context.fill();
-        }
-        context.globalAlpha = 1;
-      };
-      renderer.on("afterRender", drawHulls);
       let contextRestored = false;
       let contextFallbackTimer: ReturnType<typeof setTimeout> | null = null;
       const onContextLost = (event: Event) => {
@@ -603,7 +578,7 @@ export function GraphCanvas({
       prevTopoSigRef.current = topoSig;
       if (exportControllerRef) {
         exportControllerRef.current = {
-          png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: "#f7f7f5" }),
+          png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: graphTheme().bg }),
           svg: () => graphToSvg(renderer),
         };
       }
@@ -614,7 +589,6 @@ export function GraphCanvas({
           canvas.removeEventListener("webglcontextlost", onContextLost);
           canvas.removeEventListener("webglcontextrestored", onContextRestored);
         });
-        renderer.off("afterRender", drawHulls);
         startLayoutRef.current = null;
         stopLayout();
         mouse.off("mousemovebody", onMove);
@@ -633,7 +607,7 @@ export function GraphCanvas({
       graphRef.current = null;
       rendererRef.current = null;
     }
-  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed]);
+  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed, themeEpoch]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -721,9 +695,6 @@ export function GraphCanvas({
           onPointerLeave={() => setDebugHoverId(null)}
         >
           <g className="graph-nodes labels-on">
-            <g className="graph-hulls">
-              {hulls.map((hull) => <path key={hull.community} className="graph-hull" d={hull.path} style={{ fill: communityColor(hull.community) }} />)}
-            </g>
             {debugNodes.map((node, index) => {
               const baseX = 120 + (index % 5) * 150;
               const baseY = 130 + Math.floor(index / 5) * 130;

@@ -66,10 +66,6 @@ interface GraphFilterPanelProps {
   communities: FacetItem<number>[];
   maxDegree: number;
   onFiltersChange: (next: GraphFilters) => void;
-  /** Community-area toggle: only meaningful when the overlay supplies them. */
-  hullsAvailable: boolean;
-  showHulls: boolean;
-  onShowHullsChange: (next: boolean) => void;
 }
 
 function toggle(set: Set<string>, value: string): Set<string> {
@@ -86,9 +82,6 @@ export function GraphFilterPanel({
   communities,
   maxDegree,
   onFiltersChange,
-  hullsAvailable,
-  showHulls,
-  onShowHullsChange,
 }: GraphFilterPanelProps) {
   const { t } = useTranslation();
   const dirty = !filtersAreDefault(filters);
@@ -179,17 +172,6 @@ export function GraphFilterPanel({
           />
           {t("graph.filter.showGhosts")}
         </label>
-        {hullsAvailable ? (
-          <label className="graph-toggle">
-            <input
-              type="checkbox"
-              checked={showHulls}
-              data-testid="graph-hulls-toggle"
-              onChange={(event) => onShowHullsChange(event.target.checked)}
-            />
-            {t("graph.filter.showHulls")}
-          </label>
-        ) : null}
       </section>
 
       <section className="graph-filter-section">
