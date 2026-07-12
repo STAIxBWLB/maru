@@ -5,6 +5,8 @@ import {
   buildVaultGraph,
   enrichGraph,
   focusSubgraph,
+  isNoiseNode,
+  type GraphNode,
   type VaultGraphFile,
 } from "./model";
 
@@ -154,5 +156,43 @@ describe("focusSubgraph / buildAdjacency", () => {
     expect(ids.has("far")).toBe(false); // disconnected
     const adjacency = buildAdjacency(model);
     expect(adjacency.get("a-note")).toContain("b-note");
+  });
+});
+
+describe("isNoiseNode", () => {
+  const node = (over: Partial<GraphNode>): GraphNode => ({
+    id: "n",
+    label: "N",
+    relPath: "notes/n.md",
+    type: "meeting",
+    domain: null,
+    degree: 1,
+    community: null,
+    isGodNode: false,
+    date: null,
+    updatedAt: null,
+    ...over,
+  } as GraphNode);
+  const patterns = ["reports/", "log.md"];
+
+  it("flags untyped notes regardless of path", () => {
+    expect(isNoiseNode(node({ type: "unknown", relPath: "notes/anything.md" }), patterns)).toBe(true);
+    expect(isNoiseNode(node({ type: "unknown" }), [])).toBe(true);
+  });
+
+  it("matches trailing-slash patterns as relPath prefixes, case-insensitively", () => {
+    expect(isNoiseNode(node({ relPath: "reports/lint-260712.md" }), patterns)).toBe(true);
+    expect(isNoiseNode(node({ relPath: "Reports/Graph-Report.md" }), patterns)).toBe(true);
+    expect(isNoiseNode(node({ relPath: "notes/reports-summary.md" }), patterns)).toBe(false);
+  });
+
+  it("matches bare patterns as exact filenames only", () => {
+    expect(isNoiseNode(node({ relPath: "log.md" }), patterns)).toBe(true);
+    expect(isNoiseNode(node({ relPath: "vault/LOG.md" }), patterns)).toBe(true);
+    expect(isNoiseNode(node({ relPath: "notes/backlog.md" }), patterns)).toBe(false);
+  });
+
+  it("never flags ghosts; they belong to the showGhosts filter", () => {
+    expect(isNoiseNode(node({ type: "unresolved", relPath: null }), patterns)).toBe(false);
   });
 });

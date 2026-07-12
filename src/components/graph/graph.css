@@ -343,6 +343,20 @@
   font-weight: 600;
 }
 
+.graph-degree-input {
+  width: 52px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel-2, var(--bg));
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .graph-filter-section input[type="range"] {
   width: 100%;
   accent-color: var(--accent);

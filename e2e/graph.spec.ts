@@ -15,7 +15,9 @@ test.beforeEach(async ({ page }) => {
     // (mock://maru-sample-workspace in web mode — see fixtures.MOCK_WORKSPACE_PATH).
     window.localStorage.setItem(
       "maru:settings:fallback:v1:mock://maru-sample-workspace",
-      JSON.stringify({ graph: { source: "all", scope: "all" } }),
+      // filters.minDegree 0: the mock glossary note has no links, and the
+      // default threshold of 1 would hide it, shifting every count below.
+      JSON.stringify({ graph: { source: "all", scope: "all", filters: { minDegree: 0 } } }),
     );
     window.sessionStorage.setItem("maru:graph-e2e:storage-cleared", "true");
   });

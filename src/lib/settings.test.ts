@@ -369,11 +369,13 @@ describe("normalizeMaruSettings", () => {
         localDirection: "incoming",
         view: "chains",
         searchAsFilter: true,
+        noisePatterns: ["reports/", " archive/  ", "log.md", ""],
         filters: {
           domains: ["research", "projects"],
           types: ["decision"],
           community: 3,
           showGhosts: true,
+          showNoise: true,
           minDegree: 2,
         },
       },
@@ -385,11 +387,13 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.localDepth).toBe(3);
     expect(settings.graph.localDirection).toBe("incoming");
     expect(settings.graph.searchAsFilter).toBe(true);
+    expect(settings.graph.noisePatterns).toEqual(["reports/", "archive/", "log.md"]);
     expect(settings.graph.filters).toEqual({
       domains: ["research", "projects"],
       types: ["decision"],
       community: 3,
       showGhosts: true,
+      showNoise: true,
       minDegree: 2,
     });
   });
@@ -418,7 +422,19 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.filters.types).toEqual(["decision"]);
     expect(settings.graph.filters.community).toBeNull();
     expect(settings.graph.filters.showGhosts).toBe(false);
+    expect(settings.graph.filters.showNoise).toBe(false);
     expect(settings.graph.filters.minDegree).toBe(0);
+    expect(settings.graph.noisePatterns).toEqual(["reports/", "log.md"]);
+  });
+
+  it("defaults minDegree to 1 and noise hidden when keys are absent (back-compat)", () => {
+    const settings = normalizeMaruSettings({ graph: { filters: {} } });
+    expect(settings.graph.filters.minDegree).toBe(1);
+    expect(settings.graph.filters.showNoise).toBe(false);
+    expect(settings.graph.noisePatterns).toEqual(["reports/", "log.md"]);
+    // A stored 0 is respected as-is (existing users keep their setting).
+    const stored = normalizeMaruSettings({ graph: { filters: { minDegree: 0 } } });
+    expect(stored.graph.filters.minDegree).toBe(0);
   });
 
   it("parses catalog and studio modes for document operations", () => {

@@ -282,14 +282,20 @@ export interface GraphSettings {
   localDirection: "both" | "incoming" | "outgoing";
   view: "graph" | "chains";
   searchAsFilter: boolean;
+  /** relPath patterns treated as auto-generated noise: trailing "/" = prefix
+   *  match, otherwise exact filename match (case-insensitive). */
+  noisePatterns: string[];
   filters: {
     domains: string[];
     types: string[];
     community: number | null;
     showGhosts: boolean;
+    showNoise: boolean;
     minDegree: number;
   };
 }
+
+export const DEFAULT_GRAPH_NOISE_PATTERNS = ["reports/", "log.md"];
 
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
 export const COMMS_PROVIDER_RESULTS_MAX = 200;
@@ -438,12 +444,14 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     localDirection: "both",
     view: "graph",
     searchAsFilter: false,
+    noisePatterns: DEFAULT_GRAPH_NOISE_PATTERNS,
     filters: {
       domains: [],
       types: [],
       community: null,
       showGhosts: false,
-      minDegree: 0,
+      showNoise: false,
+      minDegree: 1,
     },
   },
   inboxChannels: {},
@@ -893,6 +901,9 @@ function normalizeGraphSettings(value: unknown): GraphSettings {
   const filters = isRecord(graph.filters) ? graph.filters : {};
   const community = filters.community;
   const minDegree = Number(filters.minDegree);
+  const noisePatterns = graph.noisePatterns === undefined
+    ? DEFAULT_GRAPH_NOISE_PATTERNS
+    : parseStringArray(graph.noisePatterns).map((pattern) => pattern.trim()).filter(Boolean);
   return {
     source: graph.source === "workspace" || graph.source === "all" ? graph.source : "vault",
     scope: graph.scope === "all" ? "all" : "connected",
@@ -903,13 +914,18 @@ function normalizeGraphSettings(value: unknown): GraphSettings {
         : "both",
     view: graph.view === "chains" ? "chains" : "graph",
     searchAsFilter: graph.searchAsFilter === true,
+    noisePatterns,
     filters: {
       domains: parseStringArray(filters.domains),
       types: parseStringArray(filters.types),
       community:
         typeof community === "number" && Number.isFinite(community) ? community : null,
       showGhosts: filters.showGhosts === true,
-      minDegree: Number.isFinite(minDegree) && minDegree > 0 ? Math.floor(minDegree) : 0,
+      showNoise: filters.showNoise === true,
+      // Stored values are respected as-is; only a missing key gets the new default of 1.
+      minDegree: filters.minDegree === undefined
+        ? 1
+        : Number.isFinite(minDegree) && minDegree > 0 ? Math.floor(minDegree) : 0,
     },
   };
 }

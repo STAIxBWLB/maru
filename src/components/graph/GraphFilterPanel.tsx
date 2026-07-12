@@ -12,6 +12,7 @@ export interface GraphFilters {
   types: Set<string>;
   community: number | null;
   showGhosts: boolean;
+  showNoise: boolean;
   minDegree: number;
 }
 
@@ -20,7 +21,8 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilters = {
   types: new Set(),
   community: null,
   showGhosts: false,
-  minDegree: 0,
+  showNoise: false,
+  minDegree: 1,
 };
 
 /** Persisted (JSON-friendly, array-based) ↔ runtime (Set-based) filter shape. */
@@ -30,6 +32,7 @@ export function filtersFromSettings(f: GraphSettings["filters"]): GraphFilters {
     types: new Set(f.types),
     community: f.community,
     showGhosts: f.showGhosts,
+    showNoise: f.showNoise,
     minDegree: f.minDegree,
   };
 }
@@ -40,6 +43,7 @@ export function filtersToSettings(f: GraphFilters): GraphSettings["filters"] {
     types: [...f.types],
     community: f.community,
     showGhosts: f.showGhosts,
+    showNoise: f.showNoise,
     minDegree: f.minDegree,
   };
 }
@@ -55,7 +59,8 @@ export function filtersAreDefault(filters: GraphFilters): boolean {
     filters.types.size === 0 &&
     filters.community == null &&
     !filters.showGhosts &&
-    filters.minDegree === 0
+    !filters.showNoise &&
+    filters.minDegree === DEFAULT_GRAPH_FILTERS.minDegree
   );
 }
 
@@ -100,6 +105,33 @@ export function GraphFilterPanel({
           <RotateCcw size={12} /> {t("graph.filter.reset")}
         </button>
       </div>
+
+      <section className="graph-filter-section">
+        <h4>
+          {t("graph.filter.minDegree")}
+          <input
+            type="number"
+            className="graph-degree-input"
+            min={0}
+            value={filters.minDegree}
+            data-testid="graph-min-degree-input"
+            onChange={(event) => {
+              const parsed = Math.floor(Number(event.target.value));
+              onFiltersChange({
+                ...filters,
+                minDegree: Number.isFinite(parsed) && parsed > 0 ? parsed : 0,
+              });
+            }}
+          />
+        </h4>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(maxDegree, 1)}
+          value={Math.min(filters.minDegree, Math.max(maxDegree, 1))}
+          onChange={(event) => onFiltersChange({ ...filters, minDegree: Number(event.target.value) })}
+        />
+      </section>
 
       <section className="graph-filter-section">
         <h4>{t("graph.filter.domain")}</h4>
@@ -175,18 +207,17 @@ export function GraphFilterPanel({
       </section>
 
       <section className="graph-filter-section">
-        <h4>
-          {t("graph.filter.minDegree")}
-          <span className="graph-slider-value">{filters.minDegree}</span>
-        </h4>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(maxDegree, 1)}
-          value={filters.minDegree}
-          onChange={(event) => onFiltersChange({ ...filters, minDegree: Number(event.target.value) })}
-        />
+        <label className="graph-toggle">
+          <input
+            type="checkbox"
+            checked={filters.showNoise}
+            data-testid="graph-show-noise"
+            onChange={(event) => onFiltersChange({ ...filters, showNoise: event.target.checked })}
+          />
+          {t("graph.filter.showNoise")}
+        </label>
       </section>
+
     </aside>
   );
 }
