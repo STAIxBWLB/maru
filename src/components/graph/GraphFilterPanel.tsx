@@ -2,6 +2,7 @@
 // show-ghosts / min-degree, each chip carrying a count and color swatch, plus
 // a reset action.
 
+import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { GraphSettings } from "../../lib/settings";
@@ -90,6 +91,9 @@ export function GraphFilterPanel({
 }: GraphFilterPanelProps) {
   const { t } = useTranslation();
   const dirty = !filtersAreDefault(filters);
+  // Draft lets the field go transiently blank while retyping; Number("") is 0
+  // and would otherwise commit minDegree 0 on clear. Blur restores the value.
+  const [degreeDraft, setDegreeDraft] = useState<string | null>(null);
 
   return (
     <aside className="graph-filter-panel" data-testid="graph-filter-panel">
@@ -113,15 +117,17 @@ export function GraphFilterPanel({
             type="number"
             className="graph-degree-input"
             min={0}
-            value={filters.minDegree}
+            value={degreeDraft ?? String(filters.minDegree)}
             data-testid="graph-min-degree-input"
             onChange={(event) => {
-              const parsed = Math.floor(Number(event.target.value));
-              onFiltersChange({
-                ...filters,
-                minDegree: Number.isFinite(parsed) && parsed > 0 ? parsed : 0,
-              });
+              const raw = event.target.value;
+              setDegreeDraft(raw);
+              if (raw.trim() === "") return;
+              const parsed = Math.floor(Number(raw));
+              if (!Number.isFinite(parsed)) return;
+              onFiltersChange({ ...filters, minDegree: Math.max(0, parsed) });
             }}
+            onBlur={() => setDegreeDraft(null)}
           />
         </h4>
         <input

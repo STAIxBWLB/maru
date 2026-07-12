@@ -435,6 +435,9 @@ describe("normalizeMaruSettings", () => {
     // A stored 0 is respected as-is (existing users keep their setting).
     const stored = normalizeMaruSettings({ graph: { filters: { minDegree: 0 } } });
     expect(stored.graph.filters.minDegree).toBe(0);
+    // A deliberately empty pattern list is respected, not replaced by defaults.
+    const empty = normalizeMaruSettings({ graph: { noisePatterns: [] } });
+    expect(empty.graph.noisePatterns).toEqual([]);
   });
 
   it("parses catalog and studio modes for document operations", () => {

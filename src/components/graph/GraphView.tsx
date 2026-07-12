@@ -268,14 +268,20 @@ export function GraphView({
     let base = model;
     if (focus) base = focusSubgraph(model, focus, localDepth, localDirection);
     const keep = new Set<string>();
+    // While noise is hidden, an "unknown" entry in a persisted type selection
+    // would exclude every visible node (its chip is hidden too) — ignore it.
+    const effectiveTypes = filters.showNoise
+      ? filters.types
+      : new Set([...filters.types].filter((type) => type !== "unknown"));
     for (const node of base.nodes) {
       if (!filters.showGhosts && node.type === "unresolved") continue;
       // Before the types check so a stale persisted types:["unknown"] selection
-      // can't resurrect noise.
-      if (!filters.showNoise && isNoiseNode(node, graphSettings.noisePatterns)) continue;
+      // can't resurrect noise. The explicitly focused node stays visible even
+      // when it is noise (e.g. "view in graph" from an untyped document).
+      if (!filters.showNoise && node.id !== focus && isNoiseNode(node, graphSettings.noisePatterns)) continue;
       if (scope === "connected" && node.degree === 0) continue;
       if (filters.domains.size > 0 && (!node.domain || !filters.domains.has(node.domain))) continue;
-      if (filters.types.size > 0 && !filters.types.has(node.type)) continue;
+      if (effectiveTypes.size > 0 && !effectiveTypes.has(node.type)) continue;
       if (filters.community != null && node.community !== filters.community) continue;
       if (node.degree < filters.minDegree) continue;
       keep.add(node.id);
