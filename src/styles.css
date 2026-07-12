@@ -244,6 +244,12 @@ button {
   cursor: pointer;
 }
 
+/* Bare utility used app-wide for secondary text; color only, so container
+   type scales and margins stay untouched. */
+.muted {
+  color: var(--muted);
+}
+
 a {
   color: inherit;
 }
@@ -3779,7 +3785,9 @@ a {
   background: var(--bg);
 }
 
-.editor-empty .empty-document-plate {
+.editor-empty .empty-document-plate,
+.system-empty .empty-document-plate,
+.tasks-empty .empty-document-plate {
   display: grid;
   place-items: center;
   gap: 14px;
@@ -3791,7 +3799,9 @@ a {
   box-shadow: var(--shadow);
 }
 
-.editor-empty h2 {
+.editor-empty h2,
+.system-empty h2,
+.tasks-empty .empty-document-plate h2 {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
@@ -3799,7 +3809,9 @@ a {
   color: var(--ink);
 }
 
-.editor-empty p {
+.editor-empty p,
+.system-empty p,
+.tasks-empty .empty-document-plate p {
   margin: 0;
   max-width: 36ch;
   text-align: center;
@@ -4065,6 +4077,22 @@ a {
 
 .tab-panel[data-state="inactive"] {
   display: none;
+}
+
+/* Suspense fallbacks (lazy modes + rich editor) */
+.mode-loading,
+.editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.mode-loading {
+  grid-column: 2 / -1;
+  grid-row: 2;
 }
 
 .source-editor {
@@ -5666,11 +5694,14 @@ button.git-badge:hover {
   padding: 10px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-muted);
+  background: var(--panel-2);
 }
 
 .settings-section-heading.inline {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .secret-input-row {
@@ -5714,7 +5745,10 @@ button.git-badge:hover {
   word-break: break-all;
 }
 
-.checkbox-field {
+/* .field.checkbox-field outranks the later .field { display: grid } so the
+   checkbox stays inline with its label wherever the combo is used. */
+.checkbox-field,
+.field.checkbox-field {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
@@ -7273,6 +7307,11 @@ button.git-badge:hover {
   gap: 4px;
   margin-top: 2px;
 }
+.writing-guideline__body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
 .writing-guideline__markdown {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -7834,7 +7873,10 @@ button.git-badge:hover {
   color: var(--panel);
 }
 
-/* ─── Integrated terminal ──────────────────────────────────────────── */
+/* ─── Integrated terminal ──────────────────────────────────────────────
+   Intentionally fixed dark palette in BOTH app themes (VS Code style):
+   matches NativeTerminalView DEFAULT_BG #111111 and its ANSI palette.
+   Do not tokenize these hex values. */
 
 .terminal-panel {
   position: relative;
@@ -10341,6 +10383,20 @@ button.git-badge:hover {
   min-width: 0;
   overflow: hidden;
 }
+/* Guard: bare headings dropped into the 12.5px pane get sane sizes instead
+   of browser defaults. :where() keeps specificity at 0-0-1 so EVERY styled
+   heading rule (including equal-specificity ones like the skills headings)
+   still wins regardless of source order. */
+:where(.system-pane) h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+:where(.system-pane) h4 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+}
 .system-empty {
   display: grid;
   place-items: center;
@@ -10660,6 +10716,10 @@ button.git-badge:hover {
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 }
 
+.settings-grid.three {
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+
 .inbox-runtime-editor {
   max-width: none;
   display: grid;
@@ -10752,7 +10812,7 @@ button.git-badge:hover {
 }
 
 .secrets-stat.ok {
-  border-color: color-mix(in srgb, var(--success) 24%, var(--line-soft));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line-soft));
 }
 
 .secrets-stat.warn {
@@ -10861,8 +10921,8 @@ button.git-badge:hover {
 }
 
 .secrets-pill.ok {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 32%, var(--line-soft));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line-soft));
 }
 
 .secrets-pill.warn {
@@ -13955,6 +14015,7 @@ button.git-badge:hover {
 
 .tasks-run-log [data-severity="error"] { color: var(--danger); }
 .tasks-run-log-summary span[data-severity="error"] { color: var(--danger); }
+.tasks-run-log-text { overflow-wrap: anywhere; }
 
 /* Task review card */
 .tasks-review-card {
@@ -14324,6 +14385,7 @@ button.git-badge:hover {
   font-size: 11px;
 }
 .inbox-run-log-phase { margin-right: 6px; color: var(--accent); text-transform: uppercase; font-size: 9.5px; }
+.inbox-run-log-text { overflow-wrap: anywhere; }
 .inbox-run-log [data-severity="error"] { color: var(--danger); }
 .inbox-run-log-summary span[data-severity="error"] { color: var(--danger); }
 .inbox-run-review-slot {
