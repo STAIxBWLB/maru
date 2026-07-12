@@ -86,7 +86,7 @@ export function GraphToolbar({
       </select>
       <button
         type="button"
-        className={scope === "all" ? "graph-icon-button active" : "graph-icon-button"}
+        className={scope === "all" ? "graph-icon-button graph-scope-button active" : "graph-icon-button graph-scope-button"}
         aria-pressed={scope === "all"}
         title={t("graph.scope.toggle")}
         onClick={() => onScopeChange(scope === "all" ? "connected" : "all")}
