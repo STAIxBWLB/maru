@@ -17,6 +17,15 @@
   color: var(--maru-fg, #1f2937);
   overflow: hidden;
   position: relative;
+  /* Status-chip tokens; .is-dark overrides them below. */
+  --maru-ok-bg: #ecfdf5;
+  --maru-ok-fg: #047857;
+  --maru-ok-border: #a7f3d0;
+  --maru-warn-bg: #fef3c7;
+  --maru-warn-fg: #92400e;
+  --maru-warn-border: #fcd34d;
+  --maru-danger-bg: #fee2e2;
+  --maru-danger-fg: #991b1b;
 }
 
 .maru-diagram-header {
@@ -65,15 +74,15 @@
 }
 
 .maru-diagram-status-saved {
-  background: #ecfdf5;
-  color: #047857;
-  border: 1px solid #a7f3d0;
+  background: var(--maru-ok-bg);
+  color: var(--maru-ok-fg);
+  border: 1px solid var(--maru-ok-border);
 }
 
 .maru-diagram-status-dirty {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--maru-warn-bg);
+  color: var(--maru-warn-fg);
+  border: 1px solid var(--maru-warn-border);
 }
 
 .maru-diagram-meta {
@@ -797,13 +806,13 @@
 }
 
 .maru-diagram-export-status.is-ok {
-  background: #ecfdf5;
-  color: #047857;
+  background: var(--maru-ok-bg);
+  color: var(--maru-ok-fg);
 }
 
 .maru-diagram-export-status.is-err {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--maru-danger-bg);
+  color: var(--maru-danger-fg);
 }
 
 .maru-diagram-history-dialog {
@@ -915,6 +924,14 @@
   --maru-border: #334155;
   --maru-soft: #1f2937;
   --maru-muted: #94a3b8;
+  --maru-ok-bg: rgba(16, 185, 129, 0.15);
+  --maru-ok-fg: #34d399;
+  --maru-ok-border: rgba(16, 185, 129, 0.4);
+  --maru-warn-bg: rgba(245, 158, 11, 0.15);
+  --maru-warn-fg: #fbbf24;
+  --maru-warn-border: rgba(245, 158, 11, 0.4);
+  --maru-danger-bg: rgba(239, 68, 68, 0.15);
+  --maru-danger-fg: #f87171;
 }
 
 /* Canvas surface always stays light per the source rule, regardless of theme. */

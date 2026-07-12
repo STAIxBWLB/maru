@@ -907,10 +907,14 @@ function SecretTextEditorDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content dialog-content--wide secret-editor-dialog">
-          <Dialog.Title>{editor?.mode === "create" ? "New text secret" : "Edit text secret"}</Dialog.Title>
-          <Dialog.Description>
-            Text values are hidden by default. Reveal loads the current file content into this editor.
-          </Dialog.Description>
+          <div className="dialog-header">
+            <div>
+              <Dialog.Title>{editor?.mode === "create" ? "New text secret" : "Edit text secret"}</Dialog.Title>
+              <Dialog.Description>
+                Text values are hidden by default. Reveal loads the current file content into this editor.
+              </Dialog.Description>
+            </div>
+          </div>
           {editor ? (
             <div className="settings-form secret-editor-form">
               {editor.error ? (
@@ -2144,7 +2148,7 @@ function DiagramPreviewToggle() {
           checked={enabled}
           onChange={(event) => toggle(event.target.checked)}
         />
-        <small style={{ color: "var(--maru-muted, #6b7280)" }}>
+        <small style={{ color: "var(--muted)" }}>
           {t("diagram.system.preview.hint")}
         </small>
       </div>

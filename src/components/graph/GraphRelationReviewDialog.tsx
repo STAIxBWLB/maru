@@ -89,11 +89,13 @@ export function GraphRelationReviewDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content graph-relation-dialog" data-testid="graph-relation-dialog">
-          <div className="dialog-title-row">
-            <Dialog.Title>{t("graph.relation.title")}</Dialog.Title>
+          <div className="dialog-header">
+            <div>
+              <Dialog.Title>{t("graph.relation.title")}</Dialog.Title>
+              <Dialog.Description>{t("graph.relation.description")}</Dialog.Description>
+            </div>
             <Dialog.Close className="icon-button" aria-label={t("app.errorClose")}><X size={16} /></Dialog.Close>
           </div>
-          <Dialog.Description>{t("graph.relation.description")}</Dialog.Description>
           <div className="graph-relation-pair">
             <strong>{source?.label}</strong><ArrowLeftRight size={14} /><strong>{target?.label}</strong>
           </div>
@@ -103,7 +105,7 @@ export function GraphRelationReviewDialog({
               {RELATIONS.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
-          <label className="checkbox-row">
+          <label className="field checkbox-field">
             <input type="checkbox" checked={reciprocal} onChange={(event) => setReciprocal(event.target.checked)} />
             {t("graph.relation.reciprocal")}
           </label>
@@ -117,10 +119,10 @@ export function GraphRelationReviewDialog({
               </section>
             ))}
           </div>
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          {error ? <p className="field-error" role="alert">{error}</p> : null}
           <div className="dialog-actions">
-            <Dialog.Close className="button secondary">{t("dialog.cancel")}</Dialog.Close>
-            <button type="button" className="button primary" disabled={loading || applying || !proposal?.changed} onClick={() => void apply()}>
+            <Dialog.Close className="button button-secondary button-md">{t("dialog.cancel")}</Dialog.Close>
+            <button type="button" className="button button-primary button-md" disabled={loading || applying || !proposal?.changed} onClick={() => void apply()}>
               <Link2 size={14} /> {applying ? t("graph.relation.applying") : t("graph.relation.apply")}
             </button>
           </div>
