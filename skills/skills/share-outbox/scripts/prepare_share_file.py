@@ -7,12 +7,15 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
 import shutil
 import sys
 import unicodedata
+import urllib.request
+import uuid
 from zoneinfo import ZoneInfo
 
 try:
@@ -216,6 +219,53 @@ def build_paths(outbox: dict, title: str, author: str, timestamp: str, ext: str,
     return output, receipts
 
 
+def telegram_creds(workspace: dict) -> tuple[str, str] | None:
+    providers = (workspace.get("io") or {}).get("providers") or {}
+    mon_path = ((providers.get("telegram") or {}).get("secrets") or {}).get("monitor_config")
+    if not mon_path:
+        return None
+    mon_file = expand_path(str(mon_path))
+    if not mon_file.is_file():
+        return None
+    tg = (load_yaml(mon_file).get("notification") or {}).get("telegram") or {}
+    token, chat_id = tg.get("bot_token"), tg.get("chat_id")
+    if not token or not chat_id:
+        return None
+    return str(token), str(chat_id)
+
+
+def telegram_send_document(token: str, chat_id: str, path: Path) -> dict:
+    boundary = uuid.uuid4().hex
+    ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
+        f"Content-Type: {ctype}\r\n\r\n"
+    ).encode("utf-8") + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendDocument",
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def send_via_telegram(workspace: dict, path: Path) -> dict:
+    creds = telegram_creds(workspace)
+    if creds is None:
+        return {"ok": False, "error": "telegram credentials not configured"}
+    try:
+        resp = telegram_send_document(*creds, path)
+    except Exception as exc:  # ponytail: non-fatal, the local share already succeeded
+        return {"ok": False, "error": str(exc)}
+    if not resp.get("ok"):
+        return {"ok": False, "error": json.dumps(resp, ensure_ascii=False)}
+    return {"ok": True}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare a share-ready file copy.")
     parser.add_argument("source", help="Source file to copy")
@@ -232,6 +282,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--template", help="Template/source filename to use for title derivation")
     parser.add_argument("--replace", action="store_true", help="Overwrite existing outgoing copy")
     parser.add_argument("--dry-run", action="store_true", help="Print planned output without writing")
+    parser.add_argument("--no-telegram", action="store_true", help="Skip Telegram send even when enabled in config")
     return parser.parse_args()
 
 
@@ -277,10 +328,18 @@ def main() -> int:
     if output.exists() and not args.replace:
         fail(f"Output already exists: {output}")
 
-    if not args.dry_run:
+    telegram_enabled = bool((outbox.get("telegram") or {}).get("enabled")) and not args.no_telegram
+
+    if args.dry_run:
+        receipt["telegram"] = {"planned": telegram_enabled}
+    else:
         output.parent.mkdir(parents=True, exist_ok=True)
         receipts.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, output)
+        if telegram_enabled:
+            receipt["telegram"] = send_via_telegram(workspace, output)
+            if not receipt["telegram"]["ok"]:
+                print(f"WARNING: telegram send failed: {receipt['telegram']['error']}", file=sys.stderr)
         with receipts.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n")
 

@@ -21,6 +21,8 @@ share_outbox:
   paths:
     monthly: "{yyyy}-{mm}"
     receipts: _state/index.jsonl
+  telegram:
+    enabled: false
 ```
 
 ## Runtime Rules
@@ -32,3 +34,8 @@ share_outbox:
   `{ext}`.
 - `paths.receipts` is relative to `root` unless absolute.
 - If a required key is missing, stop before copying.
+- `telegram.enabled` (optional, default false) turns on Telegram auto-send of
+  the staged copy. Bot credentials are read from the file referenced by
+  `io.providers.telegram.secrets.monitor_config`
+  (`notification.telegram.bot_token` / `chat_id`); no credentials live under
+  `share_outbox`.

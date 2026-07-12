@@ -72,7 +72,22 @@ Rules:
   Workspace sync exclusions must come from runtime sync configuration.
 - Do not embed personal values in this skill. Use `workspace.config.yaml`.
 - Actual sending or upload belongs to provider skills such as `io-gws` or
-  `io-mso`.
+  `io-mso`, except the optional Telegram auto-send below.
+
+## Telegram Auto-Send
+
+When `share_outbox.telegram.enabled` is true in `workspace.config.yaml`, the
+script also sends the staged copy as a Telegram document right after copying,
+using the bot credentials referenced by
+`io.providers.telegram.secrets.monitor_config`
+(`notification.telegram.bot_token` / `chat_id`).
+
+- Pass `--no-telegram` to skip the send for a single run.
+- `--dry-run` never sends; the output JSON reports `telegram.planned` instead.
+- A send failure is non-fatal: the local copy and receipt still succeed, and
+  the result is recorded as `telegram: {ok: false, error: ...}` in both the
+  receipt and the output JSON. Check `telegram.ok` and surface failures to the
+  user.
 
 ## References
 
