@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.4 — 2026-07-12 — Graph noise filter
+
+- Auto-generated files (lint reports, work logs, summaries) no longer clutter
+  the graph: notes without a frontmatter `type` and notes matching the
+  configurable `noisePatterns` list (default `reports/`, `log.md`) are hidden
+  by default, restorable via a new "show generated/untyped notes" toggle. The
+  hidden `unknown` type chip and stale type selections are handled so the
+  graph never silently empties.
+- The minimum-connections control moved to the top of the filter panel and
+  gained a direct number input alongside the slider; its default threshold
+  rose to 1 (stored settings keep their value).
+- Node sizes shrank (radius cap 20 to 12) for denser, Obsidian-like reading.
+- Cross-reviewed with Codex; focus-target visibility, stale type selections,
+  and number-input clearing were fixed from its findings.
+
 ## v0.4.3 — 2026-07-12 — Toolbar hotfix
 
 - Fixed the graph toolbar's scope toggle (전체/연결됨) overflowing its box:
