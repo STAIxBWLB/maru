@@ -306,3 +306,19 @@ export function focusSubgraph(
     edges: model.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
   };
 }
+
+/** Auto-generated noise: untyped notes (no frontmatter `type`) or notes whose
+ *  relPath matches a noise pattern (trailing "/" = prefix match, otherwise
+ *  exact filename match), both case-insensitive. Ghosts (`relPath: null`,
+ *  type "unresolved") are governed by the showGhosts filter, not here. */
+export function isNoiseNode(node: GraphNode, patterns: readonly string[]): boolean {
+  if (node.type === "unresolved") return false;
+  if (node.type === "unknown") return true;
+  if (!node.relPath) return false;
+  const relPath = node.relPath.toLowerCase();
+  const fileName = relPath.split("/").pop() ?? relPath;
+  return patterns.some((raw) => {
+    const pattern = raw.toLowerCase();
+    return pattern.endsWith("/") ? relPath.startsWith(pattern) : fileName === pattern;
+  });
+}

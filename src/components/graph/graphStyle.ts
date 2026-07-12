@@ -104,7 +104,7 @@ export function graphTheme(): GraphTheme {
 }
 
 export function nodeRadius(degree: number): number {
-  return Math.min(20, Math.max(4, 4 + 2 * Math.sqrt(degree)));
+  return Math.min(12, Math.max(3, 3 + 1.4 * Math.sqrt(degree)));
 }
 
 export function nodeColor(node: GraphNode, enriched: boolean): string {

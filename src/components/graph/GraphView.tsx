@@ -21,6 +21,7 @@ import {
   buildVaultGraph,
   enrichGraph,
   focusSubgraph,
+  isNoiseNode,
   type GraphModel,
   type GraphNode,
 } from "../../lib/graph/model";
@@ -134,6 +135,8 @@ export function GraphView({
   // don't re-fire persistence — only real state changes do.
   const onGraphSettingsChangeRef = useRef(onGraphSettingsChange);
   onGraphSettingsChangeRef.current = onGraphSettingsChange;
+  const graphSettingsRef = useRef(graphSettings);
+  graphSettingsRef.current = graphSettings;
   const persistSkipRef = useRef(true);
   useEffect(() => {
     if (persistSkipRef.current) {
@@ -147,6 +150,8 @@ export function GraphView({
       localDirection,
       view,
       searchAsFilter,
+      // The UI has no pattern editor; pass the current settings value through.
+      noisePatterns: graphSettingsRef.current.noisePatterns,
       filters: filtersToSettings(filters),
     });
   }, [source, scope, localDepth, localDirection, view, searchAsFilter, filters]);
@@ -263,11 +268,20 @@ export function GraphView({
     let base = model;
     if (focus) base = focusSubgraph(model, focus, localDepth, localDirection);
     const keep = new Set<string>();
+    // While noise is hidden, an "unknown" entry in a persisted type selection
+    // would exclude every visible node (its chip is hidden too) — ignore it.
+    const effectiveTypes = filters.showNoise
+      ? filters.types
+      : new Set([...filters.types].filter((type) => type !== "unknown"));
     for (const node of base.nodes) {
       if (!filters.showGhosts && node.type === "unresolved") continue;
+      // Before the types check so a stale persisted types:["unknown"] selection
+      // can't resurrect noise. The explicitly focused node stays visible even
+      // when it is noise (e.g. "view in graph" from an untyped document).
+      if (!filters.showNoise && node.id !== focus && isNoiseNode(node, graphSettings.noisePatterns)) continue;
       if (scope === "connected" && node.degree === 0) continue;
       if (filters.domains.size > 0 && (!node.domain || !filters.domains.has(node.domain))) continue;
-      if (filters.types.size > 0 && !filters.types.has(node.type)) continue;
+      if (effectiveTypes.size > 0 && !effectiveTypes.has(node.type)) continue;
       if (filters.community != null && node.community !== filters.community) continue;
       if (node.degree < filters.minDegree) continue;
       keep.add(node.id);
@@ -277,7 +291,7 @@ export function GraphView({
       nodes: base.nodes.filter((n) => keep.has(n.id)),
       edges: base.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
     };
-  }, [model, filters, focus, localDepth, localDirection, scope]);
+  }, [model, filters, focus, localDepth, localDirection, scope, graphSettings.noisePatterns]);
 
   // Search-as-filter narrows the facet-filtered set to matches + their 1-hop
   // neighbors (matches alone would render as disconnected dots). Off → returns
@@ -673,7 +687,7 @@ export function GraphView({
           <GraphFilterPanel
             filters={filters}
             domains={facets.domains}
-            types={facets.types}
+            types={filters.showNoise ? facets.types : facets.types.filter((item) => item.value !== "unknown")}
             communities={facets.communities}
             maxDegree={facets.maxDegree}
             onFiltersChange={setFilters}
