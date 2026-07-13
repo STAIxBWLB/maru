@@ -470,12 +470,21 @@ fn validate_metadata_paths(metadata: &BundleMetadata) -> Result<(), String> {
     if metadata.archive.size > ARCHIVE_CAP_BYTES {
         return Err(format!("metadata_archive_too_large: {}", metadata.archive.size));
     }
-    // Bind the archive to the signed revision: a mixed metadata/zip pair
-    // (or a reused archive name across revisions) must not validate.
+    // Bind the archive to the signed revision AND constrain its shape:
+    // the name feeds bundle ids that are joined into filesystem paths, so
+    // only `maru-skills-r<revision>-<hex sha>.zip` is acceptable. This also
+    // rejects mixed metadata/zip pairs and reused names across revisions.
     let expected_prefix = format!("maru-skills-r{}-", metadata.revision);
-    if !metadata.archive.name.starts_with(&expected_prefix)
-        || !metadata.archive.name.ends_with(".zip")
-    {
+    let name_ok = metadata
+        .archive
+        .name
+        .strip_prefix(&expected_prefix)
+        .and_then(|rest| rest.strip_suffix(".zip"))
+        .map(|sha| {
+            !sha.is_empty() && sha.len() <= 64 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .unwrap_or(false);
+    if !name_ok {
         return Err(format!(
             "metadata_archive_name_mismatch: {} (revision {})",
             metadata.archive.name, metadata.revision
@@ -1061,5 +1070,17 @@ mod tests {
         assert!(validate_metadata_paths(&metadata)
             .unwrap_err()
             .contains("archive_name_mismatch"));
+        // ...and must be hex-only after the revision: the derived bundle id
+        // is joined into filesystem paths, so traversal shapes are rejected.
+        metadata.archive.name = "maru-skills-r1-../../evil.zip".to_string();
+        assert!(validate_metadata_paths(&metadata)
+            .unwrap_err()
+            .contains("archive_name_mismatch"));
+        metadata.archive.name = "maru-skills-r1-abc/def.zip".to_string();
+        assert!(validate_metadata_paths(&metadata)
+            .unwrap_err()
+            .contains("archive_name_mismatch"));
+        metadata.archive.name = "maru-skills-r1-abc1234.zip".to_string();
+        assert!(validate_metadata_paths(&metadata).is_ok());
     }
 }

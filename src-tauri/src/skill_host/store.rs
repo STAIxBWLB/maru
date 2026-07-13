@@ -3305,8 +3305,37 @@ fn write_bootstrap_pristine(pristine: &Path) -> Result<(), String> {
 /// state file exists, `_builtin` is left alone (an applied remote bundle
 /// always wins over the embedded snapshot); the embedded snapshot only seeds
 /// fresh installs and self-heals a missing bootstrap pristine baseline.
+/// Remove swap leftovers (orphaned backups, staged next-dirs) that a crash
+/// between journal clear and cleanup can strand. Only safe with no journal
+/// present, which recover_interrupted_swap guarantees before this runs.
+fn sweep_swap_orphans() -> Result<(), String> {
+    let root = host_fs::skills_root()?;
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let cache = root.join("_cache");
+    if cache.is_dir() {
+        for entry in fs::read_dir(&cache).map_err(|err| err.to_string())? {
+            let entry = entry.map_err(|err| err.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("backup-") && entry.path().is_dir() {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    for entry in fs::read_dir(&root).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("_builtin.next-") && entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    Ok(())
+}
+
 fn ensure_active_bundle(builtin_root: &Path) -> Result<BundleState, String> {
     bundle::recover_interrupted_swap(builtin_root)?;
+    sweep_swap_orphans()?;
     if let Some(state) = bundle::read_state()? {
         if let Some(active) = &state.active {
             let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
@@ -3553,15 +3582,17 @@ fn cleanup_removed_builtin_installs(
     Ok(count)
 }
 
-/// Synchronous env repair used inside the apply transaction so a failure can
-/// roll the whole bundle back. Runs the setup script from the NEW _builtin.
+/// Synchronous env repair used inside the apply transaction, running the
+/// setup script from the STAGED new bundle BEFORE the swap: a failure means
+/// nothing was applied and no rollback is needed. Mutations setup.sh makes
+/// to the shared ~/.maru/env are idempotent by contract but not journaled.
 // ponytail: no output streaming or env status.json update here — the env
 // pane re-derives health from the venv; add streaming if repairs get long.
-fn run_env_repair_blocking(progress: ProgressReporter<'_>) -> Result<(), String> {
-    let setup = builtin_materialized_root()?
-        .join("envs")
-        .join("default")
-        .join("setup.sh");
+fn run_env_repair_blocking(
+    progress: ProgressReporter<'_>,
+    bundle_root: &Path,
+) -> Result<(), String> {
+    let setup = bundle_root.join("envs").join("default").join("setup.sh");
     if !setup.is_file() {
         progress.info("Bundle has no env setup script; skipping env repair");
         return Ok(());
@@ -3836,6 +3867,29 @@ fn skills_apply_bundle_update_impl(
     let (added_skills, updated_skills, removed_skills) =
         diff_bundle_skills(&old_pristine, &new_pristine);
 
+    // Pre-build the complete new _builtin as a sibling dir and run the env
+    // repair from it BEFORE any swap: failures up to here touch nothing, and
+    // the actual swap shrinks to two renames instead of a full tree copy
+    // (minimizing the window where ~/.claude/skills/* symlinks dangle).
+    progress.info("Preparing bundle");
+    let next_builtin = host_fs::skills_root()?.join(format!("_builtin.next-{}", Uuid::new_v4()));
+    if let Err(err) = copy_dir_all(&new_pristine, &next_builtin) {
+        let _ = fs::remove_dir_all(&next_builtin);
+        let _ = fs::remove_dir_all(&new_pristine);
+        return Err(format!("bundle_prepare_failed: {err}"));
+    }
+    if env_changed {
+        // ponytail: setup.sh mutations to ~/.maru/env are NOT rolled back on
+        // failure — the script is idempotent by contract and the next repair
+        // reconverges; the bundle itself has not been applied yet.
+        if let Err(err) = run_env_repair_blocking(progress, &next_builtin) {
+            let _ = fs::remove_dir_all(&next_builtin);
+            let _ = fs::remove_dir_all(&new_pristine);
+            return Err(err);
+        }
+    }
+
+    progress.info("Applying bundle");
     let backup = host_fs::skills_root()?.join("_cache").join(format!(
         "backup-{}",
         Utc::now().format("%Y%m%d%H%M%S%.9f")
@@ -3848,6 +3902,7 @@ fn skills_apply_bundle_update_impl(
     })?;
     if let Err(err) = fs::rename(&builtin_root, &backup) {
         let _ = bundle::clear_journal();
+        let _ = fs::remove_dir_all(&next_builtin);
         let _ = fs::remove_dir_all(&new_pristine);
         return Err(format!("bundle_swap_failed: {err}"));
     }
@@ -3855,20 +3910,12 @@ fn skills_apply_bundle_update_impl(
         let _ = fs::remove_dir_all(&builtin_root);
         let _ = fs::rename(&backup, &builtin_root);
         let _ = bundle::clear_journal();
+        let _ = fs::remove_dir_all(&next_builtin);
         let _ = fs::remove_dir_all(&new_pristine);
         reason
     };
-    progress.info("Applying bundle");
-    if let Err(err) = copy_dir_all(&new_pristine, &builtin_root) {
+    if let Err(err) = fs::rename(&next_builtin, &builtin_root) {
         return Err(rollback(format!("bundle_apply_failed: {err}")));
-    }
-    if env_changed {
-        // ponytail: setup.sh mutations to ~/.maru/env are NOT rolled back on
-        // failure — the script is idempotent by contract and the next repair
-        // reconverges; only the bundle itself rolls back.
-        if let Err(err) = run_env_repair_blocking(progress) {
-            return Err(rollback(err));
-        }
     }
 
     let current = SkillBundleRef {
