@@ -439,6 +439,18 @@ fn has_extension(path: &Path, expected: &str) -> bool {
 }
 
 fn bundled_templates_root() -> PathBuf {
+    // Active OTA bundle first; the compile-time repo path only exists on dev
+    // machines and goes stale the moment a skills bundle updates.
+    if let Ok(root) = crate::skill_host::fs::skills_root() {
+        let bundled = root
+            .join("_builtin")
+            .join("skills")
+            .join("hwpx")
+            .join("templates");
+        if bundled.is_dir() {
+            return bundled;
+        }
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/skills/hwpx/templates")
 }
 

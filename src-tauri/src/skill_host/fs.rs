@@ -191,6 +191,40 @@ fn test_maru_home_override() -> Option<PathBuf> {
     None
 }
 
+/// Shared test fixture: sandbox MARU_TEST_HOME into a TempDir, holding the
+/// process-global home lock until dropped. Field order is load-bearing (the
+/// guard must drop last) — see store::tests::TestHome.
+#[cfg(test)]
+pub(crate) struct BundleTestHome {
+    _dir: tempfile::TempDir,
+    previous: Option<std::ffi::OsString>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for BundleTestHome {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var("MARU_TEST_HOME", previous);
+        } else {
+            std::env::remove_var("MARU_TEST_HOME");
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_home_for_bundle_tests() -> BundleTestHome {
+    let guard = test_maru_home_lock();
+    let dir = tempfile::TempDir::new().unwrap();
+    let previous = std::env::var_os("MARU_TEST_HOME");
+    std::env::set_var("MARU_TEST_HOME", dir.path());
+    BundleTestHome {
+        _dir: dir,
+        previous,
+        _guard: guard,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2197,11 +2197,13 @@ name = "maru"
 version = "0.4.5"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "encoding_rs",
  "include_dir",
  "mime_guess",
+ "minisign-verify",
  "notify",
  "portable-pty",
  "quick-xml",

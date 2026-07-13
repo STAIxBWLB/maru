@@ -149,7 +149,8 @@ use site_view::{
 };
 use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{
-    skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
+    skills_add_source, skills_adopt_external_links, skills_apply_bundle_update,
+    skills_bundle_status, skills_check_bundle_update, skills_create_skill, skills_delete_skill,
     skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal, skills_doctor,
     skills_env_bootstrap, skills_env_repair, skills_env_status, skills_import_external,
     skills_import_unmanage, skills_install_skill, skills_list_dirty, skills_list_installs,
@@ -427,6 +428,9 @@ pub fn run() {
             skills_env_status,
             skills_env_bootstrap,
             skills_env_repair,
+            skills_bundle_status,
+            skills_check_bundle_update,
+            skills_apply_bundle_update,
             skills_dispatch_compose,
             skills_dispatch_terminal,
             skills_dispatch_background,

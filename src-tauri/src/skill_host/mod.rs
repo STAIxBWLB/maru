@@ -1,3 +1,4 @@
+pub mod bundle_update;
 pub mod dispatch;
 pub mod env;
 pub mod fs;
@@ -9,10 +10,12 @@ pub use dispatch::{
 };
 pub use env::{skills_env_bootstrap, skills_env_repair, skills_env_status};
 pub use store::{
-    skills_add_source, skills_adopt_external_links, skills_create_skill, skills_delete_skill,
-    skills_doctor, skills_import_external, skills_import_unmanage, skills_install_skill,
-    skills_list_dirty, skills_list_installs, skills_list_skills, skills_list_sources,
-    skills_read_skill, skills_read_skill_file, skills_reconcile_skill, skills_remove_source,
-    skills_rescan_source, skills_reset_registry, skills_save_skill_as, skills_save_skill_file,
-    skills_sync_all_sources, skills_sync_source, skills_sync_tools, skills_uninstall_skill,
+    skills_add_source, skills_adopt_external_links, skills_apply_bundle_update,
+    skills_apply_bundle_update_headless, skills_bundle_status, skills_check_bundle_update,
+    skills_create_skill, skills_delete_skill, skills_doctor, skills_import_external,
+    skills_import_unmanage, skills_install_skill, skills_list_dirty, skills_list_installs,
+    skills_list_skills, skills_list_sources, skills_read_skill, skills_read_skill_file,
+    skills_reconcile_skill, skills_remove_source, skills_rescan_source, skills_reset_registry,
+    skills_save_skill_as, skills_save_skill_file, skills_sync_all_sources, skills_sync_source,
+    skills_sync_tools, skills_uninstall_skill,
 };

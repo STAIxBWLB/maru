@@ -16,6 +16,8 @@ use walkdir::WalkDir;
 use std::os::unix::fs::PermissionsExt;
 
 use crate::cli_path::merge_path_env;
+use crate::skill_host::bundle_update as bundle;
+use crate::skill_host::bundle_update::{BundleState, SkillBundleRef, SwapJournal};
 use crate::skill_host::fs as host_fs;
 use crate::vault::{parse_frontmatter, title_from_content};
 use crate::win_process::NoWindow;
@@ -2178,10 +2180,26 @@ fn git_staged_changes_for_path(repo_root: &Path, rel: &str) -> Result<bool, Stri
 
 fn restore_builtin_skill(name: &str) -> Result<(), String> {
     let name = host_fs::safe_entry_name(name)?;
+    let target = builtin_materialized_root()?.join("skills").join(&name);
+    // Discard restores from the ACTIVE pristine baseline, not the embedded
+    // snapshot: after an OTA bundle update the embedded copy is stale and
+    // restoring it would silently downgrade the skill.
+    if let Some(active) = bundle::read_state()?.and_then(|state| state.active) {
+        let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?
+            .join("skills")
+            .join(&name);
+        if pristine.is_dir() {
+            if target.exists() {
+                fs::remove_dir_all(&target)
+                    .map_err(|err| format!("Cannot remove builtin skill {name}: {err}"))?;
+            }
+            host_fs::ensure_dir(&target)?;
+            return copy_dir_all(&pristine, &target);
+        }
+    }
     let source = BUILTIN_DIR
         .get_dir(format!("skills/{name}"))
         .ok_or_else(|| format!("unknown_builtin_skill: {name}"))?;
-    let target = builtin_materialized_root()?.join("skills").join(&name);
     if target.exists() {
         fs::remove_dir_all(&target)
             .map_err(|err| format!("Cannot remove builtin skill {name}: {err}"))?;
@@ -2952,9 +2970,7 @@ fn add_default_sources_readonly(
 fn ensure_builtin_source(registry: &mut SkillsRegistry) -> Result<(), String> {
     clear_removed_source(registry, BUILTIN_SOURCE_ID);
     let builtin = builtin_materialized_root()?;
-    profile_timing_result("skills.materialize_builtin_bundle", || {
-        materialize_builtin_bundle(&builtin)
-    })?;
+    ensure_active_bundle(&builtin)?;
     let source = SkillSource {
         id: BUILTIN_SOURCE_ID.to_string(),
         kind: "builtin".to_string(),
@@ -3033,7 +3049,7 @@ fn builtin_materialized_root() -> Result<PathBuf, String> {
 
 fn builtin_env_setup_path() -> Result<Option<PathBuf>, String> {
     let root = builtin_materialized_root()?;
-    materialize_builtin_bundle(&root)?;
+    ensure_active_bundle(&root)?;
     let setup = root.join("envs").join("default").join("setup.sh");
     Ok(setup.is_file().then_some(setup))
 }
@@ -3147,6 +3163,705 @@ fn set_builtin_file_mode(path: &Path, contents: &[u8]) -> Result<(), String> {
         let _ = (path, contents);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// OTA skills bundle: state bootstrap, dirty detection, check/apply commands.
+// Network/verification/zip plumbing lives in skill_host::bundle_update.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillBundleAvailable {
+    pub bundle_id: String,
+    pub revision: u64,
+    pub display_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
+    pub min_app_version: String,
+    pub env_hash: String,
+    pub archive_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillBundleStatus {
+    pub app_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<SkillBundleRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available: Option<SkillBundleAvailable>,
+    pub update_available: bool,
+    /// Areas drifted from the active pristine baseline: builtin skill names,
+    /// or top-level bundle areas ("envs", "lib", "manifest.json", ...).
+    pub dirty_skills: Vec<String>,
+    /// "target/installed_as" copy installs whose source skill moved on.
+    pub stale_copy_installs: Vec<String>,
+    pub env_update_required: bool,
+    pub min_app_ok: bool,
+    pub auto_applicable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillBundleApplyOutcome {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous: Option<SkillBundleRef>,
+    pub current: SkillBundleRef,
+    pub added_skills: Vec<String>,
+    pub updated_skills: Vec<String>,
+    pub removed_skills: Vec<String>,
+    pub stale_copy_installs: Vec<String>,
+    pub removed_installs: usize,
+    pub restart_required: bool,
+}
+
+fn embedded_channel() -> (String, String) {
+    let repo_fallback = "STAIxBWLB/maru".to_string();
+    let tag_fallback = "skills-channel".to_string();
+    let Some(manifest) = BUILTIN_DIR.get_file("manifest.json") else {
+        return (repo_fallback, tag_fallback);
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(manifest.contents()) else {
+        return (repo_fallback, tag_fallback);
+    };
+    let repo = value
+        .get("repoSlug")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or(repo_fallback);
+    let tag = value
+        .get("channelTag")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or(tag_fallback);
+    (repo, tag)
+}
+
+fn bootstrap_bundle_ref() -> SkillBundleRef {
+    let tree_hash = hash_include_dir(&BUILTIN_DIR);
+    let mut env_files = Vec::new();
+    if let Some(envs) = BUILTIN_DIR.get_dir("envs") {
+        collect_include_files(envs, Path::new(""), &mut env_files);
+    }
+    let pairs = env_files
+        .into_iter()
+        .map(|(rel, contents)| (rel.replace('\\', "/"), sha256_hex(contents)))
+        .collect();
+    SkillBundleRef {
+        bundle_id: format!("bootstrap-{}", &tree_hash[..12]),
+        revision: 0,
+        display_version: "bootstrap".to_string(),
+        commit: None,
+        source: bundle::BOOTSTRAP_SOURCE.to_string(),
+        env_hash: bundle::hash_from_file_hashes(pairs),
+        applied_at: Utc::now().to_rfc3339(),
+    }
+}
+
+/// Materialize the embedded snapshot as a pristine baseline dir (write to a
+/// sibling temp dir, then rename, so a crash never leaves a half baseline).
+fn write_bootstrap_pristine(pristine: &Path) -> Result<(), String> {
+    let parent = pristine
+        .parent()
+        .ok_or_else(|| "bundle_pristine_invalid".to_string())?;
+    host_fs::ensure_dir(parent)?;
+    let name = pristine
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("bootstrap");
+    let tmp = parent.join(format!(".{name}.tmp"));
+    if tmp.exists() {
+        fs::remove_dir_all(&tmp)
+            .map_err(|err| format!("Cannot clear {}: {err}", host_fs::display_path(&tmp)))?;
+    }
+    host_fs::ensure_dir(&tmp)?;
+    copy_include_dir_unconditional(&BUILTIN_DIR, &tmp, BUILTIN_DIR.path())?;
+    if pristine.exists() {
+        fs::remove_dir_all(pristine)
+            .map_err(|err| format!("Cannot clear {}: {err}", host_fs::display_path(pristine)))?;
+    }
+    fs::rename(&tmp, pristine).map_err(|err| {
+        format!(
+            "Cannot move {} to {}: {err}",
+            host_fs::display_path(&tmp),
+            host_fs::display_path(pristine)
+        )
+    })
+}
+
+/// Bootstrap or repair the active-bundle state. Never downgrades: once a
+/// state file exists, `_builtin` is left alone (an applied remote bundle
+/// always wins over the embedded snapshot); the embedded snapshot only seeds
+/// fresh installs and self-heals a missing bootstrap pristine baseline.
+fn ensure_active_bundle(builtin_root: &Path) -> Result<BundleState, String> {
+    bundle::recover_interrupted_swap(builtin_root)?;
+    if let Some(state) = bundle::read_state()? {
+        if let Some(active) = &state.active {
+            if active.source == bundle::BOOTSTRAP_SOURCE {
+                let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
+                if !pristine.is_dir() {
+                    write_bootstrap_pristine(&pristine)?;
+                }
+            }
+            return Ok(state);
+        }
+    }
+    // No state: fresh install, or first run after upgrading from an app that
+    // shipped skills inside the binary. The legacy 3-way materialize
+    // preserves user edits byte-identical; on a fresh install it writes all.
+    let bootstrap = bootstrap_bundle_ref();
+    let pristine = bundle::bundle_pristine_dir(&bootstrap.bundle_id)?;
+    if !pristine.is_dir() {
+        write_bootstrap_pristine(&pristine)?;
+    }
+    profile_timing_result("skills.materialize_builtin_bundle", || {
+        materialize_builtin_bundle(builtin_root)
+    })?;
+    let state = BundleState {
+        schema: 1,
+        active: Some(bootstrap),
+        previous: None,
+    };
+    bundle::write_state(&state)?;
+    Ok(state)
+}
+
+/// Junk that appears inside `_builtin` from running skills (python caches,
+/// Finder droppings) and must count neither as user edits nor bundle content.
+fn is_bundle_junk(rel: &Path) -> bool {
+    let junk_dirs = ["__pycache__", ".pytest_cache", "node_modules", ".venv"];
+    if rel.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .map(|value| junk_dirs.contains(&value))
+            .unwrap_or(false)
+    }) {
+        return true;
+    }
+    match rel.file_name().and_then(|name| name.to_str()) {
+        Some(".DS_Store") => true,
+        Some(name) if name == BUILTIN_HASHES_FILE => true,
+        Some(name) if name.ends_with(".pyc") => true,
+        _ => false,
+    }
+}
+
+fn hash_directory_filtered(path: &Path) -> Result<String, String> {
+    let mut entries: Vec<PathBuf> = WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| entry.path().to_path_buf())
+        .filter(|file| {
+            file.strip_prefix(path)
+                .map(|rel| !is_bundle_junk(rel))
+                .unwrap_or(true)
+        })
+        .collect();
+    entries.sort();
+    let mut hasher = Sha256::new();
+    for file in entries {
+        let rel = file.strip_prefix(path).unwrap_or(&file).to_string_lossy();
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        let data = fs::read(&file)
+            .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&file)))?;
+        hasher.update(sha256_hex(&data).as_bytes());
+        hasher.update(b"\0");
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn active_pristine_skill_hash(name: &str) -> Option<String> {
+    let active = bundle::read_state().ok()??.active?;
+    let dir = bundle::bundle_pristine_dir(&active.bundle_id)
+        .ok()?
+        .join("skills")
+        .join(name);
+    if !dir.is_dir() {
+        return None;
+    }
+    hash_directory_filtered(&dir).ok()
+}
+
+fn collect_bundle_hashes(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let mut map = BTreeMap::new();
+    if !root.is_dir() {
+        return Ok(map);
+    }
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.map_err(|err| err.to_string())?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|err| err.to_string())?;
+        if is_bundle_junk(rel) {
+            continue;
+        }
+        let rel_str = rel
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        let data = fs::read(entry.path())
+            .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(entry.path())))?;
+        map.insert(rel_str, sha256_hex(&data));
+    }
+    Ok(map)
+}
+
+fn dirty_area(rel: &str) -> String {
+    let parts: Vec<&str> = rel.splitn(3, '/').collect();
+    match parts.as_slice() {
+        ["skills", name, _rest] => (*name).to_string(),
+        [first, ..] => (*first).to_string(),
+        [] => rel.to_string(),
+    }
+}
+
+/// Areas of `_builtin` that drifted from the pristine baseline (user edits,
+/// user-added files, deletions). Junk is ignored on both sides.
+fn bundle_dirty_areas(builtin_root: &Path, pristine: &Path) -> Result<Vec<String>, String> {
+    let baseline = collect_bundle_hashes(pristine)?;
+    let current = collect_bundle_hashes(builtin_root)?;
+    let mut areas = BTreeSet::new();
+    for (rel, sha) in &baseline {
+        if current.get(rel) != Some(sha) {
+            areas.insert(dirty_area(rel));
+        }
+    }
+    for rel in current.keys() {
+        if !baseline.contains_key(rel) {
+            areas.insert(dirty_area(rel));
+        }
+    }
+    Ok(areas.into_iter().collect())
+}
+
+fn pristine_skill_names(root: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let skills = root.join("skills");
+    let Ok(entries) = fs::read_dir(&skills) else {
+        return names;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.join("SKILL.md").is_file() {
+            names.insert(entry.file_name().to_string_lossy().to_string());
+        }
+    }
+    names
+}
+
+fn diff_bundle_skills(
+    old_pristine: &Path,
+    new_pristine: &Path,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let old_names = pristine_skill_names(old_pristine);
+    let new_names = pristine_skill_names(new_pristine);
+    let added: Vec<String> = new_names.difference(&old_names).cloned().collect();
+    let removed: Vec<String> = old_names.difference(&new_names).cloned().collect();
+    let mut updated = Vec::new();
+    for name in old_names.intersection(&new_names) {
+        let old_hash = hash_directory_filtered(&old_pristine.join("skills").join(name)).ok();
+        let new_hash = hash_directory_filtered(&new_pristine.join("skills").join(name)).ok();
+        if old_hash != new_hash {
+            updated.push(name.clone());
+        }
+    }
+    (added, updated, removed)
+}
+
+/// Copy-mode installs of builtin skills whose SKILL.md moved on since the
+/// copy was made ("target/installed_as"). Copies are never auto-touched.
+fn stale_copy_installs_report(registry: &SkillsRegistry) -> Vec<String> {
+    let Ok(root) = builtin_materialized_root() else {
+        return Vec::new();
+    };
+    let prefix = format!("{BUILTIN_SOURCE_ID}::");
+    registry
+        .installs
+        .iter()
+        .filter(|install| install.mode == "copy" && install.skill_id.starts_with(&prefix))
+        .filter_map(|install| {
+            let name = install.skill_id.strip_prefix(&prefix)?;
+            let marker = read_install_marker(Path::new(&install.target_path))?;
+            let source_hash = marker.source_hash?;
+            let current = hash_file(&root.join("skills").join(name).join("SKILL.md")).ok();
+            (current.as_deref() != Some(source_hash.as_str()))
+                .then(|| format!("{}/{}", install.target, install.installed_as))
+        })
+        .collect()
+}
+
+/// Remove installs of skills the new bundle dropped — but only links that are
+/// provably Maru-owned end to end. Foreign links and copy installs survive.
+fn cleanup_removed_builtin_installs(
+    registry: &mut SkillsRegistry,
+    removed: &[String],
+) -> Result<usize, String> {
+    let builtin_prefix = builtin_materialized_root()?;
+    let mut count = 0;
+    for name in removed {
+        let skill_id = format!("{BUILTIN_SOURCE_ID}::{name}");
+        let matches: Vec<SkillInstall> = registry
+            .installs
+            .iter()
+            .filter(|install| {
+                install.skill_id == skill_id
+                    && install.managed_by == "maru"
+                    && install.mode == "symlink"
+            })
+            .cloned()
+            .collect();
+        for install in matches {
+            let tool_target = PathBuf::from(&install.target_path);
+            let maru_entry = PathBuf::from(&install.entrypoint_path);
+            let _ = host_fs::remove_if_matching_symlink(&tool_target, &maru_entry);
+            if let Some(link_target) = host_fs::read_link_target(&maru_entry) {
+                if link_target.starts_with(&builtin_prefix) && !link_target.exists() {
+                    let _ = fs::remove_file(&maru_entry);
+                }
+            }
+            registry.installs.retain(|other| {
+                !(other.target == install.target && other.installed_as == install.installed_as)
+            });
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Synchronous env repair used inside the apply transaction so a failure can
+/// roll the whole bundle back. Runs the setup script from the NEW _builtin.
+// ponytail: no output streaming or env status.json update here — the env
+// pane re-derives health from the venv; add streaming if repairs get long.
+fn run_env_repair_blocking(progress: ProgressReporter<'_>) -> Result<(), String> {
+    let setup = builtin_materialized_root()?
+        .join("envs")
+        .join("default")
+        .join("setup.sh");
+    if !setup.is_file() {
+        progress.info("Bundle has no env setup script; skipping env repair");
+        return Ok(());
+    }
+    let root = host_fs::env_root()?;
+    host_fs::ensure_dir(&root)?;
+    progress.info("Repairing skills environment (this can take a few minutes)");
+    let output = Command::new("bash")
+        .arg(&setup)
+        .arg("--target")
+        .arg(&root)
+        .no_window()
+        .output()
+        .map_err(|err| format!("env_repair_spawn_failed: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let line = stderr
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("env repair failed")
+            .to_string();
+        return Err(format!("env_repair_failed: {line}"));
+    }
+    progress.success("Skills environment repaired");
+    Ok(())
+}
+
+fn prune_bundle_dirs(keep: &[&str]) -> Result<(), String> {
+    let dir = bundle::bundles_dir()?;
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&dir).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !keep.contains(&name.as_str()) && entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn bundle_id_for(metadata: &bundle::BundleMetadata) -> String {
+    metadata
+        .archive
+        .name
+        .trim_start_matches("maru-skills-")
+        .trim_end_matches(".zip")
+        .to_string()
+}
+
+#[tauri::command]
+pub fn skills_bundle_status() -> Result<SkillBundleStatus, String> {
+    skills_bundle_status_impl(None)
+}
+
+#[tauri::command]
+pub fn skills_check_bundle_update(force: Option<bool>) -> Result<SkillBundleStatus, String> {
+    // No response caching yet, so every check hits the channel; the flag is
+    // accepted for API stability.
+    let _ = force;
+    let (repo, tag) = embedded_channel();
+    let remote = bundle::discover_remote_bundle(&repo, &tag)?;
+    skills_bundle_status_impl(remote.as_ref())
+}
+
+fn skills_bundle_status_impl(
+    remote: Option<&bundle::RemoteBundle>,
+) -> Result<SkillBundleStatus, String> {
+    let builtin_root = builtin_materialized_root()?;
+    let state = bundle::read_state()?.unwrap_or_default();
+    let active = state.active;
+    let dirty = match &active {
+        Some(active) => {
+            let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
+            if pristine.is_dir() {
+                bundle_dirty_areas(&builtin_root, &pristine)?
+            } else {
+                Vec::new()
+            }
+        }
+        None => Vec::new(),
+    };
+    let registry = load_registry()?;
+    let stale_copy_installs = stale_copy_installs_report(&registry);
+    let (update_available, available, env_update_required, min_app_ok) = match remote {
+        Some(remote) => {
+            let metadata = &remote.metadata;
+            let newer = active
+                .as_ref()
+                .map(|active| metadata.revision > active.revision)
+                .unwrap_or(true);
+            let env_changed = active
+                .as_ref()
+                .map(|active| metadata.env_hash != active.env_hash)
+                .unwrap_or(false);
+            let min_ok = bundle::app_version_satisfies(&metadata.min_app_version);
+            let available = SkillBundleAvailable {
+                bundle_id: bundle_id_for(metadata),
+                revision: metadata.revision,
+                display_version: metadata.display_version.clone(),
+                commit: metadata.commit.clone(),
+                published_at: metadata.published_at.clone(),
+                min_app_version: metadata.min_app_version.clone(),
+                env_hash: metadata.env_hash.clone(),
+                archive_size: metadata.archive.size,
+            };
+            (newer, Some(available), newer && env_changed, min_ok)
+        }
+        None => (false, None, false, true),
+    };
+    let auto_applicable =
+        update_available && min_app_ok && !env_update_required && dirty.is_empty();
+    Ok(SkillBundleStatus {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        active,
+        available,
+        update_available,
+        dirty_skills: dirty,
+        stale_copy_installs,
+        env_update_required,
+        min_app_ok,
+        auto_applicable,
+    })
+}
+
+#[tauri::command]
+pub fn skills_apply_bundle_update(
+    app: AppHandle,
+    bundle_id: Option<String>,
+    repair_env: Option<bool>,
+    progress_id: Option<String>,
+) -> Result<SkillBundleApplyOutcome, String> {
+    let outcome = skills_apply_bundle_update_impl(
+        bundle_id,
+        repair_env.unwrap_or(false),
+        ProgressReporter::new(&app, progress_id.as_deref()),
+    )?;
+    let _ = app.emit("skills://updated", &outcome);
+    Ok(outcome)
+}
+
+pub fn skills_apply_bundle_update_headless(
+    bundle_id: Option<String>,
+    repair_env: bool,
+) -> Result<SkillBundleApplyOutcome, String> {
+    skills_apply_bundle_update_impl(bundle_id, repair_env, ProgressReporter::noop())
+}
+
+fn skills_apply_bundle_update_impl(
+    requested_bundle_id: Option<String>,
+    repair_env: bool,
+    progress: ProgressReporter<'_>,
+) -> Result<SkillBundleApplyOutcome, String> {
+    let builtin_root = builtin_materialized_root()?;
+    let active = {
+        let _guard = registry_guard()?;
+        ensure_active_bundle(&builtin_root)?
+            .active
+            .ok_or_else(|| "bundle_state_missing".to_string())?
+    };
+
+    // Everything network-bound happens outside the registry lock.
+    progress.info("Checking skills channel");
+    let (repo, tag) = embedded_channel();
+    let remote = bundle::discover_remote_bundle(&repo, &tag)?
+        .ok_or_else(|| "bundle_update_not_available".to_string())?;
+    let metadata = remote.metadata.clone();
+    let new_bundle_id = bundle_id_for(&metadata);
+    if let Some(requested) = &requested_bundle_id {
+        if requested != &new_bundle_id {
+            return Err(format!(
+                "bundle_id_mismatch: requested {requested}, channel has {new_bundle_id}"
+            ));
+        }
+    }
+    if metadata.revision <= active.revision {
+        return Err(format!(
+            "bundle_not_newer: channel r{} <= active r{}",
+            metadata.revision, active.revision
+        ));
+    }
+    if !bundle::app_version_satisfies(&metadata.min_app_version) {
+        return Err(format!(
+            "bundle_requires_app: {} (running {})",
+            metadata.min_app_version,
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    let env_changed = metadata.env_hash != active.env_hash;
+    if env_changed && !repair_env {
+        return Err("bundle_env_update_required".to_string());
+    }
+
+    progress.info(format!(
+        "Downloading skills bundle {} ({} bytes)",
+        metadata.display_version, metadata.archive.size
+    ));
+    let archive = bundle::download_verified_archive(&remote)?;
+    progress.info("Verifying and staging bundle");
+    let staging = bundle::staging_root()?.join(&new_bundle_id);
+    bundle::extract_bundle_to_staging(&archive, &metadata, &staging)?;
+
+    // Swap under the registry lock.
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    let old_pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
+    let dirty = if old_pristine.is_dir() {
+        bundle_dirty_areas(&builtin_root, &old_pristine)?
+    } else {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("bundle_pristine_missing: cannot prove _builtin is clean".to_string());
+    };
+    if !dirty.is_empty() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "bundle_dirty_blocked: local edits in {}. Promote (Save As) or discard them, then retry.",
+            dirty.join(", ")
+        ));
+    }
+
+    let new_pristine = bundle::bundle_pristine_dir(&new_bundle_id)?;
+    if new_pristine.exists() {
+        fs::remove_dir_all(&new_pristine).map_err(|err| {
+            format!(
+                "Cannot clear {}: {err}",
+                host_fs::display_path(&new_pristine)
+            )
+        })?;
+    }
+    host_fs::ensure_dir(new_pristine.parent().unwrap_or(Path::new("/")))?;
+    fs::rename(&staging, &new_pristine).map_err(|err| {
+        format!(
+            "Cannot move staged bundle into {}: {err}",
+            host_fs::display_path(&new_pristine)
+        )
+    })?;
+    let (added_skills, updated_skills, removed_skills) =
+        diff_bundle_skills(&old_pristine, &new_pristine);
+
+    let backup = host_fs::skills_root()?.join("_cache").join(format!(
+        "backup-{}",
+        Utc::now().format("%Y%m%d%H%M%S%.9f")
+    ));
+    bundle::write_journal(&SwapJournal {
+        schema: 1,
+        new_bundle_id: new_bundle_id.clone(),
+        backup_dir: host_fs::display_path(&backup),
+        started_at: Utc::now().to_rfc3339(),
+    })?;
+    if let Err(err) = fs::rename(&builtin_root, &backup) {
+        let _ = bundle::clear_journal();
+        let _ = fs::remove_dir_all(&new_pristine);
+        return Err(format!("bundle_swap_failed: {err}"));
+    }
+    let rollback = |reason: String| -> String {
+        let _ = fs::remove_dir_all(&builtin_root);
+        let _ = fs::rename(&backup, &builtin_root);
+        let _ = bundle::clear_journal();
+        let _ = fs::remove_dir_all(&new_pristine);
+        reason
+    };
+    progress.info("Applying bundle");
+    if let Err(err) = copy_dir_all(&new_pristine, &builtin_root) {
+        return Err(rollback(format!("bundle_apply_failed: {err}")));
+    }
+    if env_changed {
+        if let Err(err) = run_env_repair_blocking(progress) {
+            return Err(rollback(err));
+        }
+    }
+
+    let current = SkillBundleRef {
+        bundle_id: new_bundle_id.clone(),
+        revision: metadata.revision,
+        display_version: metadata.display_version.clone(),
+        commit: metadata.commit.clone(),
+        source: bundle::REMOTE_SOURCE.to_string(),
+        env_hash: metadata.env_hash.clone(),
+        applied_at: Utc::now().to_rfc3339(),
+    };
+    bundle::write_state(&BundleState {
+        schema: 1,
+        active: Some(current.clone()),
+        previous: Some(active.clone()),
+    })?;
+    bundle::clear_journal()?;
+    let _ = fs::remove_dir_all(&backup);
+    prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
+
+    rescan_source_in_registry_with_progress(&mut registry, BUILTIN_SOURCE_ID, progress)?;
+    let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
+    save_registry_unlocked(&registry)?;
+    let stale_copy_installs = stale_copy_installs_report(&registry);
+
+    progress.success(format!(
+        "Skills bundle {} applied ({} added, {} updated, {} removed)",
+        current.display_version,
+        added_skills.len(),
+        updated_skills.len(),
+        removed_skills.len()
+    ));
+    Ok(SkillBundleApplyOutcome {
+        previous: Some(active),
+        current,
+        added_skills,
+        updated_skills,
+        removed_skills,
+        stale_copy_installs,
+        removed_installs,
+        restart_required: false,
+    })
 }
 
 fn upsert_default_linked_source(
@@ -3647,9 +4362,18 @@ fn scan_source_with_progress(
             .unwrap_or_else(|| current_hash.clone());
         let dirty = match source.kind.as_str() {
             "linked" | "cloned" => dirty || saved_hash != current_hash,
-            "builtin" => builtin_skill_hash(&name)
-                .map(|baseline| baseline != current_hash)
-                .unwrap_or(false),
+            // Builtin dirty = drift from the ACTIVE pristine baseline (the
+            // applied OTA bundle), not from the embedded snapshot — after a
+            // bundle update the embedded copy is stale by design. Junk files
+            // (__pycache__ etc.) are excluded on both sides.
+            "builtin" => match active_pristine_skill_hash(&name) {
+                Some(baseline) => hash_directory_filtered(&skill_root)
+                    .map(|current| current != baseline)
+                    .unwrap_or(false),
+                None => builtin_skill_hash(&name)
+                    .map(|baseline| baseline != current_hash)
+                    .unwrap_or(false),
+            },
             _ => saved_hash != current_hash,
         };
         let frontmatter_tier = yaml_meta_string(&parts.meta, "tier");
@@ -6078,5 +6802,175 @@ mod tests {
             .installs
             .iter()
             .any(|install| install.installed_as == "resetcopy" && install.mode == "copy"));
+    }
+
+    // -----------------------------------------------------------------------
+    // OTA bundle lifecycle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fresh_install_writes_bootstrap_state_and_pristine() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+
+        let state = ensure_active_bundle(&builtin).unwrap();
+
+        let active = state.active.expect("active bundle");
+        assert_eq!(active.source, bundle::BOOTSTRAP_SOURCE);
+        assert_eq!(active.revision, 0);
+        assert!(builtin.join("manifest.json").is_file());
+        let pristine = bundle::bundle_pristine_dir(&active.bundle_id).unwrap();
+        assert!(pristine.join("manifest.json").is_file());
+        assert!(pristine.join("skills/vault-sync/SKILL.md").is_file());
+        // Idempotent: a second call keeps the same identity.
+        let again = ensure_active_bundle(&builtin).unwrap();
+        assert_eq!(again.active.unwrap().bundle_id, active.bundle_id);
+    }
+
+    #[test]
+    fn remote_active_state_blocks_embedded_rematerialize() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        ensure_active_bundle(&builtin).unwrap();
+
+        // Simulate an applied OTA bundle newer than the embedded snapshot.
+        bundle::write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: "r9-abcdef0".to_string(),
+                revision: 9,
+                display_version: "r9".to_string(),
+                commit: None,
+                source: bundle::REMOTE_SOURCE.to_string(),
+                env_hash: "e".to_string(),
+                applied_at: "t".to_string(),
+            }),
+            previous: None,
+        })
+        .unwrap();
+        let marker = builtin.join("skills/vault-sync/SKILL.md");
+        fs::write(&marker, "remote bundle content").unwrap();
+
+        let state = ensure_active_bundle(&builtin).unwrap();
+
+        assert_eq!(state.active.unwrap().revision, 9);
+        assert_eq!(
+            fs::read_to_string(&marker).unwrap(),
+            "remote bundle content",
+            "embedded snapshot must not clobber an applied remote bundle"
+        );
+    }
+
+    #[test]
+    fn migration_from_pre_ota_install_preserves_user_edits() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        // Legacy install: materialized _builtin, no bundle state.
+        materialize_builtin_bundle(&builtin).unwrap();
+        let edited = builtin.join("skills/gaejosik/SKILL.md");
+        let user_content = "---\nname: gaejosik\ndescription: edited by user\n---\n";
+        fs::write(&edited, user_content).unwrap();
+        assert!(bundle::read_state().unwrap().is_none());
+
+        let state = ensure_active_bundle(&builtin).unwrap();
+
+        let active = state.active.expect("active bundle");
+        assert_eq!(active.source, bundle::BOOTSTRAP_SOURCE);
+        assert_eq!(
+            fs::read_to_string(&edited).unwrap(),
+            user_content,
+            "migration must keep local edits byte-identical"
+        );
+        // The pristine baseline carries the ORIGINAL content, so the edit now
+        // counts as dirty.
+        let pristine_hash = active_pristine_skill_hash("gaejosik").expect("baseline");
+        let current_hash =
+            hash_directory_filtered(&builtin.join("skills/gaejosik")).unwrap();
+        assert_ne!(pristine_hash, current_hash);
+    }
+
+    #[test]
+    fn bundle_dirty_areas_reports_drift_and_ignores_junk() {
+        let scratch = TempDir::new().unwrap();
+        let pristine = scratch.path().join("pristine");
+        let builtin = scratch.path().join("builtin");
+        for root in [&pristine, &builtin] {
+            fs::create_dir_all(root.join("skills/alpha")).unwrap();
+            fs::create_dir_all(root.join("envs/default")).unwrap();
+            fs::write(root.join("manifest.json"), "{}").unwrap();
+            fs::write(root.join("skills/alpha/SKILL.md"), "same").unwrap();
+            fs::write(root.join("envs/default/setup.sh"), "same").unwrap();
+        }
+
+        assert!(bundle_dirty_areas(&builtin, &pristine).unwrap().is_empty());
+
+        // Edit, add, delete, plus junk that must not count.
+        fs::write(builtin.join("skills/alpha/SKILL.md"), "edited").unwrap();
+        fs::create_dir_all(builtin.join("skills/beta")).unwrap();
+        fs::write(builtin.join("skills/beta/SKILL.md"), "user-added").unwrap();
+        fs::remove_file(builtin.join("envs/default/setup.sh")).unwrap();
+        fs::create_dir_all(builtin.join("skills/alpha/__pycache__")).unwrap();
+        fs::write(builtin.join("skills/alpha/__pycache__/x.pyc"), "junk").unwrap();
+        fs::write(builtin.join(".DS_Store"), "junk").unwrap();
+
+        let areas = bundle_dirty_areas(&builtin, &pristine).unwrap();
+        assert_eq!(areas, vec!["alpha", "beta", "envs"]);
+    }
+
+    #[test]
+    fn restore_builtin_skill_uses_active_pristine_over_embedded() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        ensure_active_bundle(&builtin).unwrap();
+
+        // Fake an applied remote bundle whose gaejosik differs from embedded.
+        let pristine = bundle::bundle_pristine_dir("r5-cafe000").unwrap();
+        fs::create_dir_all(pristine.join("skills/gaejosik")).unwrap();
+        let bundle_content = "---\nname: gaejosik\ndescription: from r5 bundle\n---\n";
+        fs::write(pristine.join("skills/gaejosik/SKILL.md"), bundle_content).unwrap();
+        bundle::write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: "r5-cafe000".to_string(),
+                revision: 5,
+                display_version: "r5".to_string(),
+                commit: None,
+                source: bundle::REMOTE_SOURCE.to_string(),
+                env_hash: "e".to_string(),
+                applied_at: "t".to_string(),
+            }),
+            previous: None,
+        })
+        .unwrap();
+        fs::write(
+            builtin.join("skills/gaejosik/SKILL.md"),
+            "user scribbles",
+        )
+        .unwrap();
+
+        restore_builtin_skill("gaejosik").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(builtin.join("skills/gaejosik/SKILL.md")).unwrap(),
+            bundle_content,
+            "discard must restore the ACTIVE bundle content, not the embedded snapshot"
+        );
+    }
+
+    #[test]
+    fn bundle_status_reports_clean_fresh_install() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        ensure_active_bundle(&builtin).unwrap();
+
+        let status = skills_bundle_status().unwrap();
+
+        let active = status.active.expect("active bundle");
+        assert_eq!(active.source, bundle::BOOTSTRAP_SOURCE);
+        assert!(!status.update_available);
+        assert!(status.available.is_none());
+        assert!(status.dirty_skills.is_empty());
+        assert!(!status.auto_applicable);
+        assert!(status.min_app_ok);
     }
 }
