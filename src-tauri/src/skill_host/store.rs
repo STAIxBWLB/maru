@@ -10,6 +10,7 @@ use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
+use uuid::Uuid;
 use walkdir::WalkDir;
 
 #[cfg(unix)]
@@ -2196,6 +2197,14 @@ fn restore_builtin_skill(name: &str) -> Result<(), String> {
             host_fs::ensure_dir(&target)?;
             return copy_dir_all(&pristine, &target);
         }
+        if active.source == bundle::REMOTE_SOURCE {
+            // Never downgrade a remote bundle to the embedded snapshot just
+            // because its baseline vanished; refuse the unverifiable restore.
+            return Err(format!(
+                "bundle_pristine_missing: cannot restore {name} for {}",
+                active.bundle_id
+            ));
+        }
     }
     let source = BUILTIN_DIR
         .get_dir(format!("skills/{name}"))
@@ -3300,11 +3309,15 @@ fn ensure_active_bundle(builtin_root: &Path) -> Result<BundleState, String> {
     bundle::recover_interrupted_swap(builtin_root)?;
     if let Some(state) = bundle::read_state()? {
         if let Some(active) = &state.active {
-            if active.source == bundle::BOOTSTRAP_SOURCE {
-                let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
-                if !pristine.is_dir() {
-                    write_bootstrap_pristine(&pristine)?;
-                }
+            let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
+            if !pristine.is_dir() && active.source == bundle::BOOTSTRAP_SOURCE {
+                write_bootstrap_pristine(&pristine)?;
+            }
+            // Self-heal a lost _builtin (interrupted swap whose backup was
+            // externally cleaned): the pristine baseline is the exact active
+            // bundle content.
+            if !builtin_root.is_dir() && pristine.is_dir() {
+                copy_dir_all(&pristine, builtin_root)?;
             }
             return Ok(state);
         }
@@ -3622,16 +3635,18 @@ fn skills_bundle_status_impl(
     let builtin_root = builtin_materialized_root()?;
     let state = bundle::read_state()?.unwrap_or_default();
     let active = state.active;
-    let dirty = match &active {
+    // pristine_ok=false means we cannot prove _builtin is clean (baseline
+    // missing); auto-apply must not run in that state.
+    let (dirty, pristine_ok) = match &active {
         Some(active) => {
             let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
             if pristine.is_dir() {
-                bundle_dirty_areas(&builtin_root, &pristine)?
+                (bundle_dirty_areas(&builtin_root, &pristine)?, true)
             } else {
-                Vec::new()
+                (Vec::new(), false)
             }
         }
-        None => Vec::new(),
+        None => (Vec::new(), true),
     };
     let registry = load_registry()?;
     let stale_copy_installs = stale_copy_installs_report(&registry);
@@ -3662,7 +3677,7 @@ fn skills_bundle_status_impl(
         None => (false, None, false, true),
     };
     let auto_applicable =
-        update_available && min_app_ok && !env_update_required && dirty.is_empty();
+        update_available && min_app_ok && !env_update_required && dirty.is_empty() && pristine_ok;
     Ok(SkillBundleStatus {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         active,
@@ -3750,12 +3765,33 @@ fn skills_apply_bundle_update_impl(
     ));
     let archive = bundle::download_verified_archive(&remote)?;
     progress.info("Verifying and staging bundle");
-    let staging = bundle::staging_root()?.join(&new_bundle_id);
+    // Unique staging dir: a concurrent apply must never share (or clobber)
+    // another request's staging tree.
+    let staging = bundle::staging_root()?.join(format!("{new_bundle_id}-{}", Uuid::new_v4()));
     bundle::extract_bundle_to_staging(&archive, &metadata, &staging)?;
 
     // Swap under the registry lock.
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
+    // Re-read state under the lock: `active` was sampled before the network
+    // phase, and a concurrent apply may have already applied this revision.
+    // Without this, the loser would delete the winner's active pristine.
+    let active = bundle::read_state()?
+        .and_then(|state| state.active)
+        .ok_or_else(|| "bundle_state_missing".to_string())?;
+    if metadata.revision <= active.revision {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "bundle_not_newer: channel r{} <= active r{}",
+            metadata.revision, active.revision
+        ));
+    }
+    // Recompute the env gate against the just-read active ref.
+    let env_changed = metadata.env_hash != active.env_hash;
+    if env_changed && !repair_env {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("bundle_env_update_required".to_string());
+    }
     let old_pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
     let dirty = if old_pristine.is_dir() {
         bundle_dirty_areas(&builtin_root, &old_pristine)?
@@ -3817,6 +3853,9 @@ fn skills_apply_bundle_update_impl(
         return Err(rollback(format!("bundle_apply_failed: {err}")));
     }
     if env_changed {
+        // ponytail: setup.sh mutations to ~/.maru/env are NOT rolled back on
+        // failure — the script is idempotent by contract and the next repair
+        // reconverges; only the bundle itself rolls back.
         if let Err(err) = run_env_repair_blocking(progress) {
             return Err(rollback(err));
         }
@@ -3831,11 +3870,13 @@ fn skills_apply_bundle_update_impl(
         env_hash: metadata.env_hash.clone(),
         applied_at: Utc::now().to_rfc3339(),
     };
-    bundle::write_state(&BundleState {
+    if let Err(err) = bundle::write_state(&BundleState {
         schema: 1,
         active: Some(current.clone()),
         previous: Some(active.clone()),
-    })?;
+    }) {
+        return Err(rollback(format!("bundle_state_write_failed: {err}")));
+    }
     bundle::clear_journal()?;
     let _ = fs::remove_dir_all(&backup);
     prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;

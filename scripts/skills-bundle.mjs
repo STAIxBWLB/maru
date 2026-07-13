@@ -90,6 +90,23 @@ function verify() {
       errors.push(`control character in tracked filename: ${JSON.stringify(rel)}`);
       continue;
     }
+    // The app's dirty gate ignores these names as runtime junk, so a bundle
+    // must never legitimately ship them (their drift would be invisible).
+    if (/(^|\/)(__pycache__|\.pytest_cache|node_modules|\.venv)(\/|$)|\.pyc$|(^|\/)\.DS_Store$/.test(rel)) {
+      errors.push(`runtime-junk path must not be tracked in the bundle: ${rel}`);
+    }
+    // Mirror the app's extraction path rules: names the updater would reject
+    // must fail CI instead of shipping an unappliable bundle.
+    for (const segment of rel.split("/")) {
+      const stem = (segment.split(".")[0] ?? "").toUpperCase();
+      const reserved =
+        ["CON", "PRN", "AUX", "NUL"].includes(stem) ||
+        (/^(COM|LPT)\d$/.test(stem));
+      if (reserved || segment.endsWith(".") || segment.endsWith(" ")) {
+        errors.push(`path segment invalid on Windows: ${rel}`);
+        break;
+      }
+    }
     const abs = join(repoRoot, rel);
     let st;
     try {

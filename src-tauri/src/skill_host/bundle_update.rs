@@ -470,10 +470,24 @@ fn validate_metadata_paths(metadata: &BundleMetadata) -> Result<(), String> {
     if metadata.archive.size > ARCHIVE_CAP_BYTES {
         return Err(format!("metadata_archive_too_large: {}", metadata.archive.size));
     }
+    // Bind the archive to the signed revision: a mixed metadata/zip pair
+    // (or a reused archive name across revisions) must not validate.
+    let expected_prefix = format!("maru-skills-r{}-", metadata.revision);
+    if !metadata.archive.name.starts_with(&expected_prefix)
+        || !metadata.archive.name.ends_with(".zip")
+    {
+        return Err(format!(
+            "metadata_archive_name_mismatch: {} (revision {})",
+            metadata.archive.name, metadata.revision
+        ));
+    }
     let mut seen = std::collections::BTreeSet::new();
     for file in &metadata.files {
         validate_bundle_rel_path(&file.path)?;
-        if !seen.insert(file.path.as_str()) {
+        // Case-folded uniqueness: on case-insensitive filesystems two entries
+        // differing only by case alias the same file, so the extracted tree
+        // would not match the signed inventory.
+        if !seen.insert(file.path.to_lowercase()) {
             return Err(format!("metadata_duplicate_path: {}", file.path));
         }
         if !matches!(file.mode.as_str(), "644" | "755") {
@@ -493,6 +507,18 @@ fn validate_bundle_rel_path(path: &str) -> Result<(), String> {
     for segment in path.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
             return Err(format!("bundle_path_invalid: {path}"));
+        }
+        if segment.ends_with('.') || segment.ends_with(' ') {
+            return Err(format!("bundle_path_invalid: {path}"));
+        }
+        // Windows reserved device names (with or without extension).
+        let stem = segment.split('.').next().unwrap_or(segment).to_ascii_uppercase();
+        let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+                && stem.len() == 4
+                && stem.as_bytes()[3].is_ascii_digit());
+        if reserved {
+            return Err(format!("bundle_path_reserved: {path}"));
         }
     }
     Ok(())
@@ -922,12 +948,22 @@ mod tests {
     fn bundle_rel_path_validation() {
         assert!(validate_bundle_rel_path("skills/gaejosik/SKILL.md").is_ok());
         assert!(validate_bundle_rel_path("manifest.json").is_ok());
+        assert!(validate_bundle_rel_path("skills/hwpx/templates/회의록.hwpx").is_ok());
         assert!(validate_bundle_rel_path("../evil").is_err());
         assert!(validate_bundle_rel_path("skills/../../evil").is_err());
         assert!(validate_bundle_rel_path("/abs/path").is_err());
         assert!(validate_bundle_rel_path("a\\b").is_err());
         assert!(validate_bundle_rel_path("").is_err());
         assert!(validate_bundle_rel_path("a//b").is_err());
+        // Windows reserved names and trailing dot/space aliases.
+        assert!(validate_bundle_rel_path("skills/CON/SKILL.md").is_err());
+        assert!(validate_bundle_rel_path("skills/x/nul.txt").is_err());
+        assert!(validate_bundle_rel_path("skills/x/COM1").is_err());
+        assert!(validate_bundle_rel_path("skills/x/com1.py").is_err());
+        assert!(validate_bundle_rel_path("skills/x/file.").is_err());
+        assert!(validate_bundle_rel_path("skills/x /SKILL.md").is_err());
+        assert!(validate_bundle_rel_path("skills/x/COMPARE.md").is_ok());
+        assert!(validate_bundle_rel_path("skills/x/lpt10.md").is_ok());
     }
 
     #[test]
@@ -1004,5 +1040,18 @@ mod tests {
         assert!(validate_metadata_paths(&metadata)
             .unwrap_err()
             .contains("mode_invalid"));
+        // Case-folded duplicates alias each other on APFS/NTFS.
+        metadata.files[1].mode = "644".to_string();
+        metadata.files[1].path = "SKILLS/X/skill.md".to_string();
+        metadata.files[0].path = "skills/x/SKILL.md".to_string();
+        assert!(validate_metadata_paths(&metadata)
+            .unwrap_err()
+            .contains("duplicate"));
+        // The archive name must carry the signed revision.
+        metadata.files[1].path = "ok/file".to_string();
+        metadata.archive.name = "maru-skills-r9-abc1234.zip".to_string();
+        assert!(validate_metadata_paths(&metadata)
+            .unwrap_err()
+            .contains("archive_name_mismatch"));
     }
 }
