@@ -459,7 +459,14 @@ fn run_skills_update(args: &[String]) -> i32 {
                 if err.starts_with("bundle_not_newer")
                     || err == "bundle_update_not_available" =>
             {
-                println!("up to date ({err})");
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "updated": false, "reason": err })
+                    );
+                } else {
+                    println!("up to date ({err})");
+                }
                 0
             }
             Err(err) => {

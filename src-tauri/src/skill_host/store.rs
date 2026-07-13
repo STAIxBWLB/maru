@@ -3624,6 +3624,13 @@ pub fn skills_check_bundle_update(force: Option<bool>) -> Result<SkillBundleStat
     // No response caching yet, so every check hits the channel; the flag is
     // accepted for API stability.
     let _ = force;
+    // Check is the designated launch entry point, so it first settles any
+    // interrupted swap (journal recovery + _builtin self-heal). Status and
+    // doctor stay strictly read-only.
+    {
+        let _guard = registry_guard()?;
+        ensure_active_bundle(&builtin_materialized_root()?)?;
+    }
     let (repo, tag) = embedded_channel();
     let remote = bundle::discover_remote_bundle(&repo, &tag)?;
     skills_bundle_status_impl(remote.as_ref())

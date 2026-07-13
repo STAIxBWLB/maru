@@ -102,6 +102,9 @@ function verify() {
     }
     // Mirror the app's extraction path rules: names the updater would reject
     // must fail CI instead of shipping an unappliable bundle.
+    if (/[:<>"|?*\x00-\x1f]/.test(rel)) {
+      errors.push(`character invalid on Windows: ${rel}`);
+    }
     for (const segment of rel.split("/")) {
       const stem = (segment.split(".")[0] ?? "").toUpperCase();
       const reserved =

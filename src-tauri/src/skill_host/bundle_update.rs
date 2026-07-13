@@ -501,7 +501,15 @@ fn validate_bundle_rel_path(path: &str) -> Result<(), String> {
     if path.is_empty() || path.len() > 4096 {
         return Err(format!("bundle_path_invalid: {path}"));
     }
-    if path.starts_with('/') || path.contains('\\') || path.contains('\0') {
+    if path.starts_with('/') || path.contains('\\') {
+        return Err(format!("bundle_path_invalid: {path}"));
+    }
+    // Windows-invalid characters and ASCII controls; bundles must apply on
+    // every supported platform or CI should have rejected them.
+    if path
+        .chars()
+        .any(|ch| ch.is_ascii_control() || matches!(ch, ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+    {
         return Err(format!("bundle_path_invalid: {path}"));
     }
     for segment in path.split('/') {

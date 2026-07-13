@@ -5311,7 +5311,9 @@ function MainApp() {
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          if (/signature|sha256_mismatch|size_mismatch/.test(message)) {
+          // Verification failures of any kind are security-relevant; only
+          // plain network/channel unavailability stays silent.
+          if (/signature|sha256_mismatch|size_mismatch|metadata_|archive_|bundle_path/.test(message)) {
             setUpdateToast({
               kind: "error",
               message: t("updates.skillsSecurityError", { message }),
