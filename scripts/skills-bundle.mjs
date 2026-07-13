@@ -83,8 +83,13 @@ function verify() {
   const tracked = trackedFiles();
   const trackedSet = new Set(tracked.map((p) => p.replace(/^skills\//, "")));
 
-  // Tracked inventory: every tracked path exists on disk and is a regular file.
+  // Tracked inventory: every tracked path exists on disk, is a regular file,
+  // and has a name safe for the line-based packaging protocol and zip names.
   for (const rel of tracked) {
+    if (/[\n\r\0]/.test(rel)) {
+      errors.push(`control character in tracked filename: ${JSON.stringify(rel)}`);
+      continue;
+    }
     const abs = join(repoRoot, rel);
     let st;
     try {
@@ -168,8 +173,13 @@ function packageBundle(args) {
   const outDir = resolve(repoRoot, args.out ?? "dist-skills");
   const { manifest, tracked } = verify();
 
-  const commit = git(["rev-parse", "HEAD"]).trim();
+  let commit = git(["rev-parse", "HEAD"]).trim();
   const shortSha = commit.slice(0, 7);
+  // Bytes come from the working tree; do not attribute uncommitted skill
+  // content to HEAD (local QA builds only — CI checkouts are always clean).
+  if (git(["status", "--porcelain", "--", "skills"]).trim() !== "") {
+    commit = `${commit}-dirty`;
+  }
   const baseName = `maru-skills-r${revision}-${shortSha}`;
 
   const fileEntries = tracked.map((relRepo) => {
@@ -178,8 +188,14 @@ function packageBundle(args) {
     return { path: rel, sha256: sha256(buffer), size: buffer.length, mode: fileMode(buffer) };
   });
 
-  rmSync(outDir, { recursive: true, force: true });
+  // Never recursively delete a caller-supplied path (--out . would be fatal);
+  // clear only our own artifact names inside it.
   mkdirSync(outDir, { recursive: true });
+  for (const entry of readdirSync(outDir)) {
+    if (/^maru-skills-r\d+-[0-9a-f]+(-dirty)?\.(zip|json)(\.sig)?$/.test(entry)) {
+      rmSync(join(outDir, entry), { force: true });
+    }
+  }
   const zipPath = join(outDir, `${baseName}.zip`);
   // python3 zipfile instead of the zip CLI: macOS zip stores non-ASCII names
   // without the UTF-8 flag (mojibake for the Korean HWPX templates). Fixed

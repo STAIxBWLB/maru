@@ -25,12 +25,12 @@ jobs:
     name: Package and publish skills bundle
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Publish from main only: a workflow_dispatch on a feature branch must not
+    # ship an unreviewed skills tree (clients pick the highest run id).
+    if: ${{ github.ref == 'refs/heads/main' }}
 
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
+    # Secrets are scoped to the individual steps that need them; nothing is
+    # exposed to dependency installation or packaging.
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -56,6 +56,9 @@ jobs:
         run: make skills-package REVISION=${{ github.run_id }}
 
       - name: Sign bundle and metadata
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
@@ -68,7 +71,9 @@ jobs:
           done
           ls -la dist-skills/
 
-      - name: Ensure skills-channel release exists
+      - name: Ensure skills-channel release exists and stays a prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if ! gh release view skills-channel >/dev/null 2>&1; then
@@ -77,10 +82,25 @@ jobs:
               --title "Skills bundle channel" \
               --notes "Rolling channel for Maru OTA skill bundles. Assets are immutable and consumed by the app; do not edit or delete."
           fi
+          # Re-assert on every run so a manual edit can never make this
+          # release "latest" and hijack the app updater's
+          # releases/latest/download/latest.json endpoint.
+          gh release edit skills-channel --prerelease --latest=false
 
       - name: Upload immutable assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # No --clobber: assets are immutable. Run ids are unique, so a name
-          # collision means something is wrong and the upload should fail.
-          gh release upload skills-channel dist-skills/*
+          # Assets are immutable across revisions (no --clobber). A re-run of
+          # THIS run id may have left partial uploads with identical content;
+          # sweep exactly our own asset names first so re-runs are idempotent.
+          for file in dist-skills/*; do
+            gh release delete-asset skills-channel "$(basename "$file")" -y 2>/dev/null || true
+          done
+          # The metadata JSON goes last: clients discover bundles by the
+          # highest-revision .json asset, so a partially uploaded bundle is
+          # invisible until its archive and signatures are all in place.
+          for file in dist-skills/*.zip dist-skills/*.zip.sig dist-skills/*.json.sig dist-skills/*.json; do
+            gh release upload skills-channel "$file"
+          done
