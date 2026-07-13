@@ -94,9 +94,15 @@ Commands:
   validate   mimetype·필수엔트리·XML 검증 (hwp-cli)
   to-pdf     PDF 변환 (기본 hwp-cli 네이티브 선택가능; --engine soffice)
   render-pdf hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx 모두)
+  render     페이지 이미지 렌더 png/svg (--pages/--dpi/--format; PDF는 render-pdf)
   to-html    HWP/HWPX → HTML (markdown 수준, hwp-cli)
+  convert    범용 변환 hwpx/md/json/odt (--to; pdf→to-pdf, html→to-html 권장)
+  info       파일 정보 (포맷/버전/스트림; 구조요약은 summary)
+  fields     누름틀(필드) 목록 (이름·종류·값)
+  bookmarks  책갈피 목록
+  (수식은 render/to-pdf에서 자동 조판 — references/equation-syntax.md)
 
-Note: read/render-pdf/to-html accept legacy binary .hwp (auto-delegates to hwp-cli).
+Note: read/render/render-pdf/to-html/convert accept legacy binary .hwp (auto-delegates to hwp-cli).
 
 Templates (templates/):
   공문서_기본.hwpx        대외시행 공문 기본형
@@ -114,10 +120,10 @@ Examples:
   echo '{"제목":"테스트","본문":"본문"}' | \\
     ./hwpx fill templates/공문서_기본.hwpx --stdin-json -o /tmp/out.hwpx
 
-  # 보기 좋은 문서 (preset)
-  ./hwpx styled --preset gongmun --markdown report.md \\
+  # 보기 좋은 문서 (hwp new + 공문서 스타일 후처리)
+  ./hwpx styled --markdown report.md \\
     --header "예시대학교" --footer "- # / ## -" -o styled.hwpx
-  ./hwpx styled --preset bogoseo --markdown plan.md -o plan.hwpx
+  # (--preset gongmun|bogoseo 는 하위호환 no-op — 출력 동일)
 
   # 주어진 양식 따라가기 (기관 지정 양식 파일 있을 때)
   ./hwpx styled --reference 양식.hwpx --markdown 본문.md -o final.hwpx
@@ -126,6 +132,8 @@ References (references/):
   hwpx-structure.md        zip/OWPML 구조
   korean-official-format.md 공문서 작성 규정 (기안문 10-part 구조)
   raw-zip-fallback.md      ZIP/XML 직접 처리 레시피
+  equation-syntax.md       수식(mini-TeX) 지원 문법·근사 한계
+  capability-matrix.md     hwp-cli 렌더/변환 능력·한계 (doc12 기반)
 USAGE
     exit 0
 fi

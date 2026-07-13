@@ -120,3 +120,38 @@ def test_styled_reference_produces_valid_hwpx(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert out.is_file()
     assert _run("validate", str(out)).returncode == 0
+
+
+# --- hwp-cli passthrough: info / fields / bookmarks / render / convert ------------
+
+@requires_cli
+def test_info_json_contract():
+    proc = _run("info", str(TEMPLATE), "--json")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    names = {e["name"] for e in payload["entries"]}
+    assert "mimetype" in names  # first zip entry always present
+
+
+@requires_cli
+@pytest.mark.parametrize("cmd", ["fields", "bookmarks"])
+def test_fields_bookmarks_exit_zero(cmd):
+    # the base template has neither, so an empty listing must still succeed
+    proc = _run(cmd, str(TEMPLATE))
+    assert proc.returncode == 0, proc.stderr
+
+
+@requires_cli
+def test_render_produces_nonempty_png(tmp_path):
+    out = tmp_path / "page.png"
+    proc = _run("render", str(TEMPLATE), "-o", str(out))
+    assert proc.returncode == 0, proc.stderr
+    assert out.is_file() and out.stat().st_size > 0
+
+
+@requires_cli
+def test_convert_to_markdown_writes_file(tmp_path):
+    out = tmp_path / "out.md"
+    proc = _run("convert", str(TEMPLATE), "--to", "md", "-o", str(out))
+    assert proc.returncode == 0, proc.stderr
+    assert out.is_file() and out.stat().st_size > 0

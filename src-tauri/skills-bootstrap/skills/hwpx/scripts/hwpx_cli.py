@@ -921,6 +921,72 @@ def cmd_to_html(args) -> int:
     return 0
 
 
+# hwp-cli 조회·렌더·변환 passthrough (순수 위임 — 폴백·재구현 없음)
+
+def cmd_info(args) -> int:
+    """파일 정보(포맷/버전/속성/스트림) — hwp-cli `info` 위임.
+
+    구조 요약(sections/paragraphs/styles)은 lxml 기반 `summary`를 쓴다 — 별개 관점.
+    """
+    path = _ensure_file(args.file)
+    proc = _run_hwp(["info", str(path), *(["--json"] if args.json else [])])
+    if proc.returncode != 0:
+        _die(2, f"hwp info 실패: {proc.stderr.strip()}")
+    sys.stdout.write(proc.stdout)
+    return 0
+
+
+def cmd_fields(args) -> int:
+    """누름틀(필드) 목록 — hwp-cli `fields` 위임 (이름·종류·값). 빈 목록 정상."""
+    path = _ensure_file(args.file)
+    proc = _run_hwp(["fields", str(path), *(["--json"] if args.json else [])])
+    if proc.returncode != 0:
+        _die(2, f"hwp fields 실패: {proc.stderr.strip()}")
+    sys.stdout.write(proc.stdout)
+    return 0
+
+
+def cmd_bookmarks(args) -> int:
+    """책갈피 목록 — hwp-cli `bookmarks` 위임. 빈 목록 정상."""
+    path = _ensure_file(args.file)
+    proc = _run_hwp(["bookmarks", str(path), *(["--json"] if args.json else [])])
+    if proc.returncode != 0:
+        _die(2, f"hwp bookmarks 실패: {proc.stderr.strip()}")
+    sys.stdout.write(proc.stdout)
+    return 0
+
+
+def cmd_render(args) -> int:
+    """페이지 이미지 렌더(png/svg) — hwp-cli `render` 위임. PDF는 render-pdf/to-pdf."""
+    src = _ensure_file(args.file)
+    out = Path(args.output) if args.output else src.with_suffix(f".{args.format or 'png'}")
+    cmd = ["render", str(src), "-o", str(out), "--pages", args.pages, "--dpi", str(args.dpi)]
+    if args.format:
+        cmd += ["--format", args.format]
+    proc = _run_hwp(cmd)
+    if proc.returncode != 0:
+        _die(2, f"hwp render 실패: {proc.stderr.strip()}")
+    print(f"[hwpx] render({args.pages}@{args.dpi}dpi) -> {out}", file=sys.stderr)
+    return 0
+
+
+def cmd_convert(args) -> int:
+    """범용 포맷 변환 — hwp-cli `convert` 위임 (hwpx/md/json/odt 등).
+
+    PDF는 `to-pdf`(soffice 폴백 포함), markdown-HTML은 `to-html`이 더 편리하다.
+    """
+    src = _ensure_file(args.file)
+    out = Path(args.output) if args.output else src.with_suffix(f".{args.to}")
+    cmd = ["convert", str(src), "--to", args.to, "-o", str(out)]
+    if args.strict:
+        cmd.append("--strict")
+    proc = _run_hwp(cmd)
+    if proc.returncode != 0:
+        _die(2, f"hwp convert 실패: {proc.stderr.strip()}")
+    print(f"[hwpx] convert(→{args.to}) -> {out}", file=sys.stderr)
+    return 0
+
+
 def cmd_analyze(args) -> int:
     """편집 청사진 출력: sec 직계자식 인덱스 맵 + 스타일 ID 인벤토리 + 표 shape.
 
@@ -1248,6 +1314,38 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("file")
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_to_html)
+
+    s = sub.add_parser("info", help="파일 정보 (포맷/버전/스트림) — hwp-cli info")
+    s.add_argument("file")
+    s.add_argument("--json", action="store_true", help="JSON 출력")
+    s.set_defaults(func=cmd_info)
+
+    s = sub.add_parser("fields", help="누름틀(필드) 목록 (이름·종류·값) — hwp-cli fields")
+    s.add_argument("file")
+    s.add_argument("--json", action="store_true", help="JSON 출력")
+    s.set_defaults(func=cmd_fields)
+
+    s = sub.add_parser("bookmarks", help="책갈피 목록 — hwp-cli bookmarks")
+    s.add_argument("file")
+    s.add_argument("--json", action="store_true", help="JSON 출력")
+    s.set_defaults(func=cmd_bookmarks)
+
+    s = sub.add_parser("render", help="페이지 이미지 렌더 (png/svg) — hwp-cli render. PDF는 render-pdf")
+    s.add_argument("file")
+    s.add_argument("-o", "--output", help="출력 (생략 시 <in>.png)")
+    s.add_argument("--pages", default="all", help='페이지 범위 "1"|"1-3"|"all" (기본 all)')
+    s.add_argument("--dpi", type=int, default=96, help="해상도 DPI (기본 96)")
+    s.add_argument("--format", choices=["png", "svg"], default=None,
+                   help="출력 포맷 (생략 시 확장자 추론, 기본 png)")
+    s.set_defaults(func=cmd_render)
+
+    s = sub.add_parser("convert", help="범용 변환 (hwpx/md/json/odt 등) — hwp-cli convert. pdf→to-pdf, html→to-html 권장")
+    s.add_argument("file")
+    s.add_argument("--to", required=True,
+                   choices=["hwp", "hwpx", "md", "json", "html", "odt", "pdf"], help="출력 포맷")
+    s.add_argument("-o", "--output", help="출력 (생략 시 <in>.<to>)")
+    s.add_argument("--strict", action="store_true", help="보존 불가(opaque) 데이터 발견 시 실패")
+    s.set_defaults(func=cmd_convert)
 
     s = sub.add_parser("write-java", help="markdown/텍스트 → HWPX (hwp-cli new 위임, 레거시 별칭)")
     s.add_argument("out_file")
