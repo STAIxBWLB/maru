@@ -8,6 +8,32 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.6 — 2026-07-13 — OTA skills bundle channel
+
+- Skills now deploy independently of app releases: merging `skills/**` to
+  main publishes a signed immutable bundle (minisign, Tauri updater key) to
+  the fixed `skills-channel` prerelease, and the app verifies and applies it
+  atomically at launch when local skills are clean and runtime-compatible.
+  Editing skills no longer rebuilds or re-releases the binary.
+- New bundle machinery in `skill_host`: durable bundle state with pristine
+  baselines (`~/.maru/skills/_bundles/`), transaction-journaled swap with
+  crash recovery and rollback, downgrade blocking, dirty-edit gate, env-hash
+  gate with `--repair-env`, and removed-skill cleanup limited to provably
+  Maru-owned symlinks. Builtin dirty detection and reconcile `--discard` now
+  baseline against the active bundle instead of the embedded snapshot.
+- New surfaces: `maru skills update --check|--apply [--repair-env] [--json]`,
+  Skills pane bundle status/actions, launch auto-update with security-error
+  surfacing, `skills://updated` live refresh.
+- Packaging/CI: `make skills-verify` / `make skills-package`,
+  `release-skills.yml` (main-only, step-scoped secrets, immutable assets,
+  metadata-last upload), app release workflow gated to `v*` tags, and CI
+  change classification so skill-only pushes skip the app toolchain.
+- Hardened per two Codex cross-review rounds + adversarial pass: concurrent
+  apply race, zip traversal/symlink/decompression-budget/unlisted-file
+  rejection, case-fold and NFC filename collisions, Windows reserved names,
+  archive-name/revision binding, fresh-install registry seeding.
+- Share-outbox skill: staged files can auto-send via Telegram (#79).
+
 ## v0.4.5 — 2026-07-12 — App-wide CSS repair
 
 - Fixed elements rendering at browser defaults because their classes had no
