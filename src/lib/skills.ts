@@ -506,6 +506,75 @@ export async function skillsEnvRepair(workPath: string | null): Promise<string> 
   return invoke<string>("skills_env_repair", { workPath });
 }
 
+export interface SkillBundleRef {
+  bundleId: string;
+  revision: number;
+  displayVersion: string;
+  commit?: string | null;
+  source: "bootstrap" | "remote";
+  envHash: string;
+  appliedAt: string;
+}
+
+export interface SkillBundleAvailable {
+  bundleId: string;
+  revision: number;
+  displayVersion: string;
+  commit?: string | null;
+  publishedAt?: string | null;
+  minAppVersion: string;
+  envHash: string;
+  archiveSize: number;
+}
+
+export interface SkillBundleStatus {
+  appVersion: string;
+  active?: SkillBundleRef | null;
+  available?: SkillBundleAvailable | null;
+  updateAvailable: boolean;
+  dirtySkills: string[];
+  staleCopyInstalls: string[];
+  envUpdateRequired: boolean;
+  minAppOk: boolean;
+  autoApplicable: boolean;
+}
+
+export interface SkillBundleApplyOutcome {
+  previous?: SkillBundleRef | null;
+  current: SkillBundleRef;
+  addedSkills: string[];
+  updatedSkills: string[];
+  removedSkills: string[];
+  staleCopyInstalls: string[];
+  removedInstalls: number;
+  restartRequired: boolean;
+}
+
+export async function skillsBundleStatus(): Promise<SkillBundleStatus | null> {
+  if (!isTauri()) return null;
+  return invoke<SkillBundleStatus>("skills_bundle_status");
+}
+
+export async function skillsCheckBundleUpdate(
+  force = false,
+): Promise<SkillBundleStatus | null> {
+  if (!isTauri()) return null;
+  return invoke<SkillBundleStatus>("skills_check_bundle_update", { force });
+}
+
+export async function skillsApplyBundleUpdate(params: {
+  bundleId?: string | null;
+  repairEnv?: boolean;
+  progressId?: string | null;
+}): Promise<SkillBundleApplyOutcome | null> {
+  if (!isTauri()) return null;
+  return invoke<SkillBundleApplyOutcome>("skills_apply_bundle_update", {
+    bundleId: params.bundleId ?? null,
+    repairEnv: params.repairEnv ?? false,
+    progressId: params.progressId ?? null,
+  });
+}
+
 export async function skillsRuntimeStatus(params: {
   runtime: SkillDispatchRuntime;
   commandOverride?: string | null;

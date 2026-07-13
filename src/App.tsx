@@ -233,6 +233,8 @@ import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
+  skillsApplyBundleUpdate,
+  skillsCheckBundleUpdate,
   skillsListSkills,
   skillsDispatchBackground,
   skillsRuntimeStatus,
@@ -596,6 +598,7 @@ type UpdateToast =
   | { kind: "notAvailable" }
   | { kind: "downloading"; info: AppUpdateInfo; progress: AppUpdateProgress | null }
   | { kind: "ready"; info: AppUpdateInfo }
+  | { kind: "skillsUpdated"; version: string }
   | { kind: "error"; message: string };
 
 function tabIdForEntry(entry: VaultEntry): string {
@@ -5289,6 +5292,39 @@ function MainApp() {
     return () => window.clearTimeout(timer);
   }, [checkForUpdates]);
 
+  // Skills bundle OTA: one background check after launch, silently applied
+  // only when clean and runtime-compatible (autoApplicable). Network errors
+  // stay silent; signature/integrity failures surface as a security warning.
+  useEffect(() => {
+    if (!updaterAvailable()) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const status = await skillsCheckBundleUpdate();
+          if (!status?.updateAvailable || !status.autoApplicable) return;
+          const outcome = await skillsApplyBundleUpdate({ repairEnv: false });
+          if (outcome) {
+            setUpdateToast({
+              kind: "skillsUpdated",
+              version: outcome.current.displayVersion,
+            });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (/signature|sha256_mismatch|size_mismatch/.test(message)) {
+            setUpdateToast({
+              kind: "error",
+              message: t("updates.skillsSecurityError", { message }),
+            });
+          } else {
+            console.info("[maru] skills bundle check failed:", message);
+          }
+        }
+      })();
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [t]);
+
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
@@ -7954,7 +7990,9 @@ function MainApp() {
                           })
                         : updateToast.kind === "ready"
                           ? t("updates.ready")
-                          : t("updates.error", { message: updateToast.message })
+                          : updateToast.kind === "skillsUpdated"
+                            ? t("updates.skillsUpdated", { version: updateToast.version })
+                            : t("updates.error", { message: updateToast.message })
               }
             >
               {updateToast.kind === "checking" || updateToast.kind === "downloading" ? (
@@ -7978,7 +8016,9 @@ function MainApp() {
                           })
                         : updateToast.kind === "ready"
                           ? t("updates.ready")
-                          : t("updates.error", { message: updateToast.message })}
+                          : updateToast.kind === "skillsUpdated"
+                            ? t("updates.skillsUpdated", { version: updateToast.version })
+                            : t("updates.error", { message: updateToast.message })}
               </span>
               {updateToast.kind === "available" ? (
                 <button

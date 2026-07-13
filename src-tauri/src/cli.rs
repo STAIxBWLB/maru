@@ -2,8 +2,9 @@ use std::env;
 
 use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 use crate::skill_host::{
-    skills_doctor, skills_import_external, skills_import_unmanage, skills_list_dirty,
-    skills_reconcile_skill, skills_sync_tools,
+    skills_apply_bundle_update_headless, skills_check_bundle_update, skills_doctor,
+    skills_import_external, skills_import_unmanage, skills_list_dirty, skills_reconcile_skill,
+    skills_sync_tools,
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
@@ -325,6 +326,7 @@ fn run_skills(args: &[String]) -> i32 {
     };
     match subcommand {
         "sync" => run_skills_sync(&args[1..]),
+        "update" => run_skills_update(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
         "reconcile" => run_skills_reconcile(&args[1..]),
         "import" => run_skills_import(&args[1..]),
@@ -332,6 +334,138 @@ fn run_skills(args: &[String]) -> i32 {
         _ => {
             eprintln!("{}", skills_usage());
             2
+        }
+    }
+}
+
+fn run_skills_update(args: &[String]) -> i32 {
+    let mut check: Option<bool> = None;
+    let mut repair_env = false;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--check" => {
+                if check == Some(false) {
+                    eprintln!("conflicting options: --check and --apply");
+                    return 2;
+                }
+                check = Some(true);
+            }
+            "--apply" => {
+                if check == Some(true) {
+                    eprintln!("conflicting options: --check and --apply");
+                    return 2;
+                }
+                check = Some(false);
+            }
+            "--repair-env" => repair_env = true,
+            "--json" => json = true,
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("usage: maru skills update --check|--apply [--repair-env] [--json]");
+                return 2;
+            }
+        }
+    }
+    let Some(check) = check else {
+        eprintln!("--check or --apply required");
+        return 2;
+    };
+    if check {
+        match skills_check_bundle_update(None) {
+            Ok(status) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&status).unwrap_or_default()
+                    );
+                } else {
+                    let active = status
+                        .active
+                        .as_ref()
+                        .map(|active| {
+                            format!("{} (r{})", active.display_version, active.revision)
+                        })
+                        .unwrap_or_else(|| "none".to_string());
+                    let channel = status
+                        .available
+                        .as_ref()
+                        .map(|available| {
+                            format!("{} (r{})", available.display_version, available.revision)
+                        })
+                        .unwrap_or_else(|| "none published".to_string());
+                    println!("skills bundle: active {active}; channel {channel}");
+                    if status.update_available {
+                        if status.auto_applicable {
+                            println!("update available: run `maru skills update --apply`");
+                        } else {
+                            let mut blockers = Vec::new();
+                            if !status.dirty_skills.is_empty() {
+                                blockers
+                                    .push(format!("local edits: {}", status.dirty_skills.join(", ")));
+                            }
+                            if status.env_update_required {
+                                blockers.push("env update required (--repair-env)".to_string());
+                            }
+                            if !status.min_app_ok {
+                                blockers.push(format!(
+                                    "app too old (needs {})",
+                                    status
+                                        .available
+                                        .as_ref()
+                                        .map(|a| a.min_app_version.as_str())
+                                        .unwrap_or("newer app")
+                                ));
+                            }
+                            println!("update available but blocked: {}", blockers.join("; "));
+                        }
+                    } else {
+                        println!("up to date");
+                    }
+                }
+                0
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                1
+            }
+        }
+    } else {
+        match skills_apply_bundle_update_headless(None, repair_env) {
+            Ok(outcome) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&outcome).unwrap_or_default()
+                    );
+                } else {
+                    println!(
+                        "skills bundle {} applied: {} added, {} updated, {} removed",
+                        outcome.current.display_version,
+                        outcome.added_skills.len(),
+                        outcome.updated_skills.len(),
+                        outcome.removed_skills.len()
+                    );
+                    if !outcome.stale_copy_installs.is_empty() {
+                        println!(
+                            "stale copy installs (reinstall to refresh): {}",
+                            outcome.stale_copy_installs.join(", ")
+                        );
+                    }
+                }
+                0
+            }
+            Err(err)
+                if err.starts_with("bundle_not_newer")
+                    || err == "bundle_update_not_available" =>
+            {
+                println!("up to date ({err})");
+                0
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                1
+            }
         }
     }
 }
@@ -634,7 +768,7 @@ fn current_work_path() -> Option<String> {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills sync|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills sync|update|dirty|reconcile|import|import-unmanage"
 }
 
 fn secrets_usage() -> &'static str {
@@ -642,7 +776,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]"
 }
 
 #[cfg(test)]
@@ -662,6 +796,39 @@ mod tests {
     #[test]
     fn missing_skills_subcommand_is_cli_error() {
         assert_eq!(run_cli(vec!["skills".to_string()]), 2);
+    }
+
+    #[test]
+    fn skills_update_requires_explicit_mode() {
+        assert_eq!(
+            run_cli(vec!["skills".to_string(), "update".to_string()]),
+            2
+        );
+    }
+
+    #[test]
+    fn skills_update_rejects_unknown_option() {
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "update".to_string(),
+                "--bogus".to_string(),
+            ]),
+            2
+        );
+    }
+
+    #[test]
+    fn skills_update_rejects_conflicting_modes() {
+        assert_eq!(
+            run_cli(vec![
+                "skills".to_string(),
+                "update".to_string(),
+                "--check".to_string(),
+                "--apply".to_string(),
+            ]),
+            2
+        );
     }
 
     #[test]

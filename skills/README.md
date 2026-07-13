@@ -1,8 +1,26 @@
 # Maru Bundled Skills
 
-Skills bundle embedded by Maru. This directory is the T1 core source for
-skills that must ship with the desktop app. Public/private extension skills
-belong in the Maru source checkouts under `~/.maru/skills/_sources/`.
+This directory is the T1 core skill source, deployed as a signed OTA bundle
+independently of app releases. Public/private extension skills belong in the
+Maru source checkouts under `~/.maru/skills/_sources/`.
+
+## Deployment (skills-channel OTA)
+
+Merging a change under `skills/**` to `main` triggers
+`.github/workflows/release-skills.yml`, which verifies (`make skills-verify`),
+packages (`make skills-package`), signs with the Tauri updater key, and
+uploads immutable assets (`maru-skills-r<run-id>-<sha>.zip` + metadata JSON +
+`.sig` files) to the fixed `skills-channel` prerelease. No app, CLI, or
+Homebrew build runs for skill-only changes.
+
+The app checks the channel at launch and applies the newest bundle
+automatically when the local copy is clean and runtime-compatible; manual
+paths are the Skills UI and `maru skills update --check|--apply`.
+
+A frozen snapshot of this tree lives at `src-tauri/skills-bootstrap/` and is
+embedded in the binary ONLY as the offline first-run fallback. It is
+deliberately not synced with `skills/`; refresh it explicitly when cutting an
+app release that should seed newer skills offline.
 
 ## Layout
 
@@ -20,10 +38,9 @@ this bundle.
 
 ## Catalog
 
-- Document toolkits: `hwpx`, `pptx-toolkit`, `xlsx-toolkit`
+- Document toolkits: `hwpx`, `pptx-toolkit`, `xlsx-toolkit`, `md2docx`
 - Korean writing: `gaejosik`
 - Slide deck prompts: `canva-deck`, `notebooklm-deck`, `gpt-images-deck`
-- Design system: `design-init`, `design-motion`, `design-system`, `design-review`, `design-a11y`
 - Project workflows: `business-unit-lifecycle`
 - Task and git: `task-management`, `git-sync`
 - IO and inbox/outbox: `io-mso`, `io-gws`, `io-telegram`, `io-kakao`, `inbox-intake`, `inbox-process`, `meeting-notes`, `share-outbox`

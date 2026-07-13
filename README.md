@@ -246,12 +246,28 @@ cd src-tauri && cargo test --release bench_scan_real_workspace \
 ```
 
 CI runs `make verify` (typecheck + vitest + cargo test --lib + build) on every
-pull request and push to `main` via `.github/workflows/ci.yml`. The heavier
-`release-preflight` (adds CLI + e2e + a debug Tauri build) runs on version tags.
+pull request and push to `main` via `.github/workflows/ci.yml`; pushes that
+touch only `skills/**` run `make skills-verify` instead of the full app
+toolchain. The heavier `release-preflight` (adds CLI + e2e + a debug Tauri
+build) runs on version tags.
+
+## Skills Bundle Channel (OTA)
+
+Skills deploy independently of app releases. Merging `skills/**` changes to
+`main` triggers `.github/workflows/release-skills.yml`: it verifies and
+packages the tree (`make skills-verify` / `make skills-package`), signs the
+zip and metadata with the Tauri updater key, and uploads immutable assets to
+the fixed `skills-channel` prerelease. The app checks that channel at launch
+and applies new bundles automatically when the local skills are clean and
+runtime-compatible; `maru skills update --check|--apply [--repair-env]` and
+the Skills UI cover manual flows. The binary embeds only a frozen
+`src-tauri/skills-bootstrap/` snapshot as the offline first-run fallback, so
+editing `skills/` requires no Rust rebuild.
 
 ## Release Bundles
 
-Publishing a GitHub Release triggers `.github/workflows/release-bundles.yml`.
+Publishing a GitHub Release (a `v*` tag; the skills channel is excluded)
+triggers `.github/workflows/release-bundles.yml`.
 The workflow builds native Tauri bundles on macOS, Ubuntu, and Windows, then
 uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` / `.AppImage`, `.exe`,
 and `.msi` assets to that same release. It also uploads signed updater

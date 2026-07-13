@@ -1,19 +1,20 @@
 # Skill Index
 
-Public skill catalog. Each skill lives at `skills/<name>/SKILL.md`.
+Maru bundled skill catalog. Each skill lives at `skills/<name>/SKILL.md`.
+`manifest.json` is the machine-readable source of truth; keep this index in
+sync with it.
 
 ## Runtime And Shared Helpers
 
-- `env/` — shared Python/Node runtime scaffold for document, graph, and workspace skills.
+- `envs/default/` — shared Python/Node runtime scaffold for document, graph, and workspace skills.
 - `lib/build-graph.py` — shared graph builder used by `vault-graph` and `skill-mine`.
 - `lib/vault_adapter.md` — shared vault access policy for Obsidian MCP workflows.
 
-## Public Skills
+## Skills (34)
 
-- Document toolkits: `hwpx`, `pptx-toolkit`, `xlsx-toolkit`
+- Document toolkits: `hwpx`, `pptx-toolkit`, `xlsx-toolkit`, `md2docx`
 - Korean writing: `gaejosik`
 - Slide deck prompts: `canva-deck`, `notebooklm-deck`, `gpt-images-deck`
-- Design: `design-init`, `design-motion`, `design-system`, `design-review`, `design-a11y`
 - Project workflows: `business-unit-lifecycle`
 - IO and inbox/outbox: `io-mso`, `io-gws`, `io-telegram`, `io-kakao`, `inbox-intake`, `inbox-process`, `meeting-notes`, `share-outbox`
 - Task and git: `task-management`, `git-sync`
@@ -22,7 +23,6 @@ Public skill catalog. Each skill lives at `skills/<name>/SKILL.md`.
 
 ## Install
 
-```bash
-./install.sh -n
-./install-codex.sh -n
-```
+Skills are installed by the Maru app (Skills UI) or `maru skills sync`;
+deployment ships through the `skills-channel` OTA bundle. See
+`skills/README.md` for the pipeline.

@@ -119,6 +119,9 @@ import type {
 import {
   skillsAddSource,
   skillsAdoptExternalLinks,
+  skillsApplyBundleUpdate,
+  skillsBundleStatus,
+  skillsCheckBundleUpdate,
   skillsCreateSkill,
   skillsEnvBootstrap,
   skillsEnvStatus,
@@ -132,6 +135,7 @@ import {
   skillsSyncAllSources,
   skillsSyncSource,
   skillsUninstallSkill,
+  type SkillBundleStatus,
   type SkillInstall,
   type SkillInstallMode,
   type SkillInstallTarget,
@@ -3270,6 +3274,7 @@ function SkillsTab({ workPath }: { workPath: string }) {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [installs, setInstalls] = useState<SkillInstall[]>([]);
   const [envStatus, setEnvStatus] = useState<SkillsEnvStatus | null>(null);
+  const [bundleStatus, setBundleStatus] = useState<SkillBundleStatus | null>(null);
   const [newSkillName, setNewSkillName] = useState("");
   const [newSourceId, setNewSourceId] = useState("");
   const [newSourcePath, setNewSourcePath] = useState("");
@@ -3733,6 +3738,100 @@ function SkillsTab({ workPath }: { workPath: string }) {
         }),
     );
   }, [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, sources.length, t, workPath]);
+
+  const loadBundleStatus = useCallback(async () => {
+    try {
+      setBundleStatus(await skillsBundleStatus());
+    } catch {
+      // Best-effort: the pane works without bundle status.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBundleStatus();
+  }, [loadBundleStatus]);
+
+  // A bundle applied elsewhere (launch auto-update, CLI) invalidates the
+  // skill list and bundle status without any local action.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("skills://updated", () => {
+          void refresh();
+          void loadBundleStatus();
+        }),
+      )
+      .then((off) => {
+        if (disposed) {
+          off();
+        } else {
+          unlisten = off;
+        }
+      })
+      .catch(() => {
+        // Non-Tauri shells have no event bus.
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [loadBundleStatus, refresh]);
+
+  const checkBundleUpdate = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setBundleStatus(await skillsCheckBundleUpdate());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const applyBundleUpdate = useCallback(async () => {
+    const repairEnv = Boolean(bundleStatus?.envUpdateRequired);
+    const version = bundleStatus?.available?.displayVersion ?? "";
+    if (
+      !(await confirmAction(
+        repairEnv
+          ? t("system.skills.bundleApplyEnvConfirm", { version })
+          : t("system.skills.bundleApplyConfirm", { version }),
+      ))
+    ) {
+      return;
+    }
+    await runBackendProgressOperation(
+      t("system.skills.bundleApplying", { version }),
+      1,
+      async (progressId) => {
+        const outcome = await skillsApplyBundleUpdate({ repairEnv, progressId });
+        appendOperationLog(t("system.skills.log.refreshSkills"));
+        await refresh();
+        await loadBundleStatus();
+        return outcome;
+      },
+      (outcome) =>
+        outcome
+          ? t("system.skills.bundleApplied", {
+              version: outcome.current.displayVersion,
+              added: outcome.addedSkills.length,
+              updated: outcome.updatedSkills.length,
+              removed: outcome.removedSkills.length,
+            })
+          : t("system.skills.bundleApplyFailed"),
+    );
+  }, [
+    appendOperationLog,
+    bundleStatus,
+    confirmAction,
+    loadBundleStatus,
+    refresh,
+    runBackendProgressOperation,
+    t,
+  ]);
 
   const removeSource = useCallback(
     async (source: SkillSource) => {
@@ -4207,6 +4306,60 @@ function SkillsTab({ workPath }: { workPath: string }) {
             <ShieldCheck size={12} />
             {envStatus?.healthy ? t("system.skills.envReady") : t("system.skills.envSetup")}
           </span>
+          <span
+            className={
+              bundleStatus?.updateAvailable
+                ? "skill-status-pill warn"
+                : "skill-status-pill installed"
+            }
+            title={
+              bundleStatus?.dirtySkills.length
+                ? t("system.skills.bundleDirtyHint", {
+                    skills: bundleStatus.dirtySkills.join(", "),
+                  })
+                : undefined
+            }
+          >
+            {t("system.skills.bundleActive", {
+              version: bundleStatus?.active?.displayVersion ?? "-",
+            })}
+          </span>
+          {bundleStatus?.updateAvailable ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void applyBundleUpdate()}
+              disabled={
+                busy ||
+                bundleStatus.dirtySkills.length > 0 ||
+                !bundleStatus.minAppOk
+              }
+              title={
+                bundleStatus.dirtySkills.length > 0
+                  ? t("system.skills.bundleDirtyHint", {
+                      skills: bundleStatus.dirtySkills.join(", "),
+                    })
+                  : !bundleStatus.minAppOk
+                    ? t("system.skills.bundleAppTooOld", {
+                        version: bundleStatus.available?.minAppVersion ?? "",
+                      })
+                    : undefined
+              }
+            >
+              {t("system.skills.bundleApply", {
+                version: bundleStatus.available?.displayVersion ?? "",
+              })}
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void checkBundleUpdate()}
+              disabled={busy}
+            >
+              {t("system.skills.bundleCheck")}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
