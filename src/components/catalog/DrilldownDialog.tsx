@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import type { CatalogDrilldownResponse, CatalogEntry } from "../../lib/catalog";
 import { catalogDrilldown } from "../../lib/catalog";
+import { useTranslation } from "../../lib/i18n";
 
 interface DrilldownDialogProps {
   workspaceRoot: string;
@@ -20,6 +21,7 @@ export function DrilldownDialog({
   onClose,
   onReveal,
 }: DrilldownDialogProps) {
+  const { t } = useTranslation();
   const [data, setData] = useState<CatalogDrilldownResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,27 +66,31 @@ export function DrilldownDialog({
                 className="catalog-drilldown__action"
                 onClick={() => onReveal(entry.path)}
               >
-                Finder에서 보기
+                {t("catalog.drilldown.reveal")}
               </button>
             ) : null}
             <button
               type="button"
               className="catalog-drilldown__action"
               onClick={onClose}
-              aria-label="닫기"
+              aria-label={t("catalog.drilldown.close")}
             >
-              닫기
+              {t("catalog.drilldown.close")}
             </button>
           </div>
         </header>
 
         <div className="catalog-drilldown__body">
-          {loading && <p className="catalog-drilldown__status">불러오는 중…</p>}
-          {error && <p className="catalog-drilldown__error">오류: {error}</p>}
+          {loading && <p className="catalog-drilldown__status">{t("catalog.drilldown.loading")}</p>}
+          {error && (
+            <p className="catalog-drilldown__error">
+              {t("catalog.drilldown.error", { message: error })}
+            </p>
+          )}
 
           {data?.frontmatter_yaml ? (
             <section>
-              <h4>Frontmatter</h4>
+              <h4>{t("catalog.drilldown.frontmatter")}</h4>
               <pre className="catalog-drilldown__code">{data.frontmatter_yaml}</pre>
             </section>
           ) : null}
@@ -98,21 +104,23 @@ export function DrilldownDialog({
 
           {data?.readme_excerpt ? (
             <section>
-              <h4>README (40줄)</h4>
+              <h4>{t("catalog.drilldown.readmeExcerpt")}</h4>
               <pre className="catalog-drilldown__code">{data.readme_excerpt}</pre>
             </section>
           ) : null}
 
           {data?.related_paths.length ? (
             <section>
-              <h4>같은 디렉토리 ({data.related_paths.length})</h4>
+              <h4>{t("catalog.drilldown.related", { count: data.related_paths.length })}</h4>
               <ul className="catalog-drilldown__related">
                 {data.related_paths.slice(0, 50).map((p) => (
                   <li key={p}>{p}</li>
                 ))}
                 {data.related_paths.length > 50 ? (
                   <li className="catalog-drilldown__more">
-                    … +{data.related_paths.length - 50}건
+                    {t("catalog.drilldown.relatedMore", {
+                      count: data.related_paths.length - 50,
+                    })}
                   </li>
                 ) : null}
               </ul>
@@ -124,9 +132,7 @@ export function DrilldownDialog({
           !data.manifest_yaml &&
           !data.readme_excerpt &&
           !data.related_paths.length ? (
-            <p className="catalog-drilldown__empty">
-              관련 frontmatter·manifest·README를 찾지 못했습니다.
-            </p>
+            <p className="catalog-drilldown__empty">{t("catalog.drilldown.empty")}</p>
           ) : null}
         </div>
       </div>

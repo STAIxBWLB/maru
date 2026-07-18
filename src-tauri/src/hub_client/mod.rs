@@ -147,6 +147,44 @@ pub struct HubSubmitGateRequest {
     pub notes: Option<String>,
 }
 
+/// Network payload for a submit gate. `workspace_root` is intentionally not
+/// present: it is local routing state used to load config and the durable
+/// queue, never Hub metadata.
+#[derive(Debug, Serialize)]
+struct HubSubmitGatePayload<'a> {
+    program_id: &'a str,
+    business_unit_id: &'a str,
+    document_uri: &'a str,
+    document_type: &'a str,
+    document_sha256: &'a str,
+    submission_kind: &'a str,
+    target_org: &'a str,
+    deadline: Option<&'a str>,
+    evidence_sha256_list: &'a [String],
+    frontmatter_snapshot: &'a serde_json::Value,
+    notes: Option<&'a str>,
+}
+
+fn submit_gate_payload(req: &HubSubmitGateRequest) -> HubSubmitGatePayload<'_> {
+    HubSubmitGatePayload {
+        program_id: &req.program_id,
+        business_unit_id: &req.business_unit_id,
+        document_uri: &req.document_uri,
+        document_type: &req.document_type,
+        document_sha256: &req.document_sha256,
+        submission_kind: &req.submission_kind,
+        target_org: &req.target_org,
+        deadline: req.deadline.as_deref(),
+        evidence_sha256_list: &req.evidence_sha256_list,
+        frontmatter_snapshot: &req.frontmatter_snapshot,
+        notes: req.notes.as_deref(),
+    }
+}
+
+fn serialize_submit_gate_payload(req: &HubSubmitGateRequest) -> Result<String, String> {
+    serde_json::to_string(&submit_gate_payload(req)).map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubSubmitGateResponse {
     pub gate_id: Option<String>,
@@ -155,28 +193,165 @@ pub struct HubSubmitGateResponse {
     pub created_at: Option<String>,
 }
 
-/// Phase 6 W19에 활성화. Phase 3에서는 safety check만 동작 (실 호출은 큐로).
+/// POST one submit-gate request to the Hub. Returns `(gate_id, state)` parsed
+/// leniently from the response body (missing fields fall back to
+/// `None`/`"pending"` so an older Hub build still completes the round-trip).
+fn post_submit_gate(
+    cfg: &HubConfig,
+    req: &HubSubmitGateRequest,
+) -> Result<(Option<String>, String), String> {
+    let client = http::build_client(cfg).map_err(|e| e.to_string())?;
+    let body = serialize_submit_gate_payload(req)?;
+    let text =
+        http::post_resource(&client, cfg, "submission_gates", &body).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    let gate_id = json
+        .get("gate_id")
+        .or_else(|| json.get("id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let state = json
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending")
+        .to_string();
+    Ok((gate_id, state))
+}
+
+fn blocked_by_safety(reason: String) -> HubSubmitGateResponse {
+    HubSubmitGateResponse {
+        gate_id: None,
+        state: format!("blocked_by_safety:{}", reason),
+        queued_at: None,
+        created_at: None,
+    }
+}
+
+/// Pre-flight safety for one submit-gate payload (hub-sync.md §9): the base
+/// check plus, on public deployments, the real-name blocklist. Shared by
+/// `hub_submit_gate` and `hub_queue_drain` so an item queued under one
+/// deployment mode cannot bypass the policy of the mode it drains under.
+fn preflight_submit_gate(cfg: &HubConfig, req: &HubSubmitGateRequest) -> Result<(), String> {
+    safety::check_submit_gate(req)?;
+    if cfg.deployment_mode == HubDeploymentMode::Public {
+        // Check the exact network payload so nested frontmatter and future
+        // metadata fields cannot bypass a hand-maintained field list.
+        safety::check_public_safe(&serialize_submit_gate_payload(req)?)?;
+    }
+    Ok(())
+}
+
+/// Submit one document to the Hub submission gate. Pre-flight safety always
+/// runs; with the Hub enabled the POST is attempted immediately and any
+/// failure falls back to the durable offline queue (drained by
+/// `hub_queue_drain`), so a submit is never lost.
 #[tauri::command]
 pub fn hub_submit_gate(req: HubSubmitGateRequest) -> Result<HubSubmitGateResponse, String> {
-    // Pre-flight safety check (hub-sync.md §9)
-    if let Err(reason) = safety::check_submit_gate(&req) {
-        return Ok(HubSubmitGateResponse {
-            gate_id: None,
-            state: format!("blocked_by_safety:{}", reason),
-            queued_at: None,
-            created_at: None,
-        });
+    let root = PathBuf::from(&req.workspace_root);
+    let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
+
+    if let Err(reason) = preflight_submit_gate(&cfg, &req) {
+        return Ok(blocked_by_safety(reason));
     }
 
-    // Phase 3: 항상 큐로 (offline-first). Phase 6에서 즉시 POST 경로 추가.
-    let root = PathBuf::from(&req.workspace_root);
-    cache::enqueue_submit_gate(&root, &req).map_err(|e| e.to_string())?;
+    if cfg.enabled {
+        match post_submit_gate(&cfg, &req) {
+            Ok((gate_id, state)) => {
+                return Ok(HubSubmitGateResponse {
+                    gate_id,
+                    state,
+                    queued_at: None,
+                    created_at: Some(chrono::Utc::now().to_rfc3339()),
+                });
+            }
+            Err(err) => {
+                eprintln!("[hub_client] submit gate POST failed, queueing: {}", err);
+            }
+        }
+    }
 
+    cache::enqueue_submit_gate(&root, &req).map_err(|e| e.to_string())?;
     Ok(HubSubmitGateResponse {
         gate_id: None,
         state: "queued_offline".to_string(),
         queued_at: Some(chrono::Utc::now().to_rfc3339()),
         created_at: None,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubQueueDrainItem {
+    pub request_id: String,
+    pub outcome: String, // "submitted" | "failed"
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubQueueDrainResult {
+    pub attempted: usize,
+    pub submitted: usize,
+    pub failed: usize,
+    pub remaining: usize,
+    pub items: Vec<HubQueueDrainItem>,
+}
+
+/// Drain the durable submit-gate queue oldest-first. Each item is POSTed;
+/// success removes it, failure records `retry_count`/`last_error` and keeps
+/// it for the next drain. With the Hub disabled this is a no-op that only
+/// reports the backlog (`remaining`).
+#[tauri::command]
+pub fn hub_queue_drain(workspace_root: String) -> Result<HubQueueDrainResult, String> {
+    let root = PathBuf::from(&workspace_root);
+    let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
+    let queued = cache::list_queue(&root).map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    let mut submitted = 0usize;
+    let mut failed = 0usize;
+
+    if cfg.enabled {
+        for (path, entry) in &queued {
+            if let Err(reason) = preflight_submit_gate(&cfg, &entry.body) {
+                let msg = format!("blocked_by_safety:{}", reason);
+                let _ = cache::mark_retry(path, &msg);
+                failed += 1;
+                items.push(HubQueueDrainItem {
+                    request_id: entry.request_id.clone(),
+                    outcome: "failed".to_string(),
+                    error: Some(msg),
+                });
+                continue;
+            }
+            match post_submit_gate(&cfg, &entry.body) {
+                Ok(_) => {
+                    let _ = cache::remove_queued(path);
+                    submitted += 1;
+                    items.push(HubQueueDrainItem {
+                        request_id: entry.request_id.clone(),
+                        outcome: "submitted".to_string(),
+                        error: None,
+                    });
+                }
+                Err(err) => {
+                    let _ = cache::mark_retry(path, &err);
+                    failed += 1;
+                    items.push(HubQueueDrainItem {
+                        request_id: entry.request_id.clone(),
+                        outcome: "failed".to_string(),
+                        error: Some(err),
+                    });
+                }
+            }
+        }
+    }
+
+    let remaining = cache::queue_depth(&root).unwrap_or(0);
+    Ok(HubQueueDrainResult {
+        attempted: if cfg.enabled { queued.len() } else { 0 },
+        submitted,
+        failed,
+        remaining,
+        items,
     })
 }
 
@@ -303,5 +478,139 @@ mod tests {
         assert!(sanitize_path_segment("a:b").is_err());
         assert!(sanitize_path_segment(".gate").is_err());
         assert!(sanitize_path_segment("").is_err());
+    }
+
+    fn test_request(root: &std::path::Path) -> HubSubmitGateRequest {
+        HubSubmitGateRequest {
+            workspace_root: root.to_string_lossy().to_string(),
+            program_id: "prg_1".to_string(),
+            business_unit_id: "bu_1".to_string(),
+            document_uri: "projects/x/doc.md".to_string(),
+            document_type: "change-request".to_string(),
+            document_sha256: "a".repeat(64),
+            submission_kind: "external-dispatch".to_string(),
+            target_org: "Demo Org".to_string(),
+            deadline: None,
+            evidence_sha256_list: vec![],
+            frontmatter_snapshot: serde_json::json!({"title": "X"}),
+            notes: None,
+        }
+    }
+
+    fn workspace_with_hub_config(yaml: &str) -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("workspace.config.yaml"), yaml).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn submit_with_hub_disabled_queues() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n");
+        let resp = hub_submit_gate(test_request(tmp.path())).unwrap();
+        assert_eq!(resp.state, "queued_offline");
+        assert!(resp.gate_id.is_none());
+        assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 1);
+    }
+
+    #[test]
+    fn submit_network_payload_omits_local_workspace_root() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n");
+        let req = test_request(tmp.path());
+        let payload: serde_json::Value =
+            serde_json::from_str(&serialize_submit_gate_payload(&req).unwrap()).unwrap();
+
+        assert!(payload.get("workspace_root").is_none());
+        assert_eq!(payload["program_id"], req.program_id);
+        assert!(!payload.to_string().contains(&req.workspace_root));
+    }
+
+    #[test]
+    fn submit_blocked_by_safety_is_not_queued() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n");
+        let mut req = test_request(tmp.path());
+        req.notes = Some("call 010-1234-5678".to_string());
+        let resp = hub_submit_gate(req).unwrap();
+        assert!(resp.state.starts_with("blocked_by_safety:"));
+        assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn submit_public_mode_blocks_real_names() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n  deployment_mode: public\n");
+        let mut req = test_request(tmp.path());
+        req.target_org = "KOICA 사업단".to_string();
+        let resp = hub_submit_gate(req).unwrap();
+        assert!(resp.state.starts_with("blocked_by_safety:real_name_in_public"));
+        assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn submit_public_mode_checks_nested_frontmatter_values() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n  deployment_mode: public\n");
+        let mut req = test_request(tmp.path());
+        req.frontmatter_snapshot = serde_json::json!({"project": {"label": "Koica demo"}});
+        let resp = hub_submit_gate(req).unwrap();
+        assert!(resp.state.starts_with("blocked_by_safety:real_name_in_public"));
+        assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn drain_with_hub_disabled_is_noop_reporting_backlog() {
+        let tmp = workspace_with_hub_config("hub:\n  enabled: false\n");
+        cache::enqueue_submit_gate(tmp.path(), &test_request(tmp.path())).unwrap();
+
+        let result = hub_queue_drain(tmp.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(result.attempted, 0);
+        assert_eq!(result.submitted, 0);
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.remaining, 1);
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn drain_public_mode_blocks_queued_real_names() {
+        // Queued under private mode, drained under public mode: the drain
+        // must re-run the public blocklist, not just the base safety check.
+        let private_cfg = workspace_with_hub_config("hub:\n  enabled: false\n");
+        let mut req = test_request(private_cfg.path());
+        req.target_org = "KOICA 사업단".to_string();
+        cache::enqueue_submit_gate(private_cfg.path(), &req).unwrap();
+
+        std::fs::write(
+            private_cfg.path().join("workspace.config.yaml"),
+            "hub:\n  enabled: true\n  deployment_mode: public\n  endpoint: http://10.255.255.1:9/api/v1\n  timeout_ms: 300\n",
+        )
+        .unwrap();
+
+        let result = hub_queue_drain(private_cfg.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(result.submitted, 0);
+        assert_eq!(result.failed, 1);
+        assert!(result.items[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("real_name_in_public"));
+    }
+
+    #[test]
+    fn drain_with_unreachable_hub_marks_retry_and_keeps_item() {
+        // enabled + unroutable endpoint: every queued item fails the POST and
+        // stays queued with retry_count bumped (an RFC1918 blackhole address
+        // that fails fast on connect with the short timeout).
+        let tmp = workspace_with_hub_config(
+            "hub:\n  enabled: true\n  endpoint: http://10.255.255.1:9/api/v1\n  timeout_ms: 300\n",
+        );
+        cache::enqueue_submit_gate(tmp.path(), &test_request(tmp.path())).unwrap();
+
+        let result = hub_queue_drain(tmp.path().to_string_lossy().to_string()).unwrap();
+        assert_eq!(result.attempted, 1);
+        assert_eq!(result.submitted, 0);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.remaining, 1);
+
+        let items = cache::list_queue(tmp.path()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].1.retry_count, 1);
+        assert!(items[0].1.last_error.is_some());
     }
 }

@@ -479,7 +479,7 @@ export function InboxPane({
   };
 
   const pickDropFiles = async () => {
-    const paths = await chooseFiles("Choose files for Inbox");
+    const paths = await chooseFiles(t("inbox.drop.chooseTitle"));
     if (paths.length > 0) await onStageFiles(paths);
   };
 
@@ -554,7 +554,7 @@ export function InboxPane({
             {t("inbox.subtitle.combined", {
               files: pending.toLocaleString(locale),
             })}
-            {entryPending > 0 ? ` · process ${entryPending.toLocaleString(locale)}` : ""}
+            {entryPending > 0 ? ` · ${t("inbox.subtitle.processing", { count: entryPending.toLocaleString(locale) })}` : ""}
           </p>
         </div>
         <div className="inbox-header-actions">
@@ -572,8 +572,8 @@ export function InboxPane({
             type="button"
             className="icon-button"
             onClick={() => setCheatsheetOpen((value) => !value)}
-            title="Keyboard help"
-            aria-label="Keyboard help"
+            title={t("inbox.keyboardHelp")}
+            aria-label={t("inbox.keyboardHelp")}
           >
             <HelpCircle size={15} />
           </button>
@@ -600,11 +600,11 @@ export function InboxPane({
 
       {cheatsheetOpen ? (
         <div className="inbox-cheatsheet">
-          <span>↑/↓ focus</span>
-          <span>a accept</span>
-          <span>r reject</span>
-          <span>p process</span>
-          <span>shift/cmd click select</span>
+          <span>{t("inbox.cheatsheet.focus")}</span>
+          <span>{t("inbox.cheatsheet.accept")}</span>
+          <span>{t("inbox.cheatsheet.reject")}</span>
+          <span>{t("inbox.cheatsheet.process")}</span>
+          <span>{t("inbox.cheatsheet.select")}</span>
         </div>
       ) : null}
 
@@ -660,14 +660,14 @@ export function InboxPane({
 
       <div className="inbox-sections">
         <InboxSection
-          title="CONFIGURED ENTRIES"
+          title={t("inbox.section.configuredEntries")}
         >
             <div className="inbox-list">
               {visibleEntries.length === 0 ? (
                 <div className="inbox-empty">
                   <Inbox size={24} />
-                  <strong>No configured inbox items</strong>
-                  <span>Configured drop files and pending manifests will appear here.</span>
+                  <strong>{t("inbox.entries.empty.title")}</strong>
+                  <span>{t("inbox.entries.empty.description")}</span>
                 </div>
               ) : null}
               {entryGroups.map((group) => (
@@ -698,7 +698,7 @@ export function InboxPane({
                             toggleSelection(key, event.shiftKey);
                           }}
                           onChange={() => {}}
-                          aria-label={`Select ${entry.title}`}
+                          aria-label={t("inbox.row.select", { title: entry.title })}
                         />
                         <div className="inbox-item-main">
                           <div className="inbox-item-title">
@@ -706,7 +706,7 @@ export function InboxPane({
                             <strong>{entry.title}</strong>
                           </div>
                           <p className="inbox-item-hint">
-                            {entry.kind === "pendingItem" ? "pending item" : "drop file"}
+                            {entry.kind === "pendingItem" ? t("inbox.entryKind.pendingItem") : t("inbox.entryKind.dropFile")}
                             {entry.sourceKind ? ` · ${entry.sourceKind}` : ""}
                           </p>
                           <div className="inbox-item-meta">
@@ -743,7 +743,7 @@ export function InboxPane({
                             }}
                           >
                             <Play size={14} />
-                            <span>Process</span>
+                            <span>{t("inbox.process")}</span>
                           </button>
                         </div>
                       </article>
@@ -754,7 +754,7 @@ export function InboxPane({
             </div>
         </InboxSection>
 
-        <InboxSection title="PROCESSING">
+        <InboxSection title={t("inbox.section.processing")}>
           <InboxRunsPanel
             workPath={workPath}
             missions={processingMissions}
@@ -767,7 +767,7 @@ export function InboxPane({
           />
         </InboxSection>
 
-        <InboxSection title="PROCESSED ITEMS">
+        <InboxSection title={t("inbox.section.processedItems")}>
           <ProcessedItemsBrowser
             items={processedItems}
             loading={processedLoading}
@@ -785,7 +785,7 @@ export function InboxPane({
         </InboxSection>
 
         <InboxSection
-          title="FILES"
+          title={t("inbox.section.files")}
         >
           <div className="inbox-list">
             <div
@@ -801,7 +801,7 @@ export function InboxPane({
               }}
             >
               <Upload size={20} />
-              <strong>Drop files for Inbox</strong>
+              <strong>{t("inbox.drop.title")}</strong>
               <span>{fileDropLabel}</span>
               <button
                 type="button"
@@ -810,7 +810,7 @@ export function InboxPane({
                 disabled={actionBusy}
               >
                 <FilePlus2 size={14} />
-                <span>Choose files</span>
+                <span>{t("inbox.drop.choose")}</span>
               </button>
             </div>
             {loading ? <div className="inbox-empty">{t("inbox.loading")}</div> : null}
@@ -818,7 +818,7 @@ export function InboxPane({
               <div className="inbox-empty" title={t("inbox.empty.title")}>
                 <Inbox size={24} />
                 <strong>{t("inbox.empty.title")}</strong>
-                <span>Drop or choose files above to stage them into the configured inbox.</span>
+                <span>{t("inbox.empty.dropHint")}</span>
               </div>
             ) : null}
             {fileGroups.map((group) => (
@@ -849,7 +849,7 @@ export function InboxPane({
                           toggleSelection(key, event.shiftKey);
                         }}
                         onChange={() => {}}
-                        aria-label={`Select ${entry.item.title}`}
+                        aria-label={t("inbox.row.select", { title: entry.item.title })}
                       />
                       <div className="inbox-item-main">
                         <div className="inbox-item-title">

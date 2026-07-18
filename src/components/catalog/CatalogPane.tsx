@@ -15,6 +15,8 @@ import type {
   DocCategory,
 } from "../../lib/catalog";
 import { catalogQuery, catalogScan } from "../../lib/catalog";
+import { hubQueueDrain, hubStatus } from "../../lib/hubClient";
+import { useTranslation } from "../../lib/i18n";
 import { DrilldownDialog } from "./DrilldownDialog";
 
 interface CatalogPaneProps {
@@ -22,15 +24,16 @@ interface CatalogPaneProps {
   onReveal?: (path: string) => void;
 }
 
-const ALL_CATEGORIES: { value: DocCategory | "all"; label: string }[] = [
-  { value: "all", label: "전체" },
-  { value: "formal-report", label: "정형보고" },
-  { value: "admin-approval", label: "행정결재" },
-  { value: "evidence-cert", label: "증빙·인증" },
-  { value: "operations", label: "운영문서" },
+const ALL_CATEGORIES: { value: DocCategory | "all"; labelKey: string }[] = [
+  { value: "all", labelKey: "catalog.category.all" },
+  { value: "formal-report", labelKey: "catalog.category.formalReport" },
+  { value: "admin-approval", labelKey: "catalog.category.adminApproval" },
+  { value: "evidence-cert", labelKey: "catalog.category.evidenceCert" },
+  { value: "operations", labelKey: "catalog.category.operations" },
 ];
 
 export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
+  const { t } = useTranslation();
   const [report, setReport] = useState<CatalogScanReport | null>(null);
   const [entries, setEntries] = useState<CatalogEntry[]>([]);
   const [selectedBu, setSelectedBu] = useState<string>("all");
@@ -38,6 +41,8 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drilldownEntry, setDrilldownEntry] = useState<CatalogEntry | null>(null);
+  const [hubQueueDepth, setHubQueueDepth] = useState<number | null>(null);
+  const [hubDrainBusy, setHubDrainBusy] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(
@@ -55,9 +60,30 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
       } finally {
         setLoading(false);
       }
+      // Hub queue depth is best-effort: workspaces without hub config simply
+      // never show the indicator.
+      try {
+        const status = await hubStatus(workspaceRoot);
+        setHubQueueDepth(status.queue_depth);
+      } catch {
+        setHubQueueDepth(null);
+      }
     },
     [workspaceRoot],
   );
+
+  const drainHubQueue = useCallback(async () => {
+    if (!workspaceRoot) return;
+    setHubDrainBusy(true);
+    try {
+      const result = await hubQueueDrain(workspaceRoot);
+      setHubQueueDepth(result.remaining);
+    } catch {
+      // Drain errors are non-fatal; the depth re-reads on the next refresh.
+    } finally {
+      setHubDrainBusy(false);
+    }
+  }, [workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot) return;
@@ -106,20 +132,20 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
   );
 
   if (!workspaceRoot) {
-    return <div className="catalog-pane catalog-pane--empty">워크스페이스가 선택되지 않았습니다.</div>;
+    return <div className="catalog-pane catalog-pane--empty">{t("catalog.noWorkspace")}</div>;
   }
 
   return (
     <div className="catalog-pane">
       <header className="catalog-pane__topbar">
-        <h2>Operations Catalog</h2>
+        <h2>{t("catalog.title")}</h2>
         <div className="catalog-pane__filters">
           <select
             value={selectedBu}
             onChange={(e) => setSelectedBu(e.target.value)}
-            aria-label="사업단/조직 선택"
+            aria-label={t("catalog.bu.selectAria")}
           >
-            <option value="all">전체 사업단</option>
+            <option value="all">{t("catalog.bu.all")}</option>
             {(report?.bus_seen ?? []).map((bu) => (
               <option key={bu} value={bu}>
                 {bu}
@@ -134,31 +160,31 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
                 className={selectedCategory === c.value ? "active" : ""}
                 onClick={() => setSelectedCategory(c.value)}
               >
-                {c.label}
+                {t(c.labelKey)}
               </button>
             ))}
           </div>
         </div>
       </header>
 
-      {loading && <div className="catalog-pane__status">불러오는 중…</div>}
-      {error && <div className="catalog-pane__error">오류: {error}</div>}
+      {loading && <div className="catalog-pane__status">{t("catalog.loading")}</div>}
+      {error && <div className="catalog-pane__error">{t("catalog.error", { message: error })}</div>}
 
       <div className="catalog-pane__columns">
         <CatalogColumn
-          title="마감 임박"
+          title={t("catalog.column.deadlines")}
           entries={deadlines}
           kind="deadline-due"
           onSelect={setDrilldownEntry}
         />
         <CatalogColumn
-          title="결재 진행 중"
+          title={t("catalog.column.approvals")}
           entries={approvals}
           kind="approval-in-flight"
           onSelect={setDrilldownEntry}
         />
         <CatalogColumn
-          title="미연결 증빙"
+          title={t("catalog.column.evidence")}
           entries={evidence}
           kind="evidence-unlinked"
           onSelect={setDrilldownEntry}
@@ -167,9 +193,30 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
 
       {report && (
         <footer className="catalog-pane__footer">
-          마지막 스캔: {report.scanned_at} · 총 {report.entries_count}건 · 사업단 {report.bus_seen.length}개
+          {t("catalog.footer.summary", {
+            time: report.scanned_at,
+            count: report.entries_count,
+            buCount: report.bus_seen.length,
+          })}
           {report.warnings.length > 0 && (
-            <span className="catalog-pane__warnings"> · 경고 {report.warnings.length}건</span>
+            <span className="catalog-pane__warnings">
+              {" "}
+              {t("catalog.footer.warnings", { count: report.warnings.length })}
+            </span>
+          )}
+          {hubQueueDepth != null && hubQueueDepth > 0 && (
+            <span className="catalog-pane__hub-queue">
+              {" · "}
+              {t("catalog.hubQueue", { count: hubQueueDepth })}{" "}
+              <button
+                type="button"
+                className="button button-ghost button-sm"
+                disabled={hubDrainBusy}
+                onClick={() => void drainHubQueue()}
+              >
+                {t("catalog.hubQueueRetry")}
+              </button>
+            </span>
           )}
         </footer>
       )}
@@ -192,13 +239,14 @@ interface CatalogColumnProps {
 }
 
 function CatalogColumn({ title, entries, kind: _kind, onSelect }: CatalogColumnProps) {
+  const { t } = useTranslation();
   return (
     <section className="catalog-column">
       <h3>
         {title} <span className="catalog-column__count">({entries.length})</span>
       </h3>
       {entries.length === 0 ? (
-        <p className="catalog-column__empty">표시할 항목이 없습니다.</p>
+        <p className="catalog-column__empty">{t("catalog.column.empty")}</p>
       ) : (
         <ul className="catalog-column__list">
           {entries.map((e) => (
@@ -207,7 +255,7 @@ function CatalogColumn({ title, entries, kind: _kind, onSelect }: CatalogColumnP
                 type="button"
                 className="catalog-entry__button"
                 onClick={() => onSelect(e)}
-                aria-label={`${e.title || e.path} 상세 보기`}
+                aria-label={t("catalog.entry.detailAria", { title: e.title || e.path })}
               >
                 <div className="catalog-entry__title" title={e.title || e.path}>
                   {e.title || e.path}

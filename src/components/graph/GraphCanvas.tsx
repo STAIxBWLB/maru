@@ -16,6 +16,7 @@ import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
 import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
+import { useTranslation } from "../../lib/i18n";
 
 export interface GraphViewport {
   zoom: number;
@@ -206,11 +207,12 @@ function StaticGraphFallback({
   onSelect: (node: GraphNode | null) => void;
   onOpen: (node: GraphNode) => void;
 }) {
+  const { t } = useTranslation();
   const index = useMemo(() => new Map(nodes.map((node, i) => [node.id, i])), [nodes]);
   if (nodes.length > 2_000) {
     return (
       <div className="graph-webgl-fallback-list" role="status">
-        WebGL을 사용할 수 없어 대규모 그래프를 목록으로 표시합니다. 검색과 Inspector는 계속 사용할 수 있습니다.
+        {t("graph.webglFallback")}
       </div>
     );
   }
@@ -277,6 +279,7 @@ export function GraphCanvas({
   overlay,
   onViewportReport,
 }: GraphCanvasProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<GraphInstance | null>(null);
   const rendererRef = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
@@ -674,7 +677,7 @@ export function GraphCanvas({
       {webglFailed && !debugDomEnabled ? (
         <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} onSelect={onSelect} onOpen={onOpen} />
       ) : (
-        <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label="Knowledge graph" />
+        <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label={t("graph.aria.canvas")} />
       )}
       {debugDomEnabled ? (
         <svg
@@ -743,7 +746,7 @@ export function GraphCanvas({
           </g>
         </svg>
       ) : null}
-      <div className="sr-only" aria-live="polite">{selectedLabel ? `선택됨: ${selectedLabel}` : ""}</div>
+      <div className="sr-only" aria-live="polite">{selectedLabel ? t("graph.aria.selected", { label: selectedLabel }) : ""}</div>
       {!ready ? <div className="graph-canvas-loading" data-testid="graph-canvas-loading">…</div> : null}
       {overlay}
     </div>

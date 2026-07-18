@@ -128,3 +128,116 @@ pub fn drilldown_impl(
 
     Ok(resp)
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn entry(path: &str, kind: CatalogItemKind, deadline: Option<&str>, updated: &str) -> CatalogEntry {
+        CatalogEntry {
+            path: path.to_string(),
+            kind,
+            title: path.to_string(),
+            business_unit: None,
+            category: None,
+            deadline: deadline.map(|s| s.to_string()),
+            approval_status: None,
+            evidence_kind: None,
+            last_updated: updated.to_string(),
+        }
+    }
+
+    #[test]
+    fn query_filters_bu_category_and_kinds() {
+        let mut with_bu = entry("a.md", CatalogItemKind::DeadlineDue, Some("2026-02-01"), "2026-01-01");
+        with_bu.business_unit = Some("bu-a".to_string());
+        with_bu.category = Some(DocCategory::FormalReport);
+        let mut other_bu = entry("b.md", CatalogItemKind::DeadlineDue, Some("2026-02-02"), "2026-01-02");
+        other_bu.business_unit = Some("bu-b".to_string());
+        let mut other_kind = entry("c.md", CatalogItemKind::InboxPending, Some("2026-01-15"), "2026-01-03");
+        other_kind.business_unit = Some("bu-a".to_string());
+
+        let index = CatalogIndex {
+            version: 1,
+            generated_at: "2026-01-10T00:00:00Z".to_string(),
+            entries: vec![with_bu, other_bu, other_kind],
+        };
+
+        let by_bu = index.query(&CatalogQuery {
+            business_unit: Some("bu-a".to_string()),
+            ..CatalogQuery::default()
+        });
+        assert_eq!(by_bu.len(), 2);
+        assert!(by_bu.iter().all(|e| e.business_unit.as_deref() == Some("bu-a")));
+
+        let by_category = index.query(&CatalogQuery {
+            category: Some(DocCategory::FormalReport),
+            ..CatalogQuery::default()
+        });
+        assert_eq!(by_category.len(), 1);
+        assert_eq!(by_category[0].path, "a.md");
+
+        let by_kind = index.query(&CatalogQuery {
+            kinds: vec![CatalogItemKind::InboxPending],
+            ..CatalogQuery::default()
+        });
+        assert_eq!(by_kind.len(), 1);
+        assert_eq!(by_kind[0].path, "c.md");
+    }
+
+    #[test]
+    fn query_sorts_deadline_first_then_recent_and_honors_limit() {
+        let index = CatalogIndex {
+            version: 1,
+            generated_at: "2026-01-10T00:00:00Z".to_string(),
+            entries: vec![
+                entry("a.md", CatalogItemKind::DeadlineDue, None, "2026-01-01"),
+                entry("b.md", CatalogItemKind::DeadlineDue, Some("2026-03-01"), "2026-01-02"),
+                entry("c.md", CatalogItemKind::DeadlineDue, Some("2026-02-01"), "2026-01-03"),
+                entry("d.md", CatalogItemKind::DeadlineDue, None, "2026-02-01"),
+            ],
+        };
+
+        let all = index.query(&CatalogQuery::default());
+        let order: Vec<&str> = all.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(order, ["c.md", "b.md", "d.md", "a.md"]);
+
+        let limited = index.query(&CatalogQuery {
+            limit: 2,
+            ..CatalogQuery::default()
+        });
+        assert_eq!(limited.len(), 2);
+        assert_eq!(limited[0].path, "c.md");
+    }
+
+    #[test]
+    fn drilldown_extracts_frontmatter_manifest_readme_and_siblings() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let dir = root.join("inbox/items/x");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("doc.md"), "---\ntitle: Hello\n---\nbody text").unwrap();
+        std::fs::write(dir.join("manifest.yaml"), "id: 1").unwrap();
+        std::fs::write(dir.join("README.md"), "line1\nline2").unwrap();
+        std::fs::write(dir.join("other.md"), "sibling").unwrap();
+
+        let resp = drilldown_impl(root, "inbox/items/x/doc.md").unwrap();
+        assert_eq!(resp.frontmatter_yaml.as_deref(), Some("title: Hello"));
+        assert_eq!(resp.manifest_yaml.as_deref(), Some("id: 1"));
+        assert!(resp.readme_excerpt.as_deref().unwrap().contains("line2"));
+        assert!(resp.related_paths.iter().any(|p| p.ends_with("other.md")));
+        // The entry itself is excluded from its own related list.
+        assert!(!resp.related_paths.iter().any(|p| p.ends_with("doc.md")));
+    }
+
+    #[test]
+    fn drilldown_missing_entry_returns_default() {
+        let tmp = TempDir::new().unwrap();
+        let resp = drilldown_impl(tmp.path(), "nope.md").unwrap();
+        assert!(resp.frontmatter_yaml.is_none());
+        assert!(resp.manifest_yaml.is_none());
+        assert!(resp.related_paths.is_empty());
+    }
+}

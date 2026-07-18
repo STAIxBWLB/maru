@@ -643,7 +643,11 @@ impl StatusCommandResult {
 }
 
 fn run_status_command(binary: &Path, args: &[&str]) -> StatusCommandResult {
-    match Command::new(binary).args(args).no_window().output() {
+    let mut cmd = Command::new(binary);
+    cmd.args(args).no_window();
+    // ETXTBSY retry: status probes may exec a just-written binary (tests,
+    // freshly installed CLIs) while another thread's fork holds its fd.
+    match crate::agent_host::provider::retry_etxtbsy(|| cmd.output()) {
         Ok(output) => StatusCommandResult {
             success: output.status.success(),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),

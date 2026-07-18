@@ -911,6 +911,14 @@ function MainApp() {
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [binaryTabs, setBinaryTabs] = useState<BinaryTab[]>([]);
   const [tabOrder, setTabOrder] = useState<string[]>([]);
+  // Mirror of `tabs` for close/relaunch guards that run outside React flow
+  // (onCloseRequested, update toast actions). Binary tabs are never dirty.
+  const tabsRef = useRef<EditorTab[]>([]);
+  // Dirty-draft guard: "close" = window close requested, "relaunch" = update
+  // ready. Non-null shows the confirm dialog; the action runs on confirm.
+  const [pendingDestructiveAction, setPendingDestructiveAction] =
+    useState<"close" | "relaunch" | null>(null);
+  const closeConfirmedRef = useRef(false);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
   const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
@@ -1731,6 +1739,60 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  const hasDirtyDrafts = useCallback(
+    () => tabsRef.current.some((tab) => tab.draftContent !== tab.document.content),
+    [],
+  );
+
+  const relaunchAfterSettingsFlush = useCallback(async () => {
+    try {
+      await settingsSaverRef.current?.flush();
+      await relaunchApp();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const requestRelaunch = useCallback(async () => {
+    if (hasDirtyDrafts()) {
+      setPendingDestructiveAction("relaunch");
+      return;
+    }
+    await relaunchAfterSettingsFlush();
+  }, [hasDirtyDrafts, relaunchAfterSettingsFlush]);
+
+  const confirmDestructiveAction = useCallback(async () => {
+    const action = pendingDestructiveAction;
+    setPendingDestructiveAction(null);
+    if (action === "relaunch") {
+      await relaunchAfterSettingsFlush();
+      return;
+    }
+    if (action === "close") {
+      try {
+        await settingsSaverRef.current?.flush();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      closeConfirmedRef.current = true;
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().close();
+      } catch (err) {
+        closeConfirmedRef.current = false;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  }, [pendingDestructiveAction, relaunchAfterSettingsFlush]);
+
+  // Main-window close: flush pending settings writes before the window goes
+  // away, and gate on unsaved drafts instead of losing them silently. The
+  // Rust side no longer force-destroys windows on CloseRequested, so this
+  // handler's preventDefault actually wins.
+  useEffect(() => {
     if (!tauriAvailable()) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
@@ -1742,13 +1804,31 @@ function MainApp() {
         const appWindow = getCurrentWindow();
         if (appWindow.label !== "main") return;
         return appWindow.onCloseRequested(async (event) => {
+          // A close confirmed via the dirty-draft dialog replays through
+          // here; consume the one-shot guard and let the default close proceed.
+          if (closeConfirmedRef.current) {
+            closeConfirmedRef.current = false;
+            return;
+          }
           if (closing) return;
           event.preventDefault();
+          if (hasDirtyDrafts()) {
+            setPendingDestructiveAction("close");
+            return;
+          }
           closing = true;
           try {
             await settingsSaverRef.current?.flush();
-          } finally {
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+          closeConfirmedRef.current = true;
+          try {
             await appWindow.close();
+          } catch (err) {
+            closeConfirmedRef.current = false;
+            closing = false;
+            setError(err instanceof Error ? err.message : String(err));
           }
         });
       })
@@ -1763,7 +1843,7 @@ function MainApp() {
       disposed = true;
       unlisten?.();
     };
-  }, []);
+  }, [hasDirtyDrafts]);
 
   const updateSettings = useCallback(
     (
@@ -1806,16 +1886,14 @@ function MainApp() {
           ...current.ui.layout,
           ...patch,
         };
+        // terminal.defaultPanelOpen/lastHeight are legacy migration mirrors
+        // that normalizeMaruSettings re-derives from ui.layout — no explicit
+        // write here.
         return {
           ...current,
           ui: {
             ...current.ui,
             layout,
-          },
-          terminal: {
-            ...current.terminal,
-            defaultPanelOpen: layout.terminalOpen,
-            lastHeight: layout.terminalHeight,
           },
         };
       }, options);
@@ -2788,10 +2866,10 @@ function MainApp() {
       if (forced) return forced;
       const suggested = inboxCarry.get(id)?.classification?.suggestedFolder?.trim();
       if (suggested) return suggested;
-      const target = window.prompt("이 파일을 이동할 workspace-relative 폴더를 입력하세요.", "inbox/processed");
+      const target = window.prompt(t("app.prompt.inboxTargetFolder"), "inbox/processed");
       return target?.trim() || null;
     },
-    [inboxCarry],
+    [inboxCarry, t],
   );
 
   const decideInboxItem = useCallback(
@@ -2804,8 +2882,8 @@ function MainApp() {
         kind: decision === "accepted" ? "inbox.file.accept" : "inbox.file.reject",
         summary:
           decision === "accepted"
-            ? "Move the selected inbox file into the workspace."
-            : "Move the selected inbox file into the rejected folder.",
+            ? t("approval.inbox.accept.summary")
+            : t("approval.inbox.reject.summary"),
         target: decision === "accepted" ? targetFolder : "inbox/rejected",
         payloadPreview: id,
       });
@@ -2826,7 +2904,7 @@ function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry],
+    [approvalGate, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry, t],
   );
 
   const decideGmailItem = useCallback(
@@ -2836,8 +2914,8 @@ function MainApp() {
         kind: decision === "accepted" ? "gmail.accept" : "gmail.reject",
         summary:
           decision === "accepted"
-            ? "Apply the Maru accepted label and archive this Gmail message."
-            : "Apply the Maru rejected label to this Gmail message.",
+            ? t("approval.gmail.accept.summary")
+            : t("approval.gmail.reject.summary"),
         target: id,
         payloadPreview: decision === "accepted" ? "add maru-accepted; remove INBOX" : "add maru-rejected",
       });
@@ -2858,7 +2936,7 @@ function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxWorkspacePath],
+    [approvalGate, inboxWorkspacePath, t],
   );
 
   const decideOutlookItem = useCallback(
@@ -2868,8 +2946,8 @@ function MainApp() {
         kind: decision === "accepted" ? "outlook.accept" : "outlook.reject",
         summary:
           decision === "accepted"
-            ? "Apply the Maru accepted category to this Outlook message."
-            : "Apply the Maru rejected category to this Outlook message.",
+            ? t("approval.outlook.accept.summary")
+            : t("approval.outlook.reject.summary"),
         target: id,
         payloadPreview: decision === "accepted" ? "add maru-accepted" : "add maru-rejected",
       });
@@ -2893,7 +2971,7 @@ function MainApp() {
         setOutlookError(err instanceof Error ? err.message : String(err));
       }
     },
-    [effectiveCommsSettings.outlook.m365Path, approvalGate, inboxWorkspacePath],
+    [effectiveCommsSettings.outlook.m365Path, approvalGate, inboxWorkspacePath, t],
   );
 
   const decideTelegramItem = useCallback(
@@ -2905,8 +2983,8 @@ function MainApp() {
         kind: decision === "accepted" ? "telegram.accept" : "telegram.reject",
         summary:
           decision === "accepted"
-            ? "Write this Telegram message into the configured Telegram inbox drop."
-            : "Dismiss this Telegram message from the transient comms list.",
+            ? t("approval.telegram.accept.summary")
+            : t("approval.telegram.reject.summary"),
         target: decision === "accepted" ? "inbox/drop/telegram" : id,
         payloadPreview: message.text,
       });
@@ -2928,7 +3006,7 @@ function MainApp() {
         setTelegramError(err instanceof Error ? err.message : String(err));
       }
     },
-    [approvalGate, inboxWorkspacePath, refreshInbox, telegramMessages],
+    [approvalGate, inboxWorkspacePath, refreshInbox, telegramMessages, t],
   );
 
   const decideCommsItem = useCallback(
@@ -2961,7 +3039,7 @@ function MainApp() {
         );
         if (missing.length > 0) {
           const target = window.prompt(
-            `${missing.length}개 파일의 이동 대상 폴더를 입력하세요.`,
+            t("app.prompt.inboxBulkTargetFolder", { count: missing.length }),
             "inbox/processed",
           );
           fileTargetFolder = target?.trim() || null;
@@ -2973,8 +3051,8 @@ function MainApp() {
         kind: "inbox.bulk",
         summary:
           decision === "accepted"
-            ? `Accept ${keys.length} selected inbox item(s).`
-            : `Reject ${keys.length} selected inbox item(s).`,
+            ? t("approval.inbox.bulkAccept.summary", { count: keys.length })
+            : t("approval.inbox.bulkReject.summary", { count: keys.length }),
         target: fileTargetFolder ?? (decision === "rejected" ? "inbox/rejected" : null),
         payloadPreview: keys.join("\n"),
       };
@@ -3040,7 +3118,7 @@ function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry],
+    [approvalGate, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry, t],
   );
 
   const bulkAcceptInboxKeys = useCallback(
@@ -3055,12 +3133,12 @@ function MainApp() {
 
   const bulkMoveInboxFiles = useCallback(
     (keys: string[]) => {
-      const target = window.prompt("선택한 파일을 이동할 workspace-relative 폴더를 입력하세요.", "inbox/processed");
+      const target = window.prompt(t("app.prompt.inboxMoveSelectedFolder"), "inbox/processed");
       const trimmed = target?.trim();
       if (!trimmed) return;
       void decideInboxKeys(keys.filter((key) => key.startsWith("file:")), "accepted", trimmed);
     },
-    [decideInboxKeys],
+    [decideInboxKeys, t],
   );
 
   const trashInboxTargets = useCallback(
@@ -5229,8 +5307,10 @@ function MainApp() {
         await installAppUpdate(update, (progress) => {
           setUpdateToast({ kind: "downloading", info, progress });
         });
+        // Downloaded and installed, but never relaunch on our own: the
+        // "ready" toast offers an explicit relaunch action so unsaved
+        // drafts are never lost to a surprise restart.
         setUpdateToast({ kind: "ready", info });
-        await relaunchApp();
       } catch (err) {
         setUpdateToast({
           kind: "error",
@@ -5243,13 +5323,7 @@ function MainApp() {
     [],
   );
 
-  const checkForUpdates = useCallback(async (
-    options: boolean | { manual?: boolean; autoInstall?: boolean } = false,
-  ) => {
-    const manual = typeof options === "boolean" ? options : options.manual ?? false;
-    const autoInstall =
-      typeof options === "boolean" ? false : options.autoInstall ?? false;
-
+  const checkForUpdates = useCallback(async (manual = false) => {
     if (!updaterAvailable()) {
       if (manual) setUpdateToast({ kind: "error", message: t("updates.desktopOnly") });
       return;
@@ -5263,10 +5337,8 @@ function MainApp() {
         return;
       }
       pendingUpdateRef.current = result.update;
-      if (autoInstall) {
-        await installUpdate(result.update, result.info);
-        return;
-      }
+      // Consent-first: surface an actionable toast; downloading and
+      // relaunching only happen from explicit user action.
       setUpdateToast({ kind: "available", info: result.info });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -5276,7 +5348,7 @@ function MainApp() {
         console.info("[maru] update check failed:", message);
       }
     }
-  }, [installUpdate, t]);
+  }, [t]);
 
   const installPendingUpdate = useCallback(async () => {
     const update = pendingUpdateRef.current;
@@ -5287,7 +5359,7 @@ function MainApp() {
   useEffect(() => {
     if (!updaterAvailable()) return;
     const timer = window.setTimeout(() => {
-      void checkForUpdates({ autoInstall: true });
+      void checkForUpdates();
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [checkForUpdates]);
@@ -8031,6 +8103,15 @@ function MainApp() {
                   {t("updates.install")}
                 </button>
               ) : null}
+              {updateToast.kind === "ready" ? (
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => void requestRelaunch()}
+                >
+                  {t("updates.relaunchNow")}
+                </button>
+              ) : null}
               {updateToast.kind !== "downloading" ? (
                 <button
                   type="button"
@@ -8045,6 +8126,39 @@ function MainApp() {
             </div>
           ) : null}
         </div>
+
+        {pendingDestructiveAction ? (
+          <div className="dialog-backdrop">
+            <section className="task-new-dialog" role="alertdialog" aria-modal="true">
+              <header>
+                <div>
+                  <h2>{t("app.unsaved.title")}</h2>
+                  <p>
+                    {pendingDestructiveAction === "close"
+                      ? t("app.unsaved.closeBody")
+                      : t("app.unsaved.relaunchBody")}
+                  </p>
+                </div>
+              </header>
+              <footer>
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => setPendingDestructiveAction(null)}
+                >
+                  {t("dialog.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-sm"
+                  onClick={() => void confirmDestructiveAction()}
+                >
+                  {t("app.unsaved.confirm")}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
 
         <NewDocumentDialog
           open={newDocumentOpen}

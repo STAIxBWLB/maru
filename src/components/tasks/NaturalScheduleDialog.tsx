@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import { parseKoreanDate } from "../../lib/koreanDate";
 import { Button } from "../ui/Button";
 
 interface NaturalScheduleDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (rawText: string) => Promise<void>;
+  onSubmit: (rawText: string, parsedStart: string | null) => Promise<void>;
 }
 
 export function NaturalScheduleDialog({
@@ -14,10 +15,36 @@ export function NaturalScheduleDialog({
   onClose,
   onSubmit,
 }: NaturalScheduleDialogProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [rawText, setRawText] = useState("");
+  const [parsedStart, setParsedStart] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Debounced live preview from the Rust Korean date parser (SSOT for
+  // phrases like "내일", "다음 주 금요일"). The parsed datetime travels with
+  // the submit so the skill prompt can treat it as authoritative.
+  useEffect(() => {
+    const trimmed = rawText.trim();
+    if (!trimmed) {
+      setParsedStart(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void parseKoreanDate(trimmed)
+        .then((parsed) => {
+          if (!cancelled) setParsedStart(parsed);
+        })
+        .catch(() => {
+          if (!cancelled) setParsedStart(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [rawText]);
 
   if (!open) return null;
 
@@ -30,8 +57,13 @@ export function NaturalScheduleDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit(trimmed);
+      // Parse fresh at submit: the debounced `parsedStart` preview can be
+      // stale (or null) when the user submits within the debounce window,
+      // and the skill prompt treats this value as authoritative.
+      const freshStart = await parseKoreanDate(trimmed).catch(() => null);
+      await onSubmit(trimmed, freshStart);
       setRawText("");
+      setParsedStart(null);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -39,6 +71,13 @@ export function NaturalScheduleDialog({
       setBusy(false);
     }
   };
+
+  const preview = parsedStart
+    ? new Date(parsedStart).toLocaleString(locale === "ko" ? "ko-KR" : "en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : null;
 
   return (
     <div
@@ -73,6 +112,11 @@ export function NaturalScheduleDialog({
             autoFocus
           />
         </label>
+        {preview ? (
+          <p className="task-natural-dialog__preview">
+            {t("tasks.natural.parsedPreview", { datetime: preview })}
+          </p>
+        ) : null}
         <footer>
           <Button size="sm" variant="ghost" onClick={onClose}>
             {t("dialog.cancel")}

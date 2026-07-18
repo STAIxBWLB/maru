@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { ShieldAlert, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { prepareApproval, recordApproval } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import type { ApprovalRequest } from "../lib/types";
 import { Button } from "../components/ui/Button";
 
@@ -75,6 +76,7 @@ function ApprovalDialog({
   onCancel: () => void;
 }) {
   const request = pending?.request ?? null;
+  const { t } = useTranslation();
   return (
     <Dialog.Root
       open={Boolean(request)}
@@ -88,13 +90,13 @@ function ApprovalDialog({
           <div className="dialog-header">
             <Dialog.Title className="approval-title">
               <ShieldAlert size={17} />
-              승인 필요
+              {t("approval.dialog.title")}
             </Dialog.Title>
             <button
               type="button"
               className="icon-button"
-              aria-label="닫기"
-              title="닫기"
+              aria-label={t("app.close")}
+              title={t("app.close")}
               onClick={onCancel}
             >
               <X size={14} />
@@ -106,7 +108,7 @@ function ApprovalDialog({
               <p>{request.summary}</p>
               {request.target ? (
                 <div className="approval-target">
-                  <span>Target</span>
+                  <span>{t("approval.dialog.target")}</span>
                   <code>{request.target}</code>
                 </div>
               ) : null}
@@ -119,17 +121,17 @@ function ApprovalDialog({
                   checked={rememberKind}
                   onChange={(event) => onRememberKind(event.currentTarget.checked)}
                 />
-                <span>이번 세션 동안 같은 종류의 동작은 다시 묻지 않기</span>
+                <span>{t("approval.dialog.rememberKind")}</span>
               </label>
             </div>
           ) : null}
 
           <div className="dialog-actions">
             <Button type="button" variant="ghost" onClick={onCancel}>
-              취소
+              {t("dialog.cancel")}
             </Button>
             <Button type="button" onClick={onApprove}>
-              승인
+              {t("approval.dialog.approve")}
             </Button>
           </div>
         </Dialog.Content>

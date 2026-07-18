@@ -176,6 +176,11 @@ export interface MaruSettings {
     includeDotFolders: string[];
   };
   terminal: {
+    // Legacy migration inputs only. The live panel state is
+    // `ui.layout.terminalOpen` / `ui.layout.terminalHeight`; normalize
+    // re-derives these two mirrors from layout on every save, and the
+    // layout normalizer reads them back only when migrating pre-layout
+    // settings files. Do not consume them in new code.
     defaultPanelOpen: boolean;
     lastHeight: number;
     autoLaunch: TerminalLauncherId | null;
@@ -249,7 +254,6 @@ export interface TasksSettings {
   defaultTaskList: string | null;
   defaultCalendar: string | null;
   hooks: {
-    autoVaultExtract: boolean;
     appendVaultLog: boolean;
   };
 }
@@ -430,7 +434,6 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     defaultTaskList: null,
     defaultCalendar: null,
     hooks: {
-      autoVaultExtract: false,
       appendVaultLog: true,
     },
   },
@@ -793,11 +796,6 @@ export function applyWorkspaceTasksOverrides(
       ),
     ),
     hooks: {
-      autoVaultExtract: readBoolean(
-        hooks,
-        ["autoVaultExtract", "auto_vault_extract"],
-        settings.hooks.autoVaultExtract,
-      ),
       appendVaultLog: readBoolean(
         hooks,
         ["appendVaultLog", "append_vault_log"],
@@ -1062,10 +1060,6 @@ function normalizeTasksSettings(value: unknown): TasksSettings {
     defaultTaskList: normalizeOptionalString(tasks.defaultTaskList),
     defaultCalendar: normalizeOptionalString(tasks.defaultCalendar),
     hooks: {
-      autoVaultExtract:
-        typeof hooks.autoVaultExtract === "boolean"
-          ? hooks.autoVaultExtract
-          : DEFAULT_MARU_SETTINGS.tasks.hooks.autoVaultExtract,
       appendVaultLog:
         typeof hooks.appendVaultLog === "boolean"
           ? hooks.appendVaultLog

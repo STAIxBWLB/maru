@@ -475,11 +475,11 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       event.target.value = "";
       if (!file) return;
       if (file.size > MAX_IMAGE_BYTES) {
-        reportError(`이미지가 너무 큽니다 (${(file.size / 1024 / 1024).toFixed(1)}MB > 2MB)`);
+        reportError(t("diagram.error.imageTooLarge", { size: (file.size / 1024 / 1024).toFixed(1) }));
         return;
       }
       const reader = new FileReader();
-      reader.onerror = () => reportError("이미지를 읽을 수 없습니다");
+      reader.onerror = () => reportError(t("diagram.error.imageUnreadable"));
       reader.onload = () => {
         const dataUrl = reader.result;
         if (typeof dataUrl !== "string") return;
@@ -498,7 +498,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       };
       reader.readAsDataURL(file);
     },
-    [insertAtCenter, reportError],
+    [insertAtCenter, reportError, t],
   );
 
   const persistSnapSize = useCallback((size: number) => {

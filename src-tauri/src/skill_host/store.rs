@@ -446,6 +446,7 @@ pub fn skills_add_source(
     if registry.sources.iter().any(|source| source.id == id) {
         return Err(format!("source_exists: {id}"));
     }
+    let mut resolved_skills_subdir = normalize_skills_subdir(skills_subdir.as_deref())?;
 
     let source_path = match kind.as_str() {
         "linked" | "external-managed" | "tool-native" => {
@@ -472,6 +473,16 @@ pub fn skills_add_source(
             }
             host_fs::ensure_dir(checkout.parent().unwrap())?;
             run_command(Command::new("git").arg("clone").arg(&url).arg(&checkout))?;
+            // A checkout carrying a marketplace manifest opts into the
+            // registry contract: validate before the source is admitted and
+            // roll the clone back on failure. Checkouts without a manifest
+            // keep the legacy trust-the-URL behavior.
+            if let Some(manifest) = validate_cloned_source_manifest(&checkout, &id)? {
+                // A manifest-bearing source owns its catalog layout. Using a
+                // caller-supplied default instead would validate one tree and
+                // then scan a different one.
+                resolved_skills_subdir = manifest.skills_subdir.trim().to_string();
+            }
             Some(host_fs::display_path(&checkout))
         }
         "imported" | "managed" | "adopted" => {
@@ -487,10 +498,7 @@ pub fn skills_add_source(
         ownership_class,
         path: source_path,
         repo_url,
-        skills_subdir: skills_subdir
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(default_skills_subdir),
+        skills_subdir: resolved_skills_subdir,
         branch: None,
         last_synced_at: None,
     };
@@ -499,6 +507,51 @@ pub fn skills_add_source(
     rescan_source_in_registry(&mut registry, &source.id)?;
     save_registry_unlocked(&registry)?;
     Ok(source)
+}
+
+/// Marketplace manifest filename a cloned source may carry at its root.
+pub const CLONED_SOURCE_MANIFEST: &str = "maru.source.json";
+
+/// Validate a freshly cloned source checkout against the marketplace
+/// manifest contract (`maru.source.json`). Absent manifest = legacy
+/// trust-the-URL path (Ok). Present but invalid = roll back the clone and
+/// report the validation errors, so a rejected source never lingers on disk.
+///
+/// Note: the `signed` flag check is a metadata check (non-empty signature
+/// string), not cryptographic verification — see agent_host::marketplace.
+fn validate_cloned_source_manifest(
+    checkout: &std::path::Path,
+    expected_source_id: &str,
+) -> Result<Option<crate::agent_host::marketplace::MarketplaceSourceManifest>, String> {
+    let manifest_path = checkout.join(CLONED_SOURCE_MANIFEST);
+    if !manifest_path.is_file() {
+        return Ok(None);
+    }
+    let result = (|| -> Result<_, String> {
+        let text = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("source_manifest_unreadable: {e}"))?;
+        let manifest: crate::agent_host::marketplace::MarketplaceSourceManifest =
+            serde_json::from_str(&text)
+                .map_err(|e| format!("source_manifest_invalid_json: {e}"))?;
+        let report = crate::agent_host::marketplace::validate_marketplace_manifest(&manifest);
+        if !report.valid {
+            return Err(format!(
+                "source_manifest_invalid: {}",
+                report.errors.join(", ")
+            ));
+        }
+        if manifest.source_id.trim() != expected_source_id {
+            return Err(format!(
+                "source_manifest_id_mismatch: expected {expected_source_id}, found {}",
+                manifest.source_id
+            ));
+        }
+        Ok(Some(manifest))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(checkout);
+    }
+    result
 }
 
 #[tauri::command]
@@ -5060,6 +5113,21 @@ fn normalize_source_id(id: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn normalize_skills_subdir(value: Option<&str>) -> Result<String, String> {
+    let value = value.unwrap_or("skills").trim();
+    let value = if value.is_empty() { "skills" } else { value };
+    let path = Path::new(value);
+    let safe = !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(component, Component::Normal(_))
+                || (value == "." && matches!(component, Component::CurDir))
+        });
+    if !safe {
+        return Err(format!("invalid_skills_subdir: {value}"));
+    }
+    Ok(value.to_string())
+}
+
 fn normalize_source_kind(kind: &str) -> Result<String, String> {
     let value = kind.trim().to_lowercase();
     match value.as_str() {
@@ -7070,5 +7138,75 @@ mod tests {
         assert!(status.dirty_skills.is_empty());
         assert!(!status.auto_applicable);
         assert!(status.min_app_ok);
+    }
+
+    #[test]
+    fn cloned_source_without_manifest_is_allowed() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        assert!(validate_cloned_source_manifest(&checkout, "demo")
+            .unwrap()
+            .is_none());
+        assert!(checkout.exists());
+    }
+
+    #[test]
+    fn cloned_source_with_invalid_manifest_is_rolled_back() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(CLONED_SOURCE_MANIFEST),
+            r#"{"schemaVersion":"maru_marketplace_source_v1","sourceId":"demo","name":"Demo","version":"1.0.0","skillsSubdir":"skills","signed":false}"#,
+        )
+        .unwrap();
+        let err = validate_cloned_source_manifest(&checkout, "demo").unwrap_err();
+        assert!(err.contains("source_manifest_invalid"));
+        assert!(
+            !checkout.exists(),
+            "rejected checkout must be rolled back"
+        );
+    }
+
+    #[test]
+    fn cloned_source_with_valid_manifest_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(CLONED_SOURCE_MANIFEST),
+            r#"{"schemaVersion":"maru_marketplace_source_v1","sourceId":"demo","name":"Demo","version":"1.0.0","skillsSubdir":"skills","signed":true,"signature":"sig"}"#,
+        )
+        .unwrap();
+        let manifest = validate_cloned_source_manifest(&checkout, "demo")
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.skills_subdir, "skills");
+        assert!(checkout.exists());
+    }
+
+    #[test]
+    fn cloned_source_manifest_id_mismatch_is_rolled_back() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(CLONED_SOURCE_MANIFEST),
+            r#"{"schemaVersion":"maru_marketplace_source_v1","sourceId":"upstream","name":"Demo","version":"1.0.0","skillsSubdir":"skills","signed":true,"signature":"sig"}"#,
+        )
+        .unwrap();
+
+        let err = validate_cloned_source_manifest(&checkout, "local").unwrap_err();
+        assert!(err.contains("source_manifest_id_mismatch"));
+        assert!(!checkout.exists());
+    }
+
+    #[test]
+    fn source_subdir_rejects_path_traversal() {
+        assert!(normalize_skills_subdir(Some("skills")).is_ok());
+        assert!(normalize_skills_subdir(Some(".")).is_ok());
+        assert!(normalize_skills_subdir(Some("../outside")).is_err());
+        assert!(normalize_skills_subdir(Some("/absolute")).is_err());
     }
 }

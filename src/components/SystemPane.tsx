@@ -288,7 +288,7 @@ export function SystemPane({
             ["meetings", "system.tab.meetings"],
             ["tasks", "system.tab.tasks"],
             ["inbox-channels", "system.tab.inboxChannels"],
-            ["secrets", "Secrets"],
+            ["secrets", "system.tab.secrets"],
             ["connectors", "system.tab.connectors"],
             ["rules", "system.tab.rules"],
             ["templates", "system.tab.templates"],
@@ -389,6 +389,7 @@ export function SystemPane({
 }
 
 function SecretsTab({ workPath }: { workPath: string }) {
+  const { t } = useTranslation();
   const [report, setReport] = useState<SecretsScanReport | null>(null);
   const [migration, setMigration] = useState<SecretsMigrationReport | null>(null);
   const [busy, setBusy] = useState(false);
@@ -562,7 +563,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        `Delete the text secret file .maru/secrets/${editor.relPath}? This removes the file from disk.`,
+        t("system.secrets.delete.confirm", { path: editor.relPath }),
       )
     ) {
       return;
@@ -601,28 +602,28 @@ function SecretsTab({ workPath }: { workPath: string }) {
       <section className="settings-section-panel secrets-overview-panel">
         <div className="settings-section-heading">
           <div>
-            <strong>Workspace Secrets</strong>
-            <span>Managed under .maru/secrets with .secrets kept as a compatibility symlink. Secret values stay hidden unless explicitly revealed.</span>
+            <strong>{t("system.secrets.title")}</strong>
+            <span>{t("system.secrets.subtitle")}</span>
           </div>
           <div className="system-detail-actions compact">
             <Button size="sm" variant="ghost" icon={<RefreshCcw size={14} />} onClick={refresh} disabled={busy}>
-              Scan
+              {t("system.secrets.scan")}
             </Button>
             <Button size="sm" variant="ghost" icon={<ShieldCheck size={14} />} onClick={runDoctor} disabled={busy}>
-              Doctor
+              {t("system.secrets.doctor")}
             </Button>
             <Button size="sm" variant="ghost" icon={<FilePenLine size={14} />} onClick={openCreateEditor} disabled={busy}>
-              New text secret
+              {t("system.secrets.new")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => runMigration(true)} disabled={busy}>
-              Dry run
+              {t("system.secrets.dryRun")}
             </Button>
             <Button
               size="sm"
               onClick={applySelectedMigration}
               disabled={busy || !migration || migration.applied || selectedRelPaths.length === 0}
             >
-              Apply selected
+              {t("system.secrets.applySelected")}
             </Button>
           </div>
         </div>
@@ -634,27 +635,27 @@ function SecretsTab({ workPath }: { workPath: string }) {
         ) : null}
         {report ? (
           <div className="secrets-dashboard-grid">
-            <SecretStat label="Managed" value={String(visibleManagedSecrets.length)} />
-            <SecretStat label="Candidates" value={String(report.candidates.length)} />
-            <SecretStat label="Legacy links" value={String(report.legacySymlinks.length)} />
+            <SecretStat label={t("system.secrets.stat.managed")} value={String(visibleManagedSecrets.length)} />
+            <SecretStat label={t("system.secrets.stat.candidates")} value={String(report.candidates.length)} />
+            <SecretStat label={t("system.secrets.stat.legacyLinks")} value={String(report.legacySymlinks.length)} />
             <SecretStat
-              label="Issues"
-              value={`${issueCounts.errors} error / ${issueCounts.warnings} warn`}
+              label={t("system.secrets.stat.issues")}
+              value={t("system.secrets.stat.issuesValue", { errors: issueCounts.errors, warnings: issueCounts.warnings })}
               tone={issueCounts.errors ? "danger" : issueCounts.warnings ? "warn" : "ok"}
             />
             <div className="secrets-root-card">
-              <span>Primary root</span>
+              <span>{t("system.secrets.primaryRoot")}</span>
               <code>{report.root.primaryRoot}</code>
             </div>
             <div className="secrets-root-card">
-              <span>Legacy .secrets</span>
+              <span>{t("system.secrets.legacyRoot")}</span>
               <code>{report.root.legacyKind}{report.root.legacyTarget ? ` -> ${report.root.legacyTarget}` : ""}</code>
             </div>
           </div>
         ) : busy ? (
-          <div className="secrets-empty-state">Scanning workspace secrets...</div>
+          <div className="secrets-empty-state">{t("system.secrets.scanning")}</div>
         ) : (
-          <div className="secrets-empty-state">No scan has run yet.</div>
+          <div className="secrets-empty-state">{t("system.secrets.empty")}</div>
         )}
       </section>
 
@@ -662,18 +663,18 @@ function SecretsTab({ workPath }: { workPath: string }) {
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Issues</strong>
-              <span>Policy or compatibility checks that need attention.</span>
+              <strong>{t("system.secrets.issues.title")}</strong>
+              <span>{t("system.secrets.issues.subtitle")}</span>
             </div>
           </div>
           <div className="secrets-table-wrap">
             <table className="secrets-table">
               <thead>
                 <tr>
-                  <th>Severity</th>
-                  <th>Code</th>
-                  <th>Message</th>
-                  <th>Path</th>
+                  <th>{t("system.secrets.table.severity")}</th>
+                  <th>{t("system.secrets.table.code")}</th>
+                  <th>{t("system.secrets.table.message")}</th>
+                  <th>{t("system.secrets.table.path")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -695,17 +696,17 @@ function SecretsTab({ workPath }: { workPath: string }) {
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Unmanaged Candidates</strong>
-              <span>Secret-like files outside .maru/secrets. Values are not displayed.</span>
+              <strong>{t("system.secrets.candidates.title")}</strong>
+              <span>{t("system.secrets.candidates.subtitle")}</span>
             </div>
           </div>
           <div className="secrets-table-wrap">
             <table className="secrets-table">
               <thead>
                 <tr>
-                  <th>Path</th>
-                  <th>Reason</th>
-                  <th>Recommended target</th>
+                  <th>{t("system.secrets.table.path")}</th>
+                  <th>{t("system.secrets.table.reason")}</th>
+                  <th>{t("system.secrets.table.recommendedTarget")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -726,17 +727,17 @@ function SecretsTab({ workPath }: { workPath: string }) {
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Legacy Symlinks</strong>
-              <span>Runtime links still pointing at .secrets and eligible for retargeting.</span>
+              <strong>{t("system.secrets.legacy.title")}</strong>
+              <span>{t("system.secrets.legacy.subtitle")}</span>
             </div>
           </div>
           <div className="secrets-table-wrap">
             <table className="secrets-table">
               <thead>
                 <tr>
-                  <th>Link</th>
-                  <th>Reason</th>
-                  <th>Retarget to</th>
+                  <th>{t("system.secrets.table.link")}</th>
+                  <th>{t("system.secrets.table.reason")}</th>
+                  <th>{t("system.secrets.table.retargetTo")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -757,21 +758,21 @@ function SecretsTab({ workPath }: { workPath: string }) {
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Managed Inventory</strong>
-              <span>Path, size, and permission metadata only.</span>
+              <strong>{t("system.secrets.managed.title")}</strong>
+              <span>{t("system.secrets.managed.subtitle")}</span>
             </div>
           </div>
           <div className="secrets-table-wrap managed">
             <table className="secrets-table secrets-inventory-table">
               <thead>
                 <tr>
-                  <th>Path</th>
-                  <th>Root</th>
-                  <th>Kind</th>
-                  <th>Size</th>
-                  <th>Mode</th>
-                  <th>Status</th>
-                  <th>Text edit</th>
+                  <th>{t("system.secrets.table.path")}</th>
+                  <th>{t("system.secrets.table.root")}</th>
+                  <th>{t("system.secrets.table.kind")}</th>
+                  <th>{t("system.secrets.table.size")}</th>
+                  <th>{t("system.secrets.table.mode")}</th>
+                  <th>{t("system.secrets.table.status")}</th>
+                  <th>{t("system.secrets.table.textEdit")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -786,7 +787,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
                       <td>{item.mode ?? "-"}</td>
                       <td>
                         <span className={`secrets-pill ${item.permissionsOk ? "ok" : "warn"}`}>
-                          {item.permissionsOk ? "private" : "permission warning"}
+                          {item.permissionsOk ? t("system.secrets.permissions.ok") : t("system.secrets.permissions.warn")}
                         </span>
                       </td>
                       <td>
@@ -796,9 +797,9 @@ function SecretsTab({ workPath }: { workPath: string }) {
                           icon={<Eye size={14} />}
                           onClick={() => openEditEditor(item)}
                           disabled={!editable}
-                          aria-label={`Reveal and edit ${item.relPath}`}
+                          aria-label={t("system.secrets.revealEdit", { path: item.relPath })}
                         >
-                          Edit
+                          {t("system.skills.edit")}
                         </Button>
                       </td>
                     </tr>
@@ -814,11 +815,11 @@ function SecretsTab({ workPath }: { workPath: string }) {
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>{migration.applied ? "Applied Migration" : "Migration Dry Run"}</strong>
+              <strong>{migration.applied ? t("system.secrets.migration.appliedTitle") : t("system.secrets.migration.dryRunTitle")}</strong>
               <span>
-                {migration.actions.length} action(s)
+                {t("system.secrets.migration.actions", { count: migration.actions.length })}
                 {!migration.applied && selectableMigrationActions.length
-                  ? ` · ${selectedRelPaths.length} selected`
+                  ? ` · ${t("system.secrets.migration.selected", { count: selectedRelPaths.length })}`
                   : ""}
               </span>
             </div>
@@ -828,7 +829,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
                 onClick={applySelectedMigration}
                 disabled={busy || selectedRelPaths.length === 0}
               >
-                Apply selected
+                {t("system.secrets.applySelected")}
               </Button>
             ) : null}
           </div>
@@ -836,11 +837,11 @@ function SecretsTab({ workPath }: { workPath: string }) {
             <table className="secrets-table">
               <thead>
                 <tr>
-                  {!migration.applied ? <th>Select</th> : null}
-                  <th>Action</th>
-                  <th>Status</th>
-                  <th>Path</th>
-                  <th>Target</th>
+                  {!migration.applied ? <th>{t("system.secrets.table.select")}</th> : null}
+                  <th>{t("system.secrets.table.action")}</th>
+                  <th>{t("system.secrets.table.status")}</th>
+                  <th>{t("system.secrets.table.path")}</th>
+                  <th>{t("system.secrets.table.target")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -856,7 +857,7 @@ function SecretsTab({ workPath }: { workPath: string }) {
                             checked={selectable && selectedMigrationActions.has(key)}
                             disabled={!selectable}
                             onChange={() => toggleMigrationAction(action, index)}
-                            aria-label={`Select ${action.action} ${action.relPath ?? index}`}
+                            aria-label={t("system.secrets.migration.selectAction", { action: action.action, path: action.relPath ?? index })}
                           />
                         </td>
                       ) : null}
@@ -905,6 +906,7 @@ function SecretTextEditorDialog({
   onSave: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const open = Boolean(editor);
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onEditorChange(null); }}>
@@ -913,9 +915,9 @@ function SecretTextEditorDialog({
         <Dialog.Content className="dialog-content dialog-content--wide secret-editor-dialog">
           <div className="dialog-header">
             <div>
-              <Dialog.Title>{editor?.mode === "create" ? "New text secret" : "Edit text secret"}</Dialog.Title>
+              <Dialog.Title>{editor?.mode === "create" ? t("system.secrets.new") : t("system.secrets.editor.editTitle")}</Dialog.Title>
               <Dialog.Description>
-                Text values are hidden by default. Reveal loads the current file content into this editor.
+                {t("system.secrets.editor.description")}
               </Dialog.Description>
             </div>
           </div>
@@ -928,7 +930,7 @@ function SecretTextEditorDialog({
                 </div>
               ) : null}
               <label className="field">
-                <span>Relative path under .maru/secrets</span>
+                <span>{t("system.secrets.editor.path")}</span>
                 <input
                   value={editor.relPath}
                   readOnly={editor.mode === "edit"}
@@ -938,16 +940,16 @@ function SecretTextEditorDialog({
                     onEditorChange({ ...editor, relPath: event.target.value })
                   }
                 />
-                <small>Text files only. Certificate and key bundles stay inventory-only.</small>
+                <small>{t("system.secrets.editor.pathHelp")}</small>
               </label>
               <label className="field">
-                <span>Secret value</span>
+                <span>{t("system.secrets.editor.value")}</span>
                 <textarea
                   className="settings-textarea secret-editor-textarea"
                   value={editor.revealed ? editor.contents : ""}
                   disabled={!editor.revealed || editor.busy}
                   spellCheck={false}
-                  placeholder="Value hidden. Click Reveal to load it."
+                  placeholder={t("system.secrets.editor.valuePlaceholder")}
                   onChange={(event) =>
                     onEditorChange({ ...editor, contents: event.target.value })
                   }
@@ -961,7 +963,7 @@ function SecretTextEditorDialog({
                     onClick={onReveal}
                     disabled={editor.busy}
                   >
-                    Reveal
+                    {t("system.secrets.editor.reveal")}
                   </Button>
                 ) : null}
                 {editor.mode === "edit" ? (
@@ -972,7 +974,7 @@ function SecretTextEditorDialog({
                     onClick={onDelete}
                     disabled={editor.busy}
                   >
-                    Delete
+                    {t("system.rules.delete")}
                   </Button>
                 ) : null}
                 <Button
@@ -981,7 +983,7 @@ function SecretTextEditorDialog({
                   disabled={editor.busy || !editor.revealed || !editor.relPath.trim()}
                   icon={<Save size={14} />}
                 >
-                  Save
+                  {t("system.rules.save")}
                 </Button>
                 <Button
                   size="sm"
@@ -989,7 +991,7 @@ function SecretTextEditorDialog({
                   onClick={() => onEditorChange(null)}
                   disabled={editor.busy}
                 >
-                  Cancel
+                  {t("dialog.cancel")}
                 </Button>
               </div>
             </div>
@@ -2294,11 +2296,11 @@ function InboxRuntimeConfigTab({
     const to = toRaw.trim();
     if (!to || to === from) return;
     if (!/^[a-z0-9_-]+$/.test(to)) {
-      setError("Channel key must use lowercase letters, numbers, hyphen, or underscore.");
+      setError(t("system.inboxChannels.channel.keyInvalid"));
       return;
     }
     if (config.channels[to]) {
-      setError(`Channel already exists: ${to}`);
+      setError(t("system.inboxChannels.channel.exists", { key: to }));
       return;
     }
     setConfig((current) => {
@@ -2389,7 +2391,7 @@ function InboxRuntimeConfigTab({
           {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
         </span>
         <Button size="sm" variant="ghost" onClick={() => void load()} icon={<RefreshCcw size={14} />}>
-          Refresh
+          {t("system.skills.refresh")}
         </Button>
         <Button
           size="sm"
@@ -2406,12 +2408,12 @@ function InboxRuntimeConfigTab({
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Overview</strong>
-              <span>Runtime inbox root and configured local file drop target.</span>
+              <strong>{t("system.inboxChannels.overview.title")}</strong>
+              <span>{t("system.inboxChannels.overview.subtitle")}</span>
             </div>
           </div>
           <label className="field">
-            <span>Inbox root</span>
+            <span>{t("system.inboxChannels.inboxRoot")}</span>
             <input
               value={config.root}
               onChange={(event) => updateConfig({ root: event.target.value })}
@@ -2420,7 +2422,7 @@ function InboxRuntimeConfigTab({
           </label>
           <div className="settings-grid two">
             <label className="field">
-              <span>File drop channel</span>
+              <span>{t("system.inboxChannels.fileDropChannel")}</span>
               <select
                 value={fileDrop.channel}
                 onChange={(event) => {
@@ -2436,7 +2438,7 @@ function InboxRuntimeConfigTab({
               </select>
             </label>
             <label className="field">
-              <span>File drop path</span>
+              <span>{t("system.inboxChannels.fileDropPath")}</span>
               <select
                 value={fileDrop.drop_path}
                 onChange={(event) => updateFileDrop({ drop_path: event.target.value })}
@@ -2448,15 +2450,15 @@ function InboxRuntimeConfigTab({
             </label>
           </div>
           {!fileDropChannel ? (
-            <small className="settings-warning">Configured file drop channel is missing; Maru will fall back to the first available channel.</small>
+            <small className="settings-warning">{t("system.inboxChannels.fileDropMissing")}</small>
           ) : null}
         </section>
 
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Paths</strong>
-              <span>Folder names used by inbox-intake and inbox-process.</span>
+              <strong>{t("system.inboxChannels.paths.title")}</strong>
+              <span>{t("system.inboxChannels.paths.subtitle")}</span>
             </div>
           </div>
           <div className="settings-grid two">
@@ -2478,8 +2480,8 @@ function InboxRuntimeConfigTab({
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Artifacts</strong>
-              <span>Generated item directory and artifact file names.</span>
+              <strong>{t("system.inboxChannels.artifacts.title")}</strong>
+              <span>{t("system.inboxChannels.artifacts.subtitle")}</span>
             </div>
           </div>
           <div className="settings-grid two">
@@ -2501,15 +2503,15 @@ function InboxRuntimeConfigTab({
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Channels</strong>
-              <span>Provider channels and local drop paths scanned by Inbox.</span>
+              <strong>{t("system.inboxChannels.channels.title")}</strong>
+              <span>{t("system.inboxChannels.channels.subtitle")}</span>
             </div>
           </div>
           <div className="inbox-channel-editor">
-            <div className="inbox-channel-list" role="listbox" aria-label="Inbox channels">
+            <div className="inbox-channel-list" role="listbox" aria-label={t("system.inboxChannels.channels.listLabel")}>
               <div className="inbox-channel-list-actions">
                 <Button size="sm" variant="ghost" onClick={addChannel} icon={<Plus size={14} />}>
-                  Add
+                  {t("system.inboxChannels.channel.add")}
                 </Button>
                 <Button
                   size="sm"
@@ -2517,7 +2519,7 @@ function InboxRuntimeConfigTab({
                   disabled={!selectedChannel}
                   onClick={duplicateChannel}
                 >
-                  Duplicate
+                  {t("system.inboxChannels.channel.duplicate")}
                 </Button>
               </div>
               {channelKeys.map((key) => (
@@ -2544,11 +2546,11 @@ function InboxRuntimeConfigTab({
                     onClick={deleteChannel}
                     icon={<Trash2 size={14} />}
                   >
-                    Delete
+                    {t("system.rules.delete")}
                   </Button>
                 </div>
                 <label className="field">
-                  <span>channel key</span>
+                  <span>{t("system.inboxChannels.field.channelKey")}</span>
                   <input
                     value={channelKeyDraft}
                     onChange={(event) => setChannelKeyDraft(event.target.value)}
@@ -2558,7 +2560,7 @@ function InboxRuntimeConfigTab({
                 </label>
                 <div className="settings-grid two">
                   <label className="field">
-                    <span>provider</span>
+                    <span>{t("system.inboxChannels.field.provider")}</span>
                     <input
                       value={selectedChannel.provider}
                       onChange={(event) =>
@@ -2568,7 +2570,7 @@ function InboxRuntimeConfigTab({
                     />
                   </label>
                   <label className="field">
-                    <span>skill</span>
+                    <span>{t("system.inboxChannels.field.skill")}</span>
                     <input
                       value={selectedChannel.skill ?? ""}
                       onChange={(event) =>
@@ -2578,7 +2580,7 @@ function InboxRuntimeConfigTab({
                     />
                   </label>
                   <label className="field">
-                    <span>kind</span>
+                    <span>{t("system.inboxChannels.field.kind")}</span>
                     <input
                       value={selectedChannel.kind}
                       onChange={(event) =>
@@ -2588,7 +2590,7 @@ function InboxRuntimeConfigTab({
                     />
                   </label>
                   <label className="field">
-                    <span>dedupe</span>
+                    <span>{t("system.inboxChannels.field.dedupe")}</span>
                     <input
                       value={selectedChannel.dedupe}
                       onChange={(event) =>
@@ -2599,7 +2601,7 @@ function InboxRuntimeConfigTab({
                   </label>
                 </div>
                 <label className="field">
-                  <span>drop paths</span>
+                  <span>{t("system.inboxChannels.field.dropPaths")}</span>
                   <textarea
                     className="settings-textarea"
                     value={formatStringList(selectedChannel.drop_paths)}
@@ -2613,7 +2615,7 @@ function InboxRuntimeConfigTab({
                   />
                 </label>
                 <label className="field">
-                  <span>source kind mapping</span>
+                  <span>{t("system.inboxChannels.field.sourceKindMapping")}</span>
                   <textarea
                     className="settings-textarea"
                     value={formatStringMap(selectedChannel.source_kinds)}
@@ -2628,7 +2630,7 @@ function InboxRuntimeConfigTab({
                 </label>
               </div>
             ) : (
-              <div className="inbox-empty">No channel selected.</div>
+              <div className="inbox-empty">{t("system.inboxChannels.channel.none")}</div>
             )}
           </div>
         </section>
@@ -2636,12 +2638,12 @@ function InboxRuntimeConfigTab({
         <section className="settings-section-panel">
           <div className="settings-section-heading">
             <div>
-              <strong>Scan Visibility</strong>
-              <span>Dot folders are excluded by default. Add explicit workspace-relative prefixes to include them.</span>
+              <strong>{t("system.inboxChannels.scan.title")}</strong>
+              <span>{t("system.inboxChannels.scan.subtitle")}</span>
             </div>
           </div>
           <label className="field">
-            <span>Include dot folders</span>
+            <span>{t("system.inboxChannels.scan.includeDotFolders")}</span>
             <textarea
               className="settings-textarea"
               value={dotIncludesText}
@@ -2651,7 +2653,7 @@ function InboxRuntimeConfigTab({
               rows={4}
               placeholder={"inbox/drop/kakao/.omc\n.github"}
             />
-            <small>One workspace-relative directory prefix per line. Globs and traversal are ignored.</small>
+            <small>{t("system.inboxChannels.scan.help")}</small>
           </label>
         </section>
       </div>

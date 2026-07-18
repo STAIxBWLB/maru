@@ -309,7 +309,6 @@ describe("normalizeMaruSettings", () => {
         defaultTaskList: " personal ",
         defaultCalendar: " work ",
         hooks: {
-          autoVaultExtract: true,
           appendVaultLog: false,
         },
       },
@@ -325,7 +324,6 @@ describe("normalizeMaruSettings", () => {
     expect(settings.tasks.calendarStartHour).toBe(23);
     expect(settings.tasks.defaultTaskList).toBe("personal");
     expect(settings.tasks.defaultCalendar).toBe("work");
-    expect(settings.tasks.hooks.autoVaultExtract).toBe(true);
     expect(settings.tasks.hooks.appendVaultLog).toBe(false);
   });
 
@@ -558,7 +556,6 @@ describe("normalizeMaruSettings", () => {
         week_starts_on: "sunday",
         calendar_start_hour: 7,
         hooks: {
-          auto_vault_extract: true,
           append_vault_log: false,
         },
         google: {
@@ -582,7 +579,6 @@ describe("normalizeMaruSettings", () => {
     expect(effective.calendarStartHour).toBe(7);
     expect(effective.defaultTaskList).toBe("work");
     expect(effective.defaultCalendar).toBe("teaching");
-    expect(effective.hooks.autoVaultExtract).toBe(true);
     expect(effective.hooks.appendVaultLog).toBe(false);
   });
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::{Component, Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -23,13 +24,6 @@ pub struct MarketplaceValidationReport {
     pub errors: Vec<String>,
 }
 
-#[tauri::command]
-pub fn agent_validate_marketplace_manifest(
-    manifest: MarketplaceSourceManifest,
-) -> Result<MarketplaceValidationReport, String> {
-    Ok(validate_marketplace_manifest(&manifest))
-}
-
 pub fn validate_marketplace_manifest(
     manifest: &MarketplaceSourceManifest,
 ) -> MarketplaceValidationReport {
@@ -37,17 +31,24 @@ pub fn validate_marketplace_manifest(
     if manifest.schema_version != "maru_marketplace_source_v1" {
         errors.push(format!("unsupported_schema: {}", manifest.schema_version));
     }
-    if manifest.source_id.trim().is_empty() {
+    let source_id = manifest.source_id.trim();
+    if source_id.is_empty() {
         errors.push("source_id_required".to_string());
-    }
-    if manifest.source_id.contains('/') || manifest.source_id.contains('\\') {
+    } else if matches!(source_id, "." | "..")
+        || !source_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
         errors.push("source_id_invalid".to_string());
     }
     if manifest.version.trim().is_empty() {
         errors.push("version_required".to_string());
     }
-    if manifest.skills_subdir.trim().is_empty() {
+    let skills_subdir = manifest.skills_subdir.trim();
+    if skills_subdir.is_empty() {
         errors.push("skills_subdir_required".to_string());
+    } else if !safe_relative_subdir(skills_subdir) {
+        errors.push("skills_subdir_invalid".to_string());
     }
     if manifest.signed
         && manifest
@@ -66,6 +67,15 @@ pub fn validate_marketplace_manifest(
         valid: errors.is_empty(),
         errors,
     }
+}
+
+fn safe_relative_subdir(value: &str) -> bool {
+    let path = Path::new(value);
+    !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(component, Component::Normal(_))
+                || (value == "." && matches!(component, Component::CurDir))
+        })
 }
 
 #[cfg(test)]
@@ -88,5 +98,23 @@ mod tests {
         assert!(report
             .errors
             .contains(&"unsigned_source_rejected".to_string()));
+    }
+
+    #[test]
+    fn marketplace_manifest_rejects_path_traversal() {
+        let report = validate_marketplace_manifest(&MarketplaceSourceManifest {
+            schema_version: "maru_marketplace_source_v1".to_string(),
+            source_id: "demo".to_string(),
+            name: "Demo".to_string(),
+            version: "1.0.0".to_string(),
+            skills_subdir: "../outside".to_string(),
+            signed: true,
+            signature: Some("metadata-only".to_string()),
+            repo_url: None,
+        });
+        assert!(!report.valid);
+        assert!(report
+            .errors
+            .contains(&"skills_subdir_invalid".to_string()));
     }
 }

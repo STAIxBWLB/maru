@@ -8,7 +8,7 @@
 #   make install   # one-time setup (pnpm install + tauri icon stub)
 #   make dev       # browser dev (mocked Tauri)
 #   make tauri-dev # native dev shell
-#   make verify    # what CI runs: typecheck + ts test + rust test + build
+#   make verify    # what CI runs: typecheck + i18n lint + ts test + rust test + build
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -144,6 +144,10 @@ typecheck: node_modules ## tsc --build (no emit)
 .PHONY: test
 test: test-ts test-rust ## Run all unit tests (TS vitest + Rust cargo test)
 
+.PHONY: lint-i18n
+lint-i18n: ## i18n lint: ko/en key parity + hardcoded UI string scan
+	$(NODE) scripts/lint-i18n.mjs
+
 .PHONY: test-ts
 test-ts: node_modules ## TypeScript / React unit tests (vitest)
 	$(PNPM) test
@@ -243,7 +247,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck test-ts test-rust build ## Full verification: typecheck + ts tests + rust tests + frontend build
+verify: typecheck lint-i18n test-ts test-rust build ## Full verification: typecheck + i18n lint + ts tests + rust tests + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean

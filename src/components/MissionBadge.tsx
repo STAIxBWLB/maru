@@ -1,9 +1,11 @@
 import { CircleStop, Loader2, PauseCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { listAiMissions, stopAiMission } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import type { MissionRecord } from "../lib/types";
 
 export function MissionBadge({ onError }: { onError?: (message: string) => void }) {
+  const { t } = useTranslation();
   const [missions, setMissions] = useState<MissionRecord[]>([]);
 
   useEffect(() => {
@@ -41,12 +43,12 @@ export function MissionBadge({ onError }: { onError?: (message: string) => void 
   return (
     <div className={`mission-badge ${idle ? "idle" : "running"}`} title={active.id}>
       {idle ? <PauseCircle size={14} /> : <Loader2 size={14} className="spin" />}
-      <span>{idle ? "Idle" : "Running"}</span>
+      <span>{idle ? t("mission.status.idle") : t("mission.status.running")}</span>
       <button
         type="button"
         className="icon-button"
-        aria-label="Stop mission"
-        title="Stop mission"
+        aria-label={t("mission.stop")}
+        title={t("mission.stop")}
         onClick={() => {
           void stopAiMission(active.id).catch((err) => {
             onError?.(err instanceof Error ? err.message : String(err));

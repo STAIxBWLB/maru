@@ -2,6 +2,7 @@ import { memo, useCallback, type PointerEvent, type ReactElement } from "react";
 
 import { portPoint } from "../../../lib/diagram/geometry";
 import type { DiagramNode, EdgePort, NodeId } from "../../../lib/diagram/types";
+import { useTranslation } from "../../../lib/i18n";
 
 export interface NodeViewProps {
   node: DiagramNode;
@@ -254,6 +255,7 @@ function NodeViewBase({
   onPortPointerDown,
   onMemoOpen,
 }: NodeViewProps) {
+  const { t } = useTranslation();
   const s = shapeFor(node);
   const handlePointerDown = useCallback(
     (event: PointerEvent<SVGGElement>) => onPointerDown(event, node.id),
@@ -355,7 +357,7 @@ function NodeViewBase({
           }}
           role="button"
           tabIndex={0}
-          aria-label="Open memo"
+          aria-label={t("diagram.aria.openMemo")}
         >
           <circle r={10} fill="#fbbf24" stroke="#92400e" strokeWidth={1.4} />
           <text x={0} y={4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#78350f">

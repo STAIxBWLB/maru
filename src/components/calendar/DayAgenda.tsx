@@ -8,6 +8,7 @@ import type {
 } from "../../lib/calendar/types";
 import type { DocumentLabelMode } from "../../lib/settings";
 import { resolveDisplayLabel } from "../../lib/document";
+import { t } from "../../lib/i18n";
 
 interface DayAgendaProps<T> {
   viewDate: Date;
@@ -39,7 +40,7 @@ export function DayAgenda<T>({
   if (visible.length === 0) {
     return (
       <div className="cal-day cal-day-empty">
-        <p>{emptyLabel ?? (locale === "ko" ? "이 날짜에 일정이 없습니다." : "No events")}</p>
+        <p>{emptyLabel ?? t(locale, "calendar.day.empty")}</p>
       </div>
     );
   }
@@ -65,9 +66,7 @@ export function DayAgenda<T>({
             >
               <span className="cal-day-time">
                 {event.allDay
-                  ? locale === "ko"
-                    ? "종일"
-                    : "All-day"
+                  ? t(locale, "calendar.allDay")
                   : format(event.start, locale === "ko" ? "a h:mm" : "h:mm a", {
                       locale: localeObj,
                     })}

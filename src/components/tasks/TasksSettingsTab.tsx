@@ -146,7 +146,7 @@ export function TasksSettingsTab({
             <span>{t("tasks.settings.hooks.description")}</span>
           </div>
         </div>
-        {(["autoVaultExtract", "appendVaultLog"] as const).map((key) => (
+        {(["appendVaultLog"] as const).map((key) => (
           <label className="field checkbox-field" key={key}>
             <input
               type="checkbox"

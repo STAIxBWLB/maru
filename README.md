@@ -188,6 +188,11 @@ approval route closes. Two write paths land on Hub from Maru:
 1. **`POST /api/v1/documents/sync`** (planned M7 caller) — drafting metadata only: `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and "이미 동기화된 초안" hints.
 2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Maru auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`.
 
+Gate submits made while the Hub is disabled or unreachable persist in
+`<workspace>/.maru/queue/hub/` (one JSON per request) and drain FIFO via
+the `hub_queue_drain` command — exposed in the Catalog footer as a queue
+depth badge with a retry action.
+
 ## Development
 
 ```bash
@@ -201,6 +206,9 @@ pnpm tauri:dev
 
 # Type check:
 pnpm typecheck
+
+# i18n lint (ko/en parity + hardcoded UI string scan; also in make verify):
+pnpm lint:i18n
 
 # Production build:
 pnpm build
@@ -448,7 +456,10 @@ Out of scope for v1 by explicit decision:
 - Semantic / embedding search (keyword + wikilink + git-grep cover 10k notes).
 - Cloud sync, maru account, default telemetry (opt-in only).
 - Mobile (Tauri 2 mobile is unstable; Obsidian owns mobile for now).
-- Public marketplace server (manifest validation only; no server, no moderation policy).
+- Public marketplace server (cloned sources carrying a `maru.source.json`
+  manifest are schema-validated on install and rolled back on failure; the
+  manifest `signed` flag is a metadata check, not cryptographic signature
+  verification — no server, no moderation policy).
 - iMessage / Slack ingestion (permission pain > value).
 - Multi-user collab, CRDT, realtime (single user, single device, git for history).
 - PDF annotation, OCR (file-extracted text is enough).

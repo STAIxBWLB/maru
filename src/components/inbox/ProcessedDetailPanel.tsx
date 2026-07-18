@@ -1,3 +1,4 @@
+import { useTranslation } from "../../lib/i18n";
 import type { InboxProcessedItemDetail } from "../../lib/types";
 import { formatBytes } from "./processedFormat";
 
@@ -14,11 +15,12 @@ export function ProcessedDetailPanel({
   onTab: (tab: ProcessedDetailTab) => void;
   onRevealPath: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const tabs = [
-    { key: "summary" as const, label: "Summary", value: detail.summaryText },
-    { key: "route" as const, label: "Route", value: detail.routeText },
-    { key: "manifest" as const, label: "Manifest", value: detail.manifestText },
-    { key: "extracted" as const, label: "Extracted", value: detail.extractedText },
+    { key: "summary" as const, label: t("inbox.processed.tab.summary"), value: detail.summaryText },
+    { key: "route" as const, label: t("inbox.processed.tab.route"), value: detail.routeText },
+    { key: "manifest" as const, label: t("inbox.processed.tab.manifest"), value: detail.manifestText },
+    { key: "extracted" as const, label: t("inbox.processed.tab.extracted"), value: detail.extractedText },
   ];
   const active = tabs.find((item) => item.key === tab) ?? tabs[0];
   const artifactPath =
@@ -42,7 +44,7 @@ export function ProcessedDetailPanel({
           className="button button-ghost button-sm"
           onClick={() => onRevealPath(detail.item.itemDir)}
         >
-          Reveal
+          {t("inbox.menu.revealFinder")}
         </button>
       </div>
       <div className="processed-tabs" role="tablist">
@@ -58,20 +60,20 @@ export function ProcessedDetailPanel({
         ))}
       </div>
       <div className="processed-artifact-path">
-        <span>{artifactPath ?? "Artifact not present"}</span>
+        <span>{artifactPath ?? t("inbox.processed.artifactMissing")}</span>
         {artifactPath ? (
           <button type="button" className="link-button" onClick={() => onRevealPath(artifactPath)}>
-            Reveal
+            {t("inbox.menu.revealFinder")}
           </button>
         ) : null}
       </div>
       <pre className="processed-artifact">
-        {active.value ?? "No artifact content."}
-        {tab === "extracted" && detail.extractedTruncated ? "\n\n[truncated]" : ""}
+        {active.value ?? t("inbox.processed.artifactEmpty")}
+        {tab === "extracted" && detail.extractedTruncated ? `\n\n${t("inbox.processed.truncated")}` : ""}
       </pre>
       {detail.rawFiles.length > 0 ? (
         <div className="processed-raw-files">
-          <strong>Raw files</strong>
+          <strong>{t("inbox.processed.rawFiles")}</strong>
           {detail.rawFiles.map((file) => (
             <button
               type="button"

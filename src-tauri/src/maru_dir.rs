@@ -1211,13 +1211,6 @@ pub fn read_maru_skills(work_path: String) -> Result<JsonValue, String> {
 }
 
 #[tauri::command]
-pub fn save_maru_skills(work_path: String, value: JsonValue) -> Result<(), String> {
-    let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    write_json_pretty(&skills_json_path(&work), &value)
-}
-
-#[tauri::command]
 pub fn read_maru_settings(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     let global_path = global_settings_json_path()?;

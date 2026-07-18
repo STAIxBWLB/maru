@@ -18,6 +18,7 @@ import type {
 } from "../../lib/calendar/types";
 import type { DocumentLabelMode } from "../../lib/settings";
 import { resolveDisplayLabel } from "../../lib/document";
+import { t } from "../../lib/i18n";
 
 interface WeekGridProps<T> {
   viewDate: Date;
@@ -101,7 +102,7 @@ export function WeekGrid<T>({
           }}
         >
           <div className="cal-week-allday-gutter">
-            {locale === "ko" ? "종일" : "All-day"}
+            {t(locale, "calendar.allDay")}
           </div>
           <div
             className="cal-week-allday-grid"

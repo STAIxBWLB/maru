@@ -314,7 +314,7 @@ export function AddWorkspaceDialog({
                 <TextInput
                   value={label}
                   onChange={(event) => setLabel(event.target.value)}
-                  placeholder="e.g. Work, Public Notes"
+                  placeholder={t("workspace.dialog.label.placeholder")}
                 />
               </Field>
 

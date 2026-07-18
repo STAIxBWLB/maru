@@ -242,16 +242,16 @@ impl ProviderAdapter for CliProviderAdapter {
     }
 }
 
-/// Spawn a command, retrying briefly on `ETXTBSY` (os error 26). That error is a
-/// transient race in a multithreaded process that writes an executable and
-/// fork/execs concurrently: a fork in another thread can hold the just-written
-/// file's writable fd across our exec. The other child execs microseconds later
-/// (closing the fd), so a short bounded retry clears it. Non-`ETXTBSY` errors
-/// (and success) return immediately.
-fn spawn_with_retry(cmd: &mut Command) -> std::io::Result<Child> {
+/// Run a process operation, retrying briefly on `ETXTBSY` (os error 26). That
+/// error is a transient race in a multithreaded process that writes an
+/// executable and fork/execs concurrently: a fork in another thread can hold
+/// the just-written file's writable fd across our exec. The other child execs
+/// microseconds later (closing the fd), so a short bounded retry clears it.
+/// Non-`ETXTBSY` errors (and success) return immediately.
+pub(crate) fn retry_etxtbsy<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
     let mut attempts = 0u32;
     loop {
-        match cmd.spawn() {
+        match op() {
             Err(err) if err.raw_os_error() == Some(26) && attempts < 5 => {
                 attempts += 1;
                 std::thread::sleep(std::time::Duration::from_millis(20));
@@ -259,6 +259,10 @@ fn spawn_with_retry(cmd: &mut Command) -> std::io::Result<Child> {
             other => return other,
         }
     }
+}
+
+fn spawn_with_retry(cmd: &mut Command) -> std::io::Result<Child> {
+    retry_etxtbsy(|| cmd.spawn())
 }
 
 fn spawn_error_kind(err: &std::io::Error) -> String {
@@ -356,6 +360,36 @@ impl ProviderAdapter for MockProviderAdapter {
 mod tests {
     use super::*;
     use crate::agent_host::contracts::COMPLETION_REQUEST_SCHEMA_VERSION;
+
+    #[test]
+    fn retry_etxtbsy_retries_only_the_transient_error() {
+        let mut attempts = 0;
+        let value = retry_etxtbsy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(std::io::Error::from_raw_os_error(26))
+            } else {
+                Ok("ready")
+            }
+        })
+        .unwrap();
+
+        assert_eq!(value, "ready");
+        assert_eq!(attempts, 3);
+
+        let mut non_transient_attempts = 0;
+        let err = retry_etxtbsy(|| -> std::io::Result<()> {
+            non_transient_attempts += 1;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing",
+            ))
+        })
+        .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(non_transient_attempts, 1);
+    }
 
     #[test]
     fn mock_provider_validates_request_schema() {

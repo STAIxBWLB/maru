@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchGuideline, type Guideline } from "../../lib/hubLibrary";
+import { useTranslation } from "../../lib/i18n";
 
 interface WritingGuidelineSidebarProps {
   workspaceRoot: string | null;
@@ -55,6 +56,7 @@ export function WritingGuidelineSidebar({
   documentBody,
   frontmatter,
 }: WritingGuidelineSidebarProps) {
+  const { t } = useTranslation();
   const guidelineIds = useMemo(
     () => extractGuidelineIds(documentBody, frontmatter),
     [documentBody, frontmatter],
@@ -83,7 +85,7 @@ export function WritingGuidelineSidebar({
             id,
             slug: id,
             title: id,
-            body_markdown: `*불러올 수 없음: ${String(err)}*`,
+            body_markdown: t("catalog.guideline.fetchFailed", { message: String(err) }),
             scope: "global" as const,
             applies_to_categories: [],
             version: 0,
@@ -101,17 +103,18 @@ export function WritingGuidelineSidebar({
     return () => {
       cancelled = true;
     };
-  }, [workspaceRoot, guidelineIds.join("|")]);
+  }, [workspaceRoot, guidelineIds.join("|"), t]);
 
   if (guidelineIds.length === 0) {
     return (
       <div className="writing-guideline writing-guideline--empty">
         <p>
-          이 문서에 적용된 작성지침이 없습니다.
+          {t("catalog.guideline.empty")}
           <br />
           <span className="muted">
-            새 문서를 만들 때 Hub 템플릿/가이드라인을 선택하거나 frontmatter에{" "}
-            <code>guideline_ids</code>를 추가하면 여기에 표시됩니다.
+            {t("catalog.guideline.emptyHintStart")}{" "}
+            <code>guideline_ids</code>
+            {t("catalog.guideline.emptyHintEnd")}
           </span>
         </p>
       </div>
@@ -123,7 +126,7 @@ export function WritingGuidelineSidebar({
   return (
     <div className="writing-guideline">
       {state.guidelines.length > 1 ? (
-        <nav className="writing-guideline__tabs" aria-label="가이드라인 선택">
+        <nav className="writing-guideline__tabs" aria-label={t("catalog.guideline.tabsAria")}>
           {state.guidelines.map((g, idx) => (
             <button
               key={g.id}
@@ -139,9 +142,11 @@ export function WritingGuidelineSidebar({
       ) : null}
 
       {state.loading ? (
-        <p className="writing-guideline__status">불러오는 중…</p>
+        <p className="writing-guideline__status">{t("catalog.guideline.loading")}</p>
       ) : state.error ? (
-        <p className="writing-guideline__error">오류: {state.error}</p>
+        <p className="writing-guideline__error">
+          {t("catalog.guideline.error", { message: state.error })}
+        </p>
       ) : active ? (
         <article className="writing-guideline__body">
           <header className="writing-guideline__header">
@@ -158,7 +163,7 @@ export function WritingGuidelineSidebar({
           <pre className="writing-guideline__markdown">{active.body_markdown}</pre>
         </article>
       ) : (
-        <p className="writing-guideline__status">표시할 가이드라인이 없습니다.</p>
+        <p className="writing-guideline__status">{t("catalog.guideline.none")}</p>
       )}
     </div>
   );

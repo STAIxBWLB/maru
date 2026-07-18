@@ -533,7 +533,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           value={viewMode}
           onValueChange={(value) => onViewModeChange(value as EditorViewMode)}
         >
-          <Tabs.List className="editor-tabs-row" aria-label="document view">
+          <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
             <Tabs.Trigger className="tab-trigger" value="rich">
               {t("editor.tab.rich")}
             </Tabs.Trigger>

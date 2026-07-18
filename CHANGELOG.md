@@ -8,6 +8,40 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased — completeness hardening
+
+- **Update + close safety.** The startup update check no longer downloads,
+  installs, and relaunches on its own: updates surface as an actionable
+  toast (install → "Relaunch now"), and relaunch/window close now confirm
+  before discarding unsaved editor drafts. The Rust `CloseRequested`
+  handler that force-destroyed windows ahead of the JS close guards was
+  removed, so the settings-flush and dirty-draft guards actually run.
+- **ko/en parity restored + enforced.** Catalog, Inbox, Settings
+  (secrets/migration/inbox channels), approval dialog + prompts, git
+  badge, calendar, and editor/graph/diagram strings moved into the central
+  dictionary (~200 new keys per locale). Template-based new documents no
+  longer bake a Korean placeholder into the body under the en locale. New
+  `scripts/lint-i18n.mjs` (`pnpm lint:i18n`, wired into `make verify` and
+  CI) fails on key-parity drift and hardcoded UI strings in `src/**/*.tsx`.
+- **Hub submit queue is real.** `hub_submit_gate` now POSTs immediately
+  when the Hub is enabled (durable-queue fallback on failure), the new
+  `hub_queue_drain` command retries queued submits FIFO with
+  `retry_count`/`last_error` tracking, and the Catalog footer surfaces
+  queue depth with a retry action. Public-mode submits additionally run
+  the real-name blocklist.
+- **Marketplace manifest enforcement.** Cloned skill sources carrying a
+  `maru.source.json` manifest are schema-validated on install and rolled
+  back on failure. The `signed` flag remains a metadata check (non-empty
+  signature string), not cryptographic verification.
+- **Dead surface cleanup.** Wired the Korean date parser into Tasks
+  natural scheduling (live parse preview in the dialog + authoritative
+  RFC3339 datetime in the skill prompt); removed `default_vault_path`,
+  `save_maru_skills`, the manual `export_record_*`/`export_manifest_load`
+  commands (superseded by `export_dispatch`), the never-consumed
+  `tasks.hooks.autoVaultExtract` setting, and dead TS wrappers.
+- Tests: hub queue/drain, marketplace manifest rollback, ops_catalog
+  query/drilldown unit tests, CatalogPane component test.
+
 ## v0.4.6 — 2026-07-13 — OTA skills bundle channel
 
 - Skills now deploy independently of app releases: merging `skills/**` to

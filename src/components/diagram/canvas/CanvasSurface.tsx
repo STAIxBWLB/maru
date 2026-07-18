@@ -35,6 +35,7 @@ import type {
   EdgePort,
   NodeId,
 } from "../../../lib/diagram/types";
+import { useTranslation } from "../../../lib/i18n";
 import {
   useDiagram,
   useDiagramStore,
@@ -131,6 +132,7 @@ function findPortTarget(event: PointerEvent<SVGSVGElement>): {
 }
 
 export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
+  const { t } = useTranslation();
   const store = useDiagramStore();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gestureRef = useRef<Gesture>(null);
@@ -510,7 +512,7 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
       ref={svgRef}
       className="maru-diagram-canvas"
       role="application"
-      aria-label="Diagram canvas"
+      aria-label={t("diagram.aria.canvas")}
       onPointerDown={onSurfacePointerDown}
       onPointerMove={onSurfacePointerMove}
       onPointerUp={onSurfacePointerUp}
