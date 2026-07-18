@@ -362,6 +362,36 @@ mod tests {
     use crate::agent_host::contracts::COMPLETION_REQUEST_SCHEMA_VERSION;
 
     #[test]
+    fn retry_etxtbsy_retries_only_the_transient_error() {
+        let mut attempts = 0;
+        let value = retry_etxtbsy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(std::io::Error::from_raw_os_error(26))
+            } else {
+                Ok("ready")
+            }
+        })
+        .unwrap();
+
+        assert_eq!(value, "ready");
+        assert_eq!(attempts, 3);
+
+        let mut non_transient_attempts = 0;
+        let err = retry_etxtbsy(|| -> std::io::Result<()> {
+            non_transient_attempts += 1;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing",
+            ))
+        })
+        .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(non_transient_attempts, 1);
+    }
+
+    #[test]
     fn mock_provider_validates_request_schema() {
         let mut adapter = MockProviderAdapter::new(vec!["ok".to_string()]);
         let response = adapter
