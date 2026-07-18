@@ -57,7 +57,11 @@ export function NaturalScheduleDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit(trimmed, parsedStart);
+      // Parse fresh at submit: the debounced `parsedStart` preview can be
+      // stale (or null) when the user submits within the debounce window,
+      // and the skill prompt treats this value as authoritative.
+      const freshStart = await parseKoreanDate(trimmed).catch(() => null);
+      await onSubmit(trimmed, freshStart);
       setRawText("");
       setParsedStart(null);
       onClose();

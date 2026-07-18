@@ -60,7 +60,7 @@ mod workspace_files;
 use agent_host::{
     agent_apply_skill_proposal, agent_export_redacted_run_summary, agent_parse_skill_proposal,
     agent_read_run_events, agent_replay_run_summary, agent_run_structured_loop,
-    agent_validate_marketplace_manifest, agent_write_redacted_run_summary,
+    agent_write_redacted_run_summary,
 };
 use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
 use maru_dir::{
@@ -437,7 +437,6 @@ pub fn run() {
             agent_run_structured_loop,
             agent_parse_skill_proposal,
             agent_apply_skill_proposal,
-            agent_validate_marketplace_manifest,
             maru_e2e_run,
             maru_e2e_read,
             evidence_binder_read,

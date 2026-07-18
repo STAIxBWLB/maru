@@ -1747,31 +1747,46 @@ function MainApp() {
     [],
   );
 
+  const relaunchAfterSettingsFlush = useCallback(async () => {
+    try {
+      await settingsSaverRef.current?.flush();
+      await relaunchApp();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   const requestRelaunch = useCallback(async () => {
     if (hasDirtyDrafts()) {
       setPendingDestructiveAction("relaunch");
       return;
     }
-    await relaunchApp();
-  }, [hasDirtyDrafts]);
+    await relaunchAfterSettingsFlush();
+  }, [hasDirtyDrafts, relaunchAfterSettingsFlush]);
 
   const confirmDestructiveAction = useCallback(async () => {
     const action = pendingDestructiveAction;
     setPendingDestructiveAction(null);
     if (action === "relaunch") {
-      await relaunchApp();
+      await relaunchAfterSettingsFlush();
       return;
     }
     if (action === "close") {
-      closeConfirmedRef.current = true;
       try {
         await settingsSaverRef.current?.flush();
-      } finally {
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      closeConfirmedRef.current = true;
+      try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         await getCurrentWindow().close();
+      } catch (err) {
+        closeConfirmedRef.current = false;
+        setError(err instanceof Error ? err.message : String(err));
       }
     }
-  }, [pendingDestructiveAction]);
+  }, [pendingDestructiveAction, relaunchAfterSettingsFlush]);
 
   // Main-window close: flush pending settings writes before the window goes
   // away, and gate on unsaved drafts instead of losing them silently. The
@@ -1790,19 +1805,30 @@ function MainApp() {
         if (appWindow.label !== "main") return;
         return appWindow.onCloseRequested(async (event) => {
           // A close confirmed via the dirty-draft dialog replays through
-          // here; let the default close proceed the second time.
-          if (closeConfirmedRef.current) return;
+          // here; consume the one-shot guard and let the default close proceed.
+          if (closeConfirmedRef.current) {
+            closeConfirmedRef.current = false;
+            return;
+          }
+          if (closing) return;
           event.preventDefault();
           if (hasDirtyDrafts()) {
             setPendingDestructiveAction("close");
             return;
           }
-          if (closing) return;
           closing = true;
           try {
             await settingsSaverRef.current?.flush();
-          } finally {
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+          closeConfirmedRef.current = true;
+          try {
             await appWindow.close();
+          } catch (err) {
+            closeConfirmedRef.current = false;
+            closing = false;
+            setError(err instanceof Error ? err.message : String(err));
           }
         });
       })
