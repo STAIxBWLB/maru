@@ -2,71 +2,65 @@
 
 Outgoing PDFs are produced by printing HTML with Chrome, not by rendering
 HWPX. Reason: the hwp-cli PDF renderer cannot continue a table across a page
-boundary; every row after the boundary is silently dropped. Chunking tables
-only shrinks the loss; it does not remove it. The browser print engine
-paginates tables correctly (rows stay whole, header rows repeat per page).
+boundary; every row after the boundary is silently dropped (data loss, not
+just visual clipping). Chunking tables only shrinks the loss; it does not
+remove it. The browser print engine paginates tables correctly (rows stay
+whole, header rows repeat per page).
 
 ## Pipeline
 
-1. Markdown -> HTML body with the workspace Python runtime:
+Use the bundled script (markdown-it-py based; runs on the shared env, no
+extra packages):
 
-   ```bash
-   ~/.maru/env/.venv/bin/python - <<'EOF'
-   import markdown
-   md = open('<src.md>', encoding='utf-8').read()
-   body = markdown.markdown(md, extensions=['tables'])
-   html = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">'
-           '<title><TITLE></title><style>' + CSS + '</style></head>'
-           '<body>' + body + '</body></html>')
-   open('<tmp>/<stem>.html', 'w', encoding='utf-8').write(html)
-   EOF
-   ```
+```bash
+~/.maru/env/.venv/bin/python \
+  ~/.maru/skills/share-outbox/scripts/md_to_pdf_chrome.py \
+  <src.md> -o <tmp>/<stem>.pdf [--title "문서 제목"]
+```
 
-2. Print to PDF with Chrome headless (present on macOS workstations; no
-   extra install):
+- Chrome/Chromium is auto-detected (macOS app path, then PATH); override
+  with `--chrome <bin>` or `CHROME_BIN`. An explicit `--chrome` that does
+  not resolve is an error (no silent fallback). Exits with code 2 and a
+  fallback hint when no browser is found.
+- A leading YAML frontmatter block is stripped before rendering, so
+  internal metadata never reaches the outgoing PDF.
+- The intermediate HTML goes to a temp file, removed on success and kept
+  on failure for debugging; pass `--keep-html` to always keep it.
+- `--title` defaults to the first H1 (else the file stem); it is
+  HTML-escaped.
+- Supported syntax: CommonMark + tables + strikethrough. Footnotes and
+  task lists are not rendered (plugins not bundled) and pass through as
+  raw text; the page verification step below catches this.
 
-   ```bash
-   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-     --headless --disable-gpu --no-pdf-header-footer \
-     --print-to-pdf="<tmp>/<stem>.pdf" "file://<tmp>/<stem>.html"
-   ```
-
-3. Verify before staging: read the PDF pages (or render them) and confirm
-   long tables break between rows with the header repeated, and that the
-   last row of every table is present. Only then pass the PDF to
-   `prepare_share_file.py`.
+Then verify before staging: read the PDF pages (or render them) and confirm
+long tables break between rows with the header repeated, and that the last
+row of every table is present. Only then pass the PDF to
+`prepare_share_file.py`.
 
 ## Print CSS baseline
 
+The stylesheet is embedded in the script (`CSS` constant). The two
+load-bearing rules are:
+
 ```css
-@page { size: A4; margin: 18mm 15mm 16mm 15mm; }
-* { box-sizing: border-box; }
-body { font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-       font-size: 9.5pt; line-height: 1.5; color: #111; margin: 0;
-       word-break: keep-all; }
-h1 { font-size: 17pt; text-align: center; margin: 0 0 14pt; }
-h2 { font-size: 12.5pt; margin: 16pt 0 6pt; border-left: 4px solid #1a4f8b;
-     padding-left: 7px; page-break-after: avoid; }
-h3 { font-size: 10.5pt; margin: 10pt 0 4pt; page-break-after: avoid; }
-p, li { margin: 3pt 0; }
-ul { padding-left: 16pt; margin: 4pt 0; }
-table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt;
-        font-size: 8.6pt; }
-thead { display: table-header-group; }   /* header repeats on every page */
-tr { page-break-inside: avoid; }         /* never split a row */
-th { background: #eef2f7; border: 0.6pt solid #555; padding: 3.5pt 4pt;
-     text-align: center; font-weight: 700; }
-td { border: 0.6pt solid #777; padding: 3.5pt 4pt; vertical-align: middle; }
-td:first-child { white-space: nowrap; font-weight: 600; text-align: center; }
+thead { display: table-header-group; }  /* header repeats on every page */
+tr { page-break-inside: avoid; }        /* never split a row */
 ```
 
-The two load-bearing rules are `thead { display: table-header-group }` and
-`tr { page-break-inside: avoid }`; keep them even if the rest of the theme
-changes. `word-break: keep-all` keeps Korean words unbroken inside cells.
+Keep them even if the rest of the theme changes. Also relevant:
+`@page { size: A4; margin: 18mm 15mm 16mm 15mm }` and
+`word-break: keep-all` (keeps Korean words unbroken inside cells). Adjust
+the theme by editing the constant, not by post-processing the HTML.
 
 ## Fallbacks
 
-- No Chrome on the machine: use LibreOffice if installed
-  (`soffice --headless --convert-to pdf`), or `hwpx to-pdf --engine soffice`.
-- `hwpx to-pdf` (hwp-cli engine) is a last resort for table-free documents
-  only, and the output pages must be visually verified before sending.
+- No Chrome on the machine: convert first, then print with LibreOffice if
+  installed. Either `md2docx <src.md>` then
+  `soffice --headless --convert-to pdf <stem>.docx`, or
+  `hwpx styled --markdown <src.md>` then
+  `hwpx to-pdf --engine soffice <stem>.hwpx` (LibreOffice cannot import
+  raw Markdown as a document).
+- Bare `hwpx to-pdf` (engine auto/hwp) is a last resort for table-free
+  documents only, and the output pages must be visually verified before
+  sending. The table row loss exits 0, so the auto engine's soffice
+  fallback never triggers on it.

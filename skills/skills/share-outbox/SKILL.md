@@ -64,7 +64,7 @@ The user selects the target format by naming just the extension (e.g. "hwpx로",
 |--------|------------|
 | (none) / `docx` | `~/.maru/skills/md2docx/md2docx <src.md> -o <tmp>/<stem>.docx` |
 | `hwpx` | `~/.maru/skills/hwpx/hwpx styled --markdown <src.md> -o <tmp>/<stem>.hwpx` |
-| `pdf` | HTML print path: markdown -> HTML with print CSS -> Chrome headless `--print-to-pdf`. Full recipe in `references/pdf-print-path.md` |
+| `pdf` | `~/.maru/env/.venv/bin/python ~/.maru/skills/share-outbox/scripts/md_to_pdf_chrome.py <src.md> -o <tmp>/<stem>.pdf` (HTML print path; details in `references/pdf-print-path.md`) |
 | `md` | stage the original without conversion (explicit instruction only) |
 | other (e.g. `pptx`) | use the matching workspace conversion skill if one exists; otherwise tell the user the target is unsupported (never silently fall back) |
 
@@ -78,11 +78,13 @@ Rules:
   `--serif`, `--reference <form.hwpx>`, ...).
 - Report both the original source path and the staged output to the user; the
   receipt's `source` records the converted temp file.
-- Do not produce outgoing PDF via `hwpx to-pdf` (hwp-cli engine): tables that
-  cross a page boundary lose every row after the boundary (silent data loss,
-  not just visual clipping). Use it only when the document has no tables and
-  the user explicitly asks for the hwpx render, and visually verify pages
-  before sending. See `references/pdf-print-path.md`.
+- Do not produce outgoing PDF via bare `hwpx to-pdf` (engine auto or hwp):
+  the hwp-cli renderer drops every table row after a page boundary (silent
+  data loss with exit 0, so the auto engine never falls back). Only
+  `hwpx to-pdf --engine soffice` is acceptable as an hwpx-side path. Bare
+  hwp-cli rendering is a last resort for table-free documents with explicit
+  user request, and pages must be visually verified before sending. See
+  `references/pdf-print-path.md`.
 
 ## Script
 
@@ -128,3 +130,4 @@ using the bot credentials referenced by
 
 - `references/workspace-config.md` - runtime configuration keys
 - `references/filename-rules.md` - title and suffix replacement rules
+- `references/pdf-print-path.md` - outgoing PDF pipeline (HTML print)
