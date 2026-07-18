@@ -515,8 +515,8 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   const body = page.locator(".settings-window-shell .system-body");
   const form = body.locator(".secrets-settings-form");
   await expect(form).toBeVisible();
-  await expect(form).toContainText("Workspace Secrets");
-  await expect(form).toContainText("Managed Inventory");
+  await expect(form).toContainText("Workspace 시크릿");
+  await expect(form).toContainText("관리 인벤토리");
   const inventoryTable = form.locator(".secrets-inventory-table");
   await expect(inventoryTable).toBeVisible();
   await expect(inventoryTable).not.toContainText(".DS_Store");
@@ -534,17 +534,17 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   }));
   expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
 
-  await form.getByRole("button", { name: "Dry run" }).click();
+  await form.getByRole("button", { name: "드라이런" }).click();
   const migrationPanel = form.locator(".settings-section-panel", {
-    hasText: "Migration Dry Run",
+    hasText: "마이그레이션 드라이런",
   });
   await expect(migrationPanel).toBeVisible();
-  await expect(migrationPanel).toContainText("3 action(s) · 2 selected");
-  const applySelected = migrationPanel.getByRole("button", { name: "Apply selected" });
+  await expect(migrationPanel).toContainText("작업 3개 · 2개 선택됨");
+  const applySelected = migrationPanel.getByRole("button", { name: "선택 항목 적용" });
   await expect(applySelected).toBeEnabled();
 
   const automaticActionCheck = migrationPanel.getByRole("checkbox", {
-    name: "Select create-legacy-symlink .secrets",
+    name: "create-legacy-symlink .secrets 선택",
   });
   await expect(automaticActionCheck).toBeDisabled();
   await expect(automaticActionCheck).not.toBeChecked();
@@ -555,16 +555,16 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   for (let index = 0; index < checkCount; index += 1) {
     await selectedChecks.nth(index).uncheck();
   }
-  await expect(migrationPanel).toContainText("3 action(s) · 0 selected");
+  await expect(migrationPanel).toContainText("작업 3개 · 0개 선택됨");
   await expect(applySelected).toBeDisabled();
   await selectedChecks.first().check();
-  await expect(migrationPanel).toContainText("3 action(s) · 1 selected");
+  await expect(migrationPanel).toContainText("작업 3개 · 1개 선택됨");
   await applySelected.click();
-  await expect(form.locator(".settings-section-panel", { hasText: "Applied Migration" })).toBeVisible();
+  await expect(form.locator(".settings-section-panel", { hasText: "적용된 마이그레이션" })).toBeVisible();
 
   await form
     .getByRole("button", {
-      name: /Reveal and edit services\/telegram-monitor\.config\.yaml/,
+      name: /services\/telegram-monitor\.config\.yaml 공개 및 편집/,
     })
     .click();
   const dialog = page.locator(".secret-editor-dialog");
@@ -572,12 +572,12 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   const textarea = dialog.locator("textarea");
   await expect(textarea).toBeDisabled();
   await expect(textarea).toHaveValue("");
-  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "저장" })).toBeDisabled();
 
-  await dialog.getByRole("button", { name: "Reveal" }).click();
+  await dialog.getByRole("button", { name: "공개" }).click();
   await expect(textarea).toBeEnabled();
   await expect(textarea).toHaveValue(/api_hash/);
-  await expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "저장" })).toBeEnabled();
 
   const confirmDialogPromise = new Promise<string>((resolve) => {
     page.once("dialog", async (confirmDialog) => {
@@ -586,10 +586,10 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
       resolve(message);
     });
   });
-  await dialog.getByRole("button", { name: "Delete" }).click();
+  await dialog.getByRole("button", { name: "삭제" }).click();
   const confirmMessage = await confirmDialogPromise;
   expect(confirmMessage).toContain(
-    "Delete the text secret file .maru/secrets/services/telegram-monitor.config.yaml?",
+    "텍스트 시크릿 파일 .maru/secrets/services/telegram-monitor.config.yaml 를 삭제할까요?",
   );
   expect(confirmMessage).not.toContain("metadata entry");
   await expect(dialog).toBeVisible();
