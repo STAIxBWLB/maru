@@ -64,7 +64,7 @@ The user selects the target format by naming just the extension (e.g. "hwpx로",
 |--------|------------|
 | (none) / `docx` | `~/.maru/skills/md2docx/md2docx <src.md> -o <tmp>/<stem>.docx` |
 | `hwpx` | `~/.maru/skills/hwpx/hwpx styled --markdown <src.md> -o <tmp>/<stem>.hwpx` |
-| `pdf` | convert to hwpx first, then `~/.maru/skills/hwpx/hwpx to-pdf <tmp>/<stem>.hwpx -o <tmp>/<stem>.pdf` |
+| `pdf` | HTML print path: markdown -> HTML with print CSS -> Chrome headless `--print-to-pdf`. Full recipe in `references/pdf-print-path.md` |
 | `md` | stage the original without conversion (explicit instruction only) |
 | other (e.g. `pptx`) | use the matching workspace conversion skill if one exists; otherwise tell the user the target is unsupported (never silently fall back) |
 
@@ -78,6 +78,11 @@ Rules:
   `--serif`, `--reference <form.hwpx>`, ...).
 - Report both the original source path and the staged output to the user; the
   receipt's `source` records the converted temp file.
+- Do not produce outgoing PDF via `hwpx to-pdf` (hwp-cli engine): tables that
+  cross a page boundary lose every row after the boundary (silent data loss,
+  not just visual clipping). Use it only when the document has no tables and
+  the user explicitly asks for the hwpx render, and visually verify pages
+  before sending. See `references/pdf-print-path.md`.
 
 ## Script
 
