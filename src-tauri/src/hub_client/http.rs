@@ -101,6 +101,33 @@ pub(crate) fn fetch_resource(
     Ok(Some((body, etag_out)))
 }
 
+/// `POST /api/v1/<resource>` with a JSON body. Returns the response body.
+/// Only the approval-gated submit/drain flows use this write path.
+pub(crate) fn post_resource(
+    client: &Client,
+    cfg: &HubConfig,
+    resource: &str,
+    body_json: &str,
+) -> Result<String, HubFetchError> {
+    let url = build_url(&cfg.endpoint, resource);
+    let resp = client
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body_json.to_string())
+        .send()
+        .map_err(|e| HubFetchError::Network(e.to_string()))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        return Err(HubFetchError::Status {
+            status: status.as_u16(),
+            body,
+        });
+    }
+    resp.text()
+        .map_err(|e| HubFetchError::Encoding(e.to_string()))
+}
+
 fn build_url(endpoint: &str, resource: &str) -> String {
     // resource는 `templates`, `guidelines`, `templates/<id>` 등 path-like.
     // hub-sync.md §4 path 매핑:

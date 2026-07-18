@@ -45,12 +45,12 @@ export interface NewDocumentExtras {
   businessUnit?: string;
 }
 
-const CATEGORY_OPTIONS: { value: DocumentCategory | "all"; label: string }[] = [
-  { value: "all", label: "전체" },
-  { value: "formal_report", label: "정형보고" },
-  { value: "admin_approval", label: "행정결재" },
-  { value: "evidence_certification", label: "증빙·인증" },
-  { value: "operational", label: "운영문서" },
+const CATEGORY_OPTIONS: { value: DocumentCategory | "all"; labelKey: string }[] = [
+  { value: "all", labelKey: "newdoc.category.all" },
+  { value: "formal_report", labelKey: "newdoc.category.formalReport" },
+  { value: "admin_approval", labelKey: "newdoc.category.adminApproval" },
+  { value: "evidence_certification", labelKey: "newdoc.category.evidenceCert" },
+  { value: "operational", labelKey: "newdoc.category.operational" },
 ];
 
 export function NewDocumentDialog({
@@ -195,7 +195,7 @@ export function NewDocumentDialog({
       if (docType === "reference" || docType === initialDocType) {
         setDocType(defaultMaruDocType(summary));
       }
-      setBody(renderTemplateBody(full, "내용 입력"));
+      setBody(renderTemplateBody(full, t("newdoc.bodyPlaceholder")));
       setSelectedTemplateSlug(slug);
     } catch (err) {
       setLibraryError(err instanceof Error ? err.message : String(err));
@@ -287,7 +287,7 @@ export function NewDocumentDialog({
                     className={category === c.value ? "active" : ""}
                     onClick={() => setCategory(c.value)}
                   >
-                    {c.label}
+                    {t(c.labelKey)}
                   </button>
                 ))}
               </div>

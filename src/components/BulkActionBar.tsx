@@ -1,4 +1,5 @@
 import { Check, FolderInput, Play, X } from "lucide-react";
+import { useTranslation } from "../lib/i18n";
 import { Button } from "./ui/Button";
 
 interface BulkActionBarProps {
@@ -26,13 +27,14 @@ export function BulkActionBar({
   onProcess,
   onCancel,
 }: BulkActionBarProps) {
+  const { t } = useTranslation();
   if (count <= 0) return null;
   return (
-    <div className="bulk-action-bar" role="toolbar" aria-label="Selected inbox actions">
-      <strong>선택 {count}건</strong>
+    <div className="bulk-action-bar" role="toolbar" aria-label={t("inbox.bulk.toolbar")}>
+      <strong>{t("inbox.bulk.selectedCount", { count })}</strong>
       <Button type="button" size="sm" disabled={busy || decisionCount === 0} onClick={onAccept}>
         <Check size={14} />
-        모두 accept
+        {t("inbox.bulk.acceptAll")}
       </Button>
       <Button
         type="button"
@@ -42,7 +44,7 @@ export function BulkActionBar({
         onClick={onReject}
       >
         <X size={14} />
-        모두 reject
+        {t("inbox.bulk.rejectAll")}
       </Button>
       <Button
         type="button"
@@ -52,7 +54,7 @@ export function BulkActionBar({
         onClick={onMoveFiles}
       >
         <FolderInput size={14} />
-        폴더로 이동
+        {t("inbox.bulk.moveToFolder")}
       </Button>
       <Button
         type="button"
@@ -62,15 +64,15 @@ export function BulkActionBar({
         onClick={onProcess}
       >
         <Play size={14} />
-        Process
+        {t("inbox.process")}
       </Button>
       <button
         type="button"
         className="icon-button"
         disabled={busy}
         onClick={onCancel}
-        aria-label="선택 해제"
-        title="선택 해제"
+        aria-label={t("inbox.bulk.clearSelection")}
+        title={t("inbox.bulk.clearSelection")}
       >
         <X size={14} />
       </button>

@@ -472,6 +472,11 @@ pub fn skills_add_source(
             }
             host_fs::ensure_dir(checkout.parent().unwrap())?;
             run_command(Command::new("git").arg("clone").arg(&url).arg(&checkout))?;
+            // A checkout carrying a marketplace manifest opts into the
+            // registry contract: validate before the source is admitted and
+            // roll the clone back on failure. Checkouts without a manifest
+            // keep the legacy trust-the-URL behavior.
+            validate_cloned_source_manifest(&checkout)?;
             Some(host_fs::display_path(&checkout))
         }
         "imported" | "managed" | "adopted" => {
@@ -499,6 +504,42 @@ pub fn skills_add_source(
     rescan_source_in_registry(&mut registry, &source.id)?;
     save_registry_unlocked(&registry)?;
     Ok(source)
+}
+
+/// Marketplace manifest filename a cloned source may carry at its root.
+pub const CLONED_SOURCE_MANIFEST: &str = "maru.source.json";
+
+/// Validate a freshly cloned source checkout against the marketplace
+/// manifest contract (`maru.source.json`). Absent manifest = legacy
+/// trust-the-URL path (Ok). Present but invalid = roll back the clone and
+/// report the validation errors, so a rejected source never lingers on disk.
+///
+/// Note: the `signed` flag check is a metadata check (non-empty signature
+/// string), not cryptographic verification — see agent_host::marketplace.
+fn validate_cloned_source_manifest(checkout: &std::path::Path) -> Result<(), String> {
+    let manifest_path = checkout.join(CLONED_SOURCE_MANIFEST);
+    if !manifest_path.is_file() {
+        return Ok(());
+    }
+    let result = (|| -> Result<(), String> {
+        let text = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("source_manifest_unreadable: {e}"))?;
+        let manifest: crate::agent_host::marketplace::MarketplaceSourceManifest =
+            serde_json::from_str(&text)
+                .map_err(|e| format!("source_manifest_invalid_json: {e}"))?;
+        let report = crate::agent_host::marketplace::validate_marketplace_manifest(&manifest);
+        if !report.valid {
+            return Err(format!(
+                "source_manifest_invalid: {}",
+                report.errors.join(", ")
+            ));
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(checkout);
+    }
+    result
 }
 
 #[tauri::command]
@@ -7070,5 +7111,46 @@ mod tests {
         assert!(status.dirty_skills.is_empty());
         assert!(!status.auto_applicable);
         assert!(status.min_app_ok);
+    }
+
+    #[test]
+    fn cloned_source_without_manifest_is_allowed() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        assert!(validate_cloned_source_manifest(&checkout).is_ok());
+        assert!(checkout.exists());
+    }
+
+    #[test]
+    fn cloned_source_with_invalid_manifest_is_rolled_back() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(CLONED_SOURCE_MANIFEST),
+            r#"{"schemaVersion":"maru_marketplace_source_v1","sourceId":"demo","name":"Demo","version":"1.0.0","skillsSubdir":"skills","signed":false}"#,
+        )
+        .unwrap();
+        let err = validate_cloned_source_manifest(&checkout).unwrap_err();
+        assert!(err.contains("source_manifest_invalid"));
+        assert!(
+            !checkout.exists(),
+            "rejected checkout must be rolled back"
+        );
+    }
+
+    #[test]
+    fn cloned_source_with_valid_manifest_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let checkout = dir.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(CLONED_SOURCE_MANIFEST),
+            r#"{"schemaVersion":"maru_marketplace_source_v1","sourceId":"demo","name":"Demo","version":"1.0.0","skillsSubdir":"skills","signed":true,"signature":"sig"}"#,
+        )
+        .unwrap();
+        assert!(validate_cloned_source_manifest(&checkout).is_ok());
+        assert!(checkout.exists());
     }
 }

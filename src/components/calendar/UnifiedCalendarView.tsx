@@ -11,6 +11,7 @@ import type {
   UnifiedCalendarEvent,
 } from "../../lib/calendar/types";
 import type { DocumentLabelMode } from "../../lib/settings";
+import { t } from "../../lib/i18n";
 
 export interface UnifiedCalendarViewProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
@@ -84,7 +85,7 @@ export function UnifiedCalendarView<T>({
           {loading ? (
             <div className="cal-loading">
               <Loader2 size={16} className="cal-spin" />
-              <span>{loadingLabel ?? (locale === "ko" ? "로딩 중..." : "Loading...")}</span>
+              <span>{loadingLabel ?? t(locale, "calendar.loading")}</span>
             </div>
           ) : view === "month" ? (
             <MonthGrid

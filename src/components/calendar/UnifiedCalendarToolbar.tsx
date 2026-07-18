@@ -3,6 +3,7 @@ import { addMonths, addWeeks, format, addDays } from "date-fns";
 import { ko } from "date-fns/locale/ko";
 import { enUS } from "date-fns/locale/en-US";
 import type { CalendarLocale, CalendarView } from "../../lib/calendar/types";
+import { t } from "../../lib/i18n";
 
 interface UnifiedCalendarToolbarProps {
   view: CalendarView;
@@ -15,11 +16,6 @@ interface UnifiedCalendarToolbarProps {
   searchPlaceholder?: string;
 }
 
-const LABELS: Record<CalendarLocale, Record<string, string>> = {
-  en: { search: "Search", day: "Day", week: "Week", month: "Month", today: "Today" },
-  ko: { search: "검색", day: "일", week: "주", month: "월", today: "오늘" },
-};
-
 export function UnifiedCalendarToolbar({
   view,
   viewDate,
@@ -30,7 +26,6 @@ export function UnifiedCalendarToolbar({
   onViewDateChange,
   searchPlaceholder,
 }: UnifiedCalendarToolbarProps) {
-  const labels = LABELS[locale];
   const localeObj = locale === "ko" ? ko : enUS;
   const title =
     view === "day"
@@ -49,12 +44,12 @@ export function UnifiedCalendarToolbar({
 
   return (
     <header className="cal-toolbar">
-      <label className="cal-search" title={searchPlaceholder ?? labels.search}>
+      <label className="cal-search" title={searchPlaceholder ?? t(locale, "calendar.toolbar.search")}>
         <Search size={14} />
         <input
           type="text"
           value={query}
-          placeholder={searchPlaceholder ?? labels.search}
+          placeholder={searchPlaceholder ?? t(locale, "calendar.toolbar.search")}
           onChange={(event) => onQueryChange(event.target.value)}
         />
       </label>
@@ -63,7 +58,7 @@ export function UnifiedCalendarToolbar({
           type="button"
           className="cal-nav-button"
           onClick={() => shift(-1)}
-          aria-label={locale === "ko" ? "이전" : "Previous"}
+          aria-label={t(locale, "calendar.nav.previous")}
         >
           <ChevronLeft size={16} />
         </button>
@@ -72,7 +67,7 @@ export function UnifiedCalendarToolbar({
           type="button"
           className="cal-nav-button"
           onClick={() => shift(1)}
-          aria-label={locale === "ko" ? "다음" : "Next"}
+          aria-label={t(locale, "calendar.nav.next")}
         >
           <ChevronRight size={16} />
         </button>
@@ -88,12 +83,12 @@ export function UnifiedCalendarToolbar({
               className={view === option ? "active" : ""}
               onClick={() => onViewChange(option)}
             >
-              {labels[option]}
+              {t(locale, `calendar.view.${option}`)}
             </button>
           ))}
         </div>
         <button type="button" className="cal-today-button" onClick={() => onViewDateChange(new Date())}>
-          {labels.today}
+          {t(locale, "calendar.today")}
         </button>
       </div>
     </header>

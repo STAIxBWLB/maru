@@ -195,22 +195,6 @@ export interface ProposalApplyReport {
   }>;
 }
 
-export interface MarketplaceSourceManifest {
-  schemaVersion: string;
-  sourceId: string;
-  name: string;
-  version: string;
-  skillsSubdir: string;
-  signed: boolean;
-  signature?: string | null;
-  repoUrl?: string | null;
-}
-
-export interface MarketplaceValidationReport {
-  valid: boolean;
-  errors: string[];
-}
-
 export interface AdoptOutcome {
   adopted: number;
   skipped: number;
@@ -741,11 +725,4 @@ export async function agentApplySkillProposal(params: {
     approvalId: params.approvalId,
     runId: params.runId ?? null,
   });
-}
-
-export async function agentValidateMarketplaceManifest(
-  manifest: MarketplaceSourceManifest,
-): Promise<MarketplaceValidationReport> {
-  if (!isTauri()) return { valid: false, errors: ["tauri_required"] };
-  return invoke<MarketplaceValidationReport>("agent_validate_marketplace_manifest", { manifest });
 }

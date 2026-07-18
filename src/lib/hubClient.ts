@@ -95,3 +95,21 @@ export async function hubSubmitGate(
     },
   });
 }
+
+export interface HubQueueDrainItem {
+  request_id: string;
+  outcome: "submitted" | "failed";
+  error: string | null;
+}
+
+export interface HubQueueDrainResult {
+  attempted: number;
+  submitted: number;
+  failed: number;
+  remaining: number;
+  items: HubQueueDrainItem[];
+}
+
+export async function hubQueueDrain(workspaceRoot: string): Promise<HubQueueDrainResult> {
+  return invoke<HubQueueDrainResult>("hub_queue_drain", { workspaceRoot });
+}

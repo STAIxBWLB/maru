@@ -1154,9 +1154,10 @@ export async function buildInboxClassificationPrompt(item: InboxDropItem): Promi
  *  prose; collapses unknown categories to `noise`. */
 export async function parseInboxClassification(raw: string): Promise<InboxClassification> {
   if (!isTauri()) {
-    // Browser dev fallback — synthesize a Classification from the
-    // heuristic the old InboxPane used so the UI is exercised without
-    // a real Claude subprocess.
+    // Browser dev fallback only — the Rust `parse_inbox_classification`
+    // command is the SSOT for classification semantics; this mock exists so
+    // the browser dev shell can exercise the UI without a real subprocess
+    // and must never drift into production logic.
     return mockClassification(raw);
   }
   return invoke<InboxClassification>("parse_inbox_classification", { raw });

@@ -2,6 +2,7 @@ import { GitBranch, GitCommit, PencilLine, Plus, Sigma } from "lucide-react";
 import { useEffect, useState } from "react";
 import { gitStatus, gitStatusFast } from "../lib/api";
 import { formatGitStatusDisplay } from "../lib/gitStatusDisplay";
+import { useTranslation } from "../lib/i18n";
 import type { GitStatus } from "../lib/types";
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
  *  itself when the workspace isn't a git repo so non-versioned workspaces don't
  *  show stale "no branch" text. */
 export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitClick }: Props) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<GitStatus | null>(null);
 
   useEffect(() => {
@@ -80,19 +82,19 @@ export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitCli
       <span className="git-badge-branch">{display.branch}</span>
       {display.dirty && !display.pendingUntracked ? (
         <>
-          <span className="git-badge-metric" title="staged">
+          <span className="git-badge-metric" title={t("git.badge.staged")}>
             <GitCommit size={9} />
             <span>{display.staged}</span>
           </span>
-          <span className="git-badge-metric" title="modified">
+          <span className="git-badge-metric" title={t("git.badge.modified")}>
             <PencilLine size={9} />
             <span>{display.modified}</span>
           </span>
-          <span className="git-badge-metric" title="new">
+          <span className="git-badge-metric" title={t("git.badge.new")}>
             <Plus size={10} />
             <span>{display.untracked}</span>
           </span>
-          <span className="git-badge-metric total" title="total">
+          <span className="git-badge-metric total" title={t("git.badge.total")}>
             <Sigma size={9} />
             <span>{display.total}</span>
           </span>

@@ -68,7 +68,7 @@ use maru_dir::{
     list_maru_templates, list_workspace_projects, read_maru_imports, read_maru_mcp,
     read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills,
     read_maru_template, read_maru_workspace, save_maru_mcp, save_maru_projects,
-    save_maru_rule, save_maru_settings, save_maru_skills, save_maru_template,
+    save_maru_rule, save_maru_settings, save_maru_template,
     update_maru_workspace,
 };
 use approval::{prepare_approval, record_approval, ApprovalState};
@@ -89,10 +89,7 @@ use document::{
 };
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use evidence_binder::{evidence_binder_read, evidence_binder_save};
-use export::{
-    export_dispatch, export_manifest_load, export_plan, export_record_failure,
-    export_record_pending, export_record_success, export_validate,
-};
+use export::{export_dispatch, export_plan, export_validate};
 use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
@@ -102,7 +99,7 @@ use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
 use graph_authoring::{graph_link_apply, graph_link_preview};
-use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_status, hub_submit_gate};
+use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
     read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
@@ -184,7 +181,7 @@ use terminal_hooks::{
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
     TerminalHookWatcherState,
 };
-use vault::{default_vault_path, read_vault_cache, sample_workspace_path, scan_vault};
+use vault::{read_vault_cache, sample_workspace_path, scan_vault};
 use vault_graph::{vault_graph_layout_read, vault_graph_layout_save, vault_graph_read};
 use vault_guard::vault_validate_note;
 use vault_list::{
@@ -206,11 +203,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(app_menu::build_app_menu)
         .on_menu_event(app_menu::handle_menu_event)
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                let _ = window.destroy();
-            }
-        })
+        // No Rust-side CloseRequested handler: force-destroying the window
+        // here raced the webview's JS close guards (settings flush, dirty
+        // draft confirm) and always won. Default close semantics apply, so
+        // JS `preventDefault` now decides.
+
         .manage(InboxWatcherState::default())
         .manage(VaultWatcherState::default())
         .manage(TelegramIoState::default())
@@ -230,7 +227,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            default_vault_path,
             sample_workspace_path,
             scan_vault,
             read_vault_cache,
@@ -390,7 +386,6 @@ pub fn run() {
             list_workspace_projects,
             save_maru_projects,
             read_maru_skills,
-            save_maru_skills,
             read_maru_settings,
             save_maru_settings,
             read_maru_imports,
@@ -458,13 +453,11 @@ pub fn run() {
             hub_fetch_catalog,
             hub_submit_gate,
             hub_poll_gate,
-            // M4 Export Pipeline (Phase 4 W8-W9)
+            hub_queue_drain,
+            // M4 Export Pipeline (Phase 4 W8-W10). Manual record_* transition
+            // commands were removed: export_dispatch owns the whole lifecycle.
             export_plan,
-            export_manifest_load,
             export_validate,
-            export_record_pending,
-            export_record_success,
-            export_record_failure,
             export_dispatch,
             // M2 Document Studio (Phase 4 W11)
             studio_state_list,

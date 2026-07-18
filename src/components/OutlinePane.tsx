@@ -638,7 +638,7 @@ export function OutlinePane({
                   value={fmProject ?? ""}
                   suggestions={[]}
                   onCommit={(next) => onUpdateField("project", next || null)}
-                  placeholder="[[프로젝트]]"
+                  placeholder={t("outline.project.placeholder")}
                   readOnly={readOnly}
                 />
               </InspectorRow>
@@ -1629,6 +1629,7 @@ interface TagsInputProps {
  *  in an empty input removes the last chip. Commits the full array on each
  *  mutation so InspectorPane can write it via update_frontmatter_field. */
 function TagsInput({ value, onCommit, readOnly = false }: TagsInputProps) {
+  const { t } = useTranslation();
   const [tags, setTags] = useState<string[]>(value);
   const [draft, setDraft] = useState("");
 
@@ -1693,8 +1694,8 @@ function TagsInput({ value, onCommit, readOnly = false }: TagsInputProps) {
           className="tag-chip-add"
           onClick={pushTag}
           disabled={readOnly}
-          title="add tag"
-          aria-label="add tag"
+          title={t("outline.tag.add")}
+          aria-label={t("outline.tag.add")}
           tabIndex={-1}
         >
           <Plus size={11} />

@@ -246,6 +246,7 @@ export function buildTaskManagementSchedulePrompt(
     TasksSettings,
     "root" | "timezone" | "defaultTaskList" | "defaultCalendar"
   >,
+  parsedStart?: string | null,
 ): string {
   const root = settings.root?.trim() || "tasks";
   const timezone = settings.timezone?.trim() || "Asia/Seoul";
@@ -261,6 +262,11 @@ export function buildTaskManagementSchedulePrompt(
     "- Create a calendar-only markdown receipt under calendar/ when this is only a schedule item.",
     "- Normalize title, status, priority, due, calendarStart, calendarEnd, timezone, project, tags, and body.",
     `- Use timezone ${timezone} unless the text states another timezone.`,
+    ...(parsedStart
+      ? [
+          `- Maru's Korean date parser already resolved the schedule to ${parsedStart} (RFC3339). Treat it as authoritative for due/calendarStart unless the raw text clearly contradicts it.`,
+        ]
+      : []),
     `- Use default Google Tasks list ${defaultTaskList} for read-only conflict lookup during review; create/update/delete only after user approval through task-management's execution path.`,
     `- Use default calendar ${defaultCalendar} for read-only availability/conflict lookup during review; create/update/delete only after user approval through task-management's execution path.`,
     "- Maru itself must not call Google APIs; the skill may perform read-only Google Tasks/Calendar lookup in review mode.",

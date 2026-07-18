@@ -1,5 +1,6 @@
 import { Clock3, Square } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { useTranslation } from "../../lib/i18n";
 import { useElapsed } from "../../lib/missionProgress";
 import type { MissionRecord } from "../../lib/types";
 import { formatShortDate } from "./processedFormat";
@@ -10,8 +11,8 @@ export function ProcessingMissionsPanel({
   missions,
   logLines,
   onStop,
-  emptyLabel = "No active inbox process.",
-  waitingLabel = "Waiting for output...",
+  emptyLabel,
+  waitingLabel,
 }: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -19,12 +20,15 @@ export function ProcessingMissionsPanel({
   emptyLabel?: string;
   waitingLabel?: string;
 }) {
+  const { t } = useTranslation();
+  const resolvedEmptyLabel = emptyLabel ?? t("inbox.missions.empty");
+  const resolvedWaitingLabel = waitingLabel ?? t("inbox.missions.waiting");
   return (
     <div className="processing-panel">
       {missions.length === 0 ? (
         <div className="processing-empty">
           <Clock3 size={16} />
-          <span>{emptyLabel}</span>
+          <span>{resolvedEmptyLabel}</span>
         </div>
       ) : null}
       {missions.map((mission) => (
@@ -32,7 +36,7 @@ export function ProcessingMissionsPanel({
           key={mission.id}
           mission={mission}
           lines={logLines[mission.id] ?? EMPTY_LINES}
-          waitingLabel={waitingLabel}
+          waitingLabel={resolvedWaitingLabel}
           onStop={onStop}
         />
       ))}
@@ -51,6 +55,7 @@ function MissionCard({
   waitingLabel: string;
   onStop: (id: string) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const logRef = useRef<HTMLPreElement>(null);
   const active = mission.status === "running" || mission.status === "idle";
   const elapsed = useElapsed(mission.startedAt, active);
@@ -73,10 +78,10 @@ function MissionCard({
           type="button"
           className="button button-ghost button-sm"
           onClick={() => void onStop(mission.id)}
-          title="Stop processing"
+          title={t("mission.stop")}
         >
           <Square size={12} />
-          <span>Stop</span>
+          <span>{t("inbox.progress.stop")}</span>
         </button>
       </div>
       <pre className="processing-log" ref={logRef}>

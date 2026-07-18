@@ -38,9 +38,9 @@ export function ProcessedItemsBrowser({
   query,
   detail,
   channelFilter = null,
-  emptyTitle = "No processed items",
-  emptyDescription = "Done, failed, and duplicate items from inbox/items will appear here.",
-  searchPlaceholder = "Search processed items",
+  emptyTitle,
+  emptyDescription,
+  searchPlaceholder,
   onStatusFilter,
   onQuery,
   onRefresh,
@@ -50,6 +50,9 @@ export function ProcessedItemsBrowser({
 }: ProcessedItemsBrowserProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<ProcessedDetailTab>("summary");
+  const resolvedEmptyTitle = emptyTitle ?? t("inbox.processed.empty.title");
+  const resolvedEmptyDescription = emptyDescription ?? t("inbox.processed.empty.description");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("inbox.processed.searchPlaceholder");
   const visibleItems = useMemo(
     () => (channelFilter ? items.filter((item) => item.channel === channelFilter) : items),
     [items, channelFilter],
@@ -57,7 +60,7 @@ export function ProcessedItemsBrowser({
   return (
     <>
       <div className="processed-toolbar">
-        <div className="processed-status-chips" role="toolbar" aria-label="Processed status">
+        <div className="processed-status-chips" role="toolbar" aria-label={t("inbox.processed.statusFilter")}>
           {(["all", "done", "failed", "duplicate"] as Array<InboxProcessedStatus | "all">).map((status) => (
             <button
               type="button"
@@ -65,7 +68,7 @@ export function ProcessedItemsBrowser({
               className={statusFilter === status ? "inbox-filter-chip active" : "inbox-filter-chip"}
               onClick={() => onStatusFilter(status)}
             >
-              {statusLabel(status)}
+              {processedStatusLabel(status, t)}
             </button>
           ))}
         </div>
@@ -74,7 +77,7 @@ export function ProcessedItemsBrowser({
           <input
             value={query}
             onChange={(event) => onQuery(event.target.value)}
-            placeholder={searchPlaceholder}
+            placeholder={resolvedSearchPlaceholder}
             spellCheck={false}
           />
         </label>
@@ -82,21 +85,21 @@ export function ProcessedItemsBrowser({
           type="button"
           className="icon-button"
           onClick={onRefresh}
-          title="Refresh processed items"
-          aria-label="Refresh processed items"
+          title={t("inbox.processed.refresh")}
+          aria-label={t("inbox.processed.refresh")}
         >
           <RefreshCcw size={14} />
         </button>
       </div>
       <div className="processed-layout">
         <div className="processed-list">
-          {loading ? <div className="inbox-empty">Loading processed items...</div> : null}
+          {loading ? <div className="inbox-empty">{t("inbox.processed.loading")}</div> : null}
           {error ? <div className="inbox-error gmail-error">{error}</div> : null}
           {!loading && !error && visibleItems.length === 0 ? (
             <div className="inbox-empty">
               <FileText size={22} />
-              <strong>{emptyTitle}</strong>
-              <span>{emptyDescription}</span>
+              <strong>{resolvedEmptyTitle}</strong>
+              <span>{resolvedEmptyDescription}</span>
             </div>
           ) : null}
           {visibleItems.map((item) => (
@@ -112,7 +115,7 @@ export function ProcessedItemsBrowser({
                 onContextMenu={onContextMenu ? (event) => onContextMenu(event, item) : undefined}
               >
                 <div className="processed-row-title">
-                  <span className={`status-chip ${item.status}`}>{statusLabel(item.status)}</span>
+                  <span className={`status-chip ${item.status}`}>{processedStatusLabel(item.status, t)}</span>
                   <strong>{item.title || item.id}</strong>
                 </div>
                 <div className="processed-row-meta">
@@ -155,4 +158,12 @@ export function ProcessedItemsBrowser({
       </div>
     </>
   );
+}
+
+const TRANSLATED_STATUSES = new Set(["all", "done", "failed", "duplicate"]);
+
+function processedStatusLabel(status: string, t: (key: string) => string): string {
+  return TRANSLATED_STATUSES.has(status)
+    ? t(`inbox.processed.status.${status}`)
+    : statusLabel(status);
 }

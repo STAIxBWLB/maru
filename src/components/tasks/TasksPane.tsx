@@ -429,8 +429,12 @@ export function TasksPane({
   }, [dispatchTaskSkill, effectiveSettings, selectedEntry]);
 
   const openNaturalScheduleSkill = useCallback(
-    async (rawText: string) => {
-      await dispatchTaskSkill("schedule", buildTaskManagementSchedulePrompt(rawText, effectiveSettings), []);
+    async (rawText: string, parsedStart: string | null) => {
+      await dispatchTaskSkill(
+        "schedule",
+        buildTaskManagementSchedulePrompt(rawText, effectiveSettings, parsedStart),
+        [],
+      );
     },
     [dispatchTaskSkill, effectiveSettings],
   );

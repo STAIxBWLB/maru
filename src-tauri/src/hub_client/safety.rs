@@ -77,8 +77,8 @@ fn contains_pii(s: &str) -> bool {
     false
 }
 
-/// Public deployment에서 real-name 매칭 검사.
-#[allow(dead_code)]
+/// Public deployment에서 real-name 매칭 검사. `hub_submit_gate`가
+/// `deployment_mode: public`일 때 payload 필드에 적용한다.
 pub fn check_public_safe(s: &str) -> Result<(), String> {
     for pattern in REAL_NAME_PATTERNS {
         if s.contains(pattern) {

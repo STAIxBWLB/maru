@@ -9,6 +9,7 @@ import type {
 } from "../../lib/calendar/types";
 import type { DocumentLabelMode } from "../../lib/settings";
 import { resolveDisplayLabel } from "../../lib/document";
+import { t } from "../../lib/i18n";
 
 interface UpcomingEventsSidebarProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
@@ -51,7 +52,7 @@ export function UpcomingEventsSidebar<T>({
           <span>{rangeLabel}</span>
         </header>
         <p className="cal-sidebar-empty">
-          {emptyLabel ?? (locale === "ko" ? "다가오는 일정 없음" : "Nothing upcoming")}
+          {emptyLabel ?? t(locale, "calendar.sidebar.empty")}
         </p>
       </aside>
     );
@@ -111,14 +112,7 @@ export function UpcomingEventsSidebar<T>({
 }
 
 function sidebarHeading(view: CalendarView, locale: CalendarLocale): string {
-  if (locale === "ko") {
-    if (view === "day") return "일별 목록";
-    if (view === "week") return "주간 목록";
-    return "월간 목록";
-  }
-  if (view === "day") return "Day agenda";
-  if (view === "week") return "Week agenda";
-  return "Month agenda";
+  return t(locale, `calendar.sidebar.heading.${view}`);
 }
 
 function sidebarRangeLabel(
