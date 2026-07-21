@@ -286,7 +286,7 @@ fn spawn_preview(target: &str) -> Result<(), String> {
     )
 }
 
-fn require_existing_file(path: &Path) -> Result<(), String> {
+pub(crate) fn require_existing_file(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("Target does not exist: {}", path.display()));
     }

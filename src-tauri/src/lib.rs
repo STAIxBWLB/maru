@@ -19,6 +19,7 @@ mod frontmatter;
 mod git;
 mod gmail_gws;
 mod graph_authoring;
+mod html_editor;
 mod hub_client;
 mod inbox;
 mod inbox_classifier;
@@ -99,6 +100,7 @@ use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
 use graph_authoring::{graph_link_apply, graph_link_preview};
+use html_editor::prepare_html_editor_assets;
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
@@ -369,6 +371,7 @@ pub fn run() {
             binary_viewer_extract_hwpx,
             binary_viewer_open_external,
             binary_viewer_preview_external,
+            prepare_html_editor_assets,
             bootstrap_maru_dir,
             read_maru_workspace,
             update_maru_workspace,

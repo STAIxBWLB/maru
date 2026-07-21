@@ -2134,6 +2134,25 @@ export async function binaryViewerPrepareAsset(
   });
 }
 
+export interface PrepareHtmlEditorAssetsResult {
+  documentDirectory: string;
+}
+
+export async function prepareHtmlEditorAssets(
+  vaultPath: string,
+  documentPath: string,
+): Promise<PrepareHtmlEditorAssetsResult> {
+  if (!isTauri()) {
+    // Browser-mock mode (vitest/jsdom, e2e mocks): no asset protocol exists, so
+    // report no directory — the runtime document then keeps URLs untouched.
+    return { documentDirectory: "" };
+  }
+  return invoke<PrepareHtmlEditorAssetsResult>("prepare_html_editor_assets", {
+    vaultPath,
+    documentPath,
+  });
+}
+
 export async function binaryViewerReadText(
   vaultPath: string,
   targetPath: string,

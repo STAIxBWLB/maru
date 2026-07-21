@@ -6,6 +6,8 @@ use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, Recursiv
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::vault::is_document_extension;
+
 #[derive(Default)]
 pub struct VaultWatcherState(pub Mutex<Option<RecommendedWatcher>>);
 
@@ -34,10 +36,10 @@ fn relevant_path(path: &Path, root: &Path) -> bool {
     if rel == Path::new(".maruignore") {
         return true;
     }
-    matches!(
-        path.extension().and_then(|extension| extension.to_str()),
-        Some("md" | "markdown" | "html" | "htm")
-    )
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(is_document_extension)
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -143,5 +145,13 @@ mod tests {
             Path::new("/work/node_modules/readme.md"),
             root
         ));
+    }
+
+    #[test]
+    fn accepts_uppercase_document_extensions() {
+        let root = Path::new("/work");
+        assert!(relevant_path(Path::new("/work/notes/a.HTML"), root));
+        assert!(relevant_path(Path::new("/work/notes/a.MD"), root));
+        assert!(!relevant_path(Path::new("/work/notes/a.txt"), root));
     }
 }

@@ -40,7 +40,8 @@ import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
-import { EditorPane, type EditorViewMode } from "./components/EditorPane";
+import { EditorPane, type EditorViewMode, type HtmlViewMode } from "./components/EditorPane";
+import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
 import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
@@ -980,6 +981,14 @@ function MainApp() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>(
     DEFAULT_MARU_SETTINGS.ui.editorViewMode,
   );
+  // HTML document tabs: per pane+tab view mode, never persisted. Keyed
+  // `${group}:${tabId}` so the two split panes stay independent.
+  const [htmlPaneModes, setHtmlPaneModes] = useState<
+    Record<string, { mode: HtmlViewMode; riskAckDigest?: string | null }>
+  >({});
+  // Only the active tab of each pane is mounted, so per-pane flush refs suffice.
+  const leftHtmlFlushRef = useRef<HtmlEditorFlushHandle | null>(null);
+  const rightHtmlFlushRef = useRef<HtmlEditorFlushHandle | null>(null);
   const [rightPaneTab, setRightPaneTab] = useState<RightPaneTab>(
     DEFAULT_MARU_SETTINGS.ui.rightPaneTab,
   );
@@ -1606,7 +1615,29 @@ function MainApp() {
     setTabs((prev) =>
       prev.map((tab) => (tab.id === tabId ? { ...tab, draftContent: content } : tab)),
     );
+    // Patch tabsRef synchronously so dirty-check readers (hasDirtyDrafts,
+    // onCloseRequested) see an HTML WYSIWYG flush immediately.
+    tabsRef.current = tabsRef.current.map((tab) =>
+      tab.id === tabId ? { ...tab, draftContent: content } : tab,
+    );
   }, []);
+
+  // Flush the live HTML WYSIWYG editor showing `tabId` (if any) so pending
+  // iframe edits land in the draft before save/snapshot/close/mode-switch.
+  // flushNow routes through onChange -> updateTabDraft; returns the serialized
+  // content, or null when the tab is not mounted in a visual HTML editor.
+  const flushHtmlDraft = useCallback(
+    (tabId: string): string | null => {
+      const flushRef =
+        leftResolvedTabId === tabId
+          ? leftHtmlFlushRef
+          : rightResolvedTabId === tabId
+            ? rightHtmlFlushRef
+            : null;
+      return flushRef?.current?.flushNow() ?? null;
+    },
+    [leftResolvedTabId, rightResolvedTabId],
+  );
 
   const activateEditorTab = useCallback((tabId: string, group: EditorGroupId = focusedEditorGroup) => {
     if (group === "right") {
@@ -1742,10 +1773,13 @@ function MainApp() {
     tabsRef.current = tabs;
   }, [tabs]);
 
-  const hasDirtyDrafts = useCallback(
-    () => tabsRef.current.some((tab) => tab.draftContent !== tab.document.content),
-    [],
-  );
+  const hasDirtyDrafts = useCallback(() => {
+    // Flush live HTML WYSIWYG editors first; updateTabDraft patches tabsRef
+    // synchronously, so the dirty check below sees fresh iframe edits.
+    leftHtmlFlushRef.current?.flushNow();
+    rightHtmlFlushRef.current?.flushNow();
+    return tabsRef.current.some((tab) => tab.draftContent !== tab.document.content);
+  }, []);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
     try {
@@ -4955,8 +4989,11 @@ function MainApp() {
   }, [discardedEdit]);
 
   const saveTab = useCallback(async (tabId: string | null) => {
+    const flushed = tabId ? flushHtmlDraft(tabId) : null;
     const target = tabs.find((tab) => tab.id === tabId);
-    if (!target || target.draftContent === target.document.content) return;
+    if (!target) return;
+    const draft = flushed ?? target.draftContent;
+    if (draft === target.document.content) return;
     const workspace = workspaceRegistry.workspaces.find(
       (item) => item.path === target.workspacePath,
     );
@@ -4974,7 +5011,7 @@ function MainApp() {
       const saved = await saveDocument(
         target.workspacePath,
         target.document.path,
-        target.draftContent,
+        draft,
         target.document.revision ?? null,
       );
       const fresh = await scanVault(target.workspacePath, scanOptions);
@@ -4996,6 +5033,7 @@ function MainApp() {
   }, [
     t,
     tabs,
+    flushHtmlDraft,
     refreshWorkspaceFiles,
     scanOptions,
     updateWorkspaceState,
@@ -5007,6 +5045,7 @@ function MainApp() {
   }, [resolvedActiveTabId, saveTab]);
 
   const snapshotTab = useCallback(async (tabId: string | null) => {
+    const flushed = tabId ? flushHtmlDraft(tabId) : null;
     const target = tabs.find((tab) => tab.id === tabId);
     if (!target) return;
     const workspace = workspaceRegistry.workspaces.find(
@@ -5026,7 +5065,7 @@ function MainApp() {
         target.workspacePath,
         target.document.path,
         target.document.title,
-        target.draftContent,
+        flushed ?? target.draftContent,
         t("snapshot.summary"),
       );
       const fresh = await scanVault(target.workspacePath, scanOptions);
@@ -5046,6 +5085,7 @@ function MainApp() {
   }, [
     t,
     tabs,
+    flushHtmlDraft,
     refreshWorkspaceFiles,
     scanOptions,
     updateWorkspaceState,
@@ -5880,13 +5920,15 @@ function MainApp() {
     (tabId: string) => {
       if (!orderedAnyTabs.some((tab) => tab.id === tabId)) return;
       const fallbackId = nextFallbackTabIdAfterClose(orderedAnyTabs, [tabId], tabId);
+      const flushed = flushHtmlDraft(tabId);
       const closing = tabs.find((tab) => tab.id === tabId);
-      if (closing && closing.draftContent !== closing.document.content) {
+      const closingDraft = closing ? (flushed ?? closing.draftContent) : null;
+      if (closing && closingDraft !== null && closingDraft !== closing.document.content) {
         setDiscardedEdit({
           workspacePath: closing.workspacePath,
           visibility: closing.visibility,
           entry: closing.entry,
-          draft: closing.draftContent,
+          draft: closingDraft,
         });
       }
       setTabs((prev) => prev.filter((tab) => tab.id !== tabId));
@@ -5897,6 +5939,7 @@ function MainApp() {
       if (resolvedActiveTabId === tabId) setActiveTabId(fallbackId);
     },
     [
+      flushHtmlDraft,
       leftResolvedTabId,
       orderedAnyTabs,
       resolvedActiveTabId,
@@ -5909,15 +5952,21 @@ function MainApp() {
     (tabIds: string[]) => {
       const closeSet = new Set(tabIds);
       if (closeSet.size === 0) return;
-      const dirtyClosing = tabs.find(
-        (tab) => closeSet.has(tab.id) && tab.draftContent !== tab.document.content,
-      );
+      let dirtyClosing: { tab: EditorTab; draft: string } | null = null;
+      for (const tab of tabs) {
+        if (!closeSet.has(tab.id)) continue;
+        const draft = flushHtmlDraft(tab.id) ?? tab.draftContent;
+        if (draft !== tab.document.content) {
+          dirtyClosing = { tab, draft };
+          break;
+        }
+      }
       if (dirtyClosing) {
         setDiscardedEdit({
-          workspacePath: dirtyClosing.workspacePath,
-          visibility: dirtyClosing.visibility,
-          entry: dirtyClosing.entry,
-          draft: dirtyClosing.draftContent,
+          workspacePath: dirtyClosing.tab.workspacePath,
+          visibility: dirtyClosing.tab.visibility,
+          entry: dirtyClosing.tab.entry,
+          draft: dirtyClosing.draft,
         });
       }
       const maruId =
@@ -5940,6 +5989,7 @@ function MainApp() {
       }
     },
     [
+      flushHtmlDraft,
       leftResolvedTabId,
       orderedAnyTabs,
       resolvedActiveTabId,
@@ -7072,6 +7122,8 @@ function MainApp() {
         docTab?.document.relPath.startsWith("notes/") &&
         docTab.document.relPath.toLowerCase().endsWith(".md"),
     );
+    const htmlKey = docTab ? `${group}:${docTab.id}` : null;
+    const htmlState = htmlKey ? htmlPaneModes[htmlKey] : undefined;
     const binaryBody = binaryTab ? (
       <BinaryViewerPane
         entry={binaryTab.fileEntry}
@@ -7140,6 +7192,26 @@ function MainApp() {
         onViewModeChange={setPersistedEditorViewMode}
         onWikilinkClick={handleWikilinkClick}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
+        vaultPath={docTab?.workspacePath ?? null}
+        htmlViewMode={htmlState?.mode ?? "visual"}
+        onHtmlViewModeChange={(mode) => {
+          if (!docTab || !htmlKey) return;
+          flushHtmlDraft(docTab.id);
+          setHtmlPaneModes((prev) => ({ ...prev, [htmlKey]: { ...prev[htmlKey], mode } }));
+        }}
+        htmlRiskAckDigest={htmlState?.riskAckDigest ?? null}
+        onHtmlRiskAck={(digest) => {
+          if (!htmlKey) return;
+          setHtmlPaneModes((prev) => ({
+            ...prev,
+            [htmlKey]: {
+              ...prev[htmlKey],
+              mode: prev[htmlKey]?.mode ?? "visual",
+              riskAckDigest: digest,
+            },
+          }));
+        }}
+        htmlFlushRef={group === "left" ? leftHtmlFlushRef : rightHtmlFlushRef}
       />
     );
   };

@@ -1,6 +1,6 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
-use crate::vault::{parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
+use crate::vault::{is_document_extension, parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
 use crate::vault_guard::{is_managed_root, validate_managed_write};
 use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
@@ -143,6 +143,10 @@ pub fn save_document(
         let current =
             fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
         assert_expected_revision(&current, expected_revision.as_deref())?;
+    } else if let Some(expected) = expected_revision.as_deref() {
+        return Err(format!(
+            "document_conflict: expected revision {expected}, file is missing"
+        ));
     }
     // Managed roots snapshot the on-disk content before every overwrite
     // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
@@ -177,6 +181,14 @@ pub fn update_frontmatter_field(
     expected_revision: Option<String>,
 ) -> Result<DocumentPayload, String> {
     let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let is_html = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "html" | "htm"))
+        .unwrap_or(false);
+    if is_html {
+        return Err("frontmatter editing is not supported for HTML documents".to_string());
+    }
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
@@ -240,7 +252,7 @@ pub fn create_document(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(target) => validate_target_rel_path(target)?,
+        Some(target) => validate_target_rel_path(target, None)?,
         None => {
             let slug = slugify(&title);
             validate_filename_stem(&slug)?;
@@ -328,16 +340,29 @@ fn non_empty_string(value: &Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn validate_target_rel_path(target: &str) -> Result<String, String> {
+fn validate_target_rel_path(target: &str, fallback_ext: Option<&str>) -> Result<String, String> {
     let trimmed = target.trim().trim_matches('/');
     if trimmed.is_empty() || Path::new(trimmed).is_absolute() {
         return Err("Invalid document path".to_string());
     }
 
-    let without_ext = trimmed
-        .strip_suffix(".markdown")
-        .or_else(|| trimmed.strip_suffix(".md"))
-        .unwrap_or(trimmed);
+    // Preserve a recognized document extension (md/markdown/html/htm) with its
+    // original case; a target without one falls back to the caller's
+    // extension (e.g. the source file's on move), then `.md`.
+    let recognized_ext = Path::new(trimmed)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| is_document_extension(value));
+    let (without_ext, ext) = match recognized_ext {
+        Some(ext) => (
+            trimmed[..trimmed.len() - ext.len() - 1].to_string(),
+            ext.to_string(),
+        ),
+        None => (
+            trimmed.to_string(),
+            fallback_ext.unwrap_or("md").to_string(),
+        ),
+    };
     let parts: Vec<&str> = without_ext.split('/').collect();
     if parts.is_empty() {
         return Err("Invalid document path".to_string());
@@ -349,7 +374,7 @@ fn validate_target_rel_path(target: &str) -> Result<String, String> {
     let stem = parts[parts.len() - 1];
     validate_filename_stem(stem)?;
 
-    Ok(format!("{without_ext}.md"))
+    Ok(format!("{without_ext}.{ext}"))
 }
 
 #[tauri::command]
@@ -362,7 +387,8 @@ pub fn move_document(
     let vault = resolve_inside_vault(&vault_path, ".")?;
     ensure_existing_document(&source_path)?;
 
-    let rel_path = validate_target_rel_path(&target_rel_path)?;
+    let source_ext = source_path.extension().and_then(|value| value.to_str());
+    let rel_path = validate_target_rel_path(&target_rel_path, source_ext)?;
     let target_path = resolve_inside_vault(&vault_path, &rel_path)?;
     assert_document_owner(&vault_path, &source_path)?;
     assert_document_owner(&vault_path, &target_path)?;
@@ -468,6 +494,10 @@ fn unique_duplicate_path(source_path: &Path) -> PathBuf {
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("document");
+    let ext = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("md");
     let mut counter = 1;
     loop {
         let suffix = if counter == 1 {
@@ -475,7 +505,7 @@ fn unique_duplicate_path(source_path: &Path) -> PathBuf {
         } else {
             format!("-copy-{counter}")
         };
-        let candidate = parent.join(format!("{stem}{suffix}.md"));
+        let candidate = parent.join(format!("{stem}{suffix}.{ext}"));
         if !candidate.exists() {
             return candidate;
         }
@@ -494,6 +524,10 @@ fn unique_trash_path(source_path: &Path, vault: &Path) -> Result<PathBuf, String
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("document");
+    let ext = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("md");
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
     let trash_dir = vault
         .join(".maru")
@@ -503,9 +537,9 @@ fn unique_trash_path(source_path: &Path, vault: &Path) -> Result<PathBuf, String
     let base = format!("{stem}-{timestamp}");
     for counter in 1.. {
         let file_name = if counter == 1 {
-            format!("{base}.md")
+            format!("{base}.{ext}")
         } else {
-            format!("{base}-{counter}.md")
+            format!("{base}-{counter}.{ext}")
         };
         let candidate = trash_dir.join(file_name);
         if !candidate.exists() {
@@ -546,14 +580,19 @@ pub(crate) fn write_version_snapshot(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("document");
+    let ext = source_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("md");
     let timestamp = Utc::now();
     let version_dir = vault.join(".maru").join("versions");
     fs::create_dir_all(&version_dir)
         .map_err(|err| format!("Cannot create version directory: {err}"))?;
     let file_name = format!(
-        "{stem}-{}-{}.md",
+        "{stem}-{}-{}.{}",
         timestamp.format("%Y%m%d-%H%M%S%.3f"),
-        Uuid::new_v4().simple()
+        Uuid::new_v4().simple(),
+        ext
     );
     let version_path = version_dir.join(file_name);
 
@@ -1019,5 +1058,118 @@ mod tests {
             fs::read_to_string(deleted.trash_path).unwrap(),
             "# Weekly\n"
         );
+    }
+
+    #[test]
+    fn move_document_preserves_html_extension_and_case() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let source = tmp.path().join("notes").join("page.HTML");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "<html><body>hi</body></html>").unwrap();
+
+        // Target without an extension falls back to the source extension.
+        let payload = move_document(
+            root.clone(),
+            "notes/page.HTML".to_string(),
+            "archive/renamed".to_string(),
+        )
+        .unwrap();
+        assert_eq!(payload.rel_path, "archive/renamed.HTML");
+        assert!(tmp.path().join("archive").join("renamed.HTML").exists());
+
+        // An explicit recognized extension is kept as given.
+        let payload = move_document(
+            root,
+            "archive/renamed.HTML".to_string(),
+            "archive/final.htm".to_string(),
+        )
+        .unwrap();
+        assert_eq!(payload.rel_path, "archive/final.htm");
+        assert!(tmp.path().join("archive").join("final.htm").exists());
+    }
+
+    #[test]
+    fn duplicate_document_preserves_html_extension_and_case() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("page.HTML"), "<html></html>").unwrap();
+
+        let payload = duplicate_document(root, "page.HTML".to_string()).unwrap();
+
+        assert_eq!(payload.rel_path, "page-copy.HTML");
+        assert!(tmp.path().join("page-copy.HTML").exists());
+    }
+
+    #[test]
+    fn trash_document_preserves_html_extension() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("page.htm"), "<html></html>").unwrap();
+
+        let deleted = trash_document(root, "page.htm".to_string()).unwrap();
+
+        assert!(deleted.trash_rel_path.ends_with(".htm"));
+        assert!(Path::new(&deleted.trash_path).exists());
+    }
+
+    #[test]
+    fn create_version_snapshot_uses_source_extension() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("page.HTML"), "<html></html>").unwrap();
+
+        let snapshot = create_version(
+            root,
+            "page.HTML".to_string(),
+            "page".to_string(),
+            "<html></html>".to_string(),
+            "manual snapshot".to_string(),
+        )
+        .unwrap();
+
+        assert!(snapshot.rel_path.ends_with(".HTML"));
+        assert!(Path::new(&snapshot.path).exists());
+    }
+
+    #[test]
+    fn update_frontmatter_field_rejects_html_documents() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("page.html"), "<html></html>").unwrap();
+
+        let error = update_frontmatter_field(
+            root,
+            "page.html".to_string(),
+            "status".to_string(),
+            Some(FieldInput::Str("done".to_string())),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "frontmatter editing is not supported for HTML documents"
+        );
+    }
+
+    #[test]
+    fn save_document_with_expected_revision_and_missing_file_conflicts() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+
+        let error = save_document(
+            root,
+            "ghost.md".to_string(),
+            "# New\n".to_string(),
+            Some("abc123".to_string()),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "document_conflict: expected revision abc123, file is missing"
+        );
+        assert!(!tmp.path().join("ghost.md").exists());
     }
 }
