@@ -232,9 +232,9 @@ pnpm clean:tauri-debug
 cd src-tauri && cargo test
 # or: make test-rust  (cargo test --lib)
 
-# Frontend unit tests (vitest, 87 test files / 638 tests):
+# Frontend unit tests (vitest, 101 test files / 788 tests):
 pnpm test
-# End-to-end (Playwright, 7 specs):
+# End-to-end (Playwright, 9 specs):
 pnpm test:e2e
 
 # Local Maru MCP sidecar smoke:

@@ -32,7 +32,7 @@ pub enum TaskBucket {
 }
 
 impl TaskBucket {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             TaskBucket::Active => "active",
             TaskBucket::Backlog => "backlog",
@@ -203,7 +203,7 @@ pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMet
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
     let parts = parse_frontmatter(&raw);
-    let frontmatter_json = yaml_to_json(&parts.meta);
+    let frontmatter_json = normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta));
     let preview = parts.body.lines().take(200).collect::<Vec<_>>().join("\n");
     Ok(TaskMetadata {
         rel_path,
@@ -491,7 +491,7 @@ fn task_row_for_path(work: &Path, path: &Path, bucket: TaskBucket) -> Result<Tas
             .ok()
             .map(DateTime::<Utc>::from)
             .map(|value| value.to_rfc3339()),
-        frontmatter: yaml_to_json(&parts.meta),
+        frontmatter: normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta)),
     })
 }
 
@@ -553,10 +553,14 @@ fn should_enter_task_path(path: &Path, root: &Path) -> bool {
         return true;
     }
     let rel = path.strip_prefix(root).unwrap_or(path);
-    !rel.components().any(|component| {
+    !rel.components().enumerate().any(|(index, component)| {
         matches!(component, Component::Normal(value) if {
             let segment = value.to_string_lossy();
-            segment.starts_with('.') || segment.starts_with('_')
+            // Hidden/_-prefixed segments anywhere; `daily` journals at the
+            // top level (tasks/daily is Maru Today output, not a task note).
+            segment.starts_with('.')
+                || segment.starts_with('_')
+                || (index == 0 && segment == "daily")
         })
     })
 }
@@ -583,7 +587,7 @@ fn resolve_config_path(work: &Path, raw: &str) -> PathBuf {
     }
 }
 
-fn resolve_tasks_root(work: &Path, raw: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_tasks_root(work: &Path, raw: &str) -> Result<PathBuf, String> {
     let candidate = lexical_normalize(&resolve_config_path(work, raw));
     if candidate.starts_with(work) {
         return Ok(candidate);
@@ -650,7 +654,8 @@ fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
 
 fn parse_task_status(value: &str) -> Option<TaskStatus> {
     match value.trim().to_lowercase().replace('_', "-").as_str() {
-        "active" => Some(TaskStatus::Active),
+        // `open` is the legacy pre-canonical alias for active tasks.
+        "open" | "active" => Some(TaskStatus::Active),
         "in-progress" => Some(TaskStatus::InProgress),
         "done" => Some(TaskStatus::Done),
         "cancelled" => Some(TaskStatus::Cancelled),
@@ -659,7 +664,56 @@ fn parse_task_status(value: &str) -> Option<TaskStatus> {
     }
 }
 
-fn target_path_for_bucket(
+/// Legacy completion-date aliases, checked in order. `done` is canonical and
+/// needs no alias. Nothing is invented when no alias holds a value.
+const COMPLETED_AT_ALIASES: [&str; 3] = ["completed", "completed_at", "dateCompleted"];
+
+/// Read-side normalization for legacy frontmatter aliases. Additive only:
+/// canonical fields (`project`, `completedAt`) are derived from legacy
+/// aliases when missing; the original keys stay untouched and writers keep
+/// emitting canonical fields only.
+pub(crate) fn normalize_task_frontmatter_aliases(mut frontmatter: JsonValue) -> JsonValue {
+    let Some(map) = frontmatter.as_object_mut() else {
+        return frontmatter;
+    };
+    if !map.contains_key("project") {
+        if let Some(first) = map
+            .get("projects")
+            .and_then(JsonValue::as_array)
+            .and_then(|items| {
+                items
+                    .iter()
+                    .filter_map(JsonValue::as_str)
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+            })
+        {
+            map.insert(
+                "project".to_string(),
+                JsonValue::String(first.to_string()),
+            );
+        }
+    }
+    if !map.contains_key("completedAt") {
+        for alias in COMPLETED_AT_ALIASES {
+            let Some(value) = map.get(alias) else {
+                continue;
+            };
+            let text = match value {
+                JsonValue::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+                // Boolean `completed: true` carries no date — never invent one.
+                _ => None,
+            };
+            if let Some(text) = text {
+                map.insert("completedAt".to_string(), JsonValue::String(text));
+                break;
+            }
+        }
+    }
+    frontmatter
+}
+
+pub(crate) fn target_path_for_bucket(
     tasks_root: &Path,
     path: &Path,
     target_bucket: TaskBucket,
@@ -691,7 +745,7 @@ fn target_path_for_bucket(
     }
 }
 
-fn bucket_from_task_path(tasks_root: &Path, path: &Path) -> Result<TaskBucket, String> {
+pub(crate) fn bucket_from_task_path(tasks_root: &Path, path: &Path) -> Result<TaskBucket, String> {
     let rel = path
         .strip_prefix(tasks_root)
         .map_err(|_| "task_not_under_tasks_root".to_string())?;
@@ -709,7 +763,7 @@ fn bucket_from_rel_path(rel_path: &str) -> Option<TaskBucket> {
         .find_map(TaskBucket::parse)
 }
 
-fn conflict_free_path(path: &Path) -> PathBuf {
+pub(crate) fn conflict_free_path(path: &Path) -> PathBuf {
     if !path.exists() {
         return path.to_path_buf();
     }
@@ -768,14 +822,14 @@ fn rel_path_for(work: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn yaml_to_json(value: &BTreeMap<String, YamlValue>) -> JsonValue {
+pub(crate) fn yaml_to_json(value: &BTreeMap<String, YamlValue>) -> JsonValue {
     serde_json::to_value(value)
         .ok()
         .filter(JsonValue::is_object)
         .unwrap_or_else(|| JsonValue::Object(JsonMap::new()))
 }
 
-fn string_field(value: &JsonValue, key: &str) -> Option<String> {
+pub(crate) fn string_field(value: &JsonValue, key: &str) -> Option<String> {
     let item = value.get(key)?;
     if let Some(text) = item.as_str() {
         let trimmed = text.trim();
@@ -834,6 +888,26 @@ mod tests {
         assert_eq!(rows[0].bucket, TaskBucket::Active);
         assert_eq!(rows[0].rel_path, "tasks/active/task.md");
         assert_eq!(rows[0].frontmatter["status"], json!("active"));
+    }
+
+    #[test]
+    fn scan_task_notes_excludes_daily_journals() {
+        let tmp = tempdir().unwrap();
+        let active = tmp.path().join("tasks/active");
+        let daily = tmp.path().join("tasks/daily");
+        fs::create_dir_all(&active).unwrap();
+        fs::create_dir_all(&daily).unwrap();
+        fs::write(active.join("task.md"), "---\nstatus: active\n---\n# Task").unwrap();
+        fs::write(daily.join("2026-07-21.md"), "# Today").unwrap();
+
+        let rows = scan_task_notes(tmp.path().to_string_lossy().to_string(), None).unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rel_path, "tasks/active/task.md");
+        // The path guard itself also rejects top-level `daily` segments.
+        let root = tmp.path().join("tasks");
+        assert!(!should_enter_task_path(&daily.join("2026-07-21.md"), &root));
+        assert!(should_enter_task_path(&active.join("task.md"), &root));
     }
 
     #[test]
@@ -1225,5 +1299,77 @@ mod tests {
         assert_eq!(rows[0].event, "sync");
         assert_eq!(rows[0].run_id.as_deref(), Some("r1"));
         assert_eq!(rows[0].skill.as_deref(), Some("task-management"));
+    }
+
+    #[test]
+    fn parse_task_status_accepts_legacy_open_alias() {
+        assert_eq!(parse_task_status("open"), Some(TaskStatus::Active));
+        assert_eq!(parse_task_status("Open"), Some(TaskStatus::Active));
+        assert_eq!(parse_task_status("OPEN"), Some(TaskStatus::Active));
+        // Canonical values unchanged.
+        assert_eq!(parse_task_status("active"), Some(TaskStatus::Active));
+        assert_eq!(parse_task_status("In_Progress"), Some(TaskStatus::InProgress));
+        assert_eq!(parse_task_status("bogus"), None);
+    }
+
+    #[test]
+    fn scan_rows_normalize_legacy_projects_alias_to_first_entry() {
+        let tmp = tempdir().unwrap();
+        let active = tmp.path().join("tasks/active");
+        fs::create_dir_all(&active).unwrap();
+        fs::write(
+            active.join("task.md"),
+            "---\nstatus: open\nprojects:\n  - alpha\n  - beta\n---\n# Task",
+        )
+        .unwrap();
+
+        let rows = scan_task_notes(tmp.path().to_string_lossy().to_string(), None).unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].frontmatter["project"], json!("alpha"));
+        // Original alias key stays untouched; writers never see `project` here.
+        assert!(rows[0].frontmatter["projects"].is_array());
+    }
+
+    #[test]
+    fn metadata_normalizes_completion_aliases_without_inventing_dates() {
+        let tmp = tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let dir = tmp.path().join("tasks/archive");
+        fs::create_dir_all(&dir).unwrap();
+
+        let cases = [
+            ("completed", "completed: 2026-07-01", "2026-07-01"),
+            ("completedAt", "completedAt: 2026-07-02", "2026-07-02"),
+            ("completed_at", "completed_at: 2026-07-03", "2026-07-03"),
+            ("dateCompleted", "dateCompleted: 2026-07-04", "2026-07-04"),
+        ];
+        for (name, field, expected) in cases {
+            fs::write(
+                dir.join(format!("{name}.md")),
+                format!("---\nstatus: done\n{field}\n---\n# Task"),
+            )
+            .unwrap();
+            let metadata =
+                read_task_metadata(work.clone(), format!("tasks/archive/{name}.md")).unwrap();
+            assert_eq!(
+                metadata.frontmatter["completedAt"],
+                json!(expected),
+                "alias {name}"
+            );
+        }
+
+        // Canonical `done` date stays canonical; no completedAt is invented.
+        fs::write(dir.join("done-only.md"), "---\nstatus: done\ndone: 2026-07-05\n---\n# Task")
+            .unwrap();
+        let metadata =
+            read_task_metadata(work.clone(), "tasks/archive/done-only.md".to_string()).unwrap();
+        assert_eq!(metadata.frontmatter["done"], json!("2026-07-05"));
+        assert!(metadata.frontmatter.get("completedAt").is_none());
+
+        // Boolean `completed: true` carries no date — none is invented.
+        fs::write(dir.join("flag.md"), "---\nstatus: done\ncompleted: true\n---\n# Task").unwrap();
+        let metadata = read_task_metadata(work, "tasks/archive/flag.md".to_string()).unwrap();
+        assert!(metadata.frontmatter.get("completedAt").is_none());
     }
 }

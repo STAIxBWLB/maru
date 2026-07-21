@@ -314,6 +314,20 @@ import {
 } from "./lib/settings";
 import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
+import {
+  todayLogicalDay,
+  todayNotifyNewDay,
+  todayOpen,
+  todayRollover,
+  type TodayRoute,
+} from "./lib/today";
+import {
+  resolveLaunchRoute,
+  resolveNewDayNotice,
+  resolveRouteForDayState,
+  todayAutoOpenKey,
+} from "./lib/todayRouting";
+import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
   openSettingsWindow,
@@ -378,7 +392,7 @@ const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then(
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
-const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
+const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
@@ -1056,6 +1070,21 @@ function MainApp() {
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_MARU_SETTINGS.ui.activeAppMode);
+  // Maru Today launch routing. "all" is the existing Tasks view; the Today
+  // pane interprets the other routes and persists them into the day
+  // snapshot (best-effort) once its snapshot is loaded.
+  const [todayRoute, setTodayRoute] = useState<TodayRoute>("all");
+  // New-day fallback banner: `pending` waits for the next window focus,
+  // `visible` renders the banner.
+  const [todayBannerPending, setTodayBannerPending] = useState(false);
+  const [todayBannerVisible, setTodayBannerVisible] = useState(false);
+  // Last logical day seen by the new-day watcher (boot seeds it too).
+  const todayLogicalDayRef = useRef<string | null>(null);
+  // Workspace whose boot auto-opened Today this launch. The settings-load
+  // effect re-applies the persisted mode after boot (and again when `booting`
+  // flips) — it must keep the auto-open decision instead of clobbering it.
+  // Cleared on the first explicit user mode change.
+  const todayAutoOpenPathRef = useRef<string | null>(null);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
@@ -1653,7 +1682,13 @@ function MainApp() {
       .then((settings) => {
         if (!cancelled) {
           setMaruSettings(settings);
-          setAppMode(settings.ui.activeAppMode);
+          // A boot-time Today auto-open beat this load; keep it instead of
+          // re-applying the persisted mode over it.
+          setAppMode(
+            todayAutoOpenPathRef.current === settingsWorkPath
+              ? "tasks"
+              : settings.ui.activeAppMode,
+          );
           setEditorViewMode(settings.ui.editorViewMode);
           setRightPaneTab(settings.ui.rightPaneTab);
           setSettingsLoaded(true);
@@ -1673,17 +1708,20 @@ function MainApp() {
   useEffect(() => {
     let dispose: (() => void) | null = null;
     void listenMaruSettingsUpdated((payload) => {
+      // Unrelated settings saves (layout, outline, …) echo back here with the
+      // stored activeAppMode; they must not clobber a boot Today auto-open.
+      const keepAutoOpenMode = () => todayAutoOpenPathRef.current === settingsWorkPath;
       if (payload.workPath === settingsWorkPath) {
         const next = normalizeMaruSettings(payload.settings);
         setMaruSettings(next);
-        setAppMode(next.ui.activeAppMode);
+        if (!keepAutoOpenMode()) setAppMode(next.ui.activeAppMode);
         setEditorViewMode(next.ui.editorViewMode);
         setRightPaneTab(next.ui.rightPaneTab);
       } else if (payload.globalChanged && settingsWorkPath) {
         void readMaruSettings(settingsWorkPath)
           .then((next) => {
             setMaruSettings(next);
-            setAppMode(next.ui.activeAppMode);
+            if (!keepAutoOpenMode()) setAppMode(next.ui.activeAppMode);
             setEditorViewMode(next.ui.editorViewMode);
             setRightPaneTab(next.ui.rightPaneTab);
           })
@@ -2087,6 +2125,7 @@ function MainApp() {
 
   const setPersistedAppMode = useCallback(
     (activeAppMode: AppMode) => {
+      todayAutoOpenPathRef.current = null; // explicit user choice from here on
       setAppMode(activeAppMode);
       updateSettings((current) => ({
         ...current,
@@ -4035,7 +4074,11 @@ function MainApp() {
               readMaruSettings(bootSettingsPath),
             );
             setMaruSettings(bootSettings);
-            setAppMode(bootSettings.ui.activeAppMode);
+            // A prior boot pass (StrictMode double-run) may already have
+            // auto-opened Today — keep that over the persisted mode.
+            if (todayAutoOpenPathRef.current === null) {
+              setAppMode(bootSettings.ui.activeAppMode);
+            }
             setEditorViewMode(bootSettings.ui.editorViewMode);
             setRightPaneTab(bootSettings.ui.rightPaneTab);
           } catch {
@@ -4049,6 +4092,60 @@ function MainApp() {
           registry.workspaces.find((workspace) => workspace.visibility === initialVisibility)?.path ??
           null;
         if (initialPath) {
+          // Maru Today: first-eligible-launch auto-open. Best-effort — any
+          // failure falls back to the normal persisted-mode restore above.
+          const todaySettings = bootSettings?.tasks.today;
+          if (todaySettings?.enabled && todaySettings.autoOpenFirstDailyLaunch) {
+            try {
+              const tasksSettings = bootSettings!.tasks;
+              const timezone = tasksSettings.timezone ?? "Asia/Seoul";
+              const nowIso = new Date().toISOString();
+              const info = await todayLogicalDay(
+                initialPath,
+                nowIso,
+                timezone,
+                todaySettings.dayStart,
+              );
+              todayLogicalDayRef.current = info.logicalDay;
+              const lastAutoOpenDay = window.localStorage.getItem(todayAutoOpenKey(initialPath));
+              if (lastAutoOpenDay !== info.logicalDay) {
+                // Close out a missed day boundary before inspecting the day.
+                await todayRollover(
+                  initialPath,
+                  nowIso,
+                  timezone,
+                  todaySettings.dayStart,
+                  todaySettings.sleepStart,
+                ).catch(() => null);
+                const snapshot = await todayOpen(
+                  initialPath,
+                  nowIso,
+                  timezone,
+                  todaySettings.dayStart,
+                  todaySettings.sleepStart,
+                );
+                const decision = resolveLaunchRoute({
+                  enabled: todaySettings.enabled,
+                  autoOpen: todaySettings.autoOpenFirstDailyLaunch,
+                  lastAutoOpenDay,
+                  logicalDay: info.logicalDay,
+                  dayState: snapshot.dayState,
+                  // The main-window boot has no explicit initial-mode
+                  // mechanism; explicit modes only exist in the separate
+                  // settings/skill-editor windows, which return earlier.
+                  explicitMode: false,
+                });
+                if (decision) {
+                  setTodayRoute(decision.route);
+                  setAppMode("tasks");
+                  todayAutoOpenPathRef.current = initialPath;
+                  window.localStorage.setItem(todayAutoOpenKey(initialPath), info.logicalDay);
+                }
+              }
+            } catch (err) {
+              console.warn("today auto-open skipped", err);
+            }
+          }
           const lastRel =
             typeof window !== "undefined"
               ? window.localStorage.getItem(lastOpenKeyForWorkspace(initialPath))
@@ -5451,9 +5548,141 @@ function MainApp() {
     setPersistedAppMode("meetings");
   }, [setPersistedAppMode]);
 
+  const openToday = useCallback(
+    (route: TodayRoute) => {
+      setTodayRoute(route);
+      setPersistedAppMode("tasks");
+    },
+    [setPersistedAppMode],
+  );
+
+  // Explicit user navigation to Tasks lands on All Tasks as today.
   const openTasks = useCallback(() => {
-    setPersistedAppMode("tasks");
-  }, [setPersistedAppMode]);
+    openToday("all");
+  }, [openToday]);
+
+  // Resolve the current day's route fresh (prepare vs execute) and open
+  // Today. Shared by the new-day banner button and the notification click.
+  const openTodayForCurrentDay = useCallback(() => {
+    const workPath = inboxWorkspacePath;
+    const todaySettings = effectiveTasksSettings.today;
+    if (!workPath || !todaySettings.enabled) {
+      openToday("prepare");
+      return;
+    }
+    void (async () => {
+      let route: TodayRoute = "prepare";
+      try {
+        const snapshot = await todayOpen(
+          workPath,
+          new Date().toISOString(),
+          effectiveTasksSettings.timezone ?? "Asia/Seoul",
+          todaySettings.dayStart,
+          todaySettings.sleepStart,
+        );
+        route = resolveRouteForDayState(snapshot.dayState);
+      } catch (err) {
+        console.warn("today route resolution failed", err);
+      }
+      openToday(route);
+    })();
+  }, [inboxWorkspacePath, effectiveTasksSettings, openToday]);
+
+  // Maru Today: logical-day (03:30) watcher. Recomputes the logical day every
+  // minute; on a boundary crossed while running, rolls the store over and
+  // surfaces the new day exactly once (native notification, else banner).
+  useEffect(() => {
+    const workPath = inboxWorkspacePath;
+    const todaySettings = effectiveTasksSettings.today;
+    if (!workPath || !todaySettings.enabled) return;
+    const timezone = effectiveTasksSettings.timezone ?? "Asia/Seoul";
+    let cancelled = false;
+
+    const tick = async () => {
+      let info;
+      try {
+        info = await todayLogicalDay(
+          workPath,
+          new Date().toISOString(),
+          timezone,
+          todaySettings.dayStart,
+        );
+      } catch {
+        return; // non-desktop backend or workspace without .maru — stay silent
+      }
+      if (cancelled) return;
+      const previous = todayLogicalDayRef.current;
+      todayLogicalDayRef.current = info.logicalDay;
+      // First tick only seeds the ref; startup is handled by the boot path.
+      if (previous === null || previous === info.logicalDay) return;
+      const nowIso = new Date().toISOString();
+      await todayRollover(
+        workPath,
+        nowIso,
+        timezone,
+        todaySettings.dayStart,
+        todaySettings.sleepStart,
+      ).catch((err) => console.warn("today rollover failed", err));
+      if (!todaySettings.notificationEnabled) return;
+      let sent = false;
+      try {
+        const outcome = await todayNotifyNewDay(
+          workPath,
+          info.logicalDay,
+          t("today.notify.newDayTitle"),
+          t("today.notify.newDayBody"),
+        );
+        sent = outcome.sent;
+      } catch (err) {
+        console.warn("today notification failed", err);
+      }
+      if (
+        resolveNewDayNotice({
+          notificationEnabled: todaySettings.notificationEnabled,
+          sent,
+        }) === "banner"
+      ) {
+        setTodayBannerPending(true);
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [inboxWorkspacePath, effectiveTasksSettings, t]);
+
+  // Show the pending new-day banner on the next window focus.
+  useEffect(() => {
+    if (!todayBannerPending || todayBannerVisible) return;
+    const show = () => setTodayBannerVisible(true);
+    window.addEventListener("focus", show);
+    return () => window.removeEventListener("focus", show);
+  }, [todayBannerPending, todayBannerVisible]);
+
+  // Native notification click → open Today. Best-effort: the plugin listener
+  // only exists in the desktop backend; the banner covers everything else.
+  useEffect(() => {
+    let cancelled = false;
+    let unregister: (() => void) | null = null;
+    onNotificationAction(() => {
+      openTodayForCurrentDay();
+    })
+      .then((listener) => {
+        if (cancelled) {
+          void listener.unregister();
+          return;
+        }
+        unregister = () => void listener.unregister();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unregister?.();
+    };
+  }, [openTodayForCurrentDay]);
 
   const openSites = useCallback(() => {
     setPersistedAppMode("sites");
@@ -7250,6 +7479,36 @@ function MainApp() {
           </button>
         </header>
 
+        {todayBannerVisible && (
+          <div className="today-banner" role="status">
+            <p>{t("today.banner.newDay")}</p>
+            <div className="today-banner-actions">
+              <button
+                type="button"
+                className="today-banner-open"
+                onClick={() => {
+                  setTodayBannerVisible(false);
+                  setTodayBannerPending(false);
+                  openTodayForCurrentDay();
+                }}
+              >
+                {t("today.banner.openToday")}
+              </button>
+              <button
+                type="button"
+                className="today-banner-dismiss"
+                aria-label={t("today.banner.dismiss")}
+                onClick={() => {
+                  setTodayBannerVisible(false);
+                  setTodayBannerPending(false);
+                }}
+              >
+                {t("today.banner.dismiss")}
+              </button>
+            </div>
+          </div>
+        )}
+
         <nav className="activity-rail" aria-label={t("activity.label")}>
           <button
             type="button"
@@ -7611,28 +7870,33 @@ function MainApp() {
             onViewConsumed={() => setMeetingsRequestedView(null)}
           />
         ) : visibleAppMode === "tasks" ? (
-          <LazyTasksPane
+          <LazyTodayPane
+            route={todayRoute}
+            onRouteChange={setTodayRoute}
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
-            labelMode={maruSettings.ui.documentLabelMode}
-            skills={skills}
-            runtimeCommands={aiRuntimeCommands}
-            permissionMode={maruSettings.ai.permissionMode}
-            defaultRuntime={maruSettings.ai.defaultRuntime}
-            processingMissions={activeTasksMissions(processingMissions)}
-            processingLogLines={processingLogLines}
-            onRefreshMissions={refreshProcessingMissions}
-            onOpenSettings={openTasksSettings}
-            onOpenSkillCompose={(skill, context, prompt, cwd, onDispatched) =>
-              openSkillCompose(skill, context, prompt, cwd, onDispatched)
-            }
-            onMissionStarted={handleMeetingsMissionStarted}
-            onStopMission={(id) => void stopProcessingMission(id)}
-            onConfirmApproval={approvalGate.confirmApproval}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            tasksProps={{
+              workPath: inboxWorkspacePath,
+              effectiveSettings: effectiveTasksSettings,
+              labelMode: maruSettings.ui.documentLabelMode,
+              skills,
+              runtimeCommands: aiRuntimeCommands,
+              permissionMode: maruSettings.ai.permissionMode,
+              defaultRuntime: maruSettings.ai.defaultRuntime,
+              processingMissions: activeTasksMissions(processingMissions),
+              processingLogLines,
+              onRefreshMissions: refreshProcessingMissions,
+              onOpenSettings: openTasksSettings,
+              onOpenSkillCompose: (skill, context, prompt, cwd, onDispatched) =>
+                openSkillCompose(skill, context, prompt, cwd, onDispatched),
+              onMissionStarted: handleMeetingsMissionStarted,
+              onStopMission: (id) => void stopProcessingMission(id),
+              onConfirmApproval: approvalGate.confirmApproval,
+              onRevealPath: (path) => {
+                if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+              },
+              onError: setError,
             }}
-            onError={setError}
           />
         ) : (
           <>
