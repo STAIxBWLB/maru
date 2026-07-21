@@ -492,7 +492,13 @@ export function htmlTableToMatrix(html: string, name = ""): MatrixDataset {
         1,
         Math.min(Number(cell.getAttribute("rowspan")) || 1, trs.length - r),
       );
-      const colSpan = Math.max(1, Number(cell.getAttribute("colspan")) || 1);
+      // Clamp colspan: a hostile/corrupt attribute (colspan="1000000") would
+      // otherwise inflate colCount and the covered set before the size gate
+      // ever sees the matrix. Real spans never exceed the column limit.
+      const colSpan = Math.max(
+        1,
+        Math.min(Number(cell.getAttribute("colspan")) || 1, MATRIX_MAX_COLS),
+      );
       const style = htmlCellStyle(cell);
       placements.push({
         r,

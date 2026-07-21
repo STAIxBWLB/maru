@@ -308,6 +308,15 @@ describe("html-table codec", () => {
   it("throws when no table is present", () => {
     expect(() => htmlTableToMatrix("<p>hello</p>")).toThrow();
   });
+
+  it("clamps a hostile colspan instead of inflating the grid", () => {
+    // Un-clamped, colspan="1000000" would allocate a million-column matrix
+    // (and freeze expandMatrixToGrid) before the size gate ever runs.
+    const matrix = htmlTableToMatrix(
+      '<table><tr><td colspan="1000000">x</td></tr><tr><td>a</td><td>b</td></tr></table>',
+    );
+    expect(matrix.columns.length).toBeLessThanOrEqual(50);
+  });
 });
 
 describe("maru-json codec", () => {

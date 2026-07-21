@@ -996,9 +996,11 @@ function DiagramShell({
         // One-time v7 backup: the active document was loaded from a pre-v8
         // body and this is the first v8 save over it. A backup failure must
         // not silently lose data, so we warn via the error channel but still
-        // allow the save (and do not retry within this session).
+        // allow the save (and do not retry within this session). Save-As to a
+        // different name leaves the legacy file untouched, so no backup runs
+        // (backing up `name` would read the not-yet-existing new file).
         const session = getDiagramSession(sessionKey);
-        if (session.migratedFromLegacy && !session.legacyBackupAttempted) {
+        if (session.migratedFromLegacy && !session.legacyBackupAttempted && name === activeName) {
           setDiagramSession({ legacyBackupAttempted: true }, sessionKey);
           try {
             await diagramBackupDocument(workPath, name);
@@ -1024,7 +1026,7 @@ function DiagramShell({
         setSaving(false);
       }
     },
-    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
+    [activeName, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleSave = useCallback(() => {

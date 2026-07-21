@@ -70,6 +70,25 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Sub-doc for a `pattern:<viewId>` scope: only the view's member nodes/edges,
+ * so the rendered asset shows the selected view, not the whole canvas. The
+ * full doc is returned for the `doc` scope or when the view no longer exists.
+ */
+export function scopeDocForRender(doc: DiagramDoc, scope: string): DiagramDoc {
+  if (!scope.startsWith("pattern:")) return doc;
+  const viewId = scope.slice("pattern:".length);
+  const view = (doc.views ?? []).find((v) => v.id === viewId);
+  if (!view) return doc;
+  const nodeIds = new Set(view.nodeIds);
+  const edgeIds = new Set(view.edgeIds);
+  return {
+    ...doc,
+    nodes: doc.nodes.filter((node) => nodeIds.has(node.id)),
+    edges: doc.edges.filter((edge) => edgeIds.has(edge.id)),
+  };
+}
+
 function isConflict(message: string): boolean {
   return message.includes("document_conflict");
 }
@@ -93,6 +112,10 @@ export async function insertDiagramIntoReport(
   }
   const renderHash = `sha256:${hex}`;
   const hash8 = hex.slice(0, 8);
+  // Windows-safe file stem: scope may contain ':' (`pattern:<viewId>`), which
+  // NTFS treats as an alternate-data-stream separator. Block attrs keep the
+  // raw scope; only the asset file name is sanitized.
+  const fileScope = scope.replace(/[^A-Za-z0-9._-]+/g, "-");
 
   // Resolve the target before writing assets so a cancelled chooser leaves
   // nothing behind. (The spec orders the asset write first; both orders keep
@@ -102,9 +125,9 @@ export async function insertDiagramIntoReport(
   let svgPath: string;
   let pngPath: string;
   try {
-    const assets = await deps.renderAssets(doc);
-    svgPath = await deps.writeAsset(doc.id, `${scope}-${hash8}.svg`, assets.svg);
-    pngPath = await deps.writeAsset(doc.id, `${scope}-${hash8}.png`, assets.png);
+    const assets = await deps.renderAssets(scopeDocForRender(doc, scope));
+    svgPath = await deps.writeAsset(doc.id, `${fileScope}-${hash8}.svg`, assets.svg);
+    pngPath = await deps.writeAsset(doc.id, `${fileScope}-${hash8}.png`, assets.png);
   } catch (err) {
     return { status: "error", message: errorMessage(err) };
   }

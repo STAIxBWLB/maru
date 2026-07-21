@@ -125,7 +125,7 @@ pub fn diagram_save_document(workspace: String, name: String, body: String) -> R
     } else {
         format!("{body}\n")
     };
-    fs::write(&path, payload).map_err(|err| format!("Cannot write diagram: {err}"))?;
+    write_atomic(&path, payload.as_bytes())?;
     Ok(())
 }
 
@@ -479,6 +479,15 @@ const REPORT_ASSET_ROOT: &str = "attachments/diagrams";
 
 fn validate_report_file_name(file_name: &str) -> Result<&str, String> {
     let trimmed = validate_name(file_name)?;
+    // Asset names are machine-generated (`<scope>-<hash8>.<ext>`), so a strict
+    // ASCII allowlist is safe — and required for Windows, where ':' switches
+    // to an NTFS alternate data stream.
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(format!("Invalid report asset name: {file_name}"));
+    }
     let Some((stem, ext)) = trimmed.rsplit_once('.') else {
         return Err(format!(
             "Report asset name must include an extension: {file_name}"
@@ -552,7 +561,7 @@ pub fn diagram_pattern_save(workspace: String, name: String, body: String) -> Re
     } else {
         format!("{body}\n")
     };
-    fs::write(&path, payload).map_err(|err| format!("Cannot write pattern preset: {err}"))?;
+    write_atomic(&path, payload.as_bytes())?;
     Ok(())
 }
 
@@ -899,11 +908,11 @@ mod tests {
         let rel = diagram_write_report_asset(
             work.clone(),
             "doc-1".into(),
-            "pattern:view-1-ab12cd34.svg".into(),
+            "pattern-view-1-ab12cd34.svg".into(),
             b"<svg/>".to_vec(),
         )
         .unwrap();
-        assert_eq!(rel, "attachments/diagrams/doc-1/pattern:view-1-ab12cd34.svg");
+        assert_eq!(rel, "attachments/diagrams/doc-1/pattern-view-1-ab12cd34.svg");
         let path = PathBuf::from(&work).join(&rel);
         assert_eq!(fs::read(&path).unwrap(), b"<svg/>");
     }
@@ -932,7 +941,12 @@ mod tests {
                 .is_err()
         );
         assert!(
-            diagram_write_report_asset(work, "doc".into(), "with\0nul.svg".into(), vec![])
+            diagram_write_report_asset(work.clone(), "doc".into(), "with\0nul.svg".into(), vec![])
+                .is_err()
+        );
+        // ':' is an NTFS alternate-data-stream separator on Windows.
+        assert!(
+            diagram_write_report_asset(work, "doc".into(), "pattern:view-1.svg".into(), vec![])
                 .is_err()
         );
     }

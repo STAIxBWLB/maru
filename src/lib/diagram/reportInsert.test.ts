@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   REPORT_RENDER_OPTIONS,
   insertDiagramIntoReport,
+  scopeDocForRender,
   type ReportInsertDeps,
   type ReportInsertRequest,
 } from "./reportInsert";
 import { buildManagedBlock } from "./reportLink";
-import { createEmptyDoc } from "./types";
+import { createEmptyDoc, type DiagramDoc, type DiagramEdge, type DiagramNode } from "./types";
 
 function makeDoc(id: string = "doc-1") {
   return { ...createEmptyDoc(id, 0), docTitle: "Weekly chart" };
@@ -119,8 +120,10 @@ describe("insertDiagramIntoReport", () => {
     await insertDiagramIntoReport(makeRequest({ scope: "pattern:view-9" }), harness.deps);
     expect(harness.writes).toHaveLength(2);
     expect(harness.writes[0].docId).toBe("doc-1");
-    expect(harness.writes[0].fileName).toMatch(/^pattern:view-9-[0-9a-f]{8}\.svg$/);
-    expect(harness.writes[1].fileName).toMatch(/^pattern:view-9-[0-9a-f]{8}\.png$/);
+    // ':' in the scope is sanitized out of the file name (NTFS treats it as
+    // an alternate-data-stream separator); block attrs keep the raw scope.
+    expect(harness.writes[0].fileName).toMatch(/^pattern-view-9-[0-9a-f]{8}\.svg$/);
+    expect(harness.writes[1].fileName).toMatch(/^pattern-view-9-[0-9a-f]{8}\.png$/);
     const stem = (name: string) => name.replace(/\.(svg|png)$/, "");
     expect(stem(harness.writes[0].fileName)).toBe(stem(harness.writes[1].fileName));
   });
@@ -222,5 +225,71 @@ describe("insertDiagramIntoReport", () => {
         caption: "Weekly chart",
       }),
     );
+  });
+});
+
+describe("scopeDocForRender", () => {
+  const node = (id: string): DiagramNode => ({ id, kind: "simple", x: 0, y: 0, w: 100, h: 50 });
+  const edge = (id: string, fromNode: string, toNode: string): DiagramEdge => ({
+    id,
+    fromNode,
+    fromPort: "e",
+    toNode,
+    toPort: "w",
+    routeMode: "auto",
+    arrowStart: "none",
+    arrowEnd: "filled",
+    arrowSize: 1,
+    dash: "solid",
+    width: 1.5,
+    midOff: 0,
+  });
+  const viewDoc = (): DiagramDoc => ({
+    ...makeDoc(),
+    nodes: [node("a"), node("b"), node("c")],
+    edges: [edge("e1", "a", "b"), edge("e2", "b", "c")],
+    views: [
+      {
+        id: "view-1",
+        datasetId: "ds-1",
+        patternId: "report.table",
+        bounds: { x: 0, y: 0, w: 100, h: 50 },
+        nodeIds: ["a", "b"],
+        edgeIds: ["e1"],
+        projectionHash: "h",
+      },
+    ],
+  });
+
+  it("keeps the full doc for the doc scope", () => {
+    const doc = viewDoc();
+    expect(scopeDocForRender(doc, "doc")).toBe(doc);
+  });
+
+  it("filters nodes/edges to the scoped view's members", () => {
+    const scoped = scopeDocForRender(viewDoc(), "pattern:view-1");
+    expect(scoped.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+    expect(scoped.edges.map((e) => e.id)).toEqual(["e1"]);
+  });
+
+  it("falls back to the full doc when the view is gone", () => {
+    const doc = viewDoc();
+    expect(scopeDocForRender(doc, "pattern:missing")).toBe(doc);
+  });
+
+  it("renders the scoped sub-doc, not the whole canvas", async () => {
+    const harness = makeHarness();
+    const seen: DiagramDoc[] = [];
+    const inner = harness.deps.renderAssets;
+    harness.deps.renderAssets = (doc) => {
+      seen.push(doc);
+      return inner(doc);
+    };
+    await insertDiagramIntoReport(
+      makeRequest({ doc: viewDoc(), scope: "pattern:view-1" }),
+      harness.deps,
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0].nodes.map((n) => n.id)).toEqual(["a", "b"]);
   });
 });

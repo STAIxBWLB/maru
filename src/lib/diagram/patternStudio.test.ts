@@ -89,7 +89,7 @@ describe("insertPatternAt", () => {
     expect(() => insertPatternAt(doc, "nope", { x: 0, y: 0 })).toThrow(/pattern not found/);
   });
 
-  it("uses a preset dataset seed when provided", () => {
+  it("uses a preset dataset seed when provided, under a fresh id", () => {
     const seed = getPattern("report.timeline")!.createDataset!({
       t: (key: string) => key,
     });
@@ -97,7 +97,26 @@ describe("insertPatternAt", () => {
     const { doc: next } = insertPatternAt(doc, "report.timeline", { x: 0, y: 0 }, {
       datasetSeed: seed,
     });
-    expect(next.datasets![0]).toBe(seed);
+    const inserted = next.datasets![0]!;
+    expect({ ...inserted, id: seed.id }).toEqual(seed);
+    expect(inserted.id).not.toBe(seed.id);
+    expect(next.views![0]!.datasetId).toBe(inserted.id);
+  });
+
+  it("re-applying the same seed never aliases dataset ids", () => {
+    // A preset saved from this very doc (or applied twice) must not collide:
+    // updateMatrix matches datasets by id, so a duplicate would live-link
+    // two views the user expects to be independent copies.
+    const seed = getPattern("report.timeline")!.createDataset!({
+      t: (key: string) => key,
+    });
+    const doc = createEmptyDoc("doc-1", 1);
+    const first = insertPatternAt(doc, "report.timeline", { x: 0, y: 0 }, { datasetSeed: seed });
+    const second = insertPatternAt(first.doc, "report.timeline", { x: 200, y: 0 }, {
+      datasetSeed: seed,
+    });
+    const ids = second.doc.datasets!.map((ds) => ds.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

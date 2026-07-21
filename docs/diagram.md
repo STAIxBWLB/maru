@@ -110,13 +110,17 @@ into a Markdown report:
 1. Requires a saved, clean diagram (you are asked to save first otherwise).
 2. Renders a standalone SVG and a 2x PNG from the document model, computes
    `renderHash = sha256(serializeDoc(doc) + renderOptions)`, and writes both
-   to `attachments/diagrams/<docId>/<scope>-<hash8>.svg` / `.png` via
-   `diagram_write_report_asset`. Hash-named files make re-renders idempotent
-   (same content → same name → atomic overwrite).
+   to `attachments/diagrams/<docId>/<fileScope>-<hash8>.svg` / `.png` via
+   `diagram_write_report_asset`, where `fileScope` is the scope with
+   non-`[A-Za-z0-9._-]` runs replaced by `-` (the raw scope contains `:`,
+   which NTFS treats as an alternate-data-stream separator). Hash-named files
+   make re-renders idempotent (same content → same name → atomic overwrite).
 3. The scope is `pattern:<viewId>` when exactly one pattern view is selected,
-   otherwise `doc`. The label flips to "Update in report" when the active
-   document already links this diagram + scope (checked lazily when the File
-   tab opens).
+   otherwise `doc`. A pattern scope renders only that view's member
+   nodes/edges (the asset shows the selected view, not the whole canvas);
+   block attrs keep the raw scope. The label flips to "Update in report" when
+   the active document already links this diagram + scope (checked lazily
+   when the File tab opens).
 4. The target is the active editor document when it is Markdown; otherwise a
    recent-document chooser opens. The document is read fresh, the managed
    block is spliced, and it is saved through the revision-checked

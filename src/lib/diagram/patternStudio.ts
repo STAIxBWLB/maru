@@ -31,6 +31,7 @@ import {
 import { getPattern, passthroughT, type PatternDefinition, type TFn } from "./patterns";
 import type { PatternPresetV1 } from "./presets";
 import {
+  createDatasetId,
   createPatternViewId,
   type PatternView,
   type PatternViewBounds,
@@ -96,7 +97,10 @@ function applyPresetStyle(nodes: DiagramNode[], style: NodeStyle | undefined): D
 }
 
 function starterDataset(pattern: PatternDefinition, opts: PatternApplyOpts): ReportDataset {
-  if (opts.datasetSeed) return opts.datasetSeed;
+  // Re-id the seed: a preset's stored dataset id must not collide with a
+  // dataset already in the doc (applying the same preset twice, or a preset
+  // saved from this very document, would otherwise alias two live views).
+  if (opts.datasetSeed) return { ...opts.datasetSeed, id: createDatasetId() };
   if (!pattern.createDataset) {
     throw new Error(`pattern ${pattern.id} has no starter dataset`);
   }
