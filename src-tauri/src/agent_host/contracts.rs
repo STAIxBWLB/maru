@@ -9,6 +9,8 @@ pub const COMPLETION_REQUEST_SCHEMA_VERSION: &str = "maru_completion_request_v1"
 pub const COMPLETION_RESPONSE_SCHEMA_VERSION: &str = "maru_completion_response_v1";
 pub const SKILL_PROPOSAL_SCHEMA_VERSION: &str = "maru_skill_proposal_v1";
 pub const PROTECTED_WRITE_CLAIM_SCHEMA_VERSION: &str = "maru_protected_write_claim_v1";
+pub const TODAY_CAPTURE_SCHEMA_VERSION: &str = "maru_today_capture_v1";
+pub const TODAY_PLAN_SCHEMA_VERSION: &str = "maru_today_plan_v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

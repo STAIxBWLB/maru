@@ -15,6 +15,8 @@ import {
   taskIntegrationsRetry,
   taskTransition,
   taskTrash,
+  todayApplyPlanResult,
+  todayBuildPlanRequest,
   todayErrorCode,
   todayLogicalDay,
   todayMutate,
@@ -150,6 +152,30 @@ describe("today command wrappers", () => {
       logicalDay: "2026-07-21",
       title: null,
       body: null,
+    });
+  });
+
+  it("todayBuildPlanRequest passes workPath and logicalDay", async () => {
+    await todayBuildPlanRequest("/work", "2026-07-21");
+    expect(invokeMock).toHaveBeenCalledWith("today_build_plan_request", {
+      workPath: "/work",
+      logicalDay: "2026-07-21",
+    });
+  });
+
+  it("todayApplyPlanResult forwards the full apply payload", async () => {
+    const validRefs: PlanItemRef[] = [
+      { kind: "task", taskId: "task-1" },
+      { kind: "capture", captureId: "cap-1" },
+    ];
+    await todayApplyPlanResult("/work", "2026-07-21", "rev-1", "{\"schema\":\"maru_today_plan_v1\"}", validRefs, "21:30");
+    expect(invokeMock).toHaveBeenCalledWith("today_apply_plan_result", {
+      workPath: "/work",
+      logicalDay: "2026-07-21",
+      expectedRevision: "rev-1",
+      outputJson: "{\"schema\":\"maru_today_plan_v1\"}",
+      validRefs,
+      sleepStart: "21:30",
     });
   });
 });

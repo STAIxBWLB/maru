@@ -392,7 +392,7 @@ const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then(
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
-const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
+const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
@@ -1070,11 +1070,10 @@ function MainApp() {
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_MARU_SETTINGS.ui.activeAppMode);
-  // Maru Today launch routing. "all" is the existing Tasks view; the G2 Today
-  // pane interprets the other routes.
+  // Maru Today launch routing. "all" is the existing Tasks view; the Today
+  // pane interprets the other routes and persists them into the day
+  // snapshot (best-effort) once its snapshot is loaded.
   const [todayRoute, setTodayRoute] = useState<TodayRoute>("all");
-  // TODO(G2): persist todayRoute into the day snapshot via todayMutate once
-  // the G2 Today pane owns the loaded snapshot/revision.
   // New-day fallback banner: `pending` waits for the next window focus,
   // `visible` renders the banner.
   const [todayBannerPending, setTodayBannerPending] = useState(false);
@@ -7851,28 +7850,33 @@ function MainApp() {
             onViewConsumed={() => setMeetingsRequestedView(null)}
           />
         ) : visibleAppMode === "tasks" ? (
-          <LazyTasksPane
+          <LazyTodayPane
+            route={todayRoute}
+            onRouteChange={setTodayRoute}
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
-            labelMode={maruSettings.ui.documentLabelMode}
-            skills={skills}
-            runtimeCommands={aiRuntimeCommands}
-            permissionMode={maruSettings.ai.permissionMode}
-            defaultRuntime={maruSettings.ai.defaultRuntime}
-            processingMissions={activeTasksMissions(processingMissions)}
-            processingLogLines={processingLogLines}
-            onRefreshMissions={refreshProcessingMissions}
-            onOpenSettings={openTasksSettings}
-            onOpenSkillCompose={(skill, context, prompt, cwd, onDispatched) =>
-              openSkillCompose(skill, context, prompt, cwd, onDispatched)
-            }
-            onMissionStarted={handleMeetingsMissionStarted}
-            onStopMission={(id) => void stopProcessingMission(id)}
-            onConfirmApproval={approvalGate.confirmApproval}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            tasksProps={{
+              workPath: inboxWorkspacePath,
+              effectiveSettings: effectiveTasksSettings,
+              labelMode: maruSettings.ui.documentLabelMode,
+              skills,
+              runtimeCommands: aiRuntimeCommands,
+              permissionMode: maruSettings.ai.permissionMode,
+              defaultRuntime: maruSettings.ai.defaultRuntime,
+              processingMissions: activeTasksMissions(processingMissions),
+              processingLogLines,
+              onRefreshMissions: refreshProcessingMissions,
+              onOpenSettings: openTasksSettings,
+              onOpenSkillCompose: (skill, context, prompt, cwd, onDispatched) =>
+                openSkillCompose(skill, context, prompt, cwd, onDispatched),
+              onMissionStarted: handleMeetingsMissionStarted,
+              onStopMission: (id) => void stopProcessingMission(id),
+              onConfirmApproval: approvalGate.confirmApproval,
+              onRevealPath: (path) => {
+                if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+              },
+              onError: setError,
             }}
-            onError={setError}
           />
         ) : (
           <>

@@ -61,7 +61,7 @@ import { toUnifiedTaskEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView } from "../../lib/calendar/types";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 
-interface TasksPaneProps {
+export interface TasksPaneProps {
   workPath: string | null;
   effectiveSettings: TasksSettings;
   labelMode: DocumentLabelMode;

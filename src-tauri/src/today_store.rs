@@ -293,6 +293,14 @@ fn read_events_at(path: &Path) -> Result<Vec<TaskEvent>, String> {
 
 // --- Commands ---------------------------------------------------------------
 
+/// Read the persisted snapshot for a logical day without mutating anything.
+pub(crate) fn load_snapshot(work: &Path, logical_day: &str) -> Result<TodaySnapshot, String> {
+    validate_logical_day(logical_day)?;
+    let raw = fs::read_to_string(state_path(work, logical_day))
+        .map_err(|_| "today_state_missing".to_string())?;
+    serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))
+}
+
 /// Load the snapshot for the logical day containing `now`, initializing and
 /// persisting a fresh one when missing. Corrupt state JSON falls back to the
 /// newest valid revision snapshot (logging `state_recovered`); with no valid

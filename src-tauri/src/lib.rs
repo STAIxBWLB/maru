@@ -44,6 +44,7 @@ mod studio;
 mod sys_import;
 mod tasks;
 pub mod today;
+pub mod today_ai;
 pub mod today_lifecycle;
 pub mod today_notify;
 pub mod today_outbox;
@@ -170,6 +171,7 @@ use tasks::{
     scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
 };
 use today::today_logical_day;
+use today_ai::{today_apply_plan_result, today_build_plan_request};
 use today_lifecycle::{task_transition, task_trash};
 use today_notify::today_notify_new_day;
 use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
@@ -319,6 +321,9 @@ pub fn run() {
             today_mutate,
             today_rollover,
             read_task_events,
+            // Maru Today (AI planning contracts)
+            today_build_plan_request,
+            today_apply_plan_result,
             // Maru Today (task lifecycle + integrations)
             task_transition,
             task_trash,

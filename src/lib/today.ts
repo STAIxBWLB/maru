@@ -383,6 +383,47 @@ export async function todayNotifyNewDay(
   });
 }
 
+/** Request payload built by `today_build_plan_request` (Rust side owns the
+ *  prompt/request assembly for the `maru_today_plan_v1` AI run). The shape is
+ *  still stabilizing on the Rust side; keep this open-ended on purpose. */
+export interface TodayPlanRequest {
+  prompt?: string | null;
+  [key: string]: unknown;
+}
+
+/** Ask Rust to assemble the plan-request payload (prompt + context) for one
+ *  logical day. The result is handed to the AI runtime; the raw AI output then
+ *  goes back through `todayApplyPlanResult`. */
+export async function todayBuildPlanRequest(
+  workPath: string,
+  logicalDay: string,
+): Promise<TodayPlanRequest> {
+  return invoke<TodayPlanRequest>("today_build_plan_request", { workPath, logicalDay });
+}
+
+/** Hand raw AI output for `maru_today_plan_v1` back to Rust for validation
+ *  and application. `expectedRevision` is the snapshot revision the run
+ *  started from (stale drafts are rejected), `validRefs` the item refs the
+ *  plan may reference, `sleepStart` the day-window end used for sleep-boundary
+ *  checks on proposed blocks. */
+export async function todayApplyPlanResult(
+  workPath: string,
+  logicalDay: string,
+  expectedRevision: string,
+  outputJson: string,
+  validRefs: PlanItemRef[],
+  sleepStart: string,
+): Promise<TodaySnapshot> {
+  return invoke<TodaySnapshot>("today_apply_plan_result", {
+    workPath,
+    logicalDay,
+    expectedRevision,
+    outputJson,
+    validRefs,
+    sleepStart,
+  });
+}
+
 // --- Pure helpers ----------------------------------------------------------
 
 /** sha256 hex of `text` — used for expected task hashes and content

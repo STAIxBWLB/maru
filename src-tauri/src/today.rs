@@ -55,8 +55,8 @@ pub enum PlanLane {
 }
 
 /// Reference from a plan item (or carryover) to the thing it schedules.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum PlanItemRef {
     Task { task_id: String },
     Capture { capture_id: String },
@@ -183,6 +183,7 @@ pub struct CaptureCandidate {
     pub provider_item_id: Option<String>,
     pub fingerprint: String,
     pub confidence: CaptureConfidence,
+    #[serde(default)]
     pub category: String,
     pub title: String,
     #[serde(default)]
@@ -195,6 +196,7 @@ pub struct CaptureCandidate {
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default)]
     pub received_at: String,
 }
 
