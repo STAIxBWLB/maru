@@ -4,6 +4,7 @@
 //! rejects path traversal (`..`, `/`, `\\`, NUL) and leading-dot entries, mirroring
 //! the safety rules in `studio/mod.rs` and the workspace write-allow guard.
 //!
+use crate::atomic_file::write_atomic;
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -467,6 +468,58 @@ pub fn diagram_restore_snapshot(
 }
 
 // ---------------------------------------------------------------------------
+// Report assets (Insert/Update in report)
+// ---------------------------------------------------------------------------
+
+/// Managed-block image payloads live under
+/// `<workspace>/attachments/diagrams/<doc_id>/<file_name>` — the only write
+/// target outside `diagrams/` and `.maru/` that Diagram mode is allowed to
+/// touch. Hash-named files make re-renders idempotent.
+const REPORT_ASSET_ROOT: &str = "attachments/diagrams";
+
+fn validate_report_file_name(file_name: &str) -> Result<&str, String> {
+    let trimmed = validate_name(file_name)?;
+    let Some((stem, ext)) = trimmed.rsplit_once('.') else {
+        return Err(format!(
+            "Report asset name must include an extension: {file_name}"
+        ));
+    };
+    if stem.is_empty() {
+        return Err(format!("Invalid report asset name: {file_name}"));
+    }
+    if !matches!(ext, "svg" | "png" | "json") {
+        return Err(format!("Unsupported report asset extension: {ext}"));
+    }
+    Ok(trimmed)
+}
+
+/// Write a rendered report asset (SVG/PNG/JSON) for a managed Markdown block.
+/// Returns the workspace-relative path (`attachments/diagrams/<doc_id>/<file_name>`).
+#[tauri::command]
+pub fn diagram_write_report_asset(
+    workspace: String,
+    doc_id: String,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let id = validate_doc_id(&doc_id)?;
+    let name = validate_report_file_name(&file_name)?;
+    let root = resolve_inside_vault(&workspace, REPORT_ASSET_ROOT)?;
+    let dir = root.join(id);
+    ensure_within(&root, &dir)?;
+    let candidate = dir.join(name);
+    ensure_within(&dir, &candidate)?;
+    let action = if candidate.is_file() {
+        WorkspaceWriteAction::Modify
+    } else {
+        WorkspaceWriteAction::Create
+    };
+    assert_maru_can_write(&workspace, action)?;
+    write_atomic(&candidate, &bytes)?;
+    Ok(format!("{REPORT_ASSET_ROOT}/{id}/{name}"))
+}
+
+// ---------------------------------------------------------------------------
 // Pattern presets (Report Pattern Studio)
 // ---------------------------------------------------------------------------
 
@@ -838,5 +891,107 @@ mod tests {
         let listed = diagram_pattern_list(work).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "keep");
+    }
+
+    #[test]
+    fn report_asset_round_trip() {
+        let (_tmp, work) = setup_workspace();
+        let rel = diagram_write_report_asset(
+            work.clone(),
+            "doc-1".into(),
+            "pattern:view-1-ab12cd34.svg".into(),
+            b"<svg/>".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(rel, "attachments/diagrams/doc-1/pattern:view-1-ab12cd34.svg");
+        let path = PathBuf::from(&work).join(&rel);
+        assert_eq!(fs::read(&path).unwrap(), b"<svg/>");
+    }
+
+    #[test]
+    fn report_asset_rejects_traversal() {
+        let (_tmp, work) = setup_workspace();
+        assert!(
+            diagram_write_report_asset(work.clone(), "../escape".into(), "a.svg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "a/b".into(), "a.svg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "../a.svg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "a/b.svg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), ".hidden.svg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work, "doc".into(), "with\0nul.svg".into(), vec![])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn report_asset_rejects_bad_extension() {
+        let (_tmp, work) = setup_workspace();
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.exe".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "noext".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.jpg".into(), vec![])
+                .is_err()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.png".into(), vec![])
+                .is_ok()
+        );
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.json".into(), vec![])
+                .is_ok()
+        );
+        assert!(diagram_write_report_asset(work, "doc".into(), "a.svg".into(), vec![]).is_ok());
+    }
+
+    #[test]
+    fn report_asset_overwrite_is_complete() {
+        let (_tmp, work) = setup_workspace();
+        let rel = diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            "doc-deadbeef.png".into(),
+            vec![1u8; 64],
+        )
+        .unwrap();
+        // Same hash-named path rewritten with shorter content must not leave
+        // trailing bytes from the previous write.
+        let rel2 = diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            "doc-deadbeef.png".into(),
+            vec![2u8; 8],
+        )
+        .unwrap();
+        assert_eq!(rel, rel2);
+        let full = PathBuf::from(&work).join(&rel);
+        assert_eq!(fs::read(&full).unwrap(), vec![2u8; 8]);
+        // No temp files left behind by the atomic write.
+        let dir = full.parent().unwrap();
+        let names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+            .collect();
+        assert_eq!(names, vec!["doc-deadbeef.png".to_string()]);
     }
 }

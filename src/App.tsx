@@ -7673,6 +7673,26 @@ function MainApp() {
           <LazyDiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}
             onError={setError}
+            activeDocument={
+              activeDocTab &&
+              activeDocTab.workspacePath === (inboxWorkspacePath ?? settingsWorkPath)
+                ? {
+                    path: activeDocTab.document.path,
+                    title: activeDocTab.document.title,
+                    revision: activeDocTab.document.revision,
+                    fileKind: activeDocTab.document.fileKind,
+                  }
+                : null
+            }
+            recentDocuments={recentEntries.map((entry) => ({
+              path: entry.path,
+              title: entry.title,
+            }))}
+            onSaveDocument={(path, content, expectedRevision) => {
+              const root = inboxWorkspacePath ?? settingsWorkPath;
+              if (!root) return Promise.reject(new Error("workspace required"));
+              return saveDocument(root, path, content, expectedRevision);
+            }}
           />
         ) : visibleAppMode === "graph" ? (
           <LazyGraphView

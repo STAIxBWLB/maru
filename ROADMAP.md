@@ -157,6 +157,20 @@ Outside the M1–M7 backbone, a self-contained **Diagram** mode ships alongside 
 
 File format: `.cmd.json` (v:7 envelope continues the source HTML's numbering past its broken `localhost:5500` boundary). Implementation lives under `src/lib/diagram/`, `src/components/diagram/`, and `src-tauri/src/diagram/mod.rs`. Detailed usage doc: `docs/diagram.md`.
 
+## 6.6 Diagram Report Pattern Studio (side track, shipped)
+
+The Report Pattern Studio track upgrades the Diagram mode from a freeform canvas to a report-figure authoring surface: typed report datasets, live pattern views, and a managed link into Markdown reports.
+
+| Phase | State | Outcome |
+|-------|-------|---------|
+| 0 — v8 schema + migration | ✅ | `v:8` envelope with report datasets + pattern views; v7 documents migrate in memory on load; one-time v7 backup to `.maru/diagrams/backups/` before the first v8 save (`diagram_backup_document`, temp-file + rename). |
+| 1 — Typed tables | ✅ | Table nodes bound to matrix datasets with cell-level editing (F2/Enter/Tab/arrows/Escape, merge/split, resize) and page frames. |
+| 2 — Patterns + conversion | ✅ | Pattern registry (`report.*` ids), semantic conversion engine (same-family lossless / cross-family field-mapping preview / freeform non-convertible), workspace presets under `.maru/diagram-patterns/` (`diagram_pattern_save/list/delete`). |
+| 3 — Codec registry | ✅ | Unified import/export with declared fidelity (lossless: maru-json, maru-svg with embedded canonical JSON; structural: csv/tsv/markdown-table/html-table/mermaid; visual: svg-image/png/jpg/pdf) + OS clipboard table codecs. |
+| 4 — Insert/Update in report | ✅ | File-ribbon action renders SVG + 2x PNG to `attachments/diagrams/<docId>/<scope>-<hash8>.*` (`diagram_write_report_asset`, extension-whitelisted + atomic) and splices a managed `<!-- maru-diagram:v1 -->` block into the active Markdown document (recent-document chooser fallback) through the revision-checked `save_document` path; conflicts surface without retry, hash-named assets make re-renders idempotent. Pure splicer in `src/lib/diagram/reportLink.ts`, flow in `reportInsert.ts`. |
+
+Managed-block semantics: blocks match on `source` + `scope` (`pattern:<viewId>` or `doc`), replace in place or append at end, preserve surrounding content byte-for-byte, skip malformed blocks with a warning, and are idempotent. Studio treats the block as a normal linked image — no inline Diagram editor, no export preprocessor, no auto refresh; DOCX/PDF converters are unchanged and HWPX output does not embed the linked image. Detailed usage doc: `docs/diagram.md`.
+
 ## 7. Glossary (Maru-internal)
 
 - **BU** — Business Unit (사업단 or 대학본부조직). Identified by a slug like `koica-tiu` or `chu-ai-innovation`. Configured per directory via `.maru/bu-config.yaml`.

@@ -3,6 +3,7 @@ import {
   Clock,
   FilePlus2,
   FileImage,
+  FileInput,
   FolderOpen,
   ImportIcon,
   LayoutTemplate,
@@ -25,6 +26,11 @@ export interface RibbonFileProps {
   onCopySvg: () => void;
   onCopyTableHtml: () => void;
   onCopyTableMarkdown: () => void;
+  /** "Insert/Update in report" — splices a managed block into a Markdown doc. */
+  onInsertInReport: () => void;
+  /** Dynamic label: insert vs update vs unknown (checked lazily on tab open). */
+  insertInReportLabelKey: string;
+  insertInReportBusy?: boolean;
   saving: boolean;
   canSave: boolean;
 }
@@ -41,6 +47,9 @@ export function RibbonFile({
   onCopySvg,
   onCopyTableHtml,
   onCopyTableMarkdown,
+  onInsertInReport,
+  insertInReportLabelKey,
+  insertInReportBusy = false,
   saving,
   canSave,
 }: RibbonFileProps) {
@@ -103,6 +112,12 @@ export function RibbonFile({
           labelKey="diagram.ribbon.copyTableMarkdown"
           onClick={onCopyTableMarkdown}
           icon={<ClipboardCopy size={14} />}
+        />
+        <RibbonButton
+          labelKey={insertInReportLabelKey}
+          onClick={onInsertInReport}
+          disabled={insertInReportBusy || !canSave}
+          icon={<FileInput size={14} />}
         />
       </RibbonGroup>
       <RibbonGroup labelKey="diagram.ribbon.history">

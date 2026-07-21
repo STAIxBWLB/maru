@@ -328,3 +328,39 @@ export async function diagramPatternDelete(
   }
   return invoke<boolean>("diagram_pattern_delete", { workspace, name });
 }
+
+// ---------------------------------------------------------------------------
+// Report assets (Insert/Update in report) — `attachments/diagrams/<docId>/`
+// ---------------------------------------------------------------------------
+
+const MOCK_REPORT_ASSET_PREFIX = "maru:diagram:mock-report-assets:";
+
+/**
+ * Write a rendered report asset (SVG/PNG/JSON) next to the reports that
+ * reference it. Returns the workspace-relative path
+ * (`attachments/diagrams/<docId>/<fileName>`). Hash-named files make repeated
+ * renders idempotent. The browser mock keeps a record in localStorage so the
+ * e2e/dev path does not crash; it cannot place real files.
+ */
+export async function diagramWriteReportAsset(
+  workspace: string,
+  docId: string,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<string> {
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) throw new Error("diagram_write_report_asset_requires_tauri");
+    storage.setItem(
+      `${MOCK_REPORT_ASSET_PREFIX}${encodeURIComponent(workspace)}:${encodeURIComponent(docId)}:${encodeURIComponent(fileName)}`,
+      JSON.stringify({ bytes: Array.from(bytes), modifiedAt: Date.now() }),
+    );
+    return `attachments/diagrams/${docId}/${fileName}`;
+  }
+  return invoke<string>("diagram_write_report_asset", {
+    workspace,
+    docId,
+    fileName,
+    bytes: Array.from(bytes),
+  });
+}

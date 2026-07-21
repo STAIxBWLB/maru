@@ -90,6 +90,7 @@ use diagram::{
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
     diagram_load_document, diagram_pattern_delete, diagram_pattern_list, diagram_pattern_save,
     diagram_restore_snapshot, diagram_save_document, diagram_save_snapshot,
+    diagram_write_report_asset,
 };
 use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
@@ -519,6 +520,7 @@ pub fn run() {
             diagram_pattern_save,
             diagram_pattern_list,
             diagram_pattern_delete,
+            diagram_write_report_asset,
             // Sites (in-app browser pane + global registry + scanner)
             site_view_open,
             site_view_navigate,

@@ -72,6 +72,9 @@ import {
   type ReportDataset,
 } from "../../lib/diagram/reportTypes";
 import { readMaruSettings, saveMaruSettings } from "../../lib/maruDir";
+import { readDocument } from "../../lib/api";
+import { defaultReportInsertDeps, insertDiagramIntoReport } from "../../lib/diagram/reportInsert";
+import { findManagedBlock } from "../../lib/diagram/reportLink";
 import {
   DIAGRAM_FAVORITE_PATTERNS_CAP,
   DIAGRAM_RECENT_PATTERNS_CAP,
@@ -138,14 +141,40 @@ import {
   type GallerySelection,
 } from "./modals/PatternGalleryDialog";
 import { SaveAsDialog } from "./modals/SaveAsDialog";
+import { ReportTargetDialog } from "./modals/ReportTargetDialog";
 import { SpecialCharsPicker } from "./modals/SpecialCharsPicker";
 import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
 import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
 
+export interface DiagramActiveDocument {
+  /** Workspace-relative path (what `readDocument`/`saveDocument` take). */
+  path: string;
+  title: string;
+  revision?: string;
+  fileKind?: string;
+}
+
+export interface DiagramRecentDocument {
+  path: string;
+  title: string;
+}
+
 export interface DiagramModeProps {
   workPath: string | null;
   onError?: (message: string | null) => void;
+  /** Active editor document — the direct "Insert in report" target when it is
+   *  a Markdown file (fileKind "md"). Anything else goes to the chooser. */
+  activeDocument?: DiagramActiveDocument | null;
+  /** Recent documents for the target chooser (path + display title). */
+  recentDocuments?: DiagramRecentDocument[];
+  /** Revision-checked save callback injected by the app shell so Diagram mode
+   *  stays decoupled from the editor's save path. */
+  onSaveDocument?: (
+    path: string,
+    content: string,
+    expectedRevision: string | null,
+  ) => Promise<unknown>;
 }
 
 const ZOOM_STEP = 1.25;
@@ -228,16 +257,22 @@ function writeLastDocumentFallback(workPath: string, lastDocument: string | null
   }
 }
 
-export function DiagramMode({ workPath, onError }: DiagramModeProps) {
-  const storeKey = workPath ?? "__no-workspace__";
+export function DiagramMode(props: DiagramModeProps) {
+  const storeKey = props.workPath ?? "__no-workspace__";
   return (
     <DiagramStoreProvider storeKey={storeKey}>
-      <DiagramShell key={storeKey} workPath={workPath} onError={onError} />
+      <DiagramShell key={storeKey} {...props} />
     </DiagramStoreProvider>
   );
 }
 
-function DiagramShell({ workPath, onError }: DiagramModeProps) {
+function DiagramShell({
+  workPath,
+  onError,
+  activeDocument = null,
+  recentDocuments = [],
+  onSaveDocument,
+}: DiagramModeProps) {
   const { t } = useTranslation();
   const store = useDiagramStore();
   const coalescer = useDiagramCoalescer();
@@ -498,6 +533,10 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     [doc, selection.nodes],
   );
 
+  // "Insert/Update in report" scope: the single selected pattern view, else
+  // the whole document.
+  const reportScope = convertViewId ? `pattern:${convertViewId}` : "doc";
+
   // "Save as workspace preset" captures the selected view's pattern config.
   const presetDraft = useMemo(() => {
     if (!convertViewId) return null;
@@ -743,6 +782,116 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       reportError(t("diagram.clipboard.copyFailed", { message: (err as Error).message ?? "unknown" }));
     }
   }, [activeMatrix, reportError, t]);
+
+  // --- Phase 4: Insert/Update in report ------------------------------------
+  // Renders SVG + 2x PNG under attachments/diagrams/<docId>/ and splices a
+  // managed maru-diagram:v1 block into the target Markdown document via the
+  // app-provided revision-checked save callback.
+
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportChooserOpen, setReportChooserOpen] = useState(false);
+  const [reportLinkState, setReportLinkState] = useState<"unknown" | "insert" | "update">(
+    "unknown",
+  );
+
+  // Lazily check (on File-tab open / target change) whether the active
+  // Markdown document already links this diagram + scope, so the ribbon can
+  // label the action Update vs Insert. Unknown -> "Insert/Update".
+  const activeDocumentPath = activeDocument?.path ?? null;
+  const activeDocumentRevision = activeDocument?.revision ?? null;
+  const activeDocumentIsMarkdown = activeDocument?.fileKind === "md";
+  useEffect(() => {
+    if (!activeDocumentIsMarkdown) setReportLinkState("unknown");
+  }, [activeDocumentIsMarkdown]);
+  useEffect(() => {
+    if (
+      panels.ribbon !== "file" ||
+      !workPath ||
+      !activeName ||
+      !activeDocumentPath ||
+      !activeDocumentIsMarkdown
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const source = `diagrams/${activeName}.cmd.json`;
+    void readDocument(workPath, activeDocumentPath)
+      .then((payload) => {
+        if (cancelled) return;
+        setReportLinkState(
+          findManagedBlock(payload.content, { source, scope: reportScope })
+            ? "update"
+            : "insert",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setReportLinkState("unknown");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    panels.ribbon,
+    workPath,
+    activeName,
+    activeDocumentPath,
+    activeDocumentRevision,
+    activeDocumentIsMarkdown,
+    reportScope,
+  ]);
+
+  const runInsertInReport = useCallback(
+    async (targetPath: string | null) => {
+      if (!workPath || !onSaveDocument) {
+        reportError(t("diagram.status.noWorkspace"));
+        return;
+      }
+      setReportBusy(true);
+      try {
+        const outcome = await insertDiagramIntoReport(
+          {
+            diagramName: activeName,
+            dirty,
+            doc: store.getState().doc,
+            scope: reportScope,
+            target: targetPath ? { path: targetPath } : null,
+          },
+          defaultReportInsertDeps(workPath, onSaveDocument),
+        );
+        switch (outcome.status) {
+          case "needs-save":
+            reportError(t("diagram.report.needsSave"));
+            break;
+          case "needs-target":
+            setReportChooserOpen(true);
+            break;
+          case "conflict":
+            reportError(t("diagram.report.conflict", { message: outcome.message }));
+            break;
+          case "error":
+            reportError(t("diagram.report.failed", { message: outcome.message }));
+            break;
+          case "inserted":
+            reportError(t("diagram.report.inserted", { path: outcome.targetPath }));
+            setReportLinkState("update");
+            break;
+          case "updated":
+            reportError(t("diagram.report.updated", { path: outcome.targetPath }));
+            setReportLinkState("update");
+            break;
+        }
+      } finally {
+        setReportBusy(false);
+      }
+    },
+    [activeName, dirty, onSaveDocument, reportError, reportScope, store, t, workPath],
+  );
+
+  const handleInsertInReport = useCallback(() => {
+    const direct =
+      activeDocument && activeDocument.fileKind === "md" ? activeDocument.path : null;
+    void runInsertInReport(direct);
+  }, [activeDocument, runInsertInReport]);
 
   const handleImportDataset = useCallback(
     (dataset: ReportDataset) => {
@@ -1424,6 +1573,14 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           onCopySvg: () => void handleCopySvg(),
           onCopyTableHtml: () => void handleCopyTableHtml(),
           onCopyTableMarkdown: () => void handleCopyTableMarkdown(),
+          onInsertInReport: handleInsertInReport,
+          insertInReportLabelKey:
+            reportLinkState === "update"
+              ? "diagram.ribbon.updateInReport"
+              : reportLinkState === "insert"
+                ? "diagram.ribbon.insertInReport"
+                : "diagram.ribbon.insertUpdateInReport",
+          insertInReportBusy: reportBusy,
           saving,
           canSave: Boolean(workPath),
         }}
@@ -1565,6 +1722,15 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         workspace={workPath}
         onConfirm={handleConfirmSaveAs}
         onCancel={() => setSaveDialogOpen(false)}
+      />
+      <ReportTargetDialog
+        open={reportChooserOpen}
+        documents={recentDocuments}
+        onChoose={(path) => {
+          setReportChooserOpen(false);
+          void runInsertInReport(path);
+        }}
+        onClose={() => setReportChooserOpen(false)}
       />
       <PatternGalleryDialog
         open={galleryOpen}

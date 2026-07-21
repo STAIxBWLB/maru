@@ -672,6 +672,50 @@
   cursor: pointer;
 }
 
+.maru-diagram-report-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.maru-diagram-report-targets button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.maru-diagram-report-targets button:hover {
+  background: var(--maru-hover, #f3f4f6);
+  border-color: var(--maru-border, #e5e7eb);
+}
+
+.maru-diagram-report-target-title {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.maru-diagram-report-target-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--maru-muted, #6b7280);
+  font-size: 11px;
+}
+
 .maru-diagram-template-dialog {
   max-width: 760px;
   width: 92vw;
