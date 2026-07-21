@@ -218,3 +218,78 @@ export async function diagramBackupDocument(
   }
   return invoke<string>("diagram_backup_document", { workspace, name });
 }
+
+// ---------------------------------------------------------------------------
+// Pattern presets (Report Pattern Studio) — `.maru/diagram-patterns/`
+// ---------------------------------------------------------------------------
+
+const MOCK_PATTERN_PREFIX = "maru:diagram:mock-patterns:";
+
+function mockPatternPrefix(workspace: string): string {
+  return `${MOCK_PATTERN_PREFIX}${encodeURIComponent(workspace)}:`;
+}
+
+function mockPatternKey(workspace: string, name: string): string {
+  return `${mockPatternPrefix(workspace)}${encodeURIComponent(name)}`;
+}
+
+export async function diagramPatternSave(
+  workspace: string,
+  name: string,
+  body: string,
+): Promise<void> {
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) throw new Error("diagram_pattern_save_requires_tauri");
+    storage.setItem(
+      mockPatternKey(workspace, name),
+      JSON.stringify({ body, modifiedAt: Date.now() }),
+    );
+    return;
+  }
+  return invoke<void>("diagram_pattern_save", { workspace, name, body });
+}
+
+export async function diagramPatternList(workspace: string): Promise<DiagramFile[]> {
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) return [];
+    const prefix = mockPatternPrefix(workspace);
+    const files: DiagramFile[] = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const raw = storage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as { body?: unknown; modifiedAt?: unknown };
+        const body = typeof parsed.body === "string" ? parsed.body : "";
+        files.push({
+          name: decodeURIComponent(key.slice(prefix.length)),
+          size: new Blob([body]).size,
+          modifiedAt: typeof parsed.modifiedAt === "number" ? parsed.modifiedAt : 0,
+          docTitle: "",
+        });
+      } catch {
+        /* skip malformed mock entries */
+      }
+    }
+    return files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  }
+  return invoke<DiagramFile[]>("diagram_pattern_list", { workspace });
+}
+
+export async function diagramPatternDelete(
+  workspace: string,
+  name: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) return false;
+    const key = mockPatternKey(workspace, name);
+    const existed = storage.getItem(key) !== null;
+    storage.removeItem(key);
+    return existed;
+  }
+  return invoke<boolean>("diagram_pattern_delete", { workspace, name });
+}

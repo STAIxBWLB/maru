@@ -460,6 +460,91 @@ pub fn diagram_restore_snapshot(
     fs::read_to_string(&path).map_err(|err| format!("Cannot read snapshot: {err}"))
 }
 
+// ---------------------------------------------------------------------------
+// Pattern presets (Report Pattern Studio)
+// ---------------------------------------------------------------------------
+
+const PATTERN_DIR: &str = ".maru/diagram-patterns";
+const PATTERN_EXT: &str = ".pattern.json";
+
+fn pattern_file_path(work_path: &str, name: &str) -> Result<PathBuf, String> {
+    let trimmed = validate_name(name)?;
+    let root = resolve_inside_vault(work_path, PATTERN_DIR)?;
+    let candidate = root.join(format!("{trimmed}{PATTERN_EXT}"));
+    ensure_within(&root, &candidate)?;
+    Ok(candidate)
+}
+
+#[tauri::command]
+pub fn diagram_pattern_save(workspace: String, name: String, body: String) -> Result<(), String> {
+    let path = pattern_file_path(&workspace, &name)?;
+    let action = if path.is_file() {
+        WorkspaceWriteAction::Modify
+    } else {
+        WorkspaceWriteAction::Create
+    };
+    assert_maru_can_write(&workspace, action)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create pattern folder: {err}"))?;
+    }
+    let payload = if body.ends_with('\n') {
+        body
+    } else {
+        format!("{body}\n")
+    };
+    fs::write(&path, payload).map_err(|err| format!("Cannot write pattern preset: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, String> {
+    let root = resolve_inside_vault(&workspace, PATTERN_DIR)?;
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out: Vec<DiagramFile> = Vec::new();
+    let read = fs::read_dir(&root).map_err(|err| format!("Cannot read pattern presets: {err}"))?;
+    for entry in read {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(PATTERN_EXT) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let name = file_name
+            .strip_suffix(PATTERN_EXT)
+            .unwrap_or(file_name)
+            .to_string();
+        let doc_title = extract_doc_title(&path);
+        out.push(DiagramFile {
+            name,
+            size: meta.len(),
+            modified_at: modified_unix_ms(&meta),
+            doc_title,
+        });
+    }
+    out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn diagram_pattern_delete(workspace: String, name: String) -> Result<bool, String> {
+    let path = pattern_file_path(&workspace, &name)?;
+    if !path.is_file() {
+        return Ok(false);
+    }
+    assert_maru_can_write(&workspace, WorkspaceWriteAction::Delete)?;
+    fs::remove_file(&path).map_err(|err| format!("Cannot delete pattern preset: {err}"))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,5 +767,47 @@ mod tests {
         let (_tmp, work) = setup_workspace();
         let err = diagram_backup_document(work, "ghost".into()).unwrap_err();
         assert!(err.contains("Diagram not found"));
+    }
+
+    #[test]
+    fn pattern_save_list_delete_round_trip() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":1,"id":"p1","name":"My Preset","patternId":"table","createdAt":1,"updatedAt":1}"#;
+        diagram_pattern_save(work.clone(), "preset-a".into(), body.into()).unwrap();
+        let path = PathBuf::from(&work)
+            .join(".maru/diagram-patterns/preset-a.pattern.json");
+        assert!(path.is_file());
+        let listed = diagram_pattern_list(work.clone()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "preset-a");
+        assert!(diagram_pattern_delete(work.clone(), "preset-a".into()).unwrap());
+        assert!(diagram_pattern_list(work).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pattern_delete_returns_false_when_missing() {
+        let (_tmp, work) = setup_workspace();
+        assert_eq!(diagram_pattern_delete(work, "ghost".into()).unwrap(), false);
+    }
+
+    #[test]
+    fn pattern_save_rejects_traversal_name() {
+        let (_tmp, work) = setup_workspace();
+        assert!(diagram_pattern_save(work.clone(), "../escape".into(), "{}".into()).is_err());
+        assert!(diagram_pattern_save(work.clone(), "a/b".into(), "{}".into()).is_err());
+        assert!(diagram_pattern_save(work, ".hidden".into(), "{}".into()).is_err());
+    }
+
+    #[test]
+    fn pattern_list_skips_non_preset_files() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":1,"id":"p1","name":"x","patternId":"table","createdAt":1,"updatedAt":1}"#;
+        diagram_pattern_save(work.clone(), "keep".into(), body.into()).unwrap();
+        let stray = PathBuf::from(&work)
+            .join(".maru/diagram-patterns/stray.txt");
+        fs::write(&stray, "noise").unwrap();
+        let listed = diagram_pattern_list(work).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "keep");
     }
 }
