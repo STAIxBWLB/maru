@@ -16,11 +16,12 @@
 
 import { defaultEdge } from "./edgeRouting";
 import { mkNode } from "./nodeKinds";
-import type {
-  DiagramDoc,
-  DiagramEdge,
-  DiagramNode,
-  NodeKind,
+import {
+  DIAGRAM_SCHEMA_VERSION,
+  type DiagramDoc,
+  type DiagramEdge,
+  type DiagramNode,
+  type NodeKind,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -284,7 +285,7 @@ export function mermaidToDoc(text: string, now: () => number = Date.now): Diagra
 
   const ts = now();
   return {
-    v: 7,
+    v: DIAGRAM_SCHEMA_VERSION,
     id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc-${ts}`,
     docTitle: "",
     createdAt: ts,

@@ -2,11 +2,12 @@
  * Maru diagram-mode domain types.
  *
  * The schema number {@link DIAGRAM_SCHEMA_VERSION} continues the source
- * standalone editor's numbering (last was v:6, this is v:7) so legacy JSON can
- * be migrated forward. See `persistence.ts` for the migrator chain.
+ * standalone editor's numbering (v:6 → v:7 post-localhost boundary, v:8 adds
+ * report datasets + pattern views) so legacy JSON can be migrated forward.
+ * See `persistence.ts` for the migrator chain.
  */
 
-export const DIAGRAM_SCHEMA_VERSION = 7 as const;
+export const DIAGRAM_SCHEMA_VERSION = 8 as const;
 
 export type DiagramId = string;
 export type NodeId = string;
@@ -96,6 +97,10 @@ export interface DiagramDoc {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   layers: DiagramLayer[];
+  /** Report Pattern Studio datasets (v8+); normalized to [] on load. */
+  datasets?: import("./reportTypes").ReportDataset[];
+  /** Pattern views binding datasets to canvas patterns (v8+). */
+  views?: import("./reportTypes").PatternView[];
   meta?: { author?: string; tags?: string[] };
 }
 

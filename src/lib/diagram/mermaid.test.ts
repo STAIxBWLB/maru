@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { docToMermaid, mermaidToDoc } from "./mermaid";
-import { createEmptyDoc } from "./types";
+import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 
 describe("docToMermaid", () => {
   it("emits flowchart TD with shaped nodes and edges", () => {
@@ -36,6 +36,11 @@ describe("docToMermaid", () => {
 });
 
 describe("mermaidToDoc", () => {
+  it("produces docs at the current schema version", () => {
+    const doc = mermaidToDoc("flowchart TD\n  A[Hi] --> B((Yo))", () => 42);
+    expect(doc.v).toBe(DIAGRAM_SCHEMA_VERSION);
+  });
+
   it("parses node shapes and arrow types", () => {
     const text = `flowchart TD
       A[Hello] --> B((World))

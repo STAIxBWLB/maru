@@ -194,3 +194,27 @@ export async function diagramRestoreSnapshot(
     snapshotTs,
   });
 }
+
+/**
+ * One-time v7 backup before the first v8 save overwrites a legacy document.
+ * Returns the backup file path. In the localStorage mock the copy is kept
+ * under a `backups:` key so tests can verify it happened.
+ */
+export async function diagramBackupDocument(
+  workspace: string,
+  name: string,
+): Promise<string> {
+  if (!isTauri()) {
+    const storage = mockStorage();
+    if (!storage) throw new Error("diagram_backup_document_requires_tauri");
+    const raw = storage.getItem(mockDocumentKey(workspace, name));
+    if (!raw) throw new Error(`Diagram not found: ${name}`);
+    const backupName = `${name}-v7-${Date.now()}`;
+    storage.setItem(
+      `${mockDocumentPrefix(workspace)}backups:${encodeURIComponent(backupName)}`,
+      raw,
+    );
+    return backupName;
+  }
+  return invoke<string>("diagram_backup_document", { workspace, name });
+}

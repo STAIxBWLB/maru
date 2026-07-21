@@ -35,11 +35,13 @@ import type { MkNodeOpts } from "../../lib/diagram/nodeKinds";
 import {
   deleteDiagram,
   listDiagrams,
-  readDiagram,
+  readDiagramDetailed,
   serializeDoc,
+  UnsupportedDiagramVersionError,
   type DiagramFile,
   writeDiagram,
 } from "../../lib/diagram/persistence";
+import { diagramBackupDocument } from "../../lib/diagram";
 import type { TemplateDefinition } from "../../lib/diagram/templates";
 import {
   createAutoSnapshotScheduler,
@@ -324,11 +326,12 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
-        const restored = await readDiagram(workPath, lastDocument);
+        const { doc: restored, migratedFromLegacy } = await readDiagramDetailed(workPath, lastDocument);
         if (cancelled) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
+        setDiagramSession({ migratedFromLegacy, legacyBackupAttempted: false }, sessionKey);
       } catch {
         /* Best-effort restore only: a missing/deleted last diagram should not block Diagram mode. */
       }
@@ -409,11 +412,28 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       setSaving(true);
       reportError(null);
       try {
+        // One-time v7 backup: the active document was loaded from a pre-v8
+        // body and this is the first v8 save over it. A backup failure must
+        // not silently lose data, so we warn via the error channel but still
+        // allow the save (and do not retry within this session).
+        const session = getDiagramSession(sessionKey);
+        if (session.migratedFromLegacy && !session.legacyBackupAttempted) {
+          setDiagramSession({ legacyBackupAttempted: true }, sessionKey);
+          try {
+            await diagramBackupDocument(workPath, name);
+          } catch (backupErr) {
+            console.warn("diagram v7 backup failed", backupErr);
+            reportError(
+              t("diagram.error.backup", { message: (backupErr as Error).message ?? "unknown" }),
+            );
+          }
+        }
         const current = store.getState().doc;
         const written = await writeDiagram(workPath, name, current);
         store.setState((s) => ({ ...s, doc: written }));
         setActiveName(name);
         setLastSavedBody(serializeDoc(written));
+        setDiagramSession({ migratedFromLegacy: false }, sessionKey);
         // A successful manual save satisfies the pending auto-snapshot.
         snapshotSchedRef.current?.markClean();
         await persistLastDocument(name);
@@ -423,7 +443,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         setSaving(false);
       }
     },
-    [persistLastDocument, reportError, setActiveName, setLastSavedBody, store, t, workPath],
+    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleSave = useCallback(() => {
@@ -451,26 +471,37 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
+    setDiagramSession({ migratedFromLegacy: false, legacyBackupAttempted: false }, sessionKey);
     void persistLastDocument(null);
     reportError(null);
-  }, [persistLastDocument, reportError, setActiveName, setLastSavedBody, store]);
+  }, [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store]);
 
   const handleOpen = useCallback(
     async (name: string) => {
       if (!workPath) return;
       try {
-        const doc = await readDiagram(workPath, name);
+        const { doc, migratedFromLegacy } = await readDiagramDetailed(workPath, name);
         store.setState(replaceDoc(doc));
         setActiveName(name);
         setLastSavedBody(serializeDoc(doc));
+        setDiagramSession({ migratedFromLegacy, legacyBackupAttempted: false }, sessionKey);
         setListOpen(false);
         await persistLastDocument(name);
         reportError(null);
       } catch (err) {
-        reportError(t("diagram.error.load", { message: (err as Error).message ?? "unknown" }));
+        if (err instanceof UnsupportedDiagramVersionError) {
+          reportError(
+            t("diagram.error.unsupportedVersion", {
+              version: err.version,
+              supported: err.supported,
+            }),
+          );
+        } else {
+          reportError(t("diagram.error.load", { message: (err as Error).message ?? "unknown" }));
+        }
       }
     },
-    [persistLastDocument, reportError, setActiveName, setLastSavedBody, store, t, workPath],
+    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleDeleteFile = useCallback(

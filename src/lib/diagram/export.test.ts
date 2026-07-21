@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { exportJson, suggestedFileName } from "./export";
-import { createEmptyDoc } from "./types";
+import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 
 describe("export helpers", () => {
   it("suggestedFileName slugifies the docTitle and appends ext", () => {
@@ -23,6 +23,6 @@ describe("export helpers", () => {
     const text = await result.blob.text();
     const parsed = JSON.parse(text);
     expect(parsed.docTitle).toBe("Hi");
-    expect(parsed.v).toBe(7);
+    expect(parsed.v).toBe(DIAGRAM_SCHEMA_VERSION);
   });
 });

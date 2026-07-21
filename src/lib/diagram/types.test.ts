@@ -7,10 +7,10 @@ import {
 } from "./types";
 
 describe("diagram types", () => {
-  it("createEmptyDoc fills the v:7 envelope", () => {
+  it("createEmptyDoc fills the v:8 envelope", () => {
     const doc = createEmptyDoc("doc-1", 1700000000000);
     expect(doc.v).toBe(DIAGRAM_SCHEMA_VERSION);
-    expect(doc.v).toBe(7);
+    expect(doc.v).toBe(8);
     expect(doc.id).toBe("doc-1");
     expect(doc.createdAt).toBe(1700000000000);
     expect(doc.updatedAt).toBe(1700000000000);

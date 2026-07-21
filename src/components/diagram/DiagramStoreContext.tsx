@@ -52,6 +52,8 @@ function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
       session: {
         activeName: null,
         lastSavedBody: null,
+        migratedFromLegacy: false,
+        legacyBackupAttempted: false,
       },
     };
     contexts.set(normalized, ctx);
@@ -123,6 +125,13 @@ export function useDiagram<T>(selector: (state: DiagramStateRoot) => T): T {
 export interface DiagramSession {
   activeName: string | null;
   lastSavedBody: string | null;
+  /**
+   * Set when the active document was loaded from a pre-v8 body. The first
+   * save after that triggers a one-time v7 backup (see DiagramMode persistSave).
+   */
+  migratedFromLegacy: boolean;
+  /** True once the v7 backup has been attempted for the active document. */
+  legacyBackupAttempted: boolean;
 }
 
 export function getDiagramSession(storeKey?: string | null): DiagramSession {
@@ -136,11 +145,15 @@ export function setDiagramSession(
   const session = getWorkspaceContext(storeKey).session;
   if (patch.activeName !== undefined) session.activeName = patch.activeName;
   if (patch.lastSavedBody !== undefined) session.lastSavedBody = patch.lastSavedBody;
+  if (patch.migratedFromLegacy !== undefined) session.migratedFromLegacy = patch.migratedFromLegacy;
+  if (patch.legacyBackupAttempted !== undefined) session.legacyBackupAttempted = patch.legacyBackupAttempted;
 }
 
 export function _resetDiagramSessionForTests(): void {
   for (const ctx of contexts.values()) {
     ctx.session.activeName = null;
     ctx.session.lastSavedBody = null;
+    ctx.session.migratedFromLegacy = false;
+    ctx.session.legacyBackupAttempted = false;
   }
 }

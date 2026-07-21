@@ -275,6 +275,39 @@ pub fn diagram_export_blob_to_path(
 }
 
 // ---------------------------------------------------------------------------
+// One-time v7 backup (Report Pattern Studio schema v8)
+// ---------------------------------------------------------------------------
+
+const BACKUP_DIR: &str = ".maru/diagrams/backups";
+
+/// Copy `<workspace>/diagrams/<name>.cmd.json` to
+/// `<workspace>/.maru/diagrams/backups/<name>-v7-<unix-ts>.cmd.json` before the
+/// first v8 save overwrites a v7 document. The copy goes through a temp file +
+/// rename so a crash mid-copy cannot leave a truncated backup.
+#[tauri::command]
+pub fn diagram_backup_document(workspace: String, name: String) -> Result<String, String> {
+    let trimmed = validate_name(&name)?;
+    let src = diagram_file_path(&workspace, trimmed)?;
+    if !src.is_file() {
+        return Err(format!("Diagram not found: {trimmed}"));
+    }
+    assert_maru_can_write(&workspace, WorkspaceWriteAction::Create)?;
+    let root = resolve_inside_vault(&workspace, BACKUP_DIR)?;
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("System clock error: {err}"))?
+        .as_millis();
+    let dest = root.join(format!("{trimmed}-v7-{ts}{DIAGRAM_EXT}"));
+    ensure_within(&root, &dest)?;
+    fs::create_dir_all(&root).map_err(|err| format!("Cannot create backup folder: {err}"))?;
+    let tmp = root.join(format!(".{trimmed}-v7-{ts}.tmp"));
+    ensure_within(&root, &tmp)?;
+    fs::copy(&src, &tmp).map_err(|err| format!("Cannot copy diagram for backup: {err}"))?;
+    fs::rename(&tmp, &dest).map_err(|err| format!("Cannot finalize backup: {err}"))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Version-history snapshots
 // ---------------------------------------------------------------------------
 
@@ -617,5 +650,37 @@ mod tests {
         assert!(
             diagram_save_snapshot(work, "doc".into(), "../escape".into(), "{}".into()).is_err()
         );
+    }
+
+    #[test]
+    fn backup_creates_v7_copy() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":7,"docTitle":"legacy","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "legacy".into(), body.into()).unwrap();
+        let backup = diagram_backup_document(work.clone(), "legacy".into()).unwrap();
+        assert!(
+            backup.contains(".maru/diagrams/backups/")
+                || backup.contains(".maru\\diagrams\\backups\\")
+        );
+        assert!(backup.contains("legacy-v7-"));
+        assert!(backup.ends_with(DIAGRAM_EXT));
+        let copied = fs::read_to_string(&backup).unwrap();
+        assert!(copied.contains("\"v\":7"));
+        // original untouched
+        let original = diagram_load_document(work, "legacy".into()).unwrap();
+        assert_eq!(original.trim_end(), body);
+    }
+
+    #[test]
+    fn backup_rejects_traversal_name() {
+        let (_tmp, work) = setup_workspace();
+        assert!(diagram_backup_document(work, "../escape".into()).is_err());
+    }
+
+    #[test]
+    fn backup_errors_when_source_missing() {
+        let (_tmp, work) = setup_workspace();
+        let err = diagram_backup_document(work, "ghost".into()).unwrap_err();
+        assert!(err.contains("Diagram not found"));
     }
 }

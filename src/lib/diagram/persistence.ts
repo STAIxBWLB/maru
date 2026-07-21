@@ -2,9 +2,12 @@
  * Diagram document persistence — serialize / parse / migrate.
  *
  * The on-disk format continues the source standalone editor's `v:` numbering
- * (last shipped: `v:6`). We bump to `v:7` here to mark the post-`localhost:5500`
- * boundary; older bodies are migrated forward on read. The Tauri side is a
- * dumb byte store — all schema knowledge lives here.
+ * (last shipped: `v:6`). `v:7` marked the post-`localhost:5500` boundary;
+ * `v:8` adds report datasets + pattern views (Report Pattern Studio). Older
+ * bodies are migrated forward on read; bodies newer than
+ * {@link DIAGRAM_SCHEMA_VERSION} throw {@link UnsupportedDiagramVersionError}
+ * and are never down-converted. The Tauri side is a dumb byte store — all
+ * schema knowledge lives here.
  */
 
 import {
@@ -21,7 +24,30 @@ import {
   type DiagramNode,
   type NodeKind,
 } from "./types";
+import {
+  TABLE_PATTERN_ID,
+  computeProjectionHash,
+  createDatasetId,
+  createPatternViewId,
+  matrixFromRowsCols,
+  type PatternView,
+  type ReportDataset,
+  type TypedNodeMeta,
+} from "./reportTypes";
 import { ALL_KINDS } from "./nodeKinds";
+
+/** Thrown when a document was written by a newer schema than this build knows. */
+export class UnsupportedDiagramVersionError extends Error {
+  readonly version: number;
+  readonly supported: number;
+
+  constructor(version: number, supported: number = DIAGRAM_SCHEMA_VERSION) {
+    super(`Unsupported diagram schema version: v${version} (this build supports up to v${supported})`);
+    this.name = "UnsupportedDiagramVersionError";
+    this.version = version;
+    this.supported = supported;
+  }
+}
 
 export function serializeDoc(doc: DiagramDoc): string {
   return JSON.stringify(doc, null, 2);
@@ -114,16 +140,119 @@ function ensureEdge(raw: unknown, index: number): DiagramEdge | null {
 }
 
 /**
+ * Legacy `meta` keys that map onto {@link TypedNodeMeta} fields, with a
+ * coercion for each. Unknown keys are preserved untouched.
+ */
+const LEGACY_META_COERCIONS: Record<string, (value: unknown) => unknown> = {
+  src: (v) => (typeof v === "string" ? v : undefined),
+  name: (v) => (typeof v === "string" ? v : undefined),
+  memo: (v) => (typeof v === "string" ? v : undefined),
+  status: (v) => (typeof v === "string" ? v : undefined),
+  progress: (v) => (typeof v === "number" && Number.isFinite(v) ? v : undefined),
+  number: (v) => (typeof v === "number" && Number.isFinite(v) ? v : undefined),
+};
+
+function ensureDatasets(raw: unknown): ReportDataset[] {
+  // Shallow normalization only: dataset payloads pass through untouched so a
+  // v8 round-trip is lossless. Deep validation is `validateMatrix`'s job.
+  return Array.isArray(raw) ? (raw as ReportDataset[]) : [];
+}
+
+function ensureViews(raw: unknown): PatternView[] {
+  return Array.isArray(raw) ? (raw as PatternView[]) : [];
+}
+
+interface V8Upgrade {
+  nodes: DiagramNode[];
+  datasets: ReportDataset[];
+  views: PatternView[];
+}
+
+/**
+ * v7 → v8 upgrade.
+ *
+ * - Table nodes carrying legacy numeric `meta.rows`/`meta.cols` get an empty
+ *   `MatrixDataset` of that size plus a `PatternView` (pattern `"table"`)
+ *   matching the node's bounds; the node keeps position/size/style and its
+ *   `meta` gains typed `{ viewId, memberId }` pointers.
+ * - Other legacy `meta` keys are coerced onto their `TypedNodeMeta`
+ *   equivalents; unknown keys stay in `meta` untouched.
+ */
+function upgradeV7ToV8(nodes: DiagramNode[]): V8Upgrade {
+  const datasets: ReportDataset[] = [];
+  const views: PatternView[] = [];
+  const upgraded = nodes.map((node) => {
+    if (!node.meta || typeof node.meta !== "object") return node;
+    const meta: Record<string, unknown> = { ...node.meta };
+    const typed: TypedNodeMeta = {};
+
+    if (node.kind === "table") {
+      const rowCount = typeof meta.rows === "number" && Number.isInteger(meta.rows) && meta.rows > 0
+        ? meta.rows
+        : 0;
+      const colCount = typeof meta.cols === "number" && Number.isInteger(meta.cols) && meta.cols > 0
+        ? meta.cols
+        : 0;
+      if (rowCount > 0 && colCount > 0) {
+        const dataset = matrixFromRowsCols(rowCount, colCount, {
+          id: createDatasetId(),
+          name: node.title ?? "",
+        });
+        const view: PatternView = {
+          id: createPatternViewId(),
+          datasetId: dataset.id,
+          patternId: TABLE_PATTERN_ID,
+          bounds: { x: node.x, y: node.y, w: node.w, h: node.h },
+          nodeIds: [node.id],
+          edgeIds: [],
+          projectionHash: computeProjectionHash({
+            patternId: TABLE_PATTERN_ID,
+            dataset,
+            bounds: { x: node.x, y: node.y, w: node.w, h: node.h },
+          }),
+        };
+        datasets.push(dataset);
+        views.push(view);
+        typed.viewId = view.id;
+        typed.memberId = dataset.id;
+        delete meta.rows;
+        delete meta.cols;
+      }
+    }
+
+    for (const [key, coerce] of Object.entries(LEGACY_META_COERCIONS)) {
+      if (!(key in meta)) continue;
+      const value = coerce(meta[key]);
+      if (value !== undefined) {
+        (typed as Record<string, unknown>)[key] = value;
+        delete meta[key];
+      }
+    }
+
+    const merged = { ...meta, ...typed };
+    return { ...node, meta: Object.keys(merged).length > 0 ? merged : undefined };
+  });
+  return { nodes: upgraded, datasets, views };
+}
+
+/**
  * Bring any-shape JSON into the current {@link DiagramDoc} envelope.
  *
  * Cases handled:
- * - `v:7` doc → identity check + field defaults.
- * - `v:6` doc (source editor's last format) → bump `v`, synthesize layers/timestamps if missing.
+ * - `v:8` doc → identity check + field defaults (datasets/views default to []).
+ * - `v:7` doc → field defaults, then the v7→v8 upgrade (table `meta.rows/cols`
+ *   become datasets + views, legacy meta keys map onto `TypedNodeMeta`).
+ * - `v:6` doc (source editor's last format) → same path as v7.
  * - Bare `{ nodes, edges }` JSON export → wrap in the envelope.
+ * - `v` greater than {@link DIAGRAM_SCHEMA_VERSION} →
+ *   {@link UnsupportedDiagramVersionError} (never down-convert).
  * - Anything else → return an empty doc with a synthesized id.
  */
 export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (typeof obj.v === "number" && obj.v > DIAGRAM_SCHEMA_VERSION) {
+    throw new UnsupportedDiagramVersionError(obj.v);
+  }
   const ts = now();
   const id = typeof obj.id === "string" && obj.id.length > 0 ? obj.id : createDiagramId();
   const docTitle = typeof obj.docTitle === "string" ? obj.docTitle
@@ -134,7 +263,7 @@ export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc 
 
   const nodesRaw = Array.isArray(obj.nodes) ? obj.nodes : [];
   const edgesRaw = Array.isArray(obj.edges) ? obj.edges : [];
-  const nodes: DiagramNode[] = [];
+  let nodes: DiagramNode[] = [];
   for (let i = 0; i < nodesRaw.length; i += 1) {
     const n = ensureNode(nodesRaw[i], i);
     if (n) nodes.push(n);
@@ -146,6 +275,15 @@ export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc 
   }
   const layers = ensureLayers(obj.layers);
 
+  let datasets = ensureDatasets(obj.datasets);
+  let views = ensureViews(obj.views);
+  if (typeof obj.v === "number" && obj.v < DIAGRAM_SCHEMA_VERSION) {
+    const upgrade = upgradeV7ToV8(nodes);
+    nodes = upgrade.nodes;
+    datasets = [...datasets, ...upgrade.datasets];
+    views = [...views, ...upgrade.views];
+  }
+
   return {
     v: DIAGRAM_SCHEMA_VERSION,
     id,
@@ -155,6 +293,8 @@ export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc 
     nodes,
     edges,
     layers,
+    datasets,
+    views,
     meta: obj.meta && typeof obj.meta === "object" ? (obj.meta as DiagramDoc["meta"]) : undefined,
   };
 }
@@ -169,9 +309,37 @@ export function deserializeDoc(text: string, now?: () => number): DiagramDoc {
   return migrate(raw, now);
 }
 
-export async function readDiagram(workspace: string, name: string): Promise<DiagramDoc> {
+export interface ReadDiagramResult {
+  doc: DiagramDoc;
+  /** Schema version found on disk, or null for bare/unversioned JSON. */
+  sourceVersion: number | null;
+  /** True when the on-disk body predates v8 (first v8 save triggers a backup). */
+  migratedFromLegacy: boolean;
+}
+
+export async function readDiagramDetailed(
+  workspace: string,
+  name: string,
+): Promise<ReadDiagramResult> {
   const body = await diagramLoadDocument(workspace, name);
-  return deserializeDoc(body);
+  let sourceVersion: number | null = null;
+  try {
+    const parsed = JSON.parse(body) as { v?: unknown };
+    sourceVersion = typeof parsed.v === "number" ? parsed.v : null;
+  } catch {
+    /* deserializeDoc below reports the real parse error */
+  }
+  const doc = deserializeDoc(body);
+  return {
+    doc,
+    sourceVersion,
+    migratedFromLegacy: sourceVersion !== null && sourceVersion < DIAGRAM_SCHEMA_VERSION,
+  };
+}
+
+export async function readDiagram(workspace: string, name: string): Promise<DiagramDoc> {
+  const { doc } = await readDiagramDetailed(workspace, name);
+  return doc;
 }
 
 export async function writeDiagram(
