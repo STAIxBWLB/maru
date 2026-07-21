@@ -8,6 +8,46 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.9 — 2026-07-22 — Report Pattern Studio
+
+- **Diagram mode becomes a data-driven report editor.** A new schema v8 adds
+  typed `ReportDataset` variants (matrix, hierarchy, timeline, flow, network,
+  scorecard) with `PatternView` projections where the dataset is
+  authoritative; v7 documents migrate forward on read, with a one-time v7
+  backup (`.maru/diagrams/backups/`) taken before the first v8 save and
+  unknown future versions rejected rather than down-converted.
+- **Typed tables on canvas.** A matrix model with stable row/column/cell ids,
+  row/col spans, multi-level headers, group/subtotal rows, per-cell styles,
+  and semantic column tags. Fast editing: double-click/F2, Enter/Escape, Tab
+  and arrow navigation, range selection, drag resize, merge/split, row/column
+  insert/delete with confirmation, one undo entry per gesture, Korean IME
+  guards, and free/A4/16:9 page frames (limits: 200 rows / 50 cols / 5,000
+  rendered cells).
+- **Pattern library + workspace presets.** A searchable Pattern Gallery (16
+  report patterns plus the 11 classic templates) with new-document / insert /
+  convert-selected flows, favorites and recents, and data-only presets under
+  `.maru/diagram-patterns/`. Same-family conversions switch live-linked views
+  without copying the dataset; cross-family conversions use a semantic
+  field-mapping preview and never mutate the source.
+- **Codecs + import/export.** A codec registry with declared fidelity
+  (lossless / structural / visual) drives clipboard import (HTML table → TSV →
+  Markdown, the Excel/Word/HWP paste path), file import (csv/tsv/md/html/json/
+  cmd.json/mmd and Maru-SVG with embedded canonical JSON), structured export,
+  and Copy PNG/SVG/table/Markdown.
+- **Insert/Update in report.** Renders a hash-named SVG + 2x PNG into
+  `attachments/diagrams/<doc-id>/` (guarded atomic Rust command) and splices a
+  managed `<!-- maru-diagram:v1 -->` block through the revision-checked
+  document save; idempotent updates, conflicts leave the previous asset and
+  document untouched. Also fixes pre-existing defects: `body`/`bullets` now
+  render (KPI values, SWOT bullets, Kanban items were invisible), exports no
+  longer leak selection chrome or drop off-viewport nodes, and the
+  auto-snapshot debounce works. Post-review hardening: report-asset paths are
+  Windows-safe and ASCII-allowlisted, exported SVG colors are whitelisted
+  against markup injection, managed-block JSON escapes the comment terminator,
+  hostile paste spans are clamped, a failed v7 backup aborts the save, and
+  copy/paste/duplicate of a linked table clones its dataset instead of
+  aliasing the original.
+
 ## v0.4.8 — 2026-07-22 — Today surface + HTML editing
 
 - **Today: a daily operating surface.** The Tasks mode is now presented as

@@ -1,6 +1,6 @@
 [package]
 name = "maru"
-version = "0.4.8"
+version = "0.4.9"
 description = "Local-first Maru Workspace and AI editing desktop app"
 authors = ["Maru Contributors"]
 license = "UNLICENSED"
