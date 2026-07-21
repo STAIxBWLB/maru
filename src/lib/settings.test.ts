@@ -327,6 +327,81 @@ describe("normalizeMaruSettings", () => {
     expect(settings.tasks.hooks.appendVaultLog).toBe(false);
   });
 
+  it("applies the Maru Today defaults when the today block is missing", () => {
+    const settings = normalizeMaruSettings({ tasks: {} });
+    expect(settings.tasks.today).toEqual({
+      enabled: true,
+      dayStart: "03:30",
+      sleepStart: "21:30",
+      notificationEnabled: true,
+      autoOpenFirstDailyLaunch: true,
+      autoPlan: true,
+      dailyFocusCapMinutes: 480,
+      provisionalEstimateMinutes: 30,
+      availabilityCalendars: [],
+      calendarDestination: "defaultCalendar",
+      calendarBlockSyncPolicy: "explicit",
+      googleCompletionPolicy: "on-explicit-complete",
+      journalRoot: "tasks/daily",
+    });
+  });
+
+  it("normalizes the today block defensively and rejects invalid day times", () => {
+    const settings = normalizeMaruSettings({
+      tasks: {
+        today: {
+          enabled: "yes",
+          dayStart: "3:30",
+          sleepStart: "24:00",
+          notificationEnabled: false,
+          dailyFocusCapMinutes: -5,
+          provisionalEstimateMinutes: 45,
+          availabilityCalendars: ["personal", 42],
+          calendarDestination: "  ",
+          journalRoot: " journal/daily ",
+        },
+      },
+    });
+    const today = settings.tasks.today;
+    expect(today.enabled).toBe(true);
+    expect(today.dayStart).toBe("03:30");
+    expect(today.sleepStart).toBe("21:30");
+    expect(today.notificationEnabled).toBe(false);
+    expect(today.dailyFocusCapMinutes).toBe(480);
+    expect(today.provisionalEstimateMinutes).toBe(45);
+    expect(today.availabilityCalendars).toEqual(["personal"]);
+    expect(today.calendarDestination).toBe("defaultCalendar");
+    expect(today.journalRoot).toBe("journal/daily");
+  });
+
+  it("accepts valid today overrides including boundary day times", () => {
+    const settings = normalizeMaruSettings({
+      tasks: {
+        today: {
+          dayStart: "00:00",
+          sleepStart: "23:59",
+          autoPlan: false,
+          dailyFocusCapMinutes: 240,
+        },
+      },
+    });
+    expect(settings.tasks.today.dayStart).toBe("00:00");
+    expect(settings.tasks.today.sleepStart).toBe("23:59");
+    expect(settings.tasks.today.autoPlan).toBe(false);
+    expect(settings.tasks.today.dailyFocusCapMinutes).toBe(240);
+  });
+
+  it("keeps the today block intact through workspace task overrides", () => {
+    const base = normalizeMaruSettings({
+      tasks: { today: { dayStart: "04:00", autoPlan: false } },
+    }).tasks;
+    const effective = applyWorkspaceTasksOverrides(base, {
+      task_management: { root: "ops/tasks" },
+    });
+    expect(effective.today).toEqual(base.today);
+    expect(effective.today.dayStart).toBe("04:00");
+  });
+
   it("parses e2e mode for the guided Maru flow", () => {
     const settings = normalizeMaruSettings({
       ui: {

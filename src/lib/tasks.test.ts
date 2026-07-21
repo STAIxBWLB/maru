@@ -190,6 +190,83 @@ describe("task normalizers", () => {
     expect(normalizeTaskPriority("low")).toBe("low");
     expect(normalizeTaskPriority("unknown")).toBe("none");
   });
+
+  it("maps the legacy 'open' status alias to active", () => {
+    expect(normalizeTaskStatus("open", "active")).toBe("active");
+    expect(normalizeTaskStatus("Open", "backlog")).toBe("active");
+  });
+});
+
+describe("today task fields", () => {
+  const todayRow = (frontmatter: Record<string, unknown>): TaskNoteRow => ({
+    path: "/work/tasks/active/today.md",
+    relPath: "tasks/active/today.md",
+    fileName: "today.md",
+    bucket: "active",
+    sizeBytes: 10,
+    updatedAt: null,
+    frontmatter,
+  });
+
+  it("populates today-integration fields from frontmatter", () => {
+    const [entry] = rowsToTaskEntries([
+      todayRow({
+        title: "Integrated task",
+        taskId: "task-123",
+        done: "2026-07-20",
+        completedAt: "2026-07-20T18:00:00+09:00",
+        estimateMinutes: 45,
+        progress: 50,
+        deferDate: "2026-07-25",
+        googleTaskId: "gt-1",
+        googleTaskListId: "list-1",
+        calendarEventId: "evt-1",
+        syncStatus: "retryNeeded",
+      }),
+    ]);
+    expect(entry.taskId).toBe("task-123");
+    expect(entry.done).toBe("2026-07-20");
+    expect(entry.completedAt).toBe("2026-07-20T18:00:00+09:00");
+    expect(entry.estimateMinutes).toBe(45);
+    expect(entry.progress).toBe(50);
+    expect(entry.deferDate).toBe("2026-07-25");
+    expect(entry.googleTaskId).toBe("gt-1");
+    expect(entry.googleTaskListId).toBe("list-1");
+    expect(entry.calendarEventId).toBe("evt-1");
+    expect(entry.syncStatus).toBe("retryNeeded");
+  });
+
+  it("omits today fields when absent or malformed and invents no dates", () => {
+    const [entry] = rowsToTaskEntries([
+      todayRow({
+        title: "Plain task",
+        estimateMinutes: -3,
+        progress: 140,
+        syncStatus: "bogus",
+        done: "not-a-date",
+        completed: true,
+      }),
+    ]);
+    expect(entry.taskId).toBeUndefined();
+    expect(entry.done).toBeUndefined();
+    expect(entry.completedAt).toBeUndefined();
+    expect(entry.estimateMinutes).toBeUndefined();
+    expect(entry.progress).toBeUndefined();
+    expect(entry.deferDate).toBeUndefined();
+    expect(entry.syncStatus).toBeUndefined();
+  });
+
+  it("derives project from the legacy projects list alias when project is missing", () => {
+    const [entry] = rowsToTaskEntries([
+      todayRow({ title: "Aliased", projects: ["alpha", "beta"] }),
+    ]);
+    expect(entry.project).toBe("alpha");
+
+    const [canonical] = rowsToTaskEntries([
+      todayRow({ title: "Canonical", project: "gamma", projects: ["alpha"] }),
+    ]);
+    expect(canonical.project).toBe("gamma");
+  });
 });
 
 describe("activeTasksMissions", () => {

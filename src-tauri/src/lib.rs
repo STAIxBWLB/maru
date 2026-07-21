@@ -43,6 +43,11 @@ mod skill_host;
 mod studio;
 mod sys_import;
 mod tasks;
+pub mod today;
+pub mod today_lifecycle;
+pub mod today_notify;
+pub mod today_outbox;
+pub mod today_store;
 mod telegram_config;
 mod telegram_io;
 mod template_fill;
@@ -164,6 +169,11 @@ use tasks::{
     append_tasks_log, create_task_note, move_task_note, read_task_metadata, read_tasks_log,
     scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
 };
+use today::today_logical_day;
+use today_lifecycle::{task_transition, task_trash};
+use today_notify::today_notify_new_day;
+use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
+use today_store::{read_task_events, today_mutate, today_open, today_rollover};
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{
@@ -199,6 +209,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(app_menu::build_app_menu)
@@ -302,6 +313,19 @@ pub fn run() {
             move_task_note,
             append_tasks_log,
             read_tasks_log,
+            // Maru Today (morning ritual core)
+            today_logical_day,
+            today_open,
+            today_mutate,
+            today_rollover,
+            read_task_events,
+            // Maru Today (task lifecycle + integrations)
+            task_transition,
+            task_trash,
+            task_integrations_drain,
+            task_integrations_retry,
+            read_task_integrations,
+            today_notify_new_day,
             store_shelf_files,
             store_shelf_files_as,
             list_memos,

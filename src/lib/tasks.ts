@@ -8,6 +8,8 @@ import type { TasksSettings } from "./settings";
 
 export type TaskPriority = "highest" | "high" | "medium" | "low" | "none";
 
+export type TaskSyncStatus = "local" | "syncing" | "synced" | "retryNeeded" | "authBlocked";
+
 export interface TaskEntry {
   absPath: string;
   relPath: string;
@@ -24,6 +26,18 @@ export interface TaskEntry {
   size: number;
   modifiedAt: string | null;
   frontmatter: Record<string, unknown>;
+  taskId?: string;
+  /** Canonical completion date (YYYY-MM-DD). */
+  done?: string;
+  /** RFC3339 completion timestamp (aliases normalized by the Rust scanner). */
+  completedAt?: string;
+  estimateMinutes?: number;
+  progress?: number;
+  deferDate?: string;
+  googleTaskId?: string;
+  googleTaskListId?: string;
+  calendarEventId?: string;
+  syncStatus?: TaskSyncStatus;
 }
 
 export interface TaskFilters {
@@ -79,7 +93,7 @@ export function rowToTaskEntry(row: TaskNoteRow): TaskEntry {
     title,
     status: normalizeTaskStatus(fm.status, row.bucket),
     priority: normalizeTaskPriority(fm.priority),
-    project: scalarString(fm.project),
+    project: scalarString(fm.project) ?? firstProjectAlias(fm.projects),
     topics: scalarStringList(fm.topics).concat(scalarStringList(fm.tags)),
     due: normalizeDateLike(fm.due) ?? normalizeDateLike(fm.date),
     calendarStart:
@@ -93,7 +107,64 @@ export function rowToTaskEntry(row: TaskNoteRow): TaskEntry {
     size: row.sizeBytes,
     modifiedAt: row.updatedAt,
     frontmatter: fm,
+    ...todayTaskFields(fm),
   };
+}
+
+/** Optional Today-integration fields carried on task frontmatter. Only set
+ *  when the data is present — completion dates are never invented. */
+function todayTaskFields(fm: Record<string, unknown>): Pick<
+  TaskEntry,
+  | "taskId"
+  | "done"
+  | "completedAt"
+  | "estimateMinutes"
+  | "progress"
+  | "deferDate"
+  | "googleTaskId"
+  | "googleTaskListId"
+  | "calendarEventId"
+  | "syncStatus"
+> {
+  const fields: ReturnType<typeof todayTaskFields> = {};
+  const taskId = scalarString(fm.taskId);
+  if (taskId) fields.taskId = taskId;
+  const done = normalizeDateLike(fm.done);
+  if (done) fields.done = done;
+  const completedAt = scalarString(fm.completedAt);
+  if (completedAt) fields.completedAt = completedAt;
+  const estimateMinutes = positiveInteger(fm.estimateMinutes);
+  if (estimateMinutes !== null) fields.estimateMinutes = estimateMinutes;
+  const progress = positiveInteger(fm.progress);
+  if (progress !== null && progress <= 100) fields.progress = progress;
+  const deferDate = normalizeDateLike(fm.deferDate);
+  if (deferDate) fields.deferDate = deferDate;
+  const googleTaskId = scalarString(fm.googleTaskId);
+  if (googleTaskId) fields.googleTaskId = googleTaskId;
+  const googleTaskListId = scalarString(fm.googleTaskListId);
+  if (googleTaskListId) fields.googleTaskListId = googleTaskListId;
+  const calendarEventId = scalarString(fm.calendarEventId);
+  if (calendarEventId) fields.calendarEventId = calendarEventId;
+  const syncStatus = normalizeTaskSyncStatus(fm.syncStatus);
+  if (syncStatus) fields.syncStatus = syncStatus;
+  return fields;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.floor(number);
+}
+
+function normalizeTaskSyncStatus(value: unknown): TaskSyncStatus | null {
+  const text = scalarString(value);
+  return text === "local"
+      || text === "syncing"
+      || text === "synced"
+      || text === "retryNeeded"
+      || text === "authBlocked"
+    ? text
+    : null;
 }
 
 export function filterTasksByQuery(
@@ -327,6 +398,8 @@ export function buildTaskManagementSyncPrompt(
 
 export function normalizeTaskStatus(value: unknown, bucket: TaskBucket = "active"): TaskStatus {
   const text = scalarString(value)?.toLowerCase().replace(/_/g, "-");
+  // `open` is the legacy pre-canonical alias for active tasks.
+  if (text === "open") return "active";
   if (
     text === "active"
     || text === "in-progress"
@@ -365,8 +438,17 @@ function scalarString(value: unknown): string | null {
   return null;
 }
 
-function scalarStringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
+/** Legacy `projects: [a, b]` alias — first non-empty entry becomes `project`. */
+function firstProjectAlias(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    const text = scalarString(item);
+    if (text) return text;
+  }
+  return null;
+}
+
+function scalarStringList(value: unknown): string[] {  if (Array.isArray(value)) {
     return value
       .map(scalarString)
       .filter((item): item is string => item !== null);

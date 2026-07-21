@@ -314,6 +314,20 @@ import {
 } from "./lib/settings";
 import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
+import {
+  todayLogicalDay,
+  todayNotifyNewDay,
+  todayOpen,
+  todayRollover,
+  type TodayRoute,
+} from "./lib/today";
+import {
+  resolveLaunchRoute,
+  resolveNewDayNotice,
+  resolveRouteForDayState,
+  TODAY_LAST_AUTO_OPEN_KEY,
+} from "./lib/todayRouting";
+import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
 import {
   openSettingsWindow,
@@ -1056,6 +1070,17 @@ function MainApp() {
   // `inboxItems`; per-item classifier output is carried alongside the
   // raw drop item via the InboxItemState shape.
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_MARU_SETTINGS.ui.activeAppMode);
+  // Maru Today launch routing. "all" is the existing Tasks view; the G2 Today
+  // pane interprets the other routes.
+  const [todayRoute, setTodayRoute] = useState<TodayRoute>("all");
+  // TODO(G2): persist todayRoute into the day snapshot via todayMutate once
+  // the G2 Today pane owns the loaded snapshot/revision.
+  // New-day fallback banner: `pending` waits for the next window focus,
+  // `visible` renders the banner.
+  const [todayBannerPending, setTodayBannerPending] = useState(false);
+  const [todayBannerVisible, setTodayBannerVisible] = useState(false);
+  // Last logical day seen by the new-day watcher (boot seeds it too).
+  const todayLogicalDayRef = useRef<string | null>(null);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
@@ -4049,6 +4074,59 @@ function MainApp() {
           registry.workspaces.find((workspace) => workspace.visibility === initialVisibility)?.path ??
           null;
         if (initialPath) {
+          // Maru Today: first-eligible-launch auto-open. Best-effort — any
+          // failure falls back to the normal persisted-mode restore above.
+          const todaySettings = bootSettings?.tasks.today;
+          if (todaySettings?.enabled && todaySettings.autoOpenFirstDailyLaunch) {
+            try {
+              const tasksSettings = bootSettings!.tasks;
+              const timezone = tasksSettings.timezone ?? "Asia/Seoul";
+              const nowIso = new Date().toISOString();
+              const info = await todayLogicalDay(
+                initialPath,
+                nowIso,
+                timezone,
+                todaySettings.dayStart,
+              );
+              todayLogicalDayRef.current = info.logicalDay;
+              const lastAutoOpenDay = window.localStorage.getItem(TODAY_LAST_AUTO_OPEN_KEY);
+              if (lastAutoOpenDay !== info.logicalDay) {
+                // Close out a missed day boundary before inspecting the day.
+                await todayRollover(
+                  initialPath,
+                  nowIso,
+                  timezone,
+                  todaySettings.dayStart,
+                  todaySettings.sleepStart,
+                ).catch(() => null);
+                const snapshot = await todayOpen(
+                  initialPath,
+                  nowIso,
+                  timezone,
+                  todaySettings.dayStart,
+                  todaySettings.sleepStart,
+                );
+                const decision = resolveLaunchRoute({
+                  enabled: todaySettings.enabled,
+                  autoOpen: todaySettings.autoOpenFirstDailyLaunch,
+                  lastAutoOpenDay,
+                  logicalDay: info.logicalDay,
+                  dayState: snapshot.dayState,
+                  // The main-window boot has no explicit initial-mode
+                  // mechanism; explicit modes only exist in the separate
+                  // settings/skill-editor windows, which return earlier.
+                  explicitMode: false,
+                });
+                if (decision) {
+                  setTodayRoute(decision.route);
+                  setAppMode("tasks");
+                  window.localStorage.setItem(TODAY_LAST_AUTO_OPEN_KEY, info.logicalDay);
+                }
+              }
+            } catch (err) {
+              console.warn("today auto-open skipped", err);
+            }
+          }
           const lastRel =
             typeof window !== "undefined"
               ? window.localStorage.getItem(lastOpenKeyForWorkspace(initialPath))
@@ -5451,9 +5529,141 @@ function MainApp() {
     setPersistedAppMode("meetings");
   }, [setPersistedAppMode]);
 
+  const openToday = useCallback(
+    (route: TodayRoute) => {
+      setTodayRoute(route);
+      setPersistedAppMode("tasks");
+    },
+    [setPersistedAppMode],
+  );
+
+  // Explicit user navigation to Tasks lands on All Tasks as today.
   const openTasks = useCallback(() => {
-    setPersistedAppMode("tasks");
-  }, [setPersistedAppMode]);
+    openToday("all");
+  }, [openToday]);
+
+  // Resolve the current day's route fresh (prepare vs execute) and open
+  // Today. Shared by the new-day banner button and the notification click.
+  const openTodayForCurrentDay = useCallback(() => {
+    const workPath = inboxWorkspacePath;
+    const todaySettings = effectiveTasksSettings.today;
+    if (!workPath || !todaySettings.enabled) {
+      openToday("prepare");
+      return;
+    }
+    void (async () => {
+      let route: TodayRoute = "prepare";
+      try {
+        const snapshot = await todayOpen(
+          workPath,
+          new Date().toISOString(),
+          effectiveTasksSettings.timezone ?? "Asia/Seoul",
+          todaySettings.dayStart,
+          todaySettings.sleepStart,
+        );
+        route = resolveRouteForDayState(snapshot.dayState);
+      } catch (err) {
+        console.warn("today route resolution failed", err);
+      }
+      openToday(route);
+    })();
+  }, [inboxWorkspacePath, effectiveTasksSettings, openToday]);
+
+  // Maru Today: logical-day (03:30) watcher. Recomputes the logical day every
+  // minute; on a boundary crossed while running, rolls the store over and
+  // surfaces the new day exactly once (native notification, else banner).
+  useEffect(() => {
+    const workPath = inboxWorkspacePath;
+    const todaySettings = effectiveTasksSettings.today;
+    if (!workPath || !todaySettings.enabled) return;
+    const timezone = effectiveTasksSettings.timezone ?? "Asia/Seoul";
+    let cancelled = false;
+
+    const tick = async () => {
+      let info;
+      try {
+        info = await todayLogicalDay(
+          workPath,
+          new Date().toISOString(),
+          timezone,
+          todaySettings.dayStart,
+        );
+      } catch {
+        return; // non-desktop backend or workspace without .maru — stay silent
+      }
+      if (cancelled) return;
+      const previous = todayLogicalDayRef.current;
+      todayLogicalDayRef.current = info.logicalDay;
+      // First tick only seeds the ref; startup is handled by the boot path.
+      if (previous === null || previous === info.logicalDay) return;
+      const nowIso = new Date().toISOString();
+      await todayRollover(
+        workPath,
+        nowIso,
+        timezone,
+        todaySettings.dayStart,
+        todaySettings.sleepStart,
+      ).catch((err) => console.warn("today rollover failed", err));
+      if (!todaySettings.notificationEnabled) return;
+      let sent = false;
+      try {
+        const outcome = await todayNotifyNewDay(
+          workPath,
+          info.logicalDay,
+          t("today.notify.newDayTitle"),
+          t("today.notify.newDayBody"),
+        );
+        sent = outcome.sent;
+      } catch (err) {
+        console.warn("today notification failed", err);
+      }
+      if (
+        resolveNewDayNotice({
+          notificationEnabled: todaySettings.notificationEnabled,
+          sent,
+        }) === "banner"
+      ) {
+        setTodayBannerPending(true);
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [inboxWorkspacePath, effectiveTasksSettings, t]);
+
+  // Show the pending new-day banner on the next window focus.
+  useEffect(() => {
+    if (!todayBannerPending || todayBannerVisible) return;
+    const show = () => setTodayBannerVisible(true);
+    window.addEventListener("focus", show);
+    return () => window.removeEventListener("focus", show);
+  }, [todayBannerPending, todayBannerVisible]);
+
+  // Native notification click → open Today. Best-effort: the plugin listener
+  // only exists in the desktop backend; the banner covers everything else.
+  useEffect(() => {
+    let cancelled = false;
+    let unregister: (() => void) | null = null;
+    onNotificationAction(() => {
+      openTodayForCurrentDay();
+    })
+      .then((listener) => {
+        if (cancelled) {
+          void listener.unregister();
+          return;
+        }
+        unregister = () => void listener.unregister();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unregister?.();
+    };
+  }, [openTodayForCurrentDay]);
 
   const openSites = useCallback(() => {
     setPersistedAppMode("sites");
@@ -7249,6 +7459,36 @@ function MainApp() {
             <RefreshCcw size={14} />
           </button>
         </header>
+
+        {todayBannerVisible && (
+          <div className="today-banner" role="status">
+            <p>{t("today.banner.newDay")}</p>
+            <div className="today-banner-actions">
+              <button
+                type="button"
+                className="today-banner-open"
+                onClick={() => {
+                  setTodayBannerVisible(false);
+                  setTodayBannerPending(false);
+                  openTodayForCurrentDay();
+                }}
+              >
+                {t("today.banner.openToday")}
+              </button>
+              <button
+                type="button"
+                className="today-banner-dismiss"
+                aria-label={t("today.banner.dismiss")}
+                onClick={() => {
+                  setTodayBannerVisible(false);
+                  setTodayBannerPending(false);
+                }}
+              >
+                {t("today.banner.dismiss")}
+              </button>
+            </div>
+          </div>
+        )}
 
         <nav className="activity-rail" aria-label={t("activity.label")}>
           <button

@@ -1372,6 +1372,12 @@ const ko: Record<string, string> = {
   "tasks.settings.hooks.description": "후속 작업 버튼과 로그 기록을 제어합니다.",
   "tasks.settings.hooks.appendVaultLog": "작업 로그 append",
 
+  "today.notify.newDayTitle": "새로운 하루",
+  "today.notify.newDayBody": "새로운 하루가 시작되었습니다. 오늘 계획을 확인해 보세요.",
+  "today.banner.newDay": "새로운 하루가 시작되었습니다. 오늘을 준비해 볼까요?",
+  "today.banner.openToday": "오늘 열기",
+  "today.banner.dismiss": "닫기",
+
   "commit.title": "변경사항 커밋",
   "commit.summary": "{staged} staged · {modified} 수정 · {untracked} 새 파일 (총 {total})",
   "commit.selected": "{selected}/{total} 파일 선택됨",
@@ -3817,6 +3823,12 @@ const en: Record<string, string> = {
   "tasks.settings.hooks.title": "Hooks",
   "tasks.settings.hooks.description": "Control follow-up buttons and log appends.",
   "tasks.settings.hooks.appendVaultLog": "Append work log",
+
+  "today.notify.newDayTitle": "New day",
+  "today.notify.newDayBody": "A new day has started. Review today's plan.",
+  "today.banner.newDay": "A new day has started. Ready to prepare today?",
+  "today.banner.openToday": "Open Today",
+  "today.banner.dismiss": "Dismiss",
 
   "commit.title": "Commit changes",
   "commit.summary": "{staged} staged · {modified} modified · {untracked} new ({total} total)",

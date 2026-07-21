@@ -7641,6 +7641,66 @@ button.git-badge:hover {
   }
 }
 
+/* Maru Today new-day fallback banner (notification denied/unavailable) */
+.today-banner {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(520px, calc(100vw - 40px));
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.today-banner p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.today-banner-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.today-banner-open {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.today-banner-dismiss {
+  padding: 6px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.today-banner-dismiss:hover {
+  color: var(--ink);
+}
+
 /* ─── Command palette ──────────────────────────────────────────────── */
 
 .cmdk-overlay {

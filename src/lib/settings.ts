@@ -256,6 +256,26 @@ export interface TasksSettings {
   hooks: {
     appendVaultLog: boolean;
   };
+  today: TasksTodaySettings;
+}
+
+export interface TasksTodaySettings {
+  enabled: boolean;
+  /** HH:MM local time the logical day rolls over. */
+  dayStart: string;
+  /** HH:MM local time the day window ends (sleep boundary). */
+  sleepStart: string;
+  notificationEnabled: boolean;
+  autoOpenFirstDailyLaunch: boolean;
+  autoPlan: boolean;
+  dailyFocusCapMinutes: number;
+  provisionalEstimateMinutes: number;
+  /** Empty = all enabled calendars count toward availability. */
+  availabilityCalendars: string[];
+  calendarDestination: string;
+  calendarBlockSyncPolicy: string;
+  googleCompletionPolicy: string;
+  journalRoot: string;
 }
 
 export interface ComposerSettings {
@@ -435,6 +455,21 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     defaultCalendar: null,
     hooks: {
       appendVaultLog: true,
+    },
+    today: {
+      enabled: true,
+      dayStart: "03:30",
+      sleepStart: "21:30",
+      notificationEnabled: true,
+      autoOpenFirstDailyLaunch: true,
+      autoPlan: true,
+      dailyFocusCapMinutes: 480,
+      provisionalEstimateMinutes: 30,
+      availabilityCalendars: [],
+      calendarDestination: "defaultCalendar",
+      calendarBlockSyncPolicy: "explicit",
+      googleCompletionPolicy: "on-explicit-complete",
+      journalRoot: "tasks/daily",
     },
   },
   diagram: {
@@ -852,6 +887,10 @@ function cloneDefaultSettings(): MaruSettings {
     tasks: {
       ...DEFAULT_MARU_SETTINGS.tasks,
       hooks: { ...DEFAULT_MARU_SETTINGS.tasks.hooks },
+      today: {
+        ...DEFAULT_MARU_SETTINGS.tasks.today,
+        availabilityCalendars: [...DEFAULT_MARU_SETTINGS.tasks.today.availabilityCalendars],
+      },
     },
     diagram: {
       ...DEFAULT_MARU_SETTINGS.diagram,
@@ -1065,7 +1104,66 @@ function normalizeTasksSettings(value: unknown): TasksSettings {
           ? hooks.appendVaultLog
           : DEFAULT_MARU_SETTINGS.tasks.hooks.appendVaultLog,
     },
+    today: normalizeTasksTodaySettings(tasks.today),
   };
+}
+
+const TODAY_HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function normalizeTasksTodaySettings(value: unknown): TasksTodaySettings {
+  const today = isRecord(value) ? value : {};
+  const fallback = DEFAULT_MARU_SETTINGS.tasks.today;
+  return {
+    enabled: typeof today.enabled === "boolean" ? today.enabled : fallback.enabled,
+    dayStart: normalizeDayTime(today.dayStart, fallback.dayStart),
+    sleepStart: normalizeDayTime(today.sleepStart, fallback.sleepStart),
+    notificationEnabled:
+      typeof today.notificationEnabled === "boolean"
+        ? today.notificationEnabled
+        : fallback.notificationEnabled,
+    autoOpenFirstDailyLaunch:
+      typeof today.autoOpenFirstDailyLaunch === "boolean"
+        ? today.autoOpenFirstDailyLaunch
+        : fallback.autoOpenFirstDailyLaunch,
+    autoPlan: typeof today.autoPlan === "boolean" ? today.autoPlan : fallback.autoPlan,
+    dailyFocusCapMinutes: normalizePositiveInteger(
+      today.dailyFocusCapMinutes,
+      fallback.dailyFocusCapMinutes,
+    ),
+    provisionalEstimateMinutes: normalizePositiveInteger(
+      today.provisionalEstimateMinutes,
+      fallback.provisionalEstimateMinutes,
+    ),
+    availabilityCalendars: parseStringArray(today.availabilityCalendars),
+    calendarDestination:
+      typeof today.calendarDestination === "string" && today.calendarDestination.trim()
+        ? today.calendarDestination.trim()
+        : fallback.calendarDestination,
+    calendarBlockSyncPolicy:
+      typeof today.calendarBlockSyncPolicy === "string" && today.calendarBlockSyncPolicy.trim()
+        ? today.calendarBlockSyncPolicy.trim()
+        : fallback.calendarBlockSyncPolicy,
+    googleCompletionPolicy:
+      typeof today.googleCompletionPolicy === "string" && today.googleCompletionPolicy.trim()
+        ? today.googleCompletionPolicy.trim()
+        : fallback.googleCompletionPolicy,
+    journalRoot:
+      typeof today.journalRoot === "string" && today.journalRoot.trim()
+        ? today.journalRoot.trim()
+        : fallback.journalRoot,
+  };
+}
+
+function normalizeDayTime(value: unknown, fallback: string): string {
+  return typeof value === "string" && TODAY_HHMM_PATTERN.test(value.trim())
+    ? value.trim()
+    : fallback;
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.floor(number);
 }
 
 function providerConfig(
