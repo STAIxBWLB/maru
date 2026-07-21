@@ -50,11 +50,19 @@ fn validate_name(name: &str) -> Result<&str, String> {
         || trimmed.contains("..")
         || trimmed.contains('/')
         || trimmed.contains('\\')
-        || trimmed.contains('\0')
+        || trimmed.chars().any(char::is_control)
     {
         return Err(format!("Invalid diagram name: {name}"));
     }
     Ok(trimmed)
+}
+
+/// Windows-safe ASCII path component (report assets are machine-generated).
+fn is_ascii_component(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 fn ensure_within(parent: &Path, child: &Path) -> Result<(), String> {
@@ -482,10 +490,7 @@ fn validate_report_file_name(file_name: &str) -> Result<&str, String> {
     // Asset names are machine-generated (`<scope>-<hash8>.<ext>`), so a strict
     // ASCII allowlist is safe — and required for Windows, where ':' switches
     // to an NTFS alternate data stream.
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    {
+    if !is_ascii_component(trimmed) {
         return Err(format!("Invalid report asset name: {file_name}"));
     }
     let Some((stem, ext)) = trimmed.rsplit_once('.') else {
@@ -512,6 +517,9 @@ pub fn diagram_write_report_asset(
     bytes: Vec<u8>,
 ) -> Result<String, String> {
     let id = validate_doc_id(&doc_id)?;
+    if !is_ascii_component(id) {
+        return Err(format!("Invalid report asset doc id: {doc_id}"));
+    }
     let name = validate_report_file_name(&file_name)?;
     let root = resolve_inside_vault(&workspace, REPORT_ASSET_ROOT)?;
     let dir = root.join(id);
@@ -946,9 +954,30 @@ mod tests {
         );
         // ':' is an NTFS alternate-data-stream separator on Windows.
         assert!(
-            diagram_write_report_asset(work, "doc".into(), "pattern:view-1.svg".into(), vec![])
+            diagram_write_report_asset(
+                work.clone(),
+                "doc".into(),
+                "pattern:view-1.svg".into(),
+                vec![]
+            )
+            .is_err()
+        );
+        // Doc ids become directory names — same ASCII allowlist applies
+        // (an imported doc id is an arbitrary JSON string).
+        assert!(
+            diagram_write_report_asset(work.clone(), "doc id".into(), "a.svg".into(), vec![])
                 .is_err()
         );
+        assert!(
+            diagram_write_report_asset(work, "x)\ninjected".into(), "a.svg".into(), vec![])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_name_rejects_control_chars() {
+        assert!(validate_name("line\nbreak").is_err());
+        assert!(validate_name("tab\tname").is_err());
     }
 
     #[test]

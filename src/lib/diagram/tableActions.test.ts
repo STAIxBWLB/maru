@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultCoalescer, setSelection, undo, withSnapshot } from "./actions";
+import { defaultCoalescer, duplicateSelection, setSelection, undo, withSnapshot } from "./actions";
 import { createCoalescer } from "./history";
 import {
   deleteRow,
@@ -305,6 +305,43 @@ describe("clipboard", () => {
     const before = store.getState().doc;
     store.setState(withSnapshot(pasteClipboard(), defaultCoalescer()));
     expect(store.getState().doc).toBe(before);
+  });
+
+  it("pasting a linked table clones its dataset (no aliasing with the original)", () => {
+    const store = freshStore();
+    const { matrix } = seedTable(store, 2, 2);
+    store.setState(copyNodesToClipboard());
+    store.setState(withSnapshot(pasteClipboard(), defaultCoalescer()));
+    const state = store.getState();
+    const pastedNode = state.doc.nodes[1]!;
+    const pastedMatrix = matrixForTableNode(pastedNode, state.doc.datasets);
+    expect(pastedMatrix).not.toBeNull();
+    expect(pastedMatrix!.id).not.toBe(matrix.id);
+    // The pasted table's view exists and lists exactly the pasted node.
+    const pastedView = state.doc.views!.find((v) => v.id === pastedNode.meta?.viewId);
+    expect(pastedView?.datasetId).toBe(pastedMatrix!.id);
+    expect(pastedView?.nodeIds).toEqual([pastedNode.id]);
+    // Editing the copy must not touch the original.
+    const target = cellAt(pastedMatrix!, 0, 0);
+    store.setState(withSnapshot(setCellText(pastedMatrix!.id, target.id, "copy"), defaultCoalescer()));
+    const after = store.getState();
+    const original = after.doc.datasets!.find((ds) => ds.id === matrix.id) as MatrixDataset;
+    expect(cellAt(original, 0, 0).text).toBe("");
+    const clone = after.doc.datasets!.find((ds) => ds.id === pastedMatrix!.id) as MatrixDataset;
+    expect(cellAt(clone, 0, 0).text).toBe("copy");
+  });
+
+  it("duplicateSelection clones a linked table's dataset too", () => {
+    const store = freshStore();
+    const { matrix } = seedTable(store, 2, 2);
+    store.setState(withSnapshot(duplicateSelection(), defaultCoalescer()));
+    const state = store.getState();
+    expect(state.doc.nodes).toHaveLength(2);
+    const dupNode = state.doc.nodes[1]!;
+    const dupMatrix = matrixForTableNode(dupNode, state.doc.datasets);
+    expect(dupMatrix).not.toBeNull();
+    expect(dupMatrix!.id).not.toBe(matrix.id);
+    expect(state.doc.datasets).toHaveLength(2);
   });
 });
 

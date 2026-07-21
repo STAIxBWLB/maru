@@ -44,6 +44,22 @@ export function plainTextToHtml(text: string): string {
   return escapeHtml(text).replace(/\n/g, "<br>");
 }
 
+/**
+ * Accept only plain CSS color forms: `#hex`, a bare color name, or
+ * `rgb()/rgba()/hsl()/hsla()` with numeric-ish args. Style values ride in from
+ * imported diagram JSON and pasted HTML, and are interpolated into exported
+ * SVG attributes — anything fancier (`url(...)`, `expression`, markup chars)
+ * returns undefined so callers fall back to their default.
+ */
+const CSS_COLOR_RE =
+  /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,30}|(?:rgb|rgba|hsl|hsla)\(\s*[\d.,%\s/-]{0,48}\))$/;
+
+export function sanitizeCssColor(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return CSS_COLOR_RE.test(trimmed) ? trimmed : undefined;
+}
+
 /** Strip tags and decode entities — best-effort, for serialising back to plain. */
 export function htmlToPlainText(html: string): string {
   if (typeof document === "undefined") return html.replace(/<[^>]+>/g, "");

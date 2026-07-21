@@ -60,6 +60,25 @@ describe("renderDocToSvg", () => {
     expect(svg).toContain("white-space:pre-wrap");
   });
 
+  it("sanitizes hostile style colors out of exported markup", () => {
+    // Style bags ride in unvalidated from imported JSON; a crafted "color"
+    // must not be able to close the fill attribute and inject elements.
+    const node = mkNode("simple", 0, 0, { title: "T" });
+    node.style = {
+      bg: 'red"/><script>globalThis.pwned=1</script><rect fill="red',
+      border: "url(https://evil.example/x)",
+      fc: "#123456",
+    };
+    const other = mkNode("simple", 300, 0, { title: "U" });
+    const edge = { ...defaultEdge("e1", node.id, "e", other.id, "w"), color: "blue;}</style>" };
+    const { svg } = renderDocToSvg(docWith([node, other], [edge]));
+    expect(svg).not.toContain("<script");
+    expect(svg).not.toContain("evil.example");
+    expect(svg).not.toContain("</style>");
+    expect(svg).toContain('fill="#ffffff"');
+    expect(svg).toContain("#123456");
+  });
+
   it("includes nodes far outside any live viewport (no culling)", () => {
     const near = mkNode("simple", 0, 0, { title: "Near" });
     const far = mkNode("simple", 50_000, 50_000, { title: "Far away" });

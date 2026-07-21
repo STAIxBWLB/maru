@@ -25,6 +25,7 @@ import {
   type MatrixDataset,
   type MatrixRowRole,
   type PatternView,
+  type ReportDataset,
   type SemanticTag,
 } from "./reportTypes";
 import { applyCellStylePatch, pasteTextGridAt } from "./tableEditing";
@@ -308,6 +309,52 @@ function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/**
+ * Re-link cloned nodes after duplicate/paste. A cloned table must not alias
+ * the original's dataset (`updateMatrix` matches by id, so editing the copy
+ * would edit the original) — it gets a shallow dataset copy (structural
+ * sharing is safe: matrix updates are immutable) plus a fresh table view.
+ * Cloned members of other pattern views detach as snippets: no view lists
+ * the clone in its membership.
+ */
+export function relinkClonedNodes(
+  doc: { datasets?: { id: string; kind: string }[] },
+  cloned: DiagramNode[],
+): { nodes: DiagramNode[]; datasets: ReportDataset[]; views: PatternView[] } {
+  const datasets: ReportDataset[] = [];
+  const views: PatternView[] = [];
+  const nodes = cloned.map((node) => {
+    const meta = node.meta as Record<string, unknown> | undefined;
+    if (!meta || (meta.viewId === undefined && meta.memberId === undefined)) return node;
+    const matrix = matrixForTableNode(node, doc.datasets);
+    if (matrix) {
+      const dataset: MatrixDataset = { ...matrix, id: createDatasetId() };
+      const bounds = { x: node.x, y: node.y, w: node.w, h: node.h };
+      const view: PatternView = {
+        id: createPatternViewId(),
+        datasetId: dataset.id,
+        patternId: TABLE_PATTERN_ID,
+        bounds,
+        nodeIds: [node.id],
+        edgeIds: [],
+        projectionHash: computeProjectionHash({
+          patternId: TABLE_PATTERN_ID,
+          dataset,
+          bounds,
+        }),
+      };
+      datasets.push(dataset);
+      views.push(view);
+      return { ...node, meta: { ...meta, viewId: view.id, memberId: dataset.id } };
+    }
+    const detached: Record<string, unknown> = { ...meta, snippet: true };
+    delete detached.viewId;
+    delete detached.memberId;
+    return { ...node, meta: detached };
+  });
+  return { nodes, datasets, views };
+}
+
 /** Copy the selected nodes (plus edges internal to the selection) to the session clipboard. */
 export function copyNodesToClipboard(): StateTransformer {
   return (state) => {
@@ -380,16 +427,23 @@ export function pasteClipboard(offsetX = 24, offsetY = 24): StateTransformer {
         pastedEdges.push({ ...edge, id: newId("edge"), fromNode: fromMapped, toNode: toMapped });
       }
     }
+    const relinked = relinkClonedNodes(state.doc, pasted);
     return {
       ...state,
       doc: {
         ...state.doc,
-        nodes: [...state.doc.nodes, ...pasted],
+        nodes: [...state.doc.nodes, ...relinked.nodes],
         edges: [...state.doc.edges, ...pastedEdges],
+        ...(relinked.datasets.length > 0
+          ? { datasets: [...(state.doc.datasets ?? []), ...relinked.datasets] }
+          : {}),
+        ...(relinked.views.length > 0
+          ? { views: [...(state.doc.views ?? []), ...relinked.views] }
+          : {}),
       },
       ephemeral: {
         ...state.ephemeral,
-        selection: { nodes: new Set(pasted.map((n) => n.id)), edges: new Set() },
+        selection: { nodes: new Set(relinked.nodes.map((n) => n.id)), edges: new Set() },
         tableSelection: null,
       },
     };

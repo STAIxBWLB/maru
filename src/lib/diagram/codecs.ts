@@ -38,7 +38,7 @@ import {
   type MatrixRowRole,
   type ReportDataset,
 } from "./reportTypes";
-import { escapeHtml } from "./richText";
+import { escapeHtml, sanitizeCssColor } from "./richText";
 import { escapeTsvCell, matrixGrid, parseTsv, renderedCellCount } from "./tableEditing";
 import { createDiagramId, createEmptyDoc, type DiagramDoc } from "./types";
 
@@ -450,12 +450,16 @@ function htmlCellStyle(el: Element): MatrixCellStyle | undefined {
       case "font-weight":
         if (value === "bold" || Number(value) >= 600) style.bold = true;
         break;
-      case "background-color":
-        style.bg = value;
+      case "background-color": {
+        const bg = sanitizeCssColor(value);
+        if (bg) style.bg = bg;
         break;
-      case "color":
-        style.color = value;
+      }
+      case "color": {
+        const color = sanitizeCssColor(value);
+        if (color) style.color = color;
         break;
+      }
       default:
         break;
     }
@@ -495,10 +499,14 @@ export function htmlTableToMatrix(html: string, name = ""): MatrixDataset {
       // Clamp colspan: a hostile/corrupt attribute (colspan="1000000") would
       // otherwise inflate colCount and the covered set before the size gate
       // ever sees the matrix. Real spans never exceed the column limit.
-      const colSpan = Math.max(
+      const rawColSpan = Math.max(
         1,
         Math.min(Number(cell.getAttribute("colspan")) || 1, MATRIX_MAX_COLS),
       );
+      // A span may not cross a position covered by an earlier rowspan —
+      // otherwise two anchors overlap and the matrix tiling is invalid.
+      let colSpan = 1;
+      while (colSpan < rawColSpan && !covered.has(`${r}:${c + colSpan}`)) colSpan += 1;
       const style = htmlCellStyle(cell);
       placements.push({
         r,

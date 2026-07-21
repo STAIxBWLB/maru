@@ -27,6 +27,7 @@ import {
   type Coalescer,
 } from "./history";
 import { mkNode, type MkNodeOpts } from "./nodeKinds";
+import { relinkClonedNodes } from "./tableActions";
 import type {
   DiagramEdge,
   DiagramNode,
@@ -324,17 +325,24 @@ export function duplicateSelection(offsetX = 24, offsetY = 24): StateTransformer
         });
       }
     }
+    const relinked = relinkClonedNodes(state.doc, cloned);
     return {
       ...state,
       doc: {
         ...state.doc,
-        nodes: [...state.doc.nodes, ...cloned],
+        nodes: [...state.doc.nodes, ...relinked.nodes],
         edges: [...state.doc.edges, ...clonedEdges],
+        ...(relinked.datasets.length > 0
+          ? { datasets: [...(state.doc.datasets ?? []), ...relinked.datasets] }
+          : {}),
+        ...(relinked.views.length > 0
+          ? { views: [...(state.doc.views ?? []), ...relinked.views] }
+          : {}),
       },
       ephemeral: {
         ...state.ephemeral,
         selection: {
-          nodes: new Set(cloned.map((n) => n.id)),
+          nodes: new Set(relinked.nodes.map((n) => n.id)),
           edges: new Set(),
         },
       },

@@ -244,4 +244,12 @@ describe("diagram persistence v8 (report pattern studio)", () => {
     expect(doc.datasets).toEqual([]);
     expect(doc.views).toEqual([]);
   });
+
+  it("rejects a present-but-non-numeric v instead of silently rewriting", () => {
+    // `{"v":"9"}` is a format this build does not know — treating it as
+    // unversioned would discard unknown fields and overwrite it as v8 on save.
+    expect(() => migrate({ v: "9", nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
+    expect(() => migrate({ v: null, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
+    expect(() => migrate({ v: NaN, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
+  });
 });

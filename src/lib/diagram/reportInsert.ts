@@ -112,10 +112,14 @@ export async function insertDiagramIntoReport(
   }
   const renderHash = `sha256:${hex}`;
   const hash8 = hex.slice(0, 8);
-  // Windows-safe file stem: scope may contain ':' (`pattern:<viewId>`), which
-  // NTFS treats as an alternate-data-stream separator. Block attrs keep the
-  // raw scope; only the asset file name is sanitized.
-  const fileScope = scope.replace(/[^A-Za-z0-9._-]+/g, "-");
+  // Windows-safe path components: scope may contain ':' (`pattern:<viewId>`,
+  // an NTFS alternate-data-stream separator), and an imported doc id is an
+  // arbitrary JSON string that could carry newlines/parens which would break
+  // the Markdown image line. Block attrs keep the raw scope; only the asset
+  // path is sanitized.
+  const safeComponent = (value: string) => value.replace(/[^A-Za-z0-9._-]+/g, "-");
+  const fileScope = safeComponent(scope);
+  const assetDocId = safeComponent(doc.id) || "doc";
 
   // Resolve the target before writing assets so a cancelled chooser leaves
   // nothing behind. (The spec orders the asset write first; both orders keep
@@ -126,8 +130,8 @@ export async function insertDiagramIntoReport(
   let pngPath: string;
   try {
     const assets = await deps.renderAssets(scopeDocForRender(doc, scope));
-    svgPath = await deps.writeAsset(doc.id, `${fileScope}-${hash8}.svg`, assets.svg);
-    pngPath = await deps.writeAsset(doc.id, `${fileScope}-${hash8}.png`, assets.png);
+    svgPath = await deps.writeAsset(assetDocId, `${fileScope}-${hash8}.svg`, assets.svg);
+    pngPath = await deps.writeAsset(assetDocId, `${fileScope}-${hash8}.png`, assets.png);
   } catch (err) {
     return { status: "error", message: errorMessage(err) };
   }

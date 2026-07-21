@@ -25,7 +25,7 @@
 import { ARROW_MARKER_ID, routeEdge } from "./edgeRouting";
 import { bbox } from "./geometry";
 import type { MatrixDataset } from "./reportTypes";
-import { escapeHtml } from "./richText";
+import { escapeHtml, sanitizeCssColor } from "./richText";
 import {
   TABLE_GRID_BORDER,
   TABLE_ROLE_FILLS,
@@ -83,15 +83,20 @@ function num(value: number): string {
 
 // Mirrors `shapeFor` in NodeView.tsx — keep the two in sync.
 function shapeFor(node: DiagramNode): ShapeStyle {
+  // Style values come from imported/hand-edited JSON — `ensureNode` keeps the
+  // style bag untouched, so sanitize colors and coerce numbers here, the one
+  // place every raw SVG interpolation reads from.
   const style: NodeStyle = node.style ?? {};
+  const finite = (value: unknown, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
   return {
-    bg: style.bg ?? (node.kind === "text" ? "transparent" : "#ffffff"),
-    border: style.border ?? (node.kind === "text" ? "transparent" : "#1f2937"),
-    fc: style.fc ?? "#111827",
-    fs: style.fs ?? (node.kind === "text" ? 13 : 12),
-    fw: style.fw ?? (node.kind === "text" ? 500 : 600),
-    br: style.br ?? 4,
-    bw: style.bw ?? (node.kind === "text" ? 0 : 1.5),
+    bg: sanitizeCssColor(style.bg) ?? (node.kind === "text" ? "transparent" : "#ffffff"),
+    border: sanitizeCssColor(style.border) ?? (node.kind === "text" ? "transparent" : "#1f2937"),
+    fc: sanitizeCssColor(style.fc) ?? "#111827",
+    fs: finite(style.fs, node.kind === "text" ? 13 : 12),
+    fw: finite(style.fw, node.kind === "text" ? 500 : 600),
+    br: finite(style.br, 4),
+    bw: finite(style.bw, node.kind === "text" ? 0 : 1.5),
   };
 }
 
@@ -117,7 +122,7 @@ function tableMatrixSvg(node: DiagramNode, matrix: MatrixDataset, s: ShapeStyle)
     if (parsed.width <= 0) return "";
     return (
       `<line x1="${num(x1)}" y1="${num(y1)}" x2="${num(x2)}" y2="${num(y2)}"` +
-      ` stroke="${escapeHtml(parsed.color)}" stroke-width="${num(parsed.width)}"` +
+      ` stroke="${sanitizeCssColor(parsed.color) ?? TABLE_GRID_BORDER}" stroke-width="${num(parsed.width)}"` +
       (parsed.dash ? ` stroke-dasharray="4 3"` : "") +
       `/>`
     );
@@ -132,7 +137,7 @@ function tableMatrixSvg(node: DiagramNode, matrix: MatrixDataset, s: ShapeStyle)
       const role = matrix.rows[r]?.role ?? "data";
       out +=
         `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}"` +
-        ` fill="${escapeHtml(cell.style?.bg ?? TABLE_ROLE_FILLS[role])}"/>`;
+        ` fill="${sanitizeCssColor(cell.style?.bg) ?? TABLE_ROLE_FILLS[role]}"/>`;
       out += borderLine(rect.x, rect.y, rect.x + rect.w, rect.y, cell.style?.borders?.top);
       out += borderLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, cell.style?.borders?.bottom);
       out += borderLine(rect.x, rect.y, rect.x, rect.y + rect.h, cell.style?.borders?.left);
@@ -157,7 +162,7 @@ function tableMatrixSvg(node: DiagramNode, matrix: MatrixDataset, s: ShapeStyle)
           "justify-content:center;padding:1px 6px;box-sizing:border-box;overflow:hidden;" +
           `font-family:${FONT_FAMILY};font-size:${fontSize}px;line-height:1.3;` +
           `font-weight:${cell.style?.bold ? 700 : 400};` +
-          `color:${escapeHtml(cell.style?.color ?? TABLE_TEXT_COLOR)};` +
+          `color:${sanitizeCssColor(cell.style?.color) ?? TABLE_TEXT_COLOR};` +
           `text-align:${align};white-space:pre-wrap;word-break:break-word;`;
         out +=
           `<foreignObject x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}">` +
@@ -356,7 +361,7 @@ function sectionHeaderSvg(node: DiagramNode): string {
     "width:100%;height:100%;display:flex;align-items:center;justify-content:center;" +
     "padding:4px 8px;line-height:1.2;word-break:break-word;white-space:pre-wrap;" +
     `box-sizing:border-box;font-family:${FONT_FAMILY};` +
-    `color:${node.style?.fc ?? "#ffffff"};font-size:${(node.style?.fs ?? 12) + 1}px;` +
+    `color:${sanitizeCssColor(node.style?.fc) ?? "#ffffff"};font-size:${(typeof node.style?.fs === "number" && Number.isFinite(node.style.fs) ? node.style.fs : 12) + 1}px;` +
     "font-weight:700;text-align:center;";
   return (
     `<foreignObject x="0" y="0" width="${num(node.w)}" height="26">` +
@@ -421,7 +426,7 @@ function arrowMarkerAttr(kind: DiagramEdge["arrowStart"] | DiagramEdge["arrowEnd
 function edgeSvg(edge: DiagramEdge, fromNode: DiagramNode, toNode: DiagramNode): string {
   const routed = routeEdge(edge, fromNode, toNode);
   if (!routed) return "";
-  const color = edge.color ?? "#1f2937";
+  const color = sanitizeCssColor(edge.color) ?? "#1f2937";
   const strokeWidth = edge.width ?? 1.5;
   const dash = edge.dash === "dashed" ? ` stroke-dasharray="6 4"` : "";
   const markerStart = arrowMarkerAttr(edge.arrowStart);

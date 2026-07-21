@@ -172,4 +172,20 @@ describe("findManagedBlock", () => {
     expect(findManagedBlock(md, { source: ARGS.source, scope: "doc" })).toBeNull();
     expect(findManagedBlock(md, { source: "diagrams/other.cmd.json", scope: ARGS.scope })).toBeNull();
   });
+
+  it("survives '-->' inside attr values (diagram named 'x --> y')", () => {
+    // Un-escaped, the first --> inside the JSON would terminate the HTML
+    // comment, the block would parse as malformed, and every insert would
+    // append a duplicate.
+    const args = { ...ARGS, source: "diagrams/x --> y.cmd.json" };
+    const block = buildManagedBlock(args);
+    const md = `# R\n\n${block}\n`;
+    const match = { source: args.source, scope: args.scope };
+    const found = findManagedBlock(md, match);
+    expect(found).not.toBeNull();
+    expect(found!.attrs.source).toBe(args.source);
+    const again = spliceManagedBlock(md, block, match);
+    expect(again.mode).toBe("updated");
+    expect(again.content).toBe(md);
+  });
 });

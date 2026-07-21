@@ -128,6 +128,16 @@ describe("insertDiagramIntoReport", () => {
     expect(stem(harness.writes[0].fileName)).toBe(stem(harness.writes[1].fileName));
   });
 
+  it("sanitizes a hostile doc id out of the asset path (markdown injection)", async () => {
+    // Imported docs carry arbitrary ids; newlines/parens in the path would
+    // break out of the ![caption](path) image line in the target report.
+    const harness = makeHarness();
+    const doc = makeDoc("x)\n# injected\n(");
+    await insertDiagramIntoReport(makeRequest({ doc }), harness.deps);
+    expect(harness.writes[0].docId).toBe("x-injected-");
+    expect(harness.saves[0].content).not.toContain("# injected");
+  });
+
   it("is stable: the same doc renders to the same hash and asset paths", async () => {
     const first = makeHarness();
     const second = makeHarness();

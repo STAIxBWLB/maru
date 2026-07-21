@@ -63,7 +63,10 @@ export function buildManagedBlock(args: BuildManagedBlockArgs): string {
     ...(args.fallbackPath !== undefined ? { fallback: args.fallbackPath } : {}),
     ...(args.renderHash !== undefined ? { renderHash: args.renderHash } : {}),
   };
-  const comment = `${MANAGED_BLOCK_MARKER} ${JSON.stringify(attrs)} -->`;
+  // `>` only occurs inside JSON string values (a diagram named "x --> y" would
+  // otherwise terminate the HTML comment mid-JSON); > survives JSON.parse.
+  const json = JSON.stringify(attrs).replace(/>/g, "\\u003e");
+  const comment = `${MANAGED_BLOCK_MARKER} ${json} -->`;
   const image = `![${escapeCaption(args.caption)}](${args.assetPath})`;
   return `${comment}\n${image}`;
 }

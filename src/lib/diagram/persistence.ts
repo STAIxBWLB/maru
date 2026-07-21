@@ -260,8 +260,16 @@ function upgradeV7ToV8(nodes: DiagramNode[]): V8Upgrade {
  */
 export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  if (typeof obj.v === "number" && obj.v > DIAGRAM_SCHEMA_VERSION) {
-    throw new UnsupportedDiagramVersionError(obj.v);
+  // A present-but-non-numeric `v` (e.g. `"9"`) is a format this build does not
+  // know — treat it like a future version rather than silently rewriting the
+  // document as v8. Bare `{nodes, edges}` exports carry no `v` and still pass.
+  if (obj.v !== undefined) {
+    if (typeof obj.v !== "number" || !Number.isFinite(obj.v)) {
+      throw new UnsupportedDiagramVersionError(Number(obj.v));
+    }
+    if (obj.v > DIAGRAM_SCHEMA_VERSION) {
+      throw new UnsupportedDiagramVersionError(obj.v);
+    }
   }
   const ts = now();
   const id = typeof obj.id === "string" && obj.id.length > 0 ? obj.id : createDiagramId();

@@ -317,6 +317,28 @@ describe("html-table codec", () => {
     );
     expect(matrix.columns.length).toBeLessThanOrEqual(50);
   });
+
+  it("stops a colspan at positions covered by an earlier rowspan", () => {
+    // B's colspan=2 would otherwise overlap the cell A covers at (1,1),
+    // producing two anchors for one grid position (invalid tiling).
+    const matrix = htmlTableToMatrix(
+      '<table><tr><td>X</td><td rowspan="2">A</td></tr><tr><td colspan="2">B</td></tr></table>',
+    );
+    expect(validateMatrix(matrix).ok).toBe(true);
+    expect(expandMatrixToGrid(matrix)).toEqual([
+      ["X", "A"],
+      ["B", ""],
+    ]);
+  });
+
+  it("drops non-color css values on html import", () => {
+    const matrix = htmlTableToMatrix(
+      '<table><tr><td style="background-color:url(https://evil.example/x);color:#123456">x</td></tr></table>',
+    );
+    const cell = Object.values(matrix.cells)[0]!;
+    expect(cell.style?.bg).toBeUndefined();
+    expect(cell.style?.color).toBe("#123456");
+  });
 });
 
 describe("maru-json codec", () => {

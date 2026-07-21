@@ -994,21 +994,23 @@ function DiagramShell({
       reportError(null);
       try {
         // One-time v7 backup: the active document was loaded from a pre-v8
-        // body and this is the first v8 save over it. A backup failure must
-        // not silently lose data, so we warn via the error channel but still
-        // allow the save (and do not retry within this session). Save-As to a
-        // different name leaves the legacy file untouched, so no backup runs
-        // (backing up `name` would read the not-yet-existing new file).
+        // body and this is the first v8 save over it. A backup failure ABORTS
+        // the save — overwriting the only v7 copy without a backup would be
+        // unrecoverable — and leaves the attempt flag unset so the next save
+        // retries. Save-As to a different name leaves the legacy file
+        // untouched, so no backup runs (backing up `name` would read the
+        // not-yet-existing new file).
         const session = getDiagramSession(sessionKey);
         if (session.migratedFromLegacy && !session.legacyBackupAttempted && name === activeName) {
-          setDiagramSession({ legacyBackupAttempted: true }, sessionKey);
           try {
             await diagramBackupDocument(workPath, name);
+            setDiagramSession({ legacyBackupAttempted: true }, sessionKey);
           } catch (backupErr) {
             console.warn("diagram v7 backup failed", backupErr);
             reportError(
               t("diagram.error.backup", { message: (backupErr as Error).message ?? "unknown" }),
             );
+            return;
           }
         }
         const current = store.getState().doc;
