@@ -349,7 +349,7 @@ pub fn scan_vault(
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        if !matches!(ext, "md" | "markdown" | "html" | "htm") {
+        if !is_document_extension(ext) {
             continue;
         }
         candidates.push(path.to_path_buf());
@@ -418,6 +418,15 @@ fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>,
         })),
         Err(_) => Ok(None),
     }
+}
+
+/// Case-insensitive check for extensions maru treats as documents.
+/// Shared by the vault scan, the vault watcher, and document path validation.
+pub(crate) fn is_document_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown" | "html" | "htm"
+    )
 }
 
 pub fn normalize_existing_dir(input: &str) -> Result<PathBuf, String> {
@@ -800,6 +809,28 @@ mod tests {
         assert!(
             titles.contains(&"Deep"),
             "deep notes must be found regardless of depth"
+        );
+    }
+
+    #[test]
+    fn is_document_extension_matches_case_insensitively() {
+        for ext in ["md", "MD", "markdown", "Markdown", "html", "HTML", "htm", "Htm"] {
+            assert!(is_document_extension(ext), "expected {ext} to match");
+        }
+        for ext in ["", "txt", "mdx", "html5"] {
+            assert!(!is_document_extension(ext), "expected {ext} to not match");
+        }
+    }
+
+    #[test]
+    fn scan_vault_finds_uppercase_html_documents() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "page.HTML", "<html><body><h1>Upper</h1></body></html>\n");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        assert!(
+            entries.iter().any(|e| e.path.ends_with("page.HTML")),
+            "uppercase .HTML documents must be scanned"
         );
     }
 

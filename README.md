@@ -50,6 +50,54 @@ flag-gated.
 | `sites` | 사이트 / Sites | Left-rail site switcher with an embedded native browser pane. |
 | `e2e` | E2E 플로우 / E2E Flow | Hidden end-to-end flow console (flag-gated `e2eFlowEnabled`). |
 
+## HTML editing
+
+`.html` and `.htm` documents open in the document editor with three modes
+(Markdown files keep their own rich/source/preview modes and saved
+preference):
+
+- **Visual** (default) — sandboxed WYSIWYG editing with a formatting toolbar
+  (undo/redo, paragraph/heading styles, bold/italic/underline/strike, lists,
+  link/unlink, clear formatting).
+- **Source** — lossless raw HTML editing.
+- **Preview** — sandboxed, read-only rendering.
+
+Preservation guarantees and limits:
+
+- YAML frontmatter, the doctype, `<html>`, `<head>` (including styles and
+  scripts), `<body>` attributes, and the surrounding document shell are
+  preserved byte-for-byte. After an actual Visual edit, only the body
+  contents may receive browser HTML normalization; when Visual mode is
+  opened without editing, the source stays byte-identical.
+- HTML fragments edit as fragments. Full documents whose `<body>` boundary
+  cannot be parsed disable Visual mode with a direct Source-mode action.
+- Visual mode is limited to documents up to 2 MiB (UTF-8) or 20,000 DOM
+  nodes; larger documents fall back to Source and Preview.
+
+Sandbox behavior:
+
+- Scripts, inline event handlers, meta refresh, nested frames, and forms are
+  preserved in the source but never executed: the editing/preview surface is
+  a runtime-only iframe clone that strips them and injects a
+  Content-Security-Policy blocking scripts, connections, workers, objects,
+  frames, form submission, and remote resources. Runtime safety markup and
+  rewritten asset URLs are never serialized back to the file.
+- Documents containing scripts, event handlers, custom elements, forms, or
+  embedded content require a one-time confirmation (per tab and current
+  source digest) before Visual editing; source edits and external revisions
+  re-arm the confirmation.
+
+Local assets:
+
+- Relative asset URLs (CSS, images, fonts, media), `data:`, and `blob:` URLs
+  load through the Tauri asset protocol, authorized read-only and scoped to
+  the document's own directory inside the owning registered workspace
+  (`prepare_html_editor_assets`). Network resources and paths escaping the
+  workspace are blocked.
+- File operations (rename/move, duplicate, trash, manual and automatic
+  snapshots) preserve the original HTML extension, including case, and the
+  vault scanner/watcher recognize HTML extensions case-insensitively.
+
 ## Install
 
 Maru ships the desktop app and CLI as separate artifacts. On macOS, both are

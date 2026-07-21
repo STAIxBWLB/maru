@@ -80,8 +80,110 @@ export const mockDocuments: DocumentPayload[] = [
   },
 ];
 
+/**
+ * HTML fixtures for the WYSIWYG HTML editor e2e spec. Opt-in via the
+ * `?mockHtml=1` query param (same pattern as `mockPublic` in
+ * mockWorkspaceRegistry) so the default mock workspace — and every existing
+ * spec — stays byte-identical.
+ */
+const scriptedHtmlContent = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Maru HTML 샘플</title>
+<style>body { color: #333; }</style>
+<script>window.__maruScriptRan = true</script>
+</head>
+<body class="report">
+<h1>분기 보고서</h1>
+<p>스크립트를 포함한 본문입니다.</p>
+</body>
+</html>
+`;
+
+const cleanHtmlContent = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Clean Report</title>
+<style>body { margin: 0; }</style>
+</head>
+<body class="clean">
+<h1>클린 문서</h1>
+<p>스크립트 없는 본문입니다.</p>
+</body>
+</html>
+`;
+
+const malformedHtmlContent = `<html><head><title>Broken</title>
+<p>body 태그가 없는 문서입니다.`;
+
+const remoteAssetsHtmlContent = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Remote Assets</title>
+</head>
+<body>
+<p>원격 이미지를 포함한 문서입니다.</p>
+<img src="https://example.com/tracker.png" alt="tracker">
+<img src="./local-image.png" alt="local">
+</body>
+</html>
+`;
+
+const mockHtmlDocuments: DocumentPayload[] = [
+  {
+    path: `${MOCK_VAULT_PATH}/sample-page.html`,
+    relPath: "sample-page.html",
+    title: "HTML 샘플 리포트",
+    content: scriptedHtmlContent,
+    body: scriptedHtmlContent,
+    meta: {},
+    fileKind: "html",
+  },
+  {
+    path: `${MOCK_VAULT_PATH}/clean-report.html`,
+    relPath: "clean-report.html",
+    title: "클린 HTML 문서",
+    content: cleanHtmlContent,
+    body: cleanHtmlContent,
+    meta: {},
+    fileKind: "html",
+  },
+  {
+    path: `${MOCK_VAULT_PATH}/malformed.html`,
+    relPath: "malformed.html",
+    title: "깨진 HTML 문서",
+    content: malformedHtmlContent,
+    body: malformedHtmlContent,
+    meta: {},
+    fileKind: "html",
+  },
+  {
+    path: `${MOCK_VAULT_PATH}/remote-assets.html`,
+    relPath: "remote-assets.html",
+    title: "원격 자산 HTML 문서",
+    content: remoteAssetsHtmlContent,
+    body: remoteAssetsHtmlContent,
+    meta: {},
+    fileKind: "html",
+  },
+];
+
+function mockHtmlEnabled(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("mockHtml")
+  );
+}
+
+function allMockDocuments(): DocumentPayload[] {
+  return mockHtmlEnabled() ? [...mockDocuments, ...mockHtmlDocuments] : mockDocuments;
+}
+
 export function mockEntries(rootPath = MOCK_VAULT_PATH): VaultEntry[] {
-  return mockDocuments.map((doc, index) => ({
+  return allMockDocuments().map((doc, index) => ({
     path: `${rootPath}/${doc.relPath}`,
     relPath: doc.relPath,
     title: doc.title,
@@ -109,7 +211,7 @@ export function mockVaultGraphFile(): import("./graph/model").VaultGraphFile {
 }
 
 export function mockWorkspaceFiles(rootPath = MOCK_VAULT_PATH): WorkspaceFileEntry[] {
-  const docs = mockDocuments.map((doc, index) => ({
+  const docs = allMockDocuments().map((doc, index) => ({
     path: `${rootPath}/${doc.relPath}`,
     relPath: doc.relPath,
     name: doc.relPath.split("/").pop() ?? doc.relPath,
@@ -247,7 +349,7 @@ export function mockTrashDocument(documentPath: string): DeletedDocument {
 }
 
 function findMockDocument(path: string): DocumentPayload | undefined {
-  return mockDocuments.find(
+  return allMockDocuments().find(
     (doc) => doc.path === path || doc.relPath === path || path.endsWith(`/${doc.relPath}`),
   );
 }

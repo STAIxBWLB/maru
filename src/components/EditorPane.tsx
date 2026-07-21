@@ -23,6 +23,8 @@ import {
 } from "react";
 import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
+import { isHtmlFileKind } from "../lib/htmlDocument";
+import type { HtmlEditorFlushHandle } from "./HtmlVisualEditor";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
@@ -32,9 +34,16 @@ import { Button } from "./ui/Button";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
 
 export type EditorViewMode = "rich" | "source" | "preview";
+export type HtmlViewMode = "visual" | "source" | "preview";
 
 const LazyRichMarkdownEditor = lazy(() =>
   import("./RichMarkdownEditor").then((module) => ({ default: module.RichMarkdownEditor })),
+);
+const LazyHtmlVisualEditor = lazy(() =>
+  import("./HtmlVisualEditor").then((module) => ({ default: module.HtmlVisualEditor })),
+);
+const LazyHtmlPreviewFrame = lazy(() =>
+  import("./HtmlVisualEditor").then((module) => ({ default: module.HtmlPreviewFrame })),
 );
 
 export interface EditorTabSummary {
@@ -91,6 +100,15 @@ interface EditorPaneProps {
   onViewModeChange: (mode: EditorViewMode) => void;
   onWikilinkClick: (target: string) => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** HTML document tabs: per-pane view mode (visual/source/preview), owned by
+   *  the caller — never persisted. */
+  htmlViewMode?: HtmlViewMode;
+  onHtmlViewModeChange?: (mode: HtmlViewMode) => void;
+  htmlRiskAckDigest?: string | null;
+  onHtmlRiskAck?: (digest: string) => void;
+  htmlFlushRef?: React.RefObject<HtmlEditorFlushHandle | null>;
+  /** Workspace absolute path, used to prepare HTML editor assets. */
+  vaultPath?: string | null;
   /** Managed vault note (write_policy managed + notes/**\/*.md) — arms the
    *  schema validation strip (maru-vault-graph-spec §3 F1). */
   isManagedVaultNote?: boolean;
@@ -139,11 +157,21 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onViewModeChange,
     onWikilinkClick,
     textareaRef,
+    htmlViewMode,
+    onHtmlViewModeChange,
+    htmlRiskAckDigest,
+    onHtmlRiskAck,
+    htmlFlushRef,
+    vaultPath,
     isManagedVaultNote,
   },
   ref,
 ) {
   const { t, locale } = useTranslation();
+  const isHtml = document ? isHtmlFileKind(document.fileKind) : false;
+  const activeMode: EditorViewMode | HtmlViewMode = isHtml
+    ? (htmlViewMode ?? "visual")
+    : viewMode;
   const deferredStatsDraft = useDeferredValue(draftContent);
   const stats = useMemo(
     () => documentStats(document, deferredStatsDraft),
@@ -195,7 +223,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   const [previewHtml, setPreviewHtml] = useState("");
   useEffect(() => {
-    if (!document || viewMode !== "preview") {
+    if (!document || isHtml || viewMode !== "preview") {
       setPreviewHtml("");
       return;
     }
@@ -206,7 +234,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     return () => {
       cancelled = true;
     };
-  }, [draftContent, document, viewMode]);
+  }, [draftContent, document, isHtml, viewMode]);
 
   // F3(b): mark unresolved wikilinks in the preview (red dotted) — clicking
   // one routes to onWikilinkClick, which seeds the note-creation dialog.
@@ -215,14 +243,14 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const previewRef = useRef<HTMLDivElement | null>(null);
   const previewIndex = useMemo(() => buildEntryIndex(entries), [entries]);
   useEffect(() => {
-    if (viewMode !== "preview" || !previewRef.current) return;
+    if (isHtml || viewMode !== "preview" || !previewRef.current) return;
     const anchors = previewRef.current.querySelectorAll<HTMLElement>("[data-wikilink]");
     for (const anchor of anchors) {
       const target = anchor.getAttribute("data-wikilink") ?? "";
       const resolved = target ? resolveTargetIndexed(previewIndex, entries, target) : null;
       anchor.classList.toggle("wikilink-missing", !resolved);
     }
-  }, [previewHtml, viewMode, previewIndex, entries]);
+  }, [previewHtml, isHtml, viewMode, previewIndex, entries]);
 
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -530,12 +558,15 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       ) : (
         <Tabs.Root
           className="editor-tabs"
-          value={viewMode}
-          onValueChange={(value) => onViewModeChange(value as EditorViewMode)}
+          value={activeMode}
+          onValueChange={(value) => {
+            if (isHtml) onHtmlViewModeChange?.(value as HtmlViewMode);
+            else onViewModeChange(value as EditorViewMode);
+          }}
         >
           <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
-            <Tabs.Trigger className="tab-trigger" value="rich">
-              {t("editor.tab.rich")}
+            <Tabs.Trigger className="tab-trigger" value={isHtml ? "visual" : "rich"}>
+              {isHtml ? t("editor.tab.visual") : t("editor.tab.rich")}
             </Tabs.Trigger>
             <Tabs.Trigger className="tab-trigger" value="source">
               {t("editor.tab.source")}
@@ -544,9 +575,28 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
               {t("editor.tab.preview")}
             </Tabs.Trigger>
           </Tabs.List>
-          <Tabs.Content className="tab-panel" value="rich">
+          <Tabs.Content className="tab-panel" value={isHtml ? "visual" : "rich"}>
             <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
-              <LazyRichMarkdownEditor value={draftContent} onChange={onChange} readOnly={readOnly} />
+              {isHtml && document ? (
+                <LazyHtmlVisualEditor
+                  value={draftContent}
+                  onChange={onChange}
+                  readOnly={readOnly}
+                  readOnlyReason={readOnlyReason}
+                  vaultPath={vaultPath ?? ""}
+                  documentPath={document.path}
+                  riskAckDigest={htmlRiskAckDigest}
+                  onRiskAck={onHtmlRiskAck ?? (() => {})}
+                  onRequestSourceMode={() => onHtmlViewModeChange?.("source")}
+                  ref={htmlFlushRef}
+                />
+              ) : (
+                <LazyRichMarkdownEditor
+                  value={draftContent}
+                  onChange={onChange}
+                  readOnly={readOnly}
+                />
+              )}
             </Suspense>
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="source">
@@ -566,12 +616,23 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             {autocompletePopup}
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="preview">
-            <article
-              ref={previewRef}
-              className="preview-surface"
-              onClick={handlePreviewClick}
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
+            {isHtml && document ? (
+              <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
+                <LazyHtmlPreviewFrame
+                  value={draftContent}
+                  vaultPath={vaultPath ?? ""}
+                  documentPath={document.path}
+                  title={document.title}
+                />
+              </Suspense>
+            ) : (
+              <article
+                ref={previewRef}
+                className="preview-surface"
+                onClick={handlePreviewClick}
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            )}
           </Tabs.Content>
         </Tabs.Root>
       )}
