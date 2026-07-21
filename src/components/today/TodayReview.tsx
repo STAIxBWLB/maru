@@ -326,7 +326,7 @@ export function TodayReview({ onNavigate }: TodayReviewProps) {
                       {t("today.review.reflection.save")}
                     </button>
                     {reflectionSaved ? (
-                      <span className="today-review-saved">
+                      <span className="today-review-saved" role="status">
                         {t("today.review.reflection.saved")}
                       </span>
                     ) : null}

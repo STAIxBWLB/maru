@@ -1,25 +1,30 @@
 // Maru Today — Prepare panel: capacity, constraints, and sleep-boundary
 // cards. Capacity math comes from computeCapacitySummary (mirrors the Rust
-// side); calendar commitments are not wired yet (TODO(calendar), Group 3),
-// so busy time is empty and the constraints card says so honestly.
+// side); busy time comes from the day's calendar commitments (local calendar
+// notes) loaded by useCalendarCommitments.
 
+import { format } from "date-fns";
 import { CalendarDays, Moon, TriangleAlert } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { CalendarCommitment, TodayRoute } from "../../lib/today";
-import { computeCapacitySummary } from "../../lib/todayPlan";
+import { computeCapacitySummary, mergeBusyIntervals } from "../../lib/todayPlan";
 import { useToday } from "./todayContext";
 
 interface TodayCapacityCardsProps {
   onNavigate: (route: TodayRoute) => void;
+  /** The logical day's busy intervals (local calendar notes). */
+  commitments?: CalendarCommitment[];
 }
 
-export function TodayCapacityCards({ onNavigate }: TodayCapacityCardsProps) {
+/** How many merged busy ranges the constraints card spells out before
+ *  collapsing the rest into a "+N more" suffix. */
+const MAX_SHOWN_RANGES = 2;
+
+export function TodayCapacityCards({ onNavigate, commitments = [] }: TodayCapacityCardsProps) {
   const { t } = useTranslation();
   const { settings, snapshot } = useToday();
 
-  // TODO(calendar): real busy commitments land with the calendar lane
-  // (Group 3); computeCapacitySummary already merges/clips them.
-  const busy: CalendarCommitment[] = [];
+  const busy = commitments;
 
   const summary = computeCapacitySummary({
     dayStart: snapshot?.dayStart ?? settings.dayStart,
@@ -38,6 +43,17 @@ export function TodayCapacityCards({ onNavigate }: TodayCapacityCardsProps) {
     if (hours > 0) return t("today.capacity.hoursOnly", { hours });
     return t("today.capacity.minutesOnly", { minutes: rest });
   };
+
+  const mergedRanges = mergeBusyIntervals(busy).map(
+    (interval) =>
+      `${format(interval.startMs, "HH:mm")}-${format(interval.endMs, "HH:mm")}`,
+  );
+  const shownRanges = mergedRanges.slice(0, MAX_SHOWN_RANGES);
+  const hiddenRangeCount = mergedRanges.length - shownRanges.length;
+  const rangesSummary =
+    hiddenRangeCount > 0
+      ? `${shownRanges.join(", ")}${t("today.calendar.rangesMore", { count: hiddenRangeCount })}`
+      : shownRanges.join(", ");
 
   const rows: Array<{ key: string; label: string; value: string }> = [
     {
@@ -87,6 +103,9 @@ export function TodayCapacityCards({ onNavigate }: TodayCapacityCardsProps) {
                     ? t("today.capacity.constraints.reflected", { count: busy.length })
                     : t("today.capacity.constraints.none")}
                 </p>
+                {rangesSummary ? (
+                  <p className="today-capacity-side-text today-capacity-ranges">{rangesSummary}</p>
+                ) : null}
               </div>
               <button
                 type="button"

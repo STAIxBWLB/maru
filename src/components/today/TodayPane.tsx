@@ -155,12 +155,14 @@ export function TodayPane({
       workPath,
       settings: todaySettings,
       timezone,
+      defaultCalendar: effectiveSettings.defaultCalendar,
+      gwsBinary: effectiveSettings.gwsBinary,
       snapshot,
       loading,
       mutate,
       reload,
     }),
-    [workPath, todaySettings, timezone, snapshot, loading, mutate, reload],
+    [workPath, todaySettings, timezone, effectiveSettings, snapshot, loading, mutate, reload],
   );
 
   const content = (() => {

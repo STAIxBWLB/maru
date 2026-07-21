@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { scanTaskNotes } from "../../lib/api";
 import { rowsToTaskEntries, type TaskEntry } from "../../lib/tasks";
 import type {
+  CalendarCommitment,
   CaptureCandidate,
   DailyPlanV1,
   PlanItemRef,
@@ -45,11 +46,14 @@ export interface TodayPlanner {
 interface UseTodayPlannerArgs {
   /** Live read of the session's capture candidates (for accepted captures). */
   getCaptureCandidates: () => CaptureCandidate[];
+  /** The logical day's busy intervals (calendar commitments); feeds the
+   *  capacity budget that bounds the flexible lane. */
+  commitments?: CalendarCommitment[];
 }
 
 const DIFF_SUMMARY_MS = 6000;
 
-export function useTodayPlanner({ getCaptureCandidates }: UseTodayPlannerArgs): TodayPlanner {
+export function useTodayPlanner({ getCaptureCandidates, commitments }: UseTodayPlannerArgs): TodayPlanner {
   const { workPath, settings, snapshot, mutate } = useToday();
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [planning, setPlanning] = useState(false);
@@ -57,6 +61,8 @@ export function useTodayPlanner({ getCaptureCandidates }: UseTodayPlannerArgs): 
 
   const snapshotRef = useRef<TodaySnapshot | null>(snapshot);
   snapshotRef.current = snapshot;
+  const commitmentsRef = useRef<CalendarCommitment[]>(commitments ?? []);
+  commitmentsRef.current = commitments ?? [];
   const manualOrderRef = useRef<Set<string>>(new Set());
   const diffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -109,12 +115,12 @@ export function useTodayPlanner({ getCaptureCandidates }: UseTodayPlannerArgs): 
       const acceptedCaptures = getCaptureCandidates().filter((candidate) =>
         plannedCaptureIds.has(planItemRefKey({ kind: "capture", captureId: candidate.captureId })),
       );
-      // TODO(calendar): pass real busy commitments once the calendar lane
-      // (Group 3) exposes them; availability math already supports them.
+      // Real busy intervals from the day's calendar commitments bound the
+      // capacity budget (merge/clip handled by computeCapacitySummary).
       const capacity = computeCapacitySummary({
         dayStart: snap.dayStart,
         sleepStart: snap.sleepStart,
-        busy: [],
+        busy: commitmentsRef.current,
         focusCapMinutes: settings.dailyFocusCapMinutes,
         plan: existing,
         provisionalEstimateMinutes: settings.provisionalEstimateMinutes,

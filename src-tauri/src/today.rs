@@ -95,6 +95,13 @@ pub struct CalendarSyncState {
     pub status: CalendarSyncStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Provider event id returned by a successful publish.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    /// Destination calendar id captured at selection time (publish falls back
+    /// to the command-level destination, then `primary`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
 }
 
 impl Default for CalendarSyncStatus {
@@ -106,6 +113,15 @@ impl Default for CalendarSyncStatus {
 impl CalendarSyncState {
     pub fn none() -> Self {
         Self::default()
+    }
+
+    pub fn selected(destination: Option<String>) -> Self {
+        Self {
+            status: CalendarSyncStatus::Selected,
+            message: None,
+            event_id: None,
+            destination,
+        }
     }
 }
 
@@ -163,6 +179,13 @@ impl DailyPlanV1 {
             .iter()
             .chain(self.flexible.iter())
             .chain(self.overflow.iter())
+    }
+
+    pub fn items_mut(&mut self) -> impl Iterator<Item = &mut DailyPlanItem> {
+        self.top
+            .iter_mut()
+            .chain(self.flexible.iter_mut())
+            .chain(self.overflow.iter_mut())
     }
 }
 
@@ -394,6 +417,14 @@ pub enum TodayMutation {
     },
     SetPlan {
         plan: DailyPlanV1,
+    },
+    /// Explicit per-block calendar opt-in: toggles one plan item's
+    /// `calendarSync` between `none` and `selected`. Never publishes.
+    SetCalendarSync {
+        item_ref: PlanItemRef,
+        selected: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        destination: Option<String>,
     },
     /// Restore the previous revision snapshot (one step).
     Undo,

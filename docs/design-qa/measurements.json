@@ -1,0 +1,84 @@
+{
+  "anchors": [
+    {
+      "selector": ".topbar",
+      "property": "height",
+      "expected": 44,
+      "tolerance": 2,
+      "measured": 44,
+      "within": true
+    },
+    {
+      "selector": ".activity-rail",
+      "property": "width",
+      "expected": 48,
+      "tolerance": 2,
+      "measured": 48,
+      "within": true
+    },
+    {
+      "selector": ".today-sidebar",
+      "property": "width",
+      "expected": 350,
+      "tolerance": 2,
+      "measured": 350,
+      "within": true
+    },
+    {
+      "selector": ".today-stage-header",
+      "property": "height",
+      "expected": 116,
+      "tolerance": 4,
+      "measured": 116,
+      "within": true
+    },
+    {
+      "selector": ".today-panel-braindump",
+      "property": "width",
+      "expected": 401.72,
+      "tolerance": 4,
+      "measured": 401.7,
+      "within": true
+    },
+    {
+      "selector": ".today-panel-capture",
+      "property": "width",
+      "expected": 615.29,
+      "tolerance": 4,
+      "measured": 615.3,
+      "within": true
+    }
+  ],
+  "reference": {
+    "viewport": {
+      "width": 1487,
+      "height": 1058
+    },
+    "brainDumpWidth": 401.7,
+    "captureWidth": 615.3,
+    "measuredSplit": "39.5/60.5",
+    "docScrollWidth": 1487,
+    "docClientWidth": 1487
+  },
+  "wide": {
+    "viewport": {
+      "width": 1440,
+      "height": 920
+    },
+    "brainDumpWidth": 383.14,
+    "captureWidth": 586.86,
+    "sideBySide": true
+  },
+  "compact": {
+    "viewport": {
+      "width": 1024,
+      "height": 720
+    },
+    "sidebarWidth": 280,
+    "brainDumpWidth": 640,
+    "captureWidth": 640,
+    "stacked": true,
+    "docScrollWidth": 1024,
+    "docClientWidth": 1024
+  }
+}

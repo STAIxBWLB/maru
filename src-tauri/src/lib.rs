@@ -45,6 +45,7 @@ mod sys_import;
 mod tasks;
 pub mod today;
 pub mod today_ai;
+pub mod today_calendar;
 pub mod today_lifecycle;
 pub mod today_notify;
 pub mod today_outbox;
@@ -172,6 +173,7 @@ use tasks::{
 };
 use today::today_logical_day;
 use today_ai::{today_apply_plan_result, today_build_plan_request};
+use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
 use today_lifecycle::{task_transition, task_trash};
 use today_notify::today_notify_new_day;
 use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
@@ -331,6 +333,10 @@ pub fn run() {
             task_integrations_retry,
             read_task_integrations,
             today_notify_new_day,
+            // Maru Today (selective calendar sync)
+            today_calendar_commitments,
+            task_calendar_set_sync,
+            today_calendar_publish,
             store_shelf_files,
             store_shelf_files_as,
             list_memos,

@@ -3,6 +3,17 @@
 // Field names mirror the serde camelCase wire format exactly — keep stable.
 
 import { invoke } from "@tauri-apps/api/core";
+import { invokeE2EOverride } from "./e2eInvoke";
+
+/** Single invoke funnel for every Today command. In a plain browser (dev /
+ *  Playwright) commands resolve through per-command e2e fixtures when
+ *  registered; without a fixture the raw invoke rejects, preserving the
+ *  previous degraded-mode behavior. In the Tauri shell this is a pass-through. */
+async function todayInvoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const override = await invokeE2EOverride<T>(command, args);
+  if (override !== null) return override;
+  return invoke<T>(command, args);
+}
 
 export type TodayRoute =
   | "prepare"
@@ -40,6 +51,10 @@ export type CalendarSyncStatus = "none" | "selected" | "syncing" | "synced" | "e
 export interface CalendarSyncState {
   status: CalendarSyncStatus;
   message?: string | null;
+  /** Provider event id returned by a successful publish. */
+  eventId?: string | null;
+  /** Destination calendar id captured at selection time. */
+  destination?: string | null;
 }
 
 export interface DailyPlanItem {
@@ -202,6 +217,12 @@ export type TodayMutation =
       deferDate?: string | null;
     }
   | { type: "setPlan"; plan: DailyPlanV1 }
+  | {
+      type: "setCalendarSync";
+      itemRef: PlanItemRef;
+      selected: boolean;
+      destination?: string | null;
+    }
   | { type: "undo" };
 
 export interface LogicalDayInfo {
@@ -261,6 +282,15 @@ export interface TodayNotifyOutcome {
   permission: string;
 }
 
+export interface CalendarPublishOutcome {
+  published: number;
+  failed: number;
+  /** True when a gws auth failure stopped the run; remaining `selected`
+   *  items are untouched so the user can re-authenticate and republish. */
+  blocked: boolean;
+  snapshot: TodaySnapshot;
+}
+
 // --- Commands --------------------------------------------------------------
 
 export async function todayLogicalDay(
@@ -269,7 +299,7 @@ export async function todayLogicalDay(
   timezone: string,
   dayStart: string,
 ): Promise<LogicalDayInfo> {
-  return invoke<LogicalDayInfo>("today_logical_day", { workPath, nowIso, timezone, dayStart });
+  return todayInvoke<LogicalDayInfo>("today_logical_day", { workPath, nowIso, timezone, dayStart });
 }
 
 export async function todayOpen(
@@ -279,7 +309,7 @@ export async function todayOpen(
   dayStart: string,
   sleepStart: string,
 ): Promise<TodaySnapshot> {
-  return invoke<TodaySnapshot>("today_open", { workPath, nowIso, timezone, dayStart, sleepStart });
+  return todayInvoke<TodaySnapshot>("today_open", { workPath, nowIso, timezone, dayStart, sleepStart });
 }
 
 export async function todayMutate(
@@ -288,7 +318,7 @@ export async function todayMutate(
   expectedRevision: string,
   mutation: TodayMutation,
 ): Promise<TodaySnapshot> {
-  return invoke<TodaySnapshot>("today_mutate", {
+  return todayInvoke<TodaySnapshot>("today_mutate", {
     workPath,
     logicalDay,
     expectedRevision,
@@ -303,7 +333,7 @@ export async function todayRollover(
   dayStart: string,
   sleepStart: string,
 ): Promise<TodayRolloverOutcome> {
-  return invoke<TodayRolloverOutcome>("today_rollover", {
+  return todayInvoke<TodayRolloverOutcome>("today_rollover", {
     workPath,
     nowIso,
     timezone,
@@ -317,7 +347,7 @@ export async function readTaskEvents(
   month?: string | null,
   day?: string | null,
 ): Promise<TaskEvent[]> {
-  return invoke<TaskEvent[]>("read_task_events", {
+  return todayInvoke<TaskEvent[]>("read_task_events", {
     workPath,
     month: month ?? null,
     day: day ?? null,
@@ -328,7 +358,7 @@ export async function taskTransition(
   workPath: string,
   request: TaskTransitionRequest,
 ): Promise<TaskTransitionOutcome> {
-  return invoke<TaskTransitionOutcome>("task_transition", { workPath, request });
+  return todayInvoke<TaskTransitionOutcome>("task_transition", { workPath, request });
 }
 
 export async function taskTrash(
@@ -337,7 +367,7 @@ export async function taskTrash(
   expectedTaskHash: string,
   remoteDelete?: boolean | null,
 ): Promise<TaskTrashOutcome> {
-  return invoke<TaskTrashOutcome>("task_trash", {
+  return todayInvoke<TaskTrashOutcome>("task_trash", {
     workPath,
     taskPath,
     expectedTaskHash,
@@ -350,7 +380,7 @@ export async function taskIntegrationsDrain(
   nowIso: string,
   gwsPath?: string | null,
 ): Promise<DrainOutcome> {
-  return invoke<DrainOutcome>("task_integrations_drain", {
+  return todayInvoke<DrainOutcome>("task_integrations_drain", {
     workPath,
     nowIso,
     gwsPath: gwsPath ?? null,
@@ -362,11 +392,11 @@ export async function taskIntegrationsRetry(
   ids: string[] | null,
   nowIso: string,
 ): Promise<RetryOutcome> {
-  return invoke<RetryOutcome>("task_integrations_retry", { workPath, ids: ids ?? null, nowIso });
+  return todayInvoke<RetryOutcome>("task_integrations_retry", { workPath, ids: ids ?? null, nowIso });
 }
 
 export async function readTaskIntegrations(workPath: string): Promise<OutboxRecord[]> {
-  return invoke<OutboxRecord[]>("read_task_integrations", { workPath });
+  return todayInvoke<OutboxRecord[]>("read_task_integrations", { workPath });
 }
 
 export async function todayNotifyNewDay(
@@ -375,11 +405,72 @@ export async function todayNotifyNewDay(
   title?: string | null,
   body?: string | null,
 ): Promise<TodayNotifyOutcome> {
-  return invoke<TodayNotifyOutcome>("today_notify_new_day", {
+  return todayInvoke<TodayNotifyOutcome>("today_notify_new_day", {
     workPath,
     logicalDay,
     title: title ?? null,
     body: body ?? null,
+  });
+}
+
+/** Busy intervals for one logical day from local calendar notes, clipped to
+ *  the day window. `calendars` empty = all discovered notes; otherwise only
+ *  notes whose `calendarId` (or `local`) is listed. */
+export async function todayCalendarCommitments(
+  workPath: string,
+  logicalDay: string,
+  timezone: string,
+  dayStart: string,
+  sleepStart: string,
+  calendars: string[],
+): Promise<CalendarCommitment[]> {
+  return todayInvoke<CalendarCommitment[]>("today_calendar_commitments", {
+    workPath,
+    logicalDay,
+    timezone,
+    dayStart,
+    sleepStart,
+    calendars,
+  });
+}
+
+/** Toggle ONE plan item's calendarSync between `none` and `selected`
+ *  (explicit per-block opt-in). Never publishes. */
+export async function taskCalendarSetSync(
+  workPath: string,
+  logicalDay: string,
+  expectedRevision: string,
+  itemRef: PlanItemRef,
+  selected: boolean,
+  destination?: string | null,
+): Promise<TodaySnapshot> {
+  return todayInvoke<TodaySnapshot>("task_calendar_set_sync", {
+    workPath,
+    logicalDay,
+    expectedRevision,
+    itemRef,
+    selected,
+    destination: destination ?? null,
+  });
+}
+
+/** Publish every `selected` plan item with a proposedBlock to the destination
+ *  calendar. Explicit policy: `none` items are never published. */
+export async function todayCalendarPublish(
+  workPath: string,
+  logicalDay: string,
+  expectedRevision: string,
+  destination?: string | null,
+  gwsPath?: string | null,
+  nowIso?: string,
+): Promise<CalendarPublishOutcome> {
+  return todayInvoke<CalendarPublishOutcome>("today_calendar_publish", {
+    workPath,
+    logicalDay,
+    expectedRevision,
+    destination: destination ?? null,
+    gwsPath: gwsPath ?? null,
+    nowIso: nowIso ?? new Date().toISOString(),
   });
 }
 
@@ -398,7 +489,7 @@ export async function todayBuildPlanRequest(
   workPath: string,
   logicalDay: string,
 ): Promise<TodayPlanRequest> {
-  return invoke<TodayPlanRequest>("today_build_plan_request", { workPath, logicalDay });
+  return todayInvoke<TodayPlanRequest>("today_build_plan_request", { workPath, logicalDay });
 }
 
 /** Hand raw AI output for `maru_today_plan_v1` back to Rust for validation
@@ -414,7 +505,7 @@ export async function todayApplyPlanResult(
   validRefs: PlanItemRef[],
   sleepStart: string,
 ): Promise<TodaySnapshot> {
-  return invoke<TodaySnapshot>("today_apply_plan_result", {
+  return todayInvoke<TodaySnapshot>("today_apply_plan_result", {
     workPath,
     logicalDay,
     expectedRevision,

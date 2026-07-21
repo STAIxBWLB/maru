@@ -226,7 +226,7 @@ fn task_note_is_done(work: &Path, task_path: &str) -> bool {
 
 // --- gws spawning -------------------------------------------------------------
 
-fn resolve_gws(override_path: Option<&str>) -> Result<PathBuf, String> {
+pub(crate) fn resolve_gws(override_path: Option<&str>) -> Result<PathBuf, String> {
     if let Some(raw) = override_path {
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
@@ -295,7 +295,7 @@ fn backoff_minutes(attempts: u32) -> i64 {
     }
 }
 
-fn is_auth_error(detail: &str) -> bool {
+pub(crate) fn is_auth_error(detail: &str) -> bool {
     classify_gws_auth_state(detail) == "auth_required"
 }
 

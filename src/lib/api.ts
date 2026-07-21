@@ -21,6 +21,7 @@ import {
   readMockDocument,
 } from "./fixtures";
 import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
+import { invokeE2EOverride } from "./e2eInvoke";
 import type {
   CreatedDocument,
   DeletedDocument,
@@ -321,7 +322,14 @@ export async function scanTaskNotes(
   workPath: string,
   root?: string | null,
 ): Promise<TaskNoteRow[]> {
-  if (!isTauri()) return mockTaskNoteRows(workPath);
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<TaskNoteRow[]>("scan_task_notes", {
+      workPath,
+      root: root ?? null,
+    });
+    if (override) return override;
+    return mockTaskNoteRows(workPath);
+  }
   return invoke<TaskNoteRow[]>("scan_task_notes", { workPath, root: root ?? null });
 }
 
@@ -571,7 +579,14 @@ export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions
 }
 
 export async function scanInboxEntries(workPath: string, scanOptions?: ScanOptions): Promise<InboxEntry[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<InboxEntry[]>("scan_inbox_entries", {
+      workPath,
+      scanOptions: scanOptions ?? null,
+    });
+    if (override) return override;
+    return [];
+  }
   return invoke<InboxEntry[]>("scan_inbox_entries", { workPath, scanOptions: scanOptions ?? null });
 }
 
@@ -817,7 +832,14 @@ export async function readDocument(
   vaultPath: string,
   documentPath: string,
 ): Promise<DocumentPayload> {
-  if (!isTauri()) return readMockDocument(documentPath);
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DocumentPayload>("read_document", {
+      vaultPath,
+      documentPath,
+    });
+    if (override) return override;
+    return readMockDocument(documentPath);
+  }
   return invoke<DocumentPayload>("read_document", { vaultPath, documentPath });
 }
 
@@ -828,6 +850,13 @@ export async function saveDocument(
   expectedRevision?: string | null,
 ): Promise<DocumentPayload> {
   if (!isTauri()) {
+    const override = await invokeE2EOverride<DocumentPayload>("save_document", {
+      vaultPath,
+      documentPath,
+      content,
+      expectedRevision: expectedRevision ?? null,
+    });
+    if (override) return override;
     const doc = readMockDocument(documentPath);
     doc.content = content;
     doc.body = content.replace(/^---[\s\S]*?---\n/, "");

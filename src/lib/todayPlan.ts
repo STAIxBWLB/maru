@@ -714,7 +714,11 @@ function normalizePlanItem(value: unknown, lane: PlanLane, index: number): Daily
       : typeof record.estimate_provisional === "boolean"
         ? record.estimate_provisional
         : estimateMinutes === null;
-  const syncStatus = stringValue(asRecord(record.calendarSync ?? record.calendar_sync)?.status);
+  const syncRecord = asRecord(record.calendarSync ?? record.calendar_sync);
+  const syncStatus = stringValue(syncRecord?.status);
+  const syncMessage = stringValue(syncRecord?.message);
+  const syncEventId = stringValue(syncRecord?.eventId ?? syncRecord?.event_id);
+  const syncDestination = stringValue(syncRecord?.destination);
   return {
     itemRef,
     lane: (LANES as string[]).includes(rawLane) ? (rawLane as PlanLane) : lane,
@@ -728,6 +732,9 @@ function normalizePlanItem(value: unknown, lane: PlanLane, index: number): Daily
       status: (CALENDAR_SYNC_STATUSES as string[]).includes(syncStatus)
         ? (syncStatus as CalendarSyncStatus)
         : "none",
+      ...(syncMessage ? { message: syncMessage } : {}),
+      ...(syncEventId ? { eventId: syncEventId } : {}),
+      ...(syncDestination ? { destination: syncDestination } : {}),
     },
   };
 }

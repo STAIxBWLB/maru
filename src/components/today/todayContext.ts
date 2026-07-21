@@ -10,6 +10,11 @@ export interface TodayContextValue {
   workPath: string | null;
   settings: TasksTodaySettings;
   timezone: string;
+  /** TasksSettings.defaultCalendar — the target when
+   *  `settings.calendarDestination === "defaultCalendar"`. */
+  defaultCalendar?: string | null;
+  /** TasksSettings.gwsBinary override for the publish shell-out. */
+  gwsBinary?: string | null;
   /** Loaded day snapshot. Null = degraded read-only mode (backend
    *  unavailable or `today.enabled` off); the shell still renders. */
   snapshot: TodaySnapshot | null;

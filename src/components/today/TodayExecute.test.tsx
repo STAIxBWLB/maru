@@ -36,6 +36,7 @@ vi.mock("../../lib/today", async (importOriginal) => {
     readTaskEvents: vi.fn(),
     readTaskIntegrations: vi.fn(),
     taskTransition: vi.fn(),
+    todayCalendarPublish: vi.fn(),
     sha256Hex: vi.fn(),
   };
 });
@@ -52,6 +53,7 @@ import {
   readTaskIntegrations,
   sha256Hex,
   taskTransition,
+  todayCalendarPublish,
 } from "../../lib/today";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -319,5 +321,142 @@ describe("TodayExecute", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("opens the task sheet from a plan row via keyboard (Enter)", async () => {
+    const { container } = await renderExecute();
+    const row = container.querySelector<HTMLElement>(".today-panel-top3 .today-exec-row")!;
+    await act(async () => {
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it("does not open the sheet when an inner row button handles the key", async () => {
+    const { container } = await renderExecute();
+    const pin = container.querySelector<HTMLElement>(
+      ".today-panel-top3 .today-exec-row .today-icon-button",
+    )!;
+    await act(async () => {
+      pin.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  // --- Selective calendar sync ------------------------------------------------
+
+  function blockSnapshot(calendarSync: DailyPlanItem["calendarSync"]): TodaySnapshot {
+    return {
+      ...SNAPSHOT,
+      plan: {
+        ...PLAN,
+        top: [
+          {
+            ...planItem({ kind: "task", taskId: "t1" }, 0, 60),
+            proposedBlock: {
+              startIso: `${DAY}T10:00:00+09:00`,
+              endIso: `${DAY}T11:00:00+09:00`,
+            },
+            calendarSync,
+          },
+        ],
+      },
+    };
+  }
+
+  function fixedPanel(container: HTMLElement): HTMLElement {
+    return container.querySelector<HTMLElement>(".today-panel-fixed")!;
+  }
+
+  function linkButton(panel: HTMLElement, label: string): HTMLButtonElement {
+    return Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(label),
+    )!;
+  }
+
+  it("opts a fixed block into calendar sync via setCalendarSync", async () => {
+    const { container, mutate } = await renderExecute(blockSnapshot({ status: "none" }));
+    const add = linkButton(fixedPanel(container), translate("ko", "today.calendar.add"));
+    await act(async () => {
+      add.click();
+    });
+    expect(mutate).toHaveBeenCalledWith({
+      type: "setCalendarSync",
+      itemRef: { kind: "task", taskId: "t1" },
+      selected: true,
+      destination: null,
+    });
+    expect(todayCalendarPublish).not.toHaveBeenCalled();
+  });
+
+  it("publishes selected blocks for the day on demand", async () => {
+    const snapshot = blockSnapshot({ status: "selected", destination: null });
+    const { container, reload } = await renderExecute(snapshot);
+    vi.mocked(todayCalendarPublish).mockResolvedValue({
+      published: 1,
+      failed: 0,
+      blocked: false,
+      snapshot: blockSnapshot({ status: "synced", eventId: "evt-1" }),
+    });
+    const publish = linkButton(fixedPanel(container), translate("ko", "today.calendar.publishNow"));
+    await act(async () => {
+      publish.click();
+    });
+    expect(todayCalendarPublish).toHaveBeenCalledWith("/tmp/work", DAY, "rev-1", null, null);
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("shows a non-color synced badge for published blocks", async () => {
+    const { container } = await renderExecute(
+      blockSnapshot({ status: "synced", eventId: "evt-1" }),
+    );
+    const badge = fixedPanel(container).querySelector(".today-sync-badge")!;
+    expect(badge.textContent).toContain(translate("ko", "today.calendar.synced"));
+    expect(badge.classList.contains("warn")).toBe(false);
+  });
+
+  it("shows the error message and retries via re-select + publish", async () => {
+    const { container, mutate } = await renderExecute(
+      blockSnapshot({ status: "error", message: "network unreachable" }),
+    );
+    const panel = fixedPanel(container);
+    const warn = panel.querySelector(".today-sync-badge.warn")!;
+    expect(warn.getAttribute("title")).toBe("network unreachable");
+    vi.mocked(todayCalendarPublish).mockResolvedValue({
+      published: 1,
+      failed: 0,
+      blocked: false,
+      snapshot: blockSnapshot({ status: "synced", eventId: "evt-2" }),
+    });
+    await act(async () => {
+      linkButton(panel, translate("ko", "today.calendar.retry")).click();
+    });
+    // Retry re-selects first (clears the error), then publishes with the
+    // fresh revision that mutation returned.
+    expect(mutate).toHaveBeenCalledWith({
+      type: "setCalendarSync",
+      itemRef: { kind: "task", taskId: "t1" },
+      selected: true,
+      destination: null,
+    });
+    expect(todayCalendarPublish).toHaveBeenCalledWith("/tmp/work", DAY, "rev-2", null, null);
+  });
+
+  it("surfaces an auth-blocked publish without marking items failed", async () => {
+    const { container } = await renderExecute(
+      blockSnapshot({ status: "selected", destination: null }),
+    );
+    vi.mocked(todayCalendarPublish).mockResolvedValue({
+      published: 0,
+      failed: 0,
+      blocked: true,
+      snapshot: blockSnapshot({ status: "selected", destination: null }),
+    });
+    await act(async () => {
+      linkButton(fixedPanel(container), translate("ko", "today.calendar.publishNow")).click();
+    });
+    expect(container.querySelector(".today-notice")?.textContent).toContain(
+      translate("ko", "today.calendar.blocked"),
+    );
   });
 });

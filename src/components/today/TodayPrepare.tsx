@@ -3,7 +3,7 @@
 // yesterday-review band. Owns the auto-planner + capture session state and
 // wires change notifications between them.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { CaptureCandidate, TodayRoute } from "../../lib/today";
 import { TaskSheet } from "./TaskSheet";
@@ -16,6 +16,7 @@ import { TodayTop3 } from "./TodayTop3";
 import { TodayYesterday } from "./TodayYesterday";
 import { taskKeyOf } from "./todayPrepareUtils";
 import { useActiveSection } from "./useActiveSection";
+import { useCalendarCommitments } from "./useCalendarCommitments";
 import { useTodayCaptures } from "./useTodayCaptures";
 import { useTodayPlanner, type TodayPlanner } from "./useTodayPlanner";
 
@@ -32,14 +33,25 @@ export function TodayPrepare({ onNavigate }: TodayPrepareProps) {
   // (its onChanged notifies the planner via a ref) — breaks the cycle.
   const candidatesRef = useRef<CaptureCandidate[]>([]);
   const plannerRef = useRef<TodayPlanner | null>(null);
+  const { commitments } = useCalendarCommitments();
   const planner = useTodayPlanner({
     getCaptureCandidates: () => candidatesRef.current,
+    commitments,
   });
   plannerRef.current = planner;
   const captures = useTodayCaptures({
     onChanged: (kind) => plannerRef.current?.notifyChange(kind),
   });
   candidatesRef.current = captures.visible;
+
+  // A fresh commitments set changes the capacity budget — let the planner
+  // know (debounced; no-op when autoPlan is off).
+  const commitmentsRef = useRef(commitments);
+  useEffect(() => {
+    if (commitmentsRef.current === commitments) return;
+    commitmentsRef.current = commitments;
+    plannerRef.current?.notifyChange("calendar");
+  }, [commitments]);
 
   const [sheetTaskId, setSheetTaskId] = useState<string | null>(null);
   const sheetEntry = sheetTaskId
@@ -88,7 +100,7 @@ export function TodayPrepare({ onNavigate }: TodayPrepareProps) {
             onChanged={planner.notifyChange}
             onOpenTaskSheet={setSheetTaskId}
           />
-          <TodayCapacityCards onNavigate={onNavigate} />
+          <TodayCapacityCards onNavigate={onNavigate} commitments={commitments} />
           <TodayYesterday onChanged={planner.notifyChange} onNavigate={onNavigate} />
         </div>
       </div>

@@ -7709,7 +7709,7 @@ button.git-badge:hover {
 
 .today-pane {
   display: grid;
-  grid-template-columns: 350px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -7723,6 +7723,11 @@ button.git-badge:hover {
 }
 
 .today-sidebar {
+  /* The width (not the parent grid template) carries the responsive
+   * breakpoints: an element cannot match its own container query, so
+   * column-track rules inside @container todaypane never apply. The
+   * auto-sized track above follows this width. */
+  width: 350px;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -7951,6 +7956,8 @@ button.git-badge:hover {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   min-height: 40px;
   border: none;
   border-radius: var(--radius-sm);
@@ -7986,6 +7993,11 @@ button.git-badge:hover {
     background-color 120ms ease,
     border-color 120ms ease,
     color 120ms ease;
+}
+
+.today-step-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .today-step.active .today-step-button {
@@ -8215,6 +8227,11 @@ button.git-badge:hover {
   background: var(--panel-2);
 }
 
+.today-exec-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .today-exec-row.done .today-exec-title {
   color: var(--faint);
   text-decoration: line-through;
@@ -8243,11 +8260,15 @@ button.git-badge:hover {
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .today-exec-subtitle {
   color: var(--faint);
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .today-exec-estimate {
@@ -8297,6 +8318,104 @@ button.git-badge:hover {
   color: var(--ink);
 }
 
+/* ─── Today / Execute: integration outbox status ───────────────────── */
+
+.today-sync-status {
+  margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+.today-sync-status-header {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: none;
+  padding: 2px 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.today-sync-status-header:hover {
+  color: var(--ink);
+}
+
+.today-sync-status-header > svg {
+  margin-left: auto;
+}
+
+.today-sync-status-count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  padding: 1px 6px;
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.today-sync-status-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 4px 4px;
+}
+
+.today-sync-status-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.today-sync-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.today-sync-status-task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-sync-status-op {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.today-sync-status-attempts {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-sync-status-hint {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--warn);
+  font-size: 11px;
+}
+
 .today-spin {
   animation: today-spin 1s linear infinite;
 }
@@ -8330,6 +8449,20 @@ button.git-badge:hover {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.today-exec-agenda-calendar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.today-calendar-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .today-review-summary {
@@ -9149,8 +9282,8 @@ button.git-badge:hover {
 }
 
 @container todaypane (max-width: 1239px) {
-  .today-pane {
-    grid-template-columns: 280px minmax(0, 1fr);
+  .today-sidebar {
+    width: 280px;
   }
 
   .today-grid,
@@ -9183,11 +9316,8 @@ button.git-badge:hover {
 }
 
 @container todaypane (max-width: 959px) {
-  .today-pane {
-    grid-template-columns: 56px minmax(0, 1fr);
-  }
-
   .today-sidebar {
+    width: 56px;
     padding: 14px 8px;
   }
 
@@ -9210,17 +9340,12 @@ button.git-badge:hover {
   }
 
   .today-stepper {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .today-step {
-    flex: 0 0 auto;
+    overflow: hidden;
   }
 
   .today-step:not(:last-child)::after {
-    flex: 0 0 24px;
-    margin: 0 8px;
+    flex: 0 0 16px;
+    margin: 0 6px;
   }
 
   .today-content {

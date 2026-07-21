@@ -11,8 +11,9 @@
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
 use crate::today::{
-    logical_day, parse_day_start, parse_sleep_start, parse_timezone, validate_plan, CarryoverRef,
-    DayState, PlanItemRef, TaskEvent, TodayMutation, TodaySnapshot, TodayStage, YesterdayItem,
+    logical_day, parse_day_start, parse_sleep_start, parse_timezone, validate_plan, CalendarSyncState,
+    CarryoverRef, DayState, PlanItemRef, TaskEvent, TodayMutation, TodaySnapshot, TodayStage,
+    YesterdayItem,
 };
 use crate::vault::normalize_existing_dir;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
@@ -86,7 +87,7 @@ fn canonical_json(snapshot: &TodaySnapshot) -> Result<String, String> {
 }
 
 /// Recompute the revision from canonical content and atomically persist.
-fn persist_snapshot(work: &Path, snapshot: &mut TodaySnapshot) -> Result<(), String> {
+pub(crate) fn persist_snapshot(work: &Path, snapshot: &mut TodaySnapshot) -> Result<(), String> {
     snapshot.revision = revision_for(&canonical_json(snapshot)?);
     let json = serde_json::to_string_pretty(snapshot)
         .map_err(|err| format!("Cannot serialize today snapshot: {err}"))?;
@@ -97,7 +98,11 @@ fn persist_snapshot(work: &Path, snapshot: &mut TodaySnapshot) -> Result<(), Str
 
 /// Snapshot the current on-disk content before it is overwritten, then
 /// prune to the latest `REVISION_RETENTION` revisions.
-fn snapshot_revision(work: &Path, snapshot: &TodaySnapshot, raw: &str) -> Result<(), String> {
+pub(crate) fn snapshot_revision(
+    work: &Path,
+    snapshot: &TodaySnapshot,
+    raw: &str,
+) -> Result<(), String> {
     let dir = revisions_dir(work, &snapshot.logical_day);
     fs::create_dir_all(&dir)
         .map_err(|err| format!("Cannot create today revisions directory: {err}"))?;
@@ -295,10 +300,35 @@ fn read_events_at(path: &Path) -> Result<Vec<TaskEvent>, String> {
 
 /// Read the persisted snapshot for a logical day without mutating anything.
 pub(crate) fn load_snapshot(work: &Path, logical_day: &str) -> Result<TodaySnapshot, String> {
+    Ok(load_snapshot_with_raw(work, logical_day)?.1)
+}
+
+/// Read the persisted snapshot together with its raw on-disk JSON (needed by
+/// commands that snapshot the pre-overwrite revision themselves).
+pub(crate) fn load_snapshot_with_raw(
+    work: &Path,
+    logical_day: &str,
+) -> Result<(String, TodaySnapshot), String> {
     validate_logical_day(logical_day)?;
     let raw = fs::read_to_string(state_path(work, logical_day))
         .map_err(|_| "today_state_missing".to_string())?;
-    serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))
+    let snapshot: TodaySnapshot =
+        serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))?;
+    Ok((raw, snapshot))
+}
+
+/// Optimistic-concurrency guard shared by every revision-checked command.
+pub(crate) fn check_revision(
+    snapshot: &TodaySnapshot,
+    expected_revision: &str,
+) -> Result<(), String> {
+    if snapshot.revision != expected_revision {
+        return Err(format!(
+            "today_conflict: expected revision {expected_revision}, found {}",
+            snapshot.revision
+        ));
+    }
+    Ok(())
 }
 
 /// Load the snapshot for the logical day containing `now`, initializing and
@@ -494,6 +524,26 @@ fn apply_mutation(
                 snapshot.day_state = DayState::Preparing;
             }
             Ok("plan_set")
+        }
+        TodayMutation::SetCalendarSync {
+            item_ref,
+            selected,
+            destination,
+        } => {
+            let plan = snapshot
+                .plan
+                .as_mut()
+                .ok_or_else(|| "today_plan_missing".to_string())?;
+            let item = plan
+                .items_mut()
+                .find(|item| item.item_ref == *item_ref)
+                .ok_or_else(|| format!("today_plan_item_missing: {}", item_ref.id()))?;
+            item.calendar_sync = if *selected {
+                CalendarSyncState::selected(destination.clone())
+            } else {
+                CalendarSyncState::none()
+            };
+            Ok("calendar_sync_set")
         }
         TodayMutation::Undo => unreachable!("undo is handled before apply_mutation"),
     }

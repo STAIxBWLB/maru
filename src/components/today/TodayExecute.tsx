@@ -9,6 +9,7 @@
 import { format } from "date-fns";
 import {
   ArrowUpToLine,
+  CalendarPlus,
   Check,
   Loader2,
   Pin,
@@ -29,14 +30,17 @@ import type {
 } from "../../lib/today";
 import {
   isTaskConflict,
+  isTodayConflict,
   readTaskEvents,
   readTaskIntegrations,
   sha256Hex,
   taskTransition,
+  todayCalendarPublish,
 } from "../../lib/today";
 import { planItemRefKey, TOP_LANE_SIZE } from "../../lib/todayPlan";
 import { TaskSheet } from "./TaskSheet";
 import { TodayStageScaffold } from "./TodayStageScaffold";
+import { TodaySyncStatus } from "./TodaySyncStatus";
 import { useToday } from "./todayContext";
 import { resolveRefTitle, taskKeyOf } from "./todayPrepareUtils";
 import { useTodayTasks } from "./useTodayTasks";
@@ -71,14 +75,15 @@ function outboxToSyncStatus(record: OutboxRecord): TaskSyncStatus {
 
 export function TodayExecute({ onNavigate }: TodayExecuteProps) {
   const { t } = useTranslation();
-  const { workPath, snapshot, mutate, reload } = useToday();
+  const { workPath, settings, defaultCalendar, gwsBinary, snapshot, mutate, reload } = useToday();
   const { tasks, refresh } = useTodayTasks();
 
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [outbox, setOutbox] = useState<OutboxRecord[]>([]);
   /** Optimistic completions/reopens keyed by the plan ref task id. */
   const [optimistic, setOptimistic] = useState<Record<string, DoneRow | null>>({});
-  const [notice, setNotice] = useState<"conflict" | "error" | null>(null);
+  const [notice, setNotice] = useState<"conflict" | "error" | "calendarBlocked" | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [sheetTaskId, setSheetTaskId] = useState<string | null>(null);
 
   const logicalDay = snapshot?.logicalDay ?? "";
@@ -275,9 +280,143 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
     if (item.itemRef.kind === "task") setSheetTaskId(item.itemRef.taskId);
   };
 
+  // --- Selective calendar sync (always explicit; nothing auto-publishes) ----
+
+  /** calendarDestination "defaultCalendar" points at TasksSettings.defaultCalendar. */
+  const resolvedDestination = useCallback((): string | null => {
+    const configured = settings.calendarDestination?.trim() ?? "";
+    if (!configured || configured === "defaultCalendar") {
+      return defaultCalendar?.trim() || null;
+    }
+    return configured;
+  }, [settings.calendarDestination, defaultCalendar]);
+
+  /** Per-block opt-in: flag one item `selected` (never publishes). */
+  const selectForCalendar = (item: DailyPlanItem) => {
+    void mutate({
+      type: "setCalendarSync",
+      itemRef: item.itemRef,
+      selected: true,
+      destination: resolvedDestination(),
+    });
+  };
+
+  /** Publish every `selected` block for the day (per-item selection already
+   *  scopes what gets published). */
+  const publishSelected = async (revisionOverride?: string) => {
+    if (!workPath || !snapshot || publishing) return;
+    setPublishing(true);
+    try {
+      const outcome = await todayCalendarPublish(
+        workPath,
+        snapshot.logicalDay,
+        revisionOverride ?? snapshot.revision,
+        resolvedDestination(),
+        gwsBinary ?? null,
+      );
+      setNotice(outcome.blocked ? "calendarBlocked" : null);
+      await reload();
+    } catch (err) {
+      if (isTodayConflict(err)) {
+        setNotice("conflict");
+        void reload();
+      } else {
+        setNotice("error");
+      }
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  /** Error retry: re-select (clears the error state), then republish with the
+   *  fresh revision the mutation returned. */
+  const retryCalendarItem = async (item: DailyPlanItem) => {
+    const next = await mutate({
+      type: "setCalendarSync",
+      itemRef: item.itemRef,
+      selected: true,
+      destination: resolvedDestination(),
+    });
+    if (next) void publishSelected(next.revision);
+  };
+
+  const renderCalendarControl = (item: DailyPlanItem) => {
+    const sync = item.calendarSync;
+    switch (sync.status) {
+      case "selected":
+        return (
+          <>
+            <span className="today-sync-badge">{t("today.calendar.selected")}</span>
+            <button
+              type="button"
+              className="today-panel-link"
+              disabled={publishing}
+              onClick={() => void publishSelected()}
+            >
+              {t("today.calendar.publishNow")}
+            </button>
+          </>
+        );
+      case "syncing":
+        return (
+          <span className="today-sync-badge">
+            <Loader2 size={12} strokeWidth={1.9} className="today-spin" aria-hidden="true" />
+            {t("today.execute.sync.syncing")}
+          </span>
+        );
+      case "synced":
+        return (
+          <span className="today-sync-badge">
+            <Check size={12} strokeWidth={2.2} aria-hidden="true" />
+            {t("today.calendar.synced")}
+          </span>
+        );
+      case "error":
+        return (
+          <>
+            <span
+              className="today-sync-badge warn"
+              title={sync.message ?? undefined}
+            >
+              <TriangleAlert size={12} strokeWidth={1.9} aria-hidden="true" />
+              {t("today.calendar.error")}
+            </span>
+            <button
+              type="button"
+              className="today-panel-link"
+              disabled={publishing}
+              onClick={() => void retryCalendarItem(item)}
+            >
+              {t("today.calendar.retry")}
+            </button>
+          </>
+        );
+      default:
+        return (
+          <button
+            type="button"
+            className="today-panel-link today-calendar-add"
+            onClick={() => selectForCalendar(item)}
+          >
+            <CalendarPlus size={12} strokeWidth={1.9} aria-hidden="true" />
+            {t("today.calendar.add")}
+          </button>
+        );
+    }
+  };
+
   const sheetEntry = sheetTaskId
     ? (tasks.find((task) => taskKeyOf(task) === sheetTaskId) ?? null)
     : null;
+
+  /** Rows open the sheet on click; mirror that for keyboard users. */
+  const handleRowKeyDown = (event: React.KeyboardEvent, item: DailyPlanItem) => {
+    if (event.target !== event.currentTarget) return; // inner buttons handle themselves
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openSheet(item);
+    }
+  };
 
   const renderPlanRow = (item: DailyPlanItem, rank: number | null) => {
     const ref = item.itemRef;
@@ -289,7 +428,9 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
       <li
         key={planItemRefKey(item.itemRef)}
         className={done ? "today-exec-row done" : "today-exec-row"}
+        tabIndex={0}
         onClick={() => openSheet(item)}
+        onKeyDown={(event) => handleRowKeyDown(event, item)}
       >
         {rank !== null ? <span className="today-exec-rank">{rank}</span> : null}
         <span className="today-exec-title">
@@ -348,7 +489,11 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
         {notice ? (
           <p className="today-notice" role="alert">
             <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
-            {notice === "conflict" ? t("today.execute.conflict") : t("today.execute.error")}
+            {notice === "conflict"
+              ? t("today.execute.conflict")
+              : notice === "calendarBlocked"
+                ? t("today.calendar.blocked")
+                : t("today.execute.error")}
           </p>
         ) : null}
         <div className="today-grid today-grid-execute">
@@ -384,6 +529,9 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
                       <span className="today-exec-title">
                         {item.outcome || resolveRefTitle(item.itemRef, tasks, [])}
                       </span>
+                      <span className="today-exec-agenda-calendar">
+                        {renderCalendarControl(item)}
+                      </span>
                     </li>
                   ))}
                 </ol>
@@ -404,7 +552,9 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
                     <li
                       key={planItemRefKey(item.itemRef)}
                       className="today-exec-row"
+                      tabIndex={0}
                       onClick={() => openSheet(item)}
+                      onKeyDown={(event) => handleRowKeyDown(event, item)}
                     >
                       <span className="today-exec-title">
                         {item.outcome || resolveRefTitle(item.itemRef, tasks, [])}
@@ -480,6 +630,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
                   ))}
                 </ol>
               )}
+              <TodaySyncStatus />
             </div>
           </section>
         </div>
@@ -499,7 +650,7 @@ function SyncBadge({ status }: { status: TaskSyncStatus | null }) {
   if (!status || status === "local") return null;
   if (status === "syncing") {
     return (
-      <span className="today-sync-badge">
+      <span className="today-sync-badge" role="status">
         <Loader2 size={12} strokeWidth={1.9} className="today-spin" aria-hidden="true" />
         {t("today.execute.sync.syncing")}
       </span>
@@ -507,14 +658,14 @@ function SyncBadge({ status }: { status: TaskSyncStatus | null }) {
   }
   if (status === "synced") {
     return (
-      <span className="today-sync-badge">
+      <span className="today-sync-badge" role="status">
         <Check size={12} strokeWidth={2.2} aria-hidden="true" />
         {t("today.execute.sync.synced")}
       </span>
     );
   }
   return (
-    <span className="today-sync-badge warn">
+    <span className="today-sync-badge warn" role="status">
       <TriangleAlert size={12} strokeWidth={1.9} aria-hidden="true" />
       {status === "authBlocked"
         ? t("today.execute.sync.authBlocked")
