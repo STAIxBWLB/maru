@@ -16,7 +16,12 @@ test.describe.configure({ retries: 0 });
 // Deterministic greeting/date: fixed logical clock + fixed browser timezone.
 test.use({ timezoneId: "Asia/Seoul" });
 
+// The Concept 3 reference render is a local design-authoring artifact (not
+// committed — it lives outside the repo). Overridable via env; when absent
+// (e.g. CI) the side-by-side comparison below is skipped while the portable
+// screenshots, measurements, and hard anchor gates still run.
 const REFERENCE_PATH =
+  process.env.MARU_DESIGN_QA_REFERENCE ??
   "/Users/yj.lee/.codex/generated_images/019f81cb-5d43-79a3-89d9-c4efeb664a24/exec-a7ea0eb8-a8a6-4a6d-93d5-ce47460cd304.png";
 const OUT_DIR = path.join("docs", "design-qa");
 const REFERENCE_VIEWPORT = { width: 1487, height: 1058 };
@@ -164,16 +169,18 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   );
 
   // --- Side-by-side comparison (reference left / implementation right) ------
-  const referencePng = fs.readFileSync(REFERENCE_PATH).toString("base64");
-  const implPng = fs
-    .readFileSync(path.join(OUT_DIR, "today-prepare-1487.png"))
-    .toString("base64");
-  const comparePage = await page.context().newPage();
-  await comparePage.setViewportSize({
-    width: REFERENCE_VIEWPORT.width * 2 + 40,
-    height: REFERENCE_VIEWPORT.height + 80,
-  });
-  await comparePage.setContent(`<!doctype html>
+  // Local-only: needs the uncommitted reference render. Skipped in CI.
+  if (fs.existsSync(REFERENCE_PATH)) {
+    const referencePng = fs.readFileSync(REFERENCE_PATH).toString("base64");
+    const implPng = fs
+      .readFileSync(path.join(OUT_DIR, "today-prepare-1487.png"))
+      .toString("base64");
+    const comparePage = await page.context().newPage();
+    await comparePage.setViewportSize({
+      width: REFERENCE_VIEWPORT.width * 2 + 40,
+      height: REFERENCE_VIEWPORT.height + 80,
+    });
+    await comparePage.setContent(`<!doctype html>
 <html><body style="margin:0;padding:12px;background:#3f3f46;display:flex;gap:12px;font:600 14px/1.4 system-ui;color:#fafafa">
   <figure style="margin:0">
     <figcaption>reference (1487x1058)</figcaption>
@@ -184,11 +191,12 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
     <img alt="implementation" width="${REFERENCE_VIEWPORT.width}" height="${REFERENCE_VIEWPORT.height}" src="data:image/png;base64,${implPng}" />
   </figure>
 </body></html>`);
-  await comparePage.screenshot({
-    path: path.join(OUT_DIR, "side-by-side.png"),
-    fullPage: true,
-  });
-  await comparePage.close();
+    await comparePage.screenshot({
+      path: path.join(OUT_DIR, "side-by-side.png"),
+      fullPage: true,
+    });
+    await comparePage.close();
+  }
 
   // Hard gates: shell anchors must sit inside tolerance.
   for (const anchor of anchors) {
