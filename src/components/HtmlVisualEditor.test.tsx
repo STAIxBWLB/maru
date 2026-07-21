@@ -45,8 +45,14 @@ const FULL_DOC =
 
 const EDITED_DOC = FULL_DOC.replace("\n<p>Hello</p>\n", "<p>edited</p>");
 
-const RISKY_DOC = "<p>hi</p><script>alert(1)</script>";
-const RISKY_DOC_2 = "<p>other</p><script>alert(2)</script>";
+// Head-level script: the risk overlay fires (whole-doc detection) but the
+// body is Visual-editable (the head is preserved in the envelope prefix).
+const RISKY_DOC =
+  "<html><head><script>alert(1)</script></head><body><p>hi</p></body></html>";
+const RISKY_DOC_2 =
+  "<html><head><script>alert(2)</script></head><body><p>other</p></body></html>";
+// Body-level unpreservable markup forces Source mode (F2).
+const UNPRESERVABLE_DOC = "<html><body><p>hi</p><script>alert(1)</script></body></html>";
 const MALFORMED_DOC = "<html><head><title>t</title></head></html>";
 
 const roots: Root[] = [];
@@ -203,6 +209,20 @@ describe("HtmlVisualEditor loading and fallback states", () => {
     });
     const state = container.querySelector('[data-testid="html-editor-malformed"]');
     expect(state).not.toBeNull();
+    expect(container.querySelector('[data-testid="html-editor-frame"]')).toBeNull();
+    await act(async () => {
+      buttonByText(container, translate("en", "editor.html.openInSource")).click();
+    });
+    expect(onRequestSourceMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the unpreservable state for body-level scripts and escalates to Source (F2)", async () => {
+    const onRequestSourceMode = vi.fn();
+    const { container } = await renderEditor({
+      value: UNPRESERVABLE_DOC,
+      onRequestSourceMode,
+    });
+    expect(container.querySelector('[data-testid="html-editor-unpreservable"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="html-editor-frame"]')).toBeNull();
     await act(async () => {
       buttonByText(container, translate("en", "editor.html.openInSource")).click();

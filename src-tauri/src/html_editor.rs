@@ -1,5 +1,5 @@
 use crate::binary_viewer::require_existing_file;
-use crate::vault::resolve_inside_vault;
+use crate::vault::{normalize_existing_dir, resolve_inside_vault};
 use crate::vault_list::assert_document_owner;
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -35,9 +35,32 @@ fn resolve_html_editor_document_directory(
     let parent = path
         .parent()
         .ok_or_else(|| "Document has no parent directory".to_string())?;
-    parent
+    let dir = parent
         .canonicalize()
-        .map_err(|err| format!("Cannot resolve document directory: {err}"))
+        .map_err(|err| format!("Cannot resolve document directory: {err}"))?;
+    // `resolve_inside_vault` is lexical and deliberately allows in-vault
+    // symlinks that point outside (cloud-synced inbox/downloads). Canonicalizing
+    // the parent follows those links, so re-assert containment against the
+    // canonical vault before granting an asset-protocol read scope — otherwise a
+    // symlinked directory inside the vault would hand out reads on its external
+    // target (e.g. reports/ext -> ~/.ssh).
+    let vault = normalize_existing_dir(vault_path)?;
+    if !dir.starts_with(&vault) {
+        return Err("Document directory escapes the selected workspace".to_string());
+    }
+    // The asset grant is recursive and app-global, so never scope it to a
+    // directory that holds the `.maru` control dir (secrets) or to the vault
+    // root itself: that would expose `.maru/secrets/**` (and sibling
+    // workspaces) to the asset protocol. Assets alongside a document in a
+    // subfolder are unaffected; a root-level document simply loads without
+    // relative-asset resolution (Source/Preview are unaffected).
+    if dir == vault || dir.join(".maru").is_dir() {
+        return Err(
+            "Cannot load assets from the workspace root; move the document into a subfolder"
+                .to_string(),
+        );
+    }
+    Ok(dir)
 }
 
 #[tauri::command]
@@ -112,5 +135,47 @@ mod tests {
         let error = resolve_html_editor_document_directory(&root, "gone.html").unwrap_err();
 
         assert!(error.contains("does not exist"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn rejects_workspace_root_document() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("index.html"), "<html></html>").unwrap();
+
+        let error = resolve_html_editor_document_directory(&root, "index.html").unwrap_err();
+
+        assert!(error.contains("workspace root"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn rejects_directory_holding_maru_secrets() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let space = tmp.path().join("space");
+        fs::create_dir_all(space.join(".maru")).unwrap();
+        fs::write(space.join("page.html"), "<html></html>").unwrap();
+
+        let error =
+            resolve_html_editor_document_directory(&root, "space/page.html").unwrap_err();
+
+        assert!(error.contains("workspace root"), "unexpected error: {error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_directory_escaping_vault() {
+        let vault_tmp = TempDir::new().unwrap();
+        let root = vault_tmp.path().to_string_lossy().to_string();
+        let outside_tmp = TempDir::new().unwrap();
+        fs::write(outside_tmp.path().join("x.html"), "<html></html>").unwrap();
+        // A symlinked directory inside the vault pointing outside it: lexical
+        // containment passes, but canonicalizing the parent escapes the vault.
+        std::os::unix::fs::symlink(outside_tmp.path(), vault_tmp.path().join("link")).unwrap();
+
+        let error =
+            resolve_html_editor_document_directory(&root, "link/x.html").unwrap_err();
+
+        assert!(error.contains("escapes"), "unexpected error: {error}");
     }
 }

@@ -27,12 +27,14 @@ import {
   HTML_VISUAL_MAX_BYTES,
   HTML_VISUAL_MAX_NODES,
   analyzeHtmlEnvelope,
+  bodyHasUnpreservableMarkup,
   buildRuntimeDocument,
   checkVisualLimits,
   detectRiskyMarkup,
   digestSource,
+  restoreSerializedBody,
+  sanitizeEditableFragment,
   serializeVisualBody,
-  stripRuntimeNodes,
   type HtmlEnvelope,
 } from "../lib/htmlDocument";
 import { useTranslation } from "../lib/i18n";
@@ -112,25 +114,6 @@ function useHtmlAssetDirectory(vaultPath: string, documentPath: string) {
   return { documentDirectory, ready, failed };
 }
 
-/** Restore original asset URLs / form attributes on a cloned body so runtime
- *  rewrites never get serialized. */
-function restoreSerializedBody(clone: HTMLElement): void {
-  stripRuntimeNodes(clone);
-  clone.querySelectorAll("[data-maru-orig-src]").forEach((el) => {
-    const original = el.getAttribute("data-maru-orig-src");
-    if (original != null) el.setAttribute("src", original);
-    el.removeAttribute("data-maru-orig-src");
-  });
-  clone.querySelectorAll("[data-maru-orig-href]").forEach((el) => {
-    const original = el.getAttribute("data-maru-orig-href");
-    if (original != null) el.setAttribute("href", original);
-    el.removeAttribute("data-maru-orig-href");
-  });
-  clone.querySelectorAll("[data-maru-form]").forEach((el) => {
-    el.removeAttribute("data-maru-form");
-  });
-}
-
 export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEditorProps>(
   function HtmlVisualEditor(
     {
@@ -201,6 +184,13 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
     const envelope = envelopeRef.current;
     const limits = useMemo(() => checkVisualLimits(value), [value]);
     const risks = useMemo(() => detectRiskyMarkup(value), [value]);
+    // Body markup the runtime pipeline strips destructively (scripts, frames,
+    // handlers, forms, ...) cannot survive a Visual round-trip — editing would
+    // silently delete it, so those documents are Source-only.
+    const bodyUnpreservable = useMemo(
+      () => (envelope ? bodyHasUnpreservableMarkup(envelope.bodyInner) : false),
+      [envelope],
+    );
 
     const acked =
       sessionAckedRef.current ||
@@ -208,6 +198,17 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
         loadedValueRef.current != null &&
         riskAckDigest === digestSource(loadedValueRef.current));
     const needsRiskConfirm = risks.length > 0 && !acked;
+
+    // No editing until the risk overlay is acknowledged. A ref lets the (once-
+    // per-load) iframe handler read the current value, and the effect flips the
+    // live body the moment the user acks (which does not reload the iframe).
+    const editable = !readOnly && !needsRiskConfirm;
+    const editableRef = useRef(editable);
+    useEffect(() => {
+      editableRef.current = editable;
+      const body = iframeRef.current?.contentDocument?.body;
+      if (body) body.contentEditable = editable ? "true" : "false";
+    }, [editable]);
 
     const serializeNow = useCallback((): string | null => {
       const body = iframeRef.current?.contentDocument?.body;
@@ -231,6 +232,13 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
 
     useImperativeHandle(ref, () => ({ flushNow: serializeNow }), [serializeNow]);
 
+    // Latest serializeNow for the unmount cleanup, which runs with []-deps and
+    // would otherwise capture a stale closure.
+    const serializeNowRef = useRef(serializeNow);
+    useEffect(() => {
+      serializeNowRef.current = serializeNow;
+    }, [serializeNow]);
+
     const scheduleSerialize = useCallback(() => {
       if (serializeTimerRef.current != null) {
         window.clearTimeout(serializeTimerRef.current);
@@ -243,8 +251,12 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
 
     useEffect(
       () => () => {
+        // A pending debounced edit would otherwise be lost on unmount (tab
+        // switch, document change) — flush it synchronously first.
         if (serializeTimerRef.current != null) {
           window.clearTimeout(serializeTimerRef.current);
+          serializeTimerRef.current = null;
+          serializeNowRef.current();
         }
       },
       [],
@@ -258,7 +270,7 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
     const handleIframeLoad = useCallback(() => {
       const doc = iframeRef.current?.contentDocument;
       if (!doc?.body) return;
-      doc.body.contentEditable = readOnly ? "false" : "true";
+      doc.body.contentEditable = editableRef.current ? "true" : "false";
       const map: Record<string, boolean> = {};
       for (const command of EDIT_COMMANDS) {
         try {
@@ -269,13 +281,28 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
       }
       setSupported(map);
       doc.body.addEventListener("input", handleBodyInput);
+      // Sanitize pasted HTML before it enters the editable body: strip on*
+      // handlers, javascript:/vbscript:/data:text/html URLs, and <script> so
+      // hostile markup can never be persisted (inert in-app, but the saved
+      // .html opens elsewhere). Plain-text pastes fall through untouched.
+      doc.body.addEventListener("paste", (event) => {
+        const clip = (event as ClipboardEvent).clipboardData;
+        const html = clip?.getData("text/html");
+        if (!html) return;
+        event.preventDefault();
+        const holder = doc.createElement("div");
+        holder.innerHTML = html;
+        sanitizeEditableFragment(holder);
+        doc.execCommand("insertHTML", false, holder.innerHTML);
+        handleBodyInput();
+      });
       // Never navigate the editing surface: links and forms stay inert.
       doc.addEventListener("click", (event) => {
         const anchor = (event.target as HTMLElement | null)?.closest?.("a");
         if (anchor) event.preventDefault();
       });
       doc.addEventListener("submit", (event) => event.preventDefault());
-    }, [readOnly, handleBodyInput]);
+    }, [handleBodyInput]);
 
     const exec = useCallback(
       (command: string, arg?: string) => {
@@ -325,6 +352,17 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
       return (
         <div className="html-editor-state" data-testid="html-editor-malformed" role="alert">
           <p>{t("editor.html.state.malformed")}</p>
+          <button type="button" className="html-editor-state-action" onClick={onRequestSourceMode}>
+            {t("editor.html.openInSource")}
+          </button>
+        </div>
+      );
+    }
+
+    if (bodyUnpreservable) {
+      return (
+        <div className="html-editor-state" data-testid="html-editor-unpreservable" role="alert">
+          <p>{t("editor.html.state.unpreservable")}</p>
           <button type="button" className="html-editor-state-action" onClick={onRequestSourceMode}>
             {t("editor.html.openInSource")}
           </button>

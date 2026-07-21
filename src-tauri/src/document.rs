@@ -165,6 +165,26 @@ pub fn save_document(
             )?;
         }
     }
+    // Re-assert the revision right before the write: the checks above (and the
+    // managed-root snapshot read) widen the window in which an external
+    // co-writer could delete or modify the file. When a revision was expected,
+    // a file that vanished or changed in that window must conflict rather than
+    // be silently recreated/overwritten — that is exactly this command's
+    // guarantee. ponytail: shrinks the TOCTOU to the temp-file rename; the race
+    // against an external deleter cannot be fully closed without OS locks it
+    // does not honor.
+    if expected_revision.is_some() {
+        if path.is_file() {
+            let current =
+                fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
+            assert_expected_revision(&current, expected_revision.as_deref())?;
+        } else {
+            return Err(format!(
+                "document_conflict: expected revision {}, file is missing",
+                expected_revision.as_deref().unwrap_or_default()
+            ));
+        }
+    }
     write_atomic(&path, content.as_bytes())?;
     read_document(vault_path, path.to_string_lossy().to_string())
 }

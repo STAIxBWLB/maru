@@ -124,10 +124,15 @@ test("preserves the document shell through visual editing and saving", async ({ 
   const textarea = page.locator("textarea.source-editor");
   await expect(textarea).toHaveValue(/E2E 추가 문장/);
   const source = await textarea.inputValue();
-  expect(source).toContain("<!DOCTYPE html>");
-  expect(source).toContain("<style>body { color: #333; }</style>");
-  expect(source).toContain("<script>window.__maruScriptRan = true</script>");
-  expect(source).toContain('<body class="report">');
+  // Byte-identity of the shell: the head (incl. the untouched <script>) and
+  // the </body></html> tail survive the edit exactly; only body contents change.
+  const SHELL_PREFIX =
+    '<!DOCTYPE html>\n<html lang="ko">\n<head>\n<meta charset="utf-8">\n' +
+    "<title>Maru HTML 샘플</title>\n<style>body { color: #333; }</style>\n" +
+    "<script>window.__maruScriptRan = true</script>\n</head>\n" +
+    '<body class="report">';
+  expect(source.startsWith(SHELL_PREFIX)).toBe(true);
+  expect(source.endsWith("</body>\n</html>\n")).toBe(true);
 
   // Save through the mock backend, then close + reopen the tab to prove the
   // edit round-tripped through read/write (mock saveDocument mutates the

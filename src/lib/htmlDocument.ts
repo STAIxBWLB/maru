@@ -54,16 +54,38 @@ export function isHtmlFileKind(fileKind: string | null | undefined): boolean {
  *   (bodyInner = content, prefix/suffix = "").
  * - Otherwise -> "fragment" (bodyInner = content).
  */
+/** True when `index` falls inside an HTML comment (`<!-- ... -->`). Used so a
+ *  `<body>`/`</body>` written inside a head comment cannot mis-place the
+ *  envelope boundary. An unterminated comment swallows the rest of the file. */
+function isInsideComment(content: string, index: number): boolean {
+  const open = content.lastIndexOf("<!--", index);
+  if (open === -1) return false;
+  const close = content.indexOf("-->", open);
+  return close === -1 || close + 3 > index;
+}
+
 export function analyzeHtmlEnvelope(content: string): HtmlEnvelope {
-  const openRe = /<body\b[^>]*>/i;
-  const openMatch = openRe.exec(content);
+  // Quote-aware open tag: an attribute value may legally contain `>` inside
+  // quotes (`<body data-x=">">`), so skip quoted spans rather than stopping at
+  // the first `>`. Comment-guarded so `<!-- <body> -->` is ignored.
+  const openRe = /<body\b(?:"[^"]*"|'[^']*'|[^>"'])*>/gi;
+  let openMatch: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(content)) !== null) {
+    if (!isInsideComment(content, m.index)) {
+      openMatch = m;
+      break;
+    }
+  }
   if (openMatch) {
+    const openEnd = openMatch.index + openMatch[0].length;
     const closeRe = /<\/body\s*>/gi;
     let lastClose: RegExpExecArray | null = null;
-    let m: RegExpExecArray | null;
-    while ((m = closeRe.exec(content)) !== null) lastClose = m;
-    const openEnd = openMatch.index + openMatch[0].length;
-    if (lastClose && lastClose.index >= openEnd) {
+    let c: RegExpExecArray | null;
+    while ((c = closeRe.exec(content)) !== null) {
+      if (c.index >= openEnd && !isInsideComment(content, c.index)) lastClose = c;
+    }
+    if (lastClose) {
       return {
         kind: "full",
         prefix: content.slice(0, openEnd),
@@ -95,7 +117,8 @@ export type RiskyMarkupCategory =
 
 const RISKY_PATTERNS: Array<[RiskyMarkupCategory, RegExp]> = [
   ["script", /<script\b/i],
-  ["event-handler", /\son\w+\s*=/i],
+  // `[\s/]` so slash-separated handlers (`<img/onerror=...>`) are caught too.
+  ["event-handler", /[\s/]on\w+\s*=/i],
   ["custom-element", /<[a-zA-Z][a-zA-Z0-9]*-[a-zA-Z0-9-]*/],
   ["form", /<form\b/i],
   ["embedded", /<(?:iframe|frame|object|embed)\b/i],
@@ -117,6 +140,44 @@ export function detectRiskyMarkup(content: string): string[] {
 }
 
 /**
+ * True when the body contains markup `buildRuntimeDocument` removes or strips
+ * destructively (scripts, event handlers, embedded frames/objects, forms,
+ * meta-refresh, base). A Visual round-trip serializes `body.innerHTML` after
+ * that stripping, so such markup would be silently dropped from the saved
+ * file — the caller must keep those documents Source-only. `custom-element`
+ * survives serialization untouched and is intentionally excluded.
+ */
+export function bodyHasUnpreservableMarkup(bodyInner: string): boolean {
+  return detectRiskyMarkup(bodyInner).some((category) => category !== "custom-element");
+}
+
+const UNSAFE_URL_RE = /^\s*(?:javascript:|vbscript:|data:text\/html)/i;
+
+/**
+ * Strip inline `on*` event handlers, `javascript:`/`vbscript:`/`data:text/html`
+ * URLs, and `<script>` from an editable DOM subtree. Run on paste and again
+ * before serialization so hostile markup a user pasted (or that slipped
+ * through execCommand) never reaches the saved file. The Visual iframe sandbox
+ * already makes it inert in-app; this keeps the persisted bytes safe for a
+ * normal browser too.
+ */
+export function sanitizeEditableFragment(root: ParentNode): void {
+  root.querySelectorAll("script").forEach((el) => el.remove());
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    for (const attr of Array.from(el.attributes)) {
+      if (/^on/i.test(attr.name)) {
+        el.removeAttribute(attr.name);
+      } else if (
+        (attr.name === "src" || attr.name === "href" || attr.name === "xlink:href") &&
+        UNSAFE_URL_RE.test(attr.value)
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+}
+
+/**
  * Check whether `content` fits the visual editor limits. Bytes are checked
  * first (UTF-8 encoded length), then node count. Node count uses DOMParser
  * when available; in non-DOM environments (plain node/vitest) it falls back
@@ -132,6 +193,11 @@ export function checkVisualLimits(
   if (typeof DOMParser !== "undefined") {
     const doc = new DOMParser().parseFromString(content, "text/html");
     nodes = doc.getElementsByTagName("*").length;
+    // getElementsByTagName does not descend into <template>.content, so a
+    // template packed with nodes would otherwise bypass the cap.
+    for (const tpl of Array.from(doc.getElementsByTagName("template"))) {
+      nodes += (tpl as HTMLTemplateElement).content.querySelectorAll("*").length;
+    }
   } else {
     const matches = content.match(/<[a-zA-Z][^<>]*>/g);
     nodes = matches ? matches.length : 0;
@@ -162,6 +228,17 @@ function classifyUrl(raw: string): UrlClass {
   // Any explicit scheme (http:, https:, javascript:, file:, ...) is blocked.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return "block";
   return "resolve";
+}
+
+/**
+ * True when a value recorded in a `data-maru-orig-*` marker is the kind of URL
+ * `buildRuntimeDocument` actually rewrites (a scheme-less relative reference).
+ * Restoration trusts the marker only when this holds, so an author-forged
+ * marker carrying a `javascript:` or remote value cannot be promoted back onto
+ * a real `src`/`href` at serialization time.
+ */
+export function isRestorableAssetOriginal(original: string): boolean {
+  return classifyUrl(original) === "resolve";
 }
 
 /** Normalize an absolute-ish path: resolve `.` and `..` segments, collapse
@@ -259,11 +336,20 @@ export function buildRuntimeDocument(
       }
       // Relative (incl. ./, ../, and root-absolute /...) URL.
       if (!canResolve) continue; // leave unchanged, uncounted
-      const joined = baseDir + "/" + raw.trim().replace(/^\/+/, "");
+      const resolved = normalizeAbsolutePath(baseDir + "/" + raw.trim().replace(/^\/+/, ""));
+      const normBase = normalizeAbsolutePath(baseDir);
+      // Containment: a `../` escape out of the document's own directory must
+      // not be rewritten into an asset URL — a previously-opened doc may have
+      // authorized the sibling dir, so this would leak cross-document reads.
+      if (resolved !== normBase && !resolved.startsWith(normBase + "/")) {
+        el.removeAttribute(attrName);
+        blockedAssets++;
+        continue;
+      }
       // Keep the original URL so serialization can restore it — rewritten
       // asset URLs are runtime-only and must never be persisted.
       el.setAttribute(`data-maru-orig-${attrName}`, raw);
-      el.setAttribute(attrName, toAssetUrl(normalizeAbsolutePath(joined)));
+      el.setAttribute(attrName, toAssetUrl(resolved));
       rewrittenAssets++;
     }
   }
@@ -289,11 +375,41 @@ export function buildRuntimeDocument(
   };
 }
 
-/** Remove all `[data-maru-runtime]` descendants (used at serialization time). */
+/** Remove all `[data-maru-runtime]` descendants. Injected runtime nodes live
+ *  in `<head>`, so this is only used against a full document, never the body
+ *  clone (which would only ever delete author content). */
 export function stripRuntimeNodes(container: HTMLElement): void {
   for (const el of Array.from(container.querySelectorAll("[data-maru-runtime]"))) {
     el.remove();
   }
+}
+
+/**
+ * Restore original asset URLs / form attributes on a cloned BODY so runtime
+ * rewrites never get serialized, then sanitize. Never strips by
+ * `data-maru-runtime`: the injected base/CSP nodes live in `<head>` and are
+ * out of the body clone, so a marker found here can only be author content.
+ *
+ * A `data-maru-orig-*` marker is trusted only when its recorded value is a
+ * relative reference (`isRestorableAssetOriginal`), so a forged marker cannot
+ * promote `javascript:`/remote onto a real attribute. Finally the fragment is
+ * sanitized (on* handlers, unsafe URLs, scripts) so pasted markup never reaches
+ * disk.
+ */
+export function restoreSerializedBody(clone: HTMLElement): void {
+  for (const attr of ["src", "href"] as const) {
+    clone.querySelectorAll(`[data-maru-orig-${attr}]`).forEach((el) => {
+      const original = el.getAttribute(`data-maru-orig-${attr}`);
+      if (original != null && isRestorableAssetOriginal(original)) {
+        el.setAttribute(attr, original);
+      }
+      el.removeAttribute(`data-maru-orig-${attr}`);
+    });
+  }
+  clone.querySelectorAll("[data-maru-form]").forEach((el) => {
+    el.removeAttribute("data-maru-form");
+  });
+  sanitizeEditableFragment(clone);
 }
 
 /**

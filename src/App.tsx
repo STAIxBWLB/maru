@@ -1628,13 +1628,17 @@ function MainApp() {
   // content, or null when the tab is not mounted in a visual HTML editor.
   const flushHtmlDraft = useCallback(
     (tabId: string): string | null => {
-      const flushRef =
-        leftResolvedTabId === tabId
-          ? leftHtmlFlushRef
-          : rightResolvedTabId === tabId
-            ? rightHtmlFlushRef
-            : null;
-      return flushRef?.current?.flushNow() ?? null;
+      // The same doc can be open in both split panes; flush BOTH so neither
+      // pane's pending edit is dropped. Last non-null wins the draft (the most
+      // recently serialized content).
+      let result: string | null = null;
+      if (leftResolvedTabId === tabId) {
+        result = leftHtmlFlushRef.current?.flushNow() ?? result;
+      }
+      if (rightResolvedTabId === tabId) {
+        result = rightHtmlFlushRef.current?.flushNow() ?? result;
+      }
+      return result;
     },
     [leftResolvedTabId, rightResolvedTabId],
   );
@@ -6082,16 +6086,21 @@ function MainApp() {
       if (!tab || blockTabWrite(tab, "renameMove")) return;
       const parts = tab.document.relPath.split("/");
       const fileName = parts.pop() ?? tab.document.relPath;
-      const currentStem = fileName.replace(/\.(md|markdown)$/i, "");
+      // Preserve the source file's real extension (incl. case): appending a
+      // hardcoded `.md` would turn `page.HTML` into `page.HTML.md`, which the
+      // backend opens as Markdown — destructive for HTML documents.
+      const EXT_RE = /\.(md|markdown|html|htm)$/i;
+      const originalExt = fileName.match(EXT_RE)?.[0] ?? ".md";
+      const currentStem = fileName.replace(EXT_RE, "");
       const input = window.prompt(t("editor.tabs.rename.prompt"), currentStem);
       if (input == null) return;
-      const nextStem = input.trim().replace(/\.(md|markdown)$/i, "");
+      const nextStem = input.trim().replace(EXT_RE, "");
       if (!nextStem) return;
       if (/[\\/]/.test(nextStem)) {
         setError(t("editor.tabs.rename.invalid"));
         return;
       }
-      const targetRelPath = `${parts.length > 0 ? `${parts.join("/")}/` : ""}${nextStem}.md`;
+      const targetRelPath = `${parts.length > 0 ? `${parts.join("/")}/` : ""}${nextStem}${originalExt}`;
       try {
         const moved = await moveDocument(tab.workspacePath, tab.document.path, targetRelPath);
         const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
