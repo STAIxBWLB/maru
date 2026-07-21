@@ -200,9 +200,15 @@ function NodeBody({ node }: { node: DiagramNode }) {
 }
 
 function NodeLabel({ node }: { node: DiagramNode }) {
-  if (!node.title && !node.body) return null;
+  const headered = node.kind === "section" || node.kind === "titled-box";
+  // Headered kinds paint the title in the dark SectionHeader band, so the
+  // content area only carries body + bullets.
+  const title = headered ? null : (node.title ?? null);
+  const body = node.body ?? null;
+  const bullets = node.bullets ?? [];
+  if (!title && !body && bullets.length === 0) return null;
   const s = shapeFor(node);
-  const headerH = node.kind === "section" || node.kind === "titled-box" ? 26 : 0;
+  const headerH = headered ? 26 : 0;
   const padTop = node.kind === "numbered" ? 24 : 0;
   return (
     <foreignObject
@@ -219,9 +225,18 @@ function NodeLabel({ node }: { node: DiagramNode }) {
           fontSize: s.fs,
           fontWeight: s.fw,
           textAlign: node.style?.align ?? "center",
+          flexDirection: "column",
         }}
       >
-        {node.title ?? ""}
+        {title ? <div className="maru-diagram-node-label-title">{title}</div> : null}
+        {body ? <div className="maru-diagram-node-label-body">{body}</div> : null}
+        {bullets.length > 0 ? (
+          <ul className="maru-diagram-node-label-bullets">
+            {bullets.map((bullet, idx) => (
+              <li key={idx}>{bullet}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </foreignObject>
   );
@@ -287,6 +302,7 @@ function NodeViewBase({
       <NodeLabel node={node} />
       {selected ? (
         <rect
+          data-export-ignore
           x={-3}
           y={-3}
           width={node.w + 6}
@@ -372,6 +388,7 @@ function NodeViewBase({
               <circle
                 key={port}
                 className="maru-diagram-port"
+                data-export-ignore
                 data-port={port}
                 data-node-id={node.id}
                 cx={pt.x - node.x}

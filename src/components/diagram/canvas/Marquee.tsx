@@ -8,6 +8,7 @@ export function Marquee({ rect }: MarqueeProps) {
   if (!rect) return null;
   return (
     <rect
+      data-export-ignore
       x={rect.x}
       y={rect.y}
       width={rect.w}

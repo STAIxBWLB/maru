@@ -1235,6 +1235,41 @@
   word-break: break-word;
   white-space: pre-wrap;
   pointer-events: none;
+  box-sizing: border-box;
+}
+
+.maru-diagram-node-label-body {
+  font-weight: 400;
+}
+
+.maru-diagram-node-label-bullets {
+  margin: 2px 0 0;
+  padding-left: 1.2em;
+  font-weight: 400;
+  text-align: left;
+  align-self: stretch;
+}
+
+.maru-diagram-node-label-bullets li {
+  margin: 1px 0;
+}
+
+.maru-diagram-inline-editor {
+  position: absolute;
+  z-index: 30;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  resize: none;
+  overflow: hidden;
+  border: 1.5px solid #2563eb;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.35;
+  outline: none;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.18);
 }
 
 .maru-diagram-node-header {

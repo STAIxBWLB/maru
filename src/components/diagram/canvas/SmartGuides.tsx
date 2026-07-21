@@ -7,7 +7,7 @@ export interface SmartGuidesProps {
 export function SmartGuides({ guides }: SmartGuidesProps) {
   if (guides.length === 0) return null;
   return (
-    <g pointerEvents="none">
+    <g pointerEvents="none" data-export-ignore>
       {guides.map((g, i) => {
         if (g.orientation === "v") {
           return (

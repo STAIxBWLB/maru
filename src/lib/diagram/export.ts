@@ -2,21 +2,24 @@
  * Diagram exports — PNG / PNG-transparent / JPEG / SVG / JSON / PDF.
  *
  * Phase 4 ships a pure SVG→Canvas2D path so the main bundle stays slim
- * (no html2canvas dep needed for an all-SVG canvas). The exporter clones
- * the live `<svg>`, rewrites its viewport-transform group to identity,
- * sets a `viewBox` derived from the doc bounding box, and rasterises via
- * an Image+Canvas trip. Phase 6 may swap in html2canvas if `<foreignObject>`
- * rich-text export reveals platform gaps.
+ * (no html2canvas dep needed for an all-SVG canvas). The exporter renders the
+ * document model via {@link renderDocToSvg} — a pure, culling-free renderer —
+ * and rasterises via an Image+Canvas trip. Phase 6 may swap in html2canvas if
+ * `<foreignObject>` rich-text export reveals platform gaps.
+ *
+ * The `liveSvg` parameters on the export entry points are deprecated: they
+ * are accepted for API compatibility with existing callers (ExportDialog) but
+ * no longer read — exports derive purely from the {@link DiagramDoc} model so
+ * off-screen (culled) nodes and interactive chrome can no longer leak or go
+ * missing.
  *
  * All helpers return a Blob (or Uint8Array for the Tauri bridge) so callers
  * can hand the bytes to a save dialog without further conversion.
  */
 
-import { bbox } from "./geometry";
 import { serializeDoc } from "./persistence";
+import { renderDocToSvg, type RenderedDiagramSvg } from "./renderSvg";
 import type { DiagramDoc } from "./types";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 export type ExportFormat = "png" | "png-transparent" | "jpg" | "svg" | "json" | "pdf";
 
@@ -52,37 +55,18 @@ export async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
-function computeViewBox(doc: DiagramDoc, padding: number) {
-  const box = bbox(doc.nodes);
-  if (!box) return { x: 0, y: 0, w: 800, h: 600 };
-  return {
-    x: box.x - padding,
-    y: box.y - padding,
-    w: Math.max(1, box.w + padding * 2),
-    h: Math.max(1, box.h + padding * 2),
-  };
+function renderStandalone(doc: DiagramDoc, padding: number): RenderedDiagramSvg {
+  return renderDocToSvg(doc, { padding });
 }
 
-/** Clone the live <svg> into a standalone, transform-free, viewBox-fitted node. */
-function cloneStandaloneSvg(
-  liveSvg: SVGSVGElement,
-  doc: DiagramDoc,
-  padding: number,
-): SVGSVGElement {
-  const out = liveSvg.cloneNode(true) as SVGSVGElement;
-  // Strip the marquee / smart-guide / connect-ghost overlays so exports look clean.
-  out.querySelectorAll("[data-export-ignore]").forEach((el) => el.remove());
-  // Reset the pan/zoom transform on the inner content group so the exported
-  // viewBox aligns with canvas-space coordinates.
-  const inner = out.querySelector("g[transform]");
-  if (inner) inner.removeAttribute("transform");
-  const { x, y, w, h } = computeViewBox(doc, padding);
-  out.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
-  out.setAttribute("width", String(w));
-  out.setAttribute("height", String(h));
-  out.setAttribute("xmlns", SVG_NS);
-  out.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-  return out;
+/** Parse a rendered SVG string back into an element for the rasteriser. */
+function svgTextToElement(svgText: string): SVGSVGElement {
+  const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const el = parsed.documentElement;
+  if (!(el instanceof SVGSVGElement) || el.tagName.toLowerCase() !== "svg") {
+    throw new Error("svg_render_failed");
+  }
+  return el;
 }
 
 function serializeSvgElement(svg: SVGSVGElement): string {
@@ -144,10 +128,10 @@ export async function exportPng(
   doc: DiagramDoc,
   opts: ExportOpts = {},
 ): Promise<ExportResult> {
-  const padding = opts.padding ?? 40;
+  void liveSvg; // Deprecated — the model is the source of truth.
+  const rendered = renderStandalone(doc, opts.padding ?? 40);
   const ratio = opts.pixelRatio ?? Math.min(2, Math.max(1, window.devicePixelRatio ?? 1));
-  const standalone = cloneStandaloneSvg(liveSvg, doc, padding);
-  return rasterise(standalone, "image/png", opts.background ?? "#ffffff", ratio, 1);
+  return rasterise(svgTextToElement(rendered.svg), "image/png", opts.background ?? "#ffffff", ratio, 1);
 }
 
 export async function exportPngTransparent(
@@ -155,10 +139,10 @@ export async function exportPngTransparent(
   doc: DiagramDoc,
   opts: ExportOpts = {},
 ): Promise<ExportResult> {
-  const padding = opts.padding ?? 40;
+  void liveSvg;
+  const rendered = renderStandalone(doc, opts.padding ?? 40);
   const ratio = opts.pixelRatio ?? Math.min(2, Math.max(1, window.devicePixelRatio ?? 1));
-  const standalone = cloneStandaloneSvg(liveSvg, doc, padding);
-  return rasterise(standalone, "image/png", null, ratio, 1);
+  return rasterise(svgTextToElement(rendered.svg), "image/png", null, ratio, 1);
 }
 
 export async function exportJpg(
@@ -166,10 +150,10 @@ export async function exportJpg(
   doc: DiagramDoc,
   opts: ExportOpts = {},
 ): Promise<ExportResult> {
-  const padding = opts.padding ?? 40;
+  void liveSvg;
+  const rendered = renderStandalone(doc, opts.padding ?? 40);
   const ratio = opts.pixelRatio ?? Math.min(2, Math.max(1, window.devicePixelRatio ?? 1));
-  const standalone = cloneStandaloneSvg(liveSvg, doc, padding);
-  return rasterise(standalone, "image/jpeg", opts.background ?? "#ffffff", ratio, 0.92);
+  return rasterise(svgTextToElement(rendered.svg), "image/jpeg", opts.background ?? "#ffffff", ratio, 0.92);
 }
 
 export function exportSvg(
@@ -177,14 +161,17 @@ export function exportSvg(
   doc: DiagramDoc,
   opts: ExportOpts = {},
 ): ExportResult {
-  const padding = opts.padding ?? 40;
-  const standalone = cloneStandaloneSvg(liveSvg, doc, padding);
-  const text = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n${serializeSvgElement(standalone)}`;
+  void liveSvg;
+  const rendered = renderStandalone(doc, opts.padding ?? 40);
+  const text = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n${rendered.svg}`;
   const blob = new Blob([text], { type: "image/svg+xml" });
-  const viewBox = standalone.getAttribute("viewBox")?.split(/\s+/);
-  const w = viewBox ? parseFloat(viewBox[2] ?? "0") : 800;
-  const h = viewBox ? parseFloat(viewBox[3] ?? "0") : 600;
-  return { blob, width: w, height: h, mimeType: "image/svg+xml", extension: "svg" };
+  return {
+    blob,
+    width: rendered.width,
+    height: rendered.height,
+    mimeType: "image/svg+xml",
+    extension: "svg",
+  };
 }
 
 export function exportJson(doc: DiagramDoc): ExportResult {
@@ -203,9 +190,8 @@ export async function exportPdf(
   doc: DiagramDoc,
   opts: ExportOpts = {},
 ): Promise<void> {
-  const padding = opts.padding ?? 40;
-  const standalone = cloneStandaloneSvg(liveSvg, doc, padding);
-  const text = serializeSvgElement(standalone);
+  void liveSvg;
+  const rendered = renderStandalone(doc, opts.padding ?? 40);
   const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
   if (!printWindow) {
     throw new Error("print_popup_blocked");
@@ -215,7 +201,7 @@ export async function exportPdf(
     `<!doctype html><html><head><meta charset="utf-8"><title>${titleEsc || "Diagram"}</title>` +
       "<style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff}" +
       "svg{max-width:100%;height:auto}@media print{body{min-height:auto}}</style></head><body>" +
-      text +
+      rendered.svg +
       "</body></html>",
   );
   printWindow.document.close();

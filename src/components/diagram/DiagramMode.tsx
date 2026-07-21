@@ -25,6 +25,7 @@ import {
   setViewport,
   toggleFocusMode,
   undo as undoAction,
+  updateNode,
   withSnapshot,
 } from "../../lib/diagram/actions";
 import { isInEditable, matchesShortcut } from "../../lib/diagram/shortcuts";
@@ -43,11 +44,13 @@ import type { TemplateDefinition } from "../../lib/diagram/templates";
 import {
   createAutoSnapshotScheduler,
   saveSnapshotForDoc,
+  type AutoSnapshotScheduler,
 } from "../../lib/diagram/versionHistory";
 import {
   createDiagramId,
   createEmptyDoc,
   type DiagramDoc,
+  type NodeId,
   type NodeKind,
   type RibbonTab,
 } from "../../lib/diagram/types";
@@ -61,6 +64,7 @@ import {
   useDiagramStore,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
+import { InlineTextEditor, type InlineEditField } from "./canvas/InlineTextEditor";
 import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
@@ -206,6 +210,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const [findOpen, setFindOpen] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(false);
   const [importMermaidOpen, setImportMermaidOpen] = useState(false);
+  const [inlineEdit, setInlineEdit] = useState<{ nodeId: NodeId; field: InlineEditField } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
     return (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -216,6 +221,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const insertOffsetRef = useRef(0);
   const titleCoalescerRef = useRef(defaultCoalescer());
+  const inlineEditCoalescerRef = useRef(defaultCoalescer());
 
   // Hydrate persisted snap-size once.
   useEffect(() => {
@@ -254,9 +260,11 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       : nodes.length > 0 || edges.length > 0 || docTitle.trim().length > 0;
   const hasSelection = selection.nodes.size + selection.edges.size > 0;
 
-  // Auto-snapshot scheduler — runs whenever the doc is dirty and a workspace
-  // is attached. Each fire bypasses the human-facing save and stores a
-  // versioned copy under .maru/diagrams/history/<docId>/.
+  // Auto-snapshot scheduler — created once per workspace, re-armed on every
+  // doc mutation (tracked via doc.updatedAt) so the quiet-debounce collapses
+  // a flurry of edits into one snapshot. Each fire bypasses the human-facing
+  // save and stores a versioned copy under .maru/diagrams/history/<docId>/.
+  const snapshotSchedRef = useRef<AutoSnapshotScheduler | null>(null);
   useEffect(() => {
     if (!workPath) return;
     const sched = createAutoSnapshotScheduler({
@@ -270,9 +278,17 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         }
       },
     });
-    if (dirty) sched.markDirty();
-    return () => sched.dispose();
-  }, [dirty, store, workPath]);
+    snapshotSchedRef.current = sched;
+    return () => {
+      sched.dispose();
+      if (snapshotSchedRef.current === sched) snapshotSchedRef.current = null;
+    };
+  }, [store, workPath]);
+
+  const docUpdatedAt = doc.updatedAt;
+  useEffect(() => {
+    if (dirty) snapshotSchedRef.current?.markDirty();
+  }, [dirty, docUpdatedAt]);
 
   const reportError = useCallback((message: string | null) => onError?.(message), [onError]);
 
@@ -398,6 +414,8 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         store.setState((s) => ({ ...s, doc: written }));
         setActiveName(name);
         setLastSavedBody(serializeDoc(written));
+        // A successful manual save satisfies the pending auto-snapshot.
+        snapshotSchedRef.current?.markClean();
         await persistLastDocument(name);
       } catch (err) {
         reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
@@ -509,9 +527,39 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     }
   }, []);
 
+  // Inline editing — double-click on a node or F2 with a single selection
+  // opens the overlay editor; a fresh coalescer per gesture keeps one edit =
+  // one undo entry (the commit itself is a single updateNode mutation).
+  const openInlineEditor = useCallback(
+    (nodeId: NodeId) => {
+      const node = store.getState().doc.nodes.find((n) => n.id === nodeId);
+      if (!node || node.locked) return;
+      // Title is the primary target; fall back to body when there is no title.
+      const field: InlineEditField = !node.title && node.body ? "body" : "title";
+      inlineEditCoalescerRef.current = defaultCoalescer();
+      setInlineEdit({ nodeId, field });
+    },
+    [store],
+  );
+
+  const commitInlineEdit = useCallback(
+    (nodeId: NodeId, field: InlineEditField, value: string) => {
+      const patch = field === "title" ? { title: value } : { body: value };
+      store.setState(
+        withSnapshot(updateNode(nodeId, patch), inlineEditCoalescerRef.current, {
+          coalesce: true,
+        }),
+      );
+      setInlineEdit(null);
+    },
+    [store],
+  );
+
   // Keyboard shortcuts scoped to the diagram pane.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // Korean IME: never treat composition keystrokes as shortcuts.
+      if (event.isComposing) return;
       const target = event.target as HTMLElement | null;
       const inField = isInEditable(target);
 
@@ -557,8 +605,13 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
       }
       if (!inField && event.key === "F2") {
         event.preventDefault();
-        titleInputRef.current?.focus();
-        titleInputRef.current?.select();
+        const selected = [...store.getState().ephemeral.selection.nodes];
+        if (selected.length === 1 && selected[0]) {
+          openInlineEditor(selected[0]);
+        } else {
+          titleInputRef.current?.focus();
+          titleInputRef.current?.select();
+        }
         return;
       }
       if (!inField && event.key === "Escape") {
@@ -613,7 +666,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [coalescer, findOpen, handleSave, hasSelection, store]);
+  }, [coalescer, findOpen, handleSave, hasSelection, openInlineEditor, store]);
 
   const statusLabel = saving
     ? t("diagram.status.saving")
@@ -680,6 +733,10 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   );
 
   const initialSaveName = (docTitle || "").trim() || `diagram-${new Date().toISOString().slice(0, 10)}`;
+
+  const inlineEditNode = inlineEdit
+    ? (doc.nodes.find((n) => n.id === inlineEdit.nodeId) ?? null)
+    : null;
 
   return (
     <div
@@ -790,7 +847,25 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         ) : null}
         <div className="maru-diagram-viewport" ref={viewportRef}>
           <FindBar open={findOpen} onClose={() => setFindOpen(false)} />
-          <CanvasSurface onMemoOpen={(nodeId) => setMemoOpen(nodeId)} />
+          <CanvasSurface
+            onMemoOpen={(nodeId) => setMemoOpen(nodeId)}
+            onNodeDoubleClick={openInlineEditor}
+          />
+          {inlineEdit && inlineEditNode ? (
+            <InlineTextEditor
+              node={inlineEditNode}
+              field={inlineEdit.field}
+              rect={{
+                x: inlineEditNode.x * viewport.zoom + viewport.px,
+                y: inlineEditNode.y * viewport.zoom + viewport.py,
+                w: inlineEditNode.w * viewport.zoom,
+                h: inlineEditNode.h * viewport.zoom,
+              }}
+              zoom={viewport.zoom}
+              onCommit={(value) => commitInlineEdit(inlineEdit.nodeId, inlineEdit.field, value)}
+              onCancel={() => setInlineEdit(null)}
+            />
+          ) : null}
           {listOpen ? (
             <aside className="maru-diagram-list" aria-label={t("diagram.list.heading")}>
               <div className="maru-diagram-list-head">

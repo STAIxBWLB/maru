@@ -89,6 +89,7 @@ type Gesture = DragState | PanState | MarqueeState | ConnectState | null;
 
 export interface CanvasSurfaceProps {
   onMemoOpen?: (nodeId: NodeId) => void;
+  onNodeDoubleClick?: (nodeId: NodeId) => void;
 }
 
 const MIN_ZOOM = 0.2;
@@ -131,7 +132,7 @@ function findPortTarget(event: PointerEvent<SVGSVGElement>): {
   return null; // Body-drop without explicit port — skip for Phase 2.
 }
 
-export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ onMemoOpen, onNodeDoubleClick }: CanvasSurfaceProps = {}) {
   const { t } = useTranslation();
   const store = useDiagramStore();
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -536,6 +537,7 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
             key={n.id}
             onPointerEnter={() => onNodeEnter(n.id)}
             onPointerLeave={onNodeLeave}
+            onDoubleClick={() => onNodeDoubleClick?.(n.id)}
           >
             <NodeView
               node={n}
@@ -551,6 +553,7 @@ export function CanvasSurface({ onMemoOpen }: CanvasSurfaceProps = {}) {
         <SmartGuides guides={guides} />
         {connectGhost ? (
           <line
+            data-export-ignore
             x1={connectGhost.x1}
             y1={connectGhost.y1}
             x2={connectGhost.x2}

@@ -5,8 +5,10 @@
  * (Rust side caps the ring at 20). This module is the React-facing front:
  * - `formatSnapshotTs` produces the filesystem-safe ISO compact stamp.
  * - `createAutoSnapshotScheduler` returns a tiny controller you can start/stop
- *   from a `useEffect`. It fires the callback after `intervalMs` of idle
- *   *plus* a debounce of `quietMs` so a flurry of edits collapses into one save.
+ *   from a `useEffect`. It fires the callback after `intervalMs` of idle,
+ *   or `quietMs` after the most recent {@link AutoSnapshotScheduler.markDirty}
+ *   — whichever comes first — so a flurry of edits collapses into one save
+ *   (debounce semantics) while continuous editing still snapshots periodically.
  */
 
 import {
@@ -76,7 +78,9 @@ export function createAutoSnapshotScheduler(input: AutoSnapshotInput): AutoSnaps
       if (!input.enabled) return;
       startInterval();
       if (quietHandle) clearTimeout(quietHandle);
-      quietHandle = setTimeout(fire, quietMs + intervalMs);
+      // Debounce: fire `quietMs` after the *last* dirty mark. The interval
+      // above stays as the max-wait fallback for non-stop editing.
+      quietHandle = setTimeout(fire, quietMs);
     },
     markClean() {
       dirty = false;
