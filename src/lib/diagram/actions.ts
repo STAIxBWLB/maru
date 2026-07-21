@@ -119,6 +119,10 @@ export function removeNodes(ids: Iterable<NodeId>): StateTransformer {
           nodes: new Set([...state.ephemeral.selection.nodes].filter((id) => !removable.has(id))),
           edges: new Set(),
         },
+        tableSelection:
+          state.ephemeral.tableSelection && !removable.has(state.ephemeral.tableSelection.nodeId)
+            ? state.ephemeral.tableSelection
+            : null,
       },
     };
   };
@@ -185,13 +189,22 @@ export function setSelection(
   nodes: Iterable<NodeId>,
   edges: Iterable<string> = [],
 ): StateTransformer {
-  return (state) => ({
-    ...state,
-    ephemeral: {
-      ...state.ephemeral,
-      selection: { nodes: new Set(nodes), edges: new Set(edges) },
-    },
-  });
+  return (state) => {
+    const nextNodes = new Set(nodes);
+    // A table's cell selection is only meaningful while its node is selected.
+    const tableSelection =
+      state.ephemeral.tableSelection && nextNodes.has(state.ephemeral.tableSelection.nodeId)
+        ? state.ephemeral.tableSelection
+        : null;
+    return {
+      ...state,
+      ephemeral: {
+        ...state.ephemeral,
+        selection: { nodes: nextNodes, edges: new Set(edges) },
+        tableSelection,
+      },
+    };
+  };
 }
 
 export function setViewport(viewport: Viewport): StateTransformer {
@@ -356,6 +369,7 @@ export function replaceDoc(doc: DiagramStateRoot["doc"]): StateTransformer {
     ephemeral: {
       ...state.ephemeral,
       selection: { nodes: new Set(), edges: new Set() },
+      tableSelection: null,
       history: { past: [], future: [] },
     } satisfies EphemeralState,
   });

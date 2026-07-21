@@ -16,12 +16,14 @@ import {
   type DiagramFile,
 } from "../diagram";
 import {
+  DIAGRAM_PAGE_FORMATS,
   DIAGRAM_SCHEMA_VERSION,
   createDiagramId,
   type DiagramDoc,
   type DiagramEdge,
   type DiagramLayer,
   type DiagramNode,
+  type DiagramPageFormat,
   type NodeKind,
 } from "./types";
 import {
@@ -162,6 +164,14 @@ function ensureViews(raw: unknown): PatternView[] {
   return Array.isArray(raw) ? (raw as PatternView[]) : [];
 }
 
+/** `free` (and anything unrecognized) normalizes to absent — no page frame. */
+function ensurePage(raw: unknown): DiagramPageFormat | undefined {
+  if (typeof raw !== "string" || raw === "free") return undefined;
+  return (DIAGRAM_PAGE_FORMATS as readonly string[]).includes(raw)
+    ? (raw as DiagramPageFormat)
+    : undefined;
+}
+
 interface V8Upgrade {
   nodes: DiagramNode[];
   datasets: ReportDataset[];
@@ -293,6 +303,7 @@ export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc 
     nodes,
     edges,
     layers,
+    page: ensurePage(obj.page),
     datasets,
     views,
     meta: obj.meta && typeof obj.meta === "object" ? (obj.meta as DiagramDoc["meta"]) : undefined,

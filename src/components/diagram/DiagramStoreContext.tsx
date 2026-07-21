@@ -15,6 +15,14 @@ import { type Coalescer } from "../../lib/diagram/history";
 interface DiagramStoreContextValue {
   store: DiagramStore;
   coalescer: Coalescer;
+  /** Persistent per-gesture-type coalescers (typing / resize / paste) — created once per workspace. */
+  gestureCoalescers: GestureCoalescers;
+}
+
+export interface GestureCoalescers {
+  typing: Coalescer;
+  resize: Coalescer;
+  paste: Coalescer;
 }
 
 const Ctx = createContext<DiagramStoreContextValue | null>(null);
@@ -32,6 +40,7 @@ const Ctx = createContext<DiagramStoreContextValue | null>(null);
 interface WorkspaceDiagramContext {
   store: DiagramStore;
   coalescer: Coalescer;
+  gestureCoalescers: GestureCoalescers;
   session: DiagramSession;
 }
 
@@ -49,6 +58,11 @@ function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
     ctx = {
       store: createDiagramStore(),
       coalescer: defaultCoalescer(),
+      gestureCoalescers: {
+        typing: defaultCoalescer(),
+        resize: defaultCoalescer(),
+        paste: defaultCoalescer(),
+      },
       session: {
         activeName: null,
         lastSavedBody: null,
@@ -85,7 +99,7 @@ export function DiagramStoreProvider({ initial, storeKey, children }: DiagramSto
         ephemeral: initial.ephemeral ?? current.ephemeral,
       }));
     }
-    return { store, coalescer: ctx.coalescer };
+    return { store, coalescer: ctx.coalescer, gestureCoalescers: ctx.gestureCoalescers };
   }, [initial, storeKey]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -100,6 +114,13 @@ export function useDiagramCoalescer(): Coalescer {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useDiagramCoalescer must be used inside <DiagramStoreProvider>");
   return ctx.coalescer;
+}
+
+/** Persistent per-gesture-type coalescers (typing / resize / paste). */
+export function useDiagramGestureCoalescers(): GestureCoalescers {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error("useDiagramGestureCoalescers must be used inside <DiagramStoreProvider>");
+  return ctx.gestureCoalescers;
 }
 
 /**

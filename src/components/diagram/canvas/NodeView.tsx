@@ -1,8 +1,16 @@
-import { memo, useCallback, type PointerEvent, type ReactElement } from "react";
+import { memo, useCallback, type MouseEvent, type PointerEvent, type ReactElement } from "react";
 
 import { portPoint } from "../../../lib/diagram/geometry";
-import type { DiagramNode, EdgePort, NodeId } from "../../../lib/diagram/types";
+import type { MatrixDataset } from "../../../lib/diagram/reportTypes";
+import type {
+  DiagramNode,
+  EdgePort,
+  NodeId,
+  TableCellAddress,
+  TableSelection,
+} from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
+import { TableView } from "./TableView";
 
 export interface NodeViewProps {
   node: DiagramNode;
@@ -12,6 +20,18 @@ export interface NodeViewProps {
   onPointerDown: (event: PointerEvent<SVGGElement>, nodeId: NodeId) => void;
   onPortPointerDown: (event: PointerEvent<SVGCircleElement>, nodeId: NodeId, port: EdgePort) => void;
   onMemoOpen?: (nodeId: NodeId) => void;
+  /** Matrix dataset linked via `meta.memberId` — present only for view-linked tables. */
+  tableMatrix?: MatrixDataset | null;
+  /** Cell selection for this node (null when another/no table is cell-focused). */
+  tableSelection?: TableSelection | null;
+  onCellPointerDown?: (event: PointerEvent<SVGRectElement>, nodeId: NodeId, addr: TableCellAddress) => void;
+  onCellDoubleClick?: (event: MouseEvent<SVGRectElement>, nodeId: NodeId, addr: TableCellAddress) => void;
+  onTableResizeHandlePointerDown?: (
+    event: PointerEvent<SVGRectElement>,
+    nodeId: NodeId,
+    axis: "col" | "row",
+    index: number,
+  ) => void;
 }
 
 type NodeStatus = "todo" | "doing" | "done" | "blocked";
@@ -269,6 +289,11 @@ function NodeViewBase({
   onPointerDown,
   onPortPointerDown,
   onMemoOpen,
+  tableMatrix,
+  tableSelection,
+  onCellPointerDown,
+  onCellDoubleClick,
+  onTableResizeHandlePointerDown,
 }: NodeViewProps) {
   const { t } = useTranslation();
   const s = shapeFor(node);
@@ -276,6 +301,9 @@ function NodeViewBase({
     (event: PointerEvent<SVGGElement>) => onPointerDown(event, node.id),
     [node.id, onPointerDown],
   );
+  // View-linked tables render the matrix dataset; legacy meta.rows/cols
+  // tables (should not exist post-migration) keep the grid-line fallback.
+  const matrixTable = node.kind === "table" && tableMatrix != null && tableMatrix !== undefined;
 
   const portsVisible = showPorts || pendingConnectActive || selected;
 
@@ -297,9 +325,33 @@ function NodeViewBase({
       data-node-id={node.id}
       onPointerDown={handlePointerDown}
     >
-      <NodeBody node={node} />
+      {matrixTable && tableMatrix ? (
+        <TableView
+          node={node}
+          matrix={tableMatrix}
+          selection={tableSelection ?? null}
+          nodeSelected={selected}
+          onCellPointerDown={
+            onCellPointerDown
+              ? (event, addr) => onCellPointerDown(event, node.id, addr)
+              : undefined
+          }
+          onCellDoubleClick={
+            onCellDoubleClick
+              ? (event, addr) => onCellDoubleClick(event, node.id, addr)
+              : undefined
+          }
+          onResizeHandlePointerDown={
+            onTableResizeHandlePointerDown
+              ? (event, axis, index) => onTableResizeHandlePointerDown(event, node.id, axis, index)
+              : undefined
+          }
+        />
+      ) : (
+        <NodeBody node={node} />
+      )}
       <SectionHeader node={node} />
-      <NodeLabel node={node} />
+      {matrixTable ? null : <NodeLabel node={node} />}
       {selected ? (
         <rect
           data-export-ignore

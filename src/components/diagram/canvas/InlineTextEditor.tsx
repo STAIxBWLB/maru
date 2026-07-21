@@ -11,14 +11,30 @@ import { useTranslation } from "../../../lib/i18n";
 
 export type InlineEditField = "title" | "body";
 
+/** Why the editor settled: Enter, Tab (forward/back), or a click away. */
+export type InlineEditCommitReason = "enter" | "tab" | "shift-tab" | "blur";
+
 export interface InlineTextEditorProps {
   node: DiagramNode;
   field: InlineEditField;
   /** Screen-space rect (px, relative to the viewport container). */
   rect: { x: number; y: number; w: number; h: number };
   zoom: number;
-  onCommit: (value: string) => void;
+  /** Plain commit callback (used when `onCommitReason` is absent). */
+  onCommit?: (value: string) => void;
   onCancel: () => void;
+  /**
+   * When provided, replaces `onCommit` and also reports *why* the edit
+   * settled (cell editing navigates on Enter/Tab). Tab handling is only
+   * enabled in this mode so node title/body editing keeps its plain Tab.
+   */
+  onCommitReason?: (value: string, reason: InlineEditCommitReason) => void;
+  /** Seed value override (e.g. printable-char quick entry in a table cell). */
+  initialValue?: string;
+  ariaLabel?: string;
+  /** Final (already zoom-scaled) font size override, px. */
+  fontSize?: number;
+  textAlign?: "left" | "center" | "right";
 }
 
 /**
@@ -39,10 +55,15 @@ export function InlineTextEditor({
   zoom,
   onCommit,
   onCancel,
+  onCommitReason,
+  initialValue,
+  ariaLabel,
+  fontSize: fontSizeOverride,
+  textAlign,
 }: InlineTextEditorProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState(
-    field === "title" ? (node.title ?? "") : (node.body ?? ""),
+    () => initialValue ?? (field === "title" ? (node.title ?? "") : (node.body ?? "")),
   );
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
@@ -51,11 +72,15 @@ export function InlineTextEditor({
   const valueRef = useRef(value);
   valueRef.current = value;
 
-  const commit = useCallback(() => {
-    if (settledRef.current) return;
-    settledRef.current = true;
-    onCommit(valueRef.current);
-  }, [onCommit]);
+  const commit = useCallback(
+    (reason: InlineEditCommitReason) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      if (onCommitReason) onCommitReason(valueRef.current, reason);
+      else onCommit?.(valueRef.current);
+    },
+    [onCommit, onCommitReason],
+  );
 
   const cancel = useCallback(() => {
     if (settledRef.current) return;
@@ -63,12 +88,18 @@ export function InlineTextEditor({
     onCancel();
   }, [onCancel]);
 
-  // Focus + select the draft on mount.
+  // Focus + select the draft on mount. Seeded quick-entry text (a single
+  // printable char) places the caret at the end instead of selecting.
   useEffect(() => {
     const el = areaRef.current;
     if (!el) return;
     el.focus();
-    el.select();
+    if (initialValue !== undefined && initialValue.length === 1) {
+      el.setSelectionRange(el.value.length, el.value.length);
+    } else {
+      el.select();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clicking anywhere outside the editor commits (capture phase so we settle
@@ -77,7 +108,7 @@ export function InlineTextEditor({
     const onPointerDown = (event: PointerEvent) => {
       const el = areaRef.current;
       if (el && event.target instanceof Node && !el.contains(event.target)) {
-        commit();
+        commit("blur");
       }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -90,14 +121,18 @@ export function InlineTextEditor({
     if (event.nativeEvent.isComposing || composingRef.current) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      commit();
+      commit("enter");
+    } else if (event.key === "Tab" && onCommitReason) {
+      event.preventDefault();
+      commit(event.shiftKey ? "shift-tab" : "tab");
     } else if (event.key === "Escape") {
       event.preventDefault();
       cancel();
     }
   };
 
-  const fontSize = (node.style?.fs ?? (node.kind === "text" ? 13 : 12)) * zoom;
+  const fontSize =
+    fontSizeOverride ?? (node.style?.fs ?? (node.kind === "text" ? 13 : 12)) * zoom;
 
   return (
     <textarea
@@ -112,14 +147,14 @@ export function InlineTextEditor({
       onCompositionEnd={() => {
         composingRef.current = false;
       }}
-      aria-label={t(field === "title" ? "diagram.inlineEdit.title.aria" : "diagram.inlineEdit.body.aria")}
+      aria-label={ariaLabel ?? t(field === "title" ? "diagram.inlineEdit.title.aria" : "diagram.inlineEdit.body.aria")}
       style={{
         left: rect.x,
         top: rect.y,
         width: Math.max(rect.w, 40),
         minHeight: Math.max(rect.h, 24),
         fontSize,
-        textAlign: node.style?.align ?? "center",
+        textAlign: textAlign ?? node.style?.align ?? "center",
       }}
     />
   );

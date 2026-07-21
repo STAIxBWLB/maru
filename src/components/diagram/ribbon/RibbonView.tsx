@@ -2,13 +2,24 @@ import { Magnet, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, type ChangeEvent } from "react";
 
 import {
+  defaultCoalescer,
   setSnapSize,
   toggleSmartGuides,
   toggleSnap,
+  withSnapshot,
 } from "../../../lib/diagram/actions";
+import { setDocPage } from "../../../lib/diagram/tableActions";
+import { DIAGRAM_PAGE_FORMATS, type DiagramPageFormat } from "../../../lib/diagram/types";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
 import { useTranslation } from "../../../lib/i18n";
 import { RibbonButton, RibbonGroup, RibbonSeparator } from "./ribbonPrimitives";
+
+const PAGE_LABEL_KEYS: Record<DiagramPageFormat, string> = {
+  free: "diagram.page.free",
+  "a4-portrait": "diagram.page.a4Portrait",
+  "a4-landscape": "diagram.page.a4Landscape",
+  "16:9": "diagram.page.wide",
+};
 
 export interface RibbonViewProps {
   zoomPercent: number;
@@ -38,6 +49,7 @@ export function RibbonView({
   const snapOn = useDiagram((s) => s.ephemeral.ui.snapOn);
   const snapSize = useDiagram((s) => s.ephemeral.ui.snapSize);
   const smartGuideOn = useDiagram((s) => s.ephemeral.ui.smartGuideOn);
+  const page = useDiagram((s) => s.doc.page) ?? "free";
 
   const onSizeChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -81,6 +93,30 @@ export function RibbonView({
         <span className="maru-diagram-zoom-label">{zoomPercent}%</span>
         <RibbonButton labelKey="diagram.toolbar.zoomIn" onClick={onZoomIn} icon={<ZoomIn size={14} />} />
         <RibbonButton labelKey="diagram.toolbar.fitView" onClick={onFitView} icon={<Maximize2 size={14} />} />
+      </RibbonGroup>
+      <RibbonSeparator />
+      <RibbonGroup labelKey="diagram.ribbon.group.page">
+        <label className="maru-diagram-snap-input" title={t("diagram.page.label")}>
+          <span>{t("diagram.page.label")}</span>
+          <select
+            value={page}
+            aria-label={t("diagram.page.label")}
+            onChange={(event) =>
+              store.setState(
+                withSnapshot(
+                  setDocPage(event.target.value as DiagramPageFormat),
+                  defaultCoalescer(),
+                ),
+              )
+            }
+          >
+            {DIAGRAM_PAGE_FORMATS.map((format) => (
+              <option key={format} value={format}>
+                {t(PAGE_LABEL_KEYS[format])}
+              </option>
+            ))}
+          </select>
+        </label>
       </RibbonGroup>
       <RibbonSeparator />
       <RibbonGroup labelKey="diagram.ribbon.group.panels">

@@ -24,7 +24,17 @@
 
 import { ARROW_MARKER_ID, routeEdge } from "./edgeRouting";
 import { bbox } from "./geometry";
+import type { MatrixDataset } from "./reportTypes";
 import { escapeHtml } from "./richText";
+import {
+  TABLE_GRID_BORDER,
+  TABLE_ROLE_FILLS,
+  TABLE_TEXT_COLOR,
+  cellRect,
+  computeTableLayout,
+  matrixGrid,
+  parseBorderShorthand,
+} from "./tableEditing";
 import type { DiagramDoc, DiagramEdge, DiagramNode, NodeStyle } from "./types";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -85,6 +95,80 @@ function shapeFor(node: DiagramNode): ShapeStyle {
   };
 }
 
+/**
+ * Matrix table body — mirrors `TableView.tsx` (span-aware cells, role
+ * shading, per-cell style, multiline text/bullets). Selection chrome and
+ * resize handles are interactive-only and never exported.
+ */
+function tableMatrixSvg(node: DiagramNode, matrix: MatrixDataset, s: ShapeStyle): string {
+  const layout = computeTableLayout(matrix, node.w, node.h);
+  const grid = matrixGrid(matrix);
+  const fontSize = 11;
+  let out = rectSvg(node.w, node.h, s);
+
+  const borderLine = (
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    raw: string | undefined,
+  ): string => {
+    const parsed = parseBorderShorthand(raw) ?? { width: 1, color: TABLE_GRID_BORDER, dash: false };
+    if (parsed.width <= 0) return "";
+    return (
+      `<line x1="${num(x1)}" y1="${num(y1)}" x2="${num(x2)}" y2="${num(y2)}"` +
+      ` stroke="${escapeHtml(parsed.color)}" stroke-width="${num(parsed.width)}"` +
+      (parsed.dash ? ` stroke-dasharray="4 3"` : "") +
+      `/>`
+    );
+  };
+
+  for (let r = 0; r < matrix.rows.length; r += 1) {
+    for (let c = 0; c < matrix.columns.length; c += 1) {
+      const cell = grid[r]?.[c];
+      if (!cell) continue;
+      if (cell.rowId !== matrix.rows[r]?.id || cell.colId !== matrix.columns[c]?.id) continue;
+      const rect = cellRect(matrix, layout, cell, r, c);
+      const role = matrix.rows[r]?.role ?? "data";
+      out +=
+        `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}"` +
+        ` fill="${escapeHtml(cell.style?.bg ?? TABLE_ROLE_FILLS[role])}"/>`;
+      out += borderLine(rect.x, rect.y, rect.x + rect.w, rect.y, cell.style?.borders?.top);
+      out += borderLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, cell.style?.borders?.bottom);
+      out += borderLine(rect.x, rect.y, rect.x, rect.y + rect.h, cell.style?.borders?.left);
+      out += borderLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, cell.style?.borders?.right);
+
+      const hasBullets = (cell.bullets?.length ?? 0) > 0;
+      if (cell.text || hasBullets) {
+        const align = cell.style?.align ?? "left";
+        let inner = "";
+        if (cell.text) inner += `<div>${escapeHtml(cell.text)}</div>`;
+        if (hasBullets) {
+          inner +=
+            `<ul style="margin:0;padding-left:1.1em;align-self:stretch;text-align:left">` +
+            (cell.bullets ?? [])
+              .map((bullet) => `<li>${escapeHtml(bullet)}</li>`)
+              .join("") +
+            `</ul>`;
+        }
+        const style =
+          "width:100%;height:100%;display:flex;flex-direction:column;" +
+          `align-items:${align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start"};` +
+          "justify-content:center;padding:1px 6px;box-sizing:border-box;overflow:hidden;" +
+          `font-family:${FONT_FAMILY};font-size:${fontSize}px;line-height:1.3;` +
+          `font-weight:${cell.style?.bold ? 700 : 400};` +
+          `color:${escapeHtml(cell.style?.color ?? TABLE_TEXT_COLOR)};` +
+          `text-align:${align};white-space:pre-wrap;word-break:break-word;`;
+        out +=
+          `<foreignObject x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}">` +
+          `<div xmlns="${XHTML_NS}" style="${style}">${inner}</div>` +
+          `</foreignObject>`;
+      }
+    }
+  }
+  return `<g>${out}</g>`;
+}
+
 function polygonPath(points: Array<[number, number]>): string {
   return points.map((p, i) => `${i === 0 ? "M" : "L"} ${num(p[0])} ${num(p[1])}`).join(" ") + " Z";
 }
@@ -96,8 +180,9 @@ function rectSvg(w: number, h: number, s: ShapeStyle, extra = ""): string {
   );
 }
 
-// Mirrors `NodeBody` in NodeView.tsx (numbered badge included).
-function nodeBodySvg(node: DiagramNode): string {
+// Mirrors `NodeBody` in NodeView.tsx (numbered badge included). For
+// view-linked tables `matrix` is the dataset resolved from the doc.
+function nodeBodySvg(node: DiagramNode, matrix?: MatrixDataset | null): string {
   const s = shapeFor(node);
   const w = node.w;
   const h = node.h;
@@ -185,6 +270,8 @@ function nodeBodySvg(node: DiagramNode): string {
       );
     }
     case "table": {
+      // View-linked tables render the matrix dataset (mirrors the canvas).
+      if (matrix) return tableMatrixSvg(node, matrix, s);
       const rows = Math.max(1, Number(node.meta?.rows) || 3);
       const cols = Math.max(1, Number(node.meta?.cols) || 3);
       const cellW = w / cols;
@@ -311,12 +398,13 @@ function metaDecorationsSvg(node: DiagramNode): string {
   return out;
 }
 
-function nodeSvg(node: DiagramNode): string {
+function nodeSvg(node: DiagramNode, matrix?: MatrixDataset | null): string {
+  const matrixTable = node.kind === "table" && matrix != null;
   return (
     `<g transform="translate(${num(node.x)},${num(node.y)})" data-node-id="${escapeHtml(node.id)}">` +
-    nodeBodySvg(node) +
+    nodeBodySvg(node, matrix) +
     sectionHeaderSvg(node) +
-    nodeLabelSvg(node) +
+    (matrixTable ? "" : nodeLabelSvg(node)) +
     metaDecorationsSvg(node) +
     `</g>`
   );
@@ -435,9 +523,21 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
     h: Math.max(1, bounds.h + padding * 2),
   };
 
+  // Resolve view-linked matrix tables (node.meta.memberId → matrix dataset),
+  // the same link the migration and `addTableNode` stamp.
+  const datasetsById = new Map((doc.datasets ?? []).map((ds) => [ds.id, ds]));
+  const matrixByNodeId = new Map<string, MatrixDataset>();
+  for (const node of nodes) {
+    if (node.kind !== "table" || !node.meta) continue;
+    const memberId = (node.meta as Record<string, unknown>).memberId;
+    if (typeof memberId !== "string") continue;
+    const ds = datasetsById.get(memberId);
+    if (ds && ds.kind === "matrix") matrixByNodeId.set(node.id, ds as MatrixDataset);
+  }
+
   const content =
     edges.map((edge) => edgeSvg(edge, nodeById.get(edge.fromNode)!, nodeById.get(edge.toNode)!)).join("") +
-    nodes.map(nodeSvg).join("");
+    nodes.map((node) => nodeSvg(node, matrixByNodeId.get(node.id) ?? null)).join("");
 
   const svg =
     `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink"` +

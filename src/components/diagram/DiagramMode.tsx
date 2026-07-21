@@ -28,6 +28,18 @@ import {
   updateNode,
   withSnapshot,
 } from "../../lib/diagram/actions";
+import {
+  addTableNode,
+  clearCellsText,
+  copyCellsToClipboard,
+  copyNodesToClipboard,
+  matrixForTableNode,
+  pasteClipboard,
+  setCellText,
+  setTableSelection,
+} from "../../lib/diagram/tableActions";
+import { cellAtAddr, cellRect, computeTableLayout, moveFocus } from "../../lib/diagram/tableEditing";
+import { nextTableKeyAction } from "../../lib/diagram/tableKeys";
 import { isInEditable, matchesShortcut } from "../../lib/diagram/shortcuts";
 import { fitView } from "../../lib/diagram/geometry";
 import { readMaruSettings, saveMaruSettings } from "../../lib/maruDir";
@@ -55,6 +67,7 @@ import {
   type NodeId,
   type NodeKind,
   type RibbonTab,
+  type TableCellAddress,
 } from "../../lib/diagram/types";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -63,6 +76,7 @@ import {
   setDiagramSession,
   useDiagram,
   useDiagramCoalescer,
+  useDiagramGestureCoalescers,
   useDiagramStore,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
@@ -178,6 +192,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const { t } = useTranslation();
   const store = useDiagramStore();
   const coalescer = useDiagramCoalescer();
+  const gestureCoalescers = useDiagramGestureCoalescers();
   const sessionKey = workPath ?? "__no-workspace__";
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
@@ -213,6 +228,13 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const [specialOpen, setSpecialOpen] = useState(false);
   const [importMermaidOpen, setImportMermaidOpen] = useState(false);
   const [inlineEdit, setInlineEdit] = useState<{ nodeId: NodeId; field: InlineEditField } | null>(null);
+  // Cell editing: which cell the overlay editor is attached to (+ optional
+  // quick-entry seed character). Null when no cell editor is open.
+  const [cellEdit, setCellEdit] = useState<{
+    nodeId: NodeId;
+    addr: TableCellAddress;
+    initial?: string;
+  } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
     return (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -224,6 +246,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const insertOffsetRef = useRef(0);
   const titleCoalescerRef = useRef(defaultCoalescer());
   const inlineEditCoalescerRef = useRef(defaultCoalescer());
+  const cellEditCoalescerRef = useRef(defaultCoalescer());
 
   // Hydrate persisted snap-size once.
   useEffect(() => {
@@ -369,6 +392,14 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         kind === "text" && opts.title === undefined
           ? { ...opts, title: t("diagram.toolbar.addText") }
           : opts;
+      // Tables get a linked matrix dataset + pattern view (Phase 1b), not
+      // legacy meta.rows/cols counts.
+      if (kind === "table") {
+        store.setState(
+          withSnapshot(addTableNode(canvasX + offset, canvasY + offset, 3, 3), coalescer),
+        );
+        return;
+      }
       store.setState(
         withSnapshot(addNode(kind, canvasX + offset, canvasY + offset, nodeOpts), coalescer),
       );
@@ -586,6 +617,51 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     [store],
   );
 
+  // --- Table cell editing -------------------------------------------------
+  // One editing gesture = one store mutation (a fresh coalescer per editor
+  // open keeps rapid open/edit/close cycles from collapsing into each other).
+  const openCellEditor = useCallback(
+    (nodeId: NodeId, addr: TableCellAddress, initial?: string) => {
+      const state = store.getState();
+      const node = state.doc.nodes.find((n) => n.id === nodeId);
+      if (!node || node.locked) return;
+      const matrix = matrixForTableNode(node, state.doc.datasets);
+      if (!matrix || !cellAtAddr(matrix, addr)) return;
+      cellEditCoalescerRef.current = defaultCoalescer();
+      setCellEdit({ nodeId, addr, initial });
+    },
+    [store],
+  );
+
+  const commitCellEdit = useCallback(
+    (value: string, reason: "enter" | "tab" | "shift-tab" | "blur") => {
+      const edit = cellEdit;
+      if (!edit) return;
+      const state = store.getState();
+      const node = state.doc.nodes.find((n) => n.id === edit.nodeId);
+      const matrix = node ? matrixForTableNode(node, state.doc.datasets) : null;
+      if (node && matrix) {
+        const cell = cellAtAddr(matrix, edit.addr);
+        if (cell) {
+          store.setState(
+            withSnapshot(setCellText(matrix.id, cell.id, value), cellEditCoalescerRef.current, {
+              coalesce: true,
+            }),
+          );
+        }
+        // Spreadsheet navigation: Enter moves down, Tab right, Shift+Tab left.
+        const ts = state.ephemeral.tableSelection;
+        if (ts && ts.nodeId === edit.nodeId && reason !== "blur") {
+          const [dr, dc] =
+            reason === "enter" ? [1, 0] : reason === "tab" ? [0, 1] : [0, -1];
+          store.setState(setTableSelection(moveFocus(matrix, ts, dr, dc, false)));
+        }
+      }
+      setCellEdit(null);
+    },
+    [cellEdit, store],
+  );
+
   // Keyboard shortcuts scoped to the diagram pane.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -634,6 +710,61 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
         store.setState(withSnapshot(duplicateSelection(), coalescer));
         return;
       }
+      // Copy/paste: cell ranges win while a table has an active cell
+      // selection (handled by the table block below); otherwise whole nodes.
+      if (matchesShortcut(event, { key: "c", mod: true })) {
+        if (!inField && !store.getState().ephemeral.tableSelection) {
+          if (store.getState().ephemeral.selection.nodes.size > 0) {
+            event.preventDefault();
+            store.setState(copyNodesToClipboard());
+            return;
+          }
+        }
+      }
+      if (matchesShortcut(event, { key: "v", mod: true })) {
+        if (!inField && !store.getState().ephemeral.tableSelection) {
+          if (store.getState().ephemeral.clipboard?.kind === "nodes") {
+            event.preventDefault();
+            store.setState(withSnapshot(pasteClipboard(), gestureCoalescers.paste));
+            return;
+          }
+        }
+      }
+      // Table cell keyboard flow (F2/Tab/Enter/arrows/Delete/printable char)
+      // — takes precedence over node-level nudge/delete/inline-edit while a
+      // table has an active cell selection.
+      if (!inField && !cellEdit) {
+        const tableAction = nextTableKeyAction(event, store.getState());
+        if (tableAction) {
+          event.preventDefault();
+          switch (tableAction.kind) {
+            case "select":
+              store.setState(setTableSelection(tableAction.selection));
+              break;
+            case "clearRange":
+              store.setState(
+                withSnapshot(
+                  clearCellsText(tableAction.datasetId, tableAction.cellIds),
+                  gestureCoalescers.typing,
+                  { coalesce: true },
+                ),
+              );
+              break;
+            case "edit": {
+              const ts = store.getState().ephemeral.tableSelection;
+              if (ts) openCellEditor(ts.nodeId, tableAction.addr, tableAction.initial);
+              break;
+            }
+            case "copy":
+              store.setState(copyCellsToClipboard(tableAction.texts));
+              break;
+            case "paste":
+              store.setState(withSnapshot(pasteClipboard(), gestureCoalescers.paste));
+              break;
+          }
+          return;
+        }
+      }
       if (!inField && event.key === "F2") {
         event.preventDefault();
         const selected = [...store.getState().ephemeral.selection.nodes];
@@ -656,27 +787,32 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           setFindOpen(false);
           return;
         }
+        if (store.getState().ephemeral.tableSelection) {
+          event.preventDefault();
+          store.setState(setTableSelection(null));
+          return;
+        }
       }
       if (!inField && !event.metaKey && !event.ctrlKey) {
         const step = event.shiftKey ? 10 : 1;
         if (event.key === "ArrowLeft") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(-step, 0), coalescer));
+          store.setState(withSnapshot(nudgeSelection(-step, 0), coalescer, { coalesce: true }));
           return;
         }
         if (event.key === "ArrowRight") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(step, 0), coalescer));
+          store.setState(withSnapshot(nudgeSelection(step, 0), coalescer, { coalesce: true }));
           return;
         }
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(0, -step), coalescer));
+          store.setState(withSnapshot(nudgeSelection(0, -step), coalescer, { coalesce: true }));
           return;
         }
         if (event.key === "ArrowDown") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(0, step), coalescer));
+          store.setState(withSnapshot(nudgeSelection(0, step), coalescer, { coalesce: true }));
           return;
         }
       }
@@ -697,7 +833,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [coalescer, findOpen, handleSave, hasSelection, openInlineEditor, store]);
+  }, [cellEdit, coalescer, findOpen, gestureCoalescers, handleSave, hasSelection, openCellEditor, openInlineEditor, store]);
 
   const statusLabel = saving
     ? t("diagram.status.saving")
@@ -768,6 +904,32 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
   const inlineEditNode = inlineEdit
     ? (doc.nodes.find((n) => n.id === inlineEdit.nodeId) ?? null)
     : null;
+
+  // Cell editor positioning: node-local cell rect → screen space.
+  const cellEditInfo = (() => {
+    if (!cellEdit) return null;
+    const node = doc.nodes.find((n) => n.id === cellEdit.nodeId);
+    const matrix = node ? matrixForTableNode(node, doc.datasets) : null;
+    if (!node || !matrix) return null;
+    const cell = cellAtAddr(matrix, cellEdit.addr);
+    if (!cell) return null;
+    const r = matrix.rows.findIndex((row) => row.id === cell.rowId);
+    const c = matrix.columns.findIndex((col) => col.id === cell.colId);
+    if (r < 0 || c < 0) return null;
+    const layout = computeTableLayout(matrix, node.w, node.h);
+    const rect = cellRect(matrix, layout, cell, r, c);
+    return {
+      node,
+      matrix,
+      cell,
+      rect: {
+        x: (node.x + rect.x) * viewport.zoom + viewport.px,
+        y: (node.y + rect.y) * viewport.zoom + viewport.py,
+        w: rect.w * viewport.zoom,
+        h: rect.h * viewport.zoom,
+      },
+    };
+  })();
 
   return (
     <div
@@ -881,6 +1043,7 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
           <CanvasSurface
             onMemoOpen={(nodeId) => setMemoOpen(nodeId)}
             onNodeDoubleClick={openInlineEditor}
+            onCellEditRequest={(nodeId, addr) => openCellEditor(nodeId, addr)}
           />
           {inlineEdit && inlineEditNode ? (
             <InlineTextEditor
@@ -895,6 +1058,20 @@ function DiagramShell({ workPath, onError }: DiagramModeProps) {
               zoom={viewport.zoom}
               onCommit={(value) => commitInlineEdit(inlineEdit.nodeId, inlineEdit.field, value)}
               onCancel={() => setInlineEdit(null)}
+            />
+          ) : null}
+          {cellEdit && cellEditInfo ? (
+            <InlineTextEditor
+              node={cellEditInfo.node}
+              field="title"
+              rect={cellEditInfo.rect}
+              zoom={viewport.zoom}
+              initialValue={cellEdit.initial ?? cellEditInfo.cell.text}
+              ariaLabel={t("diagram.inlineEdit.cell.aria")}
+              fontSize={11 * viewport.zoom}
+              textAlign={cellEditInfo.cell.style?.align ?? "left"}
+              onCommitReason={commitCellEdit}
+              onCancel={() => setCellEdit(null)}
             />
           ) : null}
           {listOpen ? (
