@@ -43,4 +43,21 @@ describe("canonical graph Local targets", () => {
   it("does not create a persisted target for unresolved nodes", () => {
     expect(graphLocalTargetForNode(node({ relPath: null, type: "unresolved" }))).toBeNull();
   });
+
+  it("matches owner-stamped nodes when the target owner is unknown", () => {
+    // The Rust scanner stamps ownerWorkspacePath on every real entry
+    // (vault.rs), while fixtures and older saved views send null. A null
+    // target owner is a wildcard, not a literal null to equality-match —
+    // otherwise every real "View in graph" handoff reports target missing.
+    const target = { ownerWorkspacePath: null, relPath: "notes/a.md" };
+    expect(graphNodeMatchesLocalTarget(
+      node({ relPath: "notes/a.md", ownerWorkspacePath: "/Users/x/vault" }),
+      target,
+    )).toBe(true);
+    // A known owner still requires exact equality.
+    expect(graphNodeMatchesLocalTarget(
+      node({ relPath: "notes/a.md", ownerWorkspacePath: "/Users/x/vault" }),
+      { ownerWorkspacePath: "/Users/y/vault", relPath: "notes/a.md" },
+    )).toBe(false);
+  });
 });

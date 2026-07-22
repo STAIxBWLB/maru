@@ -25,7 +25,7 @@ import {
   type GraphModel,
   type GraphNode,
 } from "../../lib/graph/model";
-import { deriveGraphView } from "../../lib/graph/derive";
+import { applyGraphSearch, deriveGraphView } from "../../lib/graph/derive";
 import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
@@ -407,9 +407,13 @@ export function GraphView({
   // (i.e. on vault edits) so it doesn't stay frozen at mount time.
   const now = useMemo(() => Date.now(), [model]);
 
-  // One pure derivation pipeline (facet → relation → local → prune → search).
+  // One pure derivation pipeline (facet → relation → local → prune → search),
+  // split in two memos: the expensive analysis stage must keep a stable
+  // identity while the user types (a per-keystroke analysisModel restarted the
+  // insights worker with a full graph clone per character), and the transient
+  // search stage narrows it cheaply.
   // Effective mode is "local" while a local-focus anchor is set, else the stored mode.
-  const derived = useMemo(
+  const analysis = useMemo(
     () =>
       deriveGraphView({
         model,
@@ -419,10 +423,14 @@ export function GraphView({
         focusNodeId: requestedFocusId,
         localDepth,
         localDirection,
-        search,
-        searchAsFilter,
+        search: "",
+        searchAsFilter: false,
       }),
-    [model, filters, graphSettings.generatedPatterns, localTarget, requestedFocusId, mode, localDepth, localDirection, search, searchAsFilter],
+    [model, filters, graphSettings.generatedPatterns, localTarget, requestedFocusId, mode, localDepth, localDirection],
+  );
+  const derived = useMemo(
+    () => applyGraphSearch(analysis, searchAsFilter ? search : ""),
+    [analysis, search, searchAsFilter],
   );
   const filtered = derived.visibleModel;
   // Search combobox ranks the CURRENT filtered graph.
@@ -1044,7 +1052,12 @@ export function GraphView({
             <button
               type="button"
               data-testid="graph-reset-filters"
-              onClick={() => setFilters(filtersFromSettings(defaultGraphFilterProfile()))}
+              onClick={() => {
+                setFilters(filtersFromSettings(defaultGraphFilterProfile()));
+                // Search-as-filter can be the narrowing that emptied the graph;
+                // a reset that leaves the query active would be a no-op.
+                setSearch("");
+              }}
             >
               {t("graph.empty.resetFilters")}
             </button>

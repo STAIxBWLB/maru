@@ -136,11 +136,35 @@ type InteractionState = {
   searchHighlightId: string | null;
   pathSourceId: string | null;
   highlight: GraphHighlight;
+  /** Precomputed from `highlight` ONCE per change. Sigma calls the reducers
+   * per node/edge on every refresh; rebuilding a path-sized Set inside each
+   * call is O(V*P + E*P) and froze the canvas for seconds on long paths. */
+  highlightNodeIds: Set<string> | null;
+  highlightEdgeKeys: Set<string> | null;
   hoverId: string | null;
   favoriteIds: Set<string>;
   visibleNodeIds: Set<string> | null;
   visibleEdgeKeys: Set<string> | null;
 };
+
+function highlightSets(highlight: GraphHighlight): {
+  nodes: Set<string> | null;
+  edges: Set<string> | null;
+} {
+  if (!highlight) return { nodes: null, edges: null };
+  if (highlight.kind === "pair") {
+    return {
+      nodes: new Set([highlight.a, highlight.b]),
+      edges: new Set([edgeKey(highlight.a, highlight.b)]),
+    };
+  }
+  const nodes = new Set(highlight.ids);
+  const edges = new Set<string>();
+  for (let i = 0; i + 1 < highlight.ids.length; i += 1) {
+    edges.add(edgeKey(highlight.ids[i], highlight.ids[i + 1]));
+  }
+  return { nodes, edges };
+}
 
 /** arrows: "typed" = frontmatter relations get arrows (body wiki_link stays a
  *  line); "all" = every edge arrowed; "none" = no arrows. */
@@ -566,12 +590,15 @@ export function GraphCanvas({
   // changes without a rebuild.
   const displayRef = useRef(display);
   displayRef.current = display;
+  const highlightMasks = useMemo(() => highlightSets(highlight), [highlight]);
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
     searchHighlightId,
     pathSourceId,
     highlight,
+    highlightNodeIds: highlightMasks.nodes,
+    highlightEdgeKeys: highlightMasks.edges,
     hoverId: null,
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
@@ -584,6 +611,8 @@ export function GraphCanvas({
     searchHighlightId,
     pathSourceId,
     highlight,
+    highlightNodeIds: highlightMasks.nodes,
+    highlightEdgeKeys: highlightMasks.edges,
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
@@ -682,11 +711,7 @@ export function GraphCanvas({
             if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
               return { ...data, hidden: true };
             }
-            const overlayIds = state.highlight?.kind === "pair"
-              ? new Set([state.highlight.a, state.highlight.b])
-              : state.highlight?.kind === "path"
-                ? new Set(state.highlight.ids)
-                : null;
+            const overlayIds = state.highlightNodeIds;
             const hovered = state.hoverId;
             const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
             const overlayVisible = !overlayIds || overlayIds.has(node);
@@ -721,21 +746,11 @@ export function GraphCanvas({
               return { ...data, hidden: true };
             }
             const hovered = state.hoverId;
-            const pair = state.highlight?.kind === "pair" ? state.highlight : null;
-            const path = state.highlight?.kind === "path" ? state.highlight.ids : null;
+            const overlayEdges = state.highlightEdgeKeys;
             let active = true;
             if (hovered) active = data.sourceId === hovered || data.targetId === hovered;
-            if (pair) active = (data.sourceId === pair.a && data.targetId === pair.b) || (data.sourceId === pair.b && data.targetId === pair.a);
-            if (path) {
-              active = false;
-              for (let i = 0; i + 1 < path.length; i += 1) {
-                if (edgeKey(data.sourceId, data.targetId) === edgeKey(path[i], path[i + 1])) {
-                  active = true;
-                  break;
-                }
-              }
-            }
-            return active ? { ...data, color: pair || path ? graphTheme().accent : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
+            if (overlayEdges) active = overlayEdges.has(edgeKey(data.sourceId, data.targetId));
+            return active ? { ...data, color: overlayEdges ? graphTheme().accent : data.color, size: overlayEdges ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
           },
         });
       } catch (err) {

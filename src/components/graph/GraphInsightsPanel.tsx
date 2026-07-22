@@ -46,6 +46,10 @@ export function GraphInsightsPanel({
     worker.onmessage = (event: MessageEvent<{ epoch: number; bundle: InsightBundle }>) => {
       if (event.data.epoch === epochRef.current) setBundle(event.data.bundle);
     };
+    // A crashed worker must not be indistinguishable from "no insights".
+    worker.onerror = (event) => {
+      console.error("[graph] insights worker failed — sections stay empty", event);
+    };
     worker.postMessage({ epoch, model, now, staleDays: STALE_DAYS });
     return () => worker.terminate();
   }, [model, now]);

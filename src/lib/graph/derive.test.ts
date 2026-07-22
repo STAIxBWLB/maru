@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphFilterProfile } from "../settings";
-import { deriveGraphView } from "./derive";
+import { applyGraphSearch, deriveGraphView } from "./derive";
 import { GRAPH_FIXTURES } from "./fixtures";
 import {
   buildVaultGraph,
@@ -332,6 +332,53 @@ describe("deriveGraphView — facets", () => {
       { value: 2, count: 1 },
     ]);
     expect(d.facets.maxVisibleNeighbors).toBe(1);
+  });
+});
+
+describe("applyGraphSearch — two-stage identity", () => {
+  it("keeps the analysis stage stable while search narrows the visible stage", () => {
+    const m = buildVaultGraph(GRAPH_FIXTURES.dense());
+    const args = {
+      model: m,
+      profile: profile(),
+      generatedPatterns: [] as string[],
+      mode: "global" as const,
+      focusNodeId: null,
+      localDepth: 2 as const,
+      localDirection: "both" as const,
+      search: "",
+      searchAsFilter: false,
+    };
+    const analysis = deriveGraphView(args);
+    // No query: the base derivation is returned as-is (same identity), so a
+    // keystroke with search-as-filter off cannot restart downstream workers.
+    expect(applyGraphSearch(analysis, "")).toBe(analysis);
+    // Splitting the stages is behavior-preserving: analysis + search equals
+    // the single-pass derivation with the same query.
+    const narrowed = applyGraphSearch(analysis, "note-1");
+    const single = deriveGraphView({ ...args, search: "note-1", searchAsFilter: true });
+    expect(narrowed.analysisModel).toBe(analysis.analysisModel);
+    expect([...narrowed.visibleNodeIds].sort()).toEqual([...single.visibleNodeIds].sort());
+    expect([...narrowed.visibleEdgeKeys].sort()).toEqual([...single.visibleEdgeKeys].sort());
+    expect(narrowed.emptyReason).toBe(single.emptyReason);
+  });
+
+  it("reports filtered-empty when the query matches nothing", () => {
+    const m = buildVaultGraph(GRAPH_FIXTURES.dense());
+    const analysis = deriveGraphView({
+      model: m,
+      profile: profile(),
+      generatedPatterns: [],
+      mode: "global",
+      focusNodeId: null,
+      localDepth: 2,
+      localDirection: "both",
+      search: "",
+      searchAsFilter: false,
+    });
+    const narrowed = applyGraphSearch(analysis, "no-such-node-anywhere");
+    expect(narrowed.visibleModel.nodes).toHaveLength(0);
+    expect(narrowed.emptyReason).toBe("filtered-empty");
   });
 });
 

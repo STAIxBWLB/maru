@@ -136,12 +136,13 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
     return { frame, animated: fit || bridge.cameraAnimating() };
   }, options?.fit === true);
   if (cameraStart.animated) {
+    // Wait for the animation flag only. Node coordinates come from
+    // graphToViewport (synchronous camera state), so no post-settle frame is
+    // required — and demanding frames() > frame races the final animation
+    // render: captured after it, no further frame ever comes and the wait
+    // hangs (reproducible under heavy host load on a pristine checkout).
     await page.waitForFunction(
-      ({ frame }) => {
-        const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
-        return !bridge.cameraAnimating() && bridge.frames() > frame;
-      },
-      cameraStart,
+      () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.cameraAnimating(),
     );
   }
   const point = await nodePoint(page, id);

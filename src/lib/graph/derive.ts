@@ -38,6 +38,8 @@ export interface DerivedGraph {
   emptyReason: GraphEmptyReason;
   /** Local mode requested a canonical target absent from the current source. */
   focusMissing: boolean;
+  /** Local focus node kept visible through pruning and search narrowing. */
+  protectedFocusId: string | null;
 }
 
 function pruneByMinNeighbors(
@@ -236,28 +238,8 @@ export function deriveGraphView(args: {
   );
   const analysisModel = working;
 
-  const query = searchAsFilter ? search.trim() : "";
-  if (query) {
-    const matched = new Set(
-      working.nodes.filter((node) => graphNodeMatchesSearch(node, query)).map((node) => node.id),
-    );
-    const visible = new Set(matched);
-    for (const edge of working.edges) {
-      if (matched.has(edge.source)) visible.add(edge.target);
-      if (matched.has(edge.target)) visible.add(edge.source);
-    }
-    if (protectedFocusId) visible.add(protectedFocusId);
-    working = withGraphDegrees({
-      ...working,
-      nodes: working.nodes.filter((node) => visible.has(node.id)),
-      edges: working.edges.filter(
-        (edge) => visible.has(edge.source) && visible.has(edge.target),
-      ),
-    });
-  }
-  const visibleModel = working;
-  const visibleNodeIds = new Set(visibleModel.nodes.map((node) => node.id));
-  const visibleEdgeKeys = new Set(visibleModel.edges.map(graphEdgeVisibilityKey));
+  const visibleNodeIds = new Set(analysisModel.nodes.map((node) => node.id));
+  const visibleEdgeKeys = new Set(analysisModel.edges.map(graphEdgeVisibilityKey));
   const visibleNeighborCounts = distinctNeighborCounts(analysisModel);
   const maxVisibleNeighbors = Math.max(0, ...visibleNeighborCounts.values());
 
@@ -275,13 +257,13 @@ export function deriveGraphView(args: {
 
   const emptyReason: GraphEmptyReason = model.nodes.length === 0
     ? "empty-source"
-    : visibleModel.nodes.length === 0
+    : analysisModel.nodes.length === 0
       ? "filtered-empty"
       : null;
 
-  return {
+  const base: DerivedGraph = {
     analysisModel,
-    visibleModel,
+    visibleModel: analysisModel,
     visibleNodeIds,
     visibleEdgeKeys,
     visibleNeighborCounts,
@@ -289,5 +271,45 @@ export function deriveGraphView(args: {
     pausedFilters,
     emptyReason,
     focusMissing,
+    protectedFocusId,
+  };
+  return applyGraphSearch(base, searchAsFilter ? search : "");
+}
+
+/** Transient search narrowing over an analysis-stage derivation. Split out so
+ * the expensive facet/local/k-core stage keeps a stable identity across
+ * keystrokes — recreating `analysisModel` per keystroke made the insights
+ * panel terminate and respawn its worker (with a full structured clone of the
+ * graph) on every character typed. */
+export function applyGraphSearch(base: DerivedGraph, search: string): DerivedGraph {
+  const query = search.trim();
+  if (!query) return base;
+  const analysis = base.analysisModel;
+  const matched = new Set(
+    analysis.nodes.filter((node) => graphNodeMatchesSearch(node, query)).map((node) => node.id),
+  );
+  const visible = new Set(matched);
+  for (const edge of analysis.edges) {
+    if (matched.has(edge.source)) visible.add(edge.target);
+    if (matched.has(edge.target)) visible.add(edge.source);
+  }
+  if (base.protectedFocusId) visible.add(base.protectedFocusId);
+  const visibleModel = withGraphDegrees({
+    ...analysis,
+    nodes: analysis.nodes.filter((node) => visible.has(node.id)),
+    edges: analysis.edges.filter(
+      (edge) => visible.has(edge.source) && visible.has(edge.target),
+    ),
+  });
+  return {
+    ...base,
+    visibleModel,
+    visibleNodeIds: new Set(visibleModel.nodes.map((node) => node.id)),
+    visibleEdgeKeys: new Set(visibleModel.edges.map(graphEdgeVisibilityKey)),
+    emptyReason: base.emptyReason === "empty-source"
+      ? "empty-source"
+      : visibleModel.nodes.length === 0
+        ? "filtered-empty"
+        : base.emptyReason,
   };
 }
