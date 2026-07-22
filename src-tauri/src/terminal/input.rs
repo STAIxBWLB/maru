@@ -1,7 +1,11 @@
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum TerminalInputCommand {
     Text {
         text: String,
@@ -335,6 +339,25 @@ mod tests {
         let command: TerminalInputCommand =
             serde_json::from_str(r#"{"type":"lineBreak"}"#).unwrap();
         assert_eq!(command, TerminalInputCommand::LineBreak);
+    }
+
+    #[test]
+    fn key_modifiers_deserialize_from_ipc_shape() {
+        let command: TerminalInputCommand = serde_json::from_str(
+            r#"{"type":"key","key":"Enter","code":"Enter","shiftKey":true,"altKey":true,"ctrlKey":true,"metaKey":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            TerminalInputCommand::Key {
+                key: "Enter".to_string(),
+                code: Some("Enter".to_string()),
+                shift_key: true,
+                alt_key: true,
+                ctrl_key: true,
+                meta_key: true,
+            }
+        );
     }
 
     #[test]

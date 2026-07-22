@@ -54,12 +54,10 @@ import type {
   TerminalLaunchRequest,
   TerminalPanelHandle,
 } from "./components/TerminalPanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import {
   buildMaruBackgroundContextEnv,
-  hasPersistedTerminalTabs,
   scratchpadRootForWorkspace,
-  TERMINAL_LAUNCHERS,
-  terminalCommandPreview,
   type ActiveTerminalContext,
 } from "./lib/terminal";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
@@ -381,13 +379,6 @@ const MAX_OUTLINE_PANE_WIDTH = 520;
 const OUTLOOK_REFRESH_TTL_MS = 60_000;
 const TELEGRAM_REFRESH_TTL_MS = 60_000;
 
-const LazyTerminalPanel = lazy(async () => {
-  markStartup("terminal:module-import:start");
-  const module = await import("./components/TerminalPanel");
-  markStartup("terminal:module-import:end");
-  return { default: module.TerminalPanel };
-});
-
 const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((module) => ({ default: module.GraphView })));
 const LazyDiagramMode = lazy(() => import("./components/diagram/DiagramMode").then((module) => ({ default: module.DiagramMode })));
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
@@ -398,70 +389,6 @@ const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((mo
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
-
-function preloadTerminalPanel(): void {
-  markStartup("terminal:module-preload");
-  void import("./components/TerminalPanel");
-}
-
-function TerminalDockPlaceholder({
-  cwd,
-  dock,
-  settings,
-  t,
-  onOpen,
-  onLaunch,
-}: {
-  cwd: string | null;
-  dock: TerminalDock;
-  settings: MaruSettings;
-  t: (key: string, vars?: Record<string, string | number>) => string;
-  onOpen: () => void;
-  onLaunch: (kind: TerminalKind) => void;
-}) {
-  const canRunTerminal = terminalAvailable();
-  return (
-    <section className={`terminal-panel dock-${dock} collapsed`}>
-      <div className="terminal-resize-handle" />
-      <header className="terminal-header">
-        <button
-          type="button"
-          className="terminal-title"
-          onClick={onOpen}
-          aria-expanded={false}
-          title={t("terminal.expand")}
-          aria-label={t("terminal.expand")}
-        >
-          {dock === "right" ? <PanelRight size={14} /> : <PanelBottom size={14} />}
-          <span>{t("terminal.title")}</span>
-          <ChevronUp size={14} />
-        </button>
-        <div className="terminal-launchers" role="group" aria-label={t("terminal.launchers")}>
-          {TERMINAL_LAUNCHERS.map((launcher) => {
-            const enabled = settings.terminal.launchers[launcher.id]?.enabled ?? true;
-            return (
-              <button
-                key={launcher.id}
-                type="button"
-                disabled={!canRunTerminal || !enabled}
-                onClick={() => onLaunch(launcher.id)}
-                title={
-                  canRunTerminal
-                    ? terminalCommandPreview(launcher.id, cwd ?? "")
-                    : t("terminal.tauriRequired")
-                }
-                aria-label={t(launcher.titleKey)}
-              >
-                {launcher.id === "codex" ? <Code2 size={13} /> : <SquareTerminal size={13} />}
-                <span>{t(launcher.titleKey)}</span>
-              </button>
-            );
-          })}
-        </div>
-      </header>
-    </section>
-  );
-}
 
 interface ProviderRefreshCache {
   fetchedAt: number | null;
@@ -1163,9 +1090,6 @@ function MainApp() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const skillsStartupLoadKeyRef = useRef<string | null>(null);
-  const [terminalPanelMounted, setTerminalPanelMounted] = useState(() =>
-    hasPersistedTerminalTabs(),
-  );
   const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
     "transcript" | "external" | null
@@ -1993,26 +1917,6 @@ function MainApp() {
   useEffect(() => {
     updateLayoutSettingsRef.current = updateLayoutSettings;
   }, [updateLayoutSettings]);
-
-  useEffect(() => {
-    if (terminalPanelMounted) return;
-    if (!maruSettings.ui.layout.terminalOpen && !terminalLaunchRequest) return;
-    markStartup("terminal:full-mount-request", {
-      open: maruSettings.ui.layout.terminalOpen,
-      launch: terminalLaunchRequest?.kind ?? null,
-    });
-    setTerminalPanelMounted(true);
-    preloadTerminalPanel();
-  }, [
-    maruSettings.ui.layout.terminalOpen,
-    terminalLaunchRequest,
-    terminalPanelMounted,
-  ]);
-
-  useEffect(() => {
-    if (booting || !settingsWorkspaceStartupReady || terminalPanelMounted) return;
-    return scheduleStartupIdle(() => preloadTerminalPanel(), 2000);
-  }, [booting, settingsWorkspaceStartupReady, terminalPanelMounted]);
 
   const requestTerminalLaunch = useCallback(
     (kind: TerminalKind) => {
@@ -6576,6 +6480,33 @@ function MainApp() {
     [updateLayoutSettings],
   );
 
+  const handleTerminalOpenChange = useCallback(
+    (terminalOpen: boolean) => updateLayoutSettings({ terminalOpen }, { flush: true }),
+    [updateLayoutSettings],
+  );
+  const handleTerminalHeightChange = useCallback(
+    (terminalHeight: number) => updateLayoutSettings({ terminalHeight }),
+    [updateLayoutSettings],
+  );
+  const handleTerminalWidthChange = useCallback(
+    (terminalWidth: number) => updateLayoutSettings({ terminalWidth }),
+    [updateLayoutSettings],
+  );
+  const handleTerminalSplitOpenChange = useCallback(
+    (terminalSplitOpen: boolean) =>
+      updateLayoutSettings({ terminalSplitOpen, terminalOpen: true }),
+    [updateLayoutSettings],
+  );
+  const handleTerminalSplitRatioChange = useCallback(
+    (terminalSplitRatio: number) => updateLayoutSettings({ terminalSplitRatio }),
+    [updateLayoutSettings],
+  );
+  const handleTerminalMaximizedChange = useCallback(
+    (terminalMaximized: boolean) =>
+      updateLayoutSettings({ terminalMaximized, terminalOpen: true }),
+    [updateLayoutSettings],
+  );
+
   const splitActiveSurfaceRight = useCallback(() => {
     const active = window.document.activeElement as HTMLElement | null;
     if (active?.closest(".terminal-panel")) {
@@ -7209,8 +7140,6 @@ function MainApp() {
       : "";
   const terminalDockClass =
     layoutSettings.terminalDock === "right" ? " terminal-dock-right" : " terminal-dock-bottom";
-  const shouldRenderFullTerminalPanel =
-    terminalPanelMounted || layoutSettings.terminalOpen || terminalLaunchRequest !== null;
   const shellClass = `app-shell${modeClass}${outlineOpen ? "" : " outline-closed"}${
     documentsPaneOpen ? "" : " documents-closed"
   }${terminalMaximizedClass}${terminalDockClass}`;
@@ -8339,59 +8268,27 @@ function MainApp() {
           />
         ) : null}
 
-        {shouldRenderFullTerminalPanel ? (
-          <Suspense
-            fallback={
-              <TerminalDockPlaceholder
-                cwd={activeDocumentWorkspacePath}
-                dock={maruSettings.ui.layout.terminalDock}
-                settings={maruSettings}
-                t={t}
-                onOpen={() => updateLayoutSettings({ terminalOpen: true }, { flush: true })}
-                onLaunch={requestTerminalLaunch}
-              />
-            }
-          >
-            <LazyTerminalPanel
-              ref={terminalPanelRef}
-              cwd={activeDocumentWorkspacePath}
-              activeContext={activeTerminalContext}
-              settings={maruSettings}
-              launchRequest={terminalLaunchRequest}
-              open={maruSettings.ui.layout.terminalOpen}
-              height={maruSettings.ui.layout.terminalHeight}
-              dock={maruSettings.ui.layout.terminalDock}
-              width={maruSettings.ui.layout.terminalWidth}
-              splitOpen={maruSettings.ui.layout.terminalSplitOpen}
-              splitRatio={maruSettings.ui.layout.terminalSplitRatio}
-              maximized={maruSettings.ui.layout.terminalMaximized}
-              onOpenChange={(terminalOpen) =>
-                updateLayoutSettings({ terminalOpen }, { flush: true })
-              }
-              onHeightChange={(terminalHeight) => updateLayoutSettings({ terminalHeight })}
-              onDockChange={dockTerminal}
-              onWidthChange={(terminalWidth) => updateLayoutSettings({ terminalWidth })}
-              onSplitOpenChange={(terminalSplitOpen) =>
-                updateLayoutSettings({ terminalSplitOpen, terminalOpen: true })
-              }
-              onSplitRatioChange={(terminalSplitRatio) =>
-                updateLayoutSettings({ terminalSplitRatio })
-              }
-              onMaximizedChange={(terminalMaximized) =>
-                updateLayoutSettings({ terminalMaximized, terminalOpen: true })
-              }
-            />
-          </Suspense>
-        ) : (
-          <TerminalDockPlaceholder
-            cwd={activeDocumentWorkspacePath}
-            dock={maruSettings.ui.layout.terminalDock}
-            settings={maruSettings}
-            t={t}
-            onOpen={() => updateLayoutSettings({ terminalOpen: true }, { flush: true })}
-            onLaunch={requestTerminalLaunch}
-          />
-        )}
+        <TerminalPanel
+          ref={terminalPanelRef}
+          cwd={activeDocumentWorkspacePath}
+          activeContext={activeTerminalContext}
+          settings={maruSettings}
+          launchRequest={terminalLaunchRequest}
+          open={maruSettings.ui.layout.terminalOpen}
+          height={maruSettings.ui.layout.terminalHeight}
+          dock={maruSettings.ui.layout.terminalDock}
+          width={maruSettings.ui.layout.terminalWidth}
+          splitOpen={maruSettings.ui.layout.terminalSplitOpen}
+          splitRatio={maruSettings.ui.layout.terminalSplitRatio}
+          maximized={maruSettings.ui.layout.terminalMaximized}
+          onOpenChange={handleTerminalOpenChange}
+          onHeightChange={handleTerminalHeightChange}
+          onDockChange={dockTerminal}
+          onWidthChange={handleTerminalWidthChange}
+          onSplitOpenChange={handleTerminalSplitOpenChange}
+          onSplitRatioChange={handleTerminalSplitRatioChange}
+          onMaximizedChange={handleTerminalMaximizedChange}
+        />
 
         <div className="toast-stack">
           {error ? (

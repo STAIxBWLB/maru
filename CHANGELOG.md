@@ -35,6 +35,16 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   from the owning private workspace; routing fails closed when the workspace
   registry is unreadable and requires the active private workspace to be
   registered as private.
+- **cmux-class terminal interaction hardening.** The integrated terminal now
+  accepts the first macOS click, mounts before launch requests, restores actual
+  textarea focus across pane/app transitions, and queues early input without
+  dropping the first keystroke. PTY output moved from global events and React
+  frame state to ordered per-session Channels with generation/sequence guards,
+  two-frame credit, hidden-session suspension, compact palette frames, and
+  imperative canvas patches. Alacritty now owns scrollback-aware selection and
+  copy semantics for soft wraps and wide CJK cells; drag selection is
+  animation-frame coalesced, supports edge auto-scroll, and exposes a terminal
+  Copy/Paste/Select All/Find/Clear menu.
 - **Graph/catalog hygiene.** Ideation stays graph-visible while scratchpad
   memos and temp are excluded from the workspace catalog and graph scans,
   honoring relocated roots and renamed collections from

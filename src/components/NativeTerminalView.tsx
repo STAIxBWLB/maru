@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -14,11 +15,15 @@ import type {
   TerminalFrame,
   TerminalInputCommand,
   TerminalMouseFlags,
+  TerminalSelectionCommand,
+  TerminalSelectionSpan,
   TerminalSearchMatch,
 } from "../lib/api";
 
 export interface NativeTerminalViewHandle {
   focus: () => void;
+  ownsFocus: () => boolean;
+  applyFrame: (frame: TerminalFrame) => boolean;
   refreshLayout: (options?: { focus?: boolean }) => void;
   pasteText: (text: string) => void;
   copySelection: () => string | null;
@@ -28,7 +33,7 @@ export interface NativeTerminalViewHandle {
 
 interface NativeTerminalViewProps {
   sessionId: string;
-  frame: TerminalFrame | null;
+  frame?: TerminalFrame | null;
   active: boolean;
   focused: boolean;
   resizeReady: boolean;
@@ -39,6 +44,22 @@ interface NativeTerminalViewProps {
   onResize: (cols: number, rows: number) => void;
   onScroll: (delta: number) => void;
   onCopyOnSelect?: (text: string) => void;
+  onFocusOwnership?: () => void;
+  onSelection?: (command: TerminalSelectionCommand) => Promise<void> | void;
+  onCopySelection?: () => Promise<string>;
+  contextMenuLabels?: {
+    copy: string;
+    paste: string;
+    selectAll: string;
+    find: string;
+    clear: string;
+  };
+  onContextCopy?: () => void;
+  onContextPaste?: () => void;
+  onContextSelectAll?: () => void;
+  onContextFind?: () => void;
+  onContextClear?: () => void;
+  canForwardMouse?: () => boolean;
 }
 
 interface CellPoint {
@@ -218,6 +239,19 @@ export function normalizeSelection(selection: CellSelection): CellRange {
     : { start: selection.focus, end: selection.anchor };
 }
 
+export function selectionFromSpans(
+  spans: TerminalSelectionSpan[] | null | undefined,
+): CellSelection | null {
+  if (!spans || spans.length === 0) return null;
+  const ordered = [...spans].sort((a, b) => a.row - b.row || a.start - b.start);
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+  return {
+    anchor: { row: first.row, col: first.start },
+    focus: { row: last.row, col: last.end },
+  };
+}
+
 /** Selected column span within `row`, or null if the row is outside the
  *  selection. End column clamps to the last column of the row. */
 export function selectionSpanForRow(
@@ -225,9 +259,12 @@ export function selectionSpanForRow(
   row: number,
   cols: number,
 ): { start: number; end: number } | null {
-  if (row < range.start.row || row > range.end.row) return null;
-  const start = row === range.start.row ? range.start.col : 0;
-  const end = row === range.end.row ? range.end.col : cols - 1;
+  if (cols <= 0 || row < range.start.row || row > range.end.row) return null;
+  const start = Math.max(0, Math.min(cols - 1, row === range.start.row ? range.start.col : 0));
+  const end = Math.max(
+    0,
+    Math.min(cols - 1, row === range.end.row ? range.end.col : cols - 1),
+  );
   if (end < start) return null;
   return { start, end };
 }
@@ -252,7 +289,8 @@ export function selectedTerminalText(
   const chunks: string[] = [];
   for (let row = start.row; row <= end.row; row += 1) {
     const line = lines[row] ?? [];
-    const startCol = row === start.row ? start.col : 0;
+    let startCol = row === start.row ? start.col : 0;
+    while (startCol > 0 && line[startCol]?.width === 0) startCol -= 1;
     const endCol = row === end.row ? end.col : line.length - 1;
     const text = line
       .slice(startCol, endCol + 1)
@@ -273,8 +311,8 @@ export const TERMINAL_WORD_SEPARATORS = ",│`|:\"' ()[]{}<>\t";
 /** Column span of the "word" at `col`. Wide-cell spacers (width 0) inherit
  *  the glyph to their left so both columns of a CJK character classify the
  *  same; clicking whitespace selects the whitespace run; clicking a
- *  separator selects just that cell. Spans never cross the visual row — the
- *  frame carries no line-wrap flag. */
+ *  separator selects just that cell. The backend remains authoritative for
+ *  semantic selection across soft-wrapped rows. */
 export function wordSpanAt(
   line: TerminalCell[] | undefined,
   col: number,
@@ -677,6 +715,16 @@ export const NativeTerminalView = memo(
       onResize,
       onScroll,
       onCopyOnSelect,
+      onFocusOwnership,
+      onSelection,
+      onCopySelection,
+      contextMenuLabels,
+      onContextCopy,
+      onContextPaste,
+      onContextSelectAll,
+      onContextFind,
+      onContextClear,
+      canForwardMouse,
     },
     ref,
   ) {
@@ -709,9 +757,12 @@ export const NativeTerminalView = memo(
     const metricsRef = useRef<TerminalMetrics | null>(null);
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const rectRef = useRef<DOMRect | null>(null);
-    const focusedRef = useRef(focused);
+    const activeRef = useRef(active);
+    activeRef.current = active;
+    const focusedRef = useRef(false);
     const wasFocusedRef = useRef(false);
     const mouseRef = useRef<TerminalMouseFlags | null>(null);
+    const latestFrameRef = useRef<TerminalFrame | null>(frame ?? null);
 
     // Pointer / selection state.
     const pointerStateRef = useRef<PointerState | null>(null);
@@ -720,19 +771,35 @@ export const NativeTerminalView = memo(
     const lastMotionCellRef = useRef<CellPoint | null>(null);
     const wheelAccumRef = useRef(0);
     const [selection, setSelection] = useState<CellSelection | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
     const selectionRef = useRef<CellSelection | null>(null);
     const selectionRangeRef = useRef<CellRange | null>(null);
     const prevSelectionRangeRef = useRef<CellRange | null>(null);
     const allSelectionTextRef = useRef<string | null>(null);
     const searchMatchRef = useRef<TerminalSearchMatch | null>(null);
+    const pendingSelectionRef = useRef<CellSelection | null | undefined>(undefined);
+    const selectionRafRef = useRef<number | null>(null);
+    const pendingSelectionCommandRef = useRef<TerminalSelectionCommand | null>(null);
+    const selectionCommandRafRef = useRef<number | null>(null);
+    const selectionCommandTailRef = useRef<Promise<void>>(Promise.resolve());
+    const autoScrollRafRef = useRef<number | null>(null);
+    const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
 
     // Paint scheduling.
     const pendingPaintRef = useRef<"all" | Set<number> | null>(null);
     const rafRef = useRef<number | null>(null);
+    const layoutRafRef = useRef<number | null>(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (focused && active) textareaRef.current?.focus();
     }, [active, focused]);
+
+    useEffect(() => {
+      if (active || rafRef.current == null) return;
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      pendingPaintRef.current = null;
+    }, [active]);
 
     const paint = useCallback((which: "all" | number[]) => {
       const canvas = canvasRef.current;
@@ -863,6 +930,7 @@ export const NativeTerminalView = memo(
 
     const requestPaint = useCallback(
       (which: "all" | number[]) => {
+        if (!activeRef.current) return;
         const pending = pendingPaintRef.current;
         if (which === "all") {
           pendingPaintRef.current = "all";
@@ -884,6 +952,53 @@ export const NativeTerminalView = memo(
         }
       },
       [paint],
+    );
+
+    const scheduleLocalSelection = useCallback((next: CellSelection | null) => {
+      selectionRef.current = next;
+      pendingSelectionRef.current = next;
+      if (selectionRafRef.current != null) return;
+      selectionRafRef.current = window.requestAnimationFrame(() => {
+        selectionRafRef.current = null;
+        const pending = pendingSelectionRef.current;
+        pendingSelectionRef.current = undefined;
+        if (pending !== undefined) setSelection(pending);
+      });
+    }, []);
+
+    const enqueueSelectionCommand = useCallback(
+      (command: TerminalSelectionCommand) => {
+        if (!onSelection) return;
+        selectionCommandTailRef.current = selectionCommandTailRef.current
+          .then(() => onSelection(command))
+          .then(() => undefined)
+          .catch(() => undefined);
+      },
+      [onSelection],
+    );
+
+    const flushSelectionUpdate = useCallback(() => {
+      if (selectionCommandRafRef.current != null) {
+        window.cancelAnimationFrame(selectionCommandRafRef.current);
+        selectionCommandRafRef.current = null;
+      }
+      const command = pendingSelectionCommandRef.current;
+      pendingSelectionCommandRef.current = null;
+      if (command) enqueueSelectionCommand(command);
+    }, [enqueueSelectionCommand]);
+
+    const scheduleSelectionUpdate = useCallback(
+      (command: TerminalSelectionCommand) => {
+        pendingSelectionCommandRef.current = command;
+        if (selectionCommandRafRef.current != null) return;
+        selectionCommandRafRef.current = window.requestAnimationFrame(() => {
+          selectionCommandRafRef.current = null;
+          const pending = pendingSelectionCommandRef.current;
+          pendingSelectionCommandRef.current = null;
+          if (pending) enqueueSelectionCommand(pending);
+        });
+      },
+      [enqueueSelectionCommand],
     );
 
     // Position + style the (focused, mostly invisible) input textarea over the
@@ -949,10 +1064,61 @@ export const NativeTerminalView = memo(
       [active, onResize, positionTextarea, requestPaint, resizeReady],
     );
 
+    const applyFrame = useCallback(
+      (nextFrame: TerminalFrame): boolean => {
+        mouseRef.current = nextFrame.mouse;
+        latestFrameRef.current = nextFrame;
+        if (pointerStateRef.current?.mode !== "select" && nextFrame.selectionSpans) {
+          scheduleLocalSelection(selectionFromSpans(nextFrame.selectionSpans));
+        }
+        const prevCursorRow = cursorRef.current.row;
+        const sameDims =
+          dimsRef.current.cols === nextFrame.cols && dimsRef.current.rows === nextFrame.rows;
+
+        if (nextFrame.dirtyRows) {
+          if (!sameDims || gridRef.current.length !== nextFrame.rows) return false;
+          const changed: number[] = [];
+          nextFrame.dirtyRows.forEach((rowIdx, i) => {
+            const line = nextFrame.lines[i];
+            if (line && rowIdx < nextFrame.rows) {
+              gridRef.current[rowIdx] = line;
+              changed.push(rowIdx);
+            }
+          });
+          cursorRef.current = nextFrame.cursor;
+          const rows = new Set<number>(changed);
+          rows.add(prevCursorRow);
+          rows.add(nextFrame.cursor.row);
+          positionTextarea();
+          requestPaint([...rows]);
+          return true;
+        }
+
+        if (nextFrame.lines.length !== nextFrame.rows) return false;
+        gridRef.current = nextFrame.lines.slice();
+        dimsRef.current = { cols: nextFrame.cols, rows: nextFrame.rows };
+        cursorRef.current = nextFrame.cursor;
+        positionTextarea();
+        requestPaint("all");
+        return true;
+      },
+      [positionTextarea, requestPaint, scheduleLocalSelection],
+    );
+
+    const scheduleLayoutRefresh = useCallback(() => {
+      if (layoutRafRef.current != null) return;
+      layoutRafRef.current = window.requestAnimationFrame(() => {
+        layoutRafRef.current = null;
+        refreshLayout();
+      });
+    }, [refreshLayout]);
+
     useImperativeHandle(
       ref,
       () => ({
         focus: () => textareaRef.current?.focus(),
+        ownsFocus: () => document.activeElement === textareaRef.current,
+        applyFrame,
         refreshLayout,
         pasteText: (text: string) => {
           if (!text) return;
@@ -965,7 +1131,8 @@ export const NativeTerminalView = memo(
           return selected || null;
         },
         selectAll: (text?: string | null) => {
-          allSelectionTextRef.current = text ?? frameToText(frame);
+          enqueueSelectionCommand({ type: "selectAll" });
+          allSelectionTextRef.current = text ?? frameToText(latestFrameRef.current);
           const { cols, rows } = dimsRef.current;
           if (cols > 0 && rows > 0) {
             setSelection({
@@ -976,45 +1143,20 @@ export const NativeTerminalView = memo(
           textareaRef.current?.focus();
         },
         clearSelection: () => {
+          enqueueSelectionCommand({ type: "clear" });
           allSelectionTextRef.current = null;
           setSelection(null);
         },
       }),
-      [frame, onInput, refreshLayout],
+      [applyFrame, enqueueSelectionCommand, onInput, refreshLayout],
     );
 
     // Apply each incoming frame to the retained grid and repaint the rows that
     // changed (plus the cursor's old and new rows).
     useEffect(() => {
       if (!frame) return;
-      mouseRef.current = frame.mouse;
-      const prevCursorRow = cursorRef.current.row;
-      const sameDims =
-        dimsRef.current.cols === frame.cols && dimsRef.current.rows === frame.rows;
-
-      if (frame.dirtyRows && sameDims && gridRef.current.length === frame.rows) {
-        const changed: number[] = [];
-        frame.dirtyRows.forEach((rowIdx, i) => {
-          const line = frame.lines[i];
-          if (line && rowIdx < frame.rows) {
-            gridRef.current[rowIdx] = line;
-            changed.push(rowIdx);
-          }
-        });
-        cursorRef.current = frame.cursor;
-        const rows = new Set<number>(changed);
-        rows.add(prevCursorRow);
-        rows.add(frame.cursor.row);
-        positionTextarea();
-        requestPaint([...rows]);
-      } else {
-        gridRef.current = frame.lines.slice();
-        dimsRef.current = { cols: frame.cols, rows: frame.rows };
-        cursorRef.current = frame.cursor;
-        positionTextarea();
-        requestPaint("all");
-      }
-    }, [frame, positionTextarea, requestPaint]);
+      applyFrame(frame);
+    }, [applyFrame, frame]);
 
     // Measure metrics, size the canvas for HiDPI, report cols/rows, repaint.
     useEffect(() => {
@@ -1022,11 +1164,18 @@ export const NativeTerminalView = memo(
       const root = rootRef.current;
       if (!root) return;
 
-      refreshLayout();
-      const observer = new ResizeObserver(() => refreshLayout());
+      scheduleLayoutRefresh();
+      const observer = new ResizeObserver(scheduleLayoutRefresh);
       observer.observe(root);
-      return () => observer.disconnect();
-    }, [active, refreshLayout, resizeReady]);
+      const resolution = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      resolution?.addEventListener?.("change", scheduleLayoutRefresh);
+      window.visualViewport?.addEventListener("resize", scheduleLayoutRefresh);
+      return () => {
+        observer.disconnect();
+        resolution?.removeEventListener?.("change", scheduleLayoutRefresh);
+        window.visualViewport?.removeEventListener("resize", scheduleLayoutRefresh);
+      };
+    }, [active, resizeReady, scheduleLayoutRefresh]);
 
     // Repaint affected rows when the local selection changes.
     useEffect(() => {
@@ -1055,9 +1204,9 @@ export const NativeTerminalView = memo(
       if (rows.size) requestPaint([...rows]);
     }, [requestPaint, searchMatch]);
 
-    // Cursor style depends on focus (solid vs hollow); repaint its row.
+    // Cursor style follows actual DOM focus, while `focused` only identifies
+    // which pane should own focus after a layout/state transition.
     useEffect(() => {
-      focusedRef.current = focused;
       requestPaint([cursorRef.current.row]);
     }, [focused, requestPaint]);
 
@@ -1069,6 +1218,22 @@ export const NativeTerminalView = memo(
           // already-cancelled id and requestPaint never schedules again →
           // the canvas stays blank forever.
           rafRef.current = null;
+        }
+        if (selectionRafRef.current != null) {
+          window.cancelAnimationFrame(selectionRafRef.current);
+          selectionRafRef.current = null;
+        }
+        if (layoutRafRef.current != null) {
+          window.cancelAnimationFrame(layoutRafRef.current);
+          layoutRafRef.current = null;
+        }
+        if (selectionCommandRafRef.current != null) {
+          window.cancelAnimationFrame(selectionCommandRafRef.current);
+          selectionCommandRafRef.current = null;
+        }
+        if (autoScrollRafRef.current != null) {
+          window.cancelAnimationFrame(autoScrollRafRef.current);
+          autoScrollRafRef.current = null;
         }
         pendingPaintRef.current = null;
       },
@@ -1088,14 +1253,81 @@ export const NativeTerminalView = memo(
       return { row, col };
     }, []);
 
+    const sideFromClient = useCallback((clientX: number, point: CellPoint): "left" | "right" => {
+      const metrics = metricsRef.current;
+      const rect = rectRef.current ?? rootRef.current?.getBoundingClientRect() ?? null;
+      if (!metrics || !rect) return "left";
+      const cellLeft = rect.left + metrics.padLeft + point.col * metrics.charWidth;
+      return clientX - cellLeft >= metrics.charWidth / 2 ? "right" : "left";
+    }, []);
+
+    const stopAutoScroll = useCallback(() => {
+      if (autoScrollRafRef.current == null) return;
+      window.cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }, []);
+
+    const ensureAutoScroll = useCallback(() => {
+      if (autoScrollRafRef.current != null) return;
+      const tick = () => {
+        autoScrollRafRef.current = null;
+        const state = pointerStateRef.current;
+        const client = pointerClientRef.current;
+        const root = rootRef.current;
+        const metrics = metricsRef.current;
+        if (state?.mode !== "select" || !client || !root || !metrics) return;
+        const rect = root.getBoundingClientRect();
+        const outside =
+          client.y < rect.top
+            ? client.y - rect.top
+            : client.y > rect.bottom
+              ? client.y - rect.bottom
+              : 0;
+        if (outside === 0) return;
+        const lines = Math.max(
+          1,
+          Math.min(8, Math.ceil(Math.abs(outside) / metrics.lineHeight)),
+        );
+        const scrollDelta = outside < 0 ? lines : -lines;
+        const point = cellFromClient(client.x, outside < 0 ? rect.top : rect.bottom - 1);
+        if (point) {
+          scheduleLocalSelection(
+            selectionForSelectDrag(
+              gridRef.current,
+              state.kind,
+              state.anchor,
+              state.anchorSpan,
+              point,
+              dimsRef.current.cols,
+            ),
+          );
+          scheduleSelectionUpdate({
+            type: "update",
+            row: point.row,
+            col: point.col,
+            side: sideFromClient(client.x, point),
+            scrollDelta,
+          });
+        }
+        autoScrollRafRef.current = window.requestAnimationFrame(tick);
+      };
+      autoScrollRafRef.current = window.requestAnimationFrame(tick);
+    }, [cellFromClient, scheduleLocalSelection, scheduleSelectionUpdate, sideFromClient]);
+
     const onPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
+        pointerClientRef.current = { x: event.clientX, y: event.clientY };
         textareaRef.current?.focus();
         rectRef.current = rootRef.current?.getBoundingClientRect() ?? rectRef.current;
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;
+        if (event.button === 2) return;
+        setContextMenu(null);
         event.currentTarget.setPointerCapture(event.pointerId);
-        const useMouse = mouseModeActive(mouseRef.current) && !event.shiftKey;
+        const useMouse =
+          mouseModeActive(mouseRef.current) &&
+          !event.shiftKey &&
+          (canForwardMouse?.() ?? true);
         if (useMouse) {
           clickChainRef.current = null;
           // Seed the motion cell with this gesture's press point so a cancel
@@ -1129,7 +1361,13 @@ export const NativeTerminalView = memo(
               kind: "cell",
               anchorSpan: null,
             };
-            setSelection({ anchor, focus: point });
+            scheduleLocalSelection({ anchor, focus: point });
+            scheduleSelectionUpdate({
+              type: "update",
+              row: point.row,
+              col: point.col,
+              side: sideFromClient(event.clientX, point),
+            });
             return;
           }
           const chain = nextClickChain(
@@ -1153,25 +1391,49 @@ export const NativeTerminalView = memo(
             kind: chain.count >= 3 ? "line" : chain.count === 2 ? "word" : "cell",
             anchorSpan: initial ? normalizeSelection(initial) : null,
           };
+          enqueueSelectionCommand({
+            type: "start",
+            row: point.row,
+            col: point.col,
+            side: sideFromClient(event.clientX, point),
+            kind: chain.count >= 3 ? "lines" : chain.count === 2 ? "semantic" : "simple",
+          });
           // A plain click paints nothing (and clears any prior highlight);
           // double/triple clicks select their word/line immediately.
-          setSelection(initial);
+          scheduleLocalSelection(initial);
         }
       },
-      [cellFromClient, onInput],
+      [
+        cellFromClient,
+        canForwardMouse,
+        enqueueSelectionCommand,
+        onInput,
+        scheduleLocalSelection,
+        scheduleSelectionUpdate,
+        sideFromClient,
+      ],
     );
 
     const onPointerMove = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
         const state = pointerStateRef.current;
+        pointerClientRef.current = { x: event.clientX, y: event.clientY };
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;
         if (state?.mode === "select") {
+          if (event.buttons === 0) {
+            pointerStateRef.current = null;
+            stopAutoScroll();
+            flushSelectionUpdate();
+            enqueueSelectionCommand({ type: "finish", includeAll: state.moved });
+            return;
+          }
+          ensureAutoScroll();
           if (!state.moved) {
             if (point.row === state.anchor.row && point.col === state.anchor.col) return;
             pointerStateRef.current = { ...state, moved: true };
           }
-          setSelection(
+          scheduleLocalSelection(
             selectionForSelectDrag(
               gridRef.current,
               state.kind,
@@ -1181,8 +1443,15 @@ export const NativeTerminalView = memo(
               dimsRef.current.cols,
             ),
           );
+          scheduleSelectionUpdate({
+            type: "update",
+            row: point.row,
+            col: point.col,
+            side: sideFromClient(event.clientX, point),
+          });
           return;
         }
+        if (!(canForwardMouse?.() ?? true)) return;
         const mouse = mouseRef.current;
         if (!mouse) return;
         const pressing = state?.mode === "mouse";
@@ -1206,13 +1475,26 @@ export const NativeTerminalView = memo(
           ctrlKey: event.ctrlKey,
         });
       },
-      [cellFromClient, onInput],
+      [
+        cellFromClient,
+        canForwardMouse,
+        enqueueSelectionCommand,
+        ensureAutoScroll,
+        flushSelectionUpdate,
+        onInput,
+        scheduleLocalSelection,
+        scheduleSelectionUpdate,
+        sideFromClient,
+        stopAutoScroll,
+      ],
     );
 
     const onPointerUp = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
         const state = pointerStateRef.current;
+        pointerClientRef.current = null;
         pointerStateRef.current = null;
+        stopAutoScroll();
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
@@ -1246,14 +1528,42 @@ export const NativeTerminalView = memo(
                 point,
                 dimsRef.current.cols,
               );
-          setSelection(next);
+          scheduleLocalSelection(next);
+          scheduleSelectionUpdate({
+            type: "update",
+            row: point.row,
+            col: point.col,
+            side: sideFromClient(event.clientX, point),
+          });
+          flushSelectionUpdate();
+          enqueueSelectionCommand({ type: "finish", includeAll: state.moved });
+          if (state.moved) clickChainRef.current = null;
           if (copyOnSelect && next) {
-            const text = selectedTerminalText(gridRef.current, next);
-            if (text) onCopyOnSelect?.(text);
+            const fallback = selectedTerminalText(gridRef.current, next);
+            if (!onCopySelection) {
+              if (fallback) onCopyOnSelect?.(fallback);
+            } else {
+              void selectionCommandTailRef.current.then(async () => {
+                const text = (await onCopySelection()) || fallback;
+                if (text) onCopyOnSelect?.(text);
+              });
+            }
           }
         }
       },
-      [cellFromClient, copyOnSelect, onCopyOnSelect, onInput],
+      [
+        cellFromClient,
+        copyOnSelect,
+        enqueueSelectionCommand,
+        flushSelectionUpdate,
+        onCopyOnSelect,
+        onCopySelection,
+        onInput,
+        scheduleLocalSelection,
+        scheduleSelectionUpdate,
+        sideFromClient,
+        stopAutoScroll,
+      ],
     );
 
     // Abort path: pointercancel / lostpointercapture must stop selection
@@ -1265,7 +1575,13 @@ export const NativeTerminalView = memo(
         const state = pointerStateRef.current;
         if (!state) return;
         pointerStateRef.current = null;
+        pointerClientRef.current = null;
+        stopAutoScroll();
         clickChainRef.current = null;
+        flushSelectionUpdate();
+        if (state.mode === "select") {
+          enqueueSelectionCommand({ type: "finish", includeAll: state.moved });
+        }
         if (state.mode !== "mouse") return;
         // Synthesize a release so a TUI doesn't keep a stuck button after an
         // aborted gesture. pointercancel coordinates are unreliable in
@@ -1284,7 +1600,7 @@ export const NativeTerminalView = memo(
           ctrlKey: event.ctrlKey,
         });
       },
-      [cellFromClient, onInput],
+      [cellFromClient, enqueueSelectionCommand, flushSelectionUpdate, onInput, stopAutoScroll],
     );
 
     // Wheel must be a native, non-passive listener: React attaches `onWheel`
@@ -1296,12 +1612,18 @@ export const NativeTerminalView = memo(
       const handler = (event: WheelEvent) => {
         const m = metricsRef.current;
         if (!m) return;
-        const lineDelta = event.deltaMode === 1 ? event.deltaY : event.deltaY / m.lineHeight;
+        const lineDelta =
+          event.deltaMode === 1
+            ? event.deltaY
+            : event.deltaMode === 2
+              ? event.deltaY * Math.max(1, dimsRef.current.rows)
+              : event.deltaY / m.lineHeight;
         wheelAccumRef.current += lineDelta;
         const steps = Math.trunc(wheelAccumRef.current);
         if (steps === 0) return;
         wheelAccumRef.current -= steps;
         event.preventDefault();
+        if (!(canForwardMouse?.() ?? true)) return;
         const mouse = mouseRef.current;
         if (mouseModeActive(mouse) && !event.shiftKey) {
           const point = cellFromClient(event.clientX, event.clientY) ?? { row: 0, col: 0 };
@@ -1326,7 +1648,7 @@ export const NativeTerminalView = memo(
       };
       root.addEventListener("wheel", handler, { passive: false });
       return () => root.removeEventListener("wheel", handler);
-    }, [cellFromClient, onInput, onScroll]);
+    }, [canForwardMouse, cellFromClient, onInput, onScroll]);
 
     const onKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1413,10 +1735,46 @@ export const NativeTerminalView = memo(
       requestPaint([cursorRef.current.row]);
     }, [requestPaint]);
 
+    const onTextareaFocus = useCallback(() => {
+      focusedRef.current = true;
+      wasFocusedRef.current = true;
+      onFocusOwnership?.();
+      requestPaint([cursorRef.current.row]);
+    }, [onFocusOwnership, requestPaint]);
+
     const onTextareaBlur = useCallback(() => {
+      focusedRef.current = false;
+      const pointer = pointerStateRef.current;
+      pointerStateRef.current = null;
+      pointerClientRef.current = null;
+      stopAutoScroll();
+      clickChainRef.current = null;
+      if (pointer?.mode === "select") {
+        flushSelectionUpdate();
+        enqueueSelectionCommand({ type: "finish", includeAll: pointer.moved });
+      }
+      if (pointer?.mode === "mouse") {
+        const point = lastMotionCellRef.current ?? { row: 0, col: 0 };
+        onInput({
+          type: "mouse",
+          button: domButtonToTerminal(pointer.button),
+          col: point.col,
+          row: point.row,
+          action: "release",
+        });
+      }
       resetMods();
       resetComposition();
-    }, [resetComposition, resetMods]);
+      requestPaint([cursorRef.current.row]);
+    }, [
+      enqueueSelectionCommand,
+      flushSelectionUpdate,
+      onInput,
+      requestPaint,
+      resetComposition,
+      resetMods,
+      stopAutoScroll,
+    ]);
 
     // Track DOM-focus ownership continuously: sampling activeElement at
     // window-blur time races WKWebView, which may blur the textarea before
@@ -1424,6 +1782,7 @@ export const NativeTerminalView = memo(
     // ownership; blur-to-body (window deactivation) fires no focusin and
     // keeps it.
     useEffect(() => {
+      if (!active) return;
       // The mount-time focus effect runs before this listener attaches, so
       // seed ownership from the current activeElement.
       wasFocusedRef.current = document.activeElement === textareaRef.current;
@@ -1432,7 +1791,7 @@ export const NativeTerminalView = memo(
       };
       document.addEventListener("focusin", onFocusIn, true);
       return () => document.removeEventListener("focusin", onFocusIn, true);
-    }, []);
+    }, [active]);
 
     // On window blur, drop modifier and composition state (macOS detaches the
     // IME at deactivation; a missed keyup must not latch a modifier). On
@@ -1441,6 +1800,7 @@ export const NativeTerminalView = memo(
     // never steals focus), on ownership, and on never stealing from another
     // genuinely focused element.
     useEffect(() => {
+      if (!active) return;
       const onWindowBlur = () => {
         resetMods();
         resetComposition();
@@ -1460,6 +1820,7 @@ export const NativeTerminalView = memo(
     }, [active, focused, resetComposition, resetMods]);
 
     useEffect(() => {
+      if (!active) return;
       const focusedOnThisTerminal = () => document.activeElement === textareaRef.current;
       const onNativeKeyDown = (event: KeyboardEvent) => {
         if (!focusedOnThisTerminal()) return;
@@ -1499,7 +1860,7 @@ export const NativeTerminalView = memo(
         window.removeEventListener("keydown", onNativeKeyDown, true);
         window.removeEventListener("keyup", onNativeKeyUp, true);
       };
-    }, [onInput]);
+    }, [active, onInput]);
 
     const handleLineBreakInput = useCallback(
       (native: InputEvent, target: HTMLTextAreaElement) => {
@@ -1650,6 +2011,29 @@ export const NativeTerminalView = memo(
       [selection],
     );
 
+    const onContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      textareaRef.current?.focus();
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setContextMenu({
+        x: Math.max(4, Math.min(rect.width - 156, event.clientX - rect.left)),
+        y: Math.max(4, Math.min(rect.height - 184, event.clientY - rect.top)),
+      });
+    }, []);
+
+    useEffect(() => {
+      if (!contextMenu) return;
+      const close = () => setContextMenu(null);
+      window.addEventListener("blur", close);
+      window.addEventListener("pointerdown", close);
+      return () => {
+        window.removeEventListener("blur", close);
+        window.removeEventListener("pointerdown", close);
+      };
+    }, [contextMenu]);
+
     return (
       <div
         ref={rootRef}
@@ -1661,6 +2045,7 @@ export const NativeTerminalView = memo(
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onPointerCancel}
         onCopy={onCopy}
+        onContextMenu={onContextMenu}
       >
         <canvas ref={canvasRef} className="native-terminal-canvas" aria-hidden="true" />
         <textarea
@@ -1674,6 +2059,7 @@ export const NativeTerminalView = memo(
           rows={1}
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
+          onFocus={onTextareaFocus}
           onBlur={onTextareaBlur}
           onBeforeInput={onBeforeInput}
           onInput={onTextInput}
@@ -1693,6 +2079,68 @@ export const NativeTerminalView = memo(
           }}
           onCompositionEnd={onCompositionEnd}
         />
+        {contextMenu && contextMenuLabels ? (
+          <div
+            className="terminal-context-menu"
+            role="menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                onContextCopy?.();
+              }}
+            >
+              {contextMenuLabels.copy}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                onContextPaste?.();
+              }}
+            >
+              {contextMenuLabels.paste}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                onContextSelectAll?.();
+              }}
+            >
+              {contextMenuLabels.selectAll}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                onContextFind?.();
+              }}
+            >
+              {contextMenuLabels.find}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                onContextClear?.();
+              }}
+            >
+              {contextMenuLabels.clear}
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }),

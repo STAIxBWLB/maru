@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   MOCK_VAULT_PATH,
@@ -1327,6 +1327,104 @@ export interface TerminalFrame {
   displayOffset: number;
   mouse: TerminalMouseFlags;
   altScreen: boolean;
+  /** Canonical backend selection projected into visible rows. */
+  selectionSpans?: TerminalSelectionSpan[];
+  /** Soft-wrap flag aligned with `lines` (and `dirtyRows` for patches). */
+  wrappedRows?: boolean[];
+}
+
+export interface TerminalSelectionSpan {
+  row: number;
+  start: number;
+  end: number;
+}
+
+export interface TerminalCellStyle {
+  fg: TerminalColor;
+  bg: TerminalColor;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  inverse: boolean;
+}
+
+export type TerminalWireCell = [text: string, width: number, styleIndex: number];
+
+export interface TerminalWireFrame {
+  sessionId: string;
+  cols: number;
+  rows: number;
+  cursor: TerminalCursor;
+  palette: TerminalCellStyle[];
+  lines: TerminalWireCell[][];
+  scrollbackLen: number;
+  title?: string | null;
+  dirtyRows?: number[] | null;
+  displayOffset: number;
+  mouse: TerminalMouseFlags;
+  altScreen: boolean;
+  selectionSpans: TerminalSelectionSpan[];
+  wrappedRows: boolean[];
+}
+
+export function decodeTerminalWireFrame(frame: TerminalWireFrame): TerminalFrame {
+  const fallback: TerminalCellStyle = {
+    fg: { kind: "named", name: "Foreground" },
+    bg: { kind: "named", name: "Background" },
+    bold: false,
+    italic: false,
+    underline: false,
+    inverse: false,
+  };
+  return {
+    sessionId: frame.sessionId,
+    cols: frame.cols,
+    rows: frame.rows,
+    cursor: frame.cursor,
+    lines: frame.lines.map((line) =>
+      line.map(([ch, width, styleIndex]) => {
+        const style = frame.palette[styleIndex] ?? fallback;
+        return { ch, width, ...style };
+      }),
+    ),
+    scrollbackLen: frame.scrollbackLen,
+    title: frame.title,
+    dirtyRows: frame.dirtyRows,
+    displayOffset: frame.displayOffset,
+    mouse: frame.mouse,
+    altScreen: frame.altScreen,
+    selectionSpans: frame.selectionSpans,
+    wrappedRows: frame.wrappedRows,
+  };
+}
+
+export type TerminalStreamMessage =
+  | {
+      kind: "frame";
+      sessionId: string;
+      generation: string;
+      seq: number;
+      prevSeq: number;
+      frame: TerminalWireFrame;
+    }
+  | {
+      kind: "exit";
+      sessionId: string;
+      generation: string;
+      seq: number;
+      exitCode: number | null;
+    }
+  | {
+      kind: "fault";
+      sessionId: string;
+      generation: string;
+      seq: number;
+      message: string;
+    };
+
+export interface TerminalSpawnHandle {
+  generation: string;
+  channel: Channel<TerminalStreamMessage>;
 }
 
 export type TerminalSearchDirection = "next" | "previous";
@@ -1382,16 +1480,39 @@ export type TerminalInputCommand =
       ctrlKey?: boolean;
     };
 
+export type TerminalSelectionKind = "simple" | "semantic" | "lines";
+
+export type TerminalSelectionCommand =
+  | {
+      type: "start";
+      row: number;
+      col: number;
+      side: "left" | "right";
+      kind: TerminalSelectionKind;
+    }
+  | {
+      type: "update";
+      row: number;
+      col: number;
+      side: "left" | "right";
+      scrollDelta?: number;
+    }
+  | { type: "finish"; includeAll?: boolean }
+  | { type: "clear" }
+  | { type: "selectAll" };
+
 export async function terminalSpawn(
   sessionId: string,
   kind: TerminalKind,
   cwd: string | null = null,
   options: TerminalSpawnOptions = {},
-): Promise<string> {
+  onEvent?: (message: TerminalStreamMessage) => void,
+): Promise<TerminalSpawnHandle> {
   if (!isTauri()) {
     throw new Error("Integrated terminal is only available inside the Tauri shell.");
   }
-  return invoke<string>("terminal_spawn", {
+  const channel = new Channel<TerminalStreamMessage>((message) => onEvent?.(message));
+  const generation = await invoke<string>("terminal_spawn", {
     sessionId,
     kind,
     cwd,
@@ -1400,7 +1521,9 @@ export async function terminalSpawn(
     extraEnv: options.extraEnv ?? null,
     cols: options.cols ?? null,
     rows: options.rows ?? null,
+    onEvent: channel,
   });
+  return { generation, channel };
 }
 
 export async function terminalWrite(sessionId: string, data: string): Promise<void> {
@@ -1414,6 +1537,59 @@ export async function terminalInput(
 ): Promise<void> {
   if (!isTauri()) return;
   await invoke("terminal_input", { sessionId, command });
+}
+
+export async function terminalInputBatch(
+  sessionId: string,
+  generation: string,
+  clientSeq: number,
+  commands: TerminalInputCommand[],
+): Promise<void> {
+  if (!isTauri() || commands.length === 0) return;
+  await invoke("terminal_input_batch", { sessionId, generation, clientSeq, commands });
+}
+
+export async function terminalAck(
+  sessionId: string,
+  generation: string,
+  seq: number,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_ack", { sessionId, generation, seq });
+}
+
+export async function terminalRequestFull(
+  sessionId: string,
+  generation: string,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_request_full", { sessionId, generation });
+}
+
+export async function terminalSetVisibility(
+  sessionId: string,
+  generation: string,
+  visible: boolean,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_set_visibility", { sessionId, generation, visible });
+}
+
+export async function terminalSelection(
+  sessionId: string,
+  generation: string,
+  command: TerminalSelectionCommand,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("terminal_selection", { sessionId, generation, command });
+}
+
+export async function terminalCopySelection(
+  sessionId: string,
+  generation: string,
+): Promise<string> {
+  if (!isTauri()) return "";
+  return invoke<string>("terminal_copy_selection", { sessionId, generation });
 }
 
 export async function terminalResize(

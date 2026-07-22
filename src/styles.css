@@ -11126,6 +11126,35 @@ button.git-badge:hover {
   z-index: 1;
 }
 
+.terminal-context-menu {
+  position: absolute;
+  z-index: 20;
+  width: 152px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  background: #252525;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 42%);
+}
+
+.terminal-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #f0f0f0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.terminal-context-menu button:hover,
+.terminal-context-menu button:focus-visible {
+  background: rgb(255 255 255 / 10%);
+  outline: none;
+}
+
 .terminal-search-overlay {
   position: absolute;
   top: 8px;
@@ -11190,27 +11219,6 @@ button.git-badge:hover {
   width: 13px;
   height: 13px;
   accent-color: #b89235;
-}
-
-.terminal-pane-close {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 3;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  background: rgba(36, 36, 36, 0.9);
-  color: #bdbdbd;
-  opacity: 0.86;
-}
-
-.terminal-pane-close:hover {
-  background: #333333;
-  color: #ffffff;
-  opacity: 1;
 }
 
 .terminal-empty {

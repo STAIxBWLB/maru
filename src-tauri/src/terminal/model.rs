@@ -1,9 +1,12 @@
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{self, ClearMode, Handler};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
+use unicode_width::UnicodeWidthStr;
 
 use super::input::MouseModes;
 use super::snapshot::{snapshot_term, terminal_indexed_lines, terminal_text, TerminalFrame};
@@ -205,8 +208,66 @@ impl TerminalModel {
         rows
     }
 
+    pub fn reset_damage(&mut self) {
+        self.term.reset_damage();
+    }
+
     pub fn scroll(&mut self, delta: i32) {
         self.term.scroll_display(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_bottom(&mut self) {
+        if self.term.grid().display_offset() != 0 {
+            self.term.scroll_display(Scroll::Bottom);
+        }
+    }
+
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    fn visible_point(&self, row: u16, col: u16) -> Point {
+        let grid = self.term.grid();
+        let row = usize::from(row).min(grid.screen_lines().saturating_sub(1));
+        let col = usize::from(col).min(grid.columns().saturating_sub(1));
+        Point::new(Line(row as i32 - grid.display_offset() as i32), Column(col))
+    }
+
+    pub fn selection_start(&mut self, row: u16, col: u16, side: Side, kind: SelectionType) {
+        self.term.selection = Some(Selection::new(kind, self.visible_point(row, col), side));
+    }
+
+    pub fn selection_update(&mut self, row: u16, col: u16, side: Side) {
+        let point = self.visible_point(row, col);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, side);
+        }
+    }
+
+    pub fn selection_clear(&mut self) {
+        self.term.selection = None;
+    }
+
+    pub fn selection_finish(&mut self) {
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.include_all();
+        }
+    }
+
+    pub fn selection_select_all(&mut self) {
+        let grid = self.term.grid();
+        let start = Point::new(Line(-(grid.history_size() as i32)), Column(0));
+        let end = Point::new(
+            Line(grid.screen_lines().saturating_sub(1) as i32),
+            Column(grid.columns().saturating_sub(1)),
+        );
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        self.term.selection = Some(selection);
+    }
+
+    pub fn selection_text(&self) -> String {
+        self.term.selection_to_string().unwrap_or_default()
     }
 
     /// Clear the visible screen and scrollback history (Cmd+K, iTerm2-style).
@@ -257,7 +318,7 @@ impl TerminalModel {
         Some(TerminalSearchHit {
             row,
             col,
-            length: query.chars().count(),
+            length: UnicodeWidthStr::width(query),
             display_offset,
         })
     }
@@ -297,12 +358,12 @@ fn search_column(text: &str, query: &str, case_sensitive: bool) -> Option<usize>
     if case_sensitive {
         return text
             .find(query)
-            .map(|byte_col| text[..byte_col].chars().count());
+            .map(|byte_col| UnicodeWidthStr::width(&text[..byte_col]));
     }
     let needle = query.to_lowercase();
     text.char_indices()
         .find(|(byte_col, _)| text[*byte_col..].to_lowercase().starts_with(&needle))
-        .map(|(byte_col, _)| text[..byte_col].chars().count())
+        .map(|(byte_col, _)| UnicodeWidthStr::width(&text[..byte_col]))
 }
 
 #[cfg(test)]
@@ -461,5 +522,27 @@ mod tests {
             .expect("expected search hit");
 
         assert_eq!(hit.col, 1);
+    }
+
+    #[test]
+    fn backend_selection_joins_soft_wrapped_lines() {
+        let mut model = TerminalModel::new(5, 3, NullTerminalWriter);
+        model.advance(b"abcdefgh");
+        model.selection_start(0, 0, Side::Left, SelectionType::Simple);
+        model.selection_update(1, 2, Side::Right);
+        model.selection_finish();
+
+        assert_eq!(model.selection_text(), "abcdefgh");
+    }
+
+    #[test]
+    fn backend_selection_includes_wide_character_from_spacer_cell() {
+        let mut model = TerminalModel::new(10, 2, NullTerminalWriter);
+        model.advance("界x".as_bytes());
+        model.selection_start(0, 1, Side::Left, SelectionType::Simple);
+        model.selection_update(0, 1, Side::Right);
+        model.selection_finish();
+
+        assert_eq!(model.selection_text(), "界");
     }
 }

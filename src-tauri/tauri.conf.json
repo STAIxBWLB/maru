@@ -24,6 +24,7 @@
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "acceptFirstMouse": true,
         "backgroundColor": "#F4F1EA",
         "dragDropEnabled": true
       }

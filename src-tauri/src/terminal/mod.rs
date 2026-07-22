@@ -3,16 +3,17 @@ mod model;
 mod snapshot;
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{ipc::Channel, State};
+use uuid::Uuid;
 
 use crate::cli_path::{augmented_path, merge_path_env, resolve_program};
 pub use input::{encode_mouse_input, encode_terminal_input, TerminalInputCommand};
@@ -28,14 +29,246 @@ const FRAME_COALESCE_MS: u64 = 16;
 #[derive(Clone, Default)]
 pub struct TerminalState {
     sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
+    reservations: Arc<Mutex<HashSet<String>>>,
 }
 
 struct TerminalSession {
     kind: String,
+    generation: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: SharedTerminalWriter,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     model: Arc<Mutex<TerminalModel>>,
+    input_modes: Arc<TerminalInputModes>,
+    resize_lock: Mutex<()>,
+    stream: Arc<TerminalStream>,
+    closing: AtomicBool,
+}
+
+#[derive(Default)]
+struct TerminalInputModes {
+    kitty: AtomicBool,
+    bracketed_paste: AtomicBool,
+    mouse_click: AtomicBool,
+    mouse_motion: AtomicBool,
+    mouse_drag: AtomicBool,
+    mouse_sgr: AtomicBool,
+    display_offset: AtomicUsize,
+}
+
+impl TerminalInputModes {
+    fn update(&self, model: &TerminalModel) {
+        let mouse = model.mouse_modes();
+        self.kitty
+            .store(model.kitty_keyboard_active(), Ordering::Release);
+        self.bracketed_paste
+            .store(model.bracketed_paste_active(), Ordering::Release);
+        self.mouse_click.store(mouse.click, Ordering::Release);
+        self.mouse_motion.store(mouse.motion, Ordering::Release);
+        self.mouse_drag.store(mouse.drag, Ordering::Release);
+        self.mouse_sgr.store(mouse.sgr, Ordering::Release);
+        self.display_offset
+            .store(model.display_offset(), Ordering::Release);
+    }
+
+    fn mouse_modes(&self) -> input::MouseModes {
+        input::MouseModes {
+            click: self.mouse_click.load(Ordering::Acquire),
+            motion: self.mouse_motion.load(Ordering::Acquire),
+            drag: self.mouse_drag.load(Ordering::Acquire),
+            sgr: self.mouse_sgr.load(Ordering::Acquire),
+        }
+    }
+}
+
+struct SessionReservation {
+    reservations: Arc<Mutex<HashSet<String>>>,
+    session_id: String,
+    active: bool,
+}
+
+impl SessionReservation {
+    fn acquire(state: &TerminalState, session_id: &str) -> Result<Self, String> {
+        let mut reservations = state
+            .reservations
+            .lock()
+            .map_err(|_| "terminal_registry_poisoned".to_string())?;
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "terminal_registry_poisoned".to_string())?;
+        if sessions.contains_key(session_id) || !reservations.insert(session_id.to_string()) {
+            return Err(format!("terminal_session_id_in_use: {session_id}"));
+        }
+        drop(sessions);
+        drop(reservations);
+        Ok(Self {
+            reservations: state.reservations.clone(),
+            session_id: session_id.to_string(),
+            active: true,
+        })
+    }
+
+    fn commit(mut self) {
+        self.release();
+        self.active = false;
+    }
+
+    fn release(&self) {
+        if let Ok(mut reservations) = self.reservations.lock() {
+            reservations.remove(&self.session_id);
+        }
+    }
+}
+
+impl Drop for SessionReservation {
+    fn drop(&mut self) {
+        if self.active {
+            self.release();
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TerminalStreamMessage {
+    Frame {
+        session_id: String,
+        generation: String,
+        seq: u64,
+        prev_seq: u64,
+        frame: snapshot::TerminalWireFrame,
+    },
+    Exit {
+        session_id: String,
+        generation: String,
+        seq: u64,
+        exit_code: Option<i32>,
+    },
+    Fault {
+        session_id: String,
+        generation: String,
+        seq: u64,
+        message: String,
+    },
+}
+
+struct TerminalStream {
+    session_id: String,
+    generation: String,
+    channel: Channel<TerminalStreamMessage>,
+    sent_seq: AtomicU64,
+    acked_seq: AtomicU64,
+    dirty: AtomicBool,
+    force_full: AtomicBool,
+    visible: AtomicBool,
+    running: AtomicBool,
+    wake: Mutex<()>,
+    wake_cv: Condvar,
+}
+
+impl TerminalStream {
+    fn new(
+        session_id: String,
+        generation: String,
+        channel: Channel<TerminalStreamMessage>,
+    ) -> Self {
+        Self {
+            session_id,
+            generation,
+            channel,
+            sent_seq: AtomicU64::new(0),
+            acked_seq: AtomicU64::new(0),
+            dirty: AtomicBool::new(true),
+            force_full: AtomicBool::new(true),
+            visible: AtomicBool::new(true),
+            running: AtomicBool::new(true),
+            wake: Mutex::new(()),
+            wake_cv: Condvar::new(),
+        }
+    }
+
+    fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Release);
+        self.wake_cv.notify_one();
+    }
+
+    fn request_full(&self) {
+        self.force_full.store(true, Ordering::Release);
+        self.mark_dirty();
+    }
+
+    fn set_visible(&self, visible: bool) {
+        self.visible.store(visible, Ordering::Release);
+        if visible {
+            self.request_full();
+        } else {
+            self.wake_cv.notify_one();
+        }
+    }
+
+    fn acknowledge(&self, seq: u64) {
+        self.acked_seq.fetch_max(seq, Ordering::AcqRel);
+        self.wake_cv.notify_one();
+    }
+
+    fn has_credit(&self) -> bool {
+        self.sent_seq
+            .load(Ordering::Acquire)
+            .saturating_sub(self.acked_seq.load(Ordering::Acquire))
+            < 2
+    }
+
+    fn next_seq(&self) -> u64 {
+        self.sent_seq.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    fn send_frame(&self, frame: snapshot::TerminalFrame) -> tauri::Result<()> {
+        let seq = self.next_seq();
+        self.channel.send(TerminalStreamMessage::Frame {
+            session_id: self.session_id.clone(),
+            generation: self.generation.clone(),
+            seq,
+            prev_seq: seq.saturating_sub(1),
+            frame: frame.into(),
+        })
+    }
+
+    fn send_exit(&self, exit_code: Option<i32>) {
+        let seq = self.next_seq();
+        let _ = self.channel.send(TerminalStreamMessage::Exit {
+            session_id: self.session_id.clone(),
+            generation: self.generation.clone(),
+            seq,
+            exit_code,
+        });
+    }
+
+    fn send_fault(&self, message: String) {
+        let seq = self.next_seq();
+        let _ = self.channel.send(TerminalStreamMessage::Fault {
+            session_id: self.session_id.clone(),
+            generation: self.generation.clone(),
+            seq,
+            message,
+        });
+    }
+
+    fn stop(&self) {
+        self.running.store(false, Ordering::Release);
+        self.wake_cv.notify_all();
+    }
+}
+
+fn should_stop_frame_emitter(stream: &TerminalStream) -> bool {
+    !stream.running.load(Ordering::Acquire)
+        && (!stream.dirty.load(Ordering::Acquire)
+            || !stream.visible.load(Ordering::Acquire)
+            || !stream.has_credit())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,13 +277,6 @@ struct TerminalCommandSpec {
     args: Vec<String>,
     cwd: PathBuf,
     extra_env: HashMap<String, String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalExitEvent {
-    pub session_id: String,
-    pub exit_code: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,9 +291,36 @@ pub struct TerminalSearchResult {
     pub display_offset: usize,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum TerminalSelectionCommand {
+    Start {
+        row: u16,
+        col: u16,
+        side: String,
+        kind: String,
+    },
+    Update {
+        row: u16,
+        col: u16,
+        side: String,
+        #[serde(default)]
+        scroll_delta: i32,
+    },
+    Finish {
+        #[serde(default)]
+        include_all: bool,
+    },
+    Clear,
+    SelectAll,
+}
+
 #[tauri::command]
-pub fn terminal_spawn(
-    app: AppHandle,
+pub async fn terminal_spawn(
     state: State<'_, TerminalState>,
     session_id: String,
     kind: String,
@@ -77,19 +330,18 @@ pub fn terminal_spawn(
     extra_env: Option<HashMap<String, String>>,
     cols: Option<u16>,
     rows: Option<u16>,
+    on_event: Channel<TerminalStreamMessage>,
 ) -> Result<String, String> {
     if session_id.trim().is_empty() {
         return Err("terminal_session_id_required".to_string());
     }
-    {
-        let guard = state
-            .sessions
-            .lock()
-            .map_err(|_| "terminal_registry_poisoned".to_string())?;
-        if guard.contains_key(&session_id) {
-            return Err(format!("terminal_session_id_in_use: {session_id}"));
-        }
-    }
+    let reservation = SessionReservation::acquire(&state, &session_id)?;
+    let generation = Uuid::new_v4().to_string();
+    let stream = Arc::new(TerminalStream::new(
+        session_id.clone(),
+        generation.clone(),
+        on_event,
+    ));
 
     let spec = build_terminal_command_spec(
         &kind,
@@ -146,13 +398,10 @@ pub fn terminal_spawn(
         initial_cols,
         initial_rows,
     )));
-    {
-        let guard = model
-            .lock()
-            .map_err(|_| "terminal_model_poisoned".to_string())?;
-        let _ = app.emit("terminal://frame", guard.snapshot(&session_id));
+    let input_modes = Arc::new(TerminalInputModes::default());
+    if let Ok(model) = model.lock() {
+        input_modes.update(&model);
     }
-
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -161,42 +410,48 @@ pub fn terminal_spawn(
 
     let session = Arc::new(TerminalSession {
         kind: kind.clone(),
+        generation: generation.clone(),
         master: Mutex::new(pair.master),
         writer: shared_writer,
         killer: Mutex::new(killer),
         model: model.clone(),
+        input_modes: input_modes.clone(),
+        resize_lock: Mutex::new(()),
+        stream: stream.clone(),
+        closing: AtomicBool::new(false),
     });
     state
         .sessions
         .lock()
         .map_err(|_| "terminal_registry_poisoned".to_string())?
-        .insert(session_id.clone(), session);
+        .insert(session_id.clone(), session.clone());
+    reservation.commit();
 
-    let pump_handle = spawn_output_pump(app.clone(), session_id.clone(), reader, model);
+    let pump_handle = spawn_output_pump(reader, model, input_modes, stream.clone());
 
     let sessions = state.sessions.clone();
-    let exit_app = app.clone();
     let exit_id = session_id.clone();
+    let exit_session = session.clone();
     thread::spawn(move || {
         let exit_code = child.wait().ok().map(|status| status.exit_code() as i32);
-        if let Ok(mut guard) = sessions.lock() {
-            guard.remove(&exit_id);
-        }
+        stream.stop();
         let _ = pump_handle.join();
-        let _ = exit_app.emit(
-            "terminal://exit",
-            TerminalExitEvent {
-                session_id: exit_id,
-                exit_code,
-            },
-        );
+        if let Ok(mut guard) = sessions.lock() {
+            let is_current = guard
+                .get(&exit_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &exit_session));
+            if is_current {
+                guard.remove(&exit_id);
+            }
+        }
+        stream.send_exit(exit_code);
     });
 
-    Ok(session_id)
+    Ok(generation)
 }
 
 #[tauri::command]
-pub fn terminal_write(
+pub async fn terminal_write(
     state: State<'_, TerminalState>,
     session_id: String,
     data: String,
@@ -206,7 +461,7 @@ pub fn terminal_write(
 }
 
 #[tauri::command]
-pub fn terminal_input(
+pub async fn terminal_input(
     state: State<'_, TerminalState>,
     session_id: String,
     command: TerminalInputCommand,
@@ -216,24 +471,25 @@ pub fn terminal_input(
         command,
         TerminalInputCommand::Mouse { .. } | TerminalInputCommand::Wheel { .. }
     );
-    let encoded = {
-        let guard = session
+    if !is_mouse && session.input_modes.display_offset.load(Ordering::Acquire) != 0 {
+        let mut model = session
             .model
             .lock()
             .map_err(|_| "terminal_model_poisoned".to_string())?;
-        if is_mouse {
-            // Mouse reports are gated on the program's active mouse modes, read
-            // under the same lock so a stale frame can't inject bytes.
-            encode_mouse_input(&command, guard.mouse_modes())
-        } else {
-            encode_terminal_input(
-                &session.kind,
-                &command,
-                guard.kitty_keyboard_active(),
-                guard.bracketed_paste_active(),
-            )
-            .map(String::into_bytes)
-        }
+        model.scroll_bottom();
+        session.input_modes.update(&model);
+        session.stream.request_full();
+    }
+    let encoded = if is_mouse {
+        encode_mouse_input(&command, session.input_modes.mouse_modes())
+    } else {
+        encode_terminal_input(
+            &session.kind,
+            &command,
+            session.input_modes.kitty.load(Ordering::Acquire),
+            session.input_modes.bracketed_paste.load(Ordering::Acquire),
+        )
+        .map(String::into_bytes)
     };
     if let Some(data) = encoded {
         write_shared(&session.writer, &data)?;
@@ -241,25 +497,200 @@ pub fn terminal_input(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn terminal_input_batch(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+    _client_seq: u64,
+    commands: Vec<TerminalInputCommand>,
+) -> Result<(), String> {
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    if commands.is_empty() {
+        return Ok(());
+    }
+    let mut bytes = Vec::new();
+    let has_keyboard_input = commands.iter().any(|command| {
+        !matches!(
+            command,
+            TerminalInputCommand::Mouse { .. } | TerminalInputCommand::Wheel { .. }
+        )
+    });
+    if has_keyboard_input && session.input_modes.display_offset.load(Ordering::Acquire) != 0 {
+        let mut model = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        model.scroll_bottom();
+        session.input_modes.update(&model);
+        session.stream.request_full();
+    }
+    let mouse_modes = session.input_modes.mouse_modes();
+    let kitty = session.input_modes.kitty.load(Ordering::Acquire);
+    let bracketed_paste = session.input_modes.bracketed_paste.load(Ordering::Acquire);
+    for command in &commands {
+        let encoded = if matches!(
+            command,
+            TerminalInputCommand::Mouse { .. } | TerminalInputCommand::Wheel { .. }
+        ) {
+            encode_mouse_input(command, mouse_modes)
+        } else {
+            encode_terminal_input(&session.kind, command, kitty, bracketed_paste)
+                .map(String::into_bytes)
+        };
+        if let Some(encoded) = encoded {
+            bytes.extend_from_slice(&encoded);
+        }
+    }
+    if !bytes.is_empty() {
+        write_shared(&session.writer, &bytes)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_ack(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+    seq: u64,
+) -> Result<(), String> {
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    session.stream.acknowledge(seq);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_request_full(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+) -> Result<(), String> {
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    session.stream.request_full();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_set_visibility(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+    visible: bool,
+) -> Result<(), String> {
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    session.stream.set_visible(visible);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_selection(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+    command: TerminalSelectionCommand,
+) -> Result<(), String> {
+    use alacritty_terminal::index::Side;
+    use alacritty_terminal::selection::SelectionType;
+
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    let repaint = {
+        let mut model = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        match command {
+            TerminalSelectionCommand::Start {
+                row,
+                col,
+                side,
+                kind,
+            } => {
+                let side = if side == "right" {
+                    Side::Right
+                } else {
+                    Side::Left
+                };
+                let kind = match kind.as_str() {
+                    "semantic" => SelectionType::Semantic,
+                    "lines" => SelectionType::Lines,
+                    _ => SelectionType::Simple,
+                };
+                model.selection_start(row, col, side, kind);
+                false
+            }
+            TerminalSelectionCommand::Update {
+                row,
+                col,
+                side,
+                scroll_delta,
+            } => {
+                if scroll_delta != 0 {
+                    model.scroll(scroll_delta);
+                    session.input_modes.update(&model);
+                }
+                let side = if side == "right" {
+                    Side::Right
+                } else {
+                    Side::Left
+                };
+                model.selection_update(row, col, side);
+                scroll_delta != 0
+            }
+            TerminalSelectionCommand::Finish { include_all } => {
+                if include_all {
+                    model.selection_finish();
+                }
+                true
+            }
+            TerminalSelectionCommand::Clear => {
+                model.selection_clear();
+                true
+            }
+            TerminalSelectionCommand::SelectAll => {
+                model.selection_select_all();
+                true
+            }
+        }
+    };
+    if repaint {
+        session.stream.request_full();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_copy_selection(
+    state: State<'_, TerminalState>,
+    session_id: String,
+    generation: String,
+) -> Result<String, String> {
+    let session = get_session_generation(&state, &session_id, &generation)?;
+    let model = session
+        .model
+        .lock()
+        .map_err(|_| "terminal_model_poisoned".to_string())?;
+    Ok(model.selection_text())
+}
+
 /// Scroll the viewport through scrollback by `delta` lines (positive = toward
 /// history). Emits a fresh full frame so the renderer shows the scrolled view.
 #[tauri::command]
-pub fn terminal_scroll(
-    app: AppHandle,
+pub async fn terminal_scroll(
     state: State<'_, TerminalState>,
     session_id: String,
     delta: i32,
 ) -> Result<(), String> {
     let session = get_session(&state, &session_id)?;
-    let frame = {
+    {
         let mut model = session
             .model
             .lock()
             .map_err(|_| "terminal_model_poisoned".to_string())?;
         model.scroll(delta);
-        model.snapshot(&session_id)
-    };
-    let _ = app.emit("terminal://frame", frame);
+        session.input_modes.update(&model);
+    }
+    session.stream.request_full();
     Ok(())
 }
 
@@ -267,13 +698,12 @@ pub fn terminal_scroll(
 /// also sends a form feed so a shell at a prompt redraws it at the top;
 /// no-op while the alternate screen is active (vim, TUIs).
 #[tauri::command]
-pub fn terminal_clear(
-    app: AppHandle,
+pub async fn terminal_clear(
     state: State<'_, TerminalState>,
     session_id: String,
 ) -> Result<(), String> {
     let session = get_session(&state, &session_id)?;
-    let frame = {
+    {
         let mut model = session
             .model
             .lock()
@@ -281,17 +711,17 @@ pub fn terminal_clear(
         if !model.clear() {
             return Ok(());
         }
-        model.snapshot(&session_id)
-    };
+        session.input_modes.update(&model);
+    }
     // Best-effort: the model is already cleared, so the frame must reach the
     // renderer even if the PTY write fails (dead shell).
     let _ = write_shared(&session.writer, b"\x0c");
-    let _ = app.emit("terminal://frame", frame);
+    session.stream.request_full();
     Ok(())
 }
 
 #[tauri::command]
-pub fn terminal_text(
+pub async fn terminal_text(
     state: State<'_, TerminalState>,
     session_id: String,
 ) -> Result<String, String> {
@@ -304,8 +734,7 @@ pub fn terminal_text(
 }
 
 #[tauri::command]
-pub fn terminal_search(
-    app: AppHandle,
+pub async fn terminal_search(
     state: State<'_, TerminalState>,
     session_id: String,
     query: String,
@@ -317,20 +746,21 @@ pub fn terminal_search(
         Some("previous") => SearchDirection::Previous,
         _ => SearchDirection::Next,
     };
-    let (hit, frame) = {
+    let (hit, display_offset) = {
         let mut model = session
             .model
             .lock()
             .map_err(|_| "terminal_model_poisoned".to_string())?;
         let hit = model.search(&query, direction, case_sensitive.unwrap_or(false));
-        let frame = model.snapshot(&session_id);
-        (hit, frame)
+        session.input_modes.update(&model);
+        let display_offset = model.display_offset();
+        (hit, display_offset)
     };
     let display_offset = hit
         .as_ref()
         .map(|item| item.display_offset)
-        .unwrap_or(frame.display_offset);
-    let _ = app.emit("terminal://frame", frame);
+        .unwrap_or(display_offset);
+    session.stream.request_full();
     Ok(TerminalSearchResult {
         session_id,
         query,
@@ -343,8 +773,7 @@ pub fn terminal_search(
 }
 
 #[tauri::command]
-pub fn terminal_resize(
-    app: AppHandle,
+pub async fn terminal_resize(
     state: State<'_, TerminalState>,
     session_id: String,
     cols: u16,
@@ -353,6 +782,10 @@ pub fn terminal_resize(
     let session = get_session(&state, &session_id)?;
     let cols = cols.clamp(2, MAX_COLS);
     let rows = rows.clamp(1, MAX_ROWS);
+    let _resize = session
+        .resize_lock
+        .lock()
+        .map_err(|_| "terminal_resize_poisoned".to_string())?;
     {
         let master = session
             .master
@@ -373,30 +806,36 @@ pub fn terminal_resize(
             .lock()
             .map_err(|_| "terminal_model_poisoned".to_string())?;
         model.resize(cols, rows);
-        let _ = app.emit("terminal://frame", model.snapshot(&session_id));
+        session.input_modes.update(&model);
     }
+    session.stream.request_full();
     Ok(())
 }
 
 #[tauri::command]
-pub fn terminal_kill(state: State<'_, TerminalState>, session_id: String) -> Result<(), String> {
-    let session = {
-        let mut guard = state
-            .sessions
-            .lock()
-            .map_err(|_| "terminal_registry_poisoned".to_string())?;
-        guard.remove(&session_id)
+pub async fn terminal_kill(
+    state: State<'_, TerminalState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = match get_session(&state, &session_id) {
+        Ok(session) => session,
+        Err(_) => return Ok(()),
     };
-    let Some(session) = session else {
+    if session.closing.swap(true, Ordering::AcqRel) {
         return Ok(());
+    }
+    let mut killer = match session.killer.lock() {
+        Ok(killer) => killer,
+        Err(_) => {
+            session.closing.store(false, Ordering::Release);
+            return Err("terminal_killer_poisoned".to_string());
+        }
     };
-    let mut killer = session
-        .killer
-        .lock()
-        .map_err(|_| "terminal_killer_poisoned".to_string())?;
-    killer
-        .kill()
-        .map_err(|err| format!("terminal_kill_failed: {err}"))
+    if let Err(err) = killer.kill() {
+        session.closing.store(false, Ordering::Release);
+        return Err(format!("terminal_kill_failed: {err}"));
+    }
+    Ok(())
 }
 
 fn get_session(
@@ -412,26 +851,26 @@ fn get_session(
         .ok_or_else(|| format!("Unknown terminal session: {session_id}"))
 }
 
+fn get_session_generation(
+    state: &State<'_, TerminalState>,
+    session_id: &str,
+    generation: &str,
+) -> Result<Arc<TerminalSession>, String> {
+    let session = get_session(state, session_id)?;
+    if session.generation != generation {
+        return Err(format!("Stale terminal session generation: {session_id}"));
+    }
+    Ok(session)
+}
+
 fn spawn_output_pump(
-    app: AppHandle,
-    session_id: String,
     mut reader: Box<dyn Read + Send>,
     model: Arc<Mutex<TerminalModel>>,
+    input_modes: Arc<TerminalInputModes>,
+    stream: Arc<TerminalStream>,
 ) -> JoinHandle<()> {
-    // The reader thread drains the PTY at full speed (no coalescing on this
-    // path — the old in-reader `thread::sleep` was a source of input
-    // backpressure) and only flags the model dirty. A separate emitter thread
-    // coalesces dirty notifications into at most one `terminal://frame` per
-    // FRAME_COALESCE_MS, sending only the rows alacritty reports as damaged.
-    let dirty = Arc::new(AtomicBool::new(true));
-    let running = Arc::new(AtomicBool::new(true));
-    let emitter = spawn_frame_emitter(
-        app,
-        session_id,
-        model.clone(),
-        dirty.clone(),
-        running.clone(),
-    );
+    let emitter = spawn_frame_emitter(model.clone(), stream.clone());
+    stream.mark_dirty();
 
     thread::spawn(move || {
         let mut buf = [0_u8; 8192];
@@ -442,50 +881,88 @@ fn spawn_output_pump(
                     {
                         let mut guard = match model.lock() {
                             Ok(guard) => guard,
-                            Err(_) => break,
+                            Err(_) => {
+                                stream.send_fault("terminal_model_poisoned".to_string());
+                                break;
+                            }
                         };
                         guard.advance(&buf[..n]);
+                        input_modes.update(&guard);
                     }
-                    dirty.store(true, Ordering::Release);
+                    stream.mark_dirty();
                 }
-                Err(_) => break,
+                Err(err) if err.kind() == ErrorKind::Interrupted => continue,
+                Err(err) => {
+                    stream.send_fault(format!("terminal_reader_failed: {err}"));
+                    break;
+                }
             }
         }
-        running.store(false, Ordering::Release);
+        stream.stop();
         let _ = emitter.join();
     })
 }
 
 fn spawn_frame_emitter(
-    app: AppHandle,
-    session_id: String,
     model: Arc<Mutex<TerminalModel>>,
-    dirty: Arc<AtomicBool>,
-    running: Arc<AtomicBool>,
+    stream: Arc<TerminalStream>,
 ) -> JoinHandle<()> {
     thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(FRAME_COALESCE_MS));
-        let was_dirty = dirty.swap(false, Ordering::AcqRel);
-        if !was_dirty {
-            // Idle: keep looping while the session lives; exit once the reader
-            // has stopped and the last frame has been flushed.
-            if running.load(Ordering::Acquire) {
-                continue;
-            }
+        let mut wake = match stream.wake.lock() {
+            Ok(wake) => wake,
+            Err(_) => break,
+        };
+        while stream.running.load(Ordering::Acquire)
+            && (!stream.dirty.load(Ordering::Acquire)
+                || !stream.visible.load(Ordering::Acquire)
+                || !stream.has_credit())
+        {
+            wake = match stream.wake_cv.wait(wake) {
+                Ok(wake) => wake,
+                Err(_) => return,
+            };
+        }
+        if should_stop_frame_emitter(&stream) {
             break;
         }
+        let (next_wake, _) = match stream
+            .wake_cv
+            .wait_timeout(wake, Duration::from_millis(FRAME_COALESCE_MS))
+        {
+            Ok(result) => result,
+            Err(_) => break,
+        };
+        drop(next_wake);
+
+        if !stream.visible.load(Ordering::Acquire) || !stream.has_credit() {
+            continue;
+        }
+        if !stream.dirty.swap(false, Ordering::AcqRel) {
+            continue;
+        }
+        let force_full = stream.force_full.swap(false, Ordering::AcqRel);
         let frame = {
             let mut guard = match model.lock() {
                 Ok(guard) => guard,
-                Err(_) => break,
+                Err(_) => {
+                    stream.send_fault("terminal_model_poisoned".to_string());
+                    break;
+                }
             };
-            match guard.take_damage() {
-                Some(rows) if rows.is_empty() => continue,
-                Some(rows) => guard.snapshot_dirty(&session_id, &rows),
-                None => guard.snapshot(&session_id),
+            if force_full {
+                guard.reset_damage();
+                guard.snapshot(&stream.session_id)
+            } else {
+                match guard.take_damage() {
+                    Some(rows) if rows.is_empty() => continue,
+                    Some(rows) => guard.snapshot_dirty(&stream.session_id, &rows),
+                    None => guard.snapshot(&stream.session_id),
+                }
             }
         };
-        let _ = app.emit("terminal://frame", frame);
+        if stream.send_frame(frame).is_err() {
+            break;
+        }
     })
 }
 
@@ -771,12 +1248,77 @@ mod tests {
     }
 
     #[test]
-    fn terminal_exit_event_serializes_camelcase() {
-        let exit = serde_json::to_value(TerminalExitEvent {
+    fn terminal_exit_stream_message_serializes_camelcase() {
+        let exit = serde_json::to_value(TerminalStreamMessage::Exit {
             session_id: "term-1".to_string(),
+            generation: "generation-1".to_string(),
+            seq: 7,
             exit_code: Some(0),
         })
         .unwrap();
-        assert_eq!(exit, json!({ "sessionId": "term-1", "exitCode": 0 }));
+        assert_eq!(
+            exit,
+            json!({
+                "kind": "exit",
+                "sessionId": "term-1",
+                "generation": "generation-1",
+                "seq": 7,
+                "exitCode": 0
+            })
+        );
+    }
+
+    #[test]
+    fn selection_update_deserializes_atomic_scroll_delta() {
+        let command: TerminalSelectionCommand = serde_json::from_value(json!({
+            "type": "update",
+            "row": 2,
+            "col": 4,
+            "side": "right",
+            "scrollDelta": 3
+        }))
+        .unwrap();
+        assert!(matches!(
+            command,
+            TerminalSelectionCommand::Update {
+                row: 2,
+                col: 4,
+                scroll_delta: 3,
+                ..
+            }
+        ));
+        let finish: TerminalSelectionCommand = serde_json::from_value(json!({
+            "type": "finish",
+            "includeAll": true
+        }))
+        .unwrap();
+        assert!(matches!(
+            finish,
+            TerminalSelectionCommand::Finish { include_all: true }
+        ));
+    }
+
+    #[test]
+    fn stream_credit_bounds_unacknowledged_frames() {
+        let channel = Channel::new(|_| Ok(()));
+        let stream = TerminalStream::new("term-1".to_string(), "generation-1".to_string(), channel);
+        let model = TerminalModel::new(10, 2, model::NullTerminalWriter);
+        assert!(stream.has_credit());
+        stream.send_frame(model.snapshot("term-1")).unwrap();
+        stream.send_frame(model.snapshot("term-1")).unwrap();
+        assert!(!stream.has_credit());
+        stream.stop();
+        assert!(should_stop_frame_emitter(&stream));
+        stream.acknowledge(1);
+        assert!(stream.has_credit());
+    }
+
+    #[test]
+    fn session_ids_are_reserved_atomically_during_spawn() {
+        let state = TerminalState::default();
+        let first = SessionReservation::acquire(&state, "term-1").unwrap();
+        assert!(SessionReservation::acquire(&state, "term-1").is_err());
+        drop(first);
+        assert!(SessionReservation::acquire(&state, "term-1").is_ok());
     }
 }

@@ -28,17 +28,25 @@ import {
 } from "react";
 import {
   terminalAvailable,
+  terminalAck,
   terminalClear,
-  terminalInput,
+  terminalCopySelection,
+  terminalInputBatch,
   terminalKill,
+  terminalRequestFull,
   terminalResize,
   terminalSearch,
+  terminalSelection,
+  terminalSetVisibility,
   terminalScroll,
   terminalSpawn,
   terminalText,
-  terminalWrite,
+  decodeTerminalWireFrame,
   type TerminalFrame,
   type TerminalInputCommand,
+  type TerminalSpawnHandle,
+  type TerminalStreamMessage,
+  type TerminalSelectionCommand,
   type TerminalSearchDirection,
   type TerminalSearchMatch,
 } from "../lib/api";
@@ -46,6 +54,7 @@ import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import type { MaruSettings, TerminalDock } from "../lib/settings";
 import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
+import { TerminalInputPump } from "../lib/terminalInputPump";
 import { NativeTerminalView, type NativeTerminalViewHandle } from "./NativeTerminalView";
 import {
   activeItemMention,
@@ -120,11 +129,6 @@ export interface TerminalPanelHandle {
   attachPath: (relPath: string | null, absPath: string | null) => boolean;
 }
 
-interface TerminalExitEvent {
-  sessionId: string;
-  exitCode: number | null;
-}
-
 interface TerminalStatusEvent {
   sessionId: string;
   status: string;
@@ -135,6 +139,25 @@ export interface TerminalFocusState {
   open: boolean;
   searchOpen: boolean;
   renamingTaskId: string | null;
+}
+
+export interface TerminalStreamCursor {
+  generation: string;
+  lastSeq: number;
+}
+
+export function terminalFrameDisposition(
+  current: TerminalStreamCursor | null | undefined,
+  generation: string,
+  seq: number,
+  prevSeq: number,
+  patch: boolean,
+): "apply" | "duplicate" | "resync" {
+  if (current?.generation === generation && seq <= current.lastSeq) return "duplicate";
+  if (patch && (!current || current.generation !== generation || current.lastSeq !== prevSeq)) {
+    return "resync";
+  }
+  return "apply";
 }
 
 const MIN_HEIGHT = 160;
@@ -213,6 +236,7 @@ export const TerminalPanel = memo(
     );
     const [draftHeight, setDraftHeight] = useState(height);
     const [draftWidth, setDraftWidth] = useState(width);
+    const [draftSplitRatio, setDraftSplitRatio] = useState(splitRatio);
     const [rightTabId, setRightTabId] = useState<string | null>(null);
     const [focusedGroup, setFocusedGroup] = useState<"left" | "right">("left");
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -223,6 +247,19 @@ export const TerminalPanel = memo(
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const sessionByTabRef = useRef<Map<string, string>>(new Map());
     const tabBySessionRef = useRef<Map<string, string>>(new Map());
+    const generationBySessionRef = useRef<Map<string, string>>(new Map());
+    const channelsBySessionRef = useRef<Map<string, TerminalSpawnHandle["channel"]>>(new Map());
+    const streamSeqBySessionRef = useRef<Map<string, { generation: string; lastSeq: number }>>(
+      new Map(),
+    );
+    const pendingFramesRef = useRef<Map<string, TerminalStreamMessage[]>>(new Map());
+    const visibilityBySessionRef = useRef<Map<string, boolean>>(new Map());
+    const inputPumpsRef = useRef<Map<string, TerminalInputPump>>(new Map());
+    const cancelledSessionsRef = useRef<Set<string>>(new Set());
+    const disposedRef = useRef(false);
+    const handleRefCallbacksRef = useRef<
+      Map<string, (handle: NativeTerminalViewHandle | null) => void>
+    >(new Map());
     // One stable handler object per session so NativeTerminalView's memo() can
     // bail out — inline closures here would re-render every grid on any state
     // change. Pruned when the session ends.
@@ -233,13 +270,21 @@ export const TerminalPanel = memo(
           onInput: (command: TerminalInputCommand) => void;
           onResize: (cols: number, rows: number) => void;
           onScroll: (delta: number) => void;
+          onFocusOwnership: () => void;
+          onSelection: (command: TerminalSelectionCommand) => Promise<void>;
+          onCopySelection: () => Promise<string>;
+          onContextCopy: () => void;
+          onContextPaste: () => void;
+          onContextSelectAll: () => void;
+          onContextFind: () => void;
+          onContextClear: () => void;
+          canForwardMouse: () => boolean;
         }
       >
     >(new Map());
     // Whether each session's program has requested a mouse mode; lets us stop
     // suppressing hover so TUIs (claude/codex) receive it.
     const mouseModesBySessionRef = useRef<Map<string, boolean>>(new Map());
-    const [framesBySession, setFramesBySession] = useState<Record<string, TerminalFrame>>({});
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
@@ -252,6 +297,12 @@ export const TerminalPanel = memo(
     const autoLaunchRef = useRef(false);
     const handledLaunchRequestRef = useRef<number | null>(null);
     const focusedTabIdRef = useRef<string | null>(null);
+    const lastActualFocusTabRef = useRef<string | null>(null);
+    const restoreFocusTabRef = useRef<string | null>(null);
+    const appActiveRef = useRef(
+      typeof document === "undefined" ? true : document.hasFocus(),
+    );
+    const suppressTerminalMouseUntilRef = useRef(0);
     const layoutRefreshRafRef = useRef<number | null>(null);
     const terminalFocusStateRef = useRef<TerminalFocusState>({
       open,
@@ -288,58 +339,115 @@ export const TerminalPanel = memo(
     }, [width]);
 
     useEffect(() => {
-      if (!canRunTerminal) return;
-      let disposed = false;
+      setDraftSplitRatio(splitRatio);
+    }, [splitRatio]);
 
-      const framePromise = import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<TerminalFrame>("terminal://frame", (event) => {
-          if (disposed) return;
-          const tabId = tabBySessionRef.current.get(event.payload.sessionId);
-          if (!tabId) return;
-          const mouse = event.payload.mouse;
-          mouseModesBySessionRef.current.set(
-            event.payload.sessionId,
-            Boolean(mouse && (mouse.click || mouse.motion || mouse.drag)),
-          );
-          setFramesBySession((current) => ({
-            ...current,
-            [event.payload.sessionId]: event.payload,
-          }));
-          // Output on a non-focused session raises an attention flag.
-          if (tabId !== focusedTabIdRef.current) {
-            dispatch({ type: "markAttention", sessionId: event.payload.sessionId });
+    const applyStreamFrame = useCallback(
+      (
+        message: Extract<TerminalStreamMessage, { kind: "frame" }>,
+        handle: NativeTerminalViewHandle,
+      ) => {
+        const { sessionId, generation, seq, prevSeq } = message;
+        const frame = decodeTerminalWireFrame(message.frame);
+        const expectedGeneration = generationBySessionRef.current.get(sessionId);
+        if (expectedGeneration && expectedGeneration !== generation) return;
+        const current = streamSeqBySessionRef.current.get(sessionId);
+        const disposition = terminalFrameDisposition(
+          current,
+          generation,
+          seq,
+          prevSeq,
+          Boolean(frame.dirtyRows),
+        );
+        if (disposition === "duplicate") {
+          void terminalAck(sessionId, generation, seq).catch(() => {});
+          return;
+        }
+        const applied = disposition === "apply" && handle.applyFrame(frame);
+        streamSeqBySessionRef.current.set(sessionId, { generation, lastSeq: seq });
+        void terminalAck(sessionId, generation, seq).catch(() => {});
+        if (!applied) {
+          void terminalRequestFull(sessionId, generation).catch(() => {});
+          return;
+        }
+        const mouse = frame.mouse;
+        mouseModesBySessionRef.current.set(
+          sessionId,
+          Boolean(mouse && (mouse.click || mouse.motion || mouse.drag)),
+        );
+        const tabId = tabBySessionRef.current.get(sessionId);
+        if (tabId && tabId !== focusedTabIdRef.current) {
+          dispatch({ type: "markAttention", sessionId });
+        }
+      },
+      [],
+    );
+
+    const handleTerminalStreamMessage = useCallback(
+      (message: TerminalStreamMessage) => {
+        if (disposedRef.current) {
+          if (message.kind === "frame") {
+            void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
           }
-        }),
-      );
-      const exitPromise = import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<TerminalExitEvent>("terminal://exit", (event) => {
-          if (disposed) return;
-          const tabId = tabBySessionRef.current.get(event.payload.sessionId);
-          if (tabId) {
-            sessionByTabRef.current.delete(tabId);
+          return;
+        }
+        const cancelled = cancelledSessionsRef.current.has(message.sessionId);
+        if (cancelled && message.kind === "frame") {
+          void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
+          return;
+        }
+        if (cancelled && message.kind === "fault") return;
+        const expectedGeneration = generationBySessionRef.current.get(message.sessionId);
+        if (expectedGeneration && expectedGeneration !== message.generation) return;
+        if (message.kind === "frame") {
+          const tabId = tabBySessionRef.current.get(message.sessionId);
+          const handle = tabId ? handlesRef.current.get(tabId) : null;
+          if (!handle) {
+            const pending = pendingFramesRef.current.get(message.sessionId) ?? [];
+            pending.push(message);
+            pendingFramesRef.current.set(message.sessionId, pending.slice(-2));
+            return;
           }
-          tabBySessionRef.current.delete(event.payload.sessionId);
-          sessionHandlersRef.current.delete(event.payload.sessionId);
-          mouseModesBySessionRef.current.delete(event.payload.sessionId);
-          setResizeReadySessions((current) => {
-            const next = { ...current };
-            delete next[event.payload.sessionId];
-            return next;
-          });
-          setFramesBySession((current) => {
-            if (!(event.payload.sessionId in current)) return current;
-            const next = { ...current };
-            delete next[event.payload.sessionId];
-            return next;
-          });
+          applyStreamFrame(message, handle);
+          return;
+        }
+        if (message.kind === "fault") {
+          setError(message.message);
+          return;
+        }
+
+        const tabId = tabBySessionRef.current.get(message.sessionId);
+        if (tabId) sessionByTabRef.current.delete(tabId);
+        tabBySessionRef.current.delete(message.sessionId);
+        generationBySessionRef.current.delete(message.sessionId);
+        channelsBySessionRef.current.delete(message.sessionId);
+        streamSeqBySessionRef.current.delete(message.sessionId);
+        pendingFramesRef.current.delete(message.sessionId);
+        visibilityBySessionRef.current.delete(message.sessionId);
+        inputPumpsRef.current.get(message.sessionId)?.fail();
+        inputPumpsRef.current.delete(message.sessionId);
+        cancelledSessionsRef.current.delete(message.sessionId);
+        sessionHandlersRef.current.delete(message.sessionId);
+        mouseModesBySessionRef.current.delete(message.sessionId);
+        setResizeReadySessions((current) => {
+          const next = { ...current };
+          delete next[message.sessionId];
+          return next;
+        });
+        if (!cancelled) {
           dispatch({
             type: "exit",
-            sessionId: event.payload.sessionId,
-            exitCode: event.payload.exitCode,
+            sessionId: message.sessionId,
+            exitCode: message.exitCode,
           });
-        }),
-      );
+        }
+      },
+      [applyStreamFrame],
+    );
 
+    useEffect(() => {
+      if (!canRunTerminal) return;
+      let disposed = false;
       const statusPromise = import("@tauri-apps/api/event").then(({ listen }) =>
         listen<TerminalStatusEvent>("terminal://status", (event) => {
           if (disposed) return;
@@ -354,12 +462,6 @@ export const TerminalPanel = memo(
         }),
       );
 
-      framePromise.catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
-      });
-      exitPromise.catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
-      });
       statusPromise.catch(() => {
         // The status channel is optional (agent hooks may be disabled).
       });
@@ -368,18 +470,29 @@ export const TerminalPanel = memo(
         disposed = true;
         // Wait for the listen() promises to resolve before unsubscribing,
         // otherwise we leak the registration.
-        void framePromise.then((off) => off()).catch(() => {});
-        void exitPromise.then((off) => off()).catch(() => {});
         void statusPromise.then((off) => off()).catch(() => {});
       };
     }, [canRunTerminal]);
 
     useEffect(() => {
+      disposedRef.current = false;
       return () => {
+        disposedRef.current = true;
         cancelTerminalLayoutRefresh(layoutRefreshRafRef);
         for (const sessionId of sessionByTabRef.current.values()) {
           void terminalKill(sessionId);
         }
+        for (const pump of inputPumpsRef.current.values()) pump.fail();
+        inputPumpsRef.current.clear();
+        channelsBySessionRef.current.clear();
+        generationBySessionRef.current.clear();
+        streamSeqBySessionRef.current.clear();
+        pendingFramesRef.current.clear();
+        visibilityBySessionRef.current.clear();
+        cancelledSessionsRef.current.clear();
+        sessionHandlersRef.current.clear();
+        mouseModesBySessionRef.current.clear();
+        handleRefCallbacksRef.current.clear();
         handlesRef.current.clear();
       };
     }, []);
@@ -439,10 +552,21 @@ export const TerminalPanel = memo(
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`
         }`;
         const title = request?.title || launcher.label || t(`terminal.launcher.${kind}`);
-        // Register the session↔tab mapping BEFORE spawning so we don't drop
-        // any terminal://frame events that race ahead of the IPC return.
+        // Register the session↔tab mapping BEFORE spawning so the Channel can
+        // deliver the first frame immediately after the backend accepts it.
         sessionByTabRef.current.set(tabId, sessionId);
         tabBySessionRef.current.set(sessionId, tabId);
+        const inputPump = new TerminalInputPump(
+          async (clientSeq, commands) => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) throw new Error("terminal_session_not_ready");
+            await terminalInputBatch(sessionId, generation, clientSeq, commands);
+          },
+          (inputError) => {
+            setError(inputError instanceof Error ? inputError.message : String(inputError));
+          },
+        );
+        inputPumpsRef.current.set(sessionId, inputPump);
         dispatch({
           type: "create",
           tab: createTerminalTab(tabId, kind, title, {
@@ -465,25 +589,54 @@ export const TerminalPanel = memo(
         try {
           const contextEnv = buildMaruContextEnv(activeContext, sessionId, injectContext);
           const contextArgs = buildAgentContextArgs(kind, activeContext, injectContext);
-          await terminalSpawn(sessionId, kind, resolvedCwd, {
-            command: request?.command ?? launcher.command ?? null,
-            extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
-            extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
-            cols: 120,
-            rows: 30,
-          });
+          const spawn = await terminalSpawn(
+            sessionId,
+            kind,
+            resolvedCwd,
+            {
+              command: request?.command ?? launcher.command ?? null,
+              extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
+              extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
+              cols: 120,
+              rows: 30,
+            },
+            handleTerminalStreamMessage,
+          );
+          const cancelled =
+            disposedRef.current ||
+            cancelledSessionsRef.current.has(sessionId) ||
+            sessionByTabRef.current.get(tabId) !== sessionId ||
+            tabBySessionRef.current.get(sessionId) !== tabId;
+          if (cancelled) {
+            pendingFramesRef.current.delete(sessionId);
+            visibilityBySessionRef.current.delete(sessionId);
+            inputPump.fail();
+            inputPumpsRef.current.delete(sessionId);
+            await terminalSetVisibility(sessionId, spawn.generation, false).catch(() => {});
+            await terminalKill(sessionId).catch(() => {});
+            return;
+          }
+          generationBySessionRef.current.set(sessionId, spawn.generation);
+          channelsBySessionRef.current.set(sessionId, spawn.channel);
+          inputPump.ready();
           setResizeReadySessions((current) => ({
             ...current,
             [sessionId]: true,
           }));
           window.requestAnimationFrame(() => {
-            if (group === focusedGroup || group === "right") {
-              handlesRef.current.get(tabId)?.focus();
-            }
+            handlesRef.current.get(tabId)?.focus();
           });
         } catch (err) {
+          const cancelled =
+            disposedRef.current || cancelledSessionsRef.current.delete(sessionId);
           sessionByTabRef.current.delete(tabId);
           tabBySessionRef.current.delete(sessionId);
+          generationBySessionRef.current.delete(sessionId);
+          channelsBySessionRef.current.delete(sessionId);
+          visibilityBySessionRef.current.delete(sessionId);
+          inputPumpsRef.current.get(sessionId)?.fail();
+          inputPumpsRef.current.delete(sessionId);
+          if (cancelled) return;
           setResizeReadySessions((current) => {
             const next = { ...current };
             delete next[sessionId];
@@ -497,7 +650,7 @@ export const TerminalPanel = memo(
         activeContext,
         canRunTerminal,
         cwd,
-        focusedGroup,
+        handleTerminalStreamMessage,
         injectContext,
         onOpenChange,
         open,
@@ -572,23 +725,27 @@ export const TerminalPanel = memo(
       (tabId: string) => {
         const sessionId = sessionByTabRef.current.get(tabId);
         if (sessionId) {
-          void terminalKill(sessionId);
+          cancelledSessionsRef.current.add(sessionId);
+          const generation = generationBySessionRef.current.get(sessionId);
+          if (generation) void terminalSetVisibility(sessionId, generation, false).catch(() => {});
+          void terminalKill(sessionId).catch((killError) => {
+            setError(killError instanceof Error ? killError.message : String(killError));
+          });
           sessionByTabRef.current.delete(tabId);
           tabBySessionRef.current.delete(sessionId);
+          inputPumpsRef.current.get(sessionId)?.fail();
+          inputPumpsRef.current.delete(sessionId);
           sessionHandlersRef.current.delete(sessionId);
           mouseModesBySessionRef.current.delete(sessionId);
+          visibilityBySessionRef.current.delete(sessionId);
           setResizeReadySessions((current) => {
-            const next = { ...current };
-            delete next[sessionId];
-            return next;
-          });
-          setFramesBySession((current) => {
             const next = { ...current };
             delete next[sessionId];
             return next;
           });
         }
         handlesRef.current.delete(tabId);
+        handleRefCallbacksRef.current.delete(tabId);
 
         if (shouldCloseTerminalSplitAfterTabClose(activeTaskTabs, splitOpen, rightTabId, tabId)) {
           setRightTabId(null);
@@ -605,23 +762,27 @@ export const TerminalPanel = memo(
         if (tab.taskId !== taskId) continue;
         const sessionId = sessionByTabRef.current.get(tab.id);
         if (sessionId) {
-          void terminalKill(sessionId);
+          cancelledSessionsRef.current.add(sessionId);
+          const generation = generationBySessionRef.current.get(sessionId);
+          if (generation) void terminalSetVisibility(sessionId, generation, false).catch(() => {});
+          void terminalKill(sessionId).catch((killError) => {
+            setError(killError instanceof Error ? killError.message : String(killError));
+          });
           sessionByTabRef.current.delete(tab.id);
           tabBySessionRef.current.delete(sessionId);
+          inputPumpsRef.current.get(sessionId)?.fail();
+          inputPumpsRef.current.delete(sessionId);
           sessionHandlersRef.current.delete(sessionId);
           mouseModesBySessionRef.current.delete(sessionId);
+          visibilityBySessionRef.current.delete(sessionId);
           setResizeReadySessions((current) => {
-            const next = { ...current };
-            delete next[sessionId];
-            return next;
-          });
-          setFramesBySession((current) => {
             const next = { ...current };
             delete next[sessionId];
             return next;
           });
         }
         handlesRef.current.delete(tab.id);
+        handleRefCallbacksRef.current.delete(tab.id);
       }
       if (rightTab && rightTab.taskId === taskId) {
         setRightTabId(null);
@@ -667,6 +828,7 @@ export const TerminalPanel = memo(
           const startX = event.clientX;
           const startWidth = draftWidth;
           let latest = startWidth;
+          let resizeRaf: number | null = null;
           handle.setPointerCapture(pointerId);
 
           const onMove = (move: PointerEvent) => {
@@ -677,8 +839,13 @@ export const TerminalPanel = memo(
               Math.max(MIN_WIDTH, startWidth + startX - move.clientX),
             );
             latest = next;
-            setDraftWidth(next);
-            onWidthChange(next);
+            if (resizeRaf == null) {
+              resizeRaf = window.requestAnimationFrame(() => {
+                resizeRaf = null;
+                setDraftWidth(latest);
+                onWidthChange(latest);
+              });
+            }
           };
           const cleanup = () => {
             handle.removeEventListener("pointermove", onMove);
@@ -689,6 +856,8 @@ export const TerminalPanel = memo(
           const onEnd = (end: PointerEvent) => {
             if (end.pointerId !== pointerId) return;
             cleanup();
+            if (resizeRaf != null) window.cancelAnimationFrame(resizeRaf);
+            setDraftWidth(latest);
             onWidthChange(latest);
           };
           handle.addEventListener("pointermove", onMove);
@@ -700,6 +869,7 @@ export const TerminalPanel = memo(
         const startY = event.clientY;
         const startHeight = draftHeight;
         let latest = startHeight;
+        let resizeRaf: number | null = null;
         handle.setPointerCapture(pointerId);
 
         const onMove = (move: PointerEvent) => {
@@ -709,7 +879,12 @@ export const TerminalPanel = memo(
             Math.max(MIN_HEIGHT, startHeight + startY - move.clientY),
           );
           latest = next;
-          setDraftHeight(next);
+          if (resizeRaf == null) {
+            resizeRaf = window.requestAnimationFrame(() => {
+              resizeRaf = null;
+              setDraftHeight(latest);
+            });
+          }
         };
         const cleanup = () => {
           handle.removeEventListener("pointermove", onMove);
@@ -720,6 +895,8 @@ export const TerminalPanel = memo(
         const onEnd = (end: PointerEvent) => {
           if (end.pointerId !== pointerId) return;
           cleanup();
+          if (resizeRaf != null) window.cancelAnimationFrame(resizeRaf);
+          setDraftHeight(latest);
           onHeightChange(latest);
         };
         handle.addEventListener("pointermove", onMove);
@@ -737,13 +914,19 @@ export const TerminalPanel = memo(
         if (!body) return;
         const handle = event.currentTarget;
         const pointerId = event.pointerId;
+        let latest = draftSplitRatio;
+        let resizeRaf: number | null = null;
         handle.setPointerCapture(pointerId);
 
         const update = (clientX: number) => {
           const rect = body.getBoundingClientRect();
           if (rect.width <= 0) return;
-          const next = Math.min(0.7, Math.max(0.3, (clientX - rect.left) / rect.width));
-          onSplitRatioChange(next);
+          latest = Math.min(0.7, Math.max(0.3, (clientX - rect.left) / rect.width));
+          if (resizeRaf != null) return;
+          resizeRaf = window.requestAnimationFrame(() => {
+            resizeRaf = null;
+            setDraftSplitRatio(latest);
+          });
         };
         update(event.clientX);
 
@@ -760,12 +943,15 @@ export const TerminalPanel = memo(
         const onEnd = (end: PointerEvent) => {
           if (end.pointerId !== pointerId) return;
           cleanup();
+          if (resizeRaf != null) window.cancelAnimationFrame(resizeRaf);
+          setDraftSplitRatio(latest);
+          onSplitRatioChange(latest);
         };
         handle.addEventListener("pointermove", onMove);
         handle.addEventListener("pointerup", onEnd);
         handle.addEventListener("pointercancel", onEnd);
       },
-      [onSplitRatioChange],
+      [draftSplitRatio, onSplitRatioChange],
     );
 
     const panelStyle =
@@ -782,9 +968,9 @@ export const TerminalPanel = memo(
     // stay direct children of terminal-body across split toggles.
     const splitLayoutStyle = splitMode
       ? ({
-          "--terminal-split-ratio": String(splitRatio),
-          "--terminal-split-left": `${splitRatio * 100}%`,
-          "--terminal-split-right": `${(1 - splitRatio) * 100}%`,
+          "--terminal-split-ratio": String(draftSplitRatio),
+          "--terminal-split-left": `${draftSplitRatio * 100}%`,
+          "--terminal-split-right": `${(1 - draftSplitRatio) * 100}%`,
         } as React.CSSProperties)
       : undefined;
     const focusedTabId =
@@ -797,6 +983,36 @@ export const TerminalPanel = memo(
     useEffect(() => {
       focusedTabIdRef.current = focusedTabId;
     }, [focusedTabId]);
+
+    useEffect(() => {
+      const visibleTabs = new Set<string>();
+      if (open) {
+        if (splitMode) {
+          if (splitLeftTabId) visibleTabs.add(splitLeftTabId);
+          if (rightTabId) visibleTabs.add(rightTabId);
+        } else if (state.activeTabId) {
+          visibleTabs.add(state.activeTabId);
+        }
+      }
+      for (const tab of state.tabs) {
+        const sessionId = sessionByTabRef.current.get(tab.id);
+        if (!sessionId) continue;
+        const generation = generationBySessionRef.current.get(sessionId);
+        if (!generation) continue;
+        const visible = visibleTabs.has(tab.id);
+        if (visibilityBySessionRef.current.get(sessionId) === visible) continue;
+        visibilityBySessionRef.current.set(sessionId, visible);
+        void terminalSetVisibility(sessionId, generation, visible).catch(() => {});
+      }
+    }, [
+      open,
+      resizeReadySessions,
+      rightTabId,
+      splitLeftTabId,
+      splitMode,
+      state.activeTabId,
+      state.tabs,
+    ]);
 
     // Clearing attention when a session gains focus.
     useEffect(() => {
@@ -818,7 +1034,9 @@ export const TerminalPanel = memo(
         if (tab.kind !== "claude" && tab.kind !== "codex") return false;
         const sessionId = sessionByTabRef.current.get(tabId);
         if (!sessionId) return false;
-        void terminalWrite(sessionId, mention);
+        if (!inputPumpsRef.current.get(sessionId)?.push({ type: "text", text: mention })) {
+          return false;
+        }
         handlesRef.current.get(tabId)?.focus();
         return true;
       },
@@ -840,6 +1058,16 @@ export const TerminalPanel = memo(
     const contextChip = useMemo(
       () => describeActiveContextChip(activeContext, { focusedKind }),
       [activeContext, focusedKind],
+    );
+    const terminalContextMenuLabels = useMemo(
+      () => ({
+        copy: t("terminal.menu.copy"),
+        paste: t("terminal.menu.paste"),
+        selectAll: t("terminal.menu.selectAll"),
+        find: t("terminal.menu.find"),
+        clear: t("terminal.menu.clear"),
+      }),
+      [t],
     );
 
     const getFocusedTerminalHandle = useCallback(() => {
@@ -864,6 +1092,89 @@ export const TerminalPanel = memo(
     }, [open, renamingTaskId, searchOpen]);
 
     useEffect(() => {
+      const onFocusIn = (event: FocusEvent) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || target === document.body) return;
+        const terminal = target.closest<HTMLElement>(".native-terminal-view");
+        if (terminal) {
+          const sessionId = terminal.dataset.sessionId;
+          lastActualFocusTabRef.current = sessionId
+            ? tabBySessionRef.current.get(sessionId) ?? null
+            : null;
+        } else {
+          lastActualFocusTabRef.current = null;
+        }
+      };
+      document.addEventListener("focusin", onFocusIn, true);
+      const onActivationPointerDown = (event: PointerEvent) => {
+        // First-mouse activation is a native macOS/Tauri concern. Browser
+        // shells (including E2E) may report `document.hasFocus() === false`
+        // indefinitely and must never have ordinary clicks swallowed.
+        if (!canRunTerminal) return;
+        if (
+          appActiveRef.current &&
+          performance.now() >= suppressTerminalMouseUntilRef.current
+        ) {
+          return;
+        }
+        const target = event.target;
+        if (target instanceof HTMLElement && target.closest(".native-terminal-view")) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      document.addEventListener("pointerdown", onActivationPointerDown, true);
+
+      const restore = () => {
+        appActiveRef.current = true;
+        suppressTerminalMouseUntilRef.current = performance.now() + 150;
+        const tabId = restoreFocusTabRef.current;
+        restoreFocusTabRef.current = null;
+        if (!tabId || tabId !== focusedTabIdRef.current) return;
+        if (!shouldFocusTerminalInput(terminalFocusStateRef.current)) return;
+        const activeElement = document.activeElement;
+        if (activeElement && activeElement !== document.body) return;
+        window.requestAnimationFrame(() => handlesRef.current.get(tabId)?.focus());
+      };
+      const deactivate = () => {
+        appActiveRef.current = false;
+        restoreFocusTabRef.current = lastActualFocusTabRef.current;
+      };
+      const onWindowBlur = () => deactivate();
+      const onWindowFocus = () => restore();
+      window.addEventListener("blur", onWindowBlur);
+      window.addEventListener("focus", onWindowFocus);
+
+      let disposed = false;
+      let offNative: (() => void) | null = null;
+      if (canRunTerminal) {
+        void import("@tauri-apps/api/window")
+          .then(({ getCurrentWindow }) =>
+            getCurrentWindow().onFocusChanged(({ payload: active }) => {
+              if (disposed) return;
+              if (active) restore();
+              else deactivate();
+            }),
+          )
+          .then((off) => {
+            if (disposed) off();
+            else offNative = off;
+          })
+          .catch(() => {
+            // Browser tests and unsupported shells use window focus fallback.
+          });
+      }
+
+      return () => {
+        disposed = true;
+        offNative?.();
+        document.removeEventListener("focusin", onFocusIn, true);
+        document.removeEventListener("pointerdown", onActivationPointerDown, true);
+        window.removeEventListener("blur", onWindowBlur);
+        window.removeEventListener("focus", onWindowFocus);
+      };
+    }, [canRunTerminal]);
+
+    useEffect(() => {
       if (!open) {
         cancelFocusedTerminalRefresh();
         return;
@@ -873,14 +1184,16 @@ export const TerminalPanel = memo(
       cancelFocusedTerminalRefresh,
       dock,
       draftHeight,
+      draftSplitRatio,
       draftWidth,
+      focusedGroup,
+      focusedTabId,
       maximized,
       open,
       renamingTaskId,
       scheduleFocusedTerminalRefresh,
       searchOpen,
       splitOpen,
-      splitRatio,
     ]);
 
     const keepTerminalFocusOnToolbarPointerDown = useCallback(
@@ -891,6 +1204,19 @@ export const TerminalPanel = memo(
       },
       [getFocusedTerminalHandle, open, renamingTaskId, searchOpen],
     );
+
+    const keepSearchFocusOnPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLButtonElement | HTMLLabelElement>) => {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      },
+      [],
+    );
+
+    const focusTabSoon = useCallback((tabId: string | null) => {
+      if (!tabId) return;
+      window.requestAnimationFrame(() => handlesRef.current.get(tabId)?.focus());
+    }, []);
 
     const getFocusedSessionId = useCallback(() => {
       const tabId = focusedTabIdRef.current;
@@ -975,22 +1301,39 @@ export const TerminalPanel = memo(
         event.stopPropagation();
 
         if (action === "paste") {
+          const tabId = focusedTabIdRef.current;
+          const sessionId = tabId ? sessionByTabRef.current.get(tabId) ?? null : null;
+          const generation = sessionId
+            ? generationBySessionRef.current.get(sessionId) ?? null
+            : null;
+          const handle = tabId ? handlesRef.current.get(tabId) ?? null : null;
           void (async () => {
             const text = await readClipboardText();
-            if (!text) return;
-            const handle = getFocusedTerminalHandle();
-            if (handle) {
-              handle.pasteText(text);
-              return;
-            }
-            const sessionId = getFocusedSessionId();
-            if (sessionId) await terminalInput(sessionId, { type: "paste", text });
+            if (!text || !sessionId || !generation) return;
+            if (generationBySessionRef.current.get(sessionId) !== generation) return;
+            inputPumpsRef.current.get(sessionId)?.push({ type: "paste", text });
+            handle?.focus();
           })();
           return;
         }
         if (action === "copy") {
-          const text = getFocusedTerminalHandle()?.copySelection();
-          if (text) void writeClipboardText(text);
+          const sessionId = getFocusedSessionId();
+          const generation = sessionId
+            ? generationBySessionRef.current.get(sessionId) ?? null
+            : null;
+          if (sessionId && generation) {
+            void terminalCopySelection(sessionId, generation)
+              .then((text) => {
+                if (text) return writeClipboardText(text);
+              })
+              .catch(() => {
+                const fallback = getFocusedTerminalHandle()?.copySelection();
+                if (fallback) void writeClipboardText(fallback);
+              });
+          } else {
+            const fallback = getFocusedTerminalHandle()?.copySelection();
+            if (fallback) void writeClipboardText(fallback);
+          }
           return;
         }
         if (action === "selectAll") {
@@ -1071,11 +1414,12 @@ export const TerminalPanel = memo(
 
     const handleTerminalMouseMoveCapture = useCallback(
       (event: React.MouseEvent<HTMLDivElement>) => {
-        const focusedSession = focusedTabIdRef.current
-          ? sessionByTabRef.current.get(focusedTabIdRef.current)
-          : undefined;
-        const mouseModeActive = focusedSession
-          ? mouseModesBySessionRef.current.get(focusedSession) ?? false
+        const target = event.target;
+        const view =
+          target instanceof HTMLElement ? target.closest(".native-terminal-view") : null;
+        const sessionId = view instanceof HTMLElement ? view.dataset.sessionId : undefined;
+        const mouseModeActive = sessionId
+          ? mouseModesBySessionRef.current.get(sessionId) ?? false
           : false;
         if (!shouldSuppressTerminalHoverMouseEvent(event.nativeEvent, mouseModeActive)) return;
         event.preventDefault();
@@ -1091,25 +1435,116 @@ export const TerminalPanel = memo(
       const cache = sessionHandlersRef.current;
       let handlers = cache.get(sessionId);
       if (!handlers) {
+        let pendingResize: { cols: number; rows: number } | null = null;
+        let resizeRaf: number | null = null;
+        let resizeTail = Promise.resolve();
+        let pendingScroll = 0;
+        let scrollRaf: number | null = null;
         handlers = {
           onInput: (command: TerminalInputCommand) => {
-            void terminalInput(sessionId, command);
+            inputPumpsRef.current.get(sessionId)?.push(command);
           },
           onResize: (cols: number, rows: number) => {
-            void terminalResize(sessionId, cols, rows).catch(() => {
-              // Session may exit between measurement and IPC delivery.
+            pendingResize = { cols, rows };
+            if (resizeRaf != null) return;
+            resizeRaf = window.requestAnimationFrame(() => {
+              resizeRaf = null;
+              const size = pendingResize;
+              pendingResize = null;
+              if (!size) return;
+              resizeTail = resizeTail.then(() =>
+                terminalResize(sessionId, size.cols, size.rows).catch((resizeError) => {
+                  if (tabBySessionRef.current.has(sessionId)) {
+                    setError(
+                      resizeError instanceof Error ? resizeError.message : String(resizeError),
+                    );
+                  }
+                }),
+              );
             });
           },
           onScroll: (delta: number) => {
-            void terminalScroll(sessionId, delta).catch(() => {
-              // Session may exit before the scroll command lands.
+            pendingScroll += delta;
+            if (scrollRaf != null) return;
+            scrollRaf = window.requestAnimationFrame(() => {
+              scrollRaf = null;
+              const next = pendingScroll;
+              pendingScroll = 0;
+              if (next === 0) return;
+              void terminalScroll(sessionId, next).catch(() => {
+                // Session may exit before the scroll command lands.
+              });
             });
           },
+          onFocusOwnership: () => {
+            lastActualFocusTabRef.current = tabBySessionRef.current.get(sessionId) ?? null;
+          },
+          onSelection: async (command: TerminalSelectionCommand) => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) return;
+            await terminalSelection(sessionId, generation, command);
+          },
+          onCopySelection: async () => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) return "";
+            return terminalCopySelection(sessionId, generation);
+          },
+          onContextCopy: () => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) return;
+            void terminalCopySelection(sessionId, generation)
+              .then((text) => {
+                if (text) return writeClipboardText(text);
+              })
+              .catch(() => {});
+          },
+          onContextPaste: () => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) return;
+            void readClipboardText().then((text) => {
+              if (!text || generationBySessionRef.current.get(sessionId) !== generation) return;
+              inputPumpsRef.current.get(sessionId)?.push({ type: "paste", text });
+            });
+          },
+          onContextSelectAll: () => {
+            const generation = generationBySessionRef.current.get(sessionId);
+            if (!generation) return;
+            void terminalSelection(sessionId, generation, { type: "selectAll" }).catch(() => {});
+          },
+          onContextFind: () => openSearch(),
+          onContextClear: () => {
+            void terminalClear(sessionId).catch(() => {});
+          },
+          canForwardMouse: () =>
+            appActiveRef.current && performance.now() >= suppressTerminalMouseUntilRef.current,
         };
         cache.set(sessionId, handlers);
       }
       return handlers;
     }, []);
+
+    const getHandleRefCallback = useCallback(
+      (tabId: string, sessionId: string) => {
+        let callback = handleRefCallbacksRef.current.get(tabId);
+        if (!callback) {
+          callback = (handle: NativeTerminalViewHandle | null) => {
+            if (!handle) {
+              handlesRef.current.delete(tabId);
+              return;
+            }
+            handlesRef.current.set(tabId, handle);
+            const pending = pendingFramesRef.current.get(sessionId) ?? [];
+            pendingFramesRef.current.delete(sessionId);
+            for (const message of pending) {
+              if (message.kind === "frame") applyStreamFrame(message, handle);
+            }
+          };
+          handleRefCallbacksRef.current.set(tabId, callback);
+        }
+        return callback;
+      },
+      [applyStreamFrame],
+    );
 
     const renderTerminalTab = (tab: (typeof state.tabs)[number]) => {
       const className = tab.id === focusedTabId ? "terminal-tab active" : "terminal-tab";
@@ -1120,6 +1555,10 @@ export const TerminalPanel = memo(
           <button
             type="button"
             className="terminal-tab-main"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              if (!relaunchable) handlesRef.current.get(tab.id)?.focus();
+            }}
             onClick={() => {
               if (relaunchable) {
                 relaunchTab(tab.id);
@@ -1127,6 +1566,7 @@ export const TerminalPanel = memo(
               }
               if (splitOpen && rightTab?.id === tab.id) {
                 setFocusedGroup("right");
+                handlesRef.current.get(tab.id)?.focus();
                 return;
               }
               dispatch({ type: "switch", tabId: tab.id });
@@ -1176,7 +1616,11 @@ export const TerminalPanel = memo(
         .filter(Boolean)
         .join(" ");
       const cwdLabel = pathBaseName(task.cwd);
-      const switchTask = () => dispatch({ type: "switchTask", taskId: task.id });
+      const switchTask = () => {
+        dispatch({ type: "switchTask", taskId: task.id });
+        setFocusedGroup("left");
+        focusTabSoon(taskTabs[0]?.id ?? null);
+      };
       return (
         <div
           key={task.id}
@@ -1184,6 +1628,10 @@ export const TerminalPanel = memo(
           role="option"
           aria-selected={isActive}
           tabIndex={0}
+          onPointerDown={(event) => {
+            if ((event.target as HTMLElement).closest("input")) return;
+            event.preventDefault();
+          }}
           onClick={switchTask}
           onDoubleClick={() => setRenamingTaskId(task.id)}
           onKeyDown={(event) => {
@@ -1277,6 +1725,7 @@ export const TerminalPanel = memo(
                   key={launcher.id}
                   type="button"
                   disabled={!canRunTerminal || !enabled}
+                  onPointerDown={keepTerminalFocusOnToolbarPointerDown}
                   onClick={() => void launch(launcher.id, focusedGroup)}
                   title={
                     canRunTerminal
@@ -1296,6 +1745,7 @@ export const TerminalPanel = memo(
               type="button"
               className="terminal-context-chip"
               disabled={!contextChip.enabled}
+              onPointerDown={keepTerminalFocusOnToolbarPointerDown}
               onClick={() => attachMention(activeItemMention(activeContext, attachStyle))}
               title={
                 contextChip.enabled
@@ -1352,6 +1802,7 @@ export const TerminalPanel = memo(
               <button
                 type="button"
                 className="terminal-sidebar-btn"
+                onPointerDown={keepTerminalFocusOnToolbarPointerDown}
                 onClick={() => setSidebarCollapsed((value) => !value)}
                 aria-label={
                   sidebarCollapsed ? t("terminal.sidebar.expand") : t("terminal.sidebar.collapse")
@@ -1369,6 +1820,7 @@ export const TerminalPanel = memo(
                 type="button"
                 className="terminal-sidebar-btn"
                 disabled={!canRunTerminal}
+                onPointerDown={keepTerminalFocusOnToolbarPointerDown}
                 onClick={createTask}
                 aria-label={t("terminal.task.new")}
                 title={t("terminal.task.new")}
@@ -1438,36 +1890,16 @@ export const TerminalPanel = memo(
                     key={tab.id}
                     className={className}
                     onMouseMoveCapture={handleTerminalMouseMoveCapture}
-                    onPointerDown={() => setFocusedGroup(isRight ? "right" : "left")}
+                    onPointerDown={() => {
+                      setFocusedGroup(isRight ? "right" : "left");
+                      handlesRef.current.get(tab.id)?.focus();
+                    }}
                   >
-                    {isVisible ? (
-                      <button
-                        type="button"
-                        className="terminal-pane-close"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          closeTab(tab.id);
-                        }}
-                        title={t("terminal.tab.close", { title: tab.title })}
-                        aria-label={t("terminal.tab.close", { title: tab.title })}
-                      >
-                        <X size={13} />
-                      </button>
-                    ) : null}
                     <div className="terminal-instance-host">
                       {sessionId && handlers ? (
                         <NativeTerminalView
-                          ref={(handle) => {
-                            if (handle) {
-                              handlesRef.current.set(tab.id, handle);
-                            } else {
-                              handlesRef.current.delete(tab.id);
-                            }
-                          }}
+                          ref={getHandleRefCallback(tab.id, sessionId)}
                           sessionId={sessionId}
-                          frame={framesBySession[sessionId] ?? null}
                           active={isVisible}
                           focused={isFocused}
                           resizeReady={resizeReadySessions[sessionId] === true}
@@ -1478,6 +1910,16 @@ export const TerminalPanel = memo(
                           onResize={handlers.onResize}
                           onScroll={handlers.onScroll}
                           onCopyOnSelect={copySelectedTerminalText}
+                          onFocusOwnership={handlers.onFocusOwnership}
+                          onSelection={handlers.onSelection}
+                          onCopySelection={handlers.onCopySelection}
+                          contextMenuLabels={terminalContextMenuLabels}
+                          onContextCopy={handlers.onContextCopy}
+                          onContextPaste={handlers.onContextPaste}
+                          onContextSelectAll={handlers.onContextSelectAll}
+                          onContextFind={handlers.onContextFind}
+                          onContextClear={handlers.onContextClear}
+                          canForwardMouse={handlers.canForwardMouse}
                         />
                       ) : null}
                     </div>
@@ -1512,6 +1954,7 @@ export const TerminalPanel = memo(
                   <button
                     type="button"
                     className="terminal-search-button"
+                    onPointerDown={keepSearchFocusOnPointerDown}
                     onClick={() => void runTerminalSearch("previous")}
                     aria-label={t("terminal.search.previous")}
                     title={t("terminal.search.previous")}
@@ -1521,6 +1964,7 @@ export const TerminalPanel = memo(
                   <button
                     type="submit"
                     className="terminal-search-button"
+                    onPointerDown={keepSearchFocusOnPointerDown}
                     aria-label={t("terminal.search.next")}
                     title={t("terminal.search.next")}
                   >
@@ -1530,13 +1974,17 @@ export const TerminalPanel = memo(
                     <input
                       type="checkbox"
                       checked={searchCaseSensitive}
-                      onChange={(event) => setSearchCaseSensitive(event.target.checked)}
+                      onChange={(event) => {
+                        setSearchCaseSensitive(event.target.checked);
+                        window.requestAnimationFrame(() => searchInputRef.current?.focus());
+                      }}
                     />
                     <span>Aa</span>
                   </label>
                   <button
                     type="button"
                     className="terminal-search-button"
+                    onPointerDown={keepSearchFocusOnPointerDown}
                     onClick={closeSearch}
                     aria-label={t("terminal.search.close")}
                     title={t("terminal.search.close")}
@@ -1565,7 +2013,7 @@ export const TerminalPanel = memo(
                   aria-orientation="vertical"
                   aria-valuemin={30}
                   aria-valuemax={70}
-                  aria-valuenow={Math.round(splitRatio * 100)}
+                  aria-valuenow={Math.round(draftSplitRatio * 100)}
                   onPointerDown={startSplitResize}
                 />
               ) : null}

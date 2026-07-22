@@ -29,6 +29,7 @@ import {
   selectedTerminalText,
   selectionForClickCount,
   selectionForSelectDrag,
+  selectionFromSpans,
   selectionSpanForRow,
   terminalSearchSpanForRow,
   terminalBeforeInputToText,
@@ -263,6 +264,7 @@ function firePointer(
     clientX: 8 + opts.col * 10 + 5,
     clientY: 6 + opts.row * 15 + 7,
     button: opts.button ?? 0,
+    buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1,
     shiftKey: opts.shiftKey ?? false,
   });
   Object.defineProperty(event, "pointerId", { value: 1 });
@@ -316,6 +318,24 @@ describe("NativeTerminalView helpers", () => {
         focus: { row: 1, col: 1 },
       }),
     ).toBe("bc\nde");
+  });
+
+  it("includes the leading glyph when selection starts on a wide-cell spacer", () => {
+    expect(
+      selectedTerminalText(
+        [[cell("界", 2), cell("", 0), cell("x")]],
+        { anchor: { row: 0, col: 1 }, focus: { row: 0, col: 1 } },
+      ),
+    ).toBe("界");
+  });
+
+  it("projects canonical backend selection spans into a local range", () => {
+    expect(
+      selectionFromSpans([
+        { row: 2, start: 0, end: 4 },
+        { row: 1, start: 3, end: 7 },
+      ]),
+    ).toEqual({ anchor: { row: 1, col: 3 }, focus: { row: 2, col: 4 } });
   });
 
   it("normalizes selection regardless of drag direction", () => {
@@ -1288,6 +1308,28 @@ describe("NativeTerminalView test harness cleanup", () => {
 });
 
 describe("NativeTerminalView layout refresh", () => {
+  it("retains hidden frames without scheduling canvas paint", () => {
+    const { ref } = renderNativeTerminalView({ active: false });
+    act(() => flushRaf());
+    canvasStub.clearRect.mockClear();
+
+    expect(ref.current?.applyFrame(frame([rowOf("hidden")]))).toBe(true);
+    act(() => flushRaf());
+
+    expect(canvasStub.clearRect).not.toHaveBeenCalled();
+  });
+
+  it("rejects a partial frame when its dimensions do not match the retained grid", () => {
+    const initial = frame([rowOf("hello")]);
+    const { ref } = renderNativeTerminalView({ frame: initial });
+    act(() => flushRaf());
+    const mismatched = frame([rowOf("x")]);
+    mismatched.cols = 1;
+    mismatched.rows = 2;
+    mismatched.dirtyRows = [0];
+    expect(ref.current?.applyFrame(mismatched)).toBe(false);
+  });
+
   it("refreshLayout remeasures and focuses the textarea without prop focus changes", () => {
     const { container, ref, onResize } = renderNativeTerminalView();
 

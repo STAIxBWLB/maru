@@ -2379,6 +2379,11 @@ const ko: Record<string, string> = {
   "terminal.search.next": "다음 결과",
   "terminal.search.case": "대소문자 구분",
   "terminal.search.close": "검색 닫기",
+  "terminal.menu.copy": "복사",
+  "terminal.menu.paste": "붙여넣기",
+  "terminal.menu.selectAll": "모두 선택",
+  "terminal.menu.find": "찾기",
+  "terminal.menu.clear": "터미널 지우기",
   "terminal.tauriRequired": "통합 터미널은 Tauri 앱에서만 사용할 수 있습니다.",
 
   "diagram.scaffold.title": "다이어그램",
@@ -5308,6 +5313,11 @@ const en: Record<string, string> = {
   "terminal.search.next": "Next result",
   "terminal.search.case": "Case sensitive",
   "terminal.search.close": "Close search",
+  "terminal.menu.copy": "Copy",
+  "terminal.menu.paste": "Paste",
+  "terminal.menu.selectAll": "Select All",
+  "terminal.menu.find": "Find",
+  "terminal.menu.clear": "Clear Terminal",
   "terminal.tauriRequired": "Integrated terminal is only available in the Tauri app.",
 
   "diagram.scaffold.title": "Diagram",

@@ -4,6 +4,7 @@ use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use serde::Serialize;
+use std::collections::HashMap;
 
 use super::model::TerminalEventProxy;
 
@@ -28,7 +29,7 @@ pub struct TerminalCell {
     pub inverse: bool,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum TerminalColor {
     Named { name: String },
@@ -50,6 +51,14 @@ pub struct TerminalMouseFlags {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalSelectionSpan {
+    pub row: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalFrame {
     pub session_id: String,
     pub cols: u16,
@@ -65,6 +74,92 @@ pub struct TerminalFrame {
     pub display_offset: usize,
     pub mouse: TerminalMouseFlags,
     pub alt_screen: bool,
+    pub selection_spans: Vec<TerminalSelectionSpan>,
+    pub wrapped_rows: Vec<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCellStyle {
+    pub fg: TerminalColor,
+    pub bg: TerminalColor,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub inverse: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct TerminalWireCell(pub String, pub u8, pub u32);
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalWireFrame {
+    pub session_id: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub cursor: TerminalCursor,
+    pub palette: Vec<TerminalCellStyle>,
+    pub lines: Vec<Vec<TerminalWireCell>>,
+    pub scrollback_len: usize,
+    pub title: Option<String>,
+    pub dirty_rows: Option<Vec<usize>>,
+    pub display_offset: usize,
+    pub mouse: TerminalMouseFlags,
+    pub alt_screen: bool,
+    pub selection_spans: Vec<TerminalSelectionSpan>,
+    pub wrapped_rows: Vec<bool>,
+}
+
+impl From<TerminalFrame> for TerminalWireFrame {
+    fn from(frame: TerminalFrame) -> Self {
+        let mut palette: Vec<TerminalCellStyle> = Vec::new();
+        let mut palette_indexes: HashMap<TerminalCellStyle, u32> = HashMap::new();
+        let lines = frame
+            .lines
+            .into_iter()
+            .map(|line| {
+                line.into_iter()
+                    .map(|cell| {
+                        let style = TerminalCellStyle {
+                            fg: cell.fg,
+                            bg: cell.bg,
+                            bold: cell.bold,
+                            italic: cell.italic,
+                            underline: cell.underline,
+                            inverse: cell.inverse,
+                        };
+                        let style_index = match palette_indexes.get(&style) {
+                            Some(index) => *index,
+                            None => {
+                                let index = palette.len() as u32;
+                                palette.push(style.clone());
+                                palette_indexes.insert(style, index);
+                                index
+                            }
+                        };
+                        TerminalWireCell(cell.ch, cell.width, style_index)
+                    })
+                    .collect()
+            })
+            .collect();
+        Self {
+            session_id: frame.session_id,
+            cols: frame.cols,
+            rows: frame.rows,
+            cursor: frame.cursor,
+            palette,
+            lines,
+            scrollback_len: frame.scrollback_len,
+            title: frame.title,
+            dirty_rows: frame.dirty_rows,
+            display_offset: frame.display_offset,
+            mouse: frame.mouse,
+            alt_screen: frame.alt_screen,
+            selection_spans: frame.selection_spans,
+            wrapped_rows: frame.wrapped_rows,
+        }
+    }
 }
 
 /// Snapshot the terminal. `dirty` selects which rows to serialize: `None`
@@ -92,8 +187,12 @@ pub fn snapshot_term(
         }
         cells
     };
+    let is_wrapped = |visible_row: usize| -> bool {
+        let line = &grid[Line(visible_row as i32 - display_offset as i32)];
+        cols > 0 && line[Column(cols - 1)].flags.contains(Flags::WRAPLINE)
+    };
 
-    let (lines, dirty_rows) = match dirty {
+    let (lines, dirty_rows, wrapped_rows) = match dirty {
         Some(indices) => {
             let lines = indices
                 .iter()
@@ -101,16 +200,45 @@ pub fn snapshot_term(
                 .map(|&row| read_row(row))
                 .collect();
             let kept = indices.iter().copied().filter(|&row| row < rows).collect();
-            (lines, Some(kept))
+            let wrapped = indices
+                .iter()
+                .copied()
+                .filter(|&row| row < rows)
+                .map(is_wrapped)
+                .collect();
+            (lines, Some(kept), wrapped)
         }
         None => {
             let mut lines = Vec::with_capacity(rows);
             for row in 0..rows {
                 lines.push(read_row(row));
             }
-            (lines, None)
+            let wrapped = (0..rows).map(is_wrapped).collect();
+            (lines, None, wrapped)
         }
     };
+
+    let selection_range = term
+        .selection
+        .as_ref()
+        .and_then(|selection| selection.to_range(term));
+    let mut selection_spans = Vec::new();
+    if let Some(range) = selection_range {
+        for row in 0..rows {
+            let line = Line(row as i32 - display_offset as i32);
+            let mut start = None;
+            let mut end = None;
+            for col in 0..cols {
+                if range.contains(alacritty_terminal::index::Point::new(line, Column(col))) {
+                    start.get_or_insert(col);
+                    end = Some(col);
+                }
+            }
+            if let (Some(start), Some(end)) = (start, end) {
+                selection_spans.push(TerminalSelectionSpan { row, start, end });
+            }
+        }
+    }
 
     let point = grid.cursor.point;
     let cursor_visible = display_offset == 0 && mode.contains(TermMode::SHOW_CURSOR);
@@ -135,6 +263,8 @@ pub fn snapshot_term(
             sgr: mode.contains(TermMode::SGR_MOUSE),
         },
         alt_screen: mode.contains(TermMode::ALT_SCREEN),
+        selection_spans,
+        wrapped_rows,
     }
 }
 
@@ -280,6 +410,7 @@ fn named_color_key(name: NamedColor) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::TerminalWireFrame;
     use crate::terminal::model::TerminalModel;
 
     #[test]
@@ -308,6 +439,28 @@ mod tests {
         assert_eq!(frame.lines.len(), 1);
         assert_eq!(frame.lines[0][0].ch, "r");
         assert_eq!(frame.lines[0][3].ch, "1");
+    }
+
+    #[test]
+    fn palette_wire_frame_meets_terminal_payload_budget() {
+        let mut model = TerminalModel::new(120, 30, super::super::model::NullTerminalWriter);
+        model.advance(b"colored \x1b[31mterminal\x1b[0m output");
+
+        let full = TerminalWireFrame::from(model.snapshot("term-1"));
+        let full_size = serde_json::to_vec(&full).unwrap().len();
+        assert!(full_size <= 100 * 1024, "full frame was {full_size} bytes");
+
+        let patch = TerminalWireFrame::from(model.snapshot_dirty("term-1", &[0]));
+        let patch_size = serde_json::to_vec(&patch).unwrap().len();
+        assert!(patch_size <= 4 * 1024, "row patch was {patch_size} bytes");
+    }
+
+    #[test]
+    fn snapshot_carries_wrap_metadata() {
+        let mut model = TerminalModel::new(5, 3, super::super::model::NullTerminalWriter);
+        model.advance(b"abcdefgh");
+        let frame = model.snapshot("term-1");
+        assert_eq!(frame.wrapped_rows, vec![true, false, false]);
     }
 
     #[test]

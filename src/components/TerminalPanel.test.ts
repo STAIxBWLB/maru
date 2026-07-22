@@ -4,6 +4,7 @@ import {
   cancelTerminalLayoutRefresh,
   refreshFocusedTerminal,
   shouldFocusTerminalInput,
+  terminalFrameDisposition,
   type TerminalFocusState,
 } from "./TerminalPanel";
 
@@ -19,6 +20,8 @@ function focusState(overrides: Partial<TerminalFocusState> = {}): TerminalFocusS
 function terminalHandle(): NativeTerminalViewHandle {
   return {
     focus: vi.fn(),
+    ownsFocus: vi.fn(() => false),
+    applyFrame: vi.fn(() => true),
     refreshLayout: vi.fn(),
     pasteText: vi.fn(),
     copySelection: vi.fn(() => null),
@@ -74,5 +77,22 @@ describe("TerminalPanel focus refresh helpers", () => {
 
     expect(handle.refreshLayout).toHaveBeenCalledWith({ focus: false });
     expect(handle.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TerminalPanel ordered frame stream", () => {
+  it("accepts an initial full frame and contiguous patches", () => {
+    expect(terminalFrameDisposition(null, "g1", 1, 0, false)).toBe("apply");
+    expect(terminalFrameDisposition({ generation: "g1", lastSeq: 1 }, "g1", 2, 1, true)).toBe(
+      "apply",
+    );
+  });
+
+  it("rejects duplicates and gaps while accepting a full resync", () => {
+    const current = { generation: "g1", lastSeq: 3 };
+    expect(terminalFrameDisposition(current, "g1", 3, 2, true)).toBe("duplicate");
+    expect(terminalFrameDisposition(current, "g1", 5, 4, true)).toBe("resync");
+    expect(terminalFrameDisposition(current, "g1", 5, 4, false)).toBe("apply");
+    expect(terminalFrameDisposition(current, "g2", 1, 0, true)).toBe("resync");
   });
 });

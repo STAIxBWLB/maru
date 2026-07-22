@@ -177,6 +177,26 @@ make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
   Python sidecar + MediaPipe voice/gesture editing. Not shipped — Phase 4 was
   repurposed to Document Studio. Voice/gesture remains a future track.
 
+### Integrated terminal reliability contract
+
+- The terminal panel mounts eagerly and keeps its textarea/canvas identity
+  across collapse and tab switches. macOS first-mouse activation focuses a
+  terminal in one click; activation clicks are not forwarded to a TUI, while
+  Shift always forces local selection.
+- Each PTY session streams ordered, generation-tagged frames through a Tauri
+  Channel. The frontend acknowledges applied frames, the backend keeps at most
+  two frames in flight, hidden sessions do not serialize or paint frames, and
+  a sequence/dimension mismatch requests a full resync.
+- Frames use a palette plus compact `[text,width,style]` cells. Release gates
+  cap a 120x30 full frame at 100 KiB and a dirty-row patch at 4 KiB.
+- The Rust Alacritty model owns selection and copy semantics, including
+  scrollback coordinates, soft wraps, wide CJK cells, resize reflow, semantic
+  word selection, and line selection. The canvas keeps an optimistic drag
+  overlay for immediate feedback.
+- Frontend input is queued before spawn, microtask-batched, and sent in strict
+  order. Normal key/text/paste delivery reads mirrored terminal modes without
+  contending with the output parser's screen-model lock.
+
 ## Phase 3 verification gates (passed)
 
 1. **Catalog watcher + auto-refresh** — notify recursively watches `inbox/items/`, `tasks/{active,calendar}`, every BU's `02-admin-approvals/` + `03-evidence-cert/` + `.maru/bu-config.yaml`; bursts are debounced 500 ms and the React pane re-queries in another 300 ms.
