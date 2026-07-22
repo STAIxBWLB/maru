@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased — Graph workspace V5
+## v0.4.12 — 2026-07-23 — Graph Workbench V5
 
 - **Adaptive graph workspace.** The graph shell measures its own width and
   switches tiers: wide (≥1280, Filters + Workbench docked with drag-resize),
@@ -47,6 +47,17 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   (`e2e/graph.spec.ts`), plus a shell-geometry regression suite
   (`e2e/graph-shell.spec.ts`) covering the right-docked-terminal zero-size
   canvas bug. `pnpm test:e2e:graph` and `pnpm bench:graph` scripts added.
+
+- **Graph fixes from adversarial review.** Path-highlight reducers precompute
+  their overlay sets once per highlight change instead of rebuilding a
+  path-sized set per node on every Sigma refresh (seconds of frozen canvas on
+  long paths at 10k nodes); canonical Local targets with an unknown owner
+  match on relative path alone, so "View in graph" resolves against
+  owner-stamped scanner entries; the derivation pipeline splits into a stable
+  analysis stage and a transient search stage, so typing in search no longer
+  restarts the insights worker with a full graph clone per keystroke; the
+  filtered-empty "Reset filters" action also clears the search query; and the
+  insights worker logs failures instead of silently showing empty sections.
 
 ## v0.4.11 — 2026-07-23 — Terminal Hardening + Scheduled Jobs
 
