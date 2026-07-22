@@ -74,7 +74,7 @@ Options:
    - vault: `<vault.path>/reports/vault-graph.json`, `<vault.path>/reports/graph-report-YYMMDD.md`
    - workspace: `<vault.path>/reports/workspace-graph.json` (report suppressed — DR-023 §6; counts printed to stdout)
    - code: `<target>/graphify-out/graph.json`, `<target>/graphify-out/graph-report-YYMMDD.md`
-6. For vault builds, append `GRAPH` event to `vault/log.md` via Obsidian MCP:
+6. For vault builds, append `GRAPH` event to `vault/log` (plain logfile, direct fs append):
    ```
    YYYY-MM-DD HH:MM  GRAPH  -  vault/reports/graph-report-YYMMDD.md  — N notes, M communities, K surprises
    ```

@@ -60,7 +60,7 @@ Accept: [a] new, [b] update, [s] skip, [q] quit
 ### Step 5: Connect
 - Call `/vault-connect note=<new-note>` to wire wiki-links (delegates log append to /vault-connect for CONNECT event)
 
-### Step 6: Append LEARN event to vault/log.md
+### Step 6: Append LEARN event to vault/log
 
 Always append — even when user skips — so the query history is preserved.
 
@@ -95,5 +95,5 @@ YYYY-MM-DD HH:MM  LEARN  <project>  <source> → <vault/notes/x.md>  — <note>
 ## Related
 
 - `<workspace-root>/CLAUDE.md` §"Query→Wiki 환원 루프" — the policy
-- `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log.md 포맷" — log line format
+- `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷" — log line format
 - `/vault-extract`, `/vault-connect` — downstream skills invoked in steps 4-5

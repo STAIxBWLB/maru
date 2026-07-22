@@ -34,14 +34,14 @@ Find relationships between a note and existing vault notes, create wiki links.
    - Add wiki link to both notes (bidirectional)
    - Include relationship context after the link
 4. Update relevant MOCs if new connections span topics
-5. **Append CONNECT event to vault/log.md** (ingest chain audit trail)
+5. **Append CONNECT event to vault/log** (ingest chain audit trail)
 6. Report connections made and any cross-domain patterns discovered
 
 ## Log Append (Step 5 — REQUIRED)
 
-Every /vault-connect invocation that creates ≥1 wiki link must produce one `log.md` line via MCP Obsidian.
+Every /vault-connect invocation that creates ≥1 wiki link must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
 
-**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log.md 포맷"):
+**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷"):
 
 ```
 YYYY-MM-DD HH:MM  CONNECT  <project>  <vault/notes/x.md>  — linked `[[a]]`, `[[b]]`, `[[c]]`
@@ -64,10 +64,10 @@ YYYY-MM-DD HH:MM  CONNECT  <project>  <vault/notes/x.md>  — linked `[[a]]`, `[
 - Every connection must have stated reasoning
 - Bidirectional: if A links to B, B should link to A
 - Don't force connections — quality over quantity
-- **CONNECT event appended to log.md for every run with ≥1 link created**
+- **CONNECT event appended to log for every run with ≥1 link created**
 
 ## Output
 - List of connections made with reasoning
 - Cross-domain patterns noted (if any)
 - Updated MOCs (if any)
-- log.md append status
+- log append status

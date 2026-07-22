@@ -90,12 +90,12 @@ Accept: [y]es, [n]o
 
 1. `Grep old-name` 재실행 — 잔여 매치 확인
 2. **허용되는 잔여**:
-   - `log.md` 내 이력 이벤트 (e.g. "old → new" 정정 기록)
+   - `log` 내 이력 이벤트 (e.g. "old → new" 정정 기록)
    - `reports/vault-graph.json` (다음 build에서 재생성)
    - Meeting 원본 파일명 (`work/meetings/.../04-02 회의 - JSIF-AWS...md`) — 물리 파일명 변경은 별도 의사결정
 3. **의도되지 않은 잔여 존재** → 사용자에게 보고 + 추가 패치 여부 확인
 
-### Step 6: log.md LINT event append
+### Step 6: log LINT event append
 
 ```
 YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N files updated
@@ -106,7 +106,7 @@ YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N 
 - **Move_note 실패 시 ABORT** — 참조 patch 단계 진입 금지
 - **Patch 도중 일부 실패** → 성공분 기록 + 실패 목록 사용자 보고, 자동 롤백 없음 (감사 가능한 부분 진척 우선)
 - **설치 스킬 인식**: `~/.claude/skills/` 및 `~/.codex/skills/`는 canonical `~/.maru/skills/`를 가리키는 symlink 설치 대상이다. 편집은 canonical에서 수행한다.
-- **vault 쓰기는 MCP Obsidian만** (notes/·reports/·ops/·log.md)
+- **vault 쓰기는 MCP Obsidian만** (notes/·reports/·ops/). 예외: `log`는 plain logfile로 fs append 허용
 - **skill 파일은 Filesystem Edit** (`.claude/skills/`·`~/.maru/skills/`는 vault 외부)
 
 ## Quality Gates

@@ -23,7 +23,7 @@ Restructure vault content for better organization. **Never auto-executes** — a
 3. On explicit accept → execute
 4. Update all affected wiki links via `mcp__obsidian__patch_note` (bidirectional)
 5. Run `/vault-lint note=<path>` on each affected note
-6. Append `CONNECT` event to `log.md` for each wiki-link update batch
+6. Append `CONNECT` event to `log` for each wiki-link update batch
 7. Commit changes (via auto-commit hook or user `/commit`)
 
 ## Approval Gate Format
@@ -69,7 +69,7 @@ Filesystem access (Read/Write/Edit/Bash) is forbidden on vault paths.
 
 ## Log Append
 
-For each refactor batch that modifies ≥1 note, append one `CONNECT` event to `log.md`:
+For each refactor batch that modifies ≥1 note, append one `CONNECT` event to `log`:
 
 ```
 YYYY-MM-DD HH:MM  CONNECT  -  refactor:<operation>  — <summary> (N notes, M links)
@@ -93,4 +93,4 @@ Each individual wiki-link update does not get its own log line — one line per 
 - Proposed changes with reasoning (approval gate block)
 - On accept: execution report (per-note status)
 - Verify results for all affected notes
-- log.md append confirmation
+- log append confirmation

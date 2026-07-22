@@ -46,7 +46,7 @@ loaded at runtime.
   create or update only a local promotion proposal and tell the user which vault
   skill to run.
 - Operational task logging stays work-local: append timeline lines only to
-  `.maru/tasks-log.md`. The `vault/log.md` `TASK` event is promoted later by
+  `.maru/tasks-log.md`. The `vault/log` `TASK` event is promoted later by
   vault-sync or an explicit vault skill — never MCP-append to the vault
   (context-enrichment §6).
 

@@ -26,7 +26,7 @@ Before writing ANY vault note, verify the source summary.md frontmatter has **al
 
 If any check fails:
 - **ABORT** the extract for this summary
-- Emit failed event to `log.md`: `YYYY-MM-DD HH:MM  EXTRACT  <proj>  <summary> → -  — failed: <reason>` (reasons include: `missing required fields: <field list>`, `dead topic: [[<target>]] not in vault/notes/`)
+- Emit failed event to `log`: `YYYY-MM-DD HH:MM  EXTRACT  <proj>  <summary> → -  — failed: <reason>` (reasons include: `missing required fields: <field list>`, `dead topic: [[<target>]] not in vault/notes/`)
 - Return error to caller (`inbox-process`, /vault-sync, /vault-pipeline) — caller decides whether to continue with other items
 - **Do NOT synthesize empty values. Do NOT guess. Do NOT proceed to write.**
 - User must fix summary.md and re-run. `inbox-process` must re-emit summary with correct fields when the summary came from an inbox item.
@@ -74,15 +74,15 @@ If any check fails:
    - Pass entities list to `/vault-connect` as wiki-link candidate seeds (`entities_hint` parameter)
    - `/vault-connect` uses entities to prioritize wiki-link discovery in its first pass
    - **Note**: `keywords` field is NOT carried forward to vault notes — it exists only for route scoring reproducibility
-9. **Append EXTRACT event to vault/log.md** (ingest chain audit trail)
+9. **Append EXTRACT event to vault/log** (ingest chain audit trail)
 
 > **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → if still ambiguous, prompt user. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
 
 ## Log Append (Step 9 — REQUIRED)
 
-Every note created or updated by /vault-extract must produce one `log.md` line via MCP Obsidian (`read_note` → append → `write_note`, or `patch_note`).
+Every note created or updated by /vault-extract must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
 
-**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log.md 포맷"):
+**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷"):
 
 ```
 YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type>
@@ -129,9 +129,9 @@ YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type
 - Composability test: "This note argues that [title]" must make sense
 - Each note must link to at least 1 domain MOC
 - source field must be set
-- **EXTRACT event appended to log.md for every created/updated note**
+- **EXTRACT event appended to log for every created/updated note**
 
 ## Output
 - List of created notes with descriptions
-- Count of log.md lines appended
+- Count of log lines appended
 - Suggestion to run /vault-connect on new notes

@@ -1,7 +1,7 @@
 ---
 name: vault-rethink
 trigger: /vault-rethink
-description: Review accumulated observations and tensions for methodology evolution. Runs aging check on reminders.md (M4-2 2026-04-22) as part of review flow.
+description: Review accumulated observations and tensions for methodology evolution.
 ---
 
 # /vault-rethink [mode]
@@ -58,7 +58,7 @@ Review + drift + aging 모두 실행.
 - 10+ unprocessed observations
 - 5+ unprocessed tensions
 - Session orient hook suggests when thresholds met
-- **Reminders Active 500건 재도달** (자동 T1 trigger)
+- **Inline tasks Active 500건 재도달** (자동 T1 trigger)
 
 ## Output
 
@@ -72,7 +72,7 @@ Review + drift + aging 모두 실행.
 
 Changes require explicit approval. This skill proposes, user decides.
 
-**Single exception (M4-2)**: reminders.md 200 soft 경고는 report에 기록만 (non-blocking). 500 hard 리셋은 별도 compaction 제안 블록으로 승격.
+(구 M4-2 reminders.md aging check는 2026-05-05 인라인 태스크의 work tasks/ 이관으로 retired.)
 
 ## 관련
 

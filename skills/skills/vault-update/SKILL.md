@@ -25,7 +25,7 @@ Update a note with new information while preserving original meaning.
 5. Check connected notes (via `mcp__obsidian__search_notes` for wiki-link targets); propose cascading updates if needed
 6. Record update in note body (timestamp or changelog line)
 7. Run `/vault-lint note=<path>` on updated note
-8. Append `CONNECT` event to `log.md` if wiki-links changed, or skip log if only body/frontmatter touched
+8. Append `CONNECT` event to `log` if wiki-links changed, or skip log if only body/frontmatter touched
 
 ## Vault Access
 
@@ -63,4 +63,4 @@ If only body text or frontmatter changed (no link impact), **do not append** —
 - Summary of changes made
 - Connected notes reviewed (and any cascading proposals)
 - note-level `/vault-lint` result
-- log.md append status (if applicable)
+- log append status (if applicable)
