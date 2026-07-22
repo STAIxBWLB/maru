@@ -364,7 +364,11 @@ export const TerminalPanel = memo(
           return;
         }
         const applied = disposition === "apply" && handle.applyFrame(frame);
-        streamSeqBySessionRef.current.set(sessionId, { generation, lastSeq: seq });
+        // Ack regardless (credit is about delivery, not application), but only
+        // advance the cursor on a frame that actually landed. Otherwise a
+        // dropped patch followed by a failed requestFull would let the next
+        // patch look contiguous and paper over the missing rows for good.
+        if (applied) streamSeqBySessionRef.current.set(sessionId, { generation, lastSeq: seq });
         void terminalAck(sessionId, generation, seq).catch(() => {});
         if (!applied) {
           void terminalRequestFull(sessionId, generation).catch(() => {});
@@ -406,6 +410,10 @@ export const TerminalPanel = memo(
             const pending = pendingFramesRef.current.get(message.sessionId) ?? [];
             pending.push(message);
             pendingFramesRef.current.set(message.sessionId, pending.slice(-2));
+            // Ack even while buffered: the backend only allows two unacked
+            // frames, so withholding acks here stalls the emitter permanently
+            // if the handle attaches late. A seq gap resyncs via requestFull.
+            void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
             return;
           }
           applyStreamFrame(message, handle);
@@ -624,6 +632,11 @@ export const TerminalPanel = memo(
             [sessionId]: true,
           }));
           window.requestAnimationFrame(() => {
+            // Spawn takes long enough for the user to move on: only claim focus
+            // if this tab is still the focused one and no rename/search input
+            // owns the caret, otherwise launching steals keystrokes mid-typing.
+            if (focusedTabIdRef.current !== tabId) return;
+            if (!shouldFocusTerminalInput(terminalFocusStateRef.current)) return;
             handlesRef.current.get(tabId)?.focus();
           });
         } catch (err) {

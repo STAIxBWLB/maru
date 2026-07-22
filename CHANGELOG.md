@@ -45,6 +45,18 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   copy semantics for soft wraps and wide CJK cells; drag selection is
   animation-frame coalesced, supports edge auto-scroll, and exposes a terminal
   Copy/Paste/Select All/Find/Clear menu.
+- **Terminal streaming and lifecycle fixes from adversarial review.** The frame
+  emitter no longer loses a condvar wakeup, which could park an idle session
+  and leave the last chunk of output unrendered (or strand the pump thread on
+  shutdown); pending damage now drains past the credit window when a session
+  stops, so the tail of a command's output survives. Sessions unregister on
+  kill and on child exit without waiting for a PTY reader that a surviving
+  grandchild holds open. PTY and model resize are atomic against the parser,
+  bracketed-paste payloads can no longer smuggle their own terminator, the
+  input pump fails closed instead of delivering later batches past a dropped
+  one, buffered frames are acknowledged so backpressure cannot deadlock,
+  unapplied frames force a real resync, launch no longer steals focus from a
+  rename or search field, and clipboard copies respect soft wraps.
 - **Graph/catalog hygiene.** Ideation stays graph-visible while scratchpad
   memos and temp are excluded from the workspace catalog and graph scans,
   honoring relocated roots and renamed collections from

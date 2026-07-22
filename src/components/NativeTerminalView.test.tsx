@@ -299,6 +299,21 @@ describe("NativeTerminalView helpers", () => {
     expect(frameToText(frame([row, [cell("o"), cell("k")]]))).toBe("안녕\nok");
   });
 
+  it("joins soft-wrapped rows without a newline when copying", () => {
+    const grid = [
+      [cell("h"), cell("t"), cell("t"), cell("p")],
+      [cell(":"), cell("/"), cell("/"), cell("a")],
+      [cell("d"), cell("o"), cell("n"), cell("e")],
+    ];
+    const selection = { anchor: { row: 0, col: 0 }, focus: { row: 2, col: 3 } };
+    // Row 0 soft-wraps into row 1; row 1 ends the logical line.
+    expect(selectedTerminalText(grid, selection, [true, false, false])).toBe(
+      "http://a\ndone",
+    );
+    // Without wrap metadata every row is treated as a hard line break.
+    expect(selectedTerminalText(grid, selection)).toBe("http\n://a\ndone");
+  });
+
   it("renders wide cells across their width and spacer cells without text", () => {
     expect(cellDisplayWidth(cell("안", 2))).toBe("2ch");
     expect(cellDisplayText(cell("안", 2))).toBe("안");

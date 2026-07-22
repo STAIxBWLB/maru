@@ -192,9 +192,21 @@ impl TerminalStream {
         }
     }
 
+    /// Wake the frame emitter. The `wake` mutex must be held across the
+    /// notification: an unlocked notify can land between the emitter's
+    /// predicate check and its `wait()` and be lost, parking the session until
+    /// the next byte of PTY output — or forever, once the PTY goes quiet.
+    fn signal(&self) {
+        let _guard = self
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.wake_cv.notify_all();
+    }
+
     fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Release);
-        self.wake_cv.notify_one();
+        self.signal();
     }
 
     fn request_full(&self) {
@@ -207,13 +219,13 @@ impl TerminalStream {
         if visible {
             self.request_full();
         } else {
-            self.wake_cv.notify_one();
+            self.signal();
         }
     }
 
     fn acknowledge(&self, seq: u64) {
         self.acked_seq.fetch_max(seq, Ordering::AcqRel);
-        self.wake_cv.notify_one();
+        self.signal();
     }
 
     fn has_credit(&self) -> bool {
@@ -260,15 +272,17 @@ impl TerminalStream {
 
     fn stop(&self) {
         self.running.store(false, Ordering::Release);
-        self.wake_cv.notify_all();
+        self.signal();
     }
 }
 
+/// Once the session is stopping, pending damage is drained regardless of the
+/// credit window: the acks for the last frames are still in flight, and the
+/// session is gone before they land, so honouring credit here would silently
+/// drop the tail of a command's output.
 fn should_stop_frame_emitter(stream: &TerminalStream) -> bool {
     !stream.running.load(Ordering::Acquire)
-        && (!stream.dirty.load(Ordering::Acquire)
-            || !stream.visible.load(Ordering::Acquire)
-            || !stream.has_credit())
+        && (!stream.dirty.load(Ordering::Acquire) || !stream.visible.load(Ordering::Acquire))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -435,7 +449,10 @@ pub async fn terminal_spawn(
     thread::spawn(move || {
         let exit_code = child.wait().ok().map(|status| status.exit_code() as i32);
         stream.stop();
-        let _ = pump_handle.join();
+        // Unregister and notify before joining the pump. A grandchild that
+        // inherited the PTY slave (`sleep 60 &` then `exit`) keeps the reader
+        // blocked past the child's death, and gating cleanup on that join
+        // strands the session in the registry with the tab stuck "running".
         if let Ok(mut guard) = sessions.lock() {
             let is_current = guard
                 .get(&exit_id)
@@ -445,6 +462,7 @@ pub async fn terminal_spawn(
             }
         }
         stream.send_exit(exit_code);
+        let _ = pump_handle.join();
     });
 
     Ok(generation)
@@ -787,6 +805,13 @@ pub async fn terminal_resize(
         .lock()
         .map_err(|_| "terminal_resize_poisoned".to_string())?;
     {
+        // Hold the model lock across the ioctl. A TUI redraws on SIGWINCH
+        // immediately, so releasing it between the PTY resize and the model
+        // resize lets the reader parse the new-size redraw into the old grid.
+        let mut model = session
+            .model
+            .lock()
+            .map_err(|_| "terminal_model_poisoned".to_string())?;
         let master = session
             .master
             .lock()
@@ -799,12 +824,7 @@ pub async fn terminal_resize(
                 pixel_height: 0,
             })
             .map_err(|err| format!("terminal_resize_failed: {err}"))?;
-    }
-    {
-        let mut model = session
-            .model
-            .lock()
-            .map_err(|_| "terminal_model_poisoned".to_string())?;
+        drop(master);
         model.resize(cols, rows);
         session.input_modes.update(&model);
     }
@@ -834,6 +854,19 @@ pub async fn terminal_kill(
     if let Err(err) = killer.kill() {
         session.closing.store(false, Ordering::Release);
         return Err(format!("terminal_kill_failed: {err}"));
+    }
+    // Unregister on kill. `ChildKiller::kill` only raises SIGHUP on unix, so a
+    // child that traps it survives and its waiter thread never removes the
+    // entry — leaving an immortal session that can never be killed again
+    // because `closing` is latched. The exit thread's `Arc::ptr_eq` guard makes
+    // this removal safe if the child does exit later.
+    if let Ok(mut guard) = state.sessions.lock() {
+        if guard
+            .get(&session_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &session))
+        {
+            guard.remove(&session_id);
+        }
     }
     Ok(())
 }
@@ -934,7 +967,8 @@ fn spawn_frame_emitter(
         };
         drop(next_wake);
 
-        if !stream.visible.load(Ordering::Acquire) || !stream.has_credit() {
+        let draining = !stream.running.load(Ordering::Acquire);
+        if !stream.visible.load(Ordering::Acquire) || (!draining && !stream.has_credit()) {
             continue;
         }
         if !stream.dirty.swap(false, Ordering::AcqRel) {
@@ -1308,9 +1342,62 @@ mod tests {
         stream.send_frame(model.snapshot("term-1")).unwrap();
         assert!(!stream.has_credit());
         stream.stop();
+        // Stopping with damage still pending must drain, not bail: the acks for
+        // the in-flight frames land after the session is already gone.
+        assert!(!should_stop_frame_emitter(&stream));
+        stream.dirty.store(false, Ordering::Release);
         assert!(should_stop_frame_emitter(&stream));
         stream.acknowledge(1);
         assert!(stream.has_credit());
+    }
+
+    /// A notification that lands between the emitter's predicate check and its
+    /// `wait()` must not be lost: an idle session would otherwise never repaint
+    /// until the next byte of PTY output arrives.
+    #[test]
+    fn frame_emitter_never_misses_a_wakeup() {
+        for attempt in 0..400 {
+            let frames = Arc::new(AtomicUsize::new(0));
+            let channel = Channel::new({
+                let frames = frames.clone();
+                move |_| {
+                    frames.fetch_add(1, Ordering::Release);
+                    Ok(())
+                }
+            });
+            let stream = Arc::new(TerminalStream::new(
+                "term-1".to_string(),
+                "generation-1".to_string(),
+                channel,
+            ));
+            stream.dirty.store(false, Ordering::Release);
+            let model = Arc::new(Mutex::new(TerminalModel::new(
+                10,
+                2,
+                model::NullTerminalWriter,
+            )));
+            let emitter = spawn_frame_emitter(model, stream.clone());
+            // Vary the delay so the notify lands across the whole window
+            // between the emitter's predicate check and its wait().
+            for _ in 0..(attempt % 40) {
+                std::hint::spin_loop();
+            }
+            stream.mark_dirty();
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while frames.load(Ordering::Acquire) == 0 && std::time::Instant::now() < deadline {
+                thread::yield_now();
+            }
+            let delivered = frames.load(Ordering::Acquire);
+            stream.stop();
+            // Deliberately not joined: on a lost wakeup the emitter is parked
+            // forever and join() would hang the suite instead of failing it.
+            drop(emitter);
+            assert!(
+                delivered > 0,
+                "attempt {attempt}: mark_dirty() was lost, emitter parked forever"
+            );
+        }
     }
 
     #[test]

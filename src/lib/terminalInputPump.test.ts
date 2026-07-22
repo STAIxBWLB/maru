@@ -51,6 +51,30 @@ describe("TerminalInputPump", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it("drops batches already chained behind an in-flight send once failed", async () => {
+    let release: () => void = () => {};
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const onError = vi.fn();
+    const pump = new TerminalInputPump(send, onError);
+    pump.ready();
+    pump.push({ type: "key", key: "a" });
+    pump.push({ type: "key", key: "b" });
+    await flushPromises();
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // Session torn down while batch B is still queued behind batch A.
+    pump.fail();
+    release();
+    await flushPromises();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("rejects startup input beyond the bounded one MiB buffer", () => {
     const onError = vi.fn();
     const pump = new TerminalInputPump(async () => {}, onError);

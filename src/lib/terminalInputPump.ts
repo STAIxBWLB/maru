@@ -92,9 +92,15 @@ export class TerminalInputPump {
     this.pending = [];
     const seq = this.clientSeq++;
     this.tail = this.tail
-      .then(() => this.sendBatch(seq, commands))
+      // Re-check on drain: batches queued behind an in-flight one are still
+      // chained when the session is torn down, and sending them then raises
+      // "session not ready" banners after a clean close.
+      .then(() => (this.failed ? undefined : this.sendBatch(seq, commands)))
       .catch((error) => {
-        this.onError(error);
+        // Fail closed. The tail has already advanced, so continuing would send
+        // later batches (a bare Enter) without the text batch that preceded
+        // them, executing a truncated command.
+        if (!this.failed) this.fail(error);
       });
   }
 }

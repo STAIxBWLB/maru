@@ -80,7 +80,11 @@ pub fn encode_terminal_input(
         }
         TerminalInputCommand::Paste { text } => {
             if bracketed_paste_active {
-                Some(format!("\x1b[200~{text}\x1b[201~"))
+                // Strip embedded paste markers: a clipboard payload containing
+                // `\e[201~` would otherwise close the bracket early and run its
+                // remainder as typed input.
+                let sanitized = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
+                Some(format!("\x1b[200~{sanitized}\x1b[201~"))
             } else {
                 Some(text.clone())
             }
@@ -466,6 +470,23 @@ mod tests {
                 true
             ),
             Some("\x1b[200~hello\x1b[201~".to_string())
+        );
+    }
+
+    /// A clipboard payload carrying its own paste terminator must not be able
+    /// to close the bracket and have its remainder executed as typed input.
+    #[test]
+    fn paste_strips_embedded_bracket_markers() {
+        assert_eq!(
+            encode_terminal_input(
+                "shell",
+                &TerminalInputCommand::Paste {
+                    text: "ls\x1b[201~\nrm -rf /\n".to_string()
+                },
+                false,
+                true
+            ),
+            Some("\x1b[200~ls\nrm -rf /\n\x1b[201~".to_string())
         );
     }
 

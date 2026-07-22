@@ -280,13 +280,17 @@ export function terminalSearchSpanForRow(
   return { start, end };
 }
 
+/** `wrapped[row]` marks a row that soft-wraps into the next one; those rows are
+ *  joined without a newline so a URL or token split across the viewport width
+ *  pastes back as the single line the user actually sees. */
 export function selectedTerminalText(
   lines: TerminalCell[][] | null,
   selection: CellSelection | null,
+  wrapped: boolean[] | null = null,
 ): string {
   if (!lines || !selection) return "";
   const { start, end } = normalizeSelection(selection);
-  const chunks: string[] = [];
+  let out = "";
   for (let row = start.row; row <= end.row; row += 1) {
     const line = lines[row] ?? [];
     let startCol = row === start.row ? start.col : 0;
@@ -296,11 +300,12 @@ export function selectedTerminalText(
       .slice(startCol, endCol + 1)
       .filter((cell) => cell.width !== 0)
       .map((cell) => cell.ch || " ")
-      .join("")
-      .replace(/\s+$/u, "");
-    chunks.push(text);
+      .join("");
+    const continues = row < end.row && wrapped?.[row] === true;
+    out += continues ? text : text.replace(/\s+$/u, "");
+    if (row < end.row && !continues) out += "\n";
   }
-  return chunks.join("\n");
+  return out;
 }
 
 /** Characters that terminate a double-click word selection. Mirrors
@@ -748,6 +753,8 @@ export const NativeTerminalView = memo(
 
     // Retained terminal grid + metrics (mutated outside React for paint speed).
     const gridRef = useRef<TerminalCell[][]>([]);
+    // Soft-wrap flag per retained grid row; keeps clipboard joins faithful.
+    const wrappedRef = useRef<boolean[]>([]);
     const dimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
     const cursorRef = useRef<{ row: number; col: number; visible: boolean }>({
       row: 0,
@@ -1082,6 +1089,7 @@ export const NativeTerminalView = memo(
             const line = nextFrame.lines[i];
             if (line && rowIdx < nextFrame.rows) {
               gridRef.current[rowIdx] = line;
+              wrappedRef.current[rowIdx] = nextFrame.wrappedRows?.[i] === true;
               changed.push(rowIdx);
             }
           });
@@ -1096,6 +1104,7 @@ export const NativeTerminalView = memo(
 
         if (nextFrame.lines.length !== nextFrame.rows) return false;
         gridRef.current = nextFrame.lines.slice();
+        wrappedRef.current = nextFrame.wrappedRows?.slice() ?? [];
         dimsRef.current = { cols: nextFrame.cols, rows: nextFrame.rows };
         cursorRef.current = nextFrame.cursor;
         positionTextarea();
@@ -1127,12 +1136,16 @@ export const NativeTerminalView = memo(
         },
         copySelection: () => {
           const selected = allSelectionTextRef.current
-            ?? selectedTerminalText(gridRef.current, selectionRef.current);
+            ?? selectedTerminalText(gridRef.current, selectionRef.current, wrappedRef.current);
           return selected || null;
         },
         selectAll: (text?: string | null) => {
           enqueueSelectionCommand({ type: "selectAll" });
-          allSelectionTextRef.current = text ?? frameToText(latestFrameRef.current);
+          // Fall back to the retained grid, not the last frame: most frames are
+          // dirty-row patches whose `lines` hold only the changed rows, so
+          // frameToText would yield a fragment of the screen.
+          allSelectionTextRef.current =
+            text ?? gridRef.current.map(frameLineToText).join("\n");
           const { cols, rows } = dimsRef.current;
           if (cols > 0 && rows > 0) {
             setSelection({
@@ -1539,7 +1552,7 @@ export const NativeTerminalView = memo(
           enqueueSelectionCommand({ type: "finish", includeAll: state.moved });
           if (state.moved) clickChainRef.current = null;
           if (copyOnSelect && next) {
-            const fallback = selectedTerminalText(gridRef.current, next);
+            const fallback = selectedTerminalText(gridRef.current, next, wrappedRef.current);
             if (!onCopySelection) {
               if (fallback) onCopyOnSelect?.(fallback);
             } else {
@@ -2003,7 +2016,9 @@ export const NativeTerminalView = memo(
     const onCopy = useCallback(
       (event: React.ClipboardEvent<HTMLDivElement>) => {
         if (!selection) return;
-        const text = allSelectionTextRef.current ?? selectedTerminalText(gridRef.current, selection);
+        const text =
+          allSelectionTextRef.current
+          ?? selectedTerminalText(gridRef.current, selection, wrappedRef.current);
         if (!text) return;
         event.preventDefault();
         event.clipboardData.setData("text/plain", text);
