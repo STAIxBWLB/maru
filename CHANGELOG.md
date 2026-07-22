@@ -8,6 +8,43 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.10 — 2026-07-22 — Unified Scratchpad
+
+- **One Scratchpad pane for memos, ideation, and AI temp files.** The right
+  pane replaces the legacy memo tool with a unified view over Git-tracked
+  `scratchpad/ideation/` and `scratchpad/memos/` plus ignored
+  `scratchpad/temp/` AI artifacts, grouped by collection, ideation stage, and
+  temp provider, with search, Markdown preview, autosave, and localStorage
+  draft recovery.
+- **Contained, revision-checked storage.** Every Scratchpad command validates
+  the primary private workspace, rejects traversal and symlinks, publishes
+  through canonicalized parents pinned immediately before atomic writes
+  (`persist_noclobber` for creates), and requires the current content hash
+  for saves, renames, stage transitions, deletes, and temp cleanup; deletes
+  and cleanup go through the system Trash.
+- **Ideation lifecycle.** Seed → developing → proposal → archive transitions
+  (with archive → seed revival) move single files or whole slug directories
+  without overwriting, verifying every published asset before removing the
+  source.
+- **Legacy memo migration.** `.maru/memos/` migrates into
+  `scratchpad/memos/` by claiming each file into a per-run staging directory
+  first, hash-verifying the copy, and leaving concurrent recreations
+  untouched; failures keep their recovery copy and are reported.
+- **AI runtime routing.** Maru terminal, agent, and skill subprocesses now
+  receive `MARU_SCRATCHPAD`, `MARU_TEMP`, and `CLAUDE_CODE_TMPDIR` resolved
+  from the owning private workspace; routing fails closed when the workspace
+  registry is unreadable and requires the active private workspace to be
+  registered as private.
+- **Graph/catalog hygiene.** Ideation stays graph-visible while scratchpad
+  memos and temp are excluded from the workspace catalog and graph scans,
+  honoring relocated roots and renamed collections from
+  `workspace.config.yaml` (skills-bootstrap copy included).
+- **Watcher-driven refresh.** A generation-tokened filesystem watcher
+  debounces Scratchpad changes into UI refreshes that never clobber in-flight
+  edits: stale async reads, out-of-order refreshes, and dirty buffers all
+  surface a conflict banner (reload / overwrite / save-copy) instead of
+  silently replacing content.
+
 ## v0.4.9 — 2026-07-22 — Report Pattern Studio
 
 - **Diagram mode becomes a data-driven report editor.** A new schema v8 adds
