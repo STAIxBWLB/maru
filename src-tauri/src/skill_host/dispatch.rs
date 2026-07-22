@@ -243,7 +243,7 @@ fn compose(
         cwd: host_fs::display_path(&cwd),
         prompt,
         context,
-        extra_env: env_vars_for_runs()?,
+        extra_env: env_vars_for_runs(Some(&cwd))?,
     })
 }
 

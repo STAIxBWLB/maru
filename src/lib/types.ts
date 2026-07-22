@@ -829,6 +829,77 @@ export interface MemoDocument extends MemoEntry {
   content: string;
 }
 
+export type ScratchpadCollection = "ideation" | "memos" | "temp";
+export type ScratchpadSource =
+  | "maru"
+  | "claude"
+  | "codex"
+  | "kiro"
+  | "kimi"
+  | "manual"
+  | "other";
+export type IdeationStage = "seed" | "developing" | "proposal" | "archive";
+
+export interface ScratchpadEntry {
+  collection: ScratchpadCollection;
+  relativePath: string;
+  name: string;
+  source: ScratchpadSource;
+  ideationStage?: IdeationStage | null;
+  format: MemoFormat;
+  updatedAt?: string | null;
+  sizeBytes: number;
+  preview: string;
+  revision: string;
+  stale: boolean;
+  editable: boolean;
+}
+
+export interface ScratchpadDocument extends ScratchpadEntry {
+  content: string;
+}
+
+export interface TempCleanupCandidate {
+  relativePath: string;
+  sizeBytes: number;
+  updatedAt?: string | null;
+  revision: string;
+  stale: boolean;
+}
+
+export interface TempCleanupSelection {
+  relativePath: string;
+  revision: string;
+}
+
+export interface TempCleanupSkipped {
+  relativePath: string;
+  reason: string;
+}
+
+export interface TempCleanupResult {
+  trashed: string[];
+  skipped: TempCleanupSkipped[];
+}
+
+export interface ScratchpadMigrationResult {
+  migrated: string[];
+  skipped: TempCleanupSkipped[];
+  markerPath?: string;
+}
+
+export interface ScratchpadChangedEvent {
+  workPath: string;
+  paths: string[];
+  generation: number;
+}
+
+export interface ScratchpadWatcherErrorEvent {
+  workPath: string;
+  message: string;
+  generation: number;
+}
+
 // === Workspace pairing + .maru/ system mode ===
 
 export interface WorkspaceOwner {

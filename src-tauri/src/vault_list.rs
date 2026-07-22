@@ -225,6 +225,77 @@ pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
+/// Distinguish "no registry has ever been created" (standalone mode, Ok(None))
+/// from "a registry exists but cannot be read" (Err). Callers that route
+/// writes by workspace visibility must fail closed on the latter.
+#[cfg(not(test))]
+pub(crate) fn load_registry_if_present() -> Result<Option<WorkspaceRegistry>, String> {
+    let registry_path = workspace_registry_path()?;
+    let legacy_path = legacy_vault_list_path()?;
+    if !registry_path.exists() && !legacy_path.exists() {
+        return Ok(None);
+    }
+    load_registry_at(&registry_path, &legacy_path).map(Some)
+}
+
+#[cfg(not(test))]
+pub(crate) fn assert_primary_private_workspace(workspace_path: &Path) -> Result<(), String> {
+    let registry_path = workspace_registry_path()?;
+    let legacy_path = legacy_vault_list_path()?;
+    if !registry_path.exists() && !legacy_path.exists() {
+        // Standalone mode: no Maru registry has ever been created.
+        return Ok(());
+    }
+    let registry = load_registry_at(&registry_path, &legacy_path)?;
+    assert_primary_private_workspace_in_registry(&registry, workspace_path)
+}
+
+fn assert_primary_private_workspace_in_registry(
+    registry: &WorkspaceRegistry,
+    workspace_path: &Path,
+) -> Result<(), String> {
+    let Some(primary) = registry.active_by_visibility.private.as_deref() else {
+        return Err(
+            "scratchpad_workspace_denied: no primary private workspace is active".to_string(),
+        );
+    };
+    let requested = workspace_path
+        .canonicalize()
+        .unwrap_or_else(|_| lexical_normalize(workspace_path));
+    let primary_path = comparable_root(primary);
+    if requested != primary_path {
+        return Err(format!(
+            "scratchpad_workspace_denied: workPath must be the primary private workspace ({})",
+            primary_path.display()
+        ));
+    }
+    if !registry
+        .workspaces
+        .iter()
+        .any(|entry| entry.visibility == "private" && comparable_root(&entry.path) == primary_path)
+    {
+        return Err(
+            "scratchpad_workspace_denied: active private workspace is not registered as private"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 fn comparable_root(path: &str) -> PathBuf {
     let raw = PathBuf::from(path);
     raw.canonicalize().unwrap_or(raw)
@@ -812,6 +883,33 @@ mod tests {
         assert!(registry.workspaces.is_empty());
         assert!(registry.active_by_visibility.private.is_none());
         assert!(registry.active_by_visibility.public.is_none());
+    }
+
+    #[test]
+    fn scratchpad_requires_the_active_registered_private_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let private = tmp.path().join("private");
+        let other_private = tmp.path().join("other-private");
+        let public = tmp.path().join("public");
+        fs::create_dir_all(&private).unwrap();
+        fs::create_dir_all(&other_private).unwrap();
+        fs::create_dir_all(&public).unwrap();
+        let registry = WorkspaceRegistry {
+            workspaces: vec![
+                entry("Private", &private.to_string_lossy(), "private"),
+                entry("Other", &other_private.to_string_lossy(), "private"),
+                entry("Public", &public.to_string_lossy(), "public"),
+            ],
+            active_by_visibility: ActiveByVisibility {
+                private: Some(private.to_string_lossy().to_string()),
+                public: Some(public.to_string_lossy().to_string()),
+            },
+            ..Default::default()
+        };
+
+        assert!(assert_primary_private_workspace_in_registry(&registry, &private).is_ok());
+        assert!(assert_primary_private_workspace_in_registry(&registry, &other_private).is_err());
+        assert!(assert_primary_private_workspace_in_registry(&registry, &public).is_err());
     }
 
     #[test]

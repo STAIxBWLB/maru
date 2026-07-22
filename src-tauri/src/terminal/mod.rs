@@ -512,6 +512,7 @@ fn build_terminal_command_spec(
     };
     args.extend(extras);
     let mut extra_env = extra_env.unwrap_or_default();
+    crate::agent_runtime_env::reserve_hash_env(&mut extra_env, &cwd)?;
     extra_env
         .entry("TERM_PROGRAM".to_string())
         .or_insert_with(|| default_term_program(kind).to_string());
@@ -642,6 +643,55 @@ mod tests {
         let spec =
             build_terminal_command_spec("claude", Some(&cwd_str), None, None, Some(env)).unwrap();
         assert_eq!(spec.extra_env["TERM_PROGRAM"], "WezTerm");
+    }
+
+    #[test]
+    fn scratchpad_contract_overrides_launcher_env() {
+        let work = tempfile::tempdir().unwrap();
+        let scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        std::fs::write(
+            work.path().join("workspace.config.yaml"),
+            format!(
+                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n",
+                work.path().display(),
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+        let mut caller_env = HashMap::new();
+        caller_env.insert("MARU_SCRATCHPAD".to_string(), "/tmp/override".to_string());
+        caller_env.insert("MARU_TEMP".to_string(), "/tmp/override/temp".to_string());
+        caller_env.insert(
+            "CLAUDE_CODE_TMPDIR".to_string(),
+            "/tmp/override/claude".to_string(),
+        );
+
+        let spec = build_terminal_command_spec(
+            "claude",
+            Some(work.path().to_string_lossy().as_ref()),
+            None,
+            None,
+            Some(caller_env),
+        )
+        .unwrap();
+
+        assert_eq!(
+            spec.extra_env.get("MARU_SCRATCHPAD"),
+            Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            spec.extra_env.get("MARU_TEMP"),
+            Some(&scratchpad.join("temp").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            spec.extra_env.get("CLAUDE_CODE_TMPDIR"),
+            Some(
+                &scratchpad
+                    .join("temp/runtime/claude")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
     }
 
     #[cfg(not(windows))]

@@ -1,9 +1,9 @@
 pub mod agent_host;
+mod agent_runtime_env;
 mod ai_router;
-mod atomic_file;
-mod maru_dir;
 mod app_menu;
 mod approval;
+mod atomic_file;
 mod binary_viewer;
 mod calendar_search;
 mod cli;
@@ -30,11 +30,14 @@ mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
 mod linter;
+mod maru_dir;
 mod maru_migration;
 mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+pub(crate) mod scratchpad;
+mod scratchpad_watcher;
 mod secrets;
 mod share_outbox;
 mod shelf;
@@ -44,6 +47,11 @@ mod skill_host;
 mod studio;
 mod sys_import;
 mod tasks;
+mod telegram_config;
+mod telegram_io;
+mod template_fill;
+mod terminal;
+mod terminal_hooks;
 pub mod today;
 pub mod today_ai;
 pub mod today_calendar;
@@ -51,11 +59,6 @@ pub mod today_lifecycle;
 pub mod today_notify;
 pub mod today_outbox;
 pub mod today_store;
-mod telegram_config;
-mod telegram_io;
-mod template_fill;
-mod terminal;
-mod terminal_hooks;
 mod vault;
 mod vault_graph;
 mod vault_guard;
@@ -71,14 +74,6 @@ use agent_host::{
     agent_write_redacted_run_summary,
 };
 use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
-use maru_dir::{
-    bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
-    list_maru_templates, list_workspace_projects, read_maru_imports, read_maru_mcp,
-    read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills,
-    read_maru_template, read_maru_workspace, save_maru_mcp, save_maru_projects,
-    save_maru_rule, save_maru_settings, save_maru_template,
-    update_maru_workspace,
-};
 use approval::{prepare_approval, record_approval, ApprovalState};
 use binary_viewer::{
     binary_viewer_classify, binary_viewer_extract_hwpx, binary_viewer_open_external,
@@ -125,6 +120,13 @@ use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
+use maru_dir::{
+    bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
+    list_maru_templates, list_workspace_projects, read_maru_imports, read_maru_mcp,
+    read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills, read_maru_template,
+    read_maru_workspace, save_maru_mcp, save_maru_projects, save_maru_rule, save_maru_settings,
+    save_maru_template, update_maru_workspace,
+};
 use meetings::{
     append_meetings_log, read_meeting_guides, read_meeting_metadata, read_meetings_log,
     scan_meeting_notes,
@@ -137,6 +139,14 @@ use ops_catalog::{
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
     stage_outlook_items,
+};
+use scratchpad::{
+    scratchpad_cleanup_apply, scratchpad_cleanup_plan, scratchpad_create_idea, scratchpad_list,
+    scratchpad_migrate_legacy_memos, scratchpad_read, scratchpad_rename, scratchpad_save,
+    scratchpad_transition_idea, scratchpad_trash,
+};
+use scratchpad_watcher::{
+    start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
 };
 use secrets::{
     secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
@@ -175,13 +185,6 @@ use tasks::{
     append_tasks_log, create_task_note, move_task_note, read_task_metadata, read_tasks_log,
     scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
 };
-use today::today_logical_day;
-use today_ai::{today_apply_plan_result, today_build_plan_request};
-use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
-use today_lifecycle::{task_transition, task_trash};
-use today_notify::today_notify_new_day;
-use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
-use today_store::{read_task_events, today_mutate, today_open, today_rollover};
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{
@@ -199,6 +202,13 @@ use terminal_hooks::{
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
     TerminalHookWatcherState,
 };
+use today::today_logical_day;
+use today_ai::{today_apply_plan_result, today_build_plan_request};
+use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
+use today_lifecycle::{task_transition, task_trash};
+use today_notify::today_notify_new_day;
+use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
+use today_store::{read_task_events, today_mutate, today_open, today_rollover};
 use vault::{read_vault_cache, sample_workspace_path, scan_vault};
 use vault_graph::{vault_graph_layout_read, vault_graph_layout_save, vault_graph_read};
 use vault_guard::vault_validate_note;
@@ -226,9 +236,9 @@ pub fn run() {
         // here raced the webview's JS close guards (settings flush, dirty
         // draft confirm) and always won. Default close semantics apply, so
         // JS `preventDefault` now decides.
-
         .manage(InboxWatcherState::default())
         .manage(VaultWatcherState::default())
+        .manage(ScratchpadWatcherState::default())
         .manage(TelegramIoState::default())
         .manage(TerminalState::default())
         .manage(TerminalHookWatcherState::default())
@@ -251,6 +261,8 @@ pub fn run() {
             read_vault_cache,
             start_vault_watcher,
             stop_vault_watcher,
+            start_scratchpad_watcher,
+            stop_scratchpad_watcher,
             vault_graph_read,
             vault_graph_layout_read,
             vault_graph_layout_save,
@@ -348,6 +360,16 @@ pub fn run() {
             save_memo,
             delete_memo,
             save_memo_as,
+            scratchpad_list,
+            scratchpad_read,
+            scratchpad_save,
+            scratchpad_rename,
+            scratchpad_trash,
+            scratchpad_create_idea,
+            scratchpad_transition_idea,
+            scratchpad_cleanup_plan,
+            scratchpad_cleanup_apply,
+            scratchpad_migrate_legacy_memos,
             start_claude_cli_invocation,
             start_agent_cli_invocation,
             list_ai_missions,

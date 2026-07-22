@@ -466,15 +466,20 @@ fn agent_context_hint_block() -> String {
     format!(
         "{HINT_START}\n\
 ## Maru active context (auto-managed — edit outside these markers)\n\n\
-When a session is launched from Maru's integrated terminal, these environment \
-variables describe the user's currently-active window/item:\n\n\
+When a session is launched from Maru, these environment variables expose the \
+durable scratchpad contract and describe the user's currently-active window/item:\n\n\
+- `MARU_SCRATCHPAD` — durable tracked root for `ideation/` and `memos/`\n\
+- `MARU_TEMP` — ephemeral AI artifacts under `$MARU_SCRATCHPAD/temp`\n\
+- `CLAUDE_CODE_TMPDIR` — Claude runtime scratch under `$MARU_TEMP/runtime/claude`\n\
 - `MARU_WORKSPACE` — current workspace root (also granted via `--add-dir`)\n\
 - `MARU_WORKSPACE_VISIBILITY` — `private` or `public`\n\
 - `MARU_APP_MODE` — active view (`pkm`, `inbox`, `meetings`, …)\n\
 - `MARU_ACTIVE_DOC` / `MARU_ACTIVE_DOC_REL` — absolute / workspace-relative path of the open document\n\
 - `MARU_ACTIVE_DOC_TITLE` / `MARU_ACTIVE_DOC_TYPE` — its title and frontmatter type\n\n\
-An unset variable means there is no active item of that kind. When the user says \
-\"this note\" or \"the current document\", prefer `$MARU_ACTIVE_DOC`.\n\
+Put explicitly-authored temporary artifacts in `$MARU_TEMP/<provider>/<task>/`; \
+do not put final deliverables or secrets there. An unset active-item variable means \
+there is no active item of that kind. When the user says \"this note\" or \
+\"the current document\", prefer `$MARU_ACTIVE_DOC`.\n\
 {HINT_END}\n"
     )
 }
@@ -684,6 +689,8 @@ mod tests {
         assert!(once.starts_with("# My Project"));
         assert!(once.contains(HINT_START));
         assert!(once.contains("MARU_ACTIVE_DOC"));
+        assert!(once.contains("MARU_SCRATCHPAD"));
+        assert!(once.contains("$MARU_TEMP/<provider>/<task>/"));
         // Re-applying replaces in place (no duplicate markers).
         let twice = upsert_marked_block(&once, &block);
         assert_eq!(once.matches(HINT_START).count(), 1);

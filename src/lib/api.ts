@@ -75,8 +75,15 @@ import type {
   MeetingNoteRow,
   MeetingsLogLineRecord,
   MemoDocument,
-  MemoEntry,
   MemoFormat,
+  ScratchpadCollection,
+  ScratchpadDocument,
+  ScratchpadEntry,
+  IdeationStage,
+  TempCleanupCandidate,
+  TempCleanupResult,
+  TempCleanupSelection,
+  ScratchpadMigrationResult,
   StoredFileOutcome,
   CreateTaskDraft,
   TaskBucket,
@@ -1887,61 +1894,8 @@ export async function storeShelfFilesAs(
   });
 }
 
-export async function listMemos(vaultPath: string): Promise<MemoEntry[]> {
-  if (!isTauri()) return [];
-  return invoke<MemoEntry[]>("list_memos", { vaultPath });
-}
-
-export async function readMemo(
-  vaultPath: string,
-  memoPath: string,
-): Promise<MemoDocument> {
-  if (!isTauri()) {
-    return {
-      name: memoPath.split("/").pop() ?? "memo.md",
-      path: memoPath,
-      format: memoPath.endsWith(".txt") ? "plain" : "markdown",
-      updatedAt: null,
-      sizeBytes: 0,
-      preview: "",
-      content: "",
-    };
-  }
-  return invoke<MemoDocument>("read_memo", { vaultPath, memoPath });
-}
-
-export async function saveMemo(
-  vaultPath: string,
-  name: string,
-  format: MemoFormat,
-  content: string,
-): Promise<MemoDocument> {
-  if (!isTauri()) {
-    const ext = format === "plain" ? "txt" : "md";
-    const leaf = (name.trim() || `memo.${ext}`).split("/").pop() ?? `memo.${ext}`;
-    const fileName = `${leaf.replace(/\.(md|markdown|txt)$/i, "")}.${ext}`;
-    return {
-      name: fileName,
-      path: `${vaultPath}/.maru/memos/${fileName}`,
-      format,
-      updatedAt: null,
-      sizeBytes: content.length,
-      preview: content.trim().slice(0, 160),
-      content,
-    };
-  }
-  return invoke<MemoDocument>("save_memo", { vaultPath, name, format, content });
-}
-
-export async function deleteMemo(
-  vaultPath: string,
-  memoPath: string,
-): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("delete_memo", { vaultPath, memoPath });
-}
-
 export async function saveMemoAs(
+  vaultPath: string,
   targetPath: string,
   content: string,
 ): Promise<MemoDocument> {
@@ -1956,7 +1910,159 @@ export async function saveMemoAs(
       content,
     };
   }
-  return invoke<MemoDocument>("save_memo_as", { targetPath, content });
+  return invoke<MemoDocument>("save_memo_as", { vaultPath, targetPath, content });
+}
+
+export async function listScratchpad(workPath: string): Promise<ScratchpadEntry[]> {
+  if (!isTauri()) return [];
+  return invoke<ScratchpadEntry[]>("scratchpad_list", { workPath });
+}
+
+export async function readScratchpadDocument(
+  workPath: string,
+  collection: ScratchpadCollection,
+  relativePath: string,
+): Promise<ScratchpadDocument> {
+  if (!isTauri()) {
+    const name = relativePath.split("/").pop() ?? "scratchpad.md";
+    return {
+      collection,
+      relativePath,
+      name,
+      source: collection === "memos" ? "maru" : "manual",
+      ideationStage: collection === "ideation" ? "seed" : null,
+      format: name.toLowerCase().endsWith(".txt") ? "plain" : "markdown",
+      updatedAt: null,
+      sizeBytes: 0,
+      preview: "",
+      revision: "browser-preview",
+      stale: false,
+      editable: true,
+      content: "",
+    };
+  }
+  return invoke<ScratchpadDocument>("scratchpad_read", {
+    workPath,
+    collection,
+    relativePath,
+  });
+}
+
+export async function saveScratchpadDocument(
+  workPath: string,
+  collection: ScratchpadCollection,
+  relativePath: string,
+  format: MemoFormat,
+  content: string,
+  expectedRevision?: string | null,
+  force = false,
+): Promise<ScratchpadDocument> {
+  if (!isTauri()) {
+    const name = relativePath.split("/").pop() ?? `scratchpad.${format === "plain" ? "txt" : "md"}`;
+    return {
+      collection,
+      relativePath,
+      name,
+      source: collection === "memos" ? "maru" : "manual",
+      ideationStage: collection === "ideation" ? "seed" : null,
+      format,
+      updatedAt: new Date().toISOString(),
+      sizeBytes: new TextEncoder().encode(content).byteLength,
+      preview: content.trim().slice(0, 160),
+      revision: `browser-${Date.now()}`,
+      stale: false,
+      editable: true,
+      content,
+    };
+  }
+  return invoke<ScratchpadDocument>("scratchpad_save", {
+    workPath,
+    collection,
+    relativePath,
+    format,
+    content,
+    expectedRevision: expectedRevision ?? null,
+    force,
+  });
+}
+
+export async function renameScratchpadDocument(
+  workPath: string,
+  collection: ScratchpadCollection,
+  relativePath: string,
+  newRelativePath: string,
+  expectedRevision: string,
+): Promise<ScratchpadDocument> {
+  return invoke<ScratchpadDocument>("scratchpad_rename", {
+    workPath,
+    collection,
+    relativePath,
+    newRelativePath,
+    expectedRevision,
+  });
+}
+
+export async function trashScratchpadDocument(
+  workPath: string,
+  collection: ScratchpadCollection,
+  relativePath: string,
+  expectedRevision: string,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("scratchpad_trash", { workPath, collection, relativePath, expectedRevision });
+}
+
+export async function createScratchpadIdea(
+  workPath: string,
+  title: string,
+): Promise<ScratchpadDocument> {
+  return invoke<ScratchpadDocument>("scratchpad_create_idea", { workPath, title });
+}
+
+export async function transitionScratchpadIdea(
+  workPath: string,
+  relativePath: string,
+  stage: IdeationStage,
+  expectedRevision: string,
+): Promise<ScratchpadDocument> {
+  return invoke<ScratchpadDocument>("scratchpad_transition_idea", {
+    workPath,
+    relativePath,
+    stage,
+    expectedRevision,
+  });
+}
+
+export async function planScratchpadTempCleanup(
+  workPath: string,
+): Promise<TempCleanupCandidate[]> {
+  if (!isTauri()) return [];
+  return invoke<TempCleanupCandidate[]>("scratchpad_cleanup_plan", { workPath });
+}
+
+export async function applyScratchpadTempCleanup(
+  workPath: string,
+  selections: TempCleanupSelection[],
+): Promise<TempCleanupResult> {
+  if (!isTauri()) return { trashed: [], skipped: [] };
+  return invoke<TempCleanupResult>("scratchpad_cleanup_apply", { workPath, selections });
+}
+
+export async function migrateLegacyMemos(
+  workPath: string,
+): Promise<ScratchpadMigrationResult> {
+  if (!isTauri()) return { migrated: [], skipped: [] };
+  return invoke<ScratchpadMigrationResult>("scratchpad_migrate_legacy_memos", { workPath });
+}
+
+export async function startScratchpadWatcher(workPath: string): Promise<number> {
+  if (!isTauri()) return 0;
+  return invoke<number>("start_scratchpad_watcher", { workPath });
+}
+
+export async function stopScratchpadWatcher(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("stop_scratchpad_watcher");
 }
 
 function mockGmailUnread(): GmailMessage[] {

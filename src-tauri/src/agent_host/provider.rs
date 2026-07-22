@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use crate::agent_host::contracts::{
@@ -104,7 +104,7 @@ pub fn build_cli_command(
     permission_mode: &str,
 ) -> Result<(Command, Option<String>), String> {
     request.validate()?;
-    match provider {
+    let (mut cmd, stdin_payload) = match provider {
         CliProviderKind::Claude => {
             let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
                 "cli_missing: claude CLI not found in PATH or common install locations".to_string()
@@ -119,7 +119,7 @@ pub fn build_cli_command(
             for dir in add_dirs {
                 cmd.arg("--add-dir").arg(dir);
             }
-            Ok((cmd, None))
+            (cmd, None)
         }
         CliProviderKind::Codex => {
             let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
@@ -134,9 +134,11 @@ pub fn build_cli_command(
                 cmd.arg("--add-dir").arg(dir);
             }
             cmd.arg("-");
-            Ok((cmd, Some(request.prompt.clone())))
+            (cmd, Some(request.prompt.clone()))
         }
-    }
+    };
+    crate::agent_runtime_env::apply_to_command(&mut cmd, Path::new(&request.cwd))?;
+    Ok((cmd, stdin_payload))
 }
 
 pub fn resolve_provider_binary(
@@ -380,10 +382,7 @@ mod tests {
         let mut non_transient_attempts = 0;
         let err = retry_etxtbsy(|| -> std::io::Result<()> {
             non_transient_attempts += 1;
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "missing",
-            ))
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"))
         })
         .unwrap_err();
 
@@ -581,6 +580,52 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
             "fake-node-ok"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_carries_structured_run_scratchpad_contract() {
+        let work = tempfile::tempdir().unwrap();
+        let scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        let cli = write_fake_cli(work.path().join("fake-claude"), "#!/bin/sh\nexit 0\n");
+
+        let (cmd, _stdin) = build_cli_command(
+            CliProviderKind::Claude,
+            &completion_request("hi", work.path().to_str().unwrap()),
+            &[],
+            Some(cli.to_str().unwrap()),
+            "plan",
+        )
+        .unwrap();
+        let explicit_env: std::collections::HashMap<_, _> = cmd
+            .get_envs()
+            .filter_map(|(key, value)| {
+                value.map(|value| {
+                    (
+                        key.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    )
+                })
+            })
+            .collect();
+
+        assert_eq!(
+            explicit_env.get("MARU_SCRATCHPAD"),
+            Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            explicit_env.get("MARU_TEMP"),
+            Some(&scratchpad.join("temp").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            explicit_env.get("CLAUDE_CODE_TMPDIR"),
+            Some(
+                &scratchpad
+                    .join("temp/runtime/claude")
+                    .to_string_lossy()
+                    .into_owned()
+            )
         );
     }
 

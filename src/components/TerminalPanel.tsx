@@ -58,6 +58,7 @@ import {
   EMPTY_TERMINAL_STATE,
   isRelaunchableTab,
   loadPersistedTerminalState,
+  mergeMaruTerminalEnv,
   pathMention,
   persistTerminalState,
   resolveExistingLaunchTaskId,
@@ -467,7 +468,7 @@ export const TerminalPanel = memo(
           await terminalSpawn(sessionId, kind, resolvedCwd, {
             command: request?.command ?? launcher.command ?? null,
             extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
-            extraEnv: { ...contextEnv, ...(request?.extraEnv ?? {}) },
+            extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
             cols: 120,
             rows: 30,
           });

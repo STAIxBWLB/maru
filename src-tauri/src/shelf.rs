@@ -1,4 +1,11 @@
+use crate::atomic_file::write_atomic_create;
+use crate::scratchpad::{
+    assert_scratchpad_workspace_access, resolve_scratchpad_memos_root, scratchpad_list,
+    scratchpad_read, scratchpad_save, scratchpad_trash, ScratchpadCollection, ScratchpadDocument,
+    ScratchpadEntry, ScratchpadFormat,
+};
 use crate::vault::resolve_inside_vault;
+use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -68,44 +75,28 @@ pub fn store_shelf_files_as(
 #[tauri::command]
 pub fn list_memos(vault_path: String) -> Result<Vec<MemoEntry>, String> {
     let dir = memo_dir(&vault_path)?;
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut entries = Vec::new();
-    for item in fs::read_dir(&dir).map_err(|err| format!("Cannot read memos: {err}"))? {
-        let item = item.map_err(|err| format!("Cannot read memo entry: {err}"))?;
-        let path = item.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(format) = memo_format_for_path(&path) else {
-            continue;
-        };
-        let content = fs::read_to_string(&path).unwrap_or_default();
-        let metadata = item
-            .metadata()
-            .map_err(|err| format!("Cannot read memo metadata: {err}"))?;
-        entries.push(memo_entry_from_parts(path, format, &content, &metadata)?);
-    }
-    entries.sort_by(|a, b| {
-        b.updated_at
-            .cmp(&a.updated_at)
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    Ok(entries)
+    scratchpad_list(vault_path).map(|entries| {
+        entries
+            .into_iter()
+            .filter(|entry| entry.collection == ScratchpadCollection::Memos)
+            .map(|entry| memo_entry_from_scratchpad(entry, &dir))
+            .collect()
+    })
 }
 
 #[tauri::command]
 pub fn read_memo(vault_path: String, memo_path: String) -> Result<MemoDocument, String> {
     let path = resolve_memo_path(&vault_path, &memo_path)?;
-    let content = fs::read_to_string(&path).map_err(|err| format!("Cannot read memo: {err}"))?;
-    let metadata =
-        fs::metadata(&path).map_err(|err| format!("Cannot read memo metadata: {err}"))?;
-    let format = memo_format_for_path(&path).unwrap_or(MemoFormat::Markdown);
-    Ok(MemoDocument {
-        entry: memo_entry_from_parts(path, format, &content, &metadata)?,
-        content,
-    })
+    let dir = memo_dir(&vault_path)?;
+    let relative = path
+        .strip_prefix(&dir)
+        .map_err(|_| "Memo path escapes scratchpad/memos".to_string())?;
+    let document = scratchpad_read(
+        vault_path,
+        ScratchpadCollection::Memos,
+        relative.to_string_lossy().replace('\\', "/"),
+    )?;
+    Ok(memo_document_from_scratchpad(document, &dir))
 }
 
 #[tauri::command]
@@ -115,31 +106,92 @@ pub fn save_memo(
     format: MemoFormat,
     content: String,
 ) -> Result<MemoDocument, String> {
-    let dir = memo_dir(&vault_path)?;
-    fs::create_dir_all(&dir).map_err(|err| format!("Cannot create memo directory: {err}"))?;
     let file_name = normalize_memo_name(&name, format);
-    let path = dir.join(file_name);
-    write_memo_document(path, format, content)
+    let dir = memo_dir(&vault_path)?;
+    let document = scratchpad_save(
+        vault_path,
+        ScratchpadCollection::Memos,
+        file_name,
+        scratchpad_format(format),
+        content,
+        None,
+        false,
+    )?;
+    Ok(memo_document_from_scratchpad(document, &dir))
 }
 
 #[tauri::command]
-pub fn delete_memo(vault_path: String, memo_path: String) -> Result<(), String> {
+pub fn delete_memo(
+    vault_path: String,
+    memo_path: String,
+    expected_revision: Option<String>,
+) -> Result<(), String> {
+    let expected_revision = expected_revision.ok_or_else(|| {
+        "memo_conflict: expectedRevision is required; use the revision-checked Scratchpad API"
+            .to_string()
+    })?;
     let path = resolve_memo_path(&vault_path, &memo_path)?;
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(format!("Cannot delete memo: {err}")),
-    }
+    let dir = memo_dir(&vault_path)?;
+    let relative = path
+        .strip_prefix(&dir)
+        .map_err(|_| "Memo path escapes scratchpad/memos".to_string())?;
+    scratchpad_trash(
+        vault_path,
+        ScratchpadCollection::Memos,
+        relative.to_string_lossy().replace('\\', "/"),
+        expected_revision,
+    )
 }
 
 #[tauri::command]
-pub fn save_memo_as(target_path: String, content: String) -> Result<MemoDocument, String> {
+pub fn save_memo_as(
+    vault_path: Option<String>,
+    target_path: String,
+    content: String,
+) -> Result<MemoDocument, String> {
+    let vault_path = vault_path.ok_or_else(|| {
+        "memo_export_disabled: vaultPath is required for capability-checked Save As".to_string()
+    })?;
+    assert_scratchpad_workspace_access(Path::new(&vault_path))?;
+    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     let path = PathBuf::from(target_path);
     if path.is_dir() {
         return Err("Memo target is a directory".to_string());
     }
     let format = memo_format_for_path(&path).unwrap_or(MemoFormat::Markdown);
-    write_memo_document(path, format, content)
+    write_new_memo_document(path, format, content)
+}
+
+fn scratchpad_format(format: MemoFormat) -> ScratchpadFormat {
+    match format {
+        MemoFormat::Plain => ScratchpadFormat::Plain,
+        MemoFormat::Markdown => ScratchpadFormat::Markdown,
+    }
+}
+
+fn memo_format(format: ScratchpadFormat) -> MemoFormat {
+    match format {
+        ScratchpadFormat::Plain => MemoFormat::Plain,
+        ScratchpadFormat::Markdown => MemoFormat::Markdown,
+    }
+}
+
+fn memo_entry_from_scratchpad(entry: ScratchpadEntry, dir: &Path) -> MemoEntry {
+    MemoEntry {
+        name: entry.name,
+        path: dir.join(&entry.relative_path).to_string_lossy().to_string(),
+        format: memo_format(entry.format),
+        updated_at: entry.updated_at,
+        size_bytes: entry.size_bytes,
+        preview: entry.preview,
+    }
+}
+
+fn memo_document_from_scratchpad(document: ScratchpadDocument, dir: &Path) -> MemoDocument {
+    MemoDocument {
+        entry: memo_entry_from_scratchpad(document.entry, dir),
+        content: document.content,
+    }
 }
 
 fn store_files_into_dir(
@@ -226,19 +278,43 @@ fn unique_path(candidate: PathBuf) -> PathBuf {
 }
 
 fn memo_dir(vault_path: &str) -> Result<PathBuf, String> {
-    resolve_inside_vault(vault_path, ".maru/memos")
+    resolve_scratchpad_memos_root(Path::new(vault_path))
 }
 
 fn resolve_memo_path(vault_path: &str, memo_path: &str) -> Result<PathBuf, String> {
     let dir = memo_dir(vault_path)?;
-    let path = resolve_inside_vault(vault_path, memo_path)?;
+    let requested = PathBuf::from(memo_path);
+    let path = if requested.is_absolute() {
+        requested
+    } else {
+        PathBuf::from(vault_path).join(requested)
+    };
     if !path.starts_with(&dir) {
-        return Err("Memo path escapes .maru/memos".to_string());
+        return Err("Memo path escapes scratchpad/memos".to_string());
+    }
+    let relative = path
+        .strip_prefix(&dir)
+        .map_err(|_| "Memo path escapes scratchpad/memos".to_string())?;
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Memo path escapes scratchpad/memos".to_string());
+    }
+    let mut current = dir.clone();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        if fs::symlink_metadata(&current)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err("Memo path contains a symlink".to_string());
+        }
     }
     Ok(path)
 }
 
-fn write_memo_document(
+fn write_new_memo_document(
     path: PathBuf,
     format: MemoFormat,
     content: String,
@@ -246,7 +322,13 @@ fn write_memo_document(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("Cannot create memo parent: {err}"))?;
     }
-    fs::write(&path, &content).map_err(|err| format!("Cannot save memo: {err}"))?;
+    if path.exists() {
+        return Err(
+            "memo_conflict: target already exists; use the revision-checked Scratchpad API"
+                .to_string(),
+        );
+    }
+    write_atomic_create(&path, content.as_bytes())?;
     let metadata =
         fs::metadata(&path).map_err(|err| format!("Cannot read memo metadata: {err}"))?;
     Ok(MemoDocument {
@@ -344,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn default_memos_stay_under_maru() {
+    fn default_memos_stay_under_scratchpad() {
         let tmp = TempDir::new().unwrap();
         let doc = save_memo(
             tmp.path().to_string_lossy().to_string(),
@@ -353,10 +435,60 @@ mod tests {
             "# Daily".to_string(),
         )
         .unwrap();
-        assert!(doc.entry.path.contains(".maru/memos/daily.md"));
+        assert!(doc.entry.path.contains("scratchpad/memos/daily.md"));
         let list = list_memos(tmp.path().to_string_lossy().to_string()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "daily.md");
+    }
+
+    #[test]
+    fn compatibility_saves_are_create_only() {
+        let tmp = TempDir::new().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let created = save_memo(
+            work.clone(),
+            "daily".to_string(),
+            MemoFormat::Markdown,
+            "original".to_string(),
+        )
+        .unwrap();
+
+        let overwrite = save_memo(
+            work,
+            "daily".to_string(),
+            MemoFormat::Markdown,
+            "replacement".to_string(),
+        )
+        .unwrap_err();
+        assert!(overwrite.contains("scratchpad_conflict"));
+        assert_eq!(fs::read_to_string(&created.entry.path).unwrap(), "original");
+
+        let export = tmp.path().join("export.md");
+        fs::write(&export, "keep").unwrap();
+        let export_error = save_memo_as(
+            Some(tmp.path().to_string_lossy().to_string()),
+            export.to_string_lossy().to_string(),
+            "replace".to_string(),
+        )
+        .unwrap_err();
+        assert!(export_error.contains("memo_conflict"));
+        assert_eq!(fs::read_to_string(export).unwrap(), "keep");
+    }
+
+    #[test]
+    fn compatibility_reads_use_bounded_scratchpad_storage() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("scratchpad/memos");
+        fs::create_dir_all(&root).unwrap();
+        let large = root.join("large.md");
+        fs::write(&large, vec![b'x'; 2 * 1024 * 1024 + 1]).unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+
+        let entries = list_memos(work.clone()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].preview.len() <= 160);
+        let error = read_memo(work, entries[0].path.clone()).unwrap_err();
+        assert!(error.contains("scratchpad_too_large"));
     }
 
     #[test]
@@ -368,7 +500,7 @@ mod tests {
             "outside.md".to_string(),
         )
         .unwrap_err();
-        assert!(err.contains(".maru/memos"));
+        assert!(err.contains("scratchpad/memos"));
     }
 
     #[test]
@@ -382,22 +514,27 @@ mod tests {
         )
         .unwrap();
         let memo_path = PathBuf::from(&doc.entry.path);
-        assert!(doc.entry.path.contains(".maru/memos/scratch.txt"));
+        assert!(doc.entry.path.contains("scratchpad/memos/scratch.txt"));
         assert!(memo_path.exists());
 
-        delete_memo(
-            tmp.path().to_string_lossy().to_string(),
-            doc.entry.path.clone(),
+        let work = tmp.path().to_string_lossy().to_string();
+        let revision = scratchpad_read(
+            work.clone(),
+            ScratchpadCollection::Memos,
+            "scratch.txt".to_string(),
         )
-        .unwrap();
+        .unwrap()
+        .entry
+        .revision;
+        let missing_revision = delete_memo(work.clone(), doc.entry.path.clone(), None).unwrap_err();
+        assert!(missing_revision.contains("expectedRevision"));
+        assert!(memo_path.exists());
+        delete_memo(work.clone(), doc.entry.path.clone(), Some(revision)).unwrap();
         assert!(!memo_path.exists());
 
-        let err = delete_memo(
-            tmp.path().to_string_lossy().to_string(),
-            "outside.txt".to_string(),
-        )
-        .unwrap_err();
-        assert!(err.contains(".maru/memos"));
+        let err =
+            delete_memo(work, "outside.txt".to_string(), Some("missing".to_string())).unwrap_err();
+        assert!(err.contains("scratchpad/memos"));
     }
 
     #[test]

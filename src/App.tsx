@@ -57,6 +57,7 @@ import type {
 import {
   buildMaruBackgroundContextEnv,
   hasPersistedTerminalTabs,
+  scratchpadRootForWorkspace,
   TERMINAL_LAUNCHERS,
   terminalCommandPreview,
   type ActiveTerminalContext,
@@ -1364,10 +1365,17 @@ function MainApp() {
   const activeDocumentWorkspaceState =
     (activeDocumentWorkspacePath ? workspaceStates[activeDocumentWorkspacePath] : null) ??
     EMPTY_WORKSPACE_STATE;
+  const scratchpadRoot = useMemo(() => {
+    const privateRoot =
+      workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? null;
+    if (!privateRoot) return null;
+    return scratchpadRootForWorkspace(privateRoot);
+  }, [privateWorkspaces, workspaceRegistry.activeByVisibility.private]);
   const activeTerminalContext = useMemo<ActiveTerminalContext>(() => {
     const frontmatterType = selectedEntry?.frontmatter?.type;
     return {
       workspaceRoot: activeDocumentWorkspacePath ?? null,
+      scratchpadRoot,
       workspaceVisibility: explorerVisibility,
       appMode,
       docAbsPath: selectedEntry?.path ?? document?.path ?? null,
@@ -1385,6 +1393,7 @@ function MainApp() {
     selectedEntry?.path,
     selectedEntry?.relPath,
     selectedEntry?.title,
+    scratchpadRoot,
   ]);
   const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
@@ -3569,6 +3578,7 @@ function MainApp() {
         const contextEnv = buildMaruBackgroundContextEnv(
           {
             workspaceRoot: inboxWorkspacePath,
+            scratchpadRoot,
             workspaceVisibility: explorerVisibility,
             appMode: "inbox",
             docAbsPath: null,
@@ -3600,6 +3610,7 @@ function MainApp() {
       explorerVisibility,
       inboxDrops,
       inboxWorkspacePath,
+      scratchpadRoot,
       updateInboxCarry,
     ],
   );
@@ -6729,6 +6740,28 @@ function MainApp() {
         case "open-graph":
           setPersistedAppMode("graph");
           break;
+        case "open-scratchpad":
+        case "new-scratchpad-memo":
+        case "new-scratchpad-idea":
+        case "review-scratchpad-temp": {
+          setPersistedAppMode("pkm");
+          if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+          setPersistedRightPaneTab("memo");
+          const action =
+            id === "new-scratchpad-memo"
+              ? "new-memo"
+              : id === "new-scratchpad-idea"
+                ? "new-idea"
+                : id === "review-scratchpad-temp"
+                  ? "review-temp"
+                  : null;
+          if (action) {
+            window.setTimeout(() => {
+              window.dispatchEvent(new CustomEvent(`maru:scratchpad:${action}`));
+            }, 0);
+          }
+          break;
+        }
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -6833,6 +6866,7 @@ function MainApp() {
       editorViewMode,
       setPersistedAppMode,
       setPersistedEditorViewMode,
+      setPersistedRightPaneTab,
       updateLayoutSettings,
       outlineOpen,
       openSkillCompose,
@@ -8212,6 +8246,7 @@ function MainApp() {
             entries={activeDocumentEntries}
             readOnly={!activeWorkspaceCanModify}
             workspacePath={activeDocumentWorkspacePath}
+            scratchpadWorkPath={primaryWorkspacePath}
             activeLine={activeOutlineLine}
             onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
