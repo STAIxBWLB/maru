@@ -35,6 +35,8 @@ export interface MaruGraphBridge {
   fitView(): void;
   /** Dispatch webglcontextlost on the renderer canvases. */
   simulateContextLost(): void;
+  /** Schedule one Sigma render (refreshes the GPU picking buffer). */
+  requestRender(): void;
   graphStats(): { nodes: number; edges: number; visibleNodes: number; visibleEdges: number };
 }
 
