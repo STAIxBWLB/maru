@@ -29,6 +29,10 @@ import { deriveGraphView } from "../../lib/graph/derive";
 import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
+import {
+  graphLocalTargetForNode,
+  graphNodeMatchesLocalTarget,
+} from "../../lib/graph/target";
 import { refreshGraphTheme } from "./graphStyle";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -46,6 +50,9 @@ import {
   type FavoriteKind,
   type GraphDisplaySettings,
   type GraphMode,
+  type GraphOpenTarget,
+  type GraphLocalTarget,
+  type GraphSavedView,
   type GraphPanelSettings,
   type GraphSettingsV2,
   type GraphSource,
@@ -76,8 +83,8 @@ interface GraphViewProps {
   workspacePath: string | null;
   overlayPath?: string | null;
   entries: VaultEntry[];
-  focusNodeId: string | null;
-  onClearFocus: () => void;
+  focusTarget: GraphOpenTarget | null;
+  onFocusTargetChange: (target: GraphOpenTarget | null) => void;
   onOpenEntry: (entry: VaultEntry) => void;
   onCreateNote: (target: string) => void;
   graphSettings: GraphSettingsV2;
@@ -89,13 +96,14 @@ interface GraphViewProps {
 }
 
 const SAVE_DEBOUNCE_MS = 1500;
+const MISSING_LOCAL_FOCUS_ID = "__maru_missing_local_focus__";
 
 export function GraphView({
   workspacePath,
   overlayPath,
   entries,
-  focusNodeId,
-  onClearFocus,
+  focusTarget,
+  onFocusTargetChange,
   onOpenEntry,
   onCreateNote,
   graphSettings,
@@ -106,7 +114,7 @@ export function GraphView({
   onGraphChanged,
 }: GraphViewProps) {
   const { t } = useTranslation();
-  const [source, setSource] = useState<GraphSource>(graphSettings.source);
+  const source = graphSettings.source;
   const [localDepth, setLocalDepth] = useState<GraphSettingsV2["localDepth"]>(graphSettings.localDepth);
   const [localDirection, setLocalDirection] = useState<GraphSettingsV2["localDirection"]>(graphSettings.localDirection);
   // Seeded from persisted settings; changes are written back (skip-first) below.
@@ -154,17 +162,6 @@ export function GraphView({
   const graphSettingsRef = useRef(graphSettings);
   graphSettingsRef.current = graphSettings;
   const persistSkipRef = useRef(true);
-  // Source switch: load the newly active source's filter profile. Declared
-  // before the persist effect so the persist pass after a source change
-  // already sees the new source's own profile (not the previous source's).
-  const sourceInitRef = useRef(true);
-  useEffect(() => {
-    if (sourceInitRef.current) {
-      sourceInitRef.current = false;
-      return;
-    }
-    setFilters(filtersFromSettings(graphSettingsRef.current.profiles[source]));
-  }, [source]);
   useEffect(() => {
     if (persistSkipRef.current) {
       persistSkipRef.current = false;
@@ -189,7 +186,6 @@ export function GraphView({
   // edit's own persist round-trip (prop catches up to local) is a no-op — no
   // reset of the in-flight local change and no feedback loop.
   useEffect(() => {
-    if (graphSettings.source !== source) setSource(graphSettings.source);
     if (graphSettings.localDepth !== localDepth) setLocalDepth(graphSettings.localDepth);
     if (graphSettings.localDirection !== localDirection) setLocalDirection(graphSettings.localDirection);
     if (graphSettings.mode !== mode) setMode(graphSettings.mode);
@@ -217,6 +213,7 @@ export function GraphView({
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [seedPositions, setSeedPositions] = useState<Record<string, [number, number]>>({});
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [layoutCacheReady, setLayoutCacheReady] = useState(() => !workspacePath);
   const [unpinSignal, setUnpinSignal] = useState<{ id: string; nonce: number } | null>(null);
   // --- separated interaction state (V5): selection / local focus / path ----
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -235,19 +232,12 @@ export function GraphView({
   const handleSearchActiveChange = useCallback((id: string | null) => setActiveSearchId(id), []);
   // Local mode (k-hop) anchor — seeded from the prop (NeighborhoodPane
   // "그래프에서 보기") but can also be set locally from the inspector.
-  const [localFocus, setLocalFocus] = useState<string | null>(focusNodeId ?? null);
-  useEffect(() => setLocalFocus(focusNodeId ?? null), [focusNodeId]);
-  // Focus hides the siblings via visibility (no relayout), so recenter the
-  // camera on the focused node when it changes — otherwise the neighborhood can
-  // sit off-screen at its full-graph position.
-  const prevFocusRef = useRef<string | null>(null);
+  const [localTarget, setLocalTarget] = useState<GraphLocalTarget | null>(() =>
+    focusTarget?.source === source ? focusTarget.localTarget : null,
+  );
   useEffect(() => {
-    if (localFocus && localFocus !== prevFocusRef.current) {
-      setCenterSignal({ id: localFocus, nonce: Date.now() });
-    }
-    prevFocusRef.current = localFocus;
-  }, [localFocus]);
-
+    setLocalTarget(focusTarget?.source === source ? focusTarget.localTarget : null);
+  }, [focusTarget, source]);
   // --- adaptive tiers + panel layout (V5) -----------------------------------
   const rootRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -334,6 +324,34 @@ export function GraphView({
     },
     [persistPanels],
   );
+  const resizePanelByKey = useCallback(
+    (kind: "filters" | "workbench") => (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const current = panelsRef.current;
+      if (kind === "filters") {
+        persistPanels({
+          ...current,
+          filterWidth: clampPanelWidth(
+            current.filterWidth + direction * 12,
+            GRAPH_FILTER_WIDTH_MIN,
+            GRAPH_FILTER_WIDTH_MAX,
+          ),
+        });
+      } else {
+        persistPanels({
+          ...current,
+          workbenchWidth: clampPanelWidth(
+            current.workbenchWidth - direction * 12,
+            GRAPH_WORKBENCH_WIDTH_MIN,
+            GRAPH_WORKBENCH_WIDTH_MAX,
+          ),
+        });
+      }
+    },
+    [persistPanels],
+  );
 
   // Renderer lifecycle (layout-running indicator + a11y announcements).
   const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
@@ -365,6 +383,26 @@ export function GraphView({
   }, [workspacePath, overlayPath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
+  const localFocusNode = useMemo(
+    () =>
+      localTarget
+        ? model.nodes.find((node) => graphNodeMatchesLocalTarget(node, localTarget)) ?? null
+        : null,
+    [model.nodes, localTarget],
+  );
+  const localFocus = localFocusNode?.id ?? null;
+  const requestedFocusId = localTarget
+    ? localFocus ?? MISSING_LOCAL_FOCUS_ID
+    : null;
+  // Focus hides siblings via reducer visibility, so re-center only when the
+  // resolved canonical target changes. Missing targets remain explicit.
+  const prevFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (localFocus && localFocus !== prevFocusRef.current) {
+      setCenterSignal({ id: localFocus, nonce: Date.now() });
+    }
+    prevFocusRef.current = localFocus;
+  }, [localFocus]);
   // "now" for stale-note detection — recomputed whenever the model changes
   // (i.e. on vault edits) so it doesn't stay frozen at mount time.
   const now = useMemo(() => Date.now(), [model]);
@@ -377,20 +415,16 @@ export function GraphView({
         model,
         profile: filtersToSettings(filters),
         generatedPatterns: graphSettings.generatedPatterns,
-        mode: localFocus ? "local" : mode,
-        focusNodeId: localFocus,
+        mode: localTarget ? "local" : mode,
+        focusNodeId: requestedFocusId,
         localDepth,
         localDirection,
         search,
         searchAsFilter,
       }),
-    [model, filters, graphSettings.generatedPatterns, localFocus, mode, localDepth, localDirection, search, searchAsFilter],
+    [model, filters, graphSettings.generatedPatterns, localTarget, requestedFocusId, mode, localDepth, localDirection, search, searchAsFilter],
   );
   const filtered = derived.visibleModel;
-  const visibleNodeIds = useMemo(
-    () => new Set(filtered.nodes.map((node) => node.id)),
-    [filtered.nodes],
-  );
   // Search combobox ranks the CURRENT filtered graph.
   const searchResults = useMemo(
     () => rankGraphSearch(filtered.nodes, search),
@@ -417,13 +451,23 @@ export function GraphView({
   );
 
   useEffect(() => {
+    setSeedPositions({});
+    setPinnedIds([]);
+    setLayoutCacheReady(!workspacePath);
     if (!workspacePath) return;
     let cancelled = false;
-    void vaultGraphLayoutRead(workspacePath).then((cache) => {
-      if (cancelled || !cache) return;
-      setSeedPositions(sanitizePositions(cache.positions));
-      setPinnedIds(cache.pinnedIds ?? []);
-    });
+    void vaultGraphLayoutRead(workspacePath)
+      .then((cache) => {
+        if (cancelled || !cache) return;
+        setSeedPositions(sanitizePositions(cache.positions));
+        setPinnedIds(cache.pinnedIds ?? []);
+      })
+      .catch((err: unknown) => {
+        console.info("[graph] layout cache unavailable", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLayoutCacheReady(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -488,6 +532,18 @@ export function GraphView({
       else setRightTab("insights");
     },
     [],
+  );
+
+  const focusNode = useCallback(
+    (node: GraphNode) => {
+      const target = graphLocalTargetForNode(node);
+      if (!target) return;
+      setLocalTarget(target);
+      setMode("local");
+      onFocusTargetChange({ source, localTarget: target });
+      selectById(node.id);
+    },
+    [selectById, onFocusTargetChange, source],
   );
 
   const handleSelect = useCallback(
@@ -644,9 +700,10 @@ export function GraphView({
   }, [nodeById]);
 
   const clearFocus = useCallback(() => {
-    setLocalFocus(null);
-    onClearFocus();
-  }, [onClearFocus]);
+    setLocalTarget(null);
+    setMode("global");
+    onFocusTargetChange(null);
+  }, [onFocusTargetChange]);
 
   const clearOverlays = useCallback(() => {
     setSelectedId(null);
@@ -654,26 +711,94 @@ export function GraphView({
     setPathIds([]);
     setPathSourceId(null);
     setRightTab("insights");
-    if (localFocus) clearFocus();
-  }, [localFocus, clearFocus]);
+    if (localTarget) clearFocus();
+  }, [localTarget, clearFocus]);
 
   // Toolbar mode segmented control: Local with no anchor keeps Global and
   // focuses the search box (the user picks a node there first).
-  const effectiveMode: GraphMode = localFocus ? "local" : mode;
+  const effectiveMode: GraphMode = localTarget ? "local" : mode === "local" ? "global" : mode;
   const handleModeChange = useCallback(
     (next: GraphMode) => {
       if (next === "local") {
-        if (!localFocus) searchRef.current?.focus();
+        if (!localTarget) searchRef.current?.focus();
         return;
       }
-      if (next === "global" && localFocus) clearFocus();
+      if (localTarget) clearFocus();
       setMode(next);
     },
-    [localFocus, clearFocus],
+    [localTarget, clearFocus],
   );
 
+  const changeSource = useCallback(
+    (next: GraphSource) => {
+      if (next === source) return;
+      setLocalTarget(null);
+      onFocusTargetChange(null);
+      const current = graphSettingsRef.current;
+      onGraphSettingsChangeRef.current({ ...current, source: next, mode: "global" });
+    },
+    [source, onFocusTargetChange],
+  );
+
+  const saveCurrentView = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const current = graphSettingsRef.current;
+      const view: GraphSavedView = {
+        id: globalThis.crypto?.randomUUID?.() ?? `graph-view-${Date.now()}`,
+        name: trimmed,
+        source,
+        mode: effectiveMode,
+        localTarget: effectiveMode === "local" ? localTarget : null,
+        profile: filtersToSettings(filters),
+        display,
+      };
+      const duplicate = current.savedViews.find((item) => item.name === trimmed);
+      const savedViews = duplicate
+        ? current.savedViews.map((item) =>
+            item.id === duplicate.id ? { ...view, id: duplicate.id } : item,
+          )
+        : [...current.savedViews, view];
+      onGraphSettingsChangeRef.current({ ...current, savedViews });
+    },
+    [source, effectiveMode, localTarget, filters, display],
+  );
+
+  const applySavedView = useCallback(
+    (view: GraphSavedView) => {
+      const target = view.mode === "local" && view.localTarget
+        ? { source: view.source, localTarget: view.localTarget }
+        : null;
+      setLocalTarget(target?.localTarget ?? null);
+      setMode(target ? "local" : view.mode === "local" ? "global" : view.mode);
+      setFilters(filtersFromSettings(view.profile));
+      setSelectedId(null);
+      setPathIds([]);
+      setPathSourceId(null);
+      onFocusTargetChange(target);
+      const current = graphSettingsRef.current;
+      onGraphSettingsChangeRef.current({
+        ...current,
+        source: view.source,
+        mode: target ? "local" : view.mode === "local" ? "global" : view.mode,
+        profiles: { ...current.profiles, [view.source]: view.profile },
+        display: view.display,
+      });
+    },
+    [onFocusTargetChange],
+  );
+
+  const deleteSavedView = useCallback((id: string) => {
+    const current = graphSettingsRef.current;
+    onGraphSettingsChangeRef.current({
+      ...current,
+      savedViews: current.savedViews.filter((view) => view.id !== id),
+    });
+  }, []);
+
   // Mode-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom.
-  const shortcutPredicate = useCallback(() => mode !== "chains", [mode]);
+  const shortcutPredicate = useCallback(() => effectiveMode !== "chains", [effectiveMode]);
   const shortcutHandler = useCallback(
     (event: KeyboardEvent) => {
       if (matchesShortcut(event, { key: "f", mod: true })) {
@@ -734,9 +859,12 @@ export function GraphView({
   }, [rendererState, t]);
 
   const selectedNode = useMemo(
-    () => (selectedId ? model.nodes.find((n) => n.id === selectedId) ?? null : null),
-    [selectedId, model],
+    () => (selectedId ? filtered.nodes.find((n) => n.id === selectedId) ?? null : null),
+    [selectedId, filtered.nodes],
   );
+  useEffect(() => {
+    if (selectedId && !derived.visibleNodeIds.has(selectedId)) selectById(null);
+  }, [selectedId, derived.visibleNodeIds, selectById]);
 
   const highlight: GraphHighlight = useMemo(() => {
     if (pathIds.length > 1) return { kind: "path", ids: pathIds };
@@ -747,6 +875,15 @@ export function GraphView({
   const enrichedCount = model.enriched
     ? new Set(model.nodes.map((n) => n.community).filter((c) => c != null)).size
     : 0;
+  const activeFilterCount =
+    filters.domains.size +
+    filters.types.size +
+    filters.relations.size +
+    (filters.community == null ? 0 : 1) +
+    (filters.showUnresolved ? 1 : 0) +
+    (filters.showGenerated ? 1 : 0) +
+    (filters.minVisibleNeighbors === defaultGraphFilterProfile().minVisibleNeighbors ? 0 : 1) +
+    (searchAsFilter && search.trim() ? 1 : 0);
 
   const filterPanel = (
     <GraphFilterPanel
@@ -782,7 +919,12 @@ export function GraphView({
       </Tabs.List>
       {/* forceMount keeps the insights worker + inspector state alive across
           tab switches; Radix hides the inactive panel via the hidden attr. */}
-      <Tabs.Content value="insights" forceMount className="graph-right-content">
+      <Tabs.Content
+        value="insights"
+        forceMount
+        hidden={rightTab !== "insights"}
+        className="graph-right-content"
+      >
         <GraphInsightsPanel
           model={derived.analysisModel}
           now={now}
@@ -793,20 +935,22 @@ export function GraphView({
           onConnect={handleConnect}
         />
       </Tabs.Content>
-      <Tabs.Content value="selected" forceMount className="graph-right-content">
+      <Tabs.Content
+        value="selected"
+        forceMount
+        hidden={rightTab !== "selected"}
+        className="graph-right-content"
+      >
         <GraphInspector
           node={selectedNode}
-          model={model}
+          model={filtered}
           isFavorite={
             selectedNode?.relPath ? isFavorite("file", selectedNode.relPath) : false
           }
           onSelectNode={handleInsightNode}
           onOpen={handleOpen}
           onToggleFavorite={toggleNodeFavorite}
-          onFocus={(node) => {
-            setLocalFocus(node.id);
-            selectById(node.id);
-          }}
+          onFocus={focusNode}
           onStartPath={(node) => {
             setPathSourceId(node.id);
             setSelectedId(node.id);
@@ -820,10 +964,10 @@ export function GraphView({
     <div ref={rootRef} className={`graph-view tier-${tier}`} data-testid="graph-mode">
       <GraphToolbar
         mode={effectiveMode}
-        localAvailable={localFocus != null}
+        localAvailable={localTarget != null}
         onModeChange={handleModeChange}
         source={source}
-        onSourceChange={setSource}
+        onSourceChange={changeSource}
         search={search}
         onSearchChange={setSearch}
         searchInputRef={searchRef}
@@ -837,6 +981,7 @@ export function GraphView({
         enriched={model.enriched}
         communityCount={enrichedCount}
         filtersOpen={filtersVisible}
+        activeFilterCount={activeFilterCount}
         onToggleFilters={toggleFiltersPanel}
         workbenchOpen={workbenchVisible}
         onToggleWorkbench={toggleWorkbenchPanel}
@@ -848,6 +993,10 @@ export function GraphView({
         onExportSvg={() => void handleExport("svg")}
         onRelayout={() => setLayoutEpoch((e) => e + 1)}
         refreshing={refreshing}
+        savedViews={graphSettings.savedViews}
+        onSaveView={saveCurrentView}
+        onApplyView={applySavedView}
+        onDeleteView={deleteSavedView}
       />
 
       {!model.enriched ? (
@@ -855,9 +1004,13 @@ export function GraphView({
           {enrichment.hint ?? t("graph.hint.noEnrichment")}
         </div>
       ) : null}
-      {localFocus ? (
+      {localTarget ? (
         <div className="graph-focus-bar" data-testid="graph-focus-bar">
-          <span>{t("graph.focus.active")}: {localFocus}</span>
+          <span>
+            {derived.focusMissing
+              ? `${t("graph.focus.missing")}: ${localTarget.relPath}`
+              : `${t("graph.focus.active")}: ${localFocusNode?.label ?? localTarget.relPath}`}
+          </span>
           <label>
             {t("graph.focus.depth")}
             <select value={localDepth} onChange={(event) => setLocalDepth(Number(event.target.value) as 1 | 2 | 3)}>
@@ -884,7 +1037,7 @@ export function GraphView({
         </div>
       ) : null}
 
-      {mode !== "chains" && derived.emptyReason ? (
+      {effectiveMode !== "chains" && derived.emptyReason ? (
         <div className="graph-degraded-bar graph-empty-bar" data-testid="graph-empty-bar">
           {derived.emptyReason === "empty-source" ? t("graph.empty.source") : t("graph.empty.filtered")}
           {derived.emptyReason === "filtered-empty" ? (
@@ -899,7 +1052,7 @@ export function GraphView({
         </div>
       ) : null}
 
-      {mode === "chains" ? (
+      {effectiveMode === "chains" ? (
         <DecisionChainLanes model={model} onNodeClick={handleOpen} />
       ) : (
         <div className="graph-body" ref={bodyRef}>
@@ -918,18 +1071,21 @@ export function GraphView({
               aria-valuemin={GRAPH_FILTER_WIDTH_MIN}
               aria-valuemax={GRAPH_FILTER_WIDTH_MAX}
               aria-valuenow={filterWidth}
+              tabIndex={0}
               onPointerDown={startPanelResize("filters")}
+              onKeyDown={resizePanelByKey("filters")}
             />
           ) : null}
           <div className="graph-canvas-column">
-            <GraphCanvas
+            {layoutCacheReady ? <GraphCanvas
               nodes={model.nodes}
               edges={model.edges}
               positionsRef={latestPositionsRef}
               positionNodeIdsRef={latestPositionNodeIdsRef}
               seedPositions={seedPositions}
               initialPinnedIds={pinnedIds}
-              visibleNodeIds={visibleNodeIds}
+              visibleNodeIds={derived.visibleNodeIds}
+              visibleEdgeKeys={derived.visibleEdgeKeys}
               layoutEpoch={layoutEpoch}
               themeEpoch={themeEpoch}
               enriched={model.enriched}
@@ -974,7 +1130,7 @@ export function GraphView({
                 </>
               }
               onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
-            />
+            /> : <div className="graph-canvas-loading" role="status">{t("graph.layout.running")}</div>}
           </div>
           {workbenchDocked ? (
             <div
@@ -986,7 +1142,9 @@ export function GraphView({
               aria-valuemin={GRAPH_WORKBENCH_WIDTH_MIN}
               aria-valuemax={GRAPH_WORKBENCH_WIDTH_MAX}
               aria-valuenow={workbenchWidth}
+              tabIndex={0}
               onPointerDown={startPanelResize("workbench")}
+              onKeyDown={resizePanelByKey("workbench")}
             />
           ) : null}
           {workbenchDocked ? (
@@ -1024,7 +1182,7 @@ export function GraphView({
           <button
             type="button"
             role="menuitem"
-            onClick={() => runMenuAction((n) => { setLocalFocus(n.id); selectById(n.id); })}
+            onClick={() => runMenuAction(focusNode)}
           >
             <span>{t("graph.inspector.focus")}</span>
           </button>
@@ -1044,22 +1202,22 @@ export function GraphView({
               <span>{favoriteIds.has(menu.node.id) ? t("graph.menu.unfavorite") : t("graph.menu.favorite")}</span>
             </button>
           ) : null}
-          <div className="context-menu-separator" role="separator" />
-          {/* ponytail: no "pin" item — pinned state lives only in the worker, so
-              a pin toggle couldn't honestly render its own on/off state. */}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() =>
-              runMenuAction((n) => {
-                const index = model.nodes.findIndex((fn) => fn.id === n.id);
-                if (index < 0) return;
-                setUnpinSignal({ id: n.id, nonce: Date.now() });
-              })
-            }
-          >
-            <span>{t("graph.menu.unpin")}</span>
-          </button>
+          {pinnedIds.includes(menu.node.id) ? (
+            <>
+              <div className="context-menu-separator" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  runMenuAction((n) =>
+                    setUnpinSignal({ id: n.id, nonce: Date.now() }),
+                  )
+                }
+              >
+                <span>{t("graph.menu.unpin")}</span>
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
       <GraphRelationReviewDialog

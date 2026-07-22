@@ -5,6 +5,7 @@
 // a floating cluster (GraphZoomCluster) rendered inside the canvas wrap.
 
 import {
+  Bookmark,
   FileDown,
   ImageDown,
   ListFilter,
@@ -16,11 +17,13 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Save,
   Search,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import type { GraphMode, GraphSource } from "../../lib/settings";
+import type { GraphMode, GraphSavedView, GraphSource } from "../../lib/settings";
 import type { GraphSearchResult } from "../../lib/graph/search";
 
 interface GraphSearchBoxProps {
@@ -151,6 +154,7 @@ interface GraphToolbarProps {
   enriched: boolean;
   communityCount: number;
   filtersOpen: boolean;
+  activeFilterCount: number;
   onToggleFilters: () => void;
   workbenchOpen: boolean;
   onToggleWorkbench: () => void;
@@ -159,6 +163,118 @@ interface GraphToolbarProps {
   onExportSvg: () => void;
   onRelayout: () => void;
   refreshing: boolean;
+  savedViews: GraphSavedView[];
+  onSaveView: (name: string) => void;
+  onApplyView: (view: GraphSavedView) => void;
+  onDeleteView: (id: string) => void;
+}
+
+function GraphSavedViewsMenu({
+  views,
+  onSave,
+  onApply,
+  onDelete,
+}: {
+  views: GraphSavedView[];
+  onSave: (name: string) => void;
+  onApply: (view: GraphSavedView) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: Event) => {
+      if (rootRef.current && event.target instanceof Node && rootRef.current.contains(event.target)) return;
+      setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSave(trimmed);
+    setName("");
+  };
+
+  return (
+    <div className="graph-saved-views" ref={rootRef}>
+      <button
+        type="button"
+        className={open ? "graph-icon-button active" : "graph-icon-button"}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={t("graph.saved.title")}
+        data-testid="graph-saved-views"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Bookmark size={14} />
+        {views.length > 0 ? <span className="graph-icon-count">{views.length}</span> : null}
+      </button>
+      {open ? (
+        <div className="graph-saved-menu" role="dialog" aria-label={t("graph.saved.title")}>
+          <div className="graph-saved-heading">{t("graph.saved.title")}</div>
+          <div className="graph-saved-create">
+            <input
+              value={name}
+              placeholder={t("graph.saved.name")}
+              aria-label={t("graph.saved.name")}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submit();
+              }}
+            />
+            <button type="button" disabled={!name.trim()} title={t("graph.saved.save")} onClick={submit}>
+              <Save size={13} />
+            </button>
+          </div>
+          {views.length === 0 ? (
+            <div className="graph-saved-empty">{t("graph.saved.empty")}</div>
+          ) : (
+            <div className="graph-saved-list">
+              {views.map((view) => (
+                <div key={view.id} className="graph-saved-row">
+                  <button
+                    type="button"
+                    className="graph-saved-apply"
+                    onClick={() => {
+                      onApply(view);
+                      setOpen(false);
+                    }}
+                    title={`${view.name} · ${view.source} · ${view.mode}`}
+                  >
+                    <span>{view.name}</span>
+                    <small>{view.source} · {view.mode}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="graph-saved-delete"
+                    aria-label={t("graph.saved.delete")}
+                    title={t("graph.saved.delete")}
+                    onClick={() => onDelete(view.id)}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function GraphToolbar({
@@ -180,6 +296,7 @@ export function GraphToolbar({
   enriched,
   communityCount,
   filtersOpen,
+  activeFilterCount,
   onToggleFilters,
   workbenchOpen,
   onToggleWorkbench,
@@ -188,6 +305,10 @@ export function GraphToolbar({
   onExportSvg,
   onRelayout,
   refreshing,
+  savedViews,
+  onSaveView,
+  onApplyView,
+  onDeleteView,
 }: GraphToolbarProps) {
   const { t } = useTranslation();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -240,6 +361,13 @@ export function GraphToolbar({
         <option value="workspace">{t("graph.source.workspace")}</option>
       </select>
 
+      <GraphSavedViewsMenu
+        views={savedViews}
+        onSave={onSaveView}
+        onApply={onApplyView}
+        onDelete={onDeleteView}
+      />
+
       <GraphSearchBox
         search={search}
         onSearchChange={onSearchChange}
@@ -275,11 +403,17 @@ export function GraphToolbar({
         type="button"
         className={filtersOpen ? "graph-icon-button active" : "graph-icon-button"}
         aria-pressed={filtersOpen}
-        title={t("graph.panels.filters")}
+        title={activeFilterCount > 0
+          ? t("graph.filter.activeCount", { count: activeFilterCount })
+          : t("graph.panels.filters")}
+        aria-label={activeFilterCount > 0
+          ? t("graph.filter.activeCount", { count: activeFilterCount })
+          : t("graph.panels.filters")}
         data-testid="graph-toggle-filters"
         onClick={onToggleFilters}
       >
         <PanelLeft size={14} />
+        {activeFilterCount > 0 ? <span className="graph-icon-count">{activeFilterCount}</span> : null}
       </button>
       <button
         type="button"

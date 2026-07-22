@@ -51,6 +51,7 @@ interface Bridge {
   containerRect(): { x: number; y: number; width: number; height: number };
   frames(): number;
   camera(): { x: number; y: number; ratio: number };
+  cameraAnimating(): boolean;
   nodeViewportPoint(id: string): { x: number; y: number } | null;
   nodeScreenState(id: string): {
     visible: boolean;
@@ -65,7 +66,7 @@ interface Bridge {
   resumeLayout(): void;
   fitView(): void;
   simulateContextLost(): void;
-  graphStats(): { nodes: number; edges: number; visibleNodes: number };
+  graphStats(): { nodes: number; edges: number; visibleNodes: number; visibleEdges: number };
 }
 
 // NOTE: page.evaluate serializes its return value — the bridge's methods do
@@ -124,8 +125,31 @@ async function clickNode(page: Page, id: string, options?: { button?: "left" | "
   }
 }
 
-async function dblclickNode(page: Page, id: string) {
+async function dblclickNode(page: Page, id: string, options?: { fit?: boolean }) {
+  // Wait for the current camera transition and its render before resolving a
+  // pixel coordinate. Only fit when the caller revealed a potentially
+  // offscreen node; otherwise preserve the interaction being tested.
+  const cameraStart = await page.evaluate((fit) => {
+    const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+    const frame = bridge.frames();
+    if (fit) bridge.fitView();
+    return { frame, animated: fit || bridge.cameraAnimating() };
+  }, options?.fit === true);
+  if (cameraStart.animated) {
+    await page.waitForFunction(
+      ({ frame }) => {
+        const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+        return !bridge.cameraAnimating() && bridge.frames() > frame;
+      },
+      cameraStart,
+    );
+  }
   const point = await nodePoint(page, id);
+  // Real users move the pointer onto a node before double-clicking. Warming
+  // Sigma's picking pass avoids Playwright's instantaneous pointer teleport
+  // racing the hover/hit buffer.
+  await page.mouse.move(point.x, point.y, { steps: 3 });
+  await expect.poll(() => hoveredId(page)).toBe(id);
   await page.mouse.dblclick(point.x, point.y);
 }
 
@@ -223,7 +247,7 @@ test("ghost node click seeds the note-creation dialog (F3b) and chain view toggl
   // Ghost double-click → NewDocumentDialog opens seeded with the unresolved target.
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(() => screenState(page, "maru-project").then((s) => s.visible)).toBe(true);
-  await dblclickNode(page, "maru-project");
+  await dblclickNode(page, "maru-project", { fit: true });
   const dialog = page.locator(".dialog-content", { hasText: "새 Maru 문서" });
   await expect(dialog).toBeVisible();
   // Seeded with the unresolved wikilink target as the title prefill.
@@ -326,6 +350,54 @@ test("graph view/filter settings persist across a mode switch", async ({ page })
   expect(forbidden).toEqual([]);
 });
 
+test("saved views restore the current profile and can be deleted", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  await page.getByLabel("미해소 링크 표시").check();
+  await expect.poll(async () => (await stats(page)).visibleEdges).toBe(1);
+
+  await page.getByTestId("graph-saved-views").click();
+  await page.getByLabel("보기 이름").fill("Ghost review");
+  await page.getByTitle("현재 보기 저장").click();
+  await expect(page.getByText("Ghost review", { exact: true })).toBeVisible();
+  await page.getByTestId("graph-saved-views").click();
+
+  await page.getByLabel("미해소 링크 표시").uncheck();
+  await expect.poll(async () => (await stats(page)).visibleEdges).toBe(0);
+
+  await page.getByTestId("graph-saved-views").click();
+  await page.getByText("Ghost review", { exact: true }).click();
+  await expect(page.getByLabel("미해소 링크 표시")).toBeChecked();
+  await expect.poll(async () => (await stats(page)).visibleEdges).toBe(1);
+
+  await page.getByTestId("graph-saved-views").click();
+  await page.getByLabel("저장된 보기 삭제").click();
+  await expect(page.getByText("저장된 보기가 없습니다")).toBeVisible();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("Neighborhood opens the exact note as a Local graph target", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  await dblclickNode(page, "maru-glossary");
+  await expect(page.getByTestId("graph-mode")).toHaveCount(0);
+  const showOutline = page.getByRole("button", { name: "오른쪽 패널 보이기" });
+  if (await showOutline.count()) await showOutline.click();
+  await page.getByRole("tab", { name: "개요", exact: true }).click();
+  const openLocal = page.getByRole("button", { name: "그래프에서 보기" });
+  await expect(openLocal).toBeVisible();
+  await openLocal.click();
+
+  await expect(page.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
+  await expect(page.getByTestId("graph-view-local")).toHaveAttribute("aria-selected", "true");
+
+  expect(forbidden).toEqual([]);
+});
+
 test("right-click opens the node context menu; Escape closes it", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
@@ -372,6 +444,25 @@ test("exports the current graph view as an SVG download", async ({ page }) => {
 
   // Web mode → chooseSaveFile returns null → direct blob download. The export
   // action lives in the More menu since V5.
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("graph-more-menu").click();
+  await page.getByTestId("graph-export-svg").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^graph-\d{4}-\d{2}-\d{2}\.svg$/);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("GPU loss falls back to an interactive, exportable static graph", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  await page.evaluate(() =>
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.simulateContextLost(),
+  );
+  await expect(page.getByTestId("graph-gpu-recovery")).toBeVisible();
+  await expect(page.locator("svg.graph-static-fallback")).toBeVisible({ timeout: 5_000 });
+
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("graph-more-menu").click();
   await page.getByTestId("graph-export-svg").click();

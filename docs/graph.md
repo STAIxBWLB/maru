@@ -72,7 +72,8 @@ overlay is produced out-of-band by the `vault-graph` skill
 - `src/lib/graph/derive.ts` — one pure pipeline: node facet filter → relation
   filter (before traversal/counting) → local k-hop → `minVisibleNeighbors`
   k-core pruning (focus anchor always retained) → search-as-filter. Produces
-  `analysisModel` (insights/pathfinding/export), `visibleModel` (canvas),
+  `analysisModel` (insights/pathfinding, before transient search),
+  `visibleModel` plus node/edge masks (canvas/Inspector/export),
   facets (incl. relations), `pausedFilters` (persisted values absent from the
   current graph — shown as inactive chips, never silently blanking the
   canvas), `emptyReason` and `focusMissing`.
@@ -89,8 +90,9 @@ overlay is produced out-of-band by the `vault-graph` skill
   `max(minDegree, connected ? 1 : 0)`), `display` (arrows typed|all|none,
   label density low|balanced|high, node/edge scale 0.5–2), `panels`
   (filtersOpen/workbenchOpen + docked widths, clamped 200–340 / 280–480), and
-  the `savedViews` schema (source/mode/localTarget/profile/display per view;
-  UI landing later).
+  `savedViews` (source/mode/localTarget/profile/display per view). The toolbar
+  menu creates, applies, replaces by name, and deletes views; query, selection,
+  path, camera, and overlay state remain transient.
 - Display wiring is hot-applied: arrows/labels via `setSetting` or attribute
   updates + `refresh()`, never a graph rebuild. Frontmatter edges carry a
   stable `relationColor` (palette hash); body `wiki_link` edges stay neutral.
@@ -102,7 +104,8 @@ overlay is produced out-of-band by the `vault-graph` skill
   resize handles), **standard 920–1279** (Filters becomes a left overlay,
   Workbench docked), **compact <920** (both overlays, mutually exclusive;
   overlay open state is session-only). Docked visibility and widths persist
-  in `graphSettings.panels`.
+  in `graphSettings.panels`. The compact toolbar wraps instead of clipping,
+  with search on its own row.
 - Workbench = Radix Tabs (Insights / Details); selecting a node opens
   Details, clearing returns to Insights. Insight sections preview 6 rows with
   a "more" expander; hidden-link rows show shared-neighbor `via` evidence and
@@ -112,7 +115,20 @@ overlay is produced out-of-band by the `vault-graph` skill
 - A11y: arrow-key camera pan on the focused canvas (shift for larger steps),
   Enter opens the selection, `aria-live` announcements for selection /
   empty-filter / layout running→done, and `prefers-reduced-motion` turns all
-  camera animations instant.
+  camera animations instant. Docked panel separators also resize with the
+  left/right arrow keys, and static fallback nodes are keyboard-operable.
+
+## Local targets and saved views
+
+- A Local target is `{ownerWorkspacePath, relPath}` plus an explicit graph
+  source at app handoff. It never uses a basename or node id, so duplicate
+  filenames in different folders/workspaces resolve deterministically.
+- The Local anchor is protected throughout derivation. If its canonical path
+  is absent from the selected source, the focus bar reports that state and
+  offers a direct exit instead of silently focusing another note.
+- Applying a saved Local view changes source, profile, display, mode, and the
+  canonical target in one settings transition. Switching source clears an
+  incompatible session focus.
 
 ### Interaction
 
@@ -143,7 +159,8 @@ interactive while hidden-link, bridge, stale and orphan analyses run.
 Layout cache v2 stores the full position map and pinned ids, migrates v1 on
 read, merges partial updates, and uses atomic replacement. WebGL context loss
 gets a restore attempt, then degrades to a static SVG graph at 2k nodes or a
-searchable inspector/list for larger models.
+searchable inspector/list for larger models. PNG/SVG export remains available
+from the fallback and observes the same node/edge visibility masks.
 
 ## Visualization & export (V3)
 

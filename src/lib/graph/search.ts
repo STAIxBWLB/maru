@@ -11,6 +11,16 @@ export interface GraphSearchResult {
 
 export const GRAPH_SEARCH_LIMIT = 20;
 
+export function graphNodeMatchesSearch(
+  node: { label: string; relPath: string | null },
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return node.label.toLowerCase().includes(q)
+    || Boolean(node.relPath?.toLowerCase().includes(q));
+}
+
 export function rankGraphSearch(
   nodes: readonly { id: string; label: string; relPath: string | null }[],
   query: string,

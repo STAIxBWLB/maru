@@ -13,8 +13,14 @@ import {
 } from "react";
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
-import type { GraphEdge, GraphNode } from "../../lib/graph/model";
+import {
+  graphEdgeVisibilityKey,
+  type GraphEdge,
+  type GraphNode,
+} from "../../lib/graph/model";
 import { isUsableCoordinate } from "../../lib/graph/positions";
+import { graphNodeMatchesSearch } from "../../lib/graph/search";
+import { rasterise } from "../../lib/diagram/export";
 import type { GraphDisplaySettings } from "../../lib/settings";
 import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, relationColor } from "./graphStyle";
 import { graphBridgeEnabled } from "./graphBridge";
@@ -80,6 +86,7 @@ type SigmaEdgeAttributes = {
   fromFrontmatter: boolean;
   sourceId: string;
   targetId: string;
+  visibilityKey: string;
   suggested?: boolean;
 };
 
@@ -93,6 +100,7 @@ interface GraphCanvasProps {
   seedPositions?: Record<string, [number, number]>;
   initialPinnedIds?: string[];
   visibleNodeIds?: Set<string>;
+  visibleEdgeKeys?: Set<string>;
   layoutEpoch: number;
   themeEpoch: number;
   enriched: boolean;
@@ -131,6 +139,7 @@ type InteractionState = {
   hoverId: string | null;
   favoriteIds: Set<string>;
   visibleNodeIds: Set<string> | null;
+  visibleEdgeKeys: Set<string> | null;
 };
 
 /** arrows: "typed" = frontmatter relations get arrows (body wiki_link stays a
@@ -217,6 +226,7 @@ function buildSigmaGraph(
       fromFrontmatter: edge.fromFrontmatter,
       sourceId: edge.source,
       targetId: edge.target,
+      visibilityKey: graphEdgeVisibilityKey(edge),
     });
   });
   return graph;
@@ -231,24 +241,41 @@ function xmlEscape(value: string): string {
     .replaceAll("'", "&apos;");
 }
 
-function graphToSvg(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>): Blob {
+function graphToSvg(
+  renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  interaction: InteractionState,
+): Blob {
   const graph = renderer.getGraph();
   const { width, height } = renderer.getDimensions();
   const edgeParts: string[] = [];
   graph.forEachEdge((key, attrs, source, target) => {
-    if (attrs.hidden) return;
+    if (
+      attrs.hidden ||
+      (interaction.visibleNodeIds &&
+        (!interaction.visibleNodeIds.has(source) || !interaction.visibleNodeIds.has(target))) ||
+      (interaction.visibleEdgeKeys && !interaction.visibleEdgeKeys.has(attrs.visibilityKey))
+    ) return;
+    const displayData = renderer.getEdgeDisplayData(key);
+    if (displayData?.hidden) return;
     const a = renderer.graphToViewport(graph.getNodeAttributes(source));
     const b = renderer.graphToViewport(graph.getNodeAttributes(target));
-    edgeParts.push(`<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="${xmlEscape(attrs.color)}" stroke-width="${attrs.size}" stroke-opacity="0.55" data-edge-id="${xmlEscape(key)}"/>`);
+    const color = displayData?.color ?? attrs.color;
+    const size = displayData?.size ?? attrs.size;
+    const marker = attrs.type === "arrow" ? ' marker-end="url(#graph-arrow)"' : "";
+    edgeParts.push(`<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="${xmlEscape(color)}" stroke-width="${size}" stroke-opacity="0.55"${marker} data-edge-id="${xmlEscape(key)}"/>`);
   });
   const nodeParts: string[] = [];
   graph.forEachNode((key, attrs) => {
-    if (attrs.hidden) return;
+    if (attrs.hidden || (interaction.visibleNodeIds && !interaction.visibleNodeIds.has(key))) return;
+    const displayData = renderer.getNodeDisplayData(key);
+    if (displayData?.hidden) return;
     const p = renderer.graphToViewport(attrs);
-    const r = Math.max(2, renderer.scaleSize(attrs.size));
-    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(attrs.color)}" stroke="${xmlEscape(attrs.borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(attrs.label)}</text></g>`);
+    const r = Math.max(2, renderer.scaleSize(displayData?.size ?? attrs.size));
+    const color = displayData?.color ?? attrs.color;
+    const borderColor = (displayData as { borderColor?: string } | undefined)?.borderColor ?? attrs.borderColor;
+    nodeParts.push(`<g data-node-id="${xmlEscape(key)}"><circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${xmlEscape(color)}" stroke="${xmlEscape(borderColor)}"/><text x="${p.x.toFixed(2)}" y="${(p.y + r + 12).toFixed(2)}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(attrs.label)}</text></g>`);
   });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs><rect width="100%" height="100%" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
   return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
 }
 
@@ -256,12 +283,73 @@ const FALLBACK_VIEWBOX = "-700 -500 1400 1000";
 const FALLBACK_LIST_THRESHOLD = 2_000;
 const FALLBACK_LIST_CAP = 500;
 
+function fallbackGraphToSvg(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+  positions: Float64Array | null,
+  enriched: boolean,
+  display: GraphDisplaySettings,
+  visibleNodeIds?: Set<string>,
+  visibleEdgeKeys?: Set<string>,
+): Blob {
+  const pointById = new Map<string, [number, number]>();
+  nodes.forEach((node, index) => {
+    if (visibleNodeIds && !visibleNodeIds.has(node.id)) return;
+    const rawX = positions?.length === nodes.length * 2 ? positions[index * 2] : undefined;
+    const rawY = positions?.length === nodes.length * 2 ? positions[index * 2 + 1] : undefined;
+    pointById.set(
+      node.id,
+      isUsableCoordinate(rawX) && isUsableCoordinate(rawY)
+        ? [rawX, rawY]
+        : hashPosition(node.id, index),
+    );
+  });
+  const points = [...pointById.values()];
+  const minX = points.length > 0 ? Math.min(...points.map(([x]) => x)) : -700;
+  const maxX = points.length > 0 ? Math.max(...points.map(([x]) => x)) : 700;
+  const minY = points.length > 0 ? Math.min(...points.map(([, y]) => y)) : -500;
+  const maxY = points.length > 0 ? Math.max(...points.map(([, y]) => y)) : 500;
+  const pad = 60;
+  const width = Math.max(1, maxX - minX) + pad * 2;
+  const height = Math.max(1, maxY - minY) + pad * 2;
+  const edgeParts = edges.flatMap((edge) => {
+    if (visibleEdgeKeys && !visibleEdgeKeys.has(graphEdgeVisibilityKey(edge))) return [];
+    const source = pointById.get(edge.source);
+    const target = pointById.get(edge.target);
+    if (!source || !target) return [];
+    const color = edge.fromFrontmatter ? relationColor(edge.relation) : graphTheme().edge;
+    const marker = edgeArrowType(edge, display.arrows) === "arrow"
+      ? ' marker-end="url(#graph-arrow)"'
+      : "";
+    return [`<line x1="${source[0]}" y1="${source[1]}" x2="${target[0]}" y2="${target[1]}" stroke="${xmlEscape(color)}" stroke-width="${(edge.fromFrontmatter ? 1 : 0.6) * display.edgeScale}" stroke-opacity="0.55"${marker}/>`];
+  });
+  const nodeParts = nodes.flatMap((node) => {
+    const point = pointById.get(node.id);
+    if (!point) return [];
+    const radius = nodeRadius(node.degree) * display.nodeScale;
+    return [`<g><circle cx="${point[0]}" cy="${point[1]}" r="${radius}" fill="${xmlEscape(nodeColor(node, enriched))}" stroke="${xmlEscape(graphTheme().nodeBorder)}"/><text x="${point[0]}" y="${point[1] + radius + 12}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(node.label)}</text></g>`];
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX - pad} ${minY - pad} ${width} ${height}"><defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs><rect x="${minX - pad}" y="${minY - pad}" width="${width}" height="${height}" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
+  return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+}
+
+async function fallbackSvgToPng(svg: Blob): Promise<Blob> {
+  const parsed = new DOMParser().parseFromString(await svg.text(), "image/svg+xml");
+  const element = parsed.documentElement as unknown as SVGSVGElement;
+  return (await rasterise(element, "image/png", graphTheme().bg, 1, 1)).blob;
+}
+
 function StaticGraphFallback({
   nodes,
   edges,
   positions,
   enriched,
   visibleNodeIds,
+  visibleEdgeKeys,
+  display,
+  selectedId,
+  focusNodeId,
+  favoriteIds,
   onSelect,
   onOpen,
 }: {
@@ -270,6 +358,11 @@ function StaticGraphFallback({
   positions: Float64Array | null;
   enriched: boolean;
   visibleNodeIds?: Set<string>;
+  visibleEdgeKeys?: Set<string>;
+  display: GraphDisplaySettings;
+  selectedId: string | null;
+  focusNodeId: string | null;
+  favoriteIds: Set<string>;
   onSelect: (node: GraphNode | null) => void;
   onOpen: (node: GraphNode) => void;
 }) {
@@ -292,7 +385,7 @@ function StaticGraphFallback({
   if (visibleCount > FALLBACK_LIST_THRESHOLD) {
     const q = query.trim().toLowerCase();
     const rows = nodes.filter(
-      (node) => isVisible(node) && (!q || node.label.toLowerCase().includes(q)),
+      (node) => isVisible(node) && (!q || graphNodeMatchesSearch(node, q)),
     );
     return (
       <div className="graph-webgl-fallback-list" data-testid="graph-canvas">
@@ -307,6 +400,8 @@ function StaticGraphFallback({
             <li key={node.id}>
               <button
                 type="button"
+                className={node.id === selectedId ? "active" : ""}
+                aria-current={node.id === selectedId ? "true" : undefined}
                 onClick={() => onSelect(node)}
                 onDoubleClick={() => onOpen(node)}
               >
@@ -339,27 +434,47 @@ function StaticGraphFallback({
     ? `${minX - pad} ${minY - pad} ${Math.max(1, maxX - minX) + pad * 2} ${Math.max(1, maxY - minY) + pad * 2}`
     : FALLBACK_VIEWBOX;
   return (
-    <svg className="graph-canvas graph-static-fallback" data-testid="graph-canvas" viewBox={viewBox} onClick={() => onSelect(null)}>
+    <svg className="graph-canvas graph-static-fallback" data-testid="graph-canvas" viewBox={viewBox} role="img" aria-label={t("graph.aria.canvas")} onClick={() => onSelect(null)}>
       <g className="graph-edges">
         {edges.map((edge, i) => {
+          if (visibleEdgeKeys && !visibleEdgeKeys.has(graphEdgeVisibilityKey(edge))) return null;
           const si = index.get(edge.source);
           const ti = index.get(edge.target);
           if (si == null || ti == null) return null;
           if (!isVisible(nodes[si]) || !isVisible(nodes[ti])) return null;
           const [x1, y1] = point(si);
           const [x2, y2] = point(ti);
-          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" />;
+          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" stroke={edge.fromFrontmatter ? relationColor(edge.relation) : undefined} strokeWidth={(edge.fromFrontmatter ? 1 : 0.6) * display.edgeScale} />;
         })}
       </g>
       <g className="graph-nodes labels-on">
         {nodes.map((node, i) => {
           if (!isVisible(node)) return null;
           const [x, y] = point(i);
-          const r = nodeRadius(node.degree);
+          const r = nodeRadius(node.degree) * display.nodeScale;
+          const emphasized = node.id === selectedId || node.id === focusNodeId;
           return (
-            <g key={node.id} className={`graph-node${node.type === "unresolved" ? " ghost" : ""}`} transform={`translate(${x}, ${y})`} onClick={(event) => { event.stopPropagation(); onSelect(node); }} onDoubleClick={() => onOpen(node)}>
+            <g
+              key={node.id}
+              className={`graph-node${node.type === "unresolved" ? " ghost" : ""}${emphasized ? " selected" : ""}`}
+              transform={`translate(${x}, ${y})`}
+              role="button"
+              tabIndex={0}
+              aria-label={node.label}
+              onClick={(event) => { event.stopPropagation(); onSelect(node); }}
+              onDoubleClick={() => onOpen(node)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onOpen(node);
+                else if (event.key === " ") {
+                  event.preventDefault();
+                  onSelect(node);
+                }
+              }}
+            >
               <circle r={r} fill={nodeColor(node, enriched)} data-node-id={node.id} />
-              <text className="graph-node-label" dy={r + 12}>{node.label}</text>
+              <text className="graph-node-label" dy={r + 12}>
+                {favoriteIds.has(node.id) ? `★ ${node.label}` : node.label}
+              </text>
             </g>
           );
         })}
@@ -376,6 +491,7 @@ export function GraphCanvas({
   seedPositions,
   initialPinnedIds = [],
   visibleNodeIds,
+  visibleEdgeKeys,
   layoutEpoch,
   themeEpoch,
   enriched,
@@ -434,7 +550,14 @@ export function GraphCanvas({
   // Set when a layout run was triggered by a topology change (new source /
   // vault): fit the camera to the settled result, once.
   const fitOnSettleRef = useRef(false);
-  const draggedRef = useRef<{ id: string; index: number; moved: boolean } | null>(null);
+  const manualCameraRef = useRef(false);
+  const draggedRef = useRef<{
+    id: string;
+    index: number;
+    moved: boolean;
+    layoutWasRunning: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef<{ id: string; until: number } | null>(null);
   const pinnedIdsRef = useRef(new Set(initialPinnedIds));
   const onLayoutSettledRef = useRef(onLayoutSettled);
   onLayoutSettledRef.current = onLayoutSettled;
@@ -452,6 +575,7 @@ export function GraphCanvas({
     hoverId: null,
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
+    visibleEdgeKeys: visibleEdgeKeys ?? null,
   });
   interactionRef.current = {
     ...interactionRef.current,
@@ -462,20 +586,34 @@ export function GraphCanvas({
     highlight,
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
+    visibleEdgeKeys: visibleEdgeKeys ?? null,
   };
   const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport });
   callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport };
 
+  useEffect(() => {
+    pinnedIdsRef.current = new Set(initialPinnedIds);
+    const graph = graphRef.current;
+    if (!graph) return;
+    graph.forEachNode((id) => {
+      const fixed = pinnedIdsRef.current.has(id);
+      if (fixed) graph.setNodeAttribute(id, "fixed", true);
+      else graph.removeNodeAttribute(id, "fixed");
+    });
+  }, [initialPinnedIds]);
+
   const adjacency = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const edge of edges) {
+      if (visibleEdgeKeys && !visibleEdgeKeys.has(graphEdgeVisibilityKey(edge))) continue;
+      if (visibleNodeIds && (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target))) continue;
       if (!map.has(edge.source)) map.set(edge.source, new Set());
       if (!map.has(edge.target)) map.set(edge.target, new Set());
       map.get(edge.source)!.add(edge.target);
       map.get(edge.target)!.add(edge.source);
     }
     return map;
-  }, [edges]);
+  }, [edges, visibleNodeIds, visibleEdgeKeys]);
   const adjacencyRef = useRef(adjacency);
   adjacencyRef.current = adjacency;
 
@@ -490,7 +628,8 @@ export function GraphCanvas({
     let mountObserver: ResizeObserver | null = null;
 
     const init = () => {
-      const bridgeEnabled = graphBridgeEnabled();
+      const bridgeEnabled = import.meta.env.DEV && graphBridgeEnabled();
+      manualCameraRef.current = false;
       const graph = buildSigmaGraph(
         nodes,
         edges,
@@ -558,11 +697,16 @@ export function GraphCanvas({
             const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.searchHighlightId || node === state.pathSourceId || overlayIds?.has(node);
             if (emphasized) {
               patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
-              patch.highlighted = true;
               patch.forceLabel = true;
               patch.size = data.size * 1.18;
             } else if (state.favoriteIds.has(node)) {
               patch.borderColor = graphTheme().warn;
+              patch.forceLabel = true;
+            }
+            // Sparse Global views and typical Local neighborhoods should be
+            // readable without an extra zoom gesture. Sigma still resolves
+            // label collisions, and larger graphs keep zoom-linked LOD.
+            if (state.visibleNodeIds && state.visibleNodeIds.size <= 12) {
               patch.forceLabel = true;
             }
             patch.favorite = state.favoriteIds.has(node);
@@ -571,6 +715,9 @@ export function GraphCanvas({
           edgeReducer: (_edge, data) => {
             const state = interactionRef.current;
             if (state.visibleNodeIds && (!state.visibleNodeIds.has(data.sourceId) || !state.visibleNodeIds.has(data.targetId))) {
+              return { ...data, hidden: true };
+            }
+            if (state.visibleEdgeKeys && !state.visibleEdgeKeys.has(data.visibilityKey)) {
               return { ...data, hidden: true };
             }
             const hovered = state.hoverId;
@@ -695,7 +842,12 @@ export function GraphCanvas({
         currentRenderer.refresh();
         const camera = currentRenderer.getCamera();
         if (animate) void camera.animatedReset({ duration: animDuration(180) });
-        else camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+        else {
+          // setState does not cancel an in-flight Sigma animation. A one-ms
+          // animation takes Sigma's cancellation path and lands on the next
+          // frame without letting a stale center/zoom animation overwrite Fit.
+          void camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration: 1 });
+        }
       };
       fitToVisibleRef.current = fitToVisible;
       const startLayout = (clearPins: boolean) => {
@@ -722,7 +874,18 @@ export function GraphCanvas({
           slowDown: graph.order >= 5_000 ? 8 : 3,
         };
         syncPinnedFixed();
-        const supervisor = new FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, { settings });
+        let supervisor: FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes>;
+        try {
+          supervisor = new FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, { settings });
+        } catch (err) {
+          console.error("[graph] layout worker construction failed - keeping last-good positions", err);
+          snapshotPositions();
+          applyRendererState("ready");
+          fitOnSettleRef.current = false;
+          fitToVisible(false);
+          onLayoutErrorRef.current?.(t("graph.error.layout"));
+          return;
+        }
         layoutRef.current = supervisor;
         // A dead worker must not freeze the graph silently: keep the last-good
         // positions (the graphology graph still holds them), stop cleanly, and
@@ -793,6 +956,7 @@ export function GraphCanvas({
             const state = renderer.getCamera().getState();
             return { x: state.x, y: state.y, ratio: state.ratio };
           },
+          cameraAnimating: () => renderer.getCamera().isAnimated(),
           nodeViewportPoint: (id) => {
             if (!graph.hasNode(id)) return null;
             const visible = interactionRef.current.visibleNodeIds;
@@ -833,6 +997,7 @@ export function GraphCanvas({
             nodes: nodes.length,
             edges: edges.length,
             visibleNodes: interactionRef.current.visibleNodeIds?.size ?? nodes.length,
+            visibleEdges: interactionRef.current.visibleEdgeKeys?.size ?? edges.length,
           }),
         };
       }
@@ -840,7 +1005,14 @@ export function GraphCanvas({
       renderer.on("clickStage", () => callbacksRef.current.onSelect(null));
       renderer.on("clickNode", ({ node, event }) => {
         const item = resolveNode(node);
-        if (!item || draggedRef.current?.moved) return;
+        const suppressed = suppressClickRef.current;
+        if (!item) return;
+        if (suppressed?.id === node && performance.now() <= suppressed.until) {
+          // Consume the synthetic click caused by a drag without swallowing a
+          // later intentional click on the same node.
+          suppressClickRef.current = null;
+          return;
+        }
         const original = event.original as MouseEvent;
         if (original.altKey) {
           pinnedIdsRef.current.delete(node);
@@ -872,10 +1044,11 @@ export function GraphCanvas({
       });
       renderer.on("downNode", ({ node, event }) => {
         event.preventSigmaDefault();
+        const layoutWasRunning = layoutRef.current?.isRunning() ?? false;
         stopLayout();
         applyRendererState("ready");
         const attrs = graph.getNodeAttributes(node);
-        draggedRef.current = { id: node, index: attrs.index, moved: false };
+        draggedRef.current = { id: node, index: attrs.index, moved: false, layoutWasRunning };
         renderer.getCamera().disable();
         callbacksRef.current.onNodeDrag(attrs.index, "start", attrs.x, attrs.y);
       });
@@ -883,6 +1056,12 @@ export function GraphCanvas({
       const onMove = ({ x, y }: { x: number; y: number }) => {
         const dragged = draggedRef.current;
         if (!dragged) return;
+        if (!dragged.moved) {
+          // Sigma can emit clickNode from its mouseup handler before our own
+          // mouseup listener runs. Mark suppression on the first drag move so
+          // the click cannot race the end-of-drag bookkeeping.
+          suppressClickRef.current = { id: dragged.id, until: Number.POSITIVE_INFINITY };
+        }
         dragged.moved = true;
         const point = renderer.viewportToGraph({ x, y });
         graph.mergeNodeAttributes(dragged.id, { x: point.x, y: point.y });
@@ -893,20 +1072,33 @@ export function GraphCanvas({
         const dragged = draggedRef.current;
         if (!dragged) return;
         const attrs = graph.getNodeAttributes(dragged.id);
-        callbacksRef.current.onNodeDrag(dragged.index, "end", attrs.x, attrs.y);
-        pinnedIdsRef.current.add(dragged.id);
-        graph.setNodeAttribute(dragged.id, "fixed", true);
         draggedRef.current = null;
         renderer.getCamera().enable();
-        snapshotPositions();
+        if (dragged.moved) {
+          callbacksRef.current.onNodeDrag(dragged.index, "end", attrs.x, attrs.y);
+          pinnedIdsRef.current.add(dragged.id);
+          graph.setNodeAttribute(dragged.id, "fixed", true);
+          // Cover Sigma's immediate synthetic click without creating a long
+          // post-drag dead zone for an intentional selection.
+          suppressClickRef.current = { id: dragged.id, until: performance.now() + 300 };
+          snapshotPositions();
+        } else if (dragged.layoutWasRunning) {
+          startLayout(false);
+        }
       };
       mouse.on("mousemovebody", onMove);
       mouse.on("mouseup", onUp);
+      const markManualCamera = () => {
+        manualCameraRef.current = true;
+        fitOnSettleRef.current = false;
+      };
+      mouse.on("mousedown", markManualCamera);
+      mouse.on("wheel", markManualCamera);
       renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
       renderer.once("afterRender", () => {
         applyRendererState(layoutRef.current ? "layout-running" : "ready");
         // First render after creation: fit the finite visible bounds once.
-        fitToVisible(false);
+        if (!manualCameraRef.current) fitToVisible(false);
       });
       // Re-run the force layout only when node ids or edge topology changed.
       // Metadata-only rescans and enrichment swaps keep the viewport stable.
@@ -925,7 +1117,7 @@ export function GraphCanvas({
       if (exportControllerRef) {
         exportControllerRef.current = {
           png: () => toBlob(renderer as unknown as Sigma, { backgroundColor: graphTheme().bg }),
-          svg: () => graphToSvg(renderer),
+          svg: () => graphToSvg(renderer, interactionRef.current),
         };
       }
       let tornDown = false;
@@ -946,6 +1138,8 @@ export function GraphCanvas({
         stopLayout();
         mouse.off("mousemovebody", onMove);
         mouse.off("mouseup", onUp);
+        mouse.off("mousedown", markManualCamera);
+        mouse.off("wheel", markManualCamera);
         renderer.kill();
         rendererRef.current = null;
         graphRef.current = null;
@@ -989,10 +1183,34 @@ export function GraphCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, themeEpoch, rendererEpoch]);
 
+  // WebGL failure must not silently disable export. The fallback exporter
+  // uses the same visibility masks and effective display settings as the
+  // static view, including relation-filtered edges.
+  useEffect(() => {
+    if (rendererState !== "fallback" || !exportControllerRef) return;
+    const svg = () => fallbackGraphToSvg(
+      nodes,
+      edges,
+      positionsRef.current,
+      enriched,
+      display,
+      visibleNodeIds,
+      visibleEdgeKeys,
+    );
+    const controller: GraphExportController = {
+      svg,
+      png: async () => fallbackSvgToPng(svg()),
+    };
+    exportControllerRef.current = controller;
+    return () => {
+      if (exportControllerRef.current === controller) exportControllerRef.current = null;
+    };
+  }, [rendererState, exportControllerRef, nodes, edges, positionsRef, enriched, display, visibleNodeIds, visibleEdgeKeys]);
+
   useEffect(() => {
     const renderer = rendererRef.current;
     if (renderer) renderer.scheduleRefresh();
-  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds]);
+  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds, visibleEdgeKeys]);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------
 
@@ -1066,10 +1284,12 @@ export function GraphCanvas({
   useEffect(() => {
     if (layoutEpoch <= 0 || fittedEpochRef.current === layoutEpoch) return;
     fittedEpochRef.current = layoutEpoch;
+    manualCameraRef.current = false;
     // Whole-graph re-layout: clear pins and the visible-fit bbox, reset camera.
     rendererRef.current?.setCustomBBox(null);
     startLayoutRef.current?.(true);
-    rendererRef.current?.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+    const camera = rendererRef.current?.getCamera();
+    if (camera) void camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration: 1 });
   }, [layoutEpoch]);
 
   useEffect(() => {
@@ -1082,18 +1302,17 @@ export function GraphCanvas({
 
   useEffect(() => {
     if (fitSignal <= 0) return;
-    // Whole-graph fit: drop any visible-set bbox before resetting.
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    renderer.setCustomBBox(null);
-    renderer.refresh();
-    void renderer.getCamera().animatedReset({ duration: animDuration(180) });
+    manualCameraRef.current = true;
+    fitOnSettleRef.current = false;
+    fitToVisibleRef.current?.(true);
   }, [fitSignal]);
 
   useEffect(() => {
     if (!zoomSignal) return;
     const camera = rendererRef.current?.getCamera();
     if (!camera) return;
+    manualCameraRef.current = true;
+    fitOnSettleRef.current = false;
     if (zoomSignal.dir === 1) void camera.animatedZoom({ duration: animDuration(100) });
     else void camera.animatedUnzoom({ duration: animDuration(100) });
   }, [zoomSignal]);
@@ -1103,8 +1322,19 @@ export function GraphCanvas({
     const renderer = rendererRef.current;
     const graph = graphRef.current;
     if (!renderer || !graph?.hasNode(centerSignal.id)) return;
-    const data = renderer.getNodeDisplayData(centerSignal.id);
-    if (data) void renderer.getCamera().animate({ x: data.x, y: data.y }, { duration: animDuration(180) });
+    const attrs = graph.getNodeAttributes(centerSignal.id);
+    if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
+    manualCameraRef.current = true;
+    fitOnSettleRef.current = false;
+    // Display-data coordinates are a transient renderer cache and can belong
+    // to the preceding camera frame. Convert the canonical graph coordinates
+    // through the current viewport to obtain a stable framed-camera target.
+    const viewport = renderer.graphToViewport(attrs);
+    const target = renderer.viewportToFramedGraph(viewport);
+    void renderer.getCamera().animate(
+      { x: target.x, y: target.y },
+      { duration: animDuration(180) },
+    );
   }, [centerSignal]);
 
   // Keyboard access on the focused canvas: arrows nudge the camera (~40px,
@@ -1130,15 +1360,17 @@ export function GraphCanvas({
     else if (event.key === "ArrowDown") dy = step;
     else return;
     event.preventDefault();
+    manualCameraRef.current = true;
+    fitOnSettleRef.current = false;
     const origin = renderer.viewportToFramedGraph({ x: 0, y: 0 });
     const delta = renderer.viewportToFramedGraph({ x: dx, y: dy });
     const camera = renderer.getCamera();
     const state = camera.getState();
-    camera.setState({
+    void camera.animate({
       ...state,
       x: state.x + (delta.x - origin.x),
       y: state.y + (delta.y - origin.y),
-    });
+    }, { duration: 1 });
   };
 
   const selectedLabel = selectedId && graphRef.current?.hasNode(selectedId)
@@ -1148,7 +1380,7 @@ export function GraphCanvas({
   return (
     <div className="graph-canvas-wrap">
       {rendererState === "fallback" ? (
-        <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} visibleNodeIds={visibleNodeIds} onSelect={onSelect} onOpen={onOpen} />
+        <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} visibleNodeIds={visibleNodeIds} visibleEdgeKeys={visibleEdgeKeys} display={display} selectedId={selectedId} focusNodeId={focusNodeId} favoriteIds={favoriteIds} onSelect={onSelect} onOpen={onOpen} />
       ) : (
         <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label={t("graph.aria.canvas")} tabIndex={0} onKeyDown={handleCanvasKeyDown} />
       )}

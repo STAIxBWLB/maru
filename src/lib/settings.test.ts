@@ -538,7 +538,7 @@ describe("normalizeMaruSettings", () => {
       community: null,
       showUnresolved: false,
       showGenerated: false,
-      minVisibleNeighbors: 0,
+      minVisibleNeighbors: 1,
     });
     expect(settings.graph.display).toEqual({
       arrows: "all",
@@ -589,7 +589,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.generatedPatterns).toEqual(["reports/", "archive/", "log.md"]);
     expect(settings.graph.profiles.workspace).toEqual({
       domains: ["research", "projects"],
-      // "unknown" coexisted with other types -> mapped to "untyped".
+      // showNoise made the legacy "unknown" authored-note bucket visible.
       types: ["decision", "untyped"],
       relations: [],
       community: 3,

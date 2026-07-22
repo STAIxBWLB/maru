@@ -45,6 +45,29 @@ export interface GraphModel {
   builtAt: number;
 }
 
+/** Stable visibility identity for an edge. The model de-duplicates identical
+ * source/target/relation tuples, so this key can mask relation-filtered edges
+ * without rebuilding the Sigma topology. */
+export function graphEdgeVisibilityKey(
+  edge: Pick<GraphEdge, "source" | "target" | "relation" | "fromFrontmatter">,
+): string {
+  return JSON.stringify([edge.source, edge.target, edge.relation, edge.fromFrontmatter]);
+}
+
+/** Recompute incident-edge degree for a derived model. Graph consumers must
+ * not keep displaying the full-vault degree after relation/local pruning. */
+export function withGraphDegrees(model: GraphModel): GraphModel {
+  const degrees = new Map(model.nodes.map((node) => [node.id, 0]));
+  for (const edge of model.edges) {
+    degrees.set(edge.source, (degrees.get(edge.source) ?? 0) + 1);
+    degrees.set(edge.target, (degrees.get(edge.target) ?? 0) + 1);
+  }
+  return {
+    ...model,
+    nodes: model.nodes.map((node) => ({ ...node, degree: degrees.get(node.id) ?? 0 })),
+  };
+}
+
 /** Shape of `vault-graph.json` as returned by the `vault_graph_read` command
  *  (schema-freeze table: knowledge-graph-integration.md §2 / spec §5.2). */
 export interface VaultGraphFile {

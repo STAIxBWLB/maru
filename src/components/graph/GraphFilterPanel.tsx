@@ -229,8 +229,8 @@ export function GraphFilterPanel({
         <input
           type="range"
           min={0}
-          max={Math.max(maxVisibleNeighbors, 1)}
-          value={Math.min(filters.minVisibleNeighbors, Math.max(maxVisibleNeighbors, 1))}
+          max={Math.max(maxVisibleNeighbors, filters.minVisibleNeighbors, 1)}
+          value={filters.minVisibleNeighbors}
           onChange={(event) => onFiltersChange({ ...filters, minVisibleNeighbors: Number(event.target.value) })}
         />
       </section>

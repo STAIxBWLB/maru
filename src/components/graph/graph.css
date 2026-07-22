@@ -107,6 +107,7 @@
 }
 
 .graph-icon-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -157,6 +158,134 @@
 
 .graph-toolbar-spacer {
   flex: 1;
+}
+
+.graph-saved-views {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.graph-icon-count {
+  position: absolute;
+  right: -3px;
+  top: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--panel);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-saved-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 24;
+  width: min(300px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+
+.graph-saved-heading {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.graph-saved-create {
+  display: grid;
+  grid-template-columns: 1fr 30px;
+  gap: 5px;
+}
+
+.graph-saved-create input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2, var(--bg));
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.graph-saved-create button,
+.graph-saved-delete {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2, var(--bg));
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.graph-saved-create button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.graph-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  margin-top: 7px;
+  overflow-y: auto;
+}
+
+.graph-saved-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 4px;
+}
+
+.graph-saved-apply {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.graph-saved-apply:hover,
+.graph-saved-delete:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.graph-saved-apply span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-saved-apply small,
+.graph-saved-empty {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.graph-saved-empty {
+  padding: 12px 3px 4px;
 }
 
 .graph-badge {
@@ -539,6 +668,12 @@
 
 .graph-webgl-fallback-list li button:hover {
   background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.graph-webgl-fallback-list li button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
 }
 
 /* Legend overlay (bottom-left of the canvas). */
@@ -1365,6 +1500,50 @@
   white-space: nowrap;
 }
 
+/* Compact shells wrap controls instead of clipping the right edge. Search
+   gets a full row, while less important badges disappear. */
+.tier-standard .graph-toolbar {
+  gap: 5px;
+  padding-inline: 8px;
+}
+
+.tier-standard .graph-search-field {
+  min-width: 120px;
+  flex: 1 1 150px;
+}
+
+.tier-standard .graph-badge {
+  display: none;
+}
+
+.tier-compact .graph-toolbar {
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 7px;
+}
+
+.tier-compact .graph-search-field {
+  order: 10;
+  flex: 1 1 calc(100% - 34px);
+  min-width: 0;
+}
+
+.tier-compact .graph-toolbar-spacer,
+.tier-compact .graph-badge {
+  display: none;
+}
+
+.tier-compact .graph-stats {
+  margin-left: auto;
+}
+
+.tier-compact .graph-focus-bar,
+.tier-compact .graph-path-bar {
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  padding-inline: 8px;
+}
+
 /* Counts use tabular numerals. */
 .graph-stats {
   font-variant-numeric: tabular-nums;
@@ -1452,7 +1631,8 @@
   flex-direction: column;
 }
 
-.graph-right-content[hidden] {
+.graph-right-content[hidden],
+.graph-right-content[data-state="inactive"] {
   display: none;
 }
 

@@ -1,18 +1,17 @@
-// Single pure derivation pipeline for the graph canvas (graph-workbench V2).
-// Replaces the scattered filter memos that used to live in GraphView: facet
-// filters → relation filter → local traversal → neighbor pruning →
-// search-as-filter, in that order, with paused-filter reporting so a persisted
-// selection that no longer matches anything never silently blanks the canvas.
+// Pure derivation pipeline for the graph workbench. The renderer keeps the
+// full topology for stable layout, while these outputs define the one truthful
+// analysis/visibility contract used by every consumer.
 
-import type {
-  GraphFilterProfile,
-  GraphMode,
-} from "../settings";
+import type { GraphFilterProfile, GraphMode } from "../settings";
 import {
   focusSubgraph,
+  graphEdgeVisibilityKey,
   isGeneratedNode,
+  withGraphDegrees,
   type GraphModel,
+  type GraphNode,
 } from "./model";
+import { graphNodeMatchesSearch } from "./search";
 
 export interface DerivedGraphFacets {
   domains: { value: string; count: number }[];
@@ -25,42 +24,22 @@ export interface DerivedGraphFacets {
 export type GraphEmptyReason = "empty-source" | "filtered-empty" | null;
 
 export interface DerivedGraph {
-  /** Facet-filtered model before local traversal/neighbor pruning — used by
-   *  insights, pathfinding, export. */
+  /** Facets + relations + Local + k-core, before transient search filtering. */
   analysisModel: GraphModel;
-  /** What the canvas renders. */
+  /** Exact canvas/inspector/export view, including search-as-filter. */
   visibleModel: GraphModel;
-  /** Distinct visible-neighbor count per node id (relation+facet-filtered edges). */
+  visibleNodeIds: Set<string>;
+  visibleEdgeKeys: Set<string>;
+  /** Derived degree per analysis node. */
   visibleNeighborCounts: Map<string, number>;
   facets: DerivedGraphFacets;
-  /** Persisted filter values that could not be applied (e.g. community after
-   *  overlay loss) — shown as inactive chips, never silently blanking the canvas. */
+  /** Persisted selections absent from the source model. */
   pausedFilters: string[];
   emptyReason: GraphEmptyReason;
-  /** mode==="local" requested but the focus target is not in the model —
-   *  global graph stays visible and this flag reports the problem. */
+  /** Local mode requested a canonical target absent from the current source. */
   focusMissing: boolean;
 }
 
-/** Distinct-neighbor counts over an edge list. */
-function neighborCounts(
-  nodeIds: readonly string[],
-  edges: GraphModel["edges"],
-): Map<string, number> {
-  const neighbors = new Map<string, Set<string>>();
-  for (const id of nodeIds) neighbors.set(id, new Set());
-  for (const edge of edges) {
-    neighbors.get(edge.source)?.add(edge.target);
-    neighbors.get(edge.target)?.add(edge.source);
-  }
-  const counts = new Map<string, number>();
-  for (const [id, set] of neighbors) counts.set(id, set.size);
-  return counts;
-}
-
-/** O(V+E) iterative k-core-style pruning: removing a sub-threshold node
- *  decrements its neighbors' counts, which can cascade. The focus anchor is
- *  never pruned. */
 function pruneByMinNeighbors(
   model: GraphModel,
   threshold: number,
@@ -91,9 +70,68 @@ function pruneByMinNeighbors(
   }
   return {
     ...model,
-    nodes: model.nodes.filter((n) => !removed.has(n.id)),
-    edges: model.edges.filter((e) => !removed.has(e.source) && !removed.has(e.target)),
+    nodes: model.nodes.filter((node) => !removed.has(node.id)),
+    edges: model.edges.filter(
+      (edge) => !removed.has(edge.source) && !removed.has(edge.target),
+    ),
   };
+}
+
+function distinctNeighborCounts(model: GraphModel): Map<string, number> {
+  const neighbors = new Map(model.nodes.map((node) => [node.id, new Set<string>()]));
+  for (const edge of model.edges) {
+    neighbors.get(edge.source)?.add(edge.target);
+    neighbors.get(edge.target)?.add(edge.source);
+  }
+  return new Map([...neighbors].map(([id, ids]) => [id, ids.size]));
+}
+
+type NodeFacet = "domain" | "type" | "community" | null;
+
+function nodePasses(
+  node: GraphNode,
+  profile: GraphFilterProfile,
+  generatedPatterns: readonly string[],
+  focusNodeId: string | null,
+  activeDomains: ReadonlySet<string>,
+  activeTypes: ReadonlySet<string>,
+  communityActive: boolean,
+  omit: NodeFacet = null,
+): boolean {
+  if (node.id === focusNodeId) return true;
+  if (!profile.showUnresolved && node.type === "unresolved") return false;
+  if (!profile.showGenerated && isGeneratedNode(node, generatedPatterns)) return false;
+  if (omit !== "domain" && activeDomains.size > 0 && (!node.domain || !activeDomains.has(node.domain))) {
+    return false;
+  }
+  if (omit !== "type" && activeTypes.size > 0 && !activeTypes.has(node.type)) return false;
+  if (omit !== "community" && communityActive && node.community !== profile.community) return false;
+  return true;
+}
+
+function countNodeFacet<T extends string | number>(
+  nodes: readonly GraphNode[],
+  value: (node: GraphNode) => T | null,
+): Map<T, number> {
+  const counts = new Map<T, number>();
+  for (const node of nodes) {
+    const item = value(node);
+    if (item != null) counts.set(item, (counts.get(item) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function facetItems<T extends string | number>(
+  counts: Map<T, number>,
+  selected: readonly T[],
+  compare: (a: T, b: T) => number,
+): { value: T; count: number }[] {
+  for (const value of selected) {
+    if (!counts.has(value)) counts.set(value, 0);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => compare(a[0], b[0]))
+    .map(([value, count]) => ({ value, count }));
 }
 
 export function deriveGraphView(args: {
@@ -119,7 +157,6 @@ export function deriveGraphView(args: {
     searchAsFilter,
   } = args;
 
-  // --- paused filters: persisted values absent from the unfiltered model ---
   const modelDomains = new Set<string>();
   const modelTypes = new Set<string>();
   const modelCommunities = new Set<number>();
@@ -131,132 +168,122 @@ export function deriveGraphView(args: {
   const modelRelations = new Set(model.edges.map((edge) => edge.relation));
 
   const pausedFilters: string[] = [];
-  const activeDomains = profile.domains.filter((value) => {
+  const activeDomains = new Set(profile.domains.filter((value) => {
     if (modelDomains.has(value)) return true;
     pausedFilters.push(`domain:${value}`);
     return false;
-  });
-  const activeTypes = profile.types.filter((value) => {
+  }));
+  const activeTypes = new Set(profile.types.filter((value) => {
     if (modelTypes.has(value)) return true;
     pausedFilters.push(`type:${value}`);
     return false;
-  });
-  const activeRelations = profile.relations.filter((value) => {
+  }));
+  const activeRelations = new Set(profile.relations.filter((value) => {
     if (modelRelations.has(value)) return true;
     pausedFilters.push(`relation:${value}`);
     return false;
-  });
-  const communityActive =
-    profile.community != null && modelCommunities.has(profile.community);
+  }));
+  const communityActive = profile.community != null && modelCommunities.has(profile.community);
   if (profile.community != null && !communityActive) {
     pausedFilters.push(`community:${profile.community}`);
   }
 
-  // --- 1. node facet filter + 2. relation filter → analysis model ----------
-  const keep = new Set<string>();
-  for (const node of model.nodes) {
-    if (!profile.showUnresolved && node.type === "unresolved") continue;
-    if (!profile.showGenerated && isGeneratedNode(node, generatedPatterns)) continue;
-    if (activeDomains.length > 0 && (!node.domain || !activeDomains.includes(node.domain))) continue;
-    if (activeTypes.length > 0 && !activeTypes.includes(node.type)) continue;
-    if (communityActive && node.community !== profile.community) continue;
-    keep.add(node.id);
-  }
-  const relationKeep = activeRelations.length > 0 ? new Set(activeRelations) : null;
-  const analysisModel: GraphModel = {
-    ...model,
-    nodes: model.nodes.filter((n) => keep.has(n.id)),
-    edges: model.edges.filter(
-      (e) => keep.has(e.source) && keep.has(e.target) && (!relationKeep || relationKeep.has(e.relation)),
-    ),
-  };
-
-  const visibleNeighborCounts = neighborCounts(
-    analysisModel.nodes.map((n) => n.id),
-    analysisModel.edges,
+  const focusExists = focusNodeId != null && model.nodes.some((node) => node.id === focusNodeId);
+  const protectedFocusId = mode === "local" && focusExists ? focusNodeId : null;
+  const pass = (node: GraphNode, omit: NodeFacet = null) => nodePasses(
+    node,
+    profile,
+    generatedPatterns,
+    protectedFocusId,
+    activeDomains,
+    activeTypes,
+    communityActive,
+    omit,
   );
 
-  // --- 4. local mode: k-hop traversal over the filtered model --------------
-  let focusMissing = false;
-  let working = analysisModel;
-  if (mode === "local" && focusNodeId) {
-    if (analysisModel.nodes.some((n) => n.id === focusNodeId)) {
-      working = focusSubgraph(analysisModel, focusNodeId, localDepth, localDirection);
-    } else {
-      // Focus target not in the (filtered) model — keep the global result.
-      focusMissing = true;
-    }
+  // Self-excluding facets keep additive choices visible. Relation counts use
+  // the fully node-filtered graph before the relation facet applies itself.
+  const domainCounts = countNodeFacet(model.nodes.filter((node) => pass(node, "domain")), (node) => node.domain);
+  const typeCounts = countNodeFacet(model.nodes.filter((node) => pass(node, "type")), (node) => node.type);
+  const communityCounts = countNodeFacet(
+    model.nodes.filter((node) => pass(node, "community")),
+    (node) => node.community,
+  );
+
+  const keptNodeIds = new Set(model.nodes.filter((node) => pass(node)).map((node) => node.id));
+  const nodeFilteredEdges = model.edges.filter(
+    (edge) => keptNodeIds.has(edge.source) && keptNodeIds.has(edge.target),
+  );
+  const relationCounts = new Map<string, number>();
+  for (const edge of nodeFilteredEdges) {
+    relationCounts.set(edge.relation, (relationCounts.get(edge.relation) ?? 0) + 1);
   }
+  const relationFilteredEdges = activeRelations.size === 0
+    ? nodeFilteredEdges
+    : nodeFilteredEdges.filter((edge) => activeRelations.has(edge.relation));
 
-  // --- 5. minVisibleNeighbors k-core pruning (anchor always retained) ------
-  working = pruneByMinNeighbors(working, profile.minVisibleNeighbors, focusNodeId);
+  let working = withGraphDegrees({
+    ...model,
+    nodes: model.nodes.filter((node) => keptNodeIds.has(node.id)),
+    edges: relationFilteredEdges,
+  });
+  const focusMissing = mode === "local" && focusNodeId != null && !focusExists;
+  if (mode === "local" && protectedFocusId) {
+    working = focusSubgraph(working, protectedFocusId, localDepth, localDirection);
+  }
+  working = withGraphDegrees(
+    pruneByMinNeighbors(working, profile.minVisibleNeighbors, protectedFocusId),
+  );
+  const analysisModel = working;
 
-  // --- 6. search-as-filter: matches + their 1-hop neighbors ----------------
-  const query = searchAsFilter ? search.trim().toLowerCase() : "";
+  const query = searchAsFilter ? search.trim() : "";
   if (query) {
-    const matched = new Set<string>();
-    for (const node of working.nodes) {
-      if (node.label.toLowerCase().includes(query)) matched.add(node.id);
-    }
+    const matched = new Set(
+      working.nodes.filter((node) => graphNodeMatchesSearch(node, query)).map((node) => node.id),
+    );
     const visible = new Set(matched);
     for (const edge of working.edges) {
       if (matched.has(edge.source)) visible.add(edge.target);
       if (matched.has(edge.target)) visible.add(edge.source);
     }
-    working = {
+    if (protectedFocusId) visible.add(protectedFocusId);
+    working = withGraphDegrees({
       ...working,
-      nodes: working.nodes.filter((n) => visible.has(n.id)),
-      edges: working.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
-    };
+      nodes: working.nodes.filter((node) => visible.has(node.id)),
+      edges: working.edges.filter(
+        (edge) => visible.has(edge.source) && visible.has(edge.target),
+      ),
+    });
   }
   const visibleModel = working;
+  const visibleNodeIds = new Set(visibleModel.nodes.map((node) => node.id));
+  const visibleEdgeKeys = new Set(visibleModel.edges.map(graphEdgeVisibilityKey));
+  const visibleNeighborCounts = distinctNeighborCounts(analysisModel);
+  const maxVisibleNeighbors = Math.max(0, ...visibleNeighborCounts.values());
 
-  // --- facets from the analysis model (post-facet, pre-local/prune) --------
-  const domainCounts = new Map<string, number>();
-  const typeCounts = new Map<string, number>();
-  const relationCounts = new Map<string, number>();
-  const communityCounts = new Map<number, number>();
-  for (const node of analysisModel.nodes) {
-    if (node.domain) domainCounts.set(node.domain, (domainCounts.get(node.domain) ?? 0) + 1);
-    typeCounts.set(node.type, (typeCounts.get(node.type) ?? 0) + 1);
-    if (node.community != null) {
-      communityCounts.set(node.community, (communityCounts.get(node.community) ?? 0) + 1);
-    }
-  }
-  for (const edge of analysisModel.edges) {
-    relationCounts.set(edge.relation, (relationCounts.get(edge.relation) ?? 0) + 1);
-  }
-  let maxVisibleNeighbors = 0;
-  for (const count of visibleNeighborCounts.values()) {
-    if (count > maxVisibleNeighbors) maxVisibleNeighbors = count;
-  }
   const facets: DerivedGraphFacets = {
-    domains: [...domainCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([value, count]) => ({ value, count })),
-    types: [...typeCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([value, count]) => ({ value, count })),
-    relations: [...relationCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([value, count]) => ({ value, count })),
-    communities: [...communityCounts.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([value, count]) => ({ value, count })),
+    domains: facetItems(domainCounts, profile.domains, (a, b) => a.localeCompare(b)),
+    types: facetItems(typeCounts, profile.types, (a, b) => a.localeCompare(b)),
+    relations: facetItems(relationCounts, profile.relations, (a, b) => a.localeCompare(b)),
+    communities: facetItems(
+      communityCounts,
+      profile.community == null ? [] : [profile.community],
+      (a, b) => a - b,
+    ),
     maxVisibleNeighbors,
   };
 
-  // --- 7. empty reason -------------------------------------------------------
-  const emptyReason: GraphEmptyReason =
-    model.nodes.length === 0
-      ? "empty-source"
-      : visibleModel.nodes.length === 0
-        ? "filtered-empty"
-        : null;
+  const emptyReason: GraphEmptyReason = model.nodes.length === 0
+    ? "empty-source"
+    : visibleModel.nodes.length === 0
+      ? "filtered-empty"
+      : null;
 
   return {
     analysisModel,
     visibleModel,
+    visibleNodeIds,
+    visibleEdgeKeys,
     visibleNeighborCounts,
     facets,
     pausedFilters,

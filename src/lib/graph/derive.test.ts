@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { GraphFilterProfile } from "../settings";
 import { deriveGraphView } from "./derive";
 import { GRAPH_FIXTURES } from "./fixtures";
-import { buildVaultGraph, type GraphEdge, type GraphModel, type GraphNode } from "./model";
+import {
+  buildVaultGraph,
+  graphEdgeVisibilityKey,
+  type GraphEdge,
+  type GraphModel,
+  type GraphNode,
+} from "./model";
 
 function node(over: Partial<GraphNode> & { id: string }): GraphNode {
   return {
@@ -103,6 +109,8 @@ describe("deriveGraphView — relation filter", () => {
     const d = derive(m, profile({ relations: ["topics"] }));
     expect(d.analysisModel.edges).toHaveLength(1);
     expect(d.analysisModel.edges[0].relation).toBe("topics");
+    expect(d.visibleEdgeKeys).toEqual(new Set([graphEdgeVisibilityKey(edge("a", "c", "topics"))]));
+    expect(d.analysisModel.nodes.find((item) => item.id === "a")?.degree).toBe(1);
     // Neighbor counts reflect only the kept edges.
     expect(d.visibleNeighborCounts.get("a")).toBe(1);
     expect(d.visibleNeighborCounts.get("b")).toBe(0);
@@ -148,6 +156,23 @@ describe("deriveGraphView — minVisibleNeighbors pruning", () => {
     });
     expect(ids(d.visibleModel)).toEqual(["a"]);
   });
+
+  it("retains a Local focus even when node facets would normally hide it", () => {
+    const m = model(
+      [
+        node({ id: "a", domain: "ops", type: "unresolved", relPath: null }),
+        node({ id: "b", domain: "research" }),
+      ],
+      [edge("a", "b")],
+    );
+    const d = derive(m, profile({ domains: ["research"], showUnresolved: false }), {
+      mode: "local",
+      focusNodeId: "a",
+      localDepth: 1,
+    });
+    expect(d.focusMissing).toBe(false);
+    expect(ids(d.visibleModel)).toEqual(["a", "b"]);
+  });
 });
 
 describe("deriveGraphView — paused filters", () => {
@@ -181,6 +206,15 @@ describe("deriveGraphView — search-as-filter", () => {
     );
     const d = derive(m, profile(), { search: "alph", searchAsFilter: true });
     expect(ids(d.visibleModel)).toEqual(["alpha", "beta"]);
+  });
+
+  it("uses the same relPath matching contract as ranked search", () => {
+    const m = model(
+      [node({ id: "alpha", label: "Alpha", relPath: "projects/hidden-key.md" }), node({ id: "beta" })],
+      [edge("alpha", "beta")],
+    );
+    expect(ids(derive(m, profile(), { search: "hidden-key", searchAsFilter: true }).visibleModel))
+      .toEqual(["alpha", "beta"]);
   });
 });
 
@@ -243,7 +277,39 @@ describe("deriveGraphView — local mode", () => {
 });
 
 describe("deriveGraphView — facets", () => {
-  it("computes facet counts from the analysis model (pre-local/prune)", () => {
+  it("self-excludes the active facet and retains paused selections at zero", () => {
+    const m = model(
+      [
+        node({ id: "a", domain: "research", type: "decision" }),
+        node({ id: "b", domain: "research", type: "decision" }),
+        node({ id: "c", domain: "ops", type: "decision" }),
+      ],
+      [edge("a", "b", "topics"), edge("a", "b", "wiki_link")],
+    );
+    const d = derive(m, profile({ domains: ["research", "missing"], relations: ["topics"] }));
+    expect(d.facets.domains).toEqual([
+      { value: "missing", count: 0 },
+      { value: "ops", count: 1 },
+      { value: "research", count: 2 },
+    ]);
+    expect(d.facets.relations).toEqual([
+      { value: "topics", count: 1 },
+      { value: "wiki_link", count: 1 },
+    ]);
+    expect(d.pausedFilters).toContain("domain:missing");
+  });
+
+  it("counts distinct visible neighbors when parallel relations exist", () => {
+    const m = model(
+      [node({ id: "a" }), node({ id: "b" })],
+      [edge("a", "b", "topics"), edge("a", "b", "wiki_link")],
+    );
+    const d = derive(m, profile());
+    expect(d.visibleNeighborCounts.get("a")).toBe(1);
+    expect(d.facets.maxVisibleNeighbors).toBe(1);
+  });
+
+  it("keeps self-excluding facet counts global while neighbor range follows Local", () => {
     const m = model(
       [
         node({ id: "a", domain: "research", community: 1 }),
@@ -265,7 +331,7 @@ describe("deriveGraphView — facets", () => {
       { value: 1, count: 2 },
       { value: 2, count: 1 },
     ]);
-    expect(d.facets.maxVisibleNeighbors).toBe(2);
+    expect(d.facets.maxVisibleNeighbors).toBe(1);
   });
 });
 

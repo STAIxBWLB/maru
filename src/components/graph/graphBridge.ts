@@ -13,6 +13,7 @@ export interface MaruGraphBridge {
   /** Frames rendered since renderer creation (afterRender counter). */
   frames(): number;
   camera(): { x: number; y: number; ratio: number };
+  cameraAnimating(): boolean;
   /** PAGE coordinates of a node's center (container-relative sigma viewport
    *  point + the container's bounding-rect origin), or null when the node is
    *  missing, hidden by filters, or has non-finite coordinates. */
@@ -34,7 +35,7 @@ export interface MaruGraphBridge {
   fitView(): void;
   /** Dispatch webglcontextlost on the renderer canvases. */
   simulateContextLost(): void;
-  graphStats(): { nodes: number; edges: number; visibleNodes: number };
+  graphStats(): { nodes: number; edges: number; visibleNodes: number; visibleEdges: number };
 }
 
 declare global {

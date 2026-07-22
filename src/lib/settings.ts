@@ -332,6 +332,13 @@ export interface GraphLocalTarget {
   relPath: string;
 }
 
+/** Canonical handoff into graph mode. Source is explicit because the same
+ * relative path may exist in both the active vault and the full workspace. */
+export interface GraphOpenTarget {
+  source: GraphSource;
+  localTarget: GraphLocalTarget;
+}
+
 /** Saved view: source/mode/local target/filter profile/display only —
  *  transient query, selection, path, camera, overlay state excluded. */
 export interface GraphSavedView {
@@ -1051,6 +1058,7 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 
 function normalizeGraphFilterProfile(value: unknown): GraphFilterProfile {
   const profile = isRecord(value) ? value : {};
+  const defaults = defaultGraphFilterProfile();
   const community = profile.community;
   const minNeighbors = Number(profile.minVisibleNeighbors);
   return {
@@ -1062,7 +1070,11 @@ function normalizeGraphFilterProfile(value: unknown): GraphFilterProfile {
     showUnresolved: profile.showUnresolved === true,
     showGenerated: profile.showGenerated === true,
     minVisibleNeighbors:
-      Number.isFinite(minNeighbors) && minNeighbors > 0 ? Math.floor(minNeighbors) : 0,
+      profile.minVisibleNeighbors === undefined
+        ? defaults.minVisibleNeighbors
+        : Number.isFinite(minNeighbors) && minNeighbors > 0
+          ? Math.floor(minNeighbors)
+          : 0,
   };
 }
 
@@ -1155,13 +1167,13 @@ function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
   const connected = graph.scope !== "all";
   const source: GraphSource =
     graph.source === "workspace" || graph.source === "all" ? "workspace" : "vault";
-  // Legacy "unknown" type maps to "untyped" only when it coexisted with other
-  // selected types (actively usable); a lone stale selection is discarded —
-  // its chip was hidden, so keeping it would silently filter everything out.
+  // V1 treated "unknown" as authored data only while showNoise was enabled.
+  // Preserve that behavior when translating the old filter into V2's explicit
+  // "untyped" authored-content type.
   const legacyTypes = parseStringArray(filters.types);
   const types = legacyTypes.flatMap((type) => {
     if (type !== "unknown") return [type];
-    return legacyTypes.length > 1 ? ["untyped"] : [];
+    return filters.showNoise === true ? ["untyped"] : [];
   });
   const profile: GraphFilterProfile = {
     domains: parseStringArray(filters.domains),

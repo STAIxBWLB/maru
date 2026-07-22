@@ -49,6 +49,10 @@ async function expectShellGeometry(page: Page) {
     expect(toolbarBox.x).toBeGreaterThanOrEqual(viewBox.x - 1);
     expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(viewBox.x + viewBox.width + 1);
   }
+  const toolbarOverflow = await page.getByTestId("graph-toolbar").evaluate(
+    (toolbar) => toolbar.scrollWidth > toolbar.clientWidth + 1,
+  );
+  expect(toolbarOverflow).toBe(false);
 
   // Legend (expanded or icon form, depending on tier) stays contained too.
   const legend = page.getByTestId("graph-legend");

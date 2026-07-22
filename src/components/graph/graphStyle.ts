@@ -104,7 +104,9 @@ export function graphTheme(): GraphTheme {
 }
 
 export function nodeRadius(degree: number): number {
-  return Math.min(12, Math.max(3, 3 + 1.4 * Math.sqrt(degree)));
+  // Keep isolated notes large enough to see and reliably pick on HiDPI/WebGL
+  // canvases; degree still adds hierarchy without letting hubs dominate.
+  return Math.min(12, Math.max(5, 5 + 1.2 * Math.sqrt(degree)));
 }
 
 export function nodeColor(node: GraphNode, enriched: boolean): string {

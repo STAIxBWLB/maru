@@ -304,6 +304,7 @@ import {
   type ExplorerPaneMode,
   type FavoriteItem,
   type FavoriteKind,
+  type GraphOpenTarget,
   type FilesBrowserMode,
   type FilesListAttribute,
   type FilesSortKey,
@@ -1025,7 +1026,7 @@ function MainApp() {
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
-  const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
+  const [graphOpenTarget, setGraphOpenTarget] = useState<GraphOpenTarget | null>(null);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -2090,11 +2091,19 @@ function MainApp() {
   );
 
   const openGraphMode = useCallback(
-    (focusNodeId?: string) => {
-      setGraphFocusNodeId(focusNodeId ?? null);
-      setPersistedAppMode("graph");
+    (target?: GraphOpenTarget) => {
+      setGraphOpenTarget(target ?? null);
+      todayAutoOpenPathRef.current = null;
+      setAppMode("graph");
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, activeAppMode: "graph" },
+        graph: target
+          ? { ...current.graph, source: target.source, mode: "local" }
+          : current.graph,
+      }));
     },
-    [setPersistedAppMode],
+    [updateSettings],
   );
 
   useEffect(() => {
@@ -7751,8 +7760,8 @@ function MainApp() {
             workspacePath={graphDataPath}
             overlayPath={graphOverlayPath}
             entries={graphEntries}
-            focusNodeId={graphFocusNodeId}
-            onClearFocus={() => setGraphFocusNodeId(null)}
+            focusTarget={graphOpenTarget}
+            onFocusTargetChange={setGraphOpenTarget}
             onOpenEntry={(entry) => {
               setPersistedAppMode("pkm");
               void selectEntry(entry);
@@ -8191,7 +8200,13 @@ function MainApp() {
             onUpdateField={updateField}
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}
-            onOpenGraph={openGraphMode}
+            onOpenGraph={(localTarget) =>
+              openGraphMode({
+                source:
+                  activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+                localTarget,
+              })
+            }
             isManagedVaultNote={Boolean(
               activeDocumentWorkspace?.writePolicy === "managed" &&
                 document?.relPath.startsWith("notes/") &&
