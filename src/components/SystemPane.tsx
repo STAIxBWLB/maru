@@ -153,6 +153,7 @@ import {
 } from "../lib/telegramMonitor";
 import { openSkillEditorWindow } from "../lib/windowLayout";
 import { CommsSettingsTab } from "./comms/CommsSettingsTab";
+import { JobsTab } from "./jobs/JobsTab";
 import { MeetingsSettingsTab } from "./meetings/MeetingsSettingsTab";
 import { TasksSettingsTab } from "./tasks/TasksSettingsTab";
 import { Button } from "./ui/Button";
@@ -172,6 +173,7 @@ type SystemTab =
   | "mcp"
   | "projects"
   | "skills"
+  | "jobs"
   | "import";
 
 function isSystemTab(value: string | null | undefined): value is SystemTab {
@@ -190,6 +192,7 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
     value === "mcp" ||
     value === "projects" ||
     value === "skills" ||
+    value === "jobs" ||
     value === "import"
   );
 }
@@ -295,6 +298,7 @@ export function SystemPane({
             ["mcp", "system.tab.mcp"],
             ["projects", "system.tab.projects"],
             ["skills", "system.tab.skills"],
+            ["jobs", "system.tab.jobs"],
             ["import", "system.tab.import"],
           ] as Array<[SystemTab, string]>
         ).map(([id, key]) => (
@@ -382,6 +386,7 @@ export function SystemPane({
         {tab === "mcp" ? <McpTab workPath={workPath} /> : null}
         {tab === "projects" ? <ProjectsTab workPath={workPath} /> : null}
         {tab === "skills" ? <SkillsTab workPath={workPath} /> : null}
+        {tab === "jobs" ? <JobsTab workPath={workPath} /> : null}
         {tab === "import" ? <ImportTab workPath={workPath} /> : null}
       </section>
     </main>

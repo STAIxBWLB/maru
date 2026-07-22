@@ -24,6 +24,7 @@ pub fn run_cli(args: Vec<String>) -> i32 {
         "doctor" => run_doctor(&args[1..]),
         "secrets" => run_secrets(&args[1..]),
         "skills" => run_skills(&args[1..]),
+        "jobs" => run_jobs(&args[1..]),
         "terminal-hook" => crate::terminal_hooks::run_terminal_hook(&args[1..]),
         other => {
             eprintln!("unknown command: {other}");
@@ -774,8 +775,184 @@ fn current_work_path() -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
+fn run_jobs(args: &[String]) -> i32 {
+    let Some(subcommand) = args.first().map(String::as_str) else {
+        eprintln!("{}", jobs_usage());
+        return 2;
+    };
+    match subcommand {
+        "list" | "status" => run_jobs_list(&args[1..]),
+        "install" => run_jobs_action("install", &args[1..]),
+        "uninstall" => run_jobs_action("uninstall", &args[1..]),
+        "start" => run_jobs_action("start", &args[1..]),
+        "stop" => run_jobs_action("stop", &args[1..]),
+        "run" => run_jobs_action("run", &args[1..]),
+        _ => {
+            eprintln!("{}", jobs_usage());
+            2
+        }
+    }
+}
+
+/// Parse `[<id>] [--json]` following the run_skills manual-parsing pattern.
+fn parse_jobs_args(args: &[String]) -> Result<(Option<String>, bool), i32> {
+    let mut id: Option<String> = None;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            other if other.starts_with('-') => {
+                eprintln!("unknown option: {other}");
+                eprintln!("{}", jobs_usage());
+                return Err(2);
+            }
+            other => {
+                if id.is_some() {
+                    eprintln!("unexpected argument: {other}");
+                    eprintln!("{}", jobs_usage());
+                    return Err(2);
+                }
+                id = Some(other.to_string());
+            }
+        }
+    }
+    Ok((id, json))
+}
+
+fn resolve_jobs_id(work_path: &std::path::Path, id: Option<String>) -> Result<String, i32> {
+    if let Some(id) = id {
+        return Ok(id);
+    }
+    let jobs = match crate::jobs::load_jobs(work_path) {
+        Ok(jobs) => jobs,
+        Err(err) => {
+            eprintln!("{err}");
+            return Err(1);
+        }
+    };
+    if jobs.jobs.len() == 1 {
+        return Ok(jobs.jobs[0].id.clone());
+    }
+    if jobs.jobs.is_empty() {
+        eprintln!("no jobs declared in <cwd>/.maru/jobs.json");
+    } else {
+        eprintln!("multiple jobs declared; pass <id>");
+    }
+    eprintln!("{}", jobs_usage());
+    Err(2)
+}
+
+fn run_jobs_list(args: &[String]) -> i32 {
+    let (id, json) = match parse_jobs_args(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return code,
+    };
+    let Some(work) = current_work_path() else {
+        eprintln!("cannot resolve current directory");
+        return 1;
+    };
+    let work_path = std::path::Path::new(&work);
+    match crate::jobs::jobs_list_in(work_path) {
+        Ok(mut statuses) => {
+            if let Some(id) = id {
+                statuses.retain(|status| status.id == id);
+                if statuses.is_empty() {
+                    eprintln!("job_not_found: {id}");
+                    return 1;
+                }
+            }
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&statuses).unwrap_or_default()
+                );
+            } else {
+                print_jobs_table(&statuses);
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
+fn run_jobs_action(verb: &str, args: &[String]) -> i32 {
+    let (id, json) = match parse_jobs_args(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return code,
+    };
+    let Some(work) = current_work_path() else {
+        eprintln!("cannot resolve current directory");
+        return 1;
+    };
+    let work_path = std::path::Path::new(&work);
+    let id = match resolve_jobs_id(work_path, id) {
+        Ok(id) => id,
+        Err(code) => return code,
+    };
+    let action: fn(&std::path::Path, &str) -> Result<crate::jobs::JobStatus, String> = match verb {
+        "install" => crate::jobs::jobs_install_in,
+        "uninstall" => crate::jobs::jobs_uninstall_in,
+        "start" => crate::jobs::jobs_start_in,
+        "stop" => crate::jobs::jobs_stop_in,
+        "run" => crate::jobs::jobs_run_now_in,
+        _ => unreachable!("run_jobs dispatch guards verbs"),
+    };
+    match action(work_path, &id) {
+        Ok(status) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&status).unwrap_or_default()
+                );
+            } else {
+                print_jobs_table(std::slice::from_ref(&status));
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
+fn print_jobs_table(statuses: &[crate::jobs::JobStatus]) {
+    for status in statuses {
+        let last_exit = status
+            .last_exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "{id}  {title}\n  installed={installed} loaded={loaded} enabled={enabled} last-exit={last_exit}\n  label={label}\n  plist={plist}",
+            id = status.id,
+            title = status.title,
+            installed = yes_no(status.installed),
+            loaded = yes_no(status.loaded),
+            enabled = yes_no(status.enabled),
+            last_exit = last_exit,
+            label = status.label,
+            plist = status.plist_path,
+        );
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
 fn skills_usage() -> &'static str {
     "usage: maru skills sync|update|dirty|reconcile|import|import-unmanage"
+}
+
+fn jobs_usage() -> &'static str {
+    "usage: maru jobs list|status [<id>] [--json]\n       maru jobs install|uninstall|start|stop|run [<id>] [--json]\n\nThe workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).\nAction verbs require <id> unless exactly one job is declared."
 }
 
 fn secrets_usage() -> &'static str {
@@ -783,7 +960,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]"
 }
 
 #[cfg(test)]

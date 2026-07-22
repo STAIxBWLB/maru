@@ -5916,6 +5916,67 @@ button.git-badge:hover {
   gap: 8px;
 }
 
+.jobs-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.jobs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.jobs-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.jobs-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jobs-list-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.jobs-list-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.jobs-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jobs-logs pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--panel-3);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .inbox-empty {
   min-height: 124px;
   display: grid;
