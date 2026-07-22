@@ -1008,6 +1008,7 @@ export function GraphCanvas({
           simulateContextLost: () => {
             rendererCanvases.forEach((canvas) => canvas.dispatchEvent(new Event("webglcontextlost")));
           },
+          requestRender: () => renderer.scheduleRefresh(),
           graphStats: () => ({
             nodes: nodes.length,
             edges: edges.length,

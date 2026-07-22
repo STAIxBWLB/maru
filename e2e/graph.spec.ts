@@ -66,6 +66,7 @@ interface Bridge {
   resumeLayout(): void;
   fitView(): void;
   simulateContextLost(): void;
+  requestRender(): void;
   graphStats(): { nodes: number; edges: number; visibleNodes: number; visibleEdges: number };
 }
 
@@ -136,15 +137,25 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
     return { frame, animated: fit || bridge.cameraAnimating() };
   }, options?.fit === true);
   if (cameraStart.animated) {
-    // Wait for the animation flag only. Node coordinates come from
-    // graphToViewport (synchronous camera state), so no post-settle frame is
-    // required — and demanding frames() > frame races the final animation
-    // render: captured after it, no further frame ever comes and the wait
-    // hangs (reproducible under heavy host load on a pristine checkout).
     await page.waitForFunction(
       () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.cameraAnimating(),
     );
   }
+  // Sigma resolves hover through a GPU picking buffer that only updates on
+  // render. Force exactly one fresh frame at the settled camera before
+  // hovering: capture the frame count FIRST, then request the render, so the
+  // wait can neither race an already-landed frame (the old frames() > frame
+  // hang under host load) nor hover against a stale picking buffer (CI miss).
+  const settled = await page.evaluate(() => {
+    const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+    const frame = bridge.frames();
+    bridge.requestRender();
+    return frame;
+  });
+  await page.waitForFunction(
+    (frame) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.frames() > frame,
+    settled,
+  );
   const point = await nodePoint(page, id);
   // Real users move the pointer onto a node before double-clicking. Warming
   // Sigma's picking pass avoids Playwright's instantaneous pointer teleport
