@@ -188,6 +188,7 @@ fn spawn_streaming_invocation(
     if let Some(cwd) = cwd.as_ref() {
         cmd.current_dir(cwd);
     }
+    let extra_env = prepare_invocation_env(cwd.as_deref(), extra_env)?;
     let augmented = augmented_path();
     let effective_path = merge_path_env(
         extra_env.get("PATH").map(std::ffi::OsStr::new),
@@ -284,6 +285,20 @@ fn spawn_streaming_invocation(
     });
 
     Ok(invocation_id)
+}
+
+fn prepare_invocation_env(
+    cwd: Option<&str>,
+    mut extra_env: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    let work_path = match cwd.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => std::path::PathBuf::from(value),
+        None => {
+            std::env::current_dir().map_err(|err| format!("agent_cli_cwd_unresolved: {err}"))?
+        }
+    };
+    crate::agent_runtime_env::reserve_hash_env(&mut extra_env, &work_path)?;
+    Ok(extra_env)
 }
 
 fn spawn_line_pump<R>(app: AppHandle, invocation_id: String, stream_name: String, source: R)
@@ -396,6 +411,46 @@ mod tests {
         assert!(args.contains(&"exec".to_string()), "{args:?}");
         assert!(args.contains(&"--cd".to_string()), "{args:?}");
         assert_eq!(args.last().map(String::as_str), Some("-"), "{args:?}");
+    }
+
+    #[test]
+    fn invocation_env_reserves_scratchpad_values() {
+        let work = tempfile::tempdir().unwrap();
+        let scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        std::fs::write(
+            work.path().join("workspace.config.yaml"),
+            format!(
+                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n",
+                work.path().display(),
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+        let caller_env = HashMap::from([
+            ("MARU_SCRATCHPAD".to_string(), "/tmp/override".to_string()),
+            ("MARU_TEMP".to_string(), "/tmp/override/temp".to_string()),
+            (
+                "CLAUDE_CODE_TMPDIR".to_string(),
+                "/tmp/override/claude".to_string(),
+            ),
+        ]);
+
+        let env = prepare_invocation_env(Some(work.path().to_string_lossy().as_ref()), caller_env)
+            .unwrap();
+
+        assert_eq!(
+            env.get("MARU_SCRATCHPAD"),
+            Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_TMPDIR"),
+            Some(
+                &scratchpad
+                    .join("temp/runtime/claude")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
     }
 
     #[test]

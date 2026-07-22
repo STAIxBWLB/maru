@@ -429,6 +429,36 @@ spctl -a -vv -t exec /Applications/Maru.app
 
 An AI workspace is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files.
 
+### Scratchpad
+
+The primary private workspace owns one Scratchpad root. `ideation/` and
+`memos/` are durable, Git-tracked content; only `temp/` is disposable and
+Git-ignored.
+
+```text
+<work>/scratchpad/
+  ideation/{seeds,developing,proposals,_archive}/
+  memos/
+  temp/{claude,codex,kiro,kimi,runtime}/
+```
+
+`workspace.config.yaml` may set `paths.scratchpad` and the
+`scratchpad.{ideation_subdir,memos_subdir,temp_subdir,editable_extensions,temp_stale_days,ideation_review_days,editable_max_bytes}`
+policy. Maru exposes the resolved root as `MARU_SCRATCHPAD`, its disposable
+subdirectory as `MARU_TEMP`, and places Claude runtime files below
+`$MARU_TEMP/runtime/claude` through `CLAUDE_CODE_TMPDIR`.
+
+Scratchpad edits support `.md`, `.markdown`, and `.txt`. Ideation files older
+than the review threshold are flagged for review but never cleaned
+automatically. Temp cleanup is an explicit, per-file system-Trash operation.
+Legacy `.maru/memos` migration is also explicit and verifies each destination
+before removing its source. The pane keeps recovery drafts locally when it
+cannot flush safely and never mutates tracked files merely by opening.
+
+Verify the frontend contract with `pnpm test`, `pnpm typecheck`,
+`pnpm lint:i18n`, and `pnpm build`; Rust containment, revision, migration,
+cleanup, and watcher behavior is covered by `cargo test --lib scratchpad`.
+
 Private workspace is the required default. Public workspace is optional and means a provider-managed shared root, not internet publishing. V1 capability support is registry-only: Maru stores non-secret provider metadata in `workspaces.json`, maps a manually entered provider role to coarse capabilities, intersects that with a filesystem writability probe, and gates direct writes in the UI and Rust commands. OAuth, Microsoft Graph, Google Drive, and Nextcloud live API checks are deferred.
 
 Supported public providers are Local, Google Drive, OneDrive, SharePoint, Nextcloud, Obsidian, and Unknown. `workspace.config.yaml` accepts:

@@ -610,6 +610,9 @@ fn is_excluded_dir(p: &Path) -> bool {
         Some(n) => n.to_string_lossy(),
         None => return false,
     };
+    if is_transient_scratchpad_dir(p) {
+        return true;
+    }
     matches!(
         name.as_ref(),
         ".git"
@@ -633,6 +636,9 @@ fn is_excluded_dir_for_bu_scan(p: &Path) -> bool {
         Some(n) => n.to_string_lossy(),
         None => return false,
     };
+    if is_transient_scratchpad_dir(p) {
+        return true;
+    }
     // .maru/<sub> 형태 검사
     if let Some(parent) = p.parent() {
         if parent.file_name().map_or(false, |n| n == ".maru") {
@@ -662,6 +668,16 @@ fn is_excluded_dir_for_bu_scan(p: &Path) -> bool {
             | "vault"
             | ".secrets"
     )
+}
+
+fn is_transient_scratchpad_dir(p: &Path) -> bool {
+    let Some(parent) = p.parent().and_then(Path::file_name) else {
+        return false;
+    };
+    let Some(name) = p.file_name() else {
+        return false;
+    };
+    parent == "scratchpad" && matches!(name.to_string_lossy().as_ref(), "memos" | "temp")
 }
 
 fn is_binary_evidence_candidate(ext: &str) -> bool {
@@ -847,6 +863,22 @@ mod tests {
         for (path, expected) in cases {
             assert_eq!(guess_evidence_kind(path), expected, "path={}", path);
         }
+    }
+
+    #[test]
+    fn scratchpad_scan_keeps_ideation_and_skips_memos_and_temp() {
+        assert!(!is_transient_scratchpad_dir(Path::new(
+            "/work/scratchpad/ideation"
+        )));
+        assert!(is_transient_scratchpad_dir(Path::new(
+            "/work/scratchpad/memos"
+        )));
+        assert!(is_transient_scratchpad_dir(Path::new(
+            "/work/scratchpad/temp"
+        )));
+        assert!(!is_transient_scratchpad_dir(Path::new(
+            "/work/projects/memos"
+        )));
     }
 
     #[test]

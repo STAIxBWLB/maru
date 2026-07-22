@@ -328,7 +328,7 @@ pub fn prepare_share_outbox_files(
     if !python.is_file() {
         return Err("share_outbox_python_missing".to_string());
     }
-    let env = skill_host::store::env_vars_for_runs()?;
+    let env = skill_host::store::env_vars_for_runs(Some(&work))?;
     let config_path = workspace_config_path(&work);
     let script_dir = script
         .parent()

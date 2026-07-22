@@ -14,9 +14,11 @@ import {
   hydrateTerminalStateFromPersisted,
   isRelaunchableTab,
   loadPersistedTerminalState,
+  mergeMaruTerminalEnv,
   pathMention,
   persistTerminalState,
   resolveExistingLaunchTaskId,
+  scratchpadRootForWorkspace,
   selectTerminalSplitLeftTabId,
   selectTerminalTabByIndex,
   serializeTerminalState,
@@ -35,6 +37,7 @@ import { DEFAULT_MARU_SETTINGS, normalizeMaruSettings } from "./settings";
 
 const CTX: ActiveTerminalContext = {
   workspaceRoot: "/work/vault",
+  scratchpadRoot: "/work/scratchpad",
   workspaceVisibility: "private",
   appMode: "pkm",
   docAbsPath: "/work/vault/notes/메모.md",
@@ -438,6 +441,9 @@ describe("active-item context bridge", () => {
     expect(env.MARU_TERMINAL).toBe("1");
     expect(env.MARU_SESSION_ID).toBe("term-1");
     expect(env.MARU_WORKSPACE).toBe("/work/vault");
+    expect(env.MARU_SCRATCHPAD).toBe("/work/scratchpad");
+    expect(env.MARU_TEMP).toBe("/work/scratchpad/temp");
+    expect(env.CLAUDE_CODE_TMPDIR).toBe("/work/scratchpad/temp/runtime/claude");
     expect(env.MARU_APP_MODE).toBe("pkm");
     expect(env.MARU_ACTIVE_DOC_REL).toBe("notes/메모.md");
 
@@ -450,19 +456,53 @@ describe("active-item context bridge", () => {
     expect("MARU_ACTIVE_DOC_REL" in noItem).toBe(false);
   });
 
-  it("returns only safe markers when disabled", () => {
+  it("keeps scratchpad contract and safe markers when active context is disabled", () => {
     const env = buildMaruContextEnv(CTX, "term-1", false);
-    expect(Object.keys(env).sort()).toEqual(["MARU_SESSION_ID", "MARU_TERMINAL"]);
+    expect(env).toEqual({
+      MARU_TERMINAL: "1",
+      MARU_SESSION_ID: "term-1",
+      MARU_SCRATCHPAD: "/work/scratchpad",
+      MARU_TEMP: "/work/scratchpad/temp",
+      CLAUDE_CODE_TMPDIR: "/work/scratchpad/temp/runtime/claude",
+    });
   });
 
   it("builds non-terminal context env for background agent runs", () => {
     const env = buildMaruBackgroundContextEnv(CTX, true);
     expect(env.MARU_WORKSPACE).toBe("/work/vault");
+    expect(env.MARU_SCRATCHPAD).toBe("/work/scratchpad");
+    expect(env.MARU_TEMP).toBe("/work/scratchpad/temp");
     expect(env.MARU_APP_MODE).toBe("pkm");
     expect(env.MARU_ACTIVE_DOC_REL).toBe("notes/메모.md");
     expect("MARU_TERMINAL" in env).toBe(false);
     expect("MARU_SESSION_ID" in env).toBe(false);
-    expect(buildMaruBackgroundContextEnv(CTX, false)).toEqual({});
+    expect(buildMaruBackgroundContextEnv(CTX, false)).toEqual({
+      MARU_SCRATCHPAD: "/work/scratchpad",
+      MARU_TEMP: "/work/scratchpad/temp",
+      CLAUDE_CODE_TMPDIR: "/work/scratchpad/temp/runtime/claude",
+    });
+  });
+
+  it("prevents launcher env from overriding the scratchpad contract", () => {
+    const context = buildMaruContextEnv(CTX, "term-1", false);
+    const merged = mergeMaruTerminalEnv(
+      {
+        PATH: "/custom/bin",
+        MARU_SCRATCHPAD: "/tmp/override",
+        MARU_TEMP: "/tmp/override/temp",
+        CLAUDE_CODE_TMPDIR: "/tmp/override/claude",
+      },
+      context,
+    );
+    expect(merged.PATH).toBe("/custom/bin");
+    expect(merged.MARU_SCRATCHPAD).toBe("/work/scratchpad");
+    expect(merged.MARU_TEMP).toBe("/work/scratchpad/temp");
+    expect(merged.CLAUDE_CODE_TMPDIR).toBe("/work/scratchpad/temp/runtime/claude");
+  });
+
+  it("derives platform-native scratchpad roots", () => {
+    expect(scratchpadRootForWorkspace("/work/")).toBe("/work/scratchpad");
+    expect(scratchpadRootForWorkspace("C:\\work\\")).toBe("C:\\work\\scratchpad");
   });
 
   it("adds --add-dir only for agents with a workspace", () => {

@@ -45,6 +45,41 @@ pub(crate) fn write_atomic(path: &Path, content: &[u8]) -> Result<(), String> {
     })
 }
 
+/// Atomically publish a fully written file only when the destination does not
+/// exist. `persist_noclobber` closes the check/write race that would otherwise
+/// let a concurrent creator be overwritten.
+pub(crate) fn write_atomic_create(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Cannot determine parent directory for {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("Cannot create {}: {err}", parent.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let prefix = format!(".{file_name}.maru-tmp-");
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(&prefix);
+    #[cfg(unix)]
+    builder.permissions(fs::Permissions::from_mode(0o666));
+    let mut temp = builder
+        .tempfile_in(parent)
+        .map_err(|err| format!("Cannot create temporary file: {err}"))?;
+    temp.write_all(content)
+        .map_err(|err| format!("Cannot write temporary file: {err}"))?;
+    temp.as_file()
+        .sync_all()
+        .map_err(|err| format!("Cannot sync temporary file: {err}"))?;
+    temp.persist_noclobber(path).map(|_| ()).map_err(|err| {
+        format!(
+            "target_exists: cannot create {} without overwriting: {}",
+            path.display(),
+            err.error
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,6 +95,18 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&path).unwrap(), "new");
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn create_never_overwrites_existing_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("note.md");
+        fs::write(&path, "old").unwrap();
+
+        let error = write_atomic_create(&path, b"new").unwrap_err();
+
+        assert!(error.contains("target_exists"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
     }
 
     #[cfg(unix)]

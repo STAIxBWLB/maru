@@ -35,13 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   chooseDirectories,
   chooseFiles,
-  chooseSaveFile,
   chooseWorkspaceDirectory,
-  deleteMemo,
-  listMemos,
-  readMemo,
-  saveMemo,
-  saveMemoAs,
 } from "../lib/api";
 import { frontmatterScalar } from "../lib/document";
 import {
@@ -67,8 +61,6 @@ import type {
   DocumentPayload,
   FileQueueItem,
   FileQueueSourceInfo,
-  MemoEntry,
-  MemoFormat,
   VaultEntry,
   WorkspaceFileEntry,
 } from "../lib/types";
@@ -77,6 +69,7 @@ import {
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
+import { ScratchpadPane } from "./ScratchpadPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
@@ -86,6 +79,7 @@ interface OutlinePaneProps {
   entries: VaultEntry[];
   readOnly: boolean;
   workspacePath: string | null;
+  scratchpadWorkPath: string | null;
   /** Editor line currently scrolled to the top (source mode); highlights the
    *  matching outline heading. Null when tracking is inactive. */
   activeLine?: number | null;
@@ -214,6 +208,7 @@ export function OutlinePane({
   entries,
   readOnly,
   workspacePath,
+  scratchpadWorkPath,
   activeLine = null,
   onJumpToLine,
   onClose,
@@ -510,8 +505,9 @@ export function OutlinePane({
           ) : null}
 
           {tab === "memo" ? (
-            <MemoPane
-              workspacePath={workspacePath}
+            <ScratchpadPane
+              key={scratchpadWorkPath ?? "scratchpad-unavailable"}
+              workPath={scratchpadWorkPath}
               onError={onError}
               onRefreshWorkspace={onRefreshWorkspace}
               t={t}
@@ -1121,291 +1117,6 @@ function fileQueueTitleFor(
   ]
     .filter(Boolean)
     .join("\n");
-}
-
-function MemoPane({
-  workspacePath,
-  onError,
-  onRefreshWorkspace,
-  t,
-}: {
-  workspacePath: string | null;
-  onError: (message: string | null) => void;
-  onRefreshWorkspace: () => void;
-  t: (key: string, vars?: Record<string, string | number>) => string;
-}) {
-  const [memos, setMemos] = useState<MemoEntry[]>([]);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [name, setName] = useState("memo.txt");
-  const [format, setFormat] = useState<MemoFormat>("plain");
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const autoSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const autoSaveSerialRef = useRef(0);
-  const selectedPathRef = useRef<string | null>(null);
-  const userEditedRef = useRef(false);
-  const lastSavedSignatureRef = useRef("");
-
-  const clearAutoSaveTimer = useCallback(() => {
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    selectedPathRef.current = selectedPath;
-  }, [selectedPath]);
-
-  const refresh = useCallback(async () => {
-    if (!workspacePath) {
-      setMemos([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      setMemos(await listMemos(workspacePath));
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [onError, workspacePath]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => () => clearAutoSaveTimer(), [clearAutoSaveTimer]);
-
-  useEffect(() => {
-    const signature = `${name}\u0000${format}\u0000${content}`;
-    if (!workspacePath || !userEditedRef.current) return;
-    if (!selectedPath && !content.trim()) {
-      setSaveState("idle");
-      return;
-    }
-    if (lastSavedSignatureRef.current === signature) return;
-
-    clearAutoSaveTimer();
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      const saveName = name;
-      const saveFormat = format;
-      const saveContent = content;
-      const previousPath = selectedPathRef.current;
-      const serial = ++autoSaveSerialRef.current;
-      setSaving(true);
-      setSaveState("saving");
-      onError(null);
-      void saveMemo(workspacePath, saveName, saveFormat, saveContent)
-        .then(async (doc) => {
-          if (serial !== autoSaveSerialRef.current) return;
-          if (previousPath && previousPath !== doc.path) {
-            await deleteMemo(workspacePath, previousPath);
-          }
-          setSelectedPath(doc.path);
-          setName((current) => (current === saveName ? doc.name : current));
-          setFormat((current) => (current === saveFormat ? doc.format : current));
-          lastSavedSignatureRef.current = `${doc.name}\u0000${doc.format}\u0000${saveContent}`;
-          userEditedRef.current = false;
-          setSaveState("saved");
-          await refresh();
-        })
-        .catch((err) => {
-          if (serial !== autoSaveSerialRef.current) return;
-          setSaveState("error");
-          onError(err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          if (serial === autoSaveSerialRef.current) {
-            setSaving(false);
-          }
-        });
-    }, 700);
-
-    return clearAutoSaveTimer;
-  }, [clearAutoSaveTimer, content, format, name, onError, refresh, selectedPath, workspacePath]);
-
-  const openMemo = async (memo: MemoEntry) => {
-    if (!workspacePath) return;
-    clearAutoSaveTimer();
-    autoSaveSerialRef.current += 1;
-    userEditedRef.current = false;
-    setSaving(false);
-    try {
-      const doc = await readMemo(workspacePath, memo.path);
-      setSelectedPath(doc.path);
-      setName(doc.name);
-      setFormat(doc.format);
-      setContent(doc.content);
-      lastSavedSignatureRef.current = `${doc.name}\u0000${doc.format}\u0000${doc.content}`;
-      setSaveState("saved");
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const newMemo = () => {
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
-    clearAutoSaveTimer();
-    autoSaveSerialRef.current += 1;
-    userEditedRef.current = false;
-    setSelectedPath(null);
-    setName(`memo-${stamp}.txt`);
-    setFormat("plain");
-    setContent("");
-    setSaving(false);
-    setSaveState("idle");
-    lastSavedSignatureRef.current = "";
-  };
-
-  const handleNameChange = (next: string) => {
-    userEditedRef.current = true;
-    setSaveState("idle");
-    setName(next);
-  };
-
-  const handleFormatChange = (next: MemoFormat) => {
-    userEditedRef.current = true;
-    setSaveState("idle");
-    setFormat(next);
-  };
-
-  const handleContentChange = (next: string) => {
-    userEditedRef.current = true;
-    setSaveState("idle");
-    setContent(next);
-  };
-
-  const deleteCurrent = async () => {
-    if (!workspacePath || !selectedPath) return;
-    if (!window.confirm(t("rightPane.memo.deleteConfirm"))) return;
-    clearAutoSaveTimer();
-    autoSaveSerialRef.current += 1;
-    setSaving(true);
-    onError(null);
-    try {
-      await deleteMemo(workspacePath, selectedPath);
-      await refresh();
-      newMemo();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveAs = async () => {
-    setSaving(true);
-    onError(null);
-    try {
-      const target = await chooseSaveFile(t("rightPane.memo.saveAs"), name);
-      if (!target) return;
-      await saveMemoAs(target, content);
-      onRefreshWorkspace();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const autoSaveLabel =
-    saveState === "saving"
-      ? t("rightPane.memo.autoSaving")
-      : saveState === "saved"
-        ? t("rightPane.memo.autoSaved")
-        : saveState === "error"
-          ? t("rightPane.memo.autoSaveError")
-          : t("rightPane.memo.autoSaveIdle");
-
-  return (
-    <section className="right-tool-pane memo-pane">
-      <div className="right-tool-actions">
-        <button
-          type="button"
-          onClick={newMemo}
-          title={t("rightPane.memo.new")}
-          aria-label={t("rightPane.memo.new")}
-        >
-          <Plus size={13} />
-          <span>{t("rightPane.memo.new")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          title={t("rightPane.memo.refresh")}
-          aria-label={t("rightPane.memo.refresh")}
-        >
-          <List size={13} />
-          <span>{t("rightPane.memo.refresh")}</span>
-        </button>
-      </div>
-      <div className="memo-list" aria-label={t("rightPane.memo.list")}>
-        {loading ? <div className="outline-empty">{t("rightPane.memo.loading")}</div> : null}
-        {!loading && memos.length === 0 ? (
-          <div className="outline-empty">{t("rightPane.memo.empty")}</div>
-        ) : null}
-        {memos.map((memo) => (
-          <button
-            key={memo.path}
-            type="button"
-            className={memo.path === selectedPath ? "memo-list-item active" : "memo-list-item"}
-            onClick={() => void openMemo(memo)}
-            title={memo.path}
-          >
-            <strong>{memo.name}</strong>
-            <span>{memo.preview || t("rightPane.memo.noPreview")}</span>
-          </button>
-        ))}
-      </div>
-      <label className="memo-name">
-        <span>{t("rightPane.memo.name")}</span>
-        <input value={name} onChange={(event) => handleNameChange(event.target.value)} />
-      </label>
-      <div className="right-tool-actions">
-        <button type="button" className={format === "plain" ? "active" : ""} onClick={() => handleFormatChange("plain")}>
-          Plain
-        </button>
-        <button type="button" className={format === "markdown" ? "active" : ""} onClick={() => handleFormatChange("markdown")}>
-          Markdown
-        </button>
-      </div>
-      <textarea
-        className="memo-editor"
-        value={content}
-        onChange={(event) => handleContentChange(event.target.value)}
-        placeholder={t("rightPane.memo.placeholder")}
-      />
-      <div className={`memo-autosave-status ${saveState}`}>{autoSaveLabel}</div>
-      <div className="right-tool-actions bottom">
-        <button
-          type="button"
-          className="danger"
-          disabled={!workspacePath || !selectedPath || saving}
-          onClick={() => void deleteCurrent()}
-          title={t("rightPane.memo.delete")}
-          aria-label={t("rightPane.memo.delete")}
-        >
-          <Trash2 size={13} />
-          <span>{t("rightPane.memo.delete")}</span>
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void saveAs()}
-          title={t("rightPane.memo.saveAs")}
-          aria-label={t("rightPane.memo.saveAs")}
-        >
-          <Save size={13} />
-          <span>{t("rightPane.memo.saveAs")}</span>
-        </button>
-      </div>
-    </section>
-  );
 }
 
 interface InspectorRowProps {

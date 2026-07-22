@@ -642,12 +642,38 @@ export type AttachMentionStyle = TerminalAttachMentionStyle;
 /** The Maru active window/item, fed to CLI agents as context. */
 export interface ActiveTerminalContext {
   workspaceRoot: string | null;
+  /** Durable local scratchpad root from the primary private workspace. */
+  scratchpadRoot: string | null;
   workspaceVisibility: "private" | "public";
   appMode: MaruAppMode;
   docAbsPath: string | null;
   docRelPath: string | null;
   docTitle: string | null;
   docType: string | null;
+}
+
+function childPath(root: string, ...segments: string[]): string {
+  const separator = root.includes("\\") && !root.includes("/") ? "\\" : "/";
+  const trimmedRoot = root.replace(/[\\/]+$/, "");
+  return [trimmedRoot, ...segments.map((segment) => segment.replace(/^[\\/]+|[\\/]+$/g, ""))]
+    .filter(Boolean)
+    .join(separator);
+}
+
+export function scratchpadRootForWorkspace(workspaceRoot: string): string {
+  return childPath(workspaceRoot, "scratchpad");
+}
+
+function applyScratchpadEnv(
+  env: Record<string, string>,
+  ctx: ActiveTerminalContext,
+): Record<string, string> {
+  if (!ctx.scratchpadRoot) return env;
+  const tempRoot = childPath(ctx.scratchpadRoot, "temp");
+  env.MARU_SCRATCHPAD = ctx.scratchpadRoot;
+  env.MARU_TEMP = tempRoot;
+  env.CLAUDE_CODE_TMPDIR = childPath(tempRoot, "runtime", "claude");
+  return env;
 }
 
 function applyActiveContextEnv(
@@ -669,7 +695,8 @@ function applyActiveContextEnv(
 /**
  * Environment variables injected into every Maru-spawned PTY (cmux pattern).
  * Item-dependent keys are omitted (not set to "") so agents can test `-n "$VAR"`.
- * When `enabled` is false only the safe markers are returned.
+ * Scratchpad paths and safe terminal markers are always returned; active-item
+ * keys are controlled by `enabled`.
  */
 export function buildMaruContextEnv(
   ctx: ActiveTerminalContext,
@@ -680,18 +707,28 @@ export function buildMaruContextEnv(
     MARU_TERMINAL: "1",
     MARU_SESSION_ID: sessionId,
   };
+  applyScratchpadEnv(env, ctx);
   return applyActiveContextEnv(env, ctx, enabled);
 }
 
 /**
  * Environment variables for non-PTY background agent runs. These carry the
- * same active item context but deliberately omit terminal hook markers.
+ * same scratchpad/active-item context but deliberately omit terminal hook markers.
  */
 export function buildMaruBackgroundContextEnv(
   ctx: ActiveTerminalContext,
   enabled: boolean,
 ): Record<string, string> {
-  return applyActiveContextEnv({}, ctx, enabled);
+  const env = applyScratchpadEnv({}, ctx);
+  return applyActiveContextEnv(env, ctx, enabled);
+}
+
+/** Merge launcher/skill env without allowing it to replace Maru's context contract. */
+export function mergeMaruTerminalEnv(
+  requestedEnv: Record<string, string> | null | undefined,
+  contextEnv: Record<string, string>,
+): Record<string, string> {
+  return { ...(requestedEnv ?? {}), ...contextEnv };
 }
 
 /** `--add-dir <workspace>` for claude/codex so the agent can read the tree. */

@@ -2683,7 +2683,7 @@ pub fn get_skill(skill_id: &str) -> Result<SkillRecord, String> {
         .ok_or_else(|| format!("unknown_skill: {skill_id}"))
 }
 
-pub fn env_vars_for_runs() -> Result<BTreeMap<String, String>, String> {
+pub fn env_vars_for_runs(work_path: Option<&Path>) -> Result<BTreeMap<String, String>, String> {
     let env_root = host_fs::env_root()?;
     let bin = env_root.join(".venv").join("bin");
     let node_modules = env_root.join("node_modules");
@@ -2711,6 +2711,9 @@ pub fn env_vars_for_runs() -> Result<BTreeMap<String, String>, String> {
         "NODE_PATH".to_string(),
         merged_node_path.to_string_lossy().to_string(),
     );
+    if let Some(work_path) = work_path {
+        crate::agent_runtime_env::reserve_btree_env(&mut vars, work_path)?;
+    }
     Ok(vars)
 }
 
@@ -3943,10 +3946,9 @@ fn skills_apply_bundle_update_impl(
     }
 
     progress.info("Applying bundle");
-    let backup = host_fs::skills_root()?.join("_cache").join(format!(
-        "backup-{}",
-        Utc::now().format("%Y%m%d%H%M%S%.9f")
-    ));
+    let backup = host_fs::skills_root()?
+        .join("_cache")
+        .join(format!("backup-{}", Utc::now().format("%Y%m%d%H%M%S%.9f")));
     bundle::write_journal(&SwapJournal {
         schema: 1,
         new_bundle_id: new_bundle_id.clone(),
@@ -5225,7 +5227,7 @@ mod tests {
         let home = test_home();
         let env_root = home._dir.path().join(".maru").join("env");
 
-        let vars = env_vars_for_runs().unwrap();
+        let vars = env_vars_for_runs(None).unwrap();
 
         assert_eq!(
             vars.get("MARU_SKILLS_ENV").unwrap(),
@@ -5245,6 +5247,34 @@ mod tests {
         assert_eq!(
             node_path_entries.first(),
             Some(&env_root.join("node_modules"))
+        );
+    }
+
+    #[test]
+    fn env_vars_for_runs_includes_the_reserved_scratchpad_contract() {
+        let home = test_home();
+        let work = home._dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let scratchpad = crate::scratchpad::resolve_scratchpad_root(&work).unwrap();
+
+        let vars = env_vars_for_runs(Some(&work)).unwrap();
+
+        assert_eq!(
+            vars.get("MARU_SCRATCHPAD"),
+            Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            vars.get("MARU_TEMP"),
+            Some(&scratchpad.join("temp").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            vars.get("CLAUDE_CODE_TMPDIR"),
+            Some(
+                &scratchpad
+                    .join("temp/runtime/claude")
+                    .to_string_lossy()
+                    .into_owned()
+            )
         );
     }
 
@@ -7050,8 +7080,7 @@ mod tests {
         // The pristine baseline carries the ORIGINAL content, so the edit now
         // counts as dirty.
         let pristine_hash = active_pristine_skill_hash("gaejosik").expect("baseline");
-        let current_hash =
-            hash_directory_filtered(&builtin.join("skills/gaejosik")).unwrap();
+        let current_hash = hash_directory_filtered(&builtin.join("skills/gaejosik")).unwrap();
         assert_ne!(pristine_hash, current_hash);
     }
 
@@ -7108,11 +7137,7 @@ mod tests {
             previous: None,
         })
         .unwrap();
-        fs::write(
-            builtin.join("skills/gaejosik/SKILL.md"),
-            "user scribbles",
-        )
-        .unwrap();
+        fs::write(builtin.join("skills/gaejosik/SKILL.md"), "user scribbles").unwrap();
 
         restore_builtin_skill("gaejosik").unwrap();
 
@@ -7163,10 +7188,7 @@ mod tests {
         .unwrap();
         let err = validate_cloned_source_manifest(&checkout, "demo").unwrap_err();
         assert!(err.contains("source_manifest_invalid"));
-        assert!(
-            !checkout.exists(),
-            "rejected checkout must be rolled back"
-        );
+        assert!(!checkout.exists(), "rejected checkout must be rolled back");
     }
 
     #[test]
