@@ -124,6 +124,18 @@ export function domainColor(domain: string | null): string {
   return domain ? (activeTheme.domainColors[domain] ?? activeTheme.fallback) : activeTheme.fallback;
 }
 
+/** Stable per-relation edge color: FNV hash into the categorical palette.
+ *  Body `wiki_link` edges are handled by the caller (they stay neutral). */
+export function relationColor(relation: string): string {
+  const palette = activeTheme.communityColors;
+  let hash = 2166136261;
+  for (let index = 0; index < relation.length; index += 1) {
+    hash ^= relation.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return palette[(hash >>> 0) % palette.length];
+}
+
 export function edgeKey(a: string, b: string): string {
   return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
 }

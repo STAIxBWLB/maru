@@ -1,9 +1,11 @@
 // Graph app mode (maru-vault-graph-spec §F2). Owns: model build (live layer),
 // enrichment overlay (vault_graph_read → community), filters/search/selection/
-// path/insights state, and a single reused layout worker. GraphCanvas renders;
-// layout.worker.ts computes positions (warm-started + disk-cached).
+// path/insights state, adaptive panel tiers, and a single reused layout worker.
+// GraphCanvas renders; layout.worker.ts computes positions (warm-started +
+// disk-cached).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Tabs from "@radix-ui/react-tabs";
 import {
   chooseSaveFile,
   isTauri,
@@ -20,12 +22,13 @@ import {
 import {
   buildVaultGraph,
   enrichGraph,
-  focusSubgraph,
-  isNoiseNode,
   type GraphModel,
   type GraphNode,
 } from "../../lib/graph/model";
+import { deriveGraphView } from "../../lib/graph/derive";
+import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
+import { rankGraphSearch } from "../../lib/graph/search";
 import { refreshGraphTheme } from "./graphStyle";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -34,7 +37,19 @@ import {
   useScopedKeyboardShortcuts,
 } from "../../lib/diagram/shortcuts";
 import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
-import type { FavoriteKind, GraphSettings } from "../../lib/settings";
+import {
+  defaultGraphFilterProfile,
+  GRAPH_FILTER_WIDTH_MAX,
+  GRAPH_FILTER_WIDTH_MIN,
+  GRAPH_WORKBENCH_WIDTH_MAX,
+  GRAPH_WORKBENCH_WIDTH_MIN,
+  type FavoriteKind,
+  type GraphDisplaySettings,
+  type GraphMode,
+  type GraphPanelSettings,
+  type GraphSettingsV2,
+  type GraphSource,
+} from "../../lib/settings";
 import type { FavoriteTarget } from "../FavoritesSection";
 import type { VaultEntry } from "../../lib/types";
 import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
@@ -43,19 +58,19 @@ import {
   GraphCanvas,
   type GraphExportController,
   type GraphHighlight,
+  type GraphRendererState,
 } from "./GraphCanvas";
 import {
   filtersFromSettings,
   filtersToSettings,
   GraphFilterPanel,
-  type FacetItem,
   type GraphFilters,
 } from "./GraphFilterPanel";
 import { GraphInspector } from "./GraphInspector";
 import { GraphInsightsPanel } from "./GraphInsightsPanel";
 import { GraphLegend } from "./GraphLegend";
 import { GraphRelationReviewDialog } from "./GraphRelationReviewDialog";
-import { GraphToolbar, type GraphViewKind } from "./GraphToolbar";
+import { GraphToolbar, GraphZoomCluster } from "./GraphToolbar";
 
 interface GraphViewProps {
   workspacePath: string | null;
@@ -65,8 +80,8 @@ interface GraphViewProps {
   onClearFocus: () => void;
   onOpenEntry: (entry: VaultEntry) => void;
   onCreateNote: (target: string) => void;
-  graphSettings: GraphSettings;
-  onGraphSettingsChange: (next: GraphSettings) => void;
+  graphSettings: GraphSettingsV2;
+  onGraphSettingsChange: (next: GraphSettingsV2) => void;
   isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
   onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
@@ -91,14 +106,15 @@ export function GraphView({
   onGraphChanged,
 }: GraphViewProps) {
   const { t } = useTranslation();
-  const [source, setSource] = useState<GraphSettings["source"]>(graphSettings.source);
-  const [scope, setScope] = useState<GraphSettings["scope"]>(graphSettings.scope);
-  const [localDepth, setLocalDepth] = useState<GraphSettings["localDepth"]>(graphSettings.localDepth);
-  const [localDirection, setLocalDirection] = useState<GraphSettings["localDirection"]>(graphSettings.localDirection);
+  const [source, setSource] = useState<GraphSource>(graphSettings.source);
+  const [localDepth, setLocalDepth] = useState<GraphSettingsV2["localDepth"]>(graphSettings.localDepth);
+  const [localDirection, setLocalDirection] = useState<GraphSettingsV2["localDirection"]>(graphSettings.localDirection);
   // Seeded from persisted settings; changes are written back (skip-first) below.
-  const [view, setView] = useState<GraphViewKind>(graphSettings.view);
+  // Stored mode ("global" | "local" | "chains"); effective mode is "local"
+  // whenever a focus node is set.
+  const [mode, setMode] = useState<GraphMode>(graphSettings.mode);
   const [filters, setFilters] = useState<GraphFilters>(() =>
-    filtersFromSettings(graphSettings.filters),
+    filtersFromSettings(graphSettings.profiles[graphSettings.source]),
   );
   const [searchAsFilter, setSearchAsFilter] = useState(graphSettings.searchAsFilter);
   const [search, setSearch] = useState("");
@@ -138,23 +154,35 @@ export function GraphView({
   const graphSettingsRef = useRef(graphSettings);
   graphSettingsRef.current = graphSettings;
   const persistSkipRef = useRef(true);
+  // Source switch: load the newly active source's filter profile. Declared
+  // before the persist effect so the persist pass after a source change
+  // already sees the new source's own profile (not the previous source's).
+  const sourceInitRef = useRef(true);
+  useEffect(() => {
+    if (sourceInitRef.current) {
+      sourceInitRef.current = false;
+      return;
+    }
+    setFilters(filtersFromSettings(graphSettingsRef.current.profiles[source]));
+  }, [source]);
   useEffect(() => {
     if (persistSkipRef.current) {
       persistSkipRef.current = false;
       return;
     }
+    const current = graphSettingsRef.current;
     onGraphSettingsChangeRef.current({
+      ...current,
       source,
-      scope,
+      mode,
       localDepth,
       localDirection,
-      view,
       searchAsFilter,
       // The UI has no pattern editor; pass the current settings value through.
-      noisePatterns: graphSettingsRef.current.noisePatterns,
-      filters: filtersToSettings(filters),
+      generatedPatterns: current.generatedPatterns,
+      profiles: { ...current.profiles, [source]: filtersToSettings(filters) },
     });
-  }, [source, scope, localDepth, localDirection, view, searchAsFilter, filters]);
+  }, [source, localDepth, localDirection, mode, searchAsFilter, filters]);
 
   // Re-seed from external (cross-window) settings changes. Deps are only
   // [graphSettings], and each setState is gated on a real diff, so a local
@@ -162,13 +190,18 @@ export function GraphView({
   // reset of the in-flight local change and no feedback loop.
   useEffect(() => {
     if (graphSettings.source !== source) setSource(graphSettings.source);
-    if (graphSettings.scope !== scope) setScope(graphSettings.scope);
     if (graphSettings.localDepth !== localDepth) setLocalDepth(graphSettings.localDepth);
     if (graphSettings.localDirection !== localDirection) setLocalDirection(graphSettings.localDirection);
-    if (graphSettings.view !== view) setView(graphSettings.view);
+    if (graphSettings.mode !== mode) setMode(graphSettings.mode);
     if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
-    if (JSON.stringify(graphSettings.filters) !== JSON.stringify(filtersToSettings(filters))) {
-      setFilters(filtersFromSettings(graphSettings.filters));
+    // The [source] effect above loads the profile on a source switch; here we
+    // only track external edits to the currently active source's profile.
+    const activeProfile = graphSettings.profiles[graphSettings.source];
+    if (
+      graphSettings.source === source &&
+      JSON.stringify(activeProfile) !== JSON.stringify(filtersToSettings(filters))
+    ) {
+      setFilters(filtersFromSettings(activeProfile));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphSettings]);
@@ -185,6 +218,7 @@ export function GraphView({
   const [seedPositions, setSeedPositions] = useState<Record<string, [number, number]>>({});
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [unpinSignal, setUnpinSignal] = useState<{ id: string; nonce: number } | null>(null);
+  // --- separated interaction state (V5): selection / local focus / path ----
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [relationPair, setRelationPair] = useState<{ source: GraphNode; target: GraphNode } | null>(null);
   const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
@@ -195,20 +229,114 @@ export function GraphView({
   const [fitSignal, setFitSignal] = useState(0);
   const [zoomSignal, setZoomSignal] = useState<{ dir: 1 | -1; nonce: number } | null>(null);
   const [centerSignal, setCenterSignal] = useState<{ id: string; nonce: number } | null>(null);
-  // Focus (k-hop subgraph) is seeded from the prop (NeighborhoodPane "그래프에서
-  // 보기") but can also be set locally from the inspector.
-  const [focus, setFocus] = useState<string | null>(focusNodeId ?? null);
-  useEffect(() => setFocus(focusNodeId ?? null), [focusNodeId]);
+  // Search combobox: active (arrow-key) result — emphasized on the canvas but
+  // NOT a selection and NOT the local-focus anchor.
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
+  const handleSearchActiveChange = useCallback((id: string | null) => setActiveSearchId(id), []);
+  // Local mode (k-hop) anchor — seeded from the prop (NeighborhoodPane
+  // "그래프에서 보기") but can also be set locally from the inspector.
+  const [localFocus, setLocalFocus] = useState<string | null>(focusNodeId ?? null);
+  useEffect(() => setLocalFocus(focusNodeId ?? null), [focusNodeId]);
   // Focus hides the siblings via visibility (no relayout), so recenter the
   // camera on the focused node when it changes — otherwise the neighborhood can
   // sit off-screen at its full-graph position.
   const prevFocusRef = useRef<string | null>(null);
   useEffect(() => {
-    if (focus && focus !== prevFocusRef.current) {
-      setCenterSignal({ id: focus, nonce: Date.now() });
+    if (localFocus && localFocus !== prevFocusRef.current) {
+      setCenterSignal({ id: localFocus, nonce: Date.now() });
     }
-    prevFocusRef.current = focus;
-  }, [focus]);
+    prevFocusRef.current = localFocus;
+  }, [localFocus]);
+
+  // --- adaptive tiers + panel layout (V5) -----------------------------------
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [tier, setTier] = useState<"wide" | "standard" | "compact">("wide");
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      const width = el.clientWidth;
+      const next = width >= 1280 ? "wide" : width >= 920 ? "standard" : "compact";
+      setTier((prev) => (prev === next ? prev : next));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const panels = graphSettings.panels;
+  const panelsRef = useRef(panels);
+  panelsRef.current = panels;
+  const display = graphSettings.display;
+  // Overlay panel open state is session-only (never persisted); the compact
+  // tier's mutual exclusion falls out of the single-slot value.
+  const [overlayPanel, setOverlayPanel] = useState<"filters" | "workbench" | null>(null);
+  const persistPanels = useCallback((next: GraphPanelSettings) => {
+    onGraphSettingsChangeRef.current({ ...graphSettingsRef.current, panels: next });
+  }, []);
+  const persistDisplay = useCallback((next: GraphDisplaySettings) => {
+    onGraphSettingsChangeRef.current({ ...graphSettingsRef.current, display: next });
+  }, []);
+  const filtersDocked = tier === "wide" && panels.filtersOpen;
+  const workbenchDocked = tier !== "compact" && panels.workbenchOpen;
+  const filtersVisible = tier === "wide" ? panels.filtersOpen : overlayPanel === "filters";
+  const workbenchVisible = tier === "compact" ? overlayPanel === "workbench" : panels.workbenchOpen;
+  const toggleFiltersPanel = useCallback(() => {
+    if (tier === "wide") persistPanels({ ...panelsRef.current, filtersOpen: !panelsRef.current.filtersOpen });
+    else setOverlayPanel((current) => (current === "filters" ? null : "filters"));
+  }, [tier, persistPanels]);
+  const toggleWorkbenchPanel = useCallback(() => {
+    if (tier === "compact") setOverlayPanel((current) => (current === "workbench" ? null : "workbench"));
+    else persistPanels({ ...panelsRef.current, workbenchOpen: !panelsRef.current.workbenchOpen });
+  }, [tier, persistPanels]);
+  const clampPanelWidth = (value: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, Math.round(value)));
+  const filterWidth = clampPanelWidth(panels.filterWidth, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX);
+  const workbenchWidth = clampPanelWidth(panels.workbenchWidth, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX);
+  const startPanelResize = useCallback(
+    (kind: "filters" | "workbench") => (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const handle = event.currentTarget;
+      const pointerId = event.pointerId;
+      handle.setPointerCapture(pointerId);
+      const update = (clientX: number) => {
+        const rect = bodyRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const current = panelsRef.current;
+        if (kind === "filters") {
+          persistPanels({
+            ...current,
+            filterWidth: clampPanelWidth(clientX - rect.left, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX),
+          });
+        } else {
+          persistPanels({
+            ...current,
+            workbenchWidth: clampPanelWidth(rect.right - clientX, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX),
+          });
+        }
+      };
+      update(event.clientX);
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId === pointerId) update(move.clientX);
+      };
+      const cleanup = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      };
+      const onEnd = (up: PointerEvent) => {
+        if (up.pointerId === pointerId) cleanup();
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    },
+    [persistPanels],
+  );
+
+  // Renderer lifecycle (layout-running indicator + a11y announcements).
+  const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -241,82 +369,51 @@ export function GraphView({
   // (i.e. on vault edits) so it doesn't stay frozen at mount time.
   const now = useMemo(() => Date.now(), [model]);
 
-  const facets = useMemo(() => {
-    const domain = new Map<string, number>();
-    const type = new Map<string, number>();
-    const community = new Map<number, number>();
-    let maxDegree = 0;
-    for (const node of model.nodes) {
-      if (node.domain) domain.set(node.domain, (domain.get(node.domain) ?? 0) + 1);
-      type.set(node.type, (type.get(node.type) ?? 0) + 1);
-      if (node.community != null) community.set(node.community, (community.get(node.community) ?? 0) + 1);
-      if (node.degree > maxDegree) maxDegree = node.degree;
-    }
-    const domains: FacetItem<string>[] = [...domain.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([value, count]) => ({ value, count }));
-    const types: FacetItem<string>[] = [...type.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([value, count]) => ({ value, count }));
-    const communities: FacetItem<number>[] = [...community.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([value, count]) => ({ value, count }));
-    return { domains, types, communities, maxDegree };
-  }, [model]);
-
-  const baseFiltered = useMemo(() => {
-    let base = model;
-    if (focus) base = focusSubgraph(model, focus, localDepth, localDirection);
-    const keep = new Set<string>();
-    // While noise is hidden, an "unknown" entry in a persisted type selection
-    // would exclude every visible node (its chip is hidden too) — ignore it.
-    const effectiveTypes = filters.showNoise
-      ? filters.types
-      : new Set([...filters.types].filter((type) => type !== "unknown"));
-    for (const node of base.nodes) {
-      if (!filters.showGhosts && node.type === "unresolved") continue;
-      // Before the types check so a stale persisted types:["unknown"] selection
-      // can't resurrect noise. The explicitly focused node stays visible even
-      // when it is noise (e.g. "view in graph" from an untyped document).
-      if (!filters.showNoise && node.id !== focus && isNoiseNode(node, graphSettings.noisePatterns)) continue;
-      if (scope === "connected" && node.degree === 0) continue;
-      if (filters.domains.size > 0 && (!node.domain || !filters.domains.has(node.domain))) continue;
-      if (effectiveTypes.size > 0 && !effectiveTypes.has(node.type)) continue;
-      if (filters.community != null && node.community !== filters.community) continue;
-      if (node.degree < filters.minDegree) continue;
-      keep.add(node.id);
-    }
-    return {
-      ...base,
-      nodes: base.nodes.filter((n) => keep.has(n.id)),
-      edges: base.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
-    };
-  }, [model, filters, focus, localDepth, localDirection, scope, graphSettings.noisePatterns]);
-
-  // Search-as-filter narrows the facet-filtered set to matches + their 1-hop
-  // neighbors (matches alone would render as disconnected dots). Off → returns
-  // baseFiltered by identity, so plain search typing doesn't re-layout.
-  const filtered = useMemo(() => {
-    const q = searchAsFilter ? search.trim().toLowerCase() : "";
-    if (!q) return baseFiltered;
-    const matched = new Set<string>();
-    for (const node of baseFiltered.nodes) {
-      if (node.label.toLowerCase().includes(q)) matched.add(node.id);
-    }
-    const visible = new Set(matched);
-    for (const e of baseFiltered.edges) {
-      if (matched.has(e.source)) visible.add(e.target);
-      if (matched.has(e.target)) visible.add(e.source);
-    }
-    return {
-      ...baseFiltered,
-      nodes: baseFiltered.nodes.filter((n) => visible.has(n.id)),
-      edges: baseFiltered.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
-    };
-  }, [baseFiltered, search, searchAsFilter]);
+  // One pure derivation pipeline (facet → relation → local → prune → search).
+  // Effective mode is "local" while a local-focus anchor is set, else the stored mode.
+  const derived = useMemo(
+    () =>
+      deriveGraphView({
+        model,
+        profile: filtersToSettings(filters),
+        generatedPatterns: graphSettings.generatedPatterns,
+        mode: localFocus ? "local" : mode,
+        focusNodeId: localFocus,
+        localDepth,
+        localDirection,
+        search,
+        searchAsFilter,
+      }),
+    [model, filters, graphSettings.generatedPatterns, localFocus, mode, localDepth, localDirection, search, searchAsFilter],
+  );
+  const filtered = derived.visibleModel;
   const visibleNodeIds = useMemo(
     () => new Set(filtered.nodes.map((node) => node.id)),
     [filtered.nodes],
+  );
+  // Search combobox ranks the CURRENT filtered graph.
+  const searchResults = useMemo(
+    () => rankGraphSearch(filtered.nodes, search),
+    [filtered.nodes, search],
+  );
+  // Paused filter chips remove the offending value from the active profile.
+  const removePausedFilter = useCallback(
+    (descriptor: string) => {
+      const separator = descriptor.indexOf(":");
+      if (separator < 0) return;
+      const kind = descriptor.slice(0, separator);
+      const value = descriptor.slice(separator + 1);
+      if (kind === "domain") {
+        setFilters((current) => ({ ...current, domains: new Set([...current.domains].filter((v) => v !== value)) }));
+      } else if (kind === "type") {
+        setFilters((current) => ({ ...current, types: new Set([...current.types].filter((v) => v !== value)) }));
+      } else if (kind === "relation") {
+        setFilters((current) => ({ ...current, relations: new Set([...current.relations].filter((v) => v !== value)) }));
+      } else if (kind === "community") {
+        setFilters((current) => ({ ...current, community: null }));
+      }
+    },
+    [],
   );
 
   useEffect(() => {
@@ -324,7 +421,7 @@ export function GraphView({
     let cancelled = false;
     void vaultGraphLayoutRead(workspacePath).then((cache) => {
       if (cancelled || !cache) return;
-      setSeedPositions(cache.positions);
+      setSeedPositions(sanitizePositions(cache.positions));
       setPinnedIds(cache.pinnedIds ?? []);
     });
     return () => {
@@ -346,6 +443,8 @@ export function GraphView({
     // Skip while `settled` belongs to a different node set (identity, not just
     // cardinality — a same-cardinality swap would persist wrong coordinates).
     if (settledNodesRef.current !== model.nodes) return;
+    // A single non-finite coordinate would poison the whole disk cache.
+    if (!isFinitePositions(settled)) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       // `settled` is index-aligned with the full model, so this is the complete
@@ -508,7 +607,7 @@ export function GraphView({
         setRightTab("selected");
         return;
       }
-      const path = shortestPath(model, source, node.id);
+      const path = shortestPath(derived.analysisModel, source, node.id);
       if (!path) {
         onError(t("graph.path.none"));
         return;
@@ -517,7 +616,7 @@ export function GraphView({
       setHighlightPair(null);
       setPathSourceId(null);
     },
-    [model, pathSourceId, selectedId, onError, t],
+    [derived.analysisModel, pathSourceId, selectedId, onError, t],
   );
 
   const handleInsightNode = useCallback(
@@ -545,7 +644,7 @@ export function GraphView({
   }, [nodeById]);
 
   const clearFocus = useCallback(() => {
-    setFocus(null);
+    setLocalFocus(null);
     onClearFocus();
   }, [onClearFocus]);
 
@@ -555,11 +654,26 @@ export function GraphView({
     setPathIds([]);
     setPathSourceId(null);
     setRightTab("insights");
-    if (focus) clearFocus();
-  }, [focus, clearFocus]);
+    if (localFocus) clearFocus();
+  }, [localFocus, clearFocus]);
+
+  // Toolbar mode segmented control: Local with no anchor keeps Global and
+  // focuses the search box (the user picks a node there first).
+  const effectiveMode: GraphMode = localFocus ? "local" : mode;
+  const handleModeChange = useCallback(
+    (next: GraphMode) => {
+      if (next === "local") {
+        if (!localFocus) searchRef.current?.focus();
+        return;
+      }
+      if (next === "global" && localFocus) clearFocus();
+      setMode(next);
+    },
+    [localFocus, clearFocus],
+  );
 
   // Mode-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom.
-  const shortcutPredicate = useCallback(() => view === "graph", [view]);
+  const shortcutPredicate = useCallback(() => mode !== "chains", [mode]);
   const shortcutHandler = useCallback(
     (event: KeyboardEvent) => {
       if (matchesShortcut(event, { key: "f", mod: true })) {
@@ -593,11 +707,31 @@ export function GraphView({
   );
   useScopedKeyboardShortcuts(shortcutPredicate, shortcutHandler);
 
-  const searchMatch = useMemo(() => {
-    if (!search.trim()) return null;
-    const lower = search.trim().toLowerCase();
-    return filtered.nodes.find((n) => n.label.toLowerCase().includes(lower)) ?? null;
-  }, [filtered, search]);
+  // Search combobox selection: select + center (opens the Details tab), no
+  // local-focus side effects.
+  const handleSearchSelect = useCallback(
+    (id: string) => {
+      selectById(id);
+      setCenterSignal({ id, nonce: Date.now() });
+    },
+    [selectById],
+  );
+
+  // a11y live announcements: empty states + layout running/done.
+  const [liveMessage, setLiveMessage] = useState("");
+  useEffect(() => {
+    if (derived.emptyReason === "empty-source") setLiveMessage(t("graph.empty.source"));
+    else if (derived.emptyReason === "filtered-empty") setLiveMessage(t("graph.empty.filtered"));
+    else setLiveMessage("");
+  }, [derived.emptyReason, t]);
+  const prevRendererStateRef = useRef<GraphRendererState>("loading");
+  useEffect(() => {
+    if (rendererState === "layout-running") setLiveMessage(t("graph.layout.running"));
+    else if (prevRendererStateRef.current === "layout-running" && rendererState === "ready") {
+      setLiveMessage(t("graph.layout.done"));
+    }
+    prevRendererStateRef.current = rendererState;
+  }, [rendererState, t]);
 
   const selectedNode = useMemo(
     () => (selectedId ? model.nodes.find((n) => n.id === selectedId) ?? null : null),
@@ -614,36 +748,106 @@ export function GraphView({
     ? new Set(model.nodes.map((n) => n.community).filter((c) => c != null)).size
     : 0;
 
+  const filterPanel = (
+    <GraphFilterPanel
+      filters={filters}
+      domains={derived.facets.domains}
+      types={derived.facets.types}
+      relations={derived.facets.relations}
+      communities={derived.facets.communities}
+      enriched={model.enriched}
+      maxVisibleNeighbors={derived.facets.maxVisibleNeighbors}
+      pausedFilters={derived.pausedFilters}
+      onRemovePaused={removePausedFilter}
+      display={display}
+      onDisplayChange={persistDisplay}
+      onFiltersChange={setFilters}
+    />
+  );
+
+  const workbench = (
+    <Tabs.Root
+      value={rightTab}
+      onValueChange={(value) => setRightTab(value as "insights" | "selected")}
+      className="graph-right"
+      data-testid="graph-right"
+    >
+      <Tabs.List className="graph-right-tabs" aria-label={t("graph.tab.insights")}>
+        <Tabs.Trigger value="insights" className="graph-right-tab">
+          {t("graph.tab.insights")}
+        </Tabs.Trigger>
+        <Tabs.Trigger value="selected" className="graph-right-tab">
+          {t("graph.tab.selected")}
+        </Tabs.Trigger>
+      </Tabs.List>
+      {/* forceMount keeps the insights worker + inspector state alive across
+          tab switches; Radix hides the inactive panel via the hidden attr. */}
+      <Tabs.Content value="insights" forceMount className="graph-right-content">
+        <GraphInsightsPanel
+          model={derived.analysisModel}
+          now={now}
+          onHighlightPair={handleHighlightPair}
+          onSelectNode={handleInsightNode}
+          onCopyWikilink={copyWikilink}
+          onOpenNode={openNodeById}
+          onConnect={handleConnect}
+        />
+      </Tabs.Content>
+      <Tabs.Content value="selected" forceMount className="graph-right-content">
+        <GraphInspector
+          node={selectedNode}
+          model={model}
+          isFavorite={
+            selectedNode?.relPath ? isFavorite("file", selectedNode.relPath) : false
+          }
+          onSelectNode={handleInsightNode}
+          onOpen={handleOpen}
+          onToggleFavorite={toggleNodeFavorite}
+          onFocus={(node) => {
+            setLocalFocus(node.id);
+            selectById(node.id);
+          }}
+          onStartPath={(node) => {
+            setPathSourceId(node.id);
+            setSelectedId(node.id);
+          }}
+        />
+      </Tabs.Content>
+    </Tabs.Root>
+  );
+
   return (
-    <div className="graph-view" data-testid="graph-mode">
+    <div ref={rootRef} className={`graph-view tier-${tier}`} data-testid="graph-mode">
       <GraphToolbar
+        mode={effectiveMode}
+        localAvailable={localFocus != null}
+        onModeChange={handleModeChange}
         source={source}
         onSourceChange={setSource}
-        scope={scope}
-        onScopeChange={setScope}
         search={search}
         onSearchChange={setSearch}
         searchInputRef={searchRef}
+        searchResults={searchResults}
+        onSearchSelect={handleSearchSelect}
+        onSearchActiveChange={handleSearchActiveChange}
         searchAsFilter={searchAsFilter}
         onSearchAsFilterChange={setSearchAsFilter}
-        view={view}
-        onViewChange={setView}
-        zoomPercent={zoomPercent}
-        onZoomIn={() => setZoomSignal({ dir: 1, nonce: Date.now() })}
-        onZoomOut={() => setZoomSignal({ dir: -1, nonce: Date.now() })}
-        onFit={() => setFitSignal((s) => s + 1)}
-        onRelayout={() => setLayoutEpoch((e) => e + 1)}
+        visibleCount={filtered.nodes.length}
+        totalCount={model.nodes.length}
+        enriched={model.enriched}
+        communityCount={enrichedCount}
+        filtersOpen={filtersVisible}
+        onToggleFilters={toggleFiltersPanel}
+        workbenchOpen={workbenchVisible}
+        onToggleWorkbench={toggleWorkbenchPanel}
         onRefreshOverlay={() => {
           const root = overlayPath ?? workspacePath;
           if (root) loadOverlay(root, liveModel);
         }}
         onExportPng={() => void handleExport("png")}
         onExportSvg={() => void handleExport("svg")}
+        onRelayout={() => setLayoutEpoch((e) => e + 1)}
         refreshing={refreshing}
-        enriched={model.enriched}
-        communityCount={enrichedCount}
-        nodeCount={filtered.nodes.length}
-        edgeCount={filtered.edges.length}
       />
 
       {!model.enriched ? (
@@ -651,9 +855,9 @@ export function GraphView({
           {enrichment.hint ?? t("graph.hint.noEnrichment")}
         </div>
       ) : null}
-      {focus ? (
+      {localFocus ? (
         <div className="graph-focus-bar" data-testid="graph-focus-bar">
-          <span>{t("graph.focus.active")}: {focus}</span>
+          <span>{t("graph.focus.active")}: {localFocus}</span>
           <label>
             {t("graph.focus.depth")}
             <select value={localDepth} onChange={(event) => setLocalDepth(Number(event.target.value) as 1 | 2 | 3)}>
@@ -664,7 +868,7 @@ export function GraphView({
           </label>
           <label>
             {t("graph.focus.direction")}
-            <select value={localDirection} onChange={(event) => setLocalDirection(event.target.value as GraphSettings["localDirection"])}>
+            <select value={localDirection} onChange={(event) => setLocalDirection(event.target.value as GraphSettingsV2["localDirection"])}>
               <option value="both">{t("graph.focus.both")}</option>
               <option value="incoming">{t("graph.focus.incoming")}</option>
               <option value="outgoing">{t("graph.focus.outgoing")}</option>
@@ -680,111 +884,125 @@ export function GraphView({
         </div>
       ) : null}
 
-      {view === "chains" ? (
+      {mode !== "chains" && derived.emptyReason ? (
+        <div className="graph-degraded-bar graph-empty-bar" data-testid="graph-empty-bar">
+          {derived.emptyReason === "empty-source" ? t("graph.empty.source") : t("graph.empty.filtered")}
+          {derived.emptyReason === "filtered-empty" ? (
+            <button
+              type="button"
+              data-testid="graph-reset-filters"
+              onClick={() => setFilters(filtersFromSettings(defaultGraphFilterProfile()))}
+            >
+              {t("graph.empty.resetFilters")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {mode === "chains" ? (
         <DecisionChainLanes model={model} onNodeClick={handleOpen} />
       ) : (
-        <div className="graph-body">
-          <GraphFilterPanel
-            filters={filters}
-            domains={facets.domains}
-            types={filters.showNoise ? facets.types : facets.types.filter((item) => item.value !== "unknown")}
-            communities={facets.communities}
-            maxDegree={facets.maxDegree}
-            onFiltersChange={setFilters}
-          />
-          <GraphCanvas
-            nodes={model.nodes}
-            edges={model.edges}
-            positionsRef={latestPositionsRef}
-            positionNodeIdsRef={latestPositionNodeIdsRef}
-            seedPositions={seedPositions}
-            initialPinnedIds={pinnedIds}
-            visibleNodeIds={visibleNodeIds}
-            layoutEpoch={layoutEpoch}
-            themeEpoch={themeEpoch}
-            enriched={model.enriched}
-            selectedId={selectedId}
-            focusNodeId={searchMatch?.id ?? focus ?? null}
-            pathSourceId={pathSourceId}
-            highlight={highlight}
-            fitSignal={fitSignal}
-            zoomSignal={zoomSignal}
-            centerSignal={centerSignal}
-            onSelect={handleSelect}
-            onOpen={handleOpen}
-            onPathTarget={handlePathTarget}
-            onNodeDrag={() => undefined}
-            onNodeUnpin={() => undefined}
-            unpinSignal={unpinSignal}
-            onLayoutSettled={handleLayoutSettled}
-            onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
-            favoriteIds={favoriteIds}
-            exportControllerRef={exportControllerRef}
-            overlay={
-              <GraphLegend
-                enriched={model.enriched}
-                domains={facets.domains}
-                communities={facets.communities}
-                filters={filters}
-                onFiltersChange={setFilters}
-              />
-            }
-            onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
-          />
-          <div className="graph-right" data-testid="graph-right">
-            <div className="graph-right-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightTab === "insights"}
-                className={rightTab === "insights" ? "active" : ""}
-                onClick={() => setRightTab("insights")}
-              >
-                {t("graph.tab.insights")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightTab === "selected"}
-                className={rightTab === "selected" ? "active" : ""}
-                onClick={() => setRightTab("selected")}
-              >
-                {t("graph.tab.selected")}
-              </button>
+        <div className="graph-body" ref={bodyRef}>
+          {filtersDocked ? (
+            <div className="graph-panel-docked" style={{ width: filterWidth }}>
+              {filterPanel}
             </div>
-            {rightTab === "insights" ? (
-              <GraphInsightsPanel
-                model={model}
-                now={now}
-                onHighlightPair={handleHighlightPair}
-                onSelectNode={handleInsightNode}
-                onCopyWikilink={copyWikilink}
-                onOpenNode={openNodeById}
-                onConnect={handleConnect}
-              />
-            ) : (
-              <GraphInspector
-                node={selectedNode}
-                model={model}
-                isFavorite={
-                  selectedNode?.relPath ? isFavorite("file", selectedNode.relPath) : false
-                }
-                onSelectNode={handleInsightNode}
-                onOpen={handleOpen}
-                onToggleFavorite={toggleNodeFavorite}
-                onFocus={(node) => {
-                  setFocus(node.id);
-                  selectById(node.id);
-                }}
-                onStartPath={(node) => {
-                  setPathSourceId(node.id);
-                  setSelectedId(node.id);
-                }}
-              />
-            )}
+          ) : null}
+          {filtersDocked ? (
+            <div
+              className="pane-resize-handle graph-panel-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("graph.panels.filters")}
+              title={t("graph.panels.filters")}
+              aria-valuemin={GRAPH_FILTER_WIDTH_MIN}
+              aria-valuemax={GRAPH_FILTER_WIDTH_MAX}
+              aria-valuenow={filterWidth}
+              onPointerDown={startPanelResize("filters")}
+            />
+          ) : null}
+          <div className="graph-canvas-column">
+            <GraphCanvas
+              nodes={model.nodes}
+              edges={model.edges}
+              positionsRef={latestPositionsRef}
+              positionNodeIdsRef={latestPositionNodeIdsRef}
+              seedPositions={seedPositions}
+              initialPinnedIds={pinnedIds}
+              visibleNodeIds={visibleNodeIds}
+              layoutEpoch={layoutEpoch}
+              themeEpoch={themeEpoch}
+              enriched={model.enriched}
+              display={display}
+              selectedId={selectedId}
+              focusNodeId={localFocus}
+              searchHighlightId={activeSearchId}
+              pathSourceId={pathSourceId}
+              highlight={highlight}
+              fitSignal={fitSignal}
+              zoomSignal={zoomSignal}
+              centerSignal={centerSignal}
+              onSelect={handleSelect}
+              onOpen={handleOpen}
+              onPathTarget={handlePathTarget}
+              onNodeDrag={() => undefined}
+              onNodeUnpin={() => undefined}
+              unpinSignal={unpinSignal}
+              onLayoutSettled={handleLayoutSettled}
+              onLayoutError={onError}
+              onRendererStateChange={setRendererState}
+              onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
+              favoriteIds={favoriteIds}
+              exportControllerRef={exportControllerRef}
+              overlay={
+                <>
+                  <GraphLegend
+                    enriched={model.enriched}
+                    domains={derived.facets.domains}
+                    communities={derived.facets.communities}
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    iconOnly={tier !== "wide"}
+                  />
+                  <GraphZoomCluster
+                    zoomPercent={zoomPercent}
+                    onZoomIn={() => setZoomSignal({ dir: 1, nonce: Date.now() })}
+                    onZoomOut={() => setZoomSignal({ dir: -1, nonce: Date.now() })}
+                    onFit={() => setFitSignal((s) => s + 1)}
+                    onRelayout={() => setLayoutEpoch((e) => e + 1)}
+                  />
+                </>
+              }
+              onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
+            />
           </div>
+          {workbenchDocked ? (
+            <div
+              className="pane-resize-handle graph-panel-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("graph.panels.workbench")}
+              title={t("graph.panels.workbench")}
+              aria-valuemin={GRAPH_WORKBENCH_WIDTH_MIN}
+              aria-valuemax={GRAPH_WORKBENCH_WIDTH_MAX}
+              aria-valuenow={workbenchWidth}
+              onPointerDown={startPanelResize("workbench")}
+            />
+          ) : null}
+          {workbenchDocked ? (
+            <div className="graph-panel-docked" style={{ width: workbenchWidth }}>
+              {workbench}
+            </div>
+          ) : null}
+          {!filtersDocked && filtersVisible ? (
+            <div className="graph-panel-overlay graph-panel-overlay-left">{filterPanel}</div>
+          ) : null}
+          {!workbenchDocked && workbenchVisible ? (
+            <div className="graph-panel-overlay graph-panel-overlay-right">{workbench}</div>
+          ) : null}
         </div>
       )}
+      <div className="sr-only" aria-live="polite">{liveMessage}</div>
 
       {menu ? (
         <div
@@ -806,7 +1024,7 @@ export function GraphView({
           <button
             type="button"
             role="menuitem"
-            onClick={() => runMenuAction((n) => { setFocus(n.id); selectById(n.id); })}
+            onClick={() => runMenuAction((n) => { setLocalFocus(n.id); selectById(n.id); })}
           >
             <span>{t("graph.inspector.focus")}</span>
           </button>

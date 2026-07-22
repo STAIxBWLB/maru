@@ -114,7 +114,7 @@ export function buildVaultGraph(
       label: entry.title,
       relPath: entry.relPath,
       ownerWorkspacePath: entry.ownerWorkspacePath ?? null,
-      type: frontmatterString(meta.type) ?? "unknown",
+      type: frontmatterString(meta.type) ?? "untyped",
       domain: frontmatterString(meta.domain),
       degree: 0,
       community: null,
@@ -307,13 +307,13 @@ export function focusSubgraph(
   };
 }
 
-/** Auto-generated noise: untyped notes (no frontmatter `type`) or notes whose
- *  relPath matches a noise pattern (trailing "/" = prefix match, otherwise
- *  exact filename match), both case-insensitive. Ghosts (`relPath: null`,
- *  type "unresolved") are governed by the showGhosts filter, not here. */
-export function isNoiseNode(node: GraphNode, patterns: readonly string[]): boolean {
+/** Generated content: notes whose relPath matches a configured generated
+ *  pattern (trailing "/" = prefix match, otherwise exact filename match),
+ *  both case-insensitive. Untyped notes are visible authored content — they
+ *  are NOT generated. Ghosts (`relPath: null`, type "unresolved") are governed
+ *  by the showUnresolved filter, not here. */
+export function isGeneratedNode(node: GraphNode, patterns: readonly string[]): boolean {
   if (node.type === "unresolved") return false;
-  if (node.type === "unknown") return true;
   if (!node.relPath) return false;
   const relPath = node.relPath.toLowerCase();
   const fileName = relPath.split("/").pop() ?? relPath;

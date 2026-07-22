@@ -14,7 +14,10 @@ import {
 import Sigma from "sigma";
 import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
-import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
+import { isUsableCoordinate } from "../../lib/graph/positions";
+import type { GraphDisplaySettings } from "../../lib/settings";
+import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, relationColor } from "./graphStyle";
+import { graphBridgeEnabled } from "./graphBridge";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
 import { useTranslation } from "../../lib/i18n";
 
@@ -34,6 +37,16 @@ export interface GraphExportController {
   svg: () => Blob;
 }
 
+/** Renderer lifecycle. empty-source / filtered-empty are NOT renderer states —
+ *  GraphView reports those via its own graph-empty-bar. */
+export type GraphRendererState =
+  | "loading"
+  | "layout-running"
+  | "ready"
+  | "gpu-recovery"
+  | "fallback"
+  | "fatal";
+
 const MaruNodeBorderProgram = createNodeBorderProgram<SigmaNodeAttributes, SigmaEdgeAttributes>();
 
 type SigmaNodeAttributes = {
@@ -45,18 +58,26 @@ type SigmaNodeAttributes = {
   borderColor: string;
   type: "border";
   hidden?: boolean;
+  /** FA2 respects `fixed` (helpers.js:144 → NodeMatrix[9]; iterate.js skips
+   *  fixed nodes) — synced from pinnedIds before every layout start. */
+  fixed?: boolean;
   forceLabel?: boolean;
   highlighted?: boolean;
+  /** Set by the nodeReducer from favoriteIds — drawMaruNodeLabel renders ★. */
+  favorite?: boolean;
   index: number;
   node: GraphNode;
 };
 
 type SigmaEdgeAttributes = {
   size: number;
+  /** Unscaled size (frontmatter 1 / body 0.6) — edgeScale reapplies from this. */
+  baseSize: number;
   color: string;
   type: "line" | "arrow";
   hidden?: boolean;
   relation: string;
+  fromFrontmatter: boolean;
   sourceId: string;
   targetId: string;
   suggested?: boolean;
@@ -75,8 +96,11 @@ interface GraphCanvasProps {
   layoutEpoch: number;
   themeEpoch: number;
   enriched: boolean;
+  display: GraphDisplaySettings;
   selectedId: string | null;
   focusNodeId: string | null;
+  /** Emphasized node from the search combobox (separate from local focus). */
+  searchHighlightId?: string | null;
   pathSourceId: string | null;
   highlight: GraphHighlight;
   fitSignal: number;
@@ -89,6 +113,8 @@ interface GraphCanvasProps {
   onNodeUnpin: (index: number) => void;
   unpinSignal?: { id: string; nonce: number } | null;
   onLayoutSettled?: (positions: Float64Array, pinnedIds: string[]) => void;
+  onLayoutError?: (message: string) => void;
+  onRendererStateChange?: (state: GraphRendererState) => void;
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
@@ -99,12 +125,37 @@ interface GraphCanvasProps {
 type InteractionState = {
   selectedId: string | null;
   focusNodeId: string | null;
+  searchHighlightId: string | null;
   pathSourceId: string | null;
   highlight: GraphHighlight;
   hoverId: string | null;
   favoriteIds: Set<string>;
   visibleNodeIds: Set<string> | null;
 };
+
+/** arrows: "typed" = frontmatter relations get arrows (body wiki_link stays a
+ *  line); "all" = every edge arrowed; "none" = no arrows. */
+function edgeArrowType(edge: GraphEdge, arrows: GraphDisplaySettings["arrows"]): "line" | "arrow" {
+  if (arrows === "none") return "line";
+  if (arrows === "all") return "arrow";
+  return edge.fromFrontmatter ? "arrow" : "line";
+}
+
+const LABEL_DENSITY: Record<GraphDisplaySettings["labels"], number> = { low: 0.35, balanced: 0.55, high: 0.8 };
+const LABEL_THRESHOLD: Record<GraphDisplaySettings["labels"], number> = { low: 4, balanced: 3, high: 2 };
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/** Camera animation duration honoring prefers-reduced-motion. */
+function animDuration(ms: number): number {
+  return prefersReducedMotion() ? 0 : ms;
+}
 
 function hashPosition(id: string, index: number): [number, number] {
   let hash = 2166136261;
@@ -124,6 +175,7 @@ function buildSigmaGraph(
   positionNodeIds: string[] | null,
   seedPositions: Record<string, [number, number]> | undefined,
   enriched: boolean,
+  display: GraphDisplaySettings,
 ): GraphInstance {
   const graph = new MultiDirectedGraph<SigmaNodeAttributes, SigmaEdgeAttributes>();
   const positionsAligned = positions?.length === nodes.length * 2
@@ -132,12 +184,16 @@ function buildSigmaGraph(
   nodes.forEach((node, index) => {
     const fallback = hashPosition(node.id, index);
     const seed = seedPositions?.[node.id];
-    const x = positionsAligned ? positions![index * 2] : seed?.[0] ?? fallback[0];
-    const y = positionsAligned ? positions![index * 2 + 1] : seed?.[1] ?? fallback[1];
+    const rawX = positionsAligned ? positions![index * 2] : seed?.[0];
+    const rawY = positionsAligned ? positions![index * 2 + 1] : seed?.[1];
+    // A single non-finite/absurd coordinate must not poison the render —
+    // fall back to the deterministic hash position for that node only.
+    const x = isUsableCoordinate(rawX) ? rawX : fallback[0];
+    const y = isUsableCoordinate(rawY) ? rawY : fallback[1];
     graph.addNode(node.id, {
       x,
       y,
-      size: nodeRadius(node.degree),
+      size: nodeRadius(node.degree) * display.nodeScale,
       label: node.label,
       color: nodeColor(node, enriched),
       borderColor: node.type === "unresolved" ? graphTheme().muted : graphTheme().nodeBorder,
@@ -149,12 +205,16 @@ function buildSigmaGraph(
   });
   edges.forEach((edge, index) => {
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
-    const directed = edge.relation === "supersedes" || edge.relation === "superseded_by";
+    const baseSize = edge.fromFrontmatter ? 1 : 0.6;
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
-      size: edge.fromFrontmatter ? 1 : 0.6,
-      color: edge.fromFrontmatter ? graphTheme().edgeStrong : graphTheme().edge,
-      type: directed ? "arrow" : "line",
+      size: baseSize * display.edgeScale,
+      baseSize,
+      // Frontmatter edges carry their relation color; body wiki_link edges
+      // stay neutral. Highlight/dim rules in the reducer stay dominant.
+      color: edge.fromFrontmatter ? relationColor(edge.relation) : graphTheme().edge,
+      type: edgeArrowType(edge, display.arrows),
       relation: edge.relation,
+      fromFrontmatter: edge.fromFrontmatter,
       sourceId: edge.source,
       targetId: edge.target,
     });
@@ -192,11 +252,16 @@ function graphToSvg(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>): 
   return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
 }
 
+const FALLBACK_VIEWBOX = "-700 -500 1400 1000";
+const FALLBACK_LIST_THRESHOLD = 2_000;
+const FALLBACK_LIST_CAP = 500;
+
 function StaticGraphFallback({
   nodes,
   edges,
   positions,
   enriched,
+  visibleNodeIds,
   onSelect,
   onOpen,
 }: {
@@ -204,29 +269,83 @@ function StaticGraphFallback({
   edges: GraphEdge[];
   positions: Float64Array | null;
   enriched: boolean;
+  visibleNodeIds?: Set<string>;
   onSelect: (node: GraphNode | null) => void;
   onOpen: (node: GraphNode) => void;
 }) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
   const index = useMemo(() => new Map(nodes.map((node, i) => [node.id, i])), [nodes]);
-  if (nodes.length > 2_000) {
+  const isVisible = (node: GraphNode) => !visibleNodeIds || visibleNodeIds.has(node.id);
+  const point = (i: number): [number, number] => {
+    if (positions?.length === nodes.length * 2) {
+      const x = positions[i * 2];
+      const y = positions[i * 2 + 1];
+      if (isUsableCoordinate(x) && isUsableCoordinate(y)) return [x, y];
+    }
+    return hashPosition(nodes[i].id, i);
+  };
+  const visibleCount = useMemo(
+    () => (visibleNodeIds ? nodes.filter((node) => visibleNodeIds.has(node.id)).length : nodes.length),
+    [nodes, visibleNodeIds],
+  );
+  if (visibleCount > FALLBACK_LIST_THRESHOLD) {
+    const q = query.trim().toLowerCase();
+    const rows = nodes.filter(
+      (node) => isVisible(node) && (!q || node.label.toLowerCase().includes(q)),
+    );
     return (
-      <div className="graph-webgl-fallback-list" role="status">
-        {t("graph.webglFallback")}
+      <div className="graph-webgl-fallback-list" data-testid="graph-canvas">
+        <input
+          type="search"
+          value={query}
+          placeholder={t("graph.fallback.search")}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <ul>
+          {rows.slice(0, FALLBACK_LIST_CAP).map((node) => (
+            <li key={node.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(node)}
+                onDoubleClick={() => onOpen(node)}
+              >
+                {node.label}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }
-  const point = (i: number) => {
-    if (positions?.length === nodes.length * 2) return [positions[i * 2], positions[i * 2 + 1]];
-    return hashPosition(nodes[i].id, i);
-  };
+  // ViewBox from the finite visible positions (fallback to the legacy box
+  // when nothing usable exists yet).
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let found = false;
+  nodes.forEach((node, i) => {
+    if (!isVisible(node)) return;
+    const [x, y] = point(i);
+    found = true;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  });
+  const pad = 50;
+  const viewBox = found
+    ? `${minX - pad} ${minY - pad} ${Math.max(1, maxX - minX) + pad * 2} ${Math.max(1, maxY - minY) + pad * 2}`
+    : FALLBACK_VIEWBOX;
   return (
-    <svg className="graph-canvas graph-static-fallback" data-testid="graph-canvas" viewBox="-700 -500 1400 1000" onClick={() => onSelect(null)}>
+    <svg className="graph-canvas graph-static-fallback" data-testid="graph-canvas" viewBox={viewBox} onClick={() => onSelect(null)}>
       <g className="graph-edges">
         {edges.map((edge, i) => {
           const si = index.get(edge.source);
           const ti = index.get(edge.target);
           if (si == null || ti == null) return null;
+          if (!isVisible(nodes[si]) || !isVisible(nodes[ti])) return null;
           const [x1, y1] = point(si);
           const [x2, y2] = point(ti);
           return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" />;
@@ -234,6 +353,7 @@ function StaticGraphFallback({
       </g>
       <g className="graph-nodes labels-on">
         {nodes.map((node, i) => {
+          if (!isVisible(node)) return null;
           const [x, y] = point(i);
           const r = nodeRadius(node.degree);
           return (
@@ -259,8 +379,10 @@ export function GraphCanvas({
   layoutEpoch,
   themeEpoch,
   enriched,
+  display,
   selectedId,
   focusNodeId,
+  searchHighlightId = null,
   pathSourceId,
   highlight,
   fitSignal,
@@ -273,6 +395,8 @@ export function GraphCanvas({
   onNodeUnpin,
   unpinSignal,
   onLayoutSettled,
+  onLayoutError,
+  onRendererStateChange,
   onNodeContextMenu,
   favoriteIds = new Set<string>(),
   exportControllerRef,
@@ -287,20 +411,42 @@ export function GraphCanvas({
   const layoutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
-  const [ready, setReady] = useState(false);
-  const [webglFailed, setWebglFailed] = useState(false);
+  const fitToVisibleRef = useRef<((animate: boolean) => void) | null>(null);
+  const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
+  const rendererStateRef = useRef<GraphRendererState>("loading");
+  const onRendererStateChangeRef = useRef(onRendererStateChange);
+  onRendererStateChangeRef.current = onRendererStateChange;
+  const applyRendererState = (next: GraphRendererState) => {
+    if (rendererStateRef.current === next) return;
+    rendererStateRef.current = next;
+    setRendererState(next);
+    onRendererStateChangeRef.current?.(next);
+  };
+  // Retry epoch — bumping remounts the renderer after a fatal init failure.
+  const [rendererEpoch, setRendererEpoch] = useState(0);
+  const onLayoutErrorRef = useRef(onLayoutError);
+  onLayoutErrorRef.current = onLayoutError;
   const fittedEpochRef = useRef(-1);
   // Node/edge-count signature of the last built graph — lets a rebuild whose
   // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
   // reuse the cached positions instead of re-annealing the whole layout.
   const prevTopoSigRef = useRef<string | null>(null);
+  // Set when a layout run was triggered by a topology change (new source /
+  // vault): fit the camera to the settled result, once.
+  const fitOnSettleRef = useRef(false);
   const draggedRef = useRef<{ id: string; index: number; moved: boolean } | null>(null);
   const pinnedIdsRef = useRef(new Set(initialPinnedIds));
   const onLayoutSettledRef = useRef(onLayoutSettled);
   onLayoutSettledRef.current = onLayoutSettled;
+  // Display settings live in a ref so the (deps-frozen) renderer-creation
+  // effect reads the latest values, while dedicated effects below hot-apply
+  // changes without a rebuild.
+  const displayRef = useRef(display);
+  displayRef.current = display;
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
+    searchHighlightId,
     pathSourceId,
     highlight,
     hoverId: null,
@@ -311,6 +457,7 @@ export function GraphCanvas({
     ...interactionRef.current,
     selectedId,
     focusNodeId,
+    searchHighlightId,
     pathSourceId,
     highlight,
     favoriteIds,
@@ -334,100 +481,155 @@ export function GraphCanvas({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || webglFailed) return;
-    const graph = buildSigmaGraph(
-      nodes,
-      edges,
-      positionsRef.current,
-      positionNodeIdsRef.current,
-      seedPositions,
-      enriched,
-    );
-    graphRef.current = graph;
-    try {
-      const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
-        allowInvalidContainer: true,
-        defaultNodeType: "border",
-        defaultEdgeType: "line",
-        nodeProgramClasses: { border: MaruNodeBorderProgram },
-        edgeProgramClasses: { line: EdgeLineProgram, arrow: EdgeArrowProgram },
-        labelFont: "Pretendard, sans-serif",
-        labelSize: 11,
-        labelWeight: "500",
-        labelRenderedSizeThreshold: 3,
-        labelDensity: 0.55,
-        defaultDrawNodeLabel: drawMaruNodeLabel,
-        defaultDrawNodeHover: drawMaruNodeHover,
-        hideEdgesOnMove: nodes.length > 5_000,
-        hideLabelsOnMove: true,
-        enableEdgeEvents: false,
-        minCameraRatio: 0.02,
-        maxCameraRatio: 8,
-        stagePadding: 36,
-        // Sigma reducers REPLACE display data — the return value must carry
-        // x/y/size/color, so every branch merges over `data`.
-        nodeReducer: (node, data) => {
-          const state = interactionRef.current;
-          const patch: Partial<SigmaNodeAttributes> & { highlighted?: boolean } = {};
-          if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
-            return { ...data, hidden: true };
+    if (!container) return;
+    // A terminal state (fallback/fatal) survives data-only re-runs of this
+    // effect; only an explicit Retry (rendererEpoch) re-enters init.
+    if (rendererStateRef.current === "fallback" || rendererStateRef.current === "fatal") return;
+
+    let disposeRenderer: (() => void) | null = null;
+    let mountObserver: ResizeObserver | null = null;
+
+    const init = () => {
+      const bridgeEnabled = graphBridgeEnabled();
+      const graph = buildSigmaGraph(
+        nodes,
+        edges,
+        positionsRef.current,
+        positionNodeIdsRef.current,
+        seedPositions,
+        enriched,
+        displayRef.current,
+      );
+      graphRef.current = graph;
+
+      // Pins → FA2 `fixed` attribute. The supervisor snapshots node attributes
+      // when it (re)sends the graph to the worker, so syncing before every
+      // startLayout is sufficient — attribute edits mid-run are not forwarded.
+      const syncPinnedFixed = () => {
+        graph.forEachNode((id) => {
+          const shouldFix = pinnedIdsRef.current.has(id);
+          if (Boolean(graph.getNodeAttribute(id, "fixed")) !== shouldFix) {
+            graph.setNodeAttribute(id, "fixed", shouldFix);
           }
-          const overlayIds = state.highlight?.kind === "pair"
-            ? new Set([state.highlight.a, state.highlight.b])
-            : state.highlight?.kind === "path"
-              ? new Set(state.highlight.ids)
-              : null;
-          const hovered = state.hoverId;
-          const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
-          const overlayVisible = !overlayIds || overlayIds.has(node);
-          if (!hoverVisible || !overlayVisible) patch.color = graphTheme().dimNode;
-          if (node === state.hoverId) {
-            patch.size = data.size * 1.15;
-          }
-          const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.pathSourceId || overlayIds?.has(node);
-          if (emphasized) {
-            patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
-            patch.highlighted = true;
-            patch.forceLabel = true;
-            patch.size = data.size * 1.18;
-          } else if (state.favoriteIds.has(node)) {
-            patch.borderColor = graphTheme().warn;
-            patch.forceLabel = true;
-          }
-          return { ...data, ...patch };
-        },
-        edgeReducer: (_edge, data) => {
-          const state = interactionRef.current;
-          if (state.visibleNodeIds && (!state.visibleNodeIds.has(data.sourceId) || !state.visibleNodeIds.has(data.targetId))) {
-            return { ...data, hidden: true };
-          }
-          const hovered = state.hoverId;
-          const pair = state.highlight?.kind === "pair" ? state.highlight : null;
-          const path = state.highlight?.kind === "path" ? state.highlight.ids : null;
-          let active = true;
-          if (hovered) active = data.sourceId === hovered || data.targetId === hovered;
-          if (pair) active = (data.sourceId === pair.a && data.targetId === pair.b) || (data.sourceId === pair.b && data.targetId === pair.a);
-          if (path) {
-            active = false;
-            for (let i = 0; i + 1 < path.length; i += 1) {
-              if (edgeKey(data.sourceId, data.targetId) === edgeKey(path[i], path[i + 1])) {
-                active = true;
-                break;
+        });
+      };
+      syncPinnedFixed();
+
+      let renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>;
+      try {
+        renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
+          defaultNodeType: "border",
+          defaultEdgeType: "line",
+          nodeProgramClasses: { border: MaruNodeBorderProgram },
+          edgeProgramClasses: { line: EdgeLineProgram, arrow: EdgeArrowProgram },
+          labelFont: "Pretendard, sans-serif",
+          labelSize: 11,
+          labelWeight: "500",
+          labelRenderedSizeThreshold: 3,
+          labelDensity: 0.55,
+          defaultDrawNodeLabel: drawMaruNodeLabel,
+          defaultDrawNodeHover: drawMaruNodeHover,
+          hideEdgesOnMove: nodes.length > 5_000,
+          hideLabelsOnMove: true,
+          enableEdgeEvents: false,
+          minCameraRatio: 0.02,
+          maxCameraRatio: 8,
+          stagePadding: 36,
+          // Sigma reducers REPLACE display data — the return value must carry
+          // x/y/size/color, so every branch merges over `data`.
+          nodeReducer: (node, data) => {
+            const state = interactionRef.current;
+            const patch: Partial<SigmaNodeAttributes> & { highlighted?: boolean } = {};
+            if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
+              return { ...data, hidden: true };
+            }
+            const overlayIds = state.highlight?.kind === "pair"
+              ? new Set([state.highlight.a, state.highlight.b])
+              : state.highlight?.kind === "path"
+                ? new Set(state.highlight.ids)
+                : null;
+            const hovered = state.hoverId;
+            const hoverVisible = hovered == null || node === hovered || adjacencyRef.current.get(hovered)?.has(node);
+            const overlayVisible = !overlayIds || overlayIds.has(node);
+            if (!hoverVisible || !overlayVisible) patch.color = graphTheme().dimNode;
+            if (node === state.hoverId) {
+              patch.size = data.size * 1.15;
+            }
+            const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.searchHighlightId || node === state.pathSourceId || overlayIds?.has(node);
+            if (emphasized) {
+              patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
+              patch.highlighted = true;
+              patch.forceLabel = true;
+              patch.size = data.size * 1.18;
+            } else if (state.favoriteIds.has(node)) {
+              patch.borderColor = graphTheme().warn;
+              patch.forceLabel = true;
+            }
+            patch.favorite = state.favoriteIds.has(node);
+            return { ...data, ...patch };
+          },
+          edgeReducer: (_edge, data) => {
+            const state = interactionRef.current;
+            if (state.visibleNodeIds && (!state.visibleNodeIds.has(data.sourceId) || !state.visibleNodeIds.has(data.targetId))) {
+              return { ...data, hidden: true };
+            }
+            const hovered = state.hoverId;
+            const pair = state.highlight?.kind === "pair" ? state.highlight : null;
+            const path = state.highlight?.kind === "path" ? state.highlight.ids : null;
+            let active = true;
+            if (hovered) active = data.sourceId === hovered || data.targetId === hovered;
+            if (pair) active = (data.sourceId === pair.a && data.targetId === pair.b) || (data.sourceId === pair.b && data.targetId === pair.a);
+            if (path) {
+              active = false;
+              for (let i = 0; i + 1 < path.length; i += 1) {
+                if (edgeKey(data.sourceId, data.targetId) === edgeKey(path[i], path[i + 1])) {
+                  active = true;
+                  break;
+                }
               }
             }
-          }
-          return active ? { ...data, color: pair || path ? graphTheme().accent : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
-        },
-      });
+            return active ? { ...data, color: pair || path ? graphTheme().accent : data.color, size: pair || path ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
+          },
+        });
+      } catch (err) {
+        console.error("[graph] WebGL renderer init failed — falling back to static render", err);
+        // Sigma appends its canvases before validating — drop any orphans so
+        // they can't sit above the fallback/overlay and swallow pointer events.
+        container.replaceChildren();
+        graphRef.current = null;
+        rendererRef.current = null;
+        applyRendererState("fallback");
+        return;
+      }
       rendererRef.current = renderer;
+
+      // Pane resize: coalesced resize()+refresh() only — never a graphology
+      // rebuild, never a layout re-run, never a camera move.
+      let resizeRaf = 0;
+      const resizeObserver = new ResizeObserver(() => {
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+          resizeRaf = 0;
+          if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
+          renderer.resize();
+          renderer.refresh();
+        });
+      });
+      resizeObserver.observe(container);
+
       let contextRestored = false;
       let contextFallbackTimer: ReturnType<typeof setTimeout> | null = null;
       const onContextLost = (event: Event) => {
         event.preventDefault();
         contextRestored = false;
+        applyRendererState("gpu-recovery");
         if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
         contextFallbackTimer = setTimeout(() => {
-          if (!contextRestored) setWebglFailed(true);
+          if (contextRestored) return;
+          // Kill the live renderer before swapping to the SVG fallback — its
+          // canvases are about to be unmounted and would otherwise leak.
+          teardown();
+          applyRendererState("fallback");
         }, 1_000);
       };
       const onContextRestored = () => {
@@ -435,12 +637,14 @@ export function GraphCanvas({
         if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
         contextFallbackTimer = null;
         renderer.refresh();
+        applyRendererState(layoutRef.current ? "layout-running" : "ready");
       };
       const rendererCanvases = Object.values(renderer.getCanvases());
       rendererCanvases.forEach((canvas) => {
         canvas.addEventListener("webglcontextlost", onContextLost);
         canvas.addEventListener("webglcontextrestored", onContextRestored);
       });
+
       const snapshotPositions = () => {
         const positions = new Float64Array(nodes.length * 2);
         nodes.forEach((node, index) => {
@@ -461,13 +665,54 @@ export function GraphCanvas({
         layoutIntervalRef.current = null;
         layoutTimeoutRef.current = null;
       };
+      // Fit the camera to the finite bounds of the visible nodes. Uses sigma's
+      // customBBox so the animatedReset framing is computed over exactly the
+      // visible set; the bbox stays set (clearing it would reframe the
+      // normalization and jump the camera) until a whole-graph fit clears it.
+      const fitToVisible = (animate: boolean) => {
+        const currentRenderer = rendererRef.current;
+        const currentGraph = graphRef.current;
+        if (!currentRenderer || !currentGraph) return;
+        const { width, height } = currentRenderer.getDimensions();
+        if (width <= 0 || height <= 0) return;
+        const visible = interactionRef.current.visibleNodeIds;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        let found = false;
+        currentGraph.forEachNode((id, attrs) => {
+          if (visible && !visible.has(id)) return;
+          if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
+          found = true;
+          minX = Math.min(minX, attrs.x);
+          minY = Math.min(minY, attrs.y);
+          maxX = Math.max(maxX, attrs.x);
+          maxY = Math.max(maxY, attrs.y);
+        });
+        if (!found) return;
+        currentRenderer.setCustomBBox({ x: [minX, maxX], y: [minY, maxY] });
+        currentRenderer.refresh();
+        const camera = currentRenderer.getCamera();
+        if (animate) void camera.animatedReset({ duration: animDuration(180) });
+        else camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+      };
+      fitToVisibleRef.current = fitToVisible;
       const startLayout = (clearPins: boolean) => {
         stopLayout();
-        if (clearPins) pinnedIdsRef.current.clear();
+        if (clearPins) {
+          pinnedIdsRef.current.clear();
+          syncPinnedFixed();
+        }
         if (graph.order < 2 || graph.size < 1) {
           snapshotPositions();
+          if (fitOnSettleRef.current) {
+            fitOnSettleRef.current = false;
+            fitToVisible(false);
+          }
           return;
         }
+        applyRendererState("layout-running");
         const settings = {
           ...inferSettings(graph.order),
           adjustSizes: true,
@@ -476,8 +721,31 @@ export function GraphCanvas({
           gravity: 1,
           slowDown: graph.order >= 5_000 ? 8 : 3,
         };
+        syncPinnedFixed();
         const supervisor = new FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, { settings });
         layoutRef.current = supervisor;
+        // A dead worker must not freeze the graph silently: keep the last-good
+        // positions (the graphology graph still holds them), stop cleanly, and
+        // surface the failure through the onLayoutError channel.
+        const worker = (supervisor as unknown as { worker?: Worker | null }).worker ?? null;
+        const onWorkerError = (event: Event) => {
+          console.error("[graph] layout worker failed — keeping last-good positions", event);
+          worker?.removeEventListener("error", onWorkerError);
+          stopLayout();
+          snapshotPositions();
+          applyRendererState("ready");
+          onLayoutErrorRef.current?.(t("graph.error.layout"));
+        };
+        worker?.addEventListener("error", onWorkerError);
+        const settle = () => {
+          stopLayout();
+          snapshotPositions();
+          applyRendererState("ready");
+          if (fitOnSettleRef.current) {
+            fitOnSettleRef.current = false;
+            fitToVisible(true);
+          }
+        };
         const sampleIds = nodes.slice(0, 256).map((node) => node.id);
         let previous = sampleIds.map((id) => [graph.getNodeAttribute(id, "x"), graph.getNodeAttribute(id, "y")] as const);
         let stableSamples = 0;
@@ -490,18 +758,84 @@ export function GraphCanvas({
           });
           previous = next;
           stableSamples = displacement / Math.max(1, sampleIds.length) < 0.08 ? stableSamples + 1 : 0;
-          if (stableSamples >= 3) {
-            stopLayout();
-            snapshotPositions();
-          }
+          if (stableSamples >= 3) settle();
         }, 250);
-        layoutTimeoutRef.current = setTimeout(() => {
-          stopLayout();
-          snapshotPositions();
-        }, seedPositions && Object.keys(seedPositions).length > 0 ? 2_500 : 5_000);
-        supervisor.start();
+        layoutTimeoutRef.current = setTimeout(
+          settle,
+          seedPositions && Object.keys(seedPositions).length > 0 ? 2_500 : 5_000,
+        );
+        try {
+          supervisor.start();
+        } catch (err) {
+          console.error("[graph] layout worker start failed — keeping last-good positions", err);
+          worker?.removeEventListener("error", onWorkerError);
+          settle();
+          onLayoutErrorRef.current?.(t("graph.error.layout"));
+        }
       };
       startLayoutRef.current = startLayout;
+      // Dev-only e2e bridge (see graphBridge.ts) — real-Sigma observability
+      // instead of the old fake DOM overlay. Nothing here ships in prod builds.
+      let bridgeFrameCount = 0;
+      renderer.on("afterRender", () => {
+        bridgeFrameCount += 1;
+      });
+      if (bridgeEnabled) {
+        window.__maruGraph = {
+          state: () => rendererStateRef.current,
+          containerSize: () => ({ width: container.clientWidth, height: container.clientHeight }),
+          containerRect: () => {
+            const rect = container.getBoundingClientRect();
+            return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+          },
+          frames: () => bridgeFrameCount,
+          camera: () => {
+            const state = renderer.getCamera().getState();
+            return { x: state.x, y: state.y, ratio: state.ratio };
+          },
+          nodeViewportPoint: (id) => {
+            if (!graph.hasNode(id)) return null;
+            const visible = interactionRef.current.visibleNodeIds;
+            if (visible && !visible.has(id)) return null;
+            const attrs = graph.getNodeAttributes(id);
+            if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return null;
+            const point = renderer.graphToViewport(attrs);
+            const rect = container.getBoundingClientRect();
+            return { x: point.x + rect.left, y: point.y + rect.top };
+          },
+          nodeScreenState: (id) => {
+            const data = renderer.getNodeDisplayData(id) as
+              | { size?: number; color?: string; borderColor?: string; favorite?: boolean }
+              | undefined;
+            const visibleIds = interactionRef.current.visibleNodeIds;
+            return {
+              // Sigma keeps display data for reducer-hidden nodes, so
+              // visibility comes from the filter set, not display data.
+              visible: graph.hasNode(id) && (!visibleIds || visibleIds.has(id)),
+              size: data?.size ?? null,
+              color: data?.color ?? null,
+              borderColor: data?.borderColor ?? null,
+              favorite: data?.favorite === true,
+            };
+          },
+          hoveredId: () => interactionRef.current.hoverId,
+          layoutRunning: () => layoutRef.current?.isRunning() ?? false,
+          freezeLayout: () => {
+            stopLayout();
+            applyRendererState("ready");
+          },
+          resumeLayout: () => startLayoutRef.current?.(false),
+          fitView: () => fitToVisible(false),
+          simulateContextLost: () => {
+            rendererCanvases.forEach((canvas) => canvas.dispatchEvent(new Event("webglcontextlost")));
+          },
+          graphStats: () => ({
+            nodes: nodes.length,
+            edges: edges.length,
+            visibleNodes: interactionRef.current.visibleNodeIds?.size ?? nodes.length,
+          }),
+        };
+      }
       const resolveNode = (id: string) => graph.hasNode(id) ? graph.getNodeAttribute(id, "node") : null;
       renderer.on("clickStage", () => callbacksRef.current.onSelect(null));
       renderer.on("clickNode", ({ node, event }) => {
@@ -510,6 +844,7 @@ export function GraphCanvas({
         const original = event.original as MouseEvent;
         if (original.altKey) {
           pinnedIdsRef.current.delete(node);
+          graph.removeNodeAttribute(node, "fixed");
           callbacksRef.current.onNodeUnpin(graph.getNodeAttribute(node, "index"));
           startLayout(false);
         }
@@ -538,6 +873,7 @@ export function GraphCanvas({
       renderer.on("downNode", ({ node, event }) => {
         event.preventSigmaDefault();
         stopLayout();
+        applyRendererState("ready");
         const attrs = graph.getNodeAttributes(node);
         draggedRef.current = { id: node, index: attrs.index, moved: false };
         renderer.getCamera().disable();
@@ -559,6 +895,7 @@ export function GraphCanvas({
         const attrs = graph.getNodeAttributes(dragged.id);
         callbacksRef.current.onNodeDrag(dragged.index, "end", attrs.x, attrs.y);
         pinnedIdsRef.current.add(dragged.id);
+        graph.setNodeAttribute(dragged.id, "fixed", true);
         draggedRef.current = null;
         renderer.getCamera().enable();
         snapshotPositions();
@@ -566,7 +903,11 @@ export function GraphCanvas({
       mouse.on("mousemovebody", onMove);
       mouse.on("mouseup", onUp);
       renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
-      renderer.once("afterRender", () => setReady(true));
+      renderer.once("afterRender", () => {
+        applyRendererState(layoutRef.current ? "layout-running" : "ready");
+        // First render after creation: fit the finite visible bounds once.
+        fitToVisible(false);
+      });
       // Re-run the force layout only when node ids or edge topology changed.
       // Metadata-only rescans and enrichment swaps keep the viewport stable.
       const topoSig = graphTopologySignature(nodes, edges);
@@ -575,7 +916,9 @@ export function GraphCanvas({
         && nodes.every((node, index) => positionNodeIdsRef.current?.[index] === node.id);
       if (prevTopoSigRef.current === topoSig && positionsValid) {
         snapshotPositions();
+        applyRendererState("ready");
       } else {
+        fitOnSettleRef.current = true;
         startLayout(false);
       }
       prevTopoSigRef.current = topoSig;
@@ -585,41 +928,146 @@ export function GraphCanvas({
           svg: () => graphToSvg(renderer),
         };
       }
-      return () => {
+      let tornDown = false;
+      function teardown() {
+        if (tornDown) return;
+        tornDown = true;
+        if (bridgeEnabled) delete window.__maruGraph;
         if (exportControllerRef) exportControllerRef.current = null;
+        resizeObserver.disconnect();
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
         if (contextFallbackTimer) clearTimeout(contextFallbackTimer);
         rendererCanvases.forEach((canvas) => {
           canvas.removeEventListener("webglcontextlost", onContextLost);
           canvas.removeEventListener("webglcontextrestored", onContextRestored);
         });
         startLayoutRef.current = null;
+        fitToVisibleRef.current = null;
         stopLayout();
         mouse.off("mousemovebody", onMove);
         mouse.off("mouseup", onUp);
         renderer.kill();
         rendererRef.current = null;
         graphRef.current = null;
-      };
-    } catch (err) {
-      console.error("[graph] WebGL renderer init failed — falling back to static render", err);
-      // Sigma appends its canvases before validating — drop any orphans so
-      // they can't sit above the fallback/overlay and swallow pointer events.
-      container.replaceChildren();
-      setWebglFailed(true);
-      setReady(true);
-      graphRef.current = null;
-      rendererRef.current = null;
+      }
+      return teardown;
+    };
+
+    // Mount gating: never construct Sigma against a zero-size container (it
+    // throws without allowInvalidContainer, and even a surviving renderer
+    // would compute a degenerate viewport). Data prep above is cheap; the
+    // renderer waits for the first positive dimensions.
+    const tryInit = (): boolean => {
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) return false;
+      try {
+        disposeRenderer = init() ?? null;
+      } catch (err) {
+        // A failure before Sigma construction (e.g. graph build) is one the
+        // SVG fallback cannot cover either — report it as fatal with Retry.
+        console.error("[graph] renderer init failed fatally", err);
+        container.replaceChildren();
+        graphRef.current = null;
+        rendererRef.current = null;
+        applyRendererState("fatal");
+      }
+      return true;
+    };
+    if (!tryInit()) {
+      applyRendererState("loading");
+      mountObserver = new ResizeObserver(() => {
+        if (tryInit()) {
+          mountObserver?.disconnect();
+          mountObserver = null;
+        }
+      });
+      mountObserver.observe(container);
     }
-  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, webglFailed, themeEpoch]);
+    return () => {
+      mountObserver?.disconnect();
+      disposeRenderer?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, themeEpoch, rendererEpoch]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
     if (renderer) renderer.scheduleRefresh();
-  }, [selectedId, focusNodeId, pathSourceId, highlight, favoriteIds, visibleNodeIds]);
+  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds]);
+
+  // --- display settings, hot-applied (no graph rebuild) --------------------
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph) return;
+    graph.forEachEdge((key, attrs) => {
+      const type: "line" | "arrow" =
+        display.arrows === "none" ? "line"
+          : display.arrows === "all" ? "arrow"
+            : attrs.fromFrontmatter ? "arrow" : "line";
+      if (attrs.type !== type) graph.setEdgeAttribute(key, "type", type);
+    });
+    renderer.refresh();
+  }, [display.arrows]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setSetting("labelDensity", LABEL_DENSITY[display.labels]);
+    renderer.setSetting("labelRenderedSizeThreshold", LABEL_THRESHOLD[display.labels]);
+    renderer.refresh();
+  }, [display.labels]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph) return;
+    graph.forEachNode((key, attrs) => {
+      graph.setNodeAttribute(key, "size", nodeRadius(attrs.node.degree) * display.nodeScale);
+    });
+    renderer.refresh();
+  }, [display.nodeScale]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph) return;
+    graph.forEachEdge((key, attrs) => {
+      graph.setEdgeAttribute(key, "size", attrs.baseSize * display.edgeScale);
+    });
+    renderer.refresh();
+  }, [display.edgeScale]);
+
+  // Filter change that leaves every visible node outside the current viewport
+  // (e.g. focusing a cluster far from the current camera): re-fit once.
+  // Ordinary filter changes and pane resizes never touch the camera.
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph || !visibleNodeIds || visibleNodeIds.size === 0) return;
+    const { width, height } = renderer.getDimensions();
+    if (width <= 0 || height <= 0) return;
+    let anyFinite = false;
+    let anyInside = false;
+    for (const id of visibleNodeIds) {
+      if (!graph.hasNode(id)) continue;
+      const attrs = graph.getNodeAttributes(id);
+      if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) continue;
+      anyFinite = true;
+      const p = renderer.graphToViewport(attrs);
+      if (p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height) {
+        anyInside = true;
+        break;
+      }
+    }
+    if (anyFinite && !anyInside) fitToVisibleRef.current?.(true);
+  }, [visibleNodeIds]);
 
   useEffect(() => {
     if (layoutEpoch <= 0 || fittedEpochRef.current === layoutEpoch) return;
     fittedEpochRef.current = layoutEpoch;
+    // Whole-graph re-layout: clear pins and the visible-fit bbox, reset camera.
+    rendererRef.current?.setCustomBBox(null);
     startLayoutRef.current?.(true);
     rendererRef.current?.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
   }, [layoutEpoch]);
@@ -627,19 +1075,27 @@ export function GraphCanvas({
   useEffect(() => {
     if (!unpinSignal) return;
     pinnedIdsRef.current.delete(unpinSignal.id);
+    const graph = graphRef.current;
+    if (graph?.hasNode(unpinSignal.id)) graph.removeNodeAttribute(unpinSignal.id, "fixed");
     startLayoutRef.current?.(false);
   }, [unpinSignal]);
 
   useEffect(() => {
-    if (fitSignal > 0) void rendererRef.current?.getCamera().animatedReset({ duration: 180 });
+    if (fitSignal <= 0) return;
+    // Whole-graph fit: drop any visible-set bbox before resetting.
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setCustomBBox(null);
+    renderer.refresh();
+    void renderer.getCamera().animatedReset({ duration: animDuration(180) });
   }, [fitSignal]);
 
   useEffect(() => {
     if (!zoomSignal) return;
     const camera = rendererRef.current?.getCamera();
     if (!camera) return;
-    if (zoomSignal.dir === 1) void camera.animatedZoom({ duration: 100 });
-    else void camera.animatedUnzoom({ duration: 100 });
+    if (zoomSignal.dir === 1) void camera.animatedZoom({ duration: animDuration(100) });
+    else void camera.animatedUnzoom({ duration: animDuration(100) });
   }, [zoomSignal]);
 
   useEffect(() => {
@@ -648,106 +1104,76 @@ export function GraphCanvas({
     const graph = graphRef.current;
     if (!renderer || !graph?.hasNode(centerSignal.id)) return;
     const data = renderer.getNodeDisplayData(centerSignal.id);
-    if (data) void renderer.getCamera().animate({ x: data.x, y: data.y }, { duration: 180 });
+    if (data) void renderer.getCamera().animate({ x: data.x, y: data.y }, { duration: animDuration(180) });
   }, [centerSignal]);
+
+  // Keyboard access on the focused canvas: arrows nudge the camera (~40px,
+  // shift for larger), Enter opens the current selection.
+  const handleCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    if (event.key === "Enter") {
+      const id = interactionRef.current.selectedId;
+      const graph = graphRef.current;
+      if (id && graph?.hasNode(id)) {
+        event.preventDefault();
+        callbacksRef.current.onOpen(graph.getNodeAttribute(id, "node"));
+      }
+      return;
+    }
+    const step = event.shiftKey ? 120 : 40;
+    let dx = 0;
+    let dy = 0;
+    if (event.key === "ArrowLeft") dx = -step;
+    else if (event.key === "ArrowRight") dx = step;
+    else if (event.key === "ArrowUp") dy = -step;
+    else if (event.key === "ArrowDown") dy = step;
+    else return;
+    event.preventDefault();
+    const origin = renderer.viewportToFramedGraph({ x: 0, y: 0 });
+    const delta = renderer.viewportToFramedGraph({ x: dx, y: dy });
+    const camera = renderer.getCamera();
+    const state = camera.getState();
+    camera.setState({
+      ...state,
+      x: state.x + (delta.x - origin.x),
+      y: state.y + (delta.y - origin.y),
+    });
+  };
 
   const selectedLabel = selectedId && graphRef.current?.hasNode(selectedId)
     ? graphRef.current.getNodeAttribute(selectedId, "label")
     : null;
-  const debugDomEnabled = useMemo(() => {
-    try {
-      const env = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
-      return env?.DEV === true && localStorage.getItem("maru:e2e:graph-dom") === "1";
-    } catch {
-      return false;
-    }
-  }, []);
-  const [debugHoverId, setDebugHoverId] = useState<string | null>(null);
-  const [debugOffsets, setDebugOffsets] = useState<Record<string, [number, number]>>({});
-  const debugDragRef = useRef<{ id: string; index: number; x: number; y: number; moved: boolean } | null>(null);
-  const debugSuppressClickRef = useRef(false);
-  const debugNodes = debugDomEnabled
-    ? nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id))
-    : [];
 
   return (
     <div className="graph-canvas-wrap">
-      {/* When the e2e DOM overlay is active it is the only surface allowed to
-          render .graph-node elements — the static fallback would double them. */}
-      {webglFailed && !debugDomEnabled ? (
-        <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} onSelect={onSelect} onOpen={onOpen} />
+      {rendererState === "fallback" ? (
+        <StaticGraphFallback nodes={nodes} edges={edges} positions={positionsRef.current} enriched={enriched} visibleNodeIds={visibleNodeIds} onSelect={onSelect} onOpen={onOpen} />
       ) : (
-        <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label={t("graph.aria.canvas")} />
+        <div ref={containerRef} className="graph-canvas graph-webgl-canvas" data-testid="graph-canvas" role="application" aria-label={t("graph.aria.canvas")} tabIndex={0} onKeyDown={handleCanvasKeyDown} />
       )}
-      {debugDomEnabled ? (
-        <svg
-          className={`graph-canvas graph-e2e-overlay${debugHoverId ? " has-hover" : ""}`}
-          aria-hidden="true"
-          onPointerMove={(event) => {
-            const drag = debugDragRef.current;
-            if (!drag) return;
-            const dx = event.clientX - drag.x;
-            const dy = event.clientY - drag.y;
-            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-            setDebugOffsets((current) => ({ ...current, [drag.id]: [dx, dy] }));
-          }}
-          onPointerUp={() => {
-            debugSuppressClickRef.current = debugDragRef.current?.moved ?? false;
-            debugDragRef.current = null;
-          }}
-          onPointerLeave={() => setDebugHoverId(null)}
-        >
-          <g className="graph-nodes labels-on">
-            {debugNodes.map((node, index) => {
-              const baseX = 120 + (index % 5) * 150;
-              const baseY = 130 + Math.floor(index / 5) * 130;
-              const offset = debugOffsets[node.id] ?? [0, 0];
-              const hovered = debugHoverId === node.id;
-              const highlighted = debugHoverId ? adjacency.get(debugHoverId)?.has(node.id) : false;
-              const className = [
-                "graph-node",
-                node.type === "unresolved" ? "ghost" : "",
-                node.id === selectedId ? "selected" : "",
-                node.id === focusNodeId ? "focus" : "",
-                hovered ? "hovered" : "",
-                highlighted ? "hl" : "",
-              ].filter(Boolean).join(" ");
-              const radius = nodeRadius(node.degree);
-              return (
-                <g key={node.id} className={className} transform={`translate(${baseX + offset[0]}, ${baseY + offset[1]})`}>
-                  <circle
-                    r={radius}
-                    fill={nodeColor(node, enriched)}
-                    data-node-id={node.id}
-                    onPointerEnter={() => setDebugHoverId(node.id)}
-                    onPointerDown={(event) => {
-                      debugDragRef.current = { id: node.id, index, x: event.clientX, y: event.clientY, moved: false };
-                    }}
-                    onClick={(event) => {
-                      if (debugSuppressClickRef.current) {
-                        debugSuppressClickRef.current = false;
-                        return;
-                      }
-                      if (event.altKey) onNodeUnpin(index);
-                      else if (event.shiftKey) onPathTarget(node);
-                      else onSelect(node);
-                    }}
-                    onDoubleClick={() => onOpen(node)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      onNodeContextMenu?.(node, index, event.clientX, event.clientY);
-                    }}
-                  />
-                  {favoriteIds.has(node.id) ? <text className="graph-node-star" dy={-(radius + 4)}>★</text> : null}
-                  <text className="graph-node-label" dy={radius + 12}>{node.label}</text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
-      ) : null}
       <div className="sr-only" aria-live="polite">{selectedLabel ? t("graph.aria.selected", { label: selectedLabel }) : ""}</div>
-      {!ready ? <div className="graph-canvas-loading" data-testid="graph-canvas-loading">…</div> : null}
+      {rendererState === "loading" ? <div className="graph-canvas-loading" data-testid="graph-canvas-loading">…</div> : null}
+      {rendererState === "gpu-recovery" ? (
+        <div className="graph-renderer-overlay" data-testid="graph-gpu-recovery">
+          {t("graph.overlay.gpuRecovery")}
+        </div>
+      ) : null}
+      {rendererState === "fatal" ? (
+        <div className="graph-renderer-overlay" data-testid="graph-fatal">
+          <span>{t("graph.overlay.fatal")}</span>
+          <button
+            type="button"
+            data-testid="graph-fatal-retry"
+            onClick={() => {
+              applyRendererState("loading");
+              setRendererEpoch((epoch) => epoch + 1);
+            }}
+          >
+            {t("graph.overlay.retry")}
+          </button>
+        </div>
+      ) : null}
       {overlay}
     </div>
   );

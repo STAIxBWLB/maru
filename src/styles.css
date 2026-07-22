@@ -419,6 +419,12 @@ a {
     "activity diagram diagram diagram terminal";
 }
 
+.app-shell.terminal-dock-right.graph-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity graph graph graph terminal";
+}
+
 .app-shell.terminal-dock-right.sites-mode {
   grid-template-areas:
     "topbar topbar topbar topbar topbar"
@@ -441,6 +447,7 @@ a {
 .app-shell.terminal-maximized.catalog-mode,
 .app-shell.terminal-maximized.studio-mode,
 .app-shell.terminal-maximized.diagram-mode,
+.app-shell.terminal-maximized.graph-mode,
 .app-shell.terminal-maximized.sites-mode {
   grid-template-areas:
     "topbar topbar topbar topbar"
@@ -467,7 +474,8 @@ a {
 .app-shell.terminal-maximized .sites-pane,
 .app-shell.terminal-maximized .catalog-pane,
 .app-shell.terminal-maximized .studio-pane,
-.app-shell.terminal-maximized .e2e-pane {
+.app-shell.terminal-maximized .e2e-pane,
+.app-shell.terminal-maximized .graph-view {
   display: none;
 }
 
@@ -13930,6 +13938,24 @@ button.git-badge:hover {
       "topbar"
       "activity"
       "diagram"
+      "terminal";
+  }
+
+  .app-shell.terminal-dock-right.graph-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "graph"
+      "terminal";
+  }
+
+  .app-shell.graph-mode {
+    grid-template-rows: 44px auto minmax(0, 1fr) auto;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "graph"
       "terminal";
   }
 

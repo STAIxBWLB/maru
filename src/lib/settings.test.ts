@@ -471,10 +471,100 @@ describe("normalizeMaruSettings", () => {
     expect(settings.diagram.recentPatterns[0]).toBe("pattern-0");
   });
 
-  it("round-trips graph view/filter settings", () => {
+  it("round-trips graph V2 settings", () => {
     const settings = normalizeMaruSettings({
       graph: {
+        schemaVersion: 2,
         source: "workspace",
+        mode: "chains",
+        localDepth: 3,
+        localDirection: "incoming",
+        searchAsFilter: true,
+        generatedPatterns: ["reports/", " archive/  ", "log.md", ""],
+        profiles: {
+          workspace: {
+            domains: ["research", "projects"],
+            types: ["decision"],
+            relations: ["supersedes"],
+            community: 3,
+            showUnresolved: true,
+            showGenerated: true,
+            minVisibleNeighbors: 2,
+          },
+        },
+        display: { arrows: "all", labels: "high", nodeScale: 1.4, edgeScale: 0.8 },
+        panels: {
+          filtersOpen: false,
+          workbenchOpen: true,
+          filterWidth: 300,
+          workbenchWidth: 400,
+        },
+        savedViews: [
+          {
+            id: "v1",
+            name: "Research",
+            source: "vault",
+            mode: "local",
+            localTarget: { ownerWorkspacePath: "/w", relPath: "notes/a.md" },
+            profile: { domains: ["research"], minVisibleNeighbors: 1 },
+            display: { arrows: "none" },
+          },
+          { id: "", name: "drop me" },
+        ],
+      },
+    });
+
+    expect(settings.graph.schemaVersion).toBe(2);
+    expect(settings.graph.source).toBe("workspace");
+    expect(settings.graph.mode).toBe("chains");
+    expect(settings.graph.localDepth).toBe(3);
+    expect(settings.graph.localDirection).toBe("incoming");
+    expect(settings.graph.searchAsFilter).toBe(true);
+    expect(settings.graph.generatedPatterns).toEqual(["reports/", "archive/", "log.md"]);
+    expect(settings.graph.profiles.workspace).toEqual({
+      domains: ["research", "projects"],
+      types: ["decision"],
+      relations: ["supersedes"],
+      community: 3,
+      showUnresolved: true,
+      showGenerated: true,
+      minVisibleNeighbors: 2,
+    });
+    // Missing profile falls back to defaults.
+    expect(settings.graph.profiles.vault).toEqual({
+      domains: [],
+      types: [],
+      relations: [],
+      community: null,
+      showUnresolved: false,
+      showGenerated: false,
+      minVisibleNeighbors: 0,
+    });
+    expect(settings.graph.display).toEqual({
+      arrows: "all",
+      labels: "high",
+      nodeScale: 1.4,
+      edgeScale: 0.8,
+    });
+    expect(settings.graph.panels).toEqual({
+      filtersOpen: false,
+      workbenchOpen: true,
+      filterWidth: 300,
+      workbenchWidth: 400,
+    });
+    expect(settings.graph.savedViews).toHaveLength(1);
+    expect(settings.graph.savedViews[0].localTarget).toEqual({
+      ownerWorkspacePath: "/w",
+      relPath: "notes/a.md",
+    });
+    expect(settings.graph.savedViews[0].display.arrows).toBe("none");
+    expect(settings.graph.savedViews[0].display.labels).toBe("balanced");
+  });
+
+  it("migrates V1 graph settings to V2", () => {
+    const settings = normalizeMaruSettings({
+      graph: {
+        source: "all",
         scope: "all",
         localDepth: 3,
         localDirection: "incoming",
@@ -483,7 +573,7 @@ describe("normalizeMaruSettings", () => {
         noisePatterns: ["reports/", " archive/  ", "log.md", ""],
         filters: {
           domains: ["research", "projects"],
-          types: ["decision"],
+          types: ["decision", "unknown"],
           community: 3,
           showGhosts: true,
           showNoise: true,
@@ -492,63 +582,92 @@ describe("normalizeMaruSettings", () => {
       },
     });
 
-    expect(settings.graph.view).toBe("chains");
+    expect(settings.graph.schemaVersion).toBe(2);
+    // all -> workspace; legacy profile lands only in the previously active source.
     expect(settings.graph.source).toBe("workspace");
-    expect(settings.graph.scope).toBe("all");
-    expect(settings.graph.localDepth).toBe(3);
-    expect(settings.graph.localDirection).toBe("incoming");
-    expect(settings.graph.searchAsFilter).toBe(true);
-    expect(settings.graph.noisePatterns).toEqual(["reports/", "archive/", "log.md"]);
-    expect(settings.graph.filters).toEqual({
+    expect(settings.graph.mode).toBe("chains");
+    expect(settings.graph.generatedPatterns).toEqual(["reports/", "archive/", "log.md"]);
+    expect(settings.graph.profiles.workspace).toEqual({
       domains: ["research", "projects"],
-      types: ["decision"],
+      // "unknown" coexisted with other types -> mapped to "untyped".
+      types: ["decision", "untyped"],
+      relations: [],
       community: 3,
-      showGhosts: true,
-      showNoise: true,
-      minDegree: 2,
+      showUnresolved: true,
+      showGenerated: true,
+      // max(minDegree 2, scope "all" ? 0) = 2.
+      minVisibleNeighbors: 2,
     });
+    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    expect(settings.graph.profiles.vault.domains).toEqual([]);
+  });
+
+  it("maps V1 connected scope into minVisibleNeighbors and drops stale unknown type", () => {
+    const connected = normalizeMaruSettings({
+      graph: { scope: "connected", filters: { minDegree: 0, types: ["unknown"] } },
+    });
+    // max(minDegree 0, connected ? 1 : 0) = 1.
+    expect(connected.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    // A lone "unknown" selection was a hidden chip — discarded, not resurrected.
+    expect(connected.graph.profiles.vault.types).toEqual([]);
+
+    const all = normalizeMaruSettings({
+      graph: { scope: "all", filters: { minDegree: 0 } },
+    });
+    expect(all.graph.profiles.vault.minVisibleNeighbors).toBe(0);
   });
 
   it("defaults garbage graph settings to safe values", () => {
     const settings = normalizeMaruSettings({
       graph: {
-        view: "nonsense",
+        schemaVersion: 2,
+        source: "everywhere",
+        mode: "nonsense",
         searchAsFilter: "yes",
-        filters: {
-          domains: "not-an-array",
-          types: [1, "decision", null],
-          community: "3",
-          minDegree: -5,
+        profiles: {
+          vault: {
+            domains: "not-an-array",
+            types: [1, "decision", null],
+            community: "3",
+            minVisibleNeighbors: -5,
+          },
         },
+        display: { arrows: "sometimes", nodeScale: 99, edgeScale: 0 },
+        panels: { filterWidth: 12, workbenchWidth: 9999 },
       },
     });
 
-    expect(settings.graph.view).toBe("graph");
     expect(settings.graph.source).toBe("vault");
-    expect(settings.graph.scope).toBe("connected");
+    expect(settings.graph.mode).toBe("global");
     expect(settings.graph.localDepth).toBe(2);
     expect(settings.graph.localDirection).toBe("both");
     expect(settings.graph.searchAsFilter).toBe(false);
-    expect(settings.graph.filters.domains).toEqual([]);
-    expect(settings.graph.filters.types).toEqual(["decision"]);
-    expect(settings.graph.filters.community).toBeNull();
-    expect(settings.graph.filters.showGhosts).toBe(false);
-    expect(settings.graph.filters.showNoise).toBe(false);
-    expect(settings.graph.filters.minDegree).toBe(0);
-    expect(settings.graph.noisePatterns).toEqual(["reports/", "log.md"]);
+    expect(settings.graph.profiles.vault.domains).toEqual([]);
+    expect(settings.graph.profiles.vault.types).toEqual(["decision"]);
+    expect(settings.graph.profiles.vault.community).toBeNull();
+    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(0);
+    expect(settings.graph.display.arrows).toBe("typed");
+    expect(settings.graph.display.labels).toBe("balanced");
+    expect(settings.graph.display.nodeScale).toBe(2);
+    expect(settings.graph.display.edgeScale).toBe(0.5);
+    expect(settings.graph.panels.filterWidth).toBe(200);
+    expect(settings.graph.panels.workbenchWidth).toBe(480);
+    expect(settings.graph.generatedPatterns).toEqual(["reports/", "log.md"]);
   });
 
-  it("defaults minDegree to 1 and noise hidden when keys are absent (back-compat)", () => {
+  it("keeps graph back-compat: absent keys get defaults, explicit empties are preserved", () => {
     const settings = normalizeMaruSettings({ graph: { filters: {} } });
-    expect(settings.graph.filters.minDegree).toBe(1);
-    expect(settings.graph.filters.showNoise).toBe(false);
-    expect(settings.graph.noisePatterns).toEqual(["reports/", "log.md"]);
-    // A stored 0 is respected as-is (existing users keep their setting).
-    const stored = normalizeMaruSettings({ graph: { filters: { minDegree: 0 } } });
-    expect(stored.graph.filters.minDegree).toBe(0);
+    // Absent scope/minDegree -> connected behavior (1).
+    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    expect(settings.graph.profiles.vault.showGenerated).toBe(false);
+    expect(settings.graph.generatedPatterns).toEqual(["reports/", "log.md"]);
     // A deliberately empty pattern list is respected, not replaced by defaults.
     const empty = normalizeMaruSettings({ graph: { noisePatterns: [] } });
-    expect(empty.graph.noisePatterns).toEqual([]);
+    expect(empty.graph.generatedPatterns).toEqual([]);
+    const emptyV2 = normalizeMaruSettings({
+      graph: { schemaVersion: 2, generatedPatterns: [] },
+    });
+    expect(emptyV2.graph.generatedPatterns).toEqual([]);
   });
 
   it("parses catalog and studio modes for document operations", () => {

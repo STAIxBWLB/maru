@@ -2,7 +2,7 @@
 // doubles as a filter. Shows communities when the overlay is present, else
 // domains. Clicking a swatch toggles the matching filter.
 
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Palette } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { communityColor, domainColor } from "./graphStyle";
@@ -14,6 +14,8 @@ interface GraphLegendProps {
   communities: FacetItem<number>[];
   filters: GraphFilters;
   onFiltersChange: (next: GraphFilters) => void;
+  /** Outside the wide tier the legend starts collapsed to an icon button. */
+  iconOnly?: boolean;
 }
 
 export function GraphLegend({
@@ -22,9 +24,10 @@ export function GraphLegend({
   communities,
   filters,
   onFiltersChange,
+  iconOnly = false,
 }: GraphLegendProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(iconOnly);
 
   const items = enriched
     ? communities.map((c) => ({
@@ -55,8 +58,23 @@ export function GraphLegend({
 
   if (items.length === 0) return null;
 
+  if (iconOnly && collapsed) {
+    return (
+      <button
+        type="button"
+        className="graph-legend-icon"
+        data-testid="graph-legend"
+        title={enriched ? t("graph.legend.community") : t("graph.legend.domain")}
+        aria-expanded={false}
+        onClick={() => setCollapsed(false)}
+      >
+        <Palette size={13} />
+      </button>
+    );
+  }
+
   return (
-    <div className="graph-legend" data-testid="graph-legend">
+    <div className="graph-legend" data-testid={iconOnly ? undefined : "graph-legend"}>
       <button
         type="button"
         className="graph-legend-head"

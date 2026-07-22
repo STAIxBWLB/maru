@@ -7043,8 +7043,7 @@ function MainApp() {
     maruSettings.graph.source === "vault"
       ? graphVaultPath ?? activeDocumentWorkspacePath
       : graphWorkspacePath ?? activeDocumentWorkspacePath;
-  const graphOverlayPath =
-    maruSettings.graph.source === "all" ? graphDataPath : graphVaultPath ?? graphDataPath;
+  const graphOverlayPath = graphVaultPath ?? graphDataPath;
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
@@ -7152,9 +7151,16 @@ function MainApp() {
           ? `${layoutSettings.documentsPaneWidth}px`
           : "0px",
         "--outline-col": outlineOpen ? `${layoutSettings.outlinePaneWidth}px` : "0px",
+        // In graph mode the canvas column must keep >= 420px, so clamp only the
+        // effective terminal column (the stored terminalWidth stays untouched).
+        // Graph mode: activity 48px + documents/outline 0 -> 100vw - 48 - 420.
         "--terminal-col":
           layoutSettings.terminalDock === "right"
-            ? `${layoutSettings.terminalOpen ? layoutSettings.terminalWidth : 40}px`
+            ? layoutSettings.terminalOpen
+              ? visibleAppMode === "graph"
+                ? `min(${layoutSettings.terminalWidth}px, calc(100vw - 468px))`
+                : `${layoutSettings.terminalWidth}px`
+              : "40px"
             : "0px",
       }) as React.CSSProperties & Record<`--${string}`, string>,
     [
@@ -7166,6 +7172,7 @@ function MainApp() {
       layoutSettings.terminalWidth,
       outlineOpen,
       themeVars,
+      visibleAppMode,
     ],
   );
   const editorSplitStyle =
