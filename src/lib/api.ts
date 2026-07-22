@@ -1843,6 +1843,85 @@ export async function unloadLegacyTelegramLaunchd(
   return invoke<LegacyLaunchdService>("unload_legacy_telegram_launchd", { plistPath });
 }
 
+// === Scheduled jobs (launchd) ===
+
+export interface JobSchedule {
+  hour: number;
+  minute: number;
+  recoveryIntervalSeconds: number;
+  runAtLoad: boolean;
+}
+
+export interface JobStatus {
+  id: string;
+  title: string;
+  description: string;
+  installed: boolean;
+  loaded: boolean;
+  enabled: boolean;
+  plistPath: string;
+  label: string;
+  schedule: JobSchedule;
+  lastExitCode: number | null;
+  lastRunAt: string | null;
+}
+
+export interface JobLogsTail {
+  stdout: string;
+  stderr: string;
+}
+
+function mockJobStatus(workPath: string): JobStatus {
+  return {
+    id: "mail-digest",
+    title: "Daily Mail Digest",
+    description: "",
+    installed: false,
+    loaded: false,
+    enabled: false,
+    plistPath: `${workPath}/.maru/jobs.json`,
+    label: "com.maru.job.mail-digest.00000000",
+    schedule: { hour: 3, minute: 30, recoveryIntervalSeconds: 900, runAtLoad: false },
+    lastExitCode: null,
+    lastRunAt: null,
+  };
+}
+
+export async function jobsList(workPath: string): Promise<JobStatus[]> {
+  if (!isTauri()) return [mockJobStatus(workPath)];
+  return invoke<JobStatus[]>("jobs_list", { workPath });
+}
+
+export async function jobsInstall(workPath: string, jobId: string): Promise<JobStatus> {
+  if (!isTauri()) return { ...mockJobStatus(workPath), id: jobId, installed: true };
+  return invoke<JobStatus>("jobs_install", { workPath, jobId });
+}
+
+export async function jobsUninstall(workPath: string, jobId: string): Promise<JobStatus> {
+  if (!isTauri()) return { ...mockJobStatus(workPath), id: jobId };
+  return invoke<JobStatus>("jobs_uninstall", { workPath, jobId });
+}
+
+export async function jobsStart(workPath: string, jobId: string): Promise<JobStatus> {
+  if (!isTauri()) return { ...mockJobStatus(workPath), id: jobId, enabled: true };
+  return invoke<JobStatus>("jobs_start", { workPath, jobId });
+}
+
+export async function jobsStop(workPath: string, jobId: string): Promise<JobStatus> {
+  if (!isTauri()) return { ...mockJobStatus(workPath), id: jobId };
+  return invoke<JobStatus>("jobs_stop", { workPath, jobId });
+}
+
+export async function jobsRunNow(workPath: string, jobId: string): Promise<JobStatus> {
+  if (!isTauri()) return { ...mockJobStatus(workPath), id: jobId };
+  return invoke<JobStatus>("jobs_run_now", { workPath, jobId });
+}
+
+export async function jobsReadLog(workPath: string, jobId: string): Promise<JobLogsTail> {
+  if (!isTauri()) return { stdout: "", stderr: "" };
+  return invoke<JobLogsTail>("jobs_read_log", { workPath, jobId });
+}
+
 export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {
   if (!isTauri()) return { ...DEFAULT_INBOX_SETTINGS };
   return invoke<InboxSettings>("read_inbox_settings", { vaultPath });

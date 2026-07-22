@@ -26,6 +26,7 @@ mod inbox_classifier;
 mod inbox_drop;
 mod inbox_settings;
 mod inbox_watcher;
+mod jobs;
 mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
@@ -117,6 +118,9 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
+use jobs::{
+    jobs_install, jobs_list, jobs_read_log, jobs_run_now, jobs_start, jobs_stop, jobs_uninstall,
+};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -413,6 +417,13 @@ pub fn run() {
             save_telegram_monitor_config,
             detect_legacy_telegram_launchd,
             unload_legacy_telegram_launchd,
+            jobs_list,
+            jobs_install,
+            jobs_uninstall,
+            jobs_start,
+            jobs_stop,
+            jobs_run_now,
+            jobs_read_log,
             prepare_approval,
             record_approval,
             // workspace pairing + .maru/ system mode
