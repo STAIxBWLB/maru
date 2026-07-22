@@ -158,6 +158,7 @@ export function ScratchpadPane({
   const editSerialRef = useRef(0);
   const autoSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const refreshSerialRef = useRef(0);
   const watcherRefreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const activeWorkPathRef = useRef(workPath);
   const activeWatcherGenerationRef = useRef<number | null>(null);
@@ -190,10 +191,15 @@ export function ScratchpadPane({
         setEntries([]);
         return;
       }
+      // Overlapping refreshes may resolve out of order; only the newest one
+      // may commit list or editor state, or a slow stale read would regress
+      // the UI to older content.
+      const refreshSerial = ++refreshSerialRef.current;
       setLoading(true);
       setLocalError(null);
       try {
         const nextEntries = await listScratchpad(workPath);
+        if (refreshSerialRef.current !== refreshSerial) return;
         setEntries(nextEntries);
         const current = editorRef.current;
         if (!checkActive || !current || !current.revision) return;
@@ -210,15 +216,31 @@ export function ScratchpadPane({
           setConflict(true);
           return;
         }
-        loadEditor(
-          await readScratchpadDocument(workPath, fresh.collection, fresh.relativePath),
+        const serialBeforeRead = editSerialRef.current;
+        const loaded = await readScratchpadDocument(
+          workPath,
+          fresh.collection,
+          fresh.relativePath,
         );
+        // The user may have switched files or typed while the read was
+        // pending; replacing the buffer then would silently drop their edits.
+        if (refreshSerialRef.current !== refreshSerial) return;
+        const stillCurrent =
+          activeWorkPathRef.current === workPath &&
+          editorRef.current &&
+          scratchpadEntryKey(editorRef.current) === scratchpadEntryKey(current);
+        if (!stillCurrent) return;
+        if (dirtyRef.current || editSerialRef.current !== serialBeforeRead) {
+          setConflict(true);
+          return;
+        }
+        loadEditor(loaded);
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
         onError(message);
       } finally {
-        setLoading(false);
+        if (refreshSerialRef.current === refreshSerial) setLoading(false);
       }
     },
     [loadEditor, onError, workPath],
@@ -368,6 +390,24 @@ export function ScratchpadPane({
     [clearAutoSaveTimer],
   );
 
+  const persistDraft = useCallback(
+    (document: ScratchpadDocument, nextContent: string) => {
+      if (!workPath) return;
+      try {
+        // Store the live buffer once; the embedded document is metadata only.
+        writeScratchpadDraft({
+          workPath,
+          document: { ...document, content: "" },
+          content: nextContent,
+          savedAt: new Date().toISOString(),
+        });
+      } catch {
+        // Quota or unavailable storage must never block the backend autosave.
+      }
+    },
+    [workPath],
+  );
+
   const scheduleAutoSave = useCallback(() => {
     clearAutoSaveTimer();
     const scheduledWorkPath = workPath;
@@ -385,14 +425,7 @@ export function ScratchpadPane({
     setContent(next);
     setSaveState("idle");
     setConflict(false);
-    if (workPath && editorRef.current) {
-      writeScratchpadDraft({
-        workPath,
-        document: editorRef.current,
-        content: next,
-        savedAt: new Date().toISOString(),
-      });
-    }
+    if (editorRef.current) persistDraft(editorRef.current, next);
     scheduleAutoSave();
   };
 
@@ -459,14 +492,7 @@ export function ScratchpadPane({
     editSerialRef.current += 1;
     setEditor(next);
     setPathDraft(relativePath);
-    if (workPath) {
-      writeScratchpadDraft({
-        workPath,
-        document: next,
-        content: contentRef.current,
-        savedAt: new Date().toISOString(),
-      });
-    }
+    persistDraft(next, contentRef.current);
     scheduleAutoSave();
   };
 

@@ -57,6 +57,51 @@ WORK_SKIP_DIRS = {
     ".frontend-slides", ".claude", ".archive", "archive", "vault",
     "inbox", "sites", "dev", "shared", "_templates", "templates",
 }
+WORK_SKIP_RELATIVE_ROOTS = {"scratchpad/memos", "scratchpad/temp"}
+
+
+def _scratchpad_skip_roots(work_root: Path) -> set:
+    """Root-relative memos/temp roots honoring workspace.config.yaml overrides.
+
+    Falls back to the default layout when the config is absent, unreadable,
+    or points the scratchpad outside the work root.
+    """
+    cfg = work_root / "workspace.config.yaml"
+    if not cfg.is_file():
+        return WORK_SKIP_RELATIVE_ROOTS
+    try:
+        import yaml
+        data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return WORK_SKIP_RELATIVE_ROOTS
+    if not isinstance(data, dict):
+        return WORK_SKIP_RELATIVE_ROOTS
+    paths = data.get("paths") if isinstance(data.get("paths"), dict) else {}
+    sp = data.get("scratchpad") if isinstance(data.get("scratchpad"), dict) else {}
+    configured = str(paths.get("scratchpad") or "").strip()
+    if configured:
+        try:
+            rel = (
+                Path(os.path.expanduser(configured))
+                .resolve()
+                .relative_to(work_root.resolve())
+            )
+        except Exception:
+            return WORK_SKIP_RELATIVE_ROOTS
+        rel_root = _nfc(str(rel)).strip("/")
+    else:
+        rel_root = "scratchpad"
+    memos = _nfc(str(sp.get("memos_subdir") or "memos")).strip("/")
+    temp = _nfc(str(sp.get("temp_subdir") or "temp")).strip("/")
+    return {f"{rel_root}/{memos}", f"{rel_root}/{temp}"}
+
+
+def _work_path_is_skipped(relative: str, roots=WORK_SKIP_RELATIVE_ROOTS) -> bool:
+    normalized = _nfc(relative).strip("/")
+    return any(
+        normalized == root or normalized.startswith(root + "/")
+        for root in roots
+    )
 # Wiki-link-bearing frontmatter fields on work docs → fm_ref edges to vault
 # stems (DR-019 §2 node-adoption criterion ② / edge type fm_ref).
 WORK_WIKI_FIELDS = (
@@ -310,8 +355,17 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
     # Pass 1 — collect qualifying work docs (nodes + stem index).
     docs = {}          # node_id -> {rel, fm, body}
     stem_index = {}    # basename-stem -> [node_id, ...]
+    scratchpad_skip_roots = _scratchpad_skip_roots(work_root)
     for dirpath, dirnames, filenames in os.walk(work_root):
-        dirnames[:] = [d for d in dirnames if d not in WORK_SKIP_DIRS]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in WORK_SKIP_DIRS
+            and not _work_path_is_skipped(
+                _nfc(str((Path(dirpath) / d).relative_to(work_root))),
+                scratchpad_skip_roots,
+            )
+        ]
         for fn in filenames:
             if not fn.endswith(".md"):
                 continue
@@ -415,7 +469,9 @@ def extract_work(work_root: Path, vault_target: Path, vault_stems: set) -> list[
                     tgt = "work:" + norm
                     if tgt in work_ids:
                         cand.append(("source_ref", f.stem, tgt, {}))
-                    elif set(Path(norm).parts) & WORK_SKIP_DIRS:
+                    elif set(Path(norm).parts) & WORK_SKIP_DIRS or _work_path_is_skipped(
+                        norm, scratchpad_skip_roots
+                    ):
                         counters["source_skiproot"] += 1  # C1: source into an excluded tree (sites/inbox/archive…)
                     elif (work_root / (norm + ".md")).is_file():
                         if tgt not in stub_nodes:

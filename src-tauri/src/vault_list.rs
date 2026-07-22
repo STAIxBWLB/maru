@@ -225,6 +225,19 @@ pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
+/// Distinguish "no registry has ever been created" (standalone mode, Ok(None))
+/// from "a registry exists but cannot be read" (Err). Callers that route
+/// writes by workspace visibility must fail closed on the latter.
+#[cfg(not(test))]
+pub(crate) fn load_registry_if_present() -> Result<Option<WorkspaceRegistry>, String> {
+    let registry_path = workspace_registry_path()?;
+    let legacy_path = legacy_vault_list_path()?;
+    if !registry_path.exists() && !legacy_path.exists() {
+        return Ok(None);
+    }
+    load_registry_at(&registry_path, &legacy_path).map(Some)
+}
+
 #[cfg(not(test))]
 pub(crate) fn assert_primary_private_workspace(workspace_path: &Path) -> Result<(), String> {
     let registry_path = workspace_registry_path()?;

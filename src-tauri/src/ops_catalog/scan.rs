@@ -142,6 +142,7 @@ fn collect_bu_configs(
         workspace_root.join("projects"),
         workspace_root.join("admin"),
     ];
+    let transient_roots = configured_transient_scratchpad_roots(workspace_root);
 
     for base in bases.iter() {
         if !base.exists() {
@@ -152,7 +153,10 @@ fn collect_bu_configs(
             .max_depth(6)
             .into_iter()
             // 단, `.maru/` 자체는 BU config 수집을 위해 통과시킨다 (단 .maru/cache, .maru/runs 등은 제외).
-            .filter_entry(|e| !is_excluded_dir_for_bu_scan(e.path()))
+            .filter_entry(|e| {
+                !is_excluded_dir_for_bu_scan(e.path())
+                    && !is_configured_transient_dir(e.path(), workspace_root, &transient_roots)
+            })
             .filter_map(Result::ok)
         {
             if !entry.file_type().is_file() {
@@ -320,6 +324,7 @@ fn extract_manifest_meta(manifest_path: &Path) -> (Option<String>, Option<String
 
 fn scan_tasks(workspace_root: &Path, out: &mut Vec<CatalogEntry>) -> io::Result<()> {
     let horizon = Utc::now().date_naive() + Duration::days(DEFAULT_DEADLINE_HORIZON_DAYS);
+    let transient_roots = configured_transient_scratchpad_roots(workspace_root);
     for sub in ["active", "calendar"] {
         let root = workspace_root.join("tasks").join(sub);
         if !root.exists() {
@@ -328,7 +333,10 @@ fn scan_tasks(workspace_root: &Path, out: &mut Vec<CatalogEntry>) -> io::Result<
         for entry in WalkDir::new(&root)
             .max_depth(4)
             .into_iter()
-            .filter_entry(|e| !is_excluded_dir(e.path()))
+            .filter_entry(|e| {
+                !is_excluded_dir(e.path())
+                    && !is_configured_transient_dir(e.path(), workspace_root, &transient_roots)
+            })
             .filter_map(Result::ok)
         {
             if !entry.file_type().is_file() {
@@ -392,6 +400,7 @@ fn scan_markdown_and_binaries(
         workspace_root.join("admin"),
         workspace_root.join("meetings"),
     ];
+    let transient_roots = configured_transient_scratchpad_roots(workspace_root);
 
     for base in bases.iter() {
         if !base.exists() {
@@ -399,7 +408,10 @@ fn scan_markdown_and_binaries(
         }
         for entry in WalkDir::new(base)
             .into_iter()
-            .filter_entry(|e| !is_excluded_dir(e.path()))
+            .filter_entry(|e| {
+                !is_excluded_dir(e.path())
+                    && !is_configured_transient_dir(e.path(), workspace_root, &transient_roots)
+            })
             .filter_map(Result::ok)
         {
             let p = entry.path();
@@ -680,6 +692,38 @@ fn is_transient_scratchpad_dir(p: &Path) -> bool {
     parent == "scratchpad" && matches!(name.to_string_lossy().as_ref(), "memos" | "temp")
 }
 
+/// Workspace-relative memos/temp roots for workspaces that relocate the
+/// Scratchpad or rename its collections. Comparison happens on paths relative
+/// to the caller's `workspace_root`, so alias forms of the same directory
+/// (for example macOS `/var` vs `/private/var`) cannot defeat the exclusion.
+/// The name-based `is_transient_scratchpad_dir` check stays as the fallback
+/// when the workspace config cannot be resolved.
+fn configured_transient_scratchpad_roots(workspace_root: &Path) -> Vec<PathBuf> {
+    let Ok(canonical_work) = workspace_root.canonicalize() else {
+        return Vec::new();
+    };
+    [
+        crate::scratchpad::resolve_scratchpad_memos_root(workspace_root),
+        crate::scratchpad::resolve_scratchpad_temp_root(workspace_root),
+    ]
+    .into_iter()
+    .filter_map(Result::ok)
+    .filter_map(|root| {
+        let canonical = root.canonicalize().unwrap_or(root);
+        canonical
+            .strip_prefix(&canonical_work)
+            .ok()
+            .map(Path::to_path_buf)
+    })
+    .collect()
+}
+
+fn is_configured_transient_dir(p: &Path, workspace_root: &Path, relatives: &[PathBuf]) -> bool {
+    p.strip_prefix(workspace_root)
+        .map(|relative| relatives.iter().any(|root| relative == root))
+        .unwrap_or(false)
+}
+
 fn is_binary_evidence_candidate(ext: &str) -> bool {
     matches!(
         ext.to_lowercase().as_str(),
@@ -863,6 +907,43 @@ mod tests {
         for (path, expected) in cases {
             assert_eq!(guess_evidence_kind(path), expected, "path={}", path);
         }
+    }
+
+    #[test]
+    fn configured_scratchpad_roots_are_excluded_even_with_custom_names() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let scratchpad = tmp.path().join("projects").join("pad");
+        std::fs::create_dir_all(scratchpad.join("notes")).unwrap();
+        std::fs::create_dir_all(scratchpad.join("cache")).unwrap();
+        std::fs::create_dir_all(scratchpad.join("ideation")).unwrap();
+        std::fs::write(
+            tmp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  memos_subdir: notes\n  temp_subdir: cache\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let roots = configured_transient_scratchpad_roots(tmp.path());
+        assert_eq!(roots.len(), 2);
+
+        let work = tmp.path();
+        assert!(is_configured_transient_dir(
+            &scratchpad.join("notes"),
+            work,
+            &roots
+        ));
+        assert!(is_configured_transient_dir(
+            &scratchpad.join("cache"),
+            work,
+            &roots
+        ));
+        assert!(!is_configured_transient_dir(
+            &scratchpad.join("ideation"),
+            work,
+            &roots
+        ));
     }
 
     #[test]

@@ -18,7 +18,12 @@ fn canonicalize_or_self(path: &Path) -> PathBuf {
 /// still use the nearest workspace.config.yaml.
 fn runtime_work_root(path: &Path) -> Result<PathBuf, String> {
     let candidate = canonicalize_or_self(path);
-    let registry = crate::vault_list::list_workspace_roots().ok();
+    // Fail closed: a registry that exists but cannot be read must not make a
+    // registered public workspace look standalone and capture the routing.
+    #[cfg(test)]
+    let registry: Option<crate::vault_list::WorkspaceRegistry> = None;
+    #[cfg(not(test))]
+    let registry = crate::vault_list::load_registry_if_present()?;
     runtime_work_root_with_registry(&candidate, registry.as_ref())
 }
 
@@ -39,7 +44,18 @@ fn runtime_work_root_with_registry(
                 "agent_runtime_primary_private_missing: registered workspace runs require an active private workspace"
                     .to_string()
             })?;
-            return Ok(canonicalize_or_self(Path::new(private)));
+            let private_root = canonicalize_or_self(Path::new(private));
+            let registered_private = registry.workspaces.iter().any(|workspace| {
+                workspace.visibility == "private"
+                    && canonicalize_or_self(Path::new(&workspace.path)) == private_root
+            });
+            if !registered_private {
+                return Err(
+                    "agent_runtime_primary_private_missing: active private workspace is not registered as private"
+                        .to_string(),
+                );
+            }
+            return Ok(private_root);
         }
     }
     Ok(candidate
@@ -233,6 +249,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, canonicalize_or_self(&primary));
+    }
+
+    #[test]
+    fn active_private_not_registered_as_private_is_an_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let private = temp.path().join("private");
+        let public = temp.path().join("public");
+        let nested_public = public.join("project");
+        fs::create_dir_all(&private).unwrap();
+        fs::create_dir_all(&nested_public).unwrap();
+        let registry = crate::vault_list::WorkspaceRegistry {
+            // The active private root is only registered with public visibility.
+            workspaces: vec![
+                registry_entry("private", &private, "public"),
+                registry_entry("public", &public, "public"),
+            ],
+            active_by_visibility: crate::vault_list::ActiveByVisibility {
+                private: Some(private.to_string_lossy().to_string()),
+                public: Some(public.to_string_lossy().to_string()),
+            },
+            hidden_defaults: Vec::new(),
+        };
+
+        let error = runtime_work_root_with_registry(
+            &canonicalize_or_self(&nested_public),
+            Some(&registry),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("not registered as private"));
     }
 
     #[test]

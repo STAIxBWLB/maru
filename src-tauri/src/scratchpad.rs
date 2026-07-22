@@ -463,6 +463,44 @@ fn assert_no_symlink_components(root: &Path, relative: &Path) -> Result<(), Stri
     Ok(())
 }
 
+/// Re-resolve the publish path through canonicalized directories immediately
+/// before committing bytes. A parent component swapped for a symlink after the
+/// earlier lexical checks changes the canonical form and is rejected here, so
+/// the subsequent rename happens against the verified directory identity.
+/// The residual exposure is the OS-level window between this check and the
+/// rename itself, which cannot be closed without openat-style directory
+/// handles (e.g. cap-std); every publish stays inside one collection root and
+/// non-create writes still re-verify the destination revision at this point.
+fn pin_commit_path(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|err| format!("Cannot resolve Scratchpad root: {err}"))?;
+    let parent = root
+        .join(relative)
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "Scratchpad path is missing a parent directory".to_string())?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|err| format!("Cannot resolve Scratchpad directory: {err}"))?;
+    let expected_parent = canonical_root
+        .join(relative)
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "Scratchpad path is missing a parent directory".to_string())?;
+    if comparable_collection_path(&canonical_parent) != comparable_collection_path(&expected_parent)
+    {
+        return Err(format!(
+            "Scratchpad path contains a symlink: {}",
+            parent.display()
+        ));
+    }
+    let name = relative
+        .file_name()
+        .ok_or_else(|| "Scratchpad path is missing a file name".to_string())?;
+    Ok(canonical_parent.join(name))
+}
+
 fn resolve_entry_path(
     work_path: &Path,
     collection: ScratchpadCollection,
@@ -800,8 +838,9 @@ pub fn scratchpad_save(
         let _explicit_overwrite = force;
         assert_revision(&path, expected)?;
         assert_no_symlink_components(&root, &relative)?;
-        assert_revision(&path, expected)?;
-        write_atomic(&path, content.as_bytes())?;
+        let pinned = pin_commit_path(&root, &relative)?;
+        assert_revision(&pinned, expected)?;
+        write_atomic(&pinned, content.as_bytes())?;
     } else {
         assert_maru_can_write(&work_path, WorkspaceWriteAction::Create)?;
         if let Some(expected) = expected_revision.as_deref() {
@@ -814,7 +853,8 @@ pub fn scratchpad_save(
                 .map_err(|err| format!("Cannot create Scratchpad directory: {err}"))?;
         }
         assert_no_symlink_components(&root, &relative)?;
-        write_atomic_create(&path, content.as_bytes())?;
+        let pinned = pin_commit_path(&root, &relative)?;
+        write_atomic_create(&pinned, content.as_bytes())?;
     }
     scratchpad_read(work_path, collection, relative_path)
 }
@@ -857,15 +897,32 @@ pub fn scratchpad_rename(
     assert_no_symlink_components(&root, &source_relative)?;
     assert_no_symlink_components(&root, &target_relative)?;
     assert_revision(&source, &expected_revision)?;
-    fs::hard_link(&source, &target).map_err(|err| {
+    let pinned_target = pin_commit_path(&root, &target_relative)?;
+    fs::hard_link(&source, &pinned_target).map_err(|err| {
         if err.kind() == std::io::ErrorKind::AlreadyExists {
             "scratchpad_conflict: rename target already exists".to_string()
         } else {
             format!("Cannot publish renamed Scratchpad file: {err}")
         }
     })?;
+    // The link pins the published bytes; verify them before the source is
+    // removed so a source swapped mid-flight can never publish foreign content.
+    if let Err(err) = assert_revision(&pinned_target, &expected_revision) {
+        let _ = fs::remove_file(&pinned_target);
+        return Err(err);
+    }
+    // The source path must still be the linked inode: a writer that atomically
+    // replaced the source after the link would otherwise have its new file
+    // deleted here. On mismatch the concurrent writer wins and the rename
+    // aborts as a conflict.
+    if !paths_are_same_file(&source, &pinned_target) {
+        let _ = fs::remove_file(&pinned_target);
+        return Err(
+            "scratchpad_conflict: source was replaced while renaming; rename aborted".to_string(),
+        );
+    }
     if let Err(err) = fs::remove_file(&source) {
-        let _ = fs::remove_file(&target);
+        let _ = fs::remove_file(&pinned_target);
         return Err(format!(
             "Cannot remove Scratchpad source after safe rename: {err}"
         ));
@@ -889,6 +946,26 @@ pub fn scratchpad_trash(
     assert_no_symlink_components(&root, &relative)?;
     assert_revision(&path, &expected_revision)?;
     move_to_system_trash(&path)
+}
+
+/// Whether two paths currently name the same file. Used after `hard_link` to
+/// confirm the source entry still points at the linked inode before deleting
+/// it. Windows std exposes no stable file identity, so the check degrades to
+/// the pre-existing pathname behavior there.
+fn paths_are_same_file(left: &Path, right: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (fs::symlink_metadata(left), fs::symlink_metadata(right)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (left, right);
+        true
+    }
 }
 
 fn idea_slug(title: &str) -> String {
@@ -1339,6 +1416,18 @@ pub fn scratchpad_migrate_legacy_memos(
         assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
         fs::create_dir_all(&target_root)
             .map_err(|err| format!("Cannot create memo target: {err}"))?;
+        // A fresh unique directory per invocation: a rerun after a failure (or
+        // a concurrent invocation) must never rename over the recovery copies
+        // a previous run intentionally left behind.
+        let staging_parent = work.join(".maru");
+        fs::create_dir_all(&staging_parent)
+            .map_err(|err| format!("Cannot create migration staging parent: {err}"))?;
+        let staging_root = tempfile::Builder::new()
+            .prefix("scratchpad-migration-staging-")
+            .tempdir_in(&staging_parent)
+            .map_err(|err| format!("Cannot create migration staging directory: {err}"))?
+            .keep();
+        let mut staged_index = 0_u32;
         for item in WalkDir::new(&legacy_root)
             .min_depth(1)
             .follow_links(false)
@@ -1367,18 +1456,30 @@ pub fn scratchpad_migrate_legacy_memos(
             let relative = source
                 .strip_prefix(&legacy_root)
                 .map_err(|_| "Legacy memo escaped its root".to_string())?;
-            let source_hash = revision_for_file(source)?;
-            let candidate = if target_root.join(relative).is_file()
-                && revision_for_file(&target_root.join(relative))? == source_hash
-            {
-                relative.to_path_buf()
-            } else {
-                unique_relative_path(&target_root, relative.to_path_buf())
-            };
-            let target = target_root.join(&candidate);
-            let migration = (|| -> Result<(), String> {
+            let file_name = source
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "memo".to_string());
+            let staged = staging_root.join(format!("{staged_index}-{file_name}"));
+            staged_index += 1;
+            let migration = (|| -> Result<String, String> {
+                // Claim the exact source inode first: a same-filesystem rename
+                // is atomic, so a concurrent writer that updates or recreates
+                // the legacy memo afterward keeps its own file untouched (it
+                // is simply picked up by the next migration run).
+                fs::rename(source, &staged)
+                    .map_err(|err| format!("Cannot claim legacy memo for migration: {err}"))?;
+                let staged_hash = revision_for_file(&staged)?;
+                let candidate = if target_root.join(relative).is_file()
+                    && revision_for_file(&target_root.join(relative))? == staged_hash
+                {
+                    relative.to_path_buf()
+                } else {
+                    unique_relative_path(&target_root, relative.to_path_buf())
+                };
+                let target = target_root.join(&candidate);
                 if !target.is_file() {
-                    let bytes = fs::read(source)
+                    let bytes = fs::read(&staged)
                         .map_err(|err| format!("Cannot read legacy memo: {err}"))?;
                     if let Some(parent) = target.parent() {
                         fs::create_dir_all(parent)
@@ -1388,21 +1489,32 @@ pub fn scratchpad_migrate_legacy_memos(
                     write_atomic_create(&target, &bytes)?;
                 }
                 let target_hash = revision_for_file(&target)?;
-                if source_hash != target_hash {
+                if staged_hash != target_hash {
                     return Err("Migrated memo hash verification failed".to_string());
                 }
-                fs::remove_file(source)
+                fs::remove_file(&staged)
                     .map_err(|err| format!("Cannot remove verified legacy memo: {err}"))?;
-                Ok(())
+                Ok(path_slashes(&candidate))
             })();
             match migration {
-                Ok(()) => result.migrated.push(path_slashes(&candidate)),
-                Err(reason) => result.skipped.push(TempCleanupSkip {
-                    relative_path: path_slashes(relative),
-                    reason,
-                }),
+                Ok(migrated) => result.migrated.push(migrated),
+                Err(reason) => {
+                    // Never rename the claimed copy back over the source slot:
+                    // a concurrent writer may have recreated it. Keep the
+                    // claimed bytes in staging and report where they live.
+                    let reason = if staged.is_file() {
+                        format!("{reason} (claimed copy kept at {})", staged.display())
+                    } else {
+                        reason
+                    };
+                    result.skipped.push(TempCleanupSkip {
+                        relative_path: path_slashes(relative),
+                        reason,
+                    });
+                }
             }
         }
+        let _ = fs::remove_dir(&staging_root);
     }
     if let Some(parent) = marker.parent() {
         fs::create_dir_all(parent)
@@ -1861,6 +1973,37 @@ mod tests {
         assert_eq!(result.migrated, vec!["memo.txt"]);
         assert!(!legacy.join("memo.txt").exists());
         assert!(!target.join("memo-2.txt").exists());
+    }
+
+    #[test]
+    fn rerun_migration_never_reuses_a_previous_staging_path() {
+        let (temp, work) = workspace();
+        let legacy = temp.path().join(".maru/memos");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("memo.txt"), "first run").unwrap();
+        scratchpad_migrate_legacy_memos(work.clone()).unwrap();
+        // A concurrent writer recreates the legacy memo between runs.
+        fs::write(legacy.join("memo.txt"), "second run").unwrap();
+
+        let result = scratchpad_migrate_legacy_memos(work.clone()).unwrap();
+
+        assert_eq!(result.migrated, vec!["memo-2.txt"]);
+        assert_eq!(
+            scratchpad_read(
+                work.clone(),
+                ScratchpadCollection::Memos,
+                "memo.txt".to_string()
+            )
+            .unwrap()
+            .content,
+            "first run"
+        );
+        assert_eq!(
+            scratchpad_read(work, ScratchpadCollection::Memos, "memo-2.txt".to_string())
+                .unwrap()
+                .content,
+            "second run"
+        );
     }
 
     #[test]
