@@ -8,6 +8,23 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased
+
+- **Scheduled jobs registry (launchd).** Jobs are declared as data in
+  `<work>/.maru/jobs.json` and managed by Maru: per-workspace launchd labels
+  (`com.maru.job.<id>.<hash>`), hand-rendered plists with safety gates, a
+  System → Jobs tab, and a `maru jobs` CLI. First consumer is the daily mail
+  digest, replacing its script-owned LaunchAgent.
+- **Jobs launchd-semantics fixes from adversarial review.** Stop now boots the
+  service out as well as disabling it, so a stopped schedule actually stops
+  firing; Start re-bootstraps after enabling instead of only flipping the
+  disabled flag; Install enables before bootstrap so reinstalling a previously
+  stopped job no longer fails, and installing a disabled job no longer leaves
+  its schedule loaded. `StartInterval` is omitted when no recovery interval is
+  declared (launchd rejects 0), flag and URL arguments pass through without
+  workspace-path mangling, and jobs.json now rejects duplicate ids and
+  out-of-range schedules.
+
 ## v0.4.10 — 2026-07-22 — Unified Scratchpad
 
 - **One Scratchpad pane for memos, ideation, and AI temp files.** The right

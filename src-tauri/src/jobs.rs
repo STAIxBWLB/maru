@@ -121,8 +121,18 @@ pub fn load_jobs(work_path: &Path) -> Result<JobsFile, String> {
             file.schema
         ));
     }
+    let mut seen = std::collections::HashSet::new();
     for job in &file.jobs {
         validate_job_id(&job.id)?;
+        if !seen.insert(job.id.as_str()) {
+            return Err(format!("job_id_duplicate: {}", job.id));
+        }
+        if job.schedule.hour > 23 || job.schedule.minute > 59 {
+            return Err(format!(
+                "job_schedule_invalid: {}: hour {} minute {} (expected 0-23 / 0-59)",
+                job.id, job.schedule.hour, job.schedule.minute
+            ));
+        }
     }
     Ok(file)
 }
@@ -190,8 +200,13 @@ fn resolve_job_path(work_path: &Path, value: &str) -> String {
 
 /// Resolve a program argument: `~` always expands, and values that look like
 /// paths (contain `/` or start with `.`) anchor at the workspace root. Bare
-/// tokens such as subcommand names (`run`) pass through unchanged.
+/// tokens such as subcommand names (`run`) pass through unchanged, as do
+/// flags (`--config=x/y`) and URLs — the job runs with WorkingDirectory set
+/// to the workspace, so unresolved relative values still land correctly.
 fn resolve_job_arg(work_path: &Path, value: &str) -> String {
+    if value.starts_with('-') || value.contains("://") {
+        return expand_tilde(value);
+    }
     if value.contains('/') || value.starts_with('.') {
         resolve_job_path(work_path, value)
     } else {
@@ -278,9 +293,7 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
     <key>Minute</key>
     <integer>{minute}</integer>
   </dict>
-  <key>StartInterval</key>
-  <integer>{recovery}</integer>
-  <key>ProcessType</key>
+{start_interval}  <key>ProcessType</key>
   <string>Background</string>
   <key>Nice</key>
   <integer>10</integer>
@@ -306,7 +319,16 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
         },
         hour = job.schedule.hour,
         minute = job.schedule.minute,
-        recovery = job.schedule.recovery_interval_seconds,
+        // launchd rejects StartInterval <= 0; omit the key when the job
+        // declares no recovery interval (the serde default is 0).
+        start_interval = if job.schedule.recovery_interval_seconds > 0 {
+            format!(
+                "  <key>StartInterval</key>\n  <integer>{}</integer>\n",
+                job.schedule.recovery_interval_seconds
+            )
+        } else {
+            String::new()
+        },
         stdout_path = xml_escape(&stdout_path),
         stderr_path = xml_escape(&stderr_path),
         environment = environment,
@@ -340,16 +362,13 @@ fn current_uid() -> Result<String, String> {
 }
 
 /// Safety gate applied before any destructive launchd call or plist removal:
-/// the label must carry the `com.maru.job.` prefix and the canonicalized plist
-/// must be a direct child of canonicalized `~/Library/LaunchAgents`.
+/// the label must carry the `com.maru.job.` prefix and the plist is always the
+/// lexical `<canonical LaunchAgents>/<label>.plist`. An existing entry that is
+/// a symlink is refused outright: canonicalizing it would pass a parent check
+/// whenever the target also lives in LaunchAgents, redirecting the overwrite
+/// or delete onto an unrelated agent's plist.
 fn guarded_plist_path(label: &str) -> Result<PathBuf, String> {
-    if !label.starts_with(JOB_LABEL_PREFIX)
-        || label.contains('/')
-        || label.contains('\\')
-        || label.contains("..")
-    {
-        return Err(format!("job_label_refused: {label}"));
-    }
+    validate_label(label)?;
     let launch_agents = launch_agents_dir()?;
     let canonical_launch_agents = fs::canonicalize(&launch_agents).map_err(|err| {
         format!(
@@ -357,16 +376,29 @@ fn guarded_plist_path(label: &str) -> Result<PathBuf, String> {
             launch_agents.to_string_lossy()
         )
     })?;
+    guarded_plist_path_in(&canonical_launch_agents, label)
+}
+
+fn validate_label(label: &str) -> Result<(), String> {
+    if !label.starts_with(JOB_LABEL_PREFIX)
+        || label.contains('/')
+        || label.contains('\\')
+        || label.contains("..")
+    {
+        return Err(format!("job_label_refused: {label}"));
+    }
+    Ok(())
+}
+
+fn guarded_plist_path_in(canonical_launch_agents: &Path, label: &str) -> Result<PathBuf, String> {
+    validate_label(label)?;
     let plist = canonical_launch_agents.join(format!("{label}.plist"));
-    if plist.exists() {
-        let canonical_plist = fs::canonicalize(&plist)
-            .map_err(|err| format!("plist_missing: {}: {err}", plist.to_string_lossy()))?;
-        if canonical_plist.parent() != Some(canonical_launch_agents.as_path()) {
-            return Err("plist_outside_launch_agents".to_string());
-        }
-        Ok(canonical_plist)
-    } else {
-        Ok(plist)
+    match fs::symlink_metadata(&plist) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(format!(
+            "plist_is_symlink: {}",
+            plist.to_string_lossy()
+        )),
+        _ => Ok(plist),
     }
 }
 
@@ -513,10 +545,14 @@ pub(crate) fn jobs_install_in(work_path: &Path, job_id: &str) -> Result<JobStatu
     // Bootout first (ignore failure) so reinstall is idempotent.
     let target = format!("gui/{uid}/{label}");
     let _ = run_launchctl(&["bootout", &target]);
-    run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
     if job.enabled {
+        // Enable before bootstrap: launchd refuses to bootstrap a service
+        // whose label is in the disabled registry (e.g. after a prior Stop).
         run_launchctl(&["enable", &target])?;
+        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
     } else {
+        // A disabled service cannot be loaded, and bootstrapping before
+        // disabling would leave the schedule live (disable never unloads).
         run_launchctl(&["disable", &target])?;
     }
     status_for(job, work_path)
@@ -530,8 +566,15 @@ pub(crate) fn jobs_uninstall_in(work_path: &Path, job_id: &str) -> Result<JobSta
     let plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
 
-    // Tolerate not-loaded on bootout.
-    let _ = run_launchctl(&["bootout", &format!("gui/{uid}/{label}")]);
+    // Tolerate not-loaded on bootout, but never delete the plist while the
+    // service is still loaded: launchd would keep running the cached job with
+    // nothing on disk left to manage it.
+    let bootout = run_launchctl(&["bootout", &format!("gui/{uid}/{label}")]);
+    if let Err(err) = bootout {
+        if print_launchd_state(&uid, &label).loaded {
+            return Err(format!("job_bootout_failed: {label}: {err}"));
+        }
+    }
     if plist.exists() {
         fs::remove_file(&plist)
             .map_err(|err| format!("plist_remove_failed: {}: {err}", plist.to_string_lossy()))?;
@@ -552,10 +595,24 @@ fn jobs_set_enabled_in(work_path: &Path, job_id: &str, enabled: bool) -> Result<
     let jobs = load_jobs(work_path)?;
     let job = find_job(&jobs, job_id)?;
     let label = label_for(&job.id, work_path)?;
-    let _plist = guarded_plist_path(&label)?;
+    let plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
-    let verb = if enabled { "enable" } else { "disable" };
-    run_launchctl(&[verb, &format!("gui/{uid}/{label}")])?;
+    let target = format!("gui/{uid}/{label}");
+    if enabled {
+        if !plist.exists() {
+            return Err(format!("job_not_installed: {job_id}"));
+        }
+        run_launchctl(&["enable", &target])?;
+        // enable only clears the disabled flag; bootstrap actually loads the
+        // schedule. Bootout first so a half-loaded state is idempotent.
+        let _ = run_launchctl(&["bootout", &target]);
+        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+    } else {
+        run_launchctl(&["disable", &target])?;
+        // disable only gates future loads: an already-loaded service keeps its
+        // calendar timer and would still fire. Bootout stops it now.
+        let _ = run_launchctl(&["bootout", &target]);
+    }
     status_for(job, work_path)
 }
 
@@ -580,9 +637,34 @@ pub(crate) fn jobs_read_log_in(work_path: &Path, job_id: &str) -> Result<JobLogs
     })
 }
 
+/// Byte cap for the log tail: launchd appends forever with no rotation, so a
+/// long-lived job's log can reach gigabytes; reading it whole would stall the
+/// process for a 200-line preview.
+const LOG_TAIL_BYTES: u64 = 256 * 1024;
+
 fn tail_lines(path: &Path, max_lines: usize) -> String {
-    let Ok(content) = fs::read_to_string(path) else {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = fs::File::open(path) else {
         return String::new();
+    };
+    let len = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let offset = len.saturating_sub(LOG_TAIL_BYTES);
+    if file.seek(SeekFrom::Start(offset)).is_err() {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    if file.read_to_end(&mut buf).is_err() {
+        return String::new();
+    }
+    let content = String::from_utf8_lossy(&buf);
+    // Starting mid-file clips the first line; drop the fragment.
+    let content: &str = if offset > 0 {
+        content
+            .split_once('\n')
+            .map(|(_, rest)| rest)
+            .unwrap_or("")
+    } else {
+        &content
     };
     let lines: Vec<&str> = content.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
@@ -747,6 +829,72 @@ mod tests {
     }
 
     #[test]
+    fn args_that_are_flags_or_urls_pass_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path();
+        // Flags and URLs contain '/' but are never workspace paths.
+        assert_eq!(
+            resolve_job_arg(work, "--config=conf/app.yaml"),
+            "--config=conf/app.yaml"
+        );
+        assert_eq!(
+            resolve_job_arg(work, "https://example.com/hook"),
+            "https://example.com/hook"
+        );
+        // Plain relative paths still anchor at the workspace root.
+        assert_eq!(
+            resolve_job_arg(work, "scripts/run.py"),
+            work.join("scripts/run.py").to_string_lossy()
+        );
+        assert_eq!(resolve_job_arg(work, "run"), "run");
+    }
+
+    #[test]
+    fn plist_omits_start_interval_when_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let mut job = sample_job();
+        job.schedule.recovery_interval_seconds = 0;
+        let xml = plist_for(&job, &work).unwrap();
+        assert!(
+            !xml.contains("StartInterval"),
+            "StartInterval 0 is invalid to launchd and must be omitted: {xml}"
+        );
+    }
+
+    #[test]
+    fn load_jobs_rejects_duplicate_ids_and_bad_schedules() {
+        let dir = tempfile::tempdir().unwrap();
+        let maru_dir = dir.path().join(".maru");
+        fs::create_dir_all(&maru_dir).unwrap();
+        let entry = |id: &str, hour: u32| {
+            format!(
+                r#"{{"id":"{id}","title":"t","program":{{"command":"x"}},"schedule":{{"hour":{hour},"minute":0}},"logs":{{"dir":"logs"}}}}"#
+            )
+        };
+        fs::write(
+            maru_dir.join("jobs.json"),
+            format!(
+                r#"{{"schema":1,"jobs":[{},{}]}}"#,
+                entry("dup", 1),
+                entry("dup", 2)
+            ),
+        )
+        .unwrap();
+        assert!(load_jobs(dir.path()).unwrap_err().starts_with("job_id_duplicate"));
+
+        fs::write(
+            maru_dir.join("jobs.json"),
+            format!(r#"{{"schema":1,"jobs":[{}]}}"#, entry("late", 24)),
+        )
+        .unwrap();
+        assert!(load_jobs(dir.path())
+            .unwrap_err()
+            .starts_with("job_schedule_invalid"));
+    }
+
+    #[test]
     fn load_jobs_returns_empty_when_file_absent() {
         let dir = tempfile::tempdir().unwrap();
         let jobs = load_jobs(dir.path()).unwrap();
@@ -788,6 +936,37 @@ mod tests {
         assert_eq!(jobs.jobs[0].schedule.hour, 3);
         assert_eq!(jobs.jobs[0].schedule.recovery_interval_seconds, 900);
         assert!(!jobs.jobs[0].schedule.run_at_load);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn guard_refuses_symlinked_plist() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents = fs::canonicalize(dir.path()).unwrap();
+        let victim = agents.join("com.vendor.agent.plist");
+        fs::write(&victim, "<plist/>").unwrap();
+        let label = "com.maru.job.test.deadbeef";
+        std::os::unix::fs::symlink(&victim, agents.join(format!("{label}.plist"))).unwrap();
+
+        let err = guarded_plist_path_in(&agents, label).unwrap_err();
+        assert!(err.starts_with("plist_is_symlink"), "{err}");
+        // A regular file (or nothing) at the lexical path is accepted.
+        fs::remove_file(agents.join(format!("{label}.plist"))).unwrap();
+        assert!(guarded_plist_path_in(&agents, label).is_ok());
+    }
+
+    #[test]
+    fn tail_lines_caps_read_at_byte_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stdout.log");
+        // ~40 bytes per line * 10_000 lines ≈ 400 KiB > 256 KiB cap.
+        let line = "x".repeat(39);
+        let content: String = (0..10_000).map(|n| format!("{line}{n}\n")).collect();
+        fs::write(&path, &content).unwrap();
+        let tail = tail_lines(&path, 200);
+        assert_eq!(tail.lines().count(), 200);
+        assert!(tail.ends_with("9999"), "keeps the newest lines");
+        assert!(!tail.contains('\u{FFFD}'), "no clipped-line fragment");
     }
 
     #[test]
