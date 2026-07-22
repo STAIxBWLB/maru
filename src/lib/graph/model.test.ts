@@ -5,7 +5,7 @@ import {
   buildVaultGraph,
   enrichGraph,
   focusSubgraph,
-  isNoiseNode,
+  isGeneratedNode,
   type GraphNode,
   type VaultGraphFile,
 } from "./model";
@@ -159,7 +159,7 @@ describe("focusSubgraph / buildAdjacency", () => {
   });
 });
 
-describe("isNoiseNode", () => {
+describe("isGeneratedNode", () => {
   const node = (over: Partial<GraphNode>): GraphNode => ({
     id: "n",
     label: "N",
@@ -175,24 +175,24 @@ describe("isNoiseNode", () => {
   } as GraphNode);
   const patterns = ["reports/", "log.md"];
 
-  it("flags untyped notes regardless of path", () => {
-    expect(isNoiseNode(node({ type: "unknown", relPath: "notes/anything.md" }), patterns)).toBe(true);
-    expect(isNoiseNode(node({ type: "unknown" }), [])).toBe(true);
+  it("does not flag untyped notes; they are visible authored content", () => {
+    expect(isGeneratedNode(node({ type: "untyped", relPath: "notes/anything.md" }), patterns)).toBe(false);
+    expect(isGeneratedNode(node({ type: "untyped" }), [])).toBe(false);
   });
 
   it("matches trailing-slash patterns as relPath prefixes, case-insensitively", () => {
-    expect(isNoiseNode(node({ relPath: "reports/lint-260712.md" }), patterns)).toBe(true);
-    expect(isNoiseNode(node({ relPath: "Reports/Graph-Report.md" }), patterns)).toBe(true);
-    expect(isNoiseNode(node({ relPath: "notes/reports-summary.md" }), patterns)).toBe(false);
+    expect(isGeneratedNode(node({ relPath: "reports/lint-260712.md" }), patterns)).toBe(true);
+    expect(isGeneratedNode(node({ relPath: "Reports/Graph-Report.md" }), patterns)).toBe(true);
+    expect(isGeneratedNode(node({ relPath: "notes/reports-summary.md" }), patterns)).toBe(false);
   });
 
   it("matches bare patterns as exact filenames only", () => {
-    expect(isNoiseNode(node({ relPath: "log.md" }), patterns)).toBe(true);
-    expect(isNoiseNode(node({ relPath: "vault/LOG.md" }), patterns)).toBe(true);
-    expect(isNoiseNode(node({ relPath: "notes/backlog.md" }), patterns)).toBe(false);
+    expect(isGeneratedNode(node({ relPath: "log.md" }), patterns)).toBe(true);
+    expect(isGeneratedNode(node({ relPath: "vault/LOG.md" }), patterns)).toBe(true);
+    expect(isGeneratedNode(node({ relPath: "notes/backlog.md" }), patterns)).toBe(false);
   });
 
-  it("never flags ghosts; they belong to the showGhosts filter", () => {
-    expect(isNoiseNode(node({ type: "unresolved", relPath: null }), patterns)).toBe(false);
+  it("never flags ghosts; they belong to the showUnresolved filter", () => {
+    expect(isGeneratedNode(node({ type: "unresolved", relPath: null }), patterns)).toBe(false);
   });
 });

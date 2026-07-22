@@ -104,7 +104,9 @@ export function graphTheme(): GraphTheme {
 }
 
 export function nodeRadius(degree: number): number {
-  return Math.min(12, Math.max(3, 3 + 1.4 * Math.sqrt(degree)));
+  // Keep isolated notes large enough to see and reliably pick on HiDPI/WebGL
+  // canvases; degree still adds hierarchy without letting hubs dominate.
+  return Math.min(12, Math.max(5, 5 + 1.2 * Math.sqrt(degree)));
 }
 
 export function nodeColor(node: GraphNode, enriched: boolean): string {
@@ -122,6 +124,18 @@ export function communityColor(community: number): string {
 
 export function domainColor(domain: string | null): string {
   return domain ? (activeTheme.domainColors[domain] ?? activeTheme.fallback) : activeTheme.fallback;
+}
+
+/** Stable per-relation edge color: FNV hash into the categorical palette.
+ *  Body `wiki_link` edges are handled by the caller (they stay neutral). */
+export function relationColor(relation: string): string {
+  const palette = activeTheme.communityColors;
+  let hash = 2166136261;
+  for (let index = 0; index < relation.length; index += 1) {
+    hash ^= relation.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return palette[(hash >>> 0) % palette.length];
 }
 
 export function edgeKey(a: string, b: string): string {

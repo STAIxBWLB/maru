@@ -8,6 +8,9 @@ by **V2** (warm-start worker, design-token UI, client-side insights) and **V3**
 (imperative rendering, persisted usability affordances, legend/hull
 visualization, PNG/SVG export), and **V4** (Sigma WebGL, Graphology
 ForceAtlas2 worker, incremental index refresh, reviewed relationship writes).
+**V5** reworked the workspace UI (adaptive tiers, per-source filter profiles,
+display controls, a single derivation pipeline) and hardened the renderer
+lifecycle (state machine, mount gating, camera-fit rules, real-Sigma e2e).
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -28,27 +31,104 @@ layer alone — the graph still renders, just without community coloring. The
 overlay is produced out-of-band by the `vault-graph` skill
 (`skills/lib/build-graph.py`), not by the app.
 
-## Rendering (V4)
+## Rendering (V4, hardened in V5)
 
-- `src/components/graph/GraphView.tsx` — mode shell; owns the model, filters,
-  selection/path/insight state, and one reused layout worker.
+- `src/components/graph/GraphView.tsx` — mode shell; owns the model,
+  adaptive tier/panel layout, filter/search/selection/path state, and one
+  reused layout worker.
 - `src/components/graph/GraphCanvas.tsx` — Sigma WebGL renderer over a
   Graphology `MultiDirectedGraph`. GPU picking owns hit testing; reducers own
   hover, path, selection and visibility. Filters never rebuild topology or
-  restart layout.
+  restart layout. V5 added an explicit renderer state machine
+  (`loading | layout-running | ready | gpu-recovery | fallback | fatal`),
+  mount gating (no renderer while the container is zero-size), a
+  ResizeObserver → coalesced `resize()`+`refresh()` (never a camera move),
+  camera-fit rules (fit on first frame, on topology change after settle, and
+  when every visible node leaves the viewport — ordinary resizes/filter
+  changes never move the camera), and pins synced to FA2's native `fixed`
+  node attribute.
 - `src/components/graph/GraphLegend.tsx` — collapsible color key overlay
-  (communities when enriched, else domains); each swatch toggles the filter.
-- `src/components/graph/GraphToolbar.tsx` — search, graph/chains view switch,
-  zoom cluster, re-layout, community-overlay refresh, stats.
-- `src/components/graph/GraphFilterPanel.tsx` — domain/type/community chips with
-  counts + color swatches, min-degree slider, reset.
+  (communities when enriched, else domains); collapses to an icon button
+  outside the wide tier.
+- `src/components/graph/GraphToolbar.tsx` — Global/Local/Chains segmented
+  control, source select, search combobox (ranked results over the current
+  filtered graph, full keyboard/ARIA), search-as-filter toggle, visible/total
+  counts, Filters/Workbench toggles, More menu (refresh overlay, export,
+  re-layout). The zoom cluster floats bottom-right inside the canvas wrap.
+- `src/components/graph/GraphFilterPanel.tsx` — Data (generated/unresolved
+  toggles, min-visible-neighbors), searchable Domain/Type/Relation/Community
+  facet groups, paused-filter chips, Display (arrows/labels/scales).
 - `src/components/graph/GraphInspector.tsx` — selected-node metadata + typed
   in/out neighbors (click to walk) + actions (open / focus / start path).
 - `graphology-layout-forceatlas2/worker` — Barnes-Hut ForceAtlas2 worker.
   Cached coordinates paint immediately, layout stops after three stable
   samples or five seconds, and drag stops layout before pinning the node.
+  A dead worker keeps last-good positions and reports through `onLayoutError`.
 - `NeighborhoodPane` gains a "그래프에서 보기" (view in graph) button that focuses
   the graph on the active document.
+
+## Derivation pipeline & settings V2 (V5)
+
+- `src/lib/graph/derive.ts` — one pure pipeline: node facet filter → relation
+  filter (before traversal/counting) → local k-hop → `minVisibleNeighbors`
+  k-core pruning (focus anchor always retained) → search-as-filter. Produces
+  `analysisModel` (insights/pathfinding, before transient search),
+  `visibleModel` plus node/edge masks (canvas/Inspector/export),
+  facets (incl. relations), `pausedFilters` (persisted values absent from the
+  current graph — shown as inactive chips, never silently blanking the
+  canvas), `emptyReason` and `focusMissing`.
+- **Untyped ≠ generated**: notes without a frontmatter `type` are `"untyped"`
+  and visible authored content. Only paths matching `generatedPatterns`
+  (trailing `/` = prefix, else exact filename, case-insensitive) count as
+  generated (`isGeneratedNode`).
+- `MaruSettings.graph` is `GraphSettingsV2` (`schemaVersion: 2`): `source`
+  (vault|workspace), `mode` (global|local|chains), `localDepth`/
+  `localDirection`, `searchAsFilter`, `generatedPatterns`, per-source
+  `profiles` (domains/types/relations/community/showUnresolved/showGenerated/
+  minVisibleNeighbors — `minVisibleNeighbors` replaces the old scope toggle
+  and minDegree; the V1→V2 migration maps `all`→workspace and
+  `max(minDegree, connected ? 1 : 0)`), `display` (arrows typed|all|none,
+  label density low|balanced|high, node/edge scale 0.5–2), `panels`
+  (filtersOpen/workbenchOpen + docked widths, clamped 200–340 / 280–480), and
+  `savedViews` (source/mode/localTarget/profile/display per view). The toolbar
+  menu creates, applies, replaces by name, and deletes views; query, selection,
+  path, camera, and overlay state remain transient.
+- Display wiring is hot-applied: arrows/labels via `setSetting` or attribute
+  updates + `refresh()`, never a graph rebuild. Frontmatter edges carry a
+  stable `relationColor` (palette hash); body `wiki_link` edges stay neutral.
+
+## Adaptive workspace (V5)
+
+- The shell measures `.graph-view` itself (ResizeObserver): **wide ≥1280**
+  (Filters docked left + Workbench docked right, persisted widths, drag
+  resize handles), **standard 920–1279** (Filters becomes a left overlay,
+  Workbench docked), **compact <920** (both overlays, mutually exclusive;
+  overlay open state is session-only). Docked visibility and widths persist
+  in `graphSettings.panels`. The compact toolbar wraps instead of clipping,
+  with search on its own row.
+- Workbench = Radix Tabs (Insights / Details); selecting a node opens
+  Details, clearing returns to Insights. Insight sections preview 6 rows with
+  a "more" expander; hidden-link rows show shared-neighbor `via` evidence and
+  the prediction score.
+- Favorites render a ★ above the node in the production canvas label drawer
+  (plus the warn border ring), not only in the e2e overlay.
+- A11y: arrow-key camera pan on the focused canvas (shift for larger steps),
+  Enter opens the selection, `aria-live` announcements for selection /
+  empty-filter / layout running→done, and `prefers-reduced-motion` turns all
+  camera animations instant. Docked panel separators also resize with the
+  left/right arrow keys, and static fallback nodes are keyboard-operable.
+
+## Local targets and saved views
+
+- A Local target is `{ownerWorkspacePath, relPath}` plus an explicit graph
+  source at app handoff. It never uses a basename or node id, so duplicate
+  filenames in different folders/workspaces resolve deterministically.
+- The Local anchor is protected throughout derivation. If its canonical path
+  is absent from the selected source, the focus bar reports that state and
+  offers a direct exit instead of silently focusing another note.
+- Applying a saved Local view changes source, profile, display, mode, and the
+  canonical target in one settings transition. Switching source clears an
+  incompatible session focus.
 
 ### Interaction
 
@@ -79,7 +159,8 @@ interactive while hidden-link, bridge, stale and orphan analyses run.
 Layout cache v2 stores the full position map and pinned ids, migrates v1 on
 read, merges partial updates, and uses atomic replacement. WebGL context loss
 gets a restore attempt, then degrades to a static SVG graph at 2k nodes or a
-searchable inspector/list for larger models.
+searchable inspector/list for larger models. PNG/SVG export remains available
+from the fallback and observes the same node/edge visibility masks.
 
 ## Visualization & export (V3)
 
@@ -152,22 +233,32 @@ Pure-frontend features built on the 8a + 8b primitives:
 
 ## Tests
 
-- vitest: `src/lib/graph/model.test.ts`, `insights.test.ts`,
-  `decisionChains.test.ts`; `src/lib/settings.test.ts` (graph
-  settings round-trip); perf bench `src/lib/graph/perf.bench.ts` (build / layout
-  / insight-pass / cold `buildAdjacency` budgets).
+- vitest: `src/lib/graph/model.test.ts`, `derive.test.ts` (pipeline + dense
+  filter/search round-trip <100ms), `insights.test.ts`,
+  `decisionChains.test.ts`, `positions.test.ts` (coordinate sanitizing),
+  `search.test.ts` (combobox ranking); `src/lib/settings.test.ts` (graph
+  settings round-trip + V1→V2 migration); perf bench
+  `src/lib/graph/perf.bench.ts` (`pnpm bench:graph` — build / layout /
+  insight-pass / cold `buildAdjacency` budgets) with seeded fixtures from
+  `src/lib/graph/fixtures.ts` (tiny / empty / dense 1.2k / stress 10k).
 - 2026-07-11 local baseline at 10,000 nodes / 59,994 edges: model build 47ms,
   ForceAtlas2 20 iterations 694ms, visibility update 0.021ms, insight pass
   129ms, cold adjacency build 9.7ms (benchmark means; hardware-dependent).
 - cargo: `vault_graph` — overlay read + layout-cache round-trip.
-- e2e: `e2e/graph.spec.ts` (mode entry, filter, select/double-click, chain view,
-  toolbar + insights + inspector; hover highlight, drag-pin/unpin,
-  search-as-filter, settings persistence across a mode switch, context menu,
-  inspector favorite ★, PNG/SVG export download). Interaction selectors are
-  exposed only by the dev/E2E graph bridge, not production DOM. **Scope note** — the enrichment
+- e2e (`pnpm test:e2e:graph`): `e2e/graph.spec.ts` drives the REAL Sigma
+  renderer (chromium + SwiftShader) through the dev-only `window.__maruGraph`
+  bridge (`localStorage["maru:e2e:graph-bridge"] = "1"`, see
+  `src/components/graph/graphBridge.ts` — viewport points, screen state,
+  camera snapshot, `freezeLayout()` for determinism). The old fake DOM
+  overlay (`maru:e2e:graph-dom`) is gone. `e2e/graph-shell.spec.ts` pins the
+  shell geometry across viewports and terminal dock/resize/maximize states
+  (the right-docked-terminal zero-size regression). Layout cache writes are
+  skipped when settled positions contain non-finite values; cached seeds are
+  sanitized on read. **Scope note** — the enrichment
   path (`vault_graph_read`) is Tauri-only, so the browser-mode e2e suite verifies
-  the *degraded* live-layer path (no communities → legend covered by
-  vitest); the enriched overlay path is covered by vitest + cargo fixtures.
+  the *degraded* live-layer path plus a mock-overlay opt-in
+  (`maru:e2e:graph-overlay`); the enriched overlay path is also covered by
+  vitest + cargo fixtures.
 
 ## Deferred
 

@@ -45,6 +45,29 @@ export interface GraphModel {
   builtAt: number;
 }
 
+/** Stable visibility identity for an edge. The model de-duplicates identical
+ * source/target/relation tuples, so this key can mask relation-filtered edges
+ * without rebuilding the Sigma topology. */
+export function graphEdgeVisibilityKey(
+  edge: Pick<GraphEdge, "source" | "target" | "relation" | "fromFrontmatter">,
+): string {
+  return JSON.stringify([edge.source, edge.target, edge.relation, edge.fromFrontmatter]);
+}
+
+/** Recompute incident-edge degree for a derived model. Graph consumers must
+ * not keep displaying the full-vault degree after relation/local pruning. */
+export function withGraphDegrees(model: GraphModel): GraphModel {
+  const degrees = new Map(model.nodes.map((node) => [node.id, 0]));
+  for (const edge of model.edges) {
+    degrees.set(edge.source, (degrees.get(edge.source) ?? 0) + 1);
+    degrees.set(edge.target, (degrees.get(edge.target) ?? 0) + 1);
+  }
+  return {
+    ...model,
+    nodes: model.nodes.map((node) => ({ ...node, degree: degrees.get(node.id) ?? 0 })),
+  };
+}
+
 /** Shape of `vault-graph.json` as returned by the `vault_graph_read` command
  *  (schema-freeze table: knowledge-graph-integration.md §2 / spec §5.2). */
 export interface VaultGraphFile {
@@ -114,7 +137,7 @@ export function buildVaultGraph(
       label: entry.title,
       relPath: entry.relPath,
       ownerWorkspacePath: entry.ownerWorkspacePath ?? null,
-      type: frontmatterString(meta.type) ?? "unknown",
+      type: frontmatterString(meta.type) ?? "untyped",
       domain: frontmatterString(meta.domain),
       degree: 0,
       community: null,
@@ -307,13 +330,13 @@ export function focusSubgraph(
   };
 }
 
-/** Auto-generated noise: untyped notes (no frontmatter `type`) or notes whose
- *  relPath matches a noise pattern (trailing "/" = prefix match, otherwise
- *  exact filename match), both case-insensitive. Ghosts (`relPath: null`,
- *  type "unresolved") are governed by the showGhosts filter, not here. */
-export function isNoiseNode(node: GraphNode, patterns: readonly string[]): boolean {
+/** Generated content: notes whose relPath matches a configured generated
+ *  pattern (trailing "/" = prefix match, otherwise exact filename match),
+ *  both case-insensitive. Untyped notes are visible authored content — they
+ *  are NOT generated. Ghosts (`relPath: null`, type "unresolved") are governed
+ *  by the showUnresolved filter, not here. */
+export function isGeneratedNode(node: GraphNode, patterns: readonly string[]): boolean {
   if (node.type === "unresolved") return false;
-  if (node.type === "unknown") return true;
   if (!node.relPath) return false;
   const relPath = node.relPath.toLowerCase();
   const fileName = relPath.split("/").pop() ?? relPath;

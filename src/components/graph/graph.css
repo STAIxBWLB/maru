@@ -85,7 +85,8 @@
 }
 
 .graph-view-toggle button.active,
-.graph-right-tabs button.active {
+.graph-right-tabs button.active,
+.graph-right-tabs button[data-state="active"] {
   background: color-mix(in srgb, var(--accent) 20%, var(--panel));
   color: var(--ink);
   font-weight: 600;
@@ -106,6 +107,7 @@
 }
 
 .graph-icon-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -158,6 +160,134 @@
   flex: 1;
 }
 
+.graph-saved-views {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.graph-icon-count {
+  position: absolute;
+  right: -3px;
+  top: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--panel);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-saved-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 24;
+  width: min(300px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+
+.graph-saved-heading {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.graph-saved-create {
+  display: grid;
+  grid-template-columns: 1fr 30px;
+  gap: 5px;
+}
+
+.graph-saved-create input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2, var(--bg));
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.graph-saved-create button,
+.graph-saved-delete {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2, var(--bg));
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.graph-saved-create button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.graph-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  margin-top: 7px;
+  overflow-y: auto;
+}
+
+.graph-saved-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 4px;
+}
+
+.graph-saved-apply {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.graph-saved-apply:hover,
+.graph-saved-delete:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.graph-saved-apply span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-saved-apply small,
+.graph-saved-empty {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.graph-saved-empty {
+  padding: 12px 3px 4px;
+}
+
 .graph-badge {
   font-size: 11.5px;
   padding: 2px 8px;
@@ -196,6 +326,22 @@
   color: var(--ink-2, var(--ink));
 }
 
+.graph-empty-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.graph-empty-bar button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
 .graph-focus-bar button,
 .graph-path-bar button {
   margin-left: auto;
@@ -214,6 +360,7 @@
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 /* === Filter panel === */
@@ -444,17 +591,6 @@
   cursor: grabbing;
 }
 
-.graph-e2e-overlay {
-  position: absolute;
-  inset: 0;
-  /* Replaced element: inset alone keeps the SVG at its 300×150 intrinsic
-     size, clipping nodes laid out beyond it. Stretch it explicitly. */
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-  background: transparent;
-}
-
 .graph-canvas-loading {
   position: absolute;
   inset: 0;
@@ -463,6 +599,81 @@
   justify-content: center;
   color: var(--muted);
   background: var(--bg);
+}
+
+.graph-renderer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-2, var(--ink));
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  z-index: 3;
+}
+
+.graph-renderer-overlay button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.graph-webgl-fallback-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.graph-webgl-fallback-list input {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.graph-webgl-fallback-list ul {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.graph-webgl-fallback-list li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.graph-webgl-fallback-list li button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.graph-webgl-fallback-list li button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
 }
 
 /* Legend overlay (bottom-left of the canvas). */
@@ -1100,4 +1311,367 @@
   color: #b91c1c;
   text-decoration: underline dotted #ef4444;
   text-underline-offset: 3px;
+}
+
+/* === V5 workspace: adaptive tiers, panels, floating controls === */
+
+.graph-canvas-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+
+.graph-panel-docked {
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--panel);
+}
+
+.graph-panel-docked .graph-filter-panel,
+.graph-panel-overlay .graph-filter-panel {
+  width: auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.graph-panel-docked .graph-right,
+.graph-panel-overlay .graph-right {
+  width: auto;
+  flex: 1;
+  min-height: 0;
+  border-left: none;
+}
+
+.graph-panel-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  background: var(--panel);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+
+.graph-panel-overlay-left {
+  left: 0;
+  width: 280px;
+  border-right: 1px solid var(--line);
+}
+
+.graph-panel-overlay-right {
+  right: 0;
+  width: 360px;
+  border-left: 1px solid var(--line);
+}
+
+.graph-panel-resize {
+  flex-shrink: 0;
+}
+
+/* Floating zoom cluster (bottom-right of the canvas, above the legend). */
+.graph-zoom-floating {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* Legend collapsed to an icon outside the wide tier. */
+.graph-legend-icon {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* More menu popover. */
+.graph-more {
+  position: relative;
+}
+
+.graph-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+
+.graph-more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.graph-more-menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.graph-more-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Search combobox results. */
+.graph-search-field {
+  position: relative;
+}
+
+.graph-search-results {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: calc(100% + 4px);
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+
+.graph-search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.graph-search-result.active,
+.graph-search-result[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.graph-search-result-label {
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-search-result-path {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact shells wrap controls instead of clipping the right edge. Search
+   gets a full row, while less important badges disappear. */
+.tier-standard .graph-toolbar {
+  gap: 5px;
+  padding-inline: 8px;
+}
+
+.tier-standard .graph-search-field {
+  min-width: 120px;
+  flex: 1 1 150px;
+}
+
+.tier-standard .graph-badge {
+  display: none;
+}
+
+.tier-compact .graph-toolbar {
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 7px;
+}
+
+.tier-compact .graph-search-field {
+  order: 10;
+  flex: 1 1 calc(100% - 34px);
+  min-width: 0;
+}
+
+.tier-compact .graph-toolbar-spacer,
+.tier-compact .graph-badge {
+  display: none;
+}
+
+.tier-compact .graph-stats {
+  margin-left: auto;
+}
+
+.tier-compact .graph-focus-bar,
+.tier-compact .graph-path-bar {
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  padding-inline: 8px;
+}
+
+/* Counts use tabular numerals. */
+.graph-stats {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Filter panel: facet search, paused chips, display fields. */
+.graph-facet-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--muted);
+}
+
+.graph-facet-search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 11.5px;
+  width: 100%;
+}
+
+.graph-chip.paused {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.graph-chip.paused:hover {
+  opacity: 0.8;
+}
+
+.graph-filter-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.graph-display-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.graph-display-field span {
+  flex-shrink: 0;
+}
+
+.graph-display-field select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 11.5px;
+  padding: 2px 4px;
+}
+
+.graph-display-field input[type="range"] {
+  flex: 1;
+  max-width: 140px;
+}
+
+/* Workbench (Radix Tabs). */
+.graph-right-tab {
+  flex: 1;
+}
+
+.graph-right-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-right-content[hidden],
+.graph-right-content[data-state="inactive"] {
+  display: none;
+}
+
+/* Insights: via evidence, expander, two-line truncation. */
+.graph-insight-via {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-insight-more {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11.5px;
+  padding: 4px 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.graph-insight-action.primary {
+  color: var(--accent);
+}
+
+.graph-insight-pair,
+.graph-insight-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  min-width: 0;
+}
+
+/* Keyboard focus ring on the canvas. */
+.graph-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

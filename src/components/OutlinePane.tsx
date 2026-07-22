@@ -64,6 +64,7 @@ import type {
   VaultEntry,
   WorkspaceFileEntry,
 } from "../lib/types";
+import type { GraphLocalTarget } from "../lib/settings";
 import {
   collectWorkspaceFileExtensionCounts,
   type WorkspaceFilesPaneFilters,
@@ -93,7 +94,7 @@ interface OutlinePaneProps {
   ) => Promise<void>;
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingWikilink?: (target: string) => void;
-  onOpenGraph?: (focusNodeId?: string) => void;
+  onOpenGraph?: (target: GraphLocalTarget) => void;
   /** Managed vault note — swaps the free-form type input for the schema form
    *  (description 카운터·type/domain select·topics 칩, spec §3 F1). */
   isManagedVaultNote?: boolean;

@@ -304,6 +304,7 @@ import {
   type ExplorerPaneMode,
   type FavoriteItem,
   type FavoriteKind,
+  type GraphOpenTarget,
   type FilesBrowserMode,
   type FilesListAttribute,
   type FilesSortKey,
@@ -1025,7 +1026,7 @@ function MainApp() {
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
-  const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
+  const [graphOpenTarget, setGraphOpenTarget] = useState<GraphOpenTarget | null>(null);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -2090,11 +2091,19 @@ function MainApp() {
   );
 
   const openGraphMode = useCallback(
-    (focusNodeId?: string) => {
-      setGraphFocusNodeId(focusNodeId ?? null);
-      setPersistedAppMode("graph");
+    (target?: GraphOpenTarget) => {
+      setGraphOpenTarget(target ?? null);
+      todayAutoOpenPathRef.current = null;
+      setAppMode("graph");
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, activeAppMode: "graph" },
+        graph: target
+          ? { ...current.graph, source: target.source, mode: "local" }
+          : current.graph,
+      }));
     },
-    [setPersistedAppMode],
+    [updateSettings],
   );
 
   useEffect(() => {
@@ -7043,8 +7052,7 @@ function MainApp() {
     maruSettings.graph.source === "vault"
       ? graphVaultPath ?? activeDocumentWorkspacePath
       : graphWorkspacePath ?? activeDocumentWorkspacePath;
-  const graphOverlayPath =
-    maruSettings.graph.source === "all" ? graphDataPath : graphVaultPath ?? graphDataPath;
+  const graphOverlayPath = graphVaultPath ?? graphDataPath;
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
@@ -7152,9 +7160,16 @@ function MainApp() {
           ? `${layoutSettings.documentsPaneWidth}px`
           : "0px",
         "--outline-col": outlineOpen ? `${layoutSettings.outlinePaneWidth}px` : "0px",
+        // In graph mode the canvas column must keep >= 420px, so clamp only the
+        // effective terminal column (the stored terminalWidth stays untouched).
+        // Graph mode: activity 48px + documents/outline 0 -> 100vw - 48 - 420.
         "--terminal-col":
           layoutSettings.terminalDock === "right"
-            ? `${layoutSettings.terminalOpen ? layoutSettings.terminalWidth : 40}px`
+            ? layoutSettings.terminalOpen
+              ? visibleAppMode === "graph"
+                ? `min(${layoutSettings.terminalWidth}px, calc(100vw - 468px))`
+                : `${layoutSettings.terminalWidth}px`
+              : "40px"
             : "0px",
       }) as React.CSSProperties & Record<`--${string}`, string>,
     [
@@ -7166,6 +7181,7 @@ function MainApp() {
       layoutSettings.terminalWidth,
       outlineOpen,
       themeVars,
+      visibleAppMode,
     ],
   );
   const editorSplitStyle =
@@ -7744,8 +7760,8 @@ function MainApp() {
             workspacePath={graphDataPath}
             overlayPath={graphOverlayPath}
             entries={graphEntries}
-            focusNodeId={graphFocusNodeId}
-            onClearFocus={() => setGraphFocusNodeId(null)}
+            focusTarget={graphOpenTarget}
+            onFocusTargetChange={setGraphOpenTarget}
             onOpenEntry={(entry) => {
               setPersistedAppMode("pkm");
               void selectEntry(entry);
@@ -8184,7 +8200,13 @@ function MainApp() {
             onUpdateField={updateField}
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}
-            onOpenGraph={openGraphMode}
+            onOpenGraph={(localTarget) =>
+              openGraphMode({
+                source:
+                  activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+                localTarget,
+              })
+            }
             isManagedVaultNote={Boolean(
               activeDocumentWorkspace?.writePolicy === "managed" &&
                 document?.relPath.startsWith("notes/") &&

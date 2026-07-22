@@ -4,12 +4,13 @@
 // neglected notes (orphans + stale). Rows highlight on the canvas.
 
 import { ArrowLeftRight, Copy, ExternalLink, Lightbulb, Link2, Sparkles, Waypoints } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Children, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { InsightBundle } from "../../lib/graph/analysis.worker";
 import type { GraphModel } from "../../lib/graph/model";
 
 const STALE_DAYS = 120;
+const INSIGHT_PREVIEW_COUNT = 6;
 
 interface GraphInsightsPanelProps {
   model: GraphModel;
@@ -45,6 +46,10 @@ export function GraphInsightsPanel({
     worker.onmessage = (event: MessageEvent<{ epoch: number; bundle: InsightBundle }>) => {
       if (event.data.epoch === epochRef.current) setBundle(event.data.bundle);
     };
+    // A crashed worker must not be indistinguishable from "no insights".
+    worker.onerror = (event) => {
+      console.error("[graph] insights worker failed — sections stay empty", event);
+    };
     worker.postMessage({ epoch, model, now, staleDays: STALE_DAYS });
     return () => worker.terminate();
   }, [model, now]);
@@ -66,7 +71,7 @@ export function GraphInsightsPanel({
           <div className="graph-insight-rowgroup" key={`${link.source}-${link.target}`}>
             <button
               type="button"
-              className="graph-insight-action"
+              className="graph-insight-action primary"
               title={t("graph.relation.apply")}
               data-testid="graph-insight-connect"
               onClick={() => onConnect(link.source, link.target)}
@@ -82,8 +87,13 @@ export function GraphInsightsPanel({
                 {label(link.source)} <ArrowLeftRight size={11} /> {label(link.target)}
               </span>
               <span className="graph-insight-meta">
-                {t("graph.insight.shared", { count: link.shared })}
+                {t("graph.insight.shared", { count: link.shared })} · {link.score.toFixed(2)}
               </span>
+              {link.via.length > 0 ? (
+                <span className="graph-insight-via" title={link.via.map(label).join(", ")}>
+                  {t("graph.insight.via", { nodes: link.via.slice(0, 3).map(label).join(", ") })}
+                </span>
+              ) : null}
             </button>
             <button
               type="button"
@@ -199,7 +209,14 @@ function InsightSection({
   count: number;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   const empty = count === 0;
+  // Show INSIGHT_PREVIEW_COUNT rows initially; a "more" expander reveals the
+  // rest (up to the section's existing limit).
+  const items = Children.toArray(children);
+  const shown = expanded ? items : items.slice(0, INSIGHT_PREVIEW_COUNT);
+  const hiddenCount = items.length - shown.length;
   return (
     <section className="graph-insight-section">
       <header className="graph-insight-header">
@@ -208,7 +225,23 @@ function InsightSection({
         </span>
         <span className="graph-insight-count">{count}</span>
       </header>
-      {empty ? <p className="graph-insight-hint">{hint}</p> : <div className="graph-insight-rows">{children}</div>}
+      {empty ? (
+        <p className="graph-insight-hint">{hint}</p>
+      ) : (
+        <div className="graph-insight-rows">
+          {shown}
+          {hiddenCount > 0 ? (
+            <button type="button" className="graph-insight-more" onClick={() => setExpanded(true)}>
+              {t("graph.insight.more", { count: hiddenCount })}
+            </button>
+          ) : null}
+          {expanded && items.length > INSIGHT_PREVIEW_COUNT ? (
+            <button type="button" className="graph-insight-more" onClick={() => setExpanded(false)}>
+              {t("graph.insight.less")}
+            </button>
+          ) : null}
+        </div>
+      )}
     </section>
   );
 }

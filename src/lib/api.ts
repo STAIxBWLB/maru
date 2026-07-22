@@ -21,6 +21,7 @@ import {
   readMockDocument,
 } from "./fixtures";
 import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
+import { denseMockEntries } from "./graph/fixtures";
 import { invokeE2EOverride } from "./e2eInvoke";
 import type {
   CreatedDocument,
@@ -256,7 +257,20 @@ export async function chooseSaveFile(
 }
 
 export async function scanVault(vaultPath: string, scanOptions?: ScanOptions): Promise<VaultEntry[]> {
-  if (!isTauri()) return mockEntries(vaultPath);
+  if (!isTauri()) {
+    // e2e opt-in: exercise the dense-graph path in web mode without a backend.
+    try {
+      if (
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("maru:e2e:graph-dense") === "1"
+      ) {
+        return denseMockEntries(vaultPath);
+      }
+    } catch {
+      /* ignore */
+    }
+    return mockEntries(vaultPath);
+  }
   return invoke<VaultEntry[]>("scan_vault", { vaultPath, scanOptions: scanOptions ?? null });
 }
 

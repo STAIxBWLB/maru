@@ -8,6 +8,7 @@ import {
 } from "../lib/neighborhood";
 import { buildEntryIndex } from "../lib/wikilinkSuggestions";
 import type { DocumentPayload, VaultEntry } from "../lib/types";
+import type { GraphLocalTarget } from "../lib/settings";
 
 interface NeighborhoodPaneProps {
   document: DocumentPayload;
@@ -16,7 +17,7 @@ interface NeighborhoodPaneProps {
   onSelectEntry: (entry: VaultEntry) => void;
   onMissingTarget?: (target: string) => void;
   /** Opens graph mode focused on this note (maru-vault-graph-spec §2.3). */
-  onOpenGraph?: (focusNodeId?: string) => void;
+  onOpenGraph?: (target: GraphLocalTarget) => void;
 }
 
 export function NeighborhoodPane({
@@ -48,7 +49,7 @@ export function NeighborhoodPane({
     backlinks.length === 0 &&
     data.peers.length === 0;
 
-  if (isEmpty) return null;
+  if (isEmpty && !onOpenGraph) return null;
 
   return (
     <section className="neighborhood">
@@ -58,11 +59,15 @@ export function NeighborhoodPane({
           <button
             type="button"
             className="neighborhood-graph-button"
-            onClick={() => {
-              const filename = document.relPath.split("/").pop() ?? document.relPath;
-              const stem = filename.replace(/\.(md|mdx|markdown)$/i, "").toLowerCase();
-              onOpenGraph(stem);
-            }}
+            onClick={() =>
+              onOpenGraph({
+                // The active document belongs to the root currently scanned by
+                // this pane. Nested workspace ownership is carried by graph
+                // nodes when present, but must never be guessed from a stem.
+                ownerWorkspacePath: null,
+                relPath: document.relPath,
+              })
+            }
             title={t("neighborhood.openGraph")}
           >
             <Waypoints size={12} />

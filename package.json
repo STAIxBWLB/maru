@@ -21,6 +21,8 @@
     "tauri:build": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri build",
     "test": "vitest run src",
     "test:e2e": "playwright test",
+    "test:e2e:graph": "playwright test e2e/graph.spec.ts e2e/graph-shell.spec.ts",
+    "bench:graph": "vitest bench src/lib/graph/perf.bench.ts --run",
     "typecheck": "tsc -b"
   },
   "dependencies": {

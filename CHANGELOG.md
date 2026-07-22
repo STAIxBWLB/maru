@@ -8,6 +8,46 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased — Graph workspace V5
+
+- **Adaptive graph workspace.** The graph shell measures its own width and
+  switches tiers: wide (≥1280, Filters + Workbench docked with drag-resize),
+  standard (920–1279, Filters as overlay), compact (<920, mutually exclusive
+  overlays). Docked visibility and widths persist in `MaruSettings.graph.panels`.
+- **Settings V2 with a single derive pipeline.** `GraphSettingsV2` adds
+  per-source filter profiles (domains/types/relations/community, generated/
+  unresolved visibility, min-visible-neighbors k-core pruning — replacing the
+  old scope toggle and min-degree), display settings (arrows, label density,
+  node/edge scale), panel state, and working saved views, with V1→V2
+  migration. `src/lib/graph/derive.ts` is the one pure pipeline behind the
+  canvas, insights, pathfinding, and export, with paused-filter reporting so
+  stale persisted selections never silently blank the graph.
+- **Untyped notes are authored content.** Notes without a frontmatter `type`
+  stay visible by default; only configured `generatedPatterns` paths count as
+  generated.
+- **Hardened renderer.** Explicit state machine
+  (loading / layout-running / ready / gpu-recovery / fallback / fatal),
+  zero-size mount gating, ResizeObserver-driven resize without camera moves,
+  camera-fit rules, pins synced to ForceAtlas2's native `fixed` attribute,
+  layout-worker error isolation, and disk-cache position validation.
+- **Canonical Local navigation and truthful visibility.** Neighborhood handoff
+  now carries source + workspace owner + relative path instead of a
+  collision-prone filename stem. Local focus survives facet, relation,
+  neighbor, and search filtering; every canvas edge, Inspector view, insight,
+  path, and export consumes the same derived visibility contract.
+- **Workbench, combobox, display controls.** Radix-tabbed Insights/Details
+  workbench with 6-row previews and via/score evidence on hidden-link
+  candidates; a ranked search combobox over the filtered graph;
+  arrows/label-density/scale controls hot-applied without rebuilds;
+  per-relation edge colors; production ★ favorite markers; and saved-view
+  create/apply/delete controls for source, mode, Local target, filters, and
+  display settings.
+- **Real-Sigma e2e.** The fake DOM test overlay is replaced by a dev-only
+  `window.__maruGraph` bridge driving the actual WebGL renderer
+  (`e2e/graph.spec.ts`), plus a shell-geometry regression suite
+  (`e2e/graph-shell.spec.ts`) covering the right-docked-terminal zero-size
+  canvas bug. `pnpm test:e2e:graph` and `pnpm bench:graph` scripts added.
+
 ## v0.4.11 — 2026-07-23 — Terminal Hardening + Scheduled Jobs
 
 - **Scheduled jobs registry (launchd).** Jobs are declared as data in
@@ -46,7 +86,6 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   one, buffered frames are acknowledged so backpressure cannot deadlock,
   unapplied frames force a real resync, launch no longer steals focus from a
   rename or search field, and clipboard copies respect soft wraps.
-
 ## v0.4.10 — 2026-07-22 — Unified Scratchpad
 
 - **One Scratchpad pane for memos, ideation, and AI temp files.** The right

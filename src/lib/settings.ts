@@ -197,7 +197,7 @@ export interface MaruSettings {
   meetings: MeetingsSettings;
   tasks: TasksSettings;
   diagram: DiagramSettings;
-  graph: GraphSettings;
+  graph: GraphSettingsV2;
   inboxChannels: Record<string, unknown>;
   composer: ComposerSettings;
   connectors: Record<string, unknown>;
@@ -306,27 +306,100 @@ export interface DiagramSettings {
 export const DIAGRAM_RECENT_PATTERNS_CAP = 12;
 export const DIAGRAM_FAVORITE_PATTERNS_CAP = 24;
 
-export interface GraphSettings {
-  source: "vault" | "workspace" | "all";
-  scope: "connected" | "all";
+export type GraphSource = "vault" | "workspace";
+export type GraphMode = "global" | "local" | "chains";
+
+export interface GraphFilterProfile {
+  domains: string[];
+  types: string[];
+  relations: string[];
+  community: number | null;
+  showUnresolved: boolean;
+  showGenerated: boolean;
+  /** Minimum distinct visible neighbors; 0 = all authored notes. */
+  minVisibleNeighbors: number;
+}
+
+export interface GraphDisplaySettings {
+  arrows: "typed" | "all" | "none";
+  labels: "low" | "balanced" | "high";
+  nodeScale: number;
+  edgeScale: number;
+}
+
+export interface GraphLocalTarget {
+  ownerWorkspacePath: string | null;
+  relPath: string;
+}
+
+/** Canonical handoff into graph mode. Source is explicit because the same
+ * relative path may exist in both the active vault and the full workspace. */
+export interface GraphOpenTarget {
+  source: GraphSource;
+  localTarget: GraphLocalTarget;
+}
+
+/** Saved view: source/mode/local target/filter profile/display only —
+ *  transient query, selection, path, camera, overlay state excluded. */
+export interface GraphSavedView {
+  id: string;
+  name: string;
+  source: GraphSource;
+  mode: GraphMode;
+  localTarget: GraphLocalTarget | null;
+  profile: GraphFilterProfile;
+  display: GraphDisplaySettings;
+}
+
+export interface GraphPanelSettings {
+  filtersOpen: boolean;
+  workbenchOpen: boolean;
+  filterWidth: number;
+  workbenchWidth: number;
+}
+
+export interface GraphSettingsV2 {
+  schemaVersion: 2;
+  source: GraphSource;
+  mode: GraphMode;
   localDepth: 1 | 2 | 3;
   localDirection: "both" | "incoming" | "outgoing";
-  view: "graph" | "chains";
   searchAsFilter: boolean;
-  /** relPath patterns treated as auto-generated noise: trailing "/" = prefix
+  /** relPath patterns treated as generated content: trailing "/" = prefix
    *  match, otherwise exact filename match (case-insensitive). */
-  noisePatterns: string[];
-  filters: {
-    domains: string[];
-    types: string[];
-    community: number | null;
-    showGhosts: boolean;
-    showNoise: boolean;
-    minDegree: number;
+  generatedPatterns: string[];
+  profiles: Record<GraphSource, GraphFilterProfile>;
+  display: GraphDisplaySettings;
+  panels: GraphPanelSettings;
+  savedViews: GraphSavedView[];
+}
+
+export const GRAPH_FILTER_WIDTH_MIN = 200;
+export const GRAPH_FILTER_WIDTH_MAX = 340;
+export const GRAPH_WORKBENCH_WIDTH_MIN = 280;
+export const GRAPH_WORKBENCH_WIDTH_MAX = 480;
+export const GRAPH_SCALE_MIN = 0.5;
+export const GRAPH_SCALE_MAX = 2;
+
+export const DEFAULT_GRAPH_GENERATED_PATTERNS = ["reports/", "log.md"];
+
+export function defaultGraphFilterProfile(): GraphFilterProfile {
+  return {
+    domains: [],
+    types: [],
+    relations: [],
+    community: null,
+    showUnresolved: false,
+    showGenerated: false,
+    minVisibleNeighbors: 1,
   };
 }
 
-export const DEFAULT_GRAPH_NOISE_PATTERNS = ["reports/", "log.md"];
+export function defaultGraphDisplay(): GraphDisplaySettings {
+  return { arrows: "typed", labels: "balanced", nodeScale: 1, edgeScale: 1 };
+}
+
+export const DEFAULT_GRAPH_NOISE_PATTERNS = DEFAULT_GRAPH_GENERATED_PATTERNS;
 
 export const COMMS_PROVIDER_RESULTS_MIN = 1;
 export const COMMS_PROVIDER_RESULTS_MAX = 200;
@@ -485,21 +558,25 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     recentPatterns: [],
   },
   graph: {
+    schemaVersion: 2,
     source: "vault",
-    scope: "connected",
+    mode: "global",
     localDepth: 2,
     localDirection: "both",
-    view: "graph",
     searchAsFilter: false,
-    noisePatterns: DEFAULT_GRAPH_NOISE_PATTERNS,
-    filters: {
-      domains: [],
-      types: [],
-      community: null,
-      showGhosts: false,
-      showNoise: false,
-      minDegree: 1,
+    generatedPatterns: DEFAULT_GRAPH_GENERATED_PATTERNS,
+    profiles: {
+      vault: defaultGraphFilterProfile(),
+      workspace: defaultGraphFilterProfile(),
     },
+    display: defaultGraphDisplay(),
+    panels: {
+      filtersOpen: true,
+      workbenchOpen: true,
+      filterWidth: 248,
+      workbenchWidth: 344,
+    },
+    savedViews: [],
   },
   inboxChannels: {},
   composer: {
@@ -906,11 +983,24 @@ function cloneDefaultSettings(): MaruSettings {
     },
     graph: {
       ...DEFAULT_MARU_SETTINGS.graph,
-      filters: {
-        ...DEFAULT_MARU_SETTINGS.graph.filters,
-        domains: [...DEFAULT_MARU_SETTINGS.graph.filters.domains],
-        types: [...DEFAULT_MARU_SETTINGS.graph.filters.types],
+      generatedPatterns: [...DEFAULT_MARU_SETTINGS.graph.generatedPatterns],
+      profiles: {
+        vault: {
+          ...DEFAULT_MARU_SETTINGS.graph.profiles.vault,
+          domains: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.domains],
+          types: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.types],
+          relations: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.relations],
+        },
+        workspace: {
+          ...DEFAULT_MARU_SETTINGS.graph.profiles.workspace,
+          domains: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.domains],
+          types: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.types],
+          relations: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.relations],
+        },
       },
+      display: { ...DEFAULT_MARU_SETTINGS.graph.display },
+      panels: { ...DEFAULT_MARU_SETTINGS.graph.panels },
+      savedViews: [],
     },
     inboxChannels: {},
     composer: {
@@ -960,37 +1050,196 @@ function normalizeDiagramSettings(value: unknown): DiagramSettings {
   };
 }
 
-function normalizeGraphSettings(value: unknown): GraphSettings {
-  const graph = isRecord(value) ? value : {};
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeGraphFilterProfile(value: unknown): GraphFilterProfile {
+  const profile = isRecord(value) ? value : {};
+  const defaults = defaultGraphFilterProfile();
+  const community = profile.community;
+  const minNeighbors = Number(profile.minVisibleNeighbors);
+  return {
+    domains: parseStringArray(profile.domains),
+    types: parseStringArray(profile.types),
+    relations: parseStringArray(profile.relations),
+    community:
+      typeof community === "number" && Number.isFinite(community) ? community : null,
+    showUnresolved: profile.showUnresolved === true,
+    showGenerated: profile.showGenerated === true,
+    minVisibleNeighbors:
+      profile.minVisibleNeighbors === undefined
+        ? defaults.minVisibleNeighbors
+        : Number.isFinite(minNeighbors) && minNeighbors > 0
+          ? Math.floor(minNeighbors)
+          : 0,
+  };
+}
+
+function normalizeGraphDisplay(value: unknown): GraphDisplaySettings {
+  const display = isRecord(value) ? value : {};
+  return {
+    arrows:
+      display.arrows === "all" || display.arrows === "none" ? display.arrows : "typed",
+    labels:
+      display.labels === "low" || display.labels === "high" ? display.labels : "balanced",
+    nodeScale: clampNumber(display.nodeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
+    edgeScale: clampNumber(display.edgeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
+  };
+}
+
+function normalizeGraphPanels(value: unknown): GraphPanelSettings {
+  const panels = isRecord(value) ? value : {};
+  return {
+    filtersOpen: panels.filtersOpen !== false,
+    workbenchOpen: panels.workbenchOpen !== false,
+    filterWidth: Math.round(
+      clampNumber(panels.filterWidth, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX, 248),
+    ),
+    workbenchWidth: Math.round(
+      clampNumber(panels.workbenchWidth, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX, 344),
+    ),
+  };
+}
+
+function normalizeGraphLocalTarget(value: unknown): GraphLocalTarget | null {
+  if (!isRecord(value)) return null;
+  const relPath = typeof value.relPath === "string" ? value.relPath.trim() : "";
+  if (!relPath) return null;
+  return {
+    ownerWorkspacePath:
+      typeof value.ownerWorkspacePath === "string" && value.ownerWorkspacePath.trim()
+        ? value.ownerWorkspacePath
+        : null,
+    relPath,
+  };
+}
+
+function normalizeGraphSavedViews(value: unknown): GraphSavedView[] {
+  if (!Array.isArray(value)) return [];
+  const views: GraphSavedView[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!id || !name) continue;
+    views.push({
+      id,
+      name,
+      source: item.source === "workspace" ? "workspace" : "vault",
+      mode: item.mode === "local" || item.mode === "chains" ? item.mode : "global",
+      localTarget: normalizeGraphLocalTarget(item.localTarget),
+      profile: normalizeGraphFilterProfile(item.profile),
+      display: normalizeGraphDisplay(item.display),
+    });
+  }
+  return views.slice(0, 50);
+}
+
+/** V1 (pre-V5) graph settings shape, accepted only as migration input. */
+interface GraphSettingsV1 {
+  source?: unknown;
+  scope?: unknown;
+  view?: unknown;
+  localDepth?: unknown;
+  localDirection?: unknown;
+  searchAsFilter?: unknown;
+  noisePatterns?: unknown;
+  filters?: {
+    domains?: unknown;
+    types?: unknown;
+    community?: unknown;
+    showGhosts?: unknown;
+    showNoise?: unknown;
+    minDegree?: unknown;
+  };
+}
+
+/** V1 -> V2 migration: `all` -> workspace; showGhosts -> showUnresolved;
+ *  showNoise -> showGenerated; connectivity -> max(minDegree, connected ? 1 : 0).
+ *  Legacy filters copy only into the previously active source's profile. */
+function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
   const filters = isRecord(graph.filters) ? graph.filters : {};
   const community = filters.community;
   const minDegree = Number(filters.minDegree);
-  const noisePatterns = graph.noisePatterns === undefined
-    ? DEFAULT_GRAPH_NOISE_PATTERNS
-    : parseStringArray(graph.noisePatterns).map((pattern) => pattern.trim()).filter(Boolean);
+  const connected = graph.scope !== "all";
+  const source: GraphSource =
+    graph.source === "workspace" || graph.source === "all" ? "workspace" : "vault";
+  // V1 treated "unknown" as authored data only while showNoise was enabled.
+  // Preserve that behavior when translating the old filter into V2's explicit
+  // "untyped" authored-content type.
+  const legacyTypes = parseStringArray(filters.types);
+  const types = legacyTypes.flatMap((type) => {
+    if (type !== "unknown") return [type];
+    return filters.showNoise === true ? ["untyped"] : [];
+  });
+  const profile: GraphFilterProfile = {
+    domains: parseStringArray(filters.domains),
+    types,
+    relations: [],
+    community:
+      typeof community === "number" && Number.isFinite(community) ? community : null,
+    showUnresolved: filters.showGhosts === true,
+    showGenerated: filters.showNoise === true,
+    minVisibleNeighbors: Math.max(
+      Number.isFinite(minDegree) && minDegree > 0 ? Math.floor(minDegree) : 0,
+      connected ? 1 : 0,
+    ),
+  };
   return {
-    source: graph.source === "workspace" || graph.source === "all" ? graph.source : "vault",
-    scope: graph.scope === "all" ? "all" : "connected",
+    schemaVersion: 2,
+    source,
+    mode: graph.view === "chains" ? "chains" : "global",
     localDepth: graph.localDepth === 1 || graph.localDepth === 3 ? graph.localDepth : 2,
     localDirection:
       graph.localDirection === "incoming" || graph.localDirection === "outgoing"
         ? graph.localDirection
         : "both",
-    view: graph.view === "chains" ? "chains" : "graph",
     searchAsFilter: graph.searchAsFilter === true,
-    noisePatterns,
-    filters: {
-      domains: parseStringArray(filters.domains),
-      types: parseStringArray(filters.types),
-      community:
-        typeof community === "number" && Number.isFinite(community) ? community : null,
-      showGhosts: filters.showGhosts === true,
-      showNoise: filters.showNoise === true,
-      // Stored values are respected as-is; only a missing key gets the new default of 1.
-      minDegree: filters.minDegree === undefined
-        ? 1
-        : Number.isFinite(minDegree) && minDegree > 0 ? Math.floor(minDegree) : 0,
+    // An explicit empty array is preserved (user cleared the defaults).
+    generatedPatterns:
+      graph.noisePatterns === undefined
+        ? DEFAULT_GRAPH_GENERATED_PATTERNS
+        : parseStringArray(graph.noisePatterns).map((p) => p.trim()).filter(Boolean),
+    profiles: {
+      vault: source === "vault" ? profile : defaultGraphFilterProfile(),
+      workspace: source === "workspace" ? profile : defaultGraphFilterProfile(),
     },
+    display: defaultGraphDisplay(),
+    panels: normalizeGraphPanels(undefined),
+    savedViews: [],
+  };
+}
+
+function normalizeGraphSettings(value: unknown): GraphSettingsV2 {
+  const graph = isRecord(value) ? value : {};
+  if (graph.schemaVersion !== 2) {
+    return migrateGraphSettingsV1(graph as GraphSettingsV1);
+  }
+  const profiles = isRecord(graph.profiles) ? graph.profiles : {};
+  return {
+    schemaVersion: 2,
+    source: graph.source === "workspace" ? "workspace" : "vault",
+    mode: graph.mode === "local" || graph.mode === "chains" ? graph.mode : "global",
+    localDepth: graph.localDepth === 1 || graph.localDepth === 3 ? graph.localDepth : 2,
+    localDirection:
+      graph.localDirection === "incoming" || graph.localDirection === "outgoing"
+        ? graph.localDirection
+        : "both",
+    searchAsFilter: graph.searchAsFilter === true,
+    generatedPatterns:
+      graph.generatedPatterns === undefined
+        ? DEFAULT_GRAPH_GENERATED_PATTERNS
+        : parseStringArray(graph.generatedPatterns).map((p) => p.trim()).filter(Boolean),
+    profiles: {
+      vault: normalizeGraphFilterProfile(profiles.vault),
+      workspace: normalizeGraphFilterProfile(profiles.workspace),
+    },
+    display: normalizeGraphDisplay(graph.display),
+    panels: normalizeGraphPanels(graph.panels),
+    savedViews: normalizeGraphSavedViews(graph.savedViews),
   };
 }
 
