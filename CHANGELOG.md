@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased
+## v0.4.14 — 2026-07-23 — In-App Terminal Refocus
 
 - **In-app terminal refocus fix (field-traced).** Clicking back into the
   terminal after focusing the editor left it key-dead: the pointerdown
