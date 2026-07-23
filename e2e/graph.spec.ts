@@ -156,12 +156,27 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
     (frame) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.frames() > frame,
     settled,
   );
-  const point = await nodePoint(page, id);
   // Real users move the pointer onto a node before double-clicking. Warming
   // Sigma's picking pass avoids Playwright's instantaneous pointer teleport
-  // racing the hover/hit buffer.
-  await page.mouse.move(point.x, point.y, { steps: 3 });
-  await expect.poll(() => hoveredId(page)).toBe(id);
+  // racing the hover/hit buffer. Hover only updates on mousemove: a move that
+  // lands on a stale picking buffer never registers no matter how long the
+  // poll waits, because a repeat move to the same pixel emits no event. Retry
+  // with a 1px jiggle over a freshly requested frame instead (CI's software
+  // GL can leave the first post-settle buffer stale).
+  let point = await nodePoint(page, id);
+  for (let attempt = 0; ; attempt += 1) {
+    await page.mouse.move(point.x + (attempt % 2), point.y, { steps: 3 });
+    try {
+      await expect.poll(() => hoveredId(page), { timeout: 2_000 }).toBe(id);
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      await page.evaluate(() => {
+        (window as unknown as { __maruGraph: Bridge }).__maruGraph.requestRender();
+      });
+      point = await nodePoint(page, id);
+    }
+  }
   await page.mouse.dblclick(point.x, point.y);
 }
 
