@@ -500,6 +500,9 @@ describe("normalizeMaruSettings", () => {
       left: "preview",
       right: "rich",
     });
+    // The legacy mirror must equal the normalized left pane even when the raw
+    // left value was junk, or the two fields desync.
+    expect(partial.ui.editorViewMode).toBe("preview");
   });
 
   it("migrates graph V2 settings to the canvas-first V3 contract", () => {
@@ -576,7 +579,8 @@ describe("normalizeMaruSettings", () => {
       labels: "high",
       colorMode: "community",
       relationColors: true,
-      theme: "dark",
+      // Pre-V3 graphs followed the app theme; migration preserves that.
+      theme: "app",
       accent: "violet",
       nodeScale: 1.4,
       edgeScale: 0.8,
@@ -592,6 +596,21 @@ describe("normalizeMaruSettings", () => {
     });
     expect(settings.graph.savedViews[0].display.arrows).toBe("none");
     expect(settings.graph.savedViews[0].display.labels).toBe("balanced");
+  });
+
+  it("keeps migrated default-display V2 graphs on the app theme", () => {
+    const settings = normalizeMaruSettings({
+      graph: { schemaVersion: 2, source: "vault" },
+    });
+    expect(settings.graph.schemaVersion).toBe(3);
+    expect(settings.graph.display.theme).toBe("app");
+  });
+
+  it("gives fresh installs the dark graph theme without a migration pass", () => {
+    const settings = normalizeMaruSettings({});
+    expect(settings.graph.schemaVersion).toBe(3);
+    expect(settings.graph.display.theme).toBe("dark");
+    expect(settings.graph.savedViews).toEqual([]);
   });
 
   it("round-trips graph V3 appearance and drawer settings", () => {

@@ -625,6 +625,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
   const legacyAi = isRecord(value.ai) ? value.ai : {};
   const legacyRuntimes = isRecord(legacyAi.runtimes) ? legacyAi.runtimes : {};
   const layout = normalizeLayout(ui.layout, terminal);
+  const editorPaneViewModes = normalizeEditorPaneViewModes(
+    ui.editorPaneViewModes,
+    parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
+  );
 
   return {
     version: 1,
@@ -632,14 +636,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       activeAppMode: parseMaruAppMode(ui.activeAppMode) ?? "pkm",
       activeWorkspaceVisibility:
         parseWorkspaceVisibilitySetting(ui.activeWorkspaceVisibility) ?? "private",
-      editorViewMode:
-        parseEditorViewModeSetting(
-          isRecord(ui.editorPaneViewModes) ? ui.editorPaneViewModes.left : ui.editorViewMode,
-        ) ?? "source",
-      editorPaneViewModes: normalizeEditorPaneViewModes(
-        ui.editorPaneViewModes,
-        parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
-      ),
+      // Legacy mirror always equals the normalized left pane so both fields
+      // can never desync, whatever junk the raw input contained.
+      editorViewMode: editorPaneViewModes.left,
+      editorPaneViewModes,
       rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "workspace",
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
@@ -1155,7 +1155,9 @@ function normalizeLegacyGraphDisplay(value: unknown): GraphDisplaySettings {
       display.labels === "low" || display.labels === "high" ? display.labels : "balanced",
     colorMode: "community",
     relationColors: true,
-    theme: "dark",
+    // Pre-V3 graphs always followed the app theme; keep that for migrated data.
+    // Only fresh installs adopt the new dark default.
+    theme: "app",
     accent: "violet",
     nodeScale: clampNumber(display.nodeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
     edgeScale: clampNumber(display.edgeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
@@ -1378,7 +1380,7 @@ function migrateGraphSettingsV2(graph: Record<string, unknown>): GraphSettingsV3
       vault: migrateProfile(profiles.vault),
       workspace: migrateProfile(profiles.workspace),
     },
-    display: isDefaultDisplay ? defaultGraphDisplay() : legacyDisplay,
+    display: isDefaultDisplay ? { ...defaultGraphDisplay(), theme: "app" } : legacyDisplay,
     panels: migrateLegacyGraphPanels(graph.panels),
     savedViews: normalizeGraphSavedViews(graph.savedViews, true),
   };
@@ -1389,7 +1391,9 @@ function normalizeGraphSettings(value: unknown): GraphSettingsV3 {
   if (graph.schemaVersion === 2) {
     return migrateGraphSettingsV2(graph);
   }
-  if (graph.schemaVersion !== 3) {
+  // Fresh installs (no stored graph settings) skip migration and take the V3
+  // defaults below; only real pre-V3 data routes through the migration chain.
+  if (graph.schemaVersion !== 3 && Object.keys(graph).length > 0) {
     return migrateGraphSettingsV2(
       migrateGraphSettingsV1(graph as GraphSettingsV1) as unknown as Record<string, unknown>,
     );
