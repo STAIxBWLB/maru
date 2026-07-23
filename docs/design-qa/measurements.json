@@ -19,9 +19,9 @@
     {
       "selector": ".today-sidebar",
       "property": "width",
-      "expected": 350,
+      "expected": 240,
       "tolerance": 2,
-      "measured": 350,
+      "measured": 240,
       "within": true
     },
     {
@@ -35,17 +35,17 @@
     {
       "selector": ".today-panel-braindump",
       "property": "width",
-      "expected": 401.72,
+      "expected": 441.61,
       "tolerance": 4,
-      "measured": 401.7,
+      "measured": 441.61,
       "within": true
     },
     {
       "selector": ".today-panel-capture",
       "property": "width",
-      "expected": 615.29,
+      "expected": 676.39,
       "tolerance": 4,
-      "measured": 615.3,
+      "measured": 676.39,
       "within": true
     }
   ],
@@ -54,8 +54,8 @@
       "width": 1487,
       "height": 1058
     },
-    "brainDumpWidth": 401.7,
-    "captureWidth": 615.3,
+    "brainDumpWidth": 441.61,
+    "captureWidth": 676.39,
     "measuredSplit": "39.5/60.5",
     "docScrollWidth": 1487,
     "docClientWidth": 1487
@@ -65,8 +65,8 @@
       "width": 1440,
       "height": 920
     },
-    "brainDumpWidth": 383.14,
-    "captureWidth": 586.86,
+    "brainDumpWidth": 423.03,
+    "captureWidth": 647.97,
     "sideBySide": true
   },
   "compact": {
@@ -74,9 +74,9 @@
       "width": 1024,
       "height": 720
     },
-    "sidebarWidth": 280,
-    "brainDumpWidth": 640,
-    "captureWidth": 640,
+    "sidebarWidth": 240,
+    "brainDumpWidth": 671,
+    "captureWidth": 671,
     "stacked": true,
     "docScrollWidth": 1024,
     "docClientWidth": 1024

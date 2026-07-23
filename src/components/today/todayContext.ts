@@ -21,8 +21,8 @@ export interface TodayContextValue {
   /** True while the first `todayOpen` is in flight. */
   loading: boolean;
   /** Apply a mutation against the current revision. Returns the new
-   *  snapshot, or null in degraded mode / on failure (conflicts trigger a
-   *  reload so the next call uses a fresh revision). */
+   *  snapshot, or null in degraded mode / on failure (a conflict reloads
+   *  the snapshot and retries the serialized mutation once). */
   mutate: (mutation: TodayMutation) => Promise<TodaySnapshot | null>;
   /** Re-run `todayOpen` (e.g. after an optimistic-concurrency conflict). */
   reload: () => Promise<void>;

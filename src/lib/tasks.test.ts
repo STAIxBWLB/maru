@@ -261,11 +261,26 @@ describe("today task fields", () => {
       todayRow({ title: "Aliased", projects: ["alpha", "beta"] }),
     ]);
     expect(entry.project).toBe("alpha");
+    expect(entry.projects).toEqual(["alpha", "beta"]);
+    expect(entry.projectKeys).toEqual(["raw:alpha", "raw:beta"]);
 
     const [canonical] = rowsToTaskEntries([
       todayRow({ title: "Canonical", project: "gamma", projects: ["alpha"] }),
     ]);
     expect(canonical.project).toBe("gamma");
+    expect(canonical.projects).toEqual(["gamma"]);
+  });
+
+  it("accepts scalar projects and uses the scanner-provided H1 title", () => {
+    const [entry] = rowsToTaskEntries([
+      {
+        ...todayRow({ projects: "admin-ai-innovation" }),
+        displayTitle: "AI혁신처 운영 정리",
+      },
+    ]);
+    expect(entry.title).toBe("AI혁신처 운영 정리");
+    expect(entry.projects).toEqual(["admin-ai-innovation"]);
+    expect(entry.projectLabels).toEqual(["Admin AI innovation"]);
   });
 });
 

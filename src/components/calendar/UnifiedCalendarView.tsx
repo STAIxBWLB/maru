@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Loader2, PanelLeft } from "lucide-react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { MonthGrid } from "./MonthGrid";
 import { WeekGrid } from "./WeekGrid";
 import { DayAgenda } from "./DayAgenda";
@@ -12,6 +12,8 @@ import type {
 } from "../../lib/calendar/types";
 import type { DocumentLabelMode } from "../../lib/settings";
 import { t } from "../../lib/i18n";
+import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
+import { PaneResizeHandle } from "../ui/PaneResizeHandle";
 
 export interface UnifiedCalendarViewProps<T> {
   events: Array<UnifiedCalendarEvent<T>>;
@@ -33,6 +35,9 @@ export interface UnifiedCalendarViewProps<T> {
   startHour?: number;
   loadingLabel?: string;
   footer?: ReactNode;
+  agendaWidth?: number;
+  onAgendaWidthChange?: (value: number) => void;
+  onAgendaWidthCommit?: (value: number) => void;
 }
 
 export function UnifiedCalendarView<T>({
@@ -55,21 +60,68 @@ export function UnifiedCalendarView<T>({
   startHour = 0,
   loadingLabel,
   footer,
+  agendaWidth = 220,
+  onAgendaWidthChange,
+  onAgendaWidthCommit,
 }: UnifiedCalendarViewProps<T>) {
   const todayDate = today ?? new Date();
+  const [agendaOpen, setAgendaOpen] = useState(false);
+  const resizableAgenda = Boolean(onAgendaWidthChange && onAgendaWidthCommit);
   return (
-    <section className="unified-calendar">
-      <UpcomingEventsSidebar
-        events={events}
-        view={view}
-        viewDate={viewDate}
-        weekStartsOn={weekStartsOn}
-        today={todayDate}
-        locale={locale}
-        labelMode={labelMode}
-        onSelectEvent={onSelectEvent}
-        emptyLabel={emptyLabel}
+    <section
+      className={[
+        "unified-calendar",
+        agendaOpen ? "agenda-open" : "",
+        resizableAgenda ? "resizable-agenda" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={{ "--calendar-agenda-width": `${agendaWidth}px` } as CSSProperties}
+    >
+      <button
+        type="button"
+        className="cal-agenda-backdrop"
+        aria-label={t(locale, "calendar.agenda.close")}
+        onClick={() => setAgendaOpen(false)}
       />
+      <button
+        type="button"
+        className="cal-agenda-toggle"
+        aria-label={t(locale, "calendar.agenda.open")}
+        aria-expanded={agendaOpen}
+        onClick={() => setAgendaOpen((open) => !open)}
+      >
+        <PanelLeft size={15} />
+      </button>
+      <div className="cal-agenda-pane">
+        <UpcomingEventsSidebar
+          events={events}
+          view={view}
+          viewDate={viewDate}
+          weekStartsOn={weekStartsOn}
+          today={todayDate}
+          locale={locale}
+          labelMode={labelMode}
+          onSelectEvent={(event) => {
+            setAgendaOpen(false);
+            onSelectEvent?.(event);
+          }}
+          emptyLabel={emptyLabel}
+        />
+      </div>
+      {resizableAgenda ? (
+        <div className="cal-agenda-resizer">
+          <PaneResizeHandle
+            label={t(locale, "calendar.agenda.resize")}
+            value={agendaWidth}
+            min={TODAY_LAYOUT_LIMITS.calendarAgendaWidth.min}
+            max={TODAY_LAYOUT_LIMITS.calendarAgendaWidth.max}
+            defaultValue={TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue}
+            onChange={onAgendaWidthChange!}
+            onCommit={onAgendaWidthCommit!}
+          />
+        </div>
+      ) : null}
       <section className="cal-main">
         <UnifiedCalendarToolbar
           view={view}

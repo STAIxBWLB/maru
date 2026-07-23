@@ -5,12 +5,9 @@
 
 import {
   Calendar,
-  CalendarClock,
   CircleCheck,
-  Inbox,
   ListTodo,
   Play,
-  ScrollText,
   Sunrise,
 } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
@@ -28,8 +25,6 @@ export function TodaySidebar({
   route,
   onRouteChange,
   calendarCount,
-  inboxCount,
-  upcomingCount,
 }: TodaySidebarProps) {
   const { t } = useTranslation();
 
@@ -42,12 +37,9 @@ export function TodaySidebar({
   const relatedItems: Array<{
     route: TodayRoute;
     label: string;
-    icon: typeof Inbox;
+    icon: typeof ListTodo;
     count?: number;
   }> = [
-    { route: "capture", label: t("today.nav.inbox"), icon: Inbox, count: inboxCount },
-    { route: "upcoming", label: t("today.nav.upcoming"), icon: CalendarClock, count: upcomingCount },
-    { route: "log", label: t("today.nav.log"), icon: ScrollText },
     { route: "all", label: t("today.nav.allTasks"), icon: ListTodo },
   ];
 

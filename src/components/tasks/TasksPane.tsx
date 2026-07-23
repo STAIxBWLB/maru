@@ -8,10 +8,12 @@ import {
   RefreshCcw,
   Search,
   Settings,
+  SlidersHorizontal,
   WandSparkles,
+  X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { format, parseISO } from "date-fns";
 import {
   appendTasksLog,
   createTaskNote,
@@ -22,8 +24,10 @@ import {
   updateTaskStatus,
 } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
-import type { DocumentLabelMode, TasksSettings } from "../../lib/settings";
+import type { DocumentLabelMode, LayoutSettings, TasksSettings } from "../../lib/settings";
+import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
 import { resolveDisplayLabel } from "../../lib/document";
+import { listWorkspaceProjects } from "../../lib/maruDir";
 import {
   skillsDispatchBackground,
   skillsRuntimeStatus,
@@ -38,6 +42,7 @@ import {
   filterTasksByQuery,
   groupTasksByStatus,
   rowsToTaskEntries,
+  resolveTaskEntryProjects,
   selectVisibleTask,
   type TaskEntry,
   type TaskPriority,
@@ -46,6 +51,7 @@ import type {
   CreateTaskDraft,
   TaskDetailsPatch,
   MissionRecord,
+  ProjectPickerEntry,
   TaskMetadata,
   TaskNoteRow,
   TaskStatus,
@@ -60,6 +66,7 @@ import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedTaskEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView } from "../../lib/calendar/types";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { PaneResizeHandle } from "../ui/PaneResizeHandle";
 
 export interface TasksPaneProps {
   workPath: string | null;
@@ -90,6 +97,16 @@ export interface TasksPaneProps {
   }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   onError: (message: string | null) => void;
+  layout?: Pick<
+    LayoutSettings,
+    "tasksSidebarWidth" | "calendarAgendaWidth" | "taskDetailsWidth"
+  >;
+  onLayoutChange?: (
+    patch: Partial<
+      Pick<LayoutSettings, "tasksSidebarWidth" | "calendarAgendaWidth" | "taskDetailsWidth">
+    >,
+  ) => void;
+  logicalDay?: string | null;
 }
 
 type TasksDisplayView = "month" | "week" | "day" | "list";
@@ -114,9 +131,13 @@ export function TasksPane({
   onConfirmApproval,
   onRevealPath,
   onError,
+  layout,
+  onLayoutChange,
+  logicalDay,
 }: TasksPaneProps) {
   const { t, locale } = useTranslation();
   const [rows, setRows] = useState<TaskNoteRow[]>([]);
+  const [projectCatalog, setProjectCatalog] = useState<ProjectPickerEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<TasksFilterView>("scheduled");
@@ -129,13 +150,28 @@ export function TasksPane({
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [naturalScheduleOpen, setNaturalScheduleOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [detailDirty, setDetailDirty] = useState(false);
-  const [viewDate, setViewDate] = useState<Date>(() => new Date());
+  const [viewDate, setViewDate] = useState<Date>(() =>
+    logicalDay ? parseISO(`${logicalDay}T12:00:00`) : new Date(),
+  );
   const [bodyHits, setBodyHits] = useState<Set<string>>(() => new Set());
+  const [tasksSidebarWidth, setTasksSidebarWidth] = useState(
+    layout?.tasksSidebarWidth ?? TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
+  );
+  const [calendarAgendaWidth, setCalendarAgendaWidth] = useState(
+    layout?.calendarAgendaWidth ?? TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
+  );
+  const [taskDetailsWidth, setTaskDetailsWidth] = useState(
+    layout?.taskDetailsWidth ?? TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
+  );
   const debouncedQuery = useDebouncedValue(query, 250);
-  const today = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
-  const todayDate = useMemo(() => new Date(), []);
-  const entries = useMemo(() => rowsToTaskEntries(rows), [rows]);
+  const today = logicalDay ?? format(new Date(), "yyyy-MM-dd");
+  const todayDate = useMemo(() => parseISO(`${today}T12:00:00`), [today]);
+  const entries = useMemo(
+    () => resolveTaskEntryProjects(rowsToTaskEntries(rows), projectCatalog),
+    [projectCatalog, rows],
+  );
   const visibleEntries = useMemo(() => {
     const titleMatches = filterTasksByQuery(entries, query, {
       ...filtersForView(view),
@@ -194,6 +230,46 @@ export function TasksPane({
     () => mergedMissions.filter((mission) => mission.status === "running" || mission.status === "idle").length,
     [mergedMissions],
   );
+
+  useEffect(() => {
+    setViewDate(todayDate);
+  }, [today, todayDate]);
+
+  useEffect(() => {
+    if (layout?.tasksSidebarWidth !== undefined) {
+      setTasksSidebarWidth(layout.tasksSidebarWidth);
+    }
+  }, [layout?.tasksSidebarWidth]);
+
+  useEffect(() => {
+    if (layout?.calendarAgendaWidth !== undefined) {
+      setCalendarAgendaWidth(layout.calendarAgendaWidth);
+    }
+  }, [layout?.calendarAgendaWidth]);
+
+  useEffect(() => {
+    if (layout?.taskDetailsWidth !== undefined) {
+      setTaskDetailsWidth(layout.taskDetailsWidth);
+    }
+  }, [layout?.taskDetailsWidth]);
+
+  useEffect(() => {
+    if (!workPath) {
+      setProjectCatalog([]);
+      return;
+    }
+    let cancelled = false;
+    void listWorkspaceProjects(workPath, true)
+      .then((projects) => {
+        if (!cancelled) setProjectCatalog(projects);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectCatalog([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workPath]);
 
   useEffect(() => {
     if (tasksMissions.length === 0) return;
@@ -459,28 +535,69 @@ export function TasksPane({
             ? "tasks-pane"
             : "tasks-pane details-collapsed"
       }
+      style={
+        {
+          "--tasks-sidebar-width": `${tasksSidebarWidth}px`,
+          "--task-details-width": `${taskDetailsWidth}px`,
+        } as CSSProperties
+      }
     >
-      <TasksSidebar
-        entries={entries}
-        activeView={view}
-        selectedProject={projectFilter}
-        activeSection={section}
-        progressCount={progressCount}
-        onViewChange={(next) => {
-          setView(next);
-          setSection("tasks");
-        }}
-        onProjectChange={(next) => {
-          setProjectFilter(next);
-          setSection("tasks");
-        }}
-        onSectionChange={setSection}
-        today={today}
+      <div className={filtersOpen ? "tasks-sidebar-shell open" : "tasks-sidebar-shell"}>
+        <button
+          type="button"
+          className="tasks-sidebar-close"
+          aria-label={t("tasks.layout.closeFilters")}
+          onClick={() => setFiltersOpen(false)}
+        >
+          <X size={15} />
+        </button>
+        <TasksSidebar
+          entries={entries}
+          activeView={view}
+          selectedProject={projectFilter}
+          activeSection={section}
+          progressCount={progressCount}
+          onViewChange={(next) => {
+            setView(next);
+            setSection("tasks");
+            setFiltersOpen(false);
+          }}
+          onProjectChange={(next) => {
+            setProjectFilter(next);
+            setSection("tasks");
+            setFiltersOpen(false);
+          }}
+          onSectionChange={(next) => {
+            setSection(next);
+            setFiltersOpen(false);
+          }}
+          today={today}
+        />
+      </div>
+      <PaneResizeHandle
+        label={t("tasks.layout.resizeFilters")}
+        value={tasksSidebarWidth}
+        min={TODAY_LAYOUT_LIMITS.tasksSidebarWidth.min}
+        max={TODAY_LAYOUT_LIMITS.tasksSidebarWidth.max}
+        defaultValue={TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue}
+        onChange={setTasksSidebarWidth}
+        onCommit={(value) => onLayoutChange?.({ tasksSidebarWidth: value })}
       />
       <section className={section === "progress" ? "tasks-main tasks-main-progress" : "tasks-main"}>
         <header className="tasks-header">
           <div>
-            <h2>{t("tasks.title")}</h2>
+            <div className="tasks-title-row">
+              <button
+                type="button"
+                className="tasks-filter-toggle"
+                aria-label={t("tasks.layout.openFilters")}
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen(true)}
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+              <h2>{t("tasks.title")}</h2>
+            </div>
             <p className="muted">{t("tasks.subtitle")}</p>
           </div>
           {section === "tasks" ? (
@@ -592,25 +709,45 @@ export function TasksPane({
                 emptyLabel={t("tasks.calendar.empty")}
                 startHour={effectiveSettings.calendarStartHour}
                 loadingLabel={t("tasks.loading")}
+                agendaWidth={calendarAgendaWidth}
+                onAgendaWidthChange={setCalendarAgendaWidth}
+                onAgendaWidthCommit={(value) =>
+                  onLayoutChange?.({ calendarAgendaWidth: value })
+                }
               />
             )}
           </>
         )}
       </section>
       {section === "tasks" ? (
-        <TaskDetailDrawer
-          entry={selectedEntry}
-          metadata={metadata}
-          loading={metadataLoading}
-          labelMode={labelMode}
-          skills={skills}
-          collapsed={!detailsOpen}
-          onToggleCollapsed={() => setDetailsOpen((value) => !value)}
-          onRevealPath={onRevealPath}
-          onOpenSkillCompose={onOpenSkillCompose}
-          onSaveDetails={updateDetails}
-          onDirtyChange={setDetailDirty}
-        />
+        <>
+          <div className="task-details-resizer">
+            <PaneResizeHandle
+              label={t("tasks.layout.resizeDetails")}
+              value={taskDetailsWidth}
+              min={TODAY_LAYOUT_LIMITS.taskDetailsWidth.min}
+              max={TODAY_LAYOUT_LIMITS.taskDetailsWidth.max}
+              defaultValue={TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue}
+              direction={-1}
+              disabled={!detailsOpen}
+              onChange={setTaskDetailsWidth}
+              onCommit={(value) => onLayoutChange?.({ taskDetailsWidth: value })}
+            />
+          </div>
+          <TaskDetailDrawer
+            entry={selectedEntry}
+            metadata={metadata}
+            loading={metadataLoading}
+            labelMode={labelMode}
+            skills={skills}
+            collapsed={!detailsOpen}
+            onToggleCollapsed={() => setDetailsOpen((value) => !value)}
+            onRevealPath={onRevealPath}
+            onOpenSkillCompose={onOpenSkillCompose}
+            onSaveDetails={updateDetails}
+            onDirtyChange={setDetailDirty}
+          />
+        </>
       ) : null}
       <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreate={createTask} />
       <NaturalScheduleDialog
@@ -678,7 +815,9 @@ function TaskList({
                 {t(`tasks.priority.${entry.priority}`)}
               </span>
               {scheduleLabel(entry) ? <span className="task-chip">{scheduleLabel(entry)}</span> : null}
-              {entry.project ? <span className="task-chip">{entry.project}</span> : null}
+              {entry.projectLabels[0] ? (
+                <span className="task-chip">{entry.projectLabels[0]}</span>
+              ) : null}
             </button>
           ))}
         </section>

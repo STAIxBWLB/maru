@@ -366,6 +366,7 @@ export interface ProjectPickerEntry {
   name: string;
   path: string;
   status: string;
+  vaultNote?: string | null;
 }
 
 export interface InboxChannelConfig {
@@ -698,6 +699,7 @@ export interface TaskNoteRow {
   path: string;
   relPath: string;
   fileName: string;
+  displayTitle?: string | null;
   bucket: TaskBucket;
   sizeBytes: number;
   updatedAt: string | null;

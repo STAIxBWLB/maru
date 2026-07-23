@@ -1016,6 +1016,7 @@ function MainApp() {
   // `visible` renders the banner.
   const [todayBannerPending, setTodayBannerPending] = useState(false);
   const [todayBannerVisible, setTodayBannerVisible] = useState(false);
+  const [todayRolloverEpoch, setTodayRolloverEpoch] = useState(0);
   // Last logical day seen by the new-day watcher (boot seeds it too).
   const todayLogicalDayRef = useRef<string | null>(null);
   // Workspace whose boot auto-opened Today this launch. The settings-load
@@ -5565,6 +5566,7 @@ function MainApp() {
     if (!workPath || !todaySettings.enabled) return;
     const timezone = effectiveTasksSettings.timezone ?? "Asia/Seoul";
     let cancelled = false;
+    let rolloverInFlight = false;
 
     const tick = async () => {
       let info;
@@ -5580,17 +5582,31 @@ function MainApp() {
       }
       if (cancelled) return;
       const previous = todayLogicalDayRef.current;
-      todayLogicalDayRef.current = info.logicalDay;
       // First tick only seeds the ref; startup is handled by the boot path.
-      if (previous === null || previous === info.logicalDay) return;
+      if (previous === null) {
+        todayLogicalDayRef.current = info.logicalDay;
+        return;
+      }
+      if (previous === info.logicalDay || rolloverInFlight) return;
+      rolloverInFlight = true;
       const nowIso = new Date().toISOString();
-      await todayRollover(
-        workPath,
-        nowIso,
-        timezone,
-        todaySettings.dayStart,
-        todaySettings.sleepStart,
-      ).catch((err) => console.warn("today rollover failed", err));
+      try {
+        await todayRollover(
+          workPath,
+          nowIso,
+          timezone,
+          todaySettings.dayStart,
+          todaySettings.sleepStart,
+        );
+      } catch (err) {
+        console.warn("today rollover failed", err);
+        return;
+      } finally {
+        rolloverInFlight = false;
+      }
+      if (cancelled) return;
+      todayLogicalDayRef.current = info.logicalDay;
+      setTodayRolloverEpoch((epoch) => epoch + 1);
       if (!todaySettings.notificationEnabled) return;
       let sent = false;
       try {
@@ -7955,6 +7971,9 @@ function MainApp() {
             onRouteChange={setTodayRoute}
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
+            layout={layoutSettings}
+            onLayoutChange={updateLayoutSettings}
+            rolloverEpoch={todayRolloverEpoch}
             tasksProps={{
               workPath: inboxWorkspacePath,
               effectiveSettings: effectiveTasksSettings,

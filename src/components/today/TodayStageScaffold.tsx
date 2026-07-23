@@ -2,7 +2,7 @@
 // stepper + scrollable content. Prepare/Execute/Review compose this so the
 // header zone stays consistent across stages.
 
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { enUS } from "date-fns/locale/en-US";
 import { ko } from "date-fns/locale/ko";
 import { CheckCheck, MoonStar, SkipForward, Sun, Sunrise } from "lucide-react";
@@ -46,10 +46,13 @@ export function TodayStageScaffold({
         : "today.header.greeting.evening";
   const GreetingIcon = hour < 12 ? Sunrise : hour < 18 ? Sun : MoonStar;
   const dateLocale = locale === "ko" ? ko : enUS;
+  const logicalDate = snapshot?.logicalDay
+    ? parseISO(`${snapshot.logicalDay}T12:00:00`)
+    : now;
   const dateLabel =
     locale === "ko"
-      ? format(now, "yyyy년 M월 d일 EEEE", { locale: dateLocale })
-      : format(now, "EEEE, MMMM d, yyyy", { locale: dateLocale });
+      ? format(logicalDate, "yyyy년 M월 d일 EEEE", { locale: dateLocale })
+      : format(logicalDate, "EEEE, MMMM d, yyyy", { locale: dateLocale });
   const dayStart = snapshot?.dayStart ?? settings.dayStart;
 
   return (

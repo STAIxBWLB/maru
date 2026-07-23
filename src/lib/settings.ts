@@ -3,6 +3,7 @@ import {
   normalizeTerminalShortcuts,
   type TerminalShortcutMap,
 } from "./terminalShortcuts";
+import { clampTodayLayoutWidth, TODAY_LAYOUT_LIMITS } from "./todayLayout";
 
 export type DocumentBrowserMode = "list" | "tree";
 export type DocumentLabelMode = "title" | "filename" | "both";
@@ -124,6 +125,10 @@ export interface WindowBoundsSettings {
 export interface LayoutSettings {
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
+  todaySidebarWidth: number;
+  tasksSidebarWidth: number;
+  calendarAgendaWidth: number;
+  taskDetailsWidth: number;
   outlineOpen: boolean;
   outlinePaneWidth: number;
   terminalOpen: boolean;
@@ -439,6 +444,10 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     layout: {
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
+      todaySidebarWidth: TODAY_LAYOUT_LIMITS.todaySidebarWidth.defaultValue,
+      tasksSidebarWidth: TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
+      calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
+      taskDetailsWidth: TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
       outlineOpen: true,
       outlinePaneWidth: 280,
       terminalOpen: false,
@@ -1798,6 +1807,30 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       DEFAULT_MARU_SETTINGS.ui.layout.documentsPaneWidth,
       260,
       560,
+    ),
+    todaySidebarWidth: clampTodayLayoutWidth(
+      "todaySidebarWidth",
+      typeof layout.todaySidebarWidth === "number"
+        ? layout.todaySidebarWidth
+        : TODAY_LAYOUT_LIMITS.todaySidebarWidth.defaultValue,
+    ),
+    tasksSidebarWidth: clampTodayLayoutWidth(
+      "tasksSidebarWidth",
+      typeof layout.tasksSidebarWidth === "number"
+        ? layout.tasksSidebarWidth
+        : TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
+    ),
+    calendarAgendaWidth: clampTodayLayoutWidth(
+      "calendarAgendaWidth",
+      typeof layout.calendarAgendaWidth === "number"
+        ? layout.calendarAgendaWidth
+        : TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
+    ),
+    taskDetailsWidth: clampTodayLayoutWidth(
+      "taskDetailsWidth",
+      typeof layout.taskDetailsWidth === "number"
+        ? layout.taskDetailsWidth
+        : TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
     ),
     outlineOpen:
       typeof layout.outlineOpen === "boolean"

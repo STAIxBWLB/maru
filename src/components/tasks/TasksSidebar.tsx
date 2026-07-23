@@ -35,9 +35,20 @@ export function TasksSidebar({
 }: TasksSidebarProps) {
   const { t } = useTranslation();
   const counts = taskFilterCounts(entries, today);
-  const projects = Array.from(
-    new Set(entries.map((entry) => entry.project).filter((value): value is string => Boolean(value))),
-  ).sort((a, b) => a.localeCompare(b));
+  const projectMap = new Map<string, { key: string; label: string; count: number }>();
+  for (const entry of entries) {
+    entry.projectKeys.forEach((key, index) => {
+      const current = projectMap.get(key);
+      projectMap.set(key, {
+        key,
+        label: entry.projectLabels[index] ?? entry.projects[index] ?? key,
+        count: (current?.count ?? 0) + 1,
+      });
+    });
+  }
+  const projects = Array.from(projectMap.values()).sort((a, b) =>
+    a.label.localeCompare(b.label),
+  );
   const views: Array<{
     id: TasksFilterView;
     label: string;
@@ -115,14 +126,17 @@ export function TasksSidebar({
         {projects.map((project) => (
           <button
             type="button"
-            key={project}
-            className={tasksActive && selectedProject === project ? "tasks-filter active" : "tasks-filter"}
-            onClick={() => onProjectChange(project)}
+            key={project.key}
+            className={
+              tasksActive && selectedProject === project.key
+                ? "tasks-filter active"
+                : "tasks-filter"
+            }
+            title={project.label}
+            onClick={() => onProjectChange(project.key)}
           >
-            <span>{project}</span>
-            <span className="tasks-count">
-              {entries.filter((entry) => entry.project === project).length}
-            </span>
+            <span className="tasks-project-label">{project.label}</span>
+            <span className="tasks-count">{project.count}</span>
           </button>
         ))}
       </div>

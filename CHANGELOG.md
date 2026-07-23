@@ -10,6 +10,15 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 
 ## Unreleased
 
+- **Today workspace resizing, readable task metadata, and calendar safety.**
+  Today navigation, task filters, calendar agenda, and task details can be
+  resized with pointer or keyboard and persist per workspace, with compact
+  overlays preventing nested panes from crushing the calendar. Task notes now
+  expose a human display title and resolve raw project IDs/wiki links to
+  readable labels. Today mutations are serialized with conflict recovery, the
+  03:30 logical-day rollover refreshes visible state, Calendar Sync is a real
+  explicit-select/publish surface, and stored per-item calendar destinations
+  take precedence when publishing.
 - **Native responder re-arm replaces the blur→focus cycle.** v0.4.13's
   synthetic blur→focus repair could leave WKWebView's key first responder
   detached, so refocusing the terminal after an in-app focus change (editor,
