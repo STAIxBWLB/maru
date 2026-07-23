@@ -1,6 +1,6 @@
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -37,11 +37,23 @@ fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::
     )?;
     let file_save = command_item(app, "file.save", "Save", Some("CmdOrCtrl+S"))?;
     let file_snapshot = command_item(app, "file.snapshot", "Snapshot", Some("CmdOrCtrl+Shift+S"))?;
+    // Native accelerators only on macOS: a native Ctrl+W/Ctrl+Shift+W on
+    // Windows/Linux would consume the key before the webview sees it, breaking
+    // shell delete-word in the terminal and the terminal shortcut rebinds.
+    #[cfg(target_os = "macos")]
+    const CLOSE_ACTIVE_ACCELERATOR: Option<&str> = Some("CmdOrCtrl+W");
+    #[cfg(not(target_os = "macos"))]
+    const CLOSE_ACTIVE_ACCELERATOR: Option<&str> = None;
+    #[cfg(target_os = "macos")]
+    const CLOSE_WINDOW_ACCELERATOR: Option<&str> = Some("CmdOrCtrl+Shift+W");
+    #[cfg(not(target_os = "macos"))]
+    const CLOSE_WINDOW_ACCELERATOR: Option<&str> = None;
+
     let file_close_active = command_item(
         app,
         "file.close_active",
         "Close Active",
-        Some("CmdOrCtrl+W"),
+        CLOSE_ACTIVE_ACCELERATOR,
     )?;
     let file_add_workspace = command_item(app, "file.add_workspace", "Add Workspace...", None)?;
     let file_preferences = command_item(
@@ -176,7 +188,7 @@ fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::
         app,
         "window.close",
         "Close Window",
-        Some("CmdOrCtrl+Shift+W"),
+        CLOSE_WINDOW_ACCELERATOR,
     )?;
     let window_minimize = PredefinedMenuItem::minimize(app, None)?;
     let window_maximize = PredefinedMenuItem::maximize(app, None)?;
@@ -194,6 +206,10 @@ fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::
             &window_close,
         ],
     )?;
+    // Restore the native window list/tiling entries lost when the default
+    // "Window" submenu was removed above.
+    #[cfg(target_os = "macos")]
+    window_menu.set_as_windows_menu_for_nsapp()?;
     menu.insert_items(
         &[
             &file_menu,
@@ -273,7 +289,23 @@ fn insert_check_for_updates_item<R: Runtime>(
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     if event.id() == CHECK_FOR_UPDATES_MENU_ID {
         let _ = app.emit(CHECK_FOR_UPDATES_EVENT, ());
-    } else {
-        let _ = app.emit(MENU_COMMAND_EVENT, event.id().0.clone());
+        return;
+    }
+    // Menu commands go to the focused window only: a broadcast made one Cmd+W
+    // act in every window at once (e.g. closing a background PTY tab while the
+    // Settings window closed itself). Fall back to broadcast if no window
+    // reports focus so menus never go dead.
+    let id = event.id().0.clone();
+    let focused = app
+        .webview_windows()
+        .into_iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false));
+    match focused {
+        Some((label, _)) => {
+            let _ = app.emit_to(&label, MENU_COMMAND_EVENT, id);
+        }
+        None => {
+            let _ = app.emit(MENU_COMMAND_EVENT, id);
+        }
     }
 }

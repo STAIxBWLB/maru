@@ -16,6 +16,7 @@ import {
   type SkillEditorOpenPayload,
   type SkillsUpdatedPayload,
 } from "../../lib/skillEditorEvents";
+import { listenForMenuCommand } from "../../lib/menu";
 import {
   skillsListSources,
   skillsReadSkill,
@@ -239,6 +240,20 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
       unlisten?.();
     };
   }, [t]);
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void listenForMenuCommand((id) => {
+      if (id !== "file.close_active" && id !== "window.close") return;
+      // Routes through onCloseRequested above, so the dirty guard still applies.
+      void import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) => getCurrentWindow().close())
+        .catch(() => {});
+    }).then((off) => {
+      dispose = off;
+    });
+    return () => dispose?.();
+  }, []);
 
   const emitUpdated = useCallback(async (payload: SkillsUpdatedPayload) => {
     await import("@tauri-apps/api/event")
