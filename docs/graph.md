@@ -53,9 +53,10 @@ overlay is produced out-of-band by the `vault-graph` skill
   changes never move the camera), and pins synced to FA2's native `fixed`
   node attribute. V6 also enables Sigma's invalid-container guard so hiding or
   maximizing another pane cannot crash the entire app while Graph is mounted.
-- `src/components/graph/GraphLegend.tsx` — collapsible color key overlay
-  (communities when enriched, else domains); collapses to an icon button
-  outside the wide tier.
+- `src/components/graph/GraphLegend.tsx` — collapsible color key overlay,
+  shown only when it describes the active canvas colors (domain color mode, or
+  community color mode on an enriched graph; hidden for neutral); collapses to
+  an icon button outside the wide tier.
 - `src/components/graph/GraphToolbar.tsx` — compact floating view/source/saved
   selector, search combobox (ranked results over the current filtered graph,
   full keyboard/ARIA), search-as-filter toggle, visible/total counts, one Tools

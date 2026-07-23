@@ -2,10 +2,10 @@
 
 ## Evidence
 
-- Reference: `/var/folders/98/_przjd655416vf04xccddy280000gn/T/clipboard-2026-07-24-041352-3CE9AD21.png`
-- Implementation: `artifacts/design-qa/graph-implementation-final.png`
-- Full-view comparison: `artifacts/design-qa/graph-comparison-full.png`
-- Focused canvas comparison: `artifacts/design-qa/graph-comparison-canvas.png`
+- Reference: Obsidian graph screenshot (not committed; composited into the comparison images below)
+- Implementation: `docs/design-qa/graph-implementation-final.png`
+- Full-view comparison: `docs/design-qa/graph-comparison-full.png`
+- Focused canvas comparison: `docs/design-qa/graph-comparison-canvas.png`
 - Viewport: 1912 x 1242 CSS pixels, DPR 2
 - Captured dimensions: 3824 x 2484 pixels
 - Fixture: workspace graph, 1,200 nodes and 6,224 edges

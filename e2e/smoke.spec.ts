@@ -1066,9 +1066,15 @@ test("keeps split editor modes independent and constrained to their pane widths"
       page.evaluate(() =>
         Array.from({ length: window.localStorage.length }, (_, index) =>
           window.localStorage.getItem(window.localStorage.key(index) ?? ""),
-        ).some((value) =>
-          value?.includes('"editorPaneViewModes":{"left":"preview","right":"source"}'),
-        ),
+        ).some((value) => {
+          if (!value) return false;
+          try {
+            const modes = JSON.parse(value)?.ui?.editorPaneViewModes;
+            return modes?.left === "preview" && modes?.right === "source";
+          } catch {
+            return false;
+          }
+        }),
       ),
     )
     .toBe(true);
@@ -1106,11 +1112,15 @@ test("opens a persistent Graph surface in the right editor split", async ({ page
       page.evaluate(() =>
         Array.from({ length: window.localStorage.length }, (_, index) =>
           window.localStorage.getItem(window.localStorage.key(index) ?? ""),
-        ).some(
-          (value) =>
-            value?.includes('"editorSplitOpen":true') &&
-            value.includes('"editorSplitSurface":"graph"'),
-        ),
+        ).some((value) => {
+          if (!value) return false;
+          try {
+            const layout = JSON.parse(value)?.ui?.layout;
+            return layout?.editorSplitOpen === true && layout?.editorSplitSurface === "graph";
+          } catch {
+            return false;
+          }
+        }),
       ),
     )
     .toBe(true);
@@ -1128,7 +1138,14 @@ test("opens a persistent Graph surface in the right editor split", async ({ page
       page.evaluate(() =>
         Array.from({ length: window.localStorage.length }, (_, index) =>
           window.localStorage.getItem(window.localStorage.key(index) ?? ""),
-        ).some((value) => value?.includes('"focusedGroup":"right"')),
+        ).some((value) => {
+          if (!value) return false;
+          try {
+            return JSON.parse(value)?.focusedGroup === "right";
+          } catch {
+            return false;
+          }
+        }),
       ),
     )
     .toBe(true);
@@ -1166,7 +1183,14 @@ test("closes the focused right editor pane with Cmd/Ctrl+W", async ({ page }) =>
       page.evaluate(() =>
         Array.from({ length: window.localStorage.length }, (_, index) =>
           window.localStorage.getItem(window.localStorage.key(index) ?? ""),
-        ).some((value) => value?.includes('"focusedGroup":"right"')),
+        ).some((value) => {
+          if (!value) return false;
+          try {
+            return JSON.parse(value)?.focusedGroup === "right";
+          } catch {
+            return false;
+          }
+        }),
       ),
     )
     .toBe(true);
