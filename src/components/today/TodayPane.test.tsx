@@ -49,9 +49,15 @@ interface RenderOptions {
   route: TodayRoute;
   workPath?: string | null;
   onRouteChange?: (route: TodayRoute) => void;
+  rolloverEpoch?: number;
 }
 
-async function renderPane({ route, workPath = null, onRouteChange = () => {} }: RenderOptions) {
+async function renderPane({
+  route,
+  workPath = null,
+  onRouteChange = () => {},
+  rolloverEpoch = 0,
+}: RenderOptions) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -69,6 +75,7 @@ async function renderPane({ route, workPath = null, onRouteChange = () => {} }: 
           onRouteChange={onRouteChange}
           workPath={workPath}
           effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
+          rolloverEpoch={rolloverEpoch}
           tasksProps={{} as unknown as TasksPaneProps}
         />
       </LocaleContext.Provider>,
@@ -298,5 +305,18 @@ describe("TodayPane", () => {
 
     expect(vi.mocked(todayOpen)).toHaveBeenCalledTimes(2);
     expect(onRouteChange).toHaveBeenCalledWith("prepare");
+  });
+
+  it("does not re-route on a fresh mount after an earlier rollover", async () => {
+    // A mode switch remounts the pane; a rollover that happened before the
+    // mount must not override the route the user navigated to.
+    const onRouteChange = vi.fn();
+    await renderPane({
+      route: "review",
+      workPath: "/tmp/work",
+      onRouteChange,
+      rolloverEpoch: 3,
+    });
+    expect(onRouteChange).not.toHaveBeenCalled();
   });
 });

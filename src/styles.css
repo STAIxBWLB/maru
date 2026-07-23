@@ -10232,14 +10232,6 @@ button.git-badge:hover {
   }
 }
 
-.today-sub-panel {
-  margin: 20px 28px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  padding: 16px 18px;
-}
-
 .today-calendar-sync {
   display: flex;
   flex: 1;
@@ -10448,13 +10440,6 @@ button.git-badge:hover {
   }
 }
 
-.today-sub-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
 @container todaypane (max-width: 1239px) {
   .today-grid,
   .today-grid-execute,
@@ -10504,8 +10489,11 @@ button.git-badge:hover {
     padding: 0;
   }
 
+  /* visibility (not display): the handle must keep its grid slot, or
+   * .today-main auto-places into the 9px track. .today-pane cannot drop
+   * the track here — an element never matches its own container query. */
   .today-sidebar + .pane-resize-handle {
-    display: none;
+    visibility: hidden;
   }
 
   .today-stage-header {
@@ -10524,10 +10512,6 @@ button.git-badge:hover {
 
   .today-content {
     padding: 14px 16px 20px;
-  }
-
-  .today-sub-panel {
-    margin: 14px 16px;
   }
 
   .task-sheet {

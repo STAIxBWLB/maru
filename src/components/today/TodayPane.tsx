@@ -110,7 +110,10 @@ export function TodayPane({
   const snapshotRef = useRef<TodaySnapshot | null>(null);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const paneIdentityRef = useRef(0);
-  const appliedRolloverEpochRef = useRef(0);
+  // Seeded with the mount-time epoch: only rollovers that happen while this
+  // pane is mounted re-route; a remount after an earlier rollover keeps the
+  // route the user was on (the fresh todayOpen already loads the new day).
+  const appliedRolloverEpochRef = useRef(rolloverEpoch);
 
   const applySnapshot = useCallback((next: TodaySnapshot | null) => {
     snapshotRef.current = next;
@@ -246,11 +249,13 @@ export function TodayPane({
     [onRouteChange, mutate],
   );
 
+  // Retired placeholder routes redirect immediately — even in degraded mode
+  // (no snapshot), where the pane would otherwise render an empty main area.
   useEffect(() => {
-    if (snapshot && route !== availableRoute) {
+    if (route !== availableRoute) {
       handleRouteChange(availableRoute);
     }
-  }, [availableRoute, handleRouteChange, route, snapshot]);
+  }, [availableRoute, handleRouteChange, route]);
 
   const contextValue = useMemo<TodayContextValue>(
     () => ({

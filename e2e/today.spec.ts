@@ -588,4 +588,12 @@ test("layout smoke at 1024x720: compact one-column layout, no horizontal scroll"
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(narrowMetrics.scrollWidth).toBeLessThanOrEqual(narrowMetrics.clientWidth);
+
+  // Regression: the hidden sidebar resize handle must keep its grid slot
+  // (visibility, not display) — otherwise .today-main auto-places into the
+  // 9px handle track and collapses.
+  const mainBox = await page.locator(".today-main").boundingBox();
+  expect(mainBox).not.toBeNull();
+  if (!mainBox) return;
+  expect(mainBox.width).toBeGreaterThan(700);
 });
