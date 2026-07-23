@@ -1167,6 +1167,31 @@ describe("NativeTerminalView focus behavior", () => {
     expect(document.activeElement).toBe(textarea);
   });
 
+  it("cancels the default focus-fixup on left pointerdown but not on right", () => {
+    // WebKit blurs the focused element when a press lands on non-focusable
+    // content (the canvas), undoing the pointerdown focus once handlers
+    // return — the in-app return-click dead-input bug. Right-clicks stay
+    // uncanceled so the contextmenu event keeps firing.
+    const { view } = renderFocused({ frame: frame([rowOf("hello")]) });
+    const press = (button: number) => {
+      const event = new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 13,
+        clientY: 13,
+        button,
+        buttons: button === 2 ? 2 : 1,
+      });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      act(() => {
+        view.dispatchEvent(event);
+      });
+      return event;
+    };
+    expect(press(0).defaultPrevented).toBe(true);
+    expect(press(2).defaultPrevented).toBe(false);
+  });
+
   it("keeps accepting input after an in-app blur and a return click", () => {
     const { ref, view, textarea, onInput } = renderFocused({
       frame: frame([rowOf("hello world")]),

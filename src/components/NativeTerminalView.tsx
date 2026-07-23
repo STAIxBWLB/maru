@@ -1335,6 +1335,13 @@ export const NativeTerminalView = memo(
       (event: React.PointerEvent<HTMLDivElement>) => {
         pointerClientRef.current = { x: event.clientX, y: event.clientY };
         textareaRef.current?.focus();
+        // Cancel the default mousedown focus-fixup: WebKit blurs the focused
+        // element when a press lands on non-focusable content, silently
+        // undoing the focus() above once the handlers return (field trace:
+        // pointerdown -> focus -> blur -> keystrokes to body). Right-clicks
+        // are exempt so the contextmenu event keeps firing — onContextMenu
+        // refocuses the textarea itself.
+        if (event.button !== 2) event.preventDefault();
         rectRef.current = rootRef.current?.getBoundingClientRect() ?? rectRef.current;
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;
