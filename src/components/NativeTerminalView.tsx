@@ -21,7 +21,7 @@ import type {
 } from "../lib/api";
 
 export interface NativeTerminalViewHandle {
-  focus: () => void;
+  focus: (options?: { reattach?: boolean }) => void;
   ownsFocus: () => boolean;
   applyFrame: (frame: TerminalFrame) => boolean;
   refreshLayout: (options?: { focus?: boolean }) => void;
@@ -768,6 +768,14 @@ export const NativeTerminalView = memo(
     activeRef.current = active;
     const focusedRef = useRef(false);
     const wasFocusedRef = useRef(false);
+    // A reattach requested mid-gesture is deferred to the gesture's end
+    // (blur during a drag cancels selection / synthesizes a mouse release).
+    const pendingReattachRef = useRef(false);
+    // True only inside the synchronous blur->focus reattach cycle so
+    // onTextareaBlur can tell our synthetic blur from a real focus loss —
+    // resetting click chains / modifiers there would break the double-click
+    // that follows an activating click.
+    const reattachingRef = useRef(false);
     const mouseRef = useRef<TerminalMouseFlags | null>(null);
     const latestFrameRef = useRef<TerminalFrame | null>(frame ?? null);
 
@@ -1122,10 +1130,37 @@ export const NativeTerminalView = memo(
       });
     }, [refreshLayout]);
 
+    // macOS first-mouse: the window-activating click DOM-focuses the textarea,
+    // but WKWebView does not attach the native key first-responder, and a
+    // repeat focus() on the already-focused element is a no-op that cannot
+    // re-arm it. `reattach` cycles blur->focus to force reattachment — never
+    // mid-IME (it would kill the composition) and never mid-gesture (deferred
+    // to pointerup/pointercancel via pendingReattachRef).
+    const focusTextarea = useCallback((options?: { reattach?: boolean }) => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      if (!options?.reattach || document.activeElement !== ta) {
+        ta.focus();
+        return;
+      }
+      if (composingRef.current) return;
+      if (pointerStateRef.current) {
+        pendingReattachRef.current = true;
+        return;
+      }
+      reattachingRef.current = true;
+      try {
+        ta.blur();
+        ta.focus();
+      } finally {
+        reattachingRef.current = false;
+      }
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
-        focus: () => textareaRef.current?.focus(),
+        focus: focusTextarea,
         ownsFocus: () => document.activeElement === textareaRef.current,
         applyFrame,
         refreshLayout,
@@ -1161,7 +1196,7 @@ export const NativeTerminalView = memo(
           setSelection(null);
         },
       }),
-      [applyFrame, enqueueSelectionCommand, onInput, refreshLayout],
+      [applyFrame, enqueueSelectionCommand, focusTextarea, onInput, refreshLayout],
     );
 
     // Apply each incoming frame to the retained grid and repaint the rows that
@@ -1511,6 +1546,10 @@ export const NativeTerminalView = memo(
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
+        if (pendingReattachRef.current) {
+          pendingReattachRef.current = false;
+          focusTextarea({ reattach: true });
+        }
         if (!state) return;
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;
@@ -1569,6 +1608,7 @@ export const NativeTerminalView = memo(
         copyOnSelect,
         enqueueSelectionCommand,
         flushSelectionUpdate,
+        focusTextarea,
         onCopyOnSelect,
         onCopySelection,
         onInput,
@@ -1589,6 +1629,10 @@ export const NativeTerminalView = memo(
         if (!state) return;
         pointerStateRef.current = null;
         pointerClientRef.current = null;
+        if (pendingReattachRef.current) {
+          pendingReattachRef.current = false;
+          focusTextarea({ reattach: true });
+        }
         stopAutoScroll();
         clickChainRef.current = null;
         flushSelectionUpdate();
@@ -1613,7 +1657,14 @@ export const NativeTerminalView = memo(
           ctrlKey: event.ctrlKey,
         });
       },
-      [cellFromClient, enqueueSelectionCommand, flushSelectionUpdate, onInput, stopAutoScroll],
+      [
+        cellFromClient,
+        enqueueSelectionCommand,
+        flushSelectionUpdate,
+        focusTextarea,
+        onInput,
+        stopAutoScroll,
+      ],
     );
 
     // Wheel must be a native, non-passive listener: React attaches `onWheel`
@@ -1756,7 +1807,16 @@ export const NativeTerminalView = memo(
     }, [onFocusOwnership, requestPaint]);
 
     const onTextareaBlur = useCallback(() => {
+      // Our own reattach cycle: focus returns synchronously on the next line,
+      // so none of the real-blur bookkeeping (gesture cancel, click chain,
+      // modifier/composition reset) may run — it would break the double-click
+      // following an activating click.
+      if (reattachingRef.current) return;
       focusedRef.current = false;
+      // An external blur (search overlay, editor) must never replay a stale
+      // deferred reattach and steal focus later. Our own reattach cycle never
+      // blurs with the flag still set (it is consumed before the cycle runs).
+      pendingReattachRef.current = false;
       const pointer = pointerStateRef.current;
       pointerStateRef.current = null;
       pointerClientRef.current = null;
@@ -1822,6 +1882,10 @@ export const NativeTerminalView = memo(
         if (!wasFocusedRef.current || !focused || !active) return;
         const el = document.activeElement;
         if (el && el !== document.body && el !== textareaRef.current) return;
+        // Plain focus only: restores focus lost to body. The key-dead
+        // (DOM-focused) repair is owned by TerminalPanel's activation rAF —
+        // a second blur->focus cycle here would run the repair twice per
+        // activation.
         textareaRef.current?.focus();
       };
       window.addEventListener("blur", onWindowBlur);

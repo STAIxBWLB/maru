@@ -169,6 +169,27 @@ export function shouldFocusTerminalInput(state: TerminalFocusState): boolean {
   return state.open && !state.searchOpen && state.renamingTaskId === null;
 }
 
+/** Decides the window-activation focus repair. `ownsFocus` (the activating
+ *  click already DOM-focused this terminal's textarea) must repair even with
+ *  no seeded tab: on first-ever first-mouse activation the textarea is
+ *  DOM-focused but key-dead, and treating it as "someone else has focus"
+ *  is exactly the bug. Without ownership, keep the strict no-steal rules. */
+export function terminalActivationFocusAction(args: {
+  seededTabId: string | null;
+  focusedTabId: string | null;
+  ownsFocus: boolean;
+  activeElementIsBody: boolean;
+  focusState: TerminalFocusState;
+}): "reattach" | "none" {
+  if (!args.focusedTabId) return "none";
+  if (!shouldFocusTerminalInput(args.focusState)) return "none";
+  if (!args.ownsFocus) {
+    if (args.seededTabId !== args.focusedTabId) return "none";
+    if (!args.activeElementIsBody) return "none";
+  }
+  return "reattach";
+}
+
 export function cancelTerminalLayoutRefresh(
   rafRef: React.MutableRefObject<number | null>,
   cancelAnimationFrameFn: (handle: number) => void = window.cancelAnimationFrame,
@@ -254,6 +275,10 @@ export const TerminalPanel = memo(
     );
     const pendingFramesRef = useRef<Map<string, TerminalStreamMessage[]>>(new Map());
     const visibilityBySessionRef = useRef<Map<string, boolean>>(new Map());
+    // Bumped (paced) when a visibility send fails, re-running the visibility
+    // effect: a ref delete alone never re-triggers it, and a hidden->visible
+    // send that stays lost parks the backend frame emitter until refocus.
+    const [visibilityRetryNonce, setVisibilityRetryNonce] = useState(0);
     const inputPumpsRef = useRef<Map<string, TerminalInputPump>>(new Map());
     const cancelledSessionsRef = useRef<Set<string>>(new Set());
     const disposedRef = useRef(false);
@@ -303,6 +328,11 @@ export const TerminalPanel = memo(
       typeof document === "undefined" ? true : document.hasFocus(),
     );
     const suppressTerminalMouseUntilRef = useRef(0);
+    // Lifecycle of a pointer gesture that began while the app was inactive:
+    // "down" while pressed, "done" once released. Lets restore() skip arming
+    // the mouse grace when native activation lands after the activating
+    // click's pointerup — arming then would eat a fast second TUI click.
+    const inactiveGestureRef = useRef<"none" | "down" | "done">("none");
     const layoutRefreshRafRef = useRef<number | null>(null);
     const terminalFocusStateRef = useRef<TerminalFocusState>({
       open,
@@ -1015,7 +1045,16 @@ export const TerminalPanel = memo(
         const visible = visibleTabs.has(tab.id);
         if (visibilityBySessionRef.current.get(sessionId) === visible) continue;
         visibilityBySessionRef.current.set(sessionId, visible);
-        void terminalSetVisibility(sessionId, generation, visible).catch(() => {});
+        // On failure, uncache and schedule a paced re-run so the value is
+        // resent; caching a failed send would suppress the corrective update
+        // forever. Only uncache while the entry still holds the value this
+        // send attempted — a late failure must not evict a newer success.
+        // Retries stop once the session's generation is torn down.
+        void terminalSetVisibility(sessionId, generation, visible).catch(() => {
+          if (visibilityBySessionRef.current.get(sessionId) !== visible) return;
+          visibilityBySessionRef.current.delete(sessionId);
+          window.setTimeout(() => setVisibilityRetryNonce((n) => n + 1), 250);
+        });
       }
     }, [
       open,
@@ -1025,6 +1064,7 @@ export const TerminalPanel = memo(
       splitMode,
       state.activeTabId,
       state.tabs,
+      visibilityRetryNonce,
     ]);
 
     // Clearing attention when a session gains focus.
@@ -1124,6 +1164,7 @@ export const TerminalPanel = memo(
         // shells (including E2E) may report `document.hasFocus() === false`
         // indefinitely and must never have ordinary clicks swallowed.
         if (!canRunTerminal) return;
+        if (!appActiveRef.current) inactiveGestureRef.current = "down";
         if (
           appActiveRef.current &&
           performance.now() >= suppressTerminalMouseUntilRef.current
@@ -1131,25 +1172,66 @@ export const TerminalPanel = memo(
           return;
         }
         const target = event.target;
-        if (target instanceof HTMLElement && target.closest(".native-terminal-view")) return;
+        // Let the whole instance through (host padding included), not just the
+        // grid: the instance holds no controls, and swallowing a chrome click
+        // here would leave the terminal unfocused with no repair path.
+        if (target instanceof HTMLElement && target.closest(".terminal-instance")) return;
         event.preventDefault();
         event.stopImmediatePropagation();
       };
       document.addEventListener("pointerdown", onActivationPointerDown, true);
+      // The activation grace ends with the activating gesture. A fast second
+      // click (double-click in htop) must not be eaten, in either ordering of
+      // native activation vs. the activating click's pointerup.
+      const onActivationPointerUp = () => {
+        if (appActiveRef.current) suppressTerminalMouseUntilRef.current = 0;
+        else if (inactiveGestureRef.current === "down") {
+          inactiveGestureRef.current = "done";
+        }
+      };
+      document.addEventListener("pointerup", onActivationPointerUp, true);
+      document.addEventListener("pointercancel", onActivationPointerUp, true);
 
       const restore = () => {
+        // Window focus and Tauri onFocusChanged both call this on one
+        // activation; only the inactive->active edge may arm the grace and
+        // schedule the repair, or the repair cycle would run twice.
+        const wasActive = appActiveRef.current;
         appActiveRef.current = true;
-        suppressTerminalMouseUntilRef.current = performance.now() + 150;
-        const tabId = restoreFocusTabRef.current;
+        if (wasActive) return;
+        suppressTerminalMouseUntilRef.current =
+          inactiveGestureRef.current === "done" ? 0 : performance.now() + 150;
+        inactiveGestureRef.current = "none";
+        const seededTab = restoreFocusTabRef.current;
         restoreFocusTabRef.current = null;
-        if (!tabId || tabId !== focusedTabIdRef.current) return;
-        if (!shouldFocusTerminalInput(terminalFocusStateRef.current)) return;
-        const activeElement = document.activeElement;
-        if (activeElement && activeElement !== document.body) return;
-        window.requestAnimationFrame(() => handlesRef.current.get(tabId)?.focus());
+        // Decide inside the rAF: on first-mouse activation the activating
+        // pointerdown (which DOM-focuses the textarea) has already run by
+        // then, and that DOM-focused-but-key-dead textarea must be repaired
+        // rather than treated as "another element holds focus".
+        window.requestAnimationFrame(() => {
+          // Prefer the terminal the click actually landed on over
+          // focusedTabIdRef: the pane-switch state update from the activating
+          // pointerdown may not have flushed to the ref before this rAF.
+          const owned = [...handlesRef.current.entries()].find(([, h]) =>
+            h.ownsFocus(),
+          );
+          const tabId = owned?.[0] ?? focusedTabIdRef.current;
+          const handle = owned?.[1] ?? (tabId ? handlesRef.current.get(tabId) : undefined);
+          if (!tabId || !handle) return;
+          const el = document.activeElement;
+          const action = terminalActivationFocusAction({
+            seededTabId: seededTab,
+            focusedTabId: tabId,
+            ownsFocus: owned != null,
+            activeElementIsBody: !el || el === document.body,
+            focusState: terminalFocusStateRef.current,
+          });
+          if (action === "reattach") handle.focus({ reattach: true });
+        });
       };
       const deactivate = () => {
         appActiveRef.current = false;
+        inactiveGestureRef.current = "none";
         restoreFocusTabRef.current = lastActualFocusTabRef.current;
       };
       const onWindowBlur = () => deactivate();
@@ -1182,6 +1264,8 @@ export const TerminalPanel = memo(
         offNative?.();
         document.removeEventListener("focusin", onFocusIn, true);
         document.removeEventListener("pointerdown", onActivationPointerDown, true);
+        document.removeEventListener("pointerup", onActivationPointerUp, true);
+        document.removeEventListener("pointercancel", onActivationPointerUp, true);
         window.removeEventListener("blur", onWindowBlur);
         window.removeEventListener("focus", onWindowFocus);
       };

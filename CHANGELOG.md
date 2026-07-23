@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased
+
+- **First-click terminal input fix.** On macOS the window-activating
+  first-mouse click DOM-focused the terminal textarea, but WKWebView never
+  attached the native key first responder, so the terminal looked focused yet
+  dropped every keystroke until a second focus cycle. The focus handle now
+  supports a reattach mode that cycles blur→focus to re-arm the responder
+  (never mid-IME, deferred past an active pointer gesture), and window
+  activation repairs a click-focused terminal even on the first-ever
+  activation instead of bailing on unseeded restore state. Also fixed: first
+  clicks on terminal chrome are no longer swallowed while the app is inactive,
+  the post-activation TUI mouse grace ends with the activating gesture instead
+  of eating fast double-clicks, and a failed visibility send no longer caches
+  as delivered (which could freeze a session's output until refocus).
+
 ## v0.4.12 — 2026-07-23 — Graph Workbench V5
 
 - **Adaptive graph workspace.** The graph shell measures its own width and

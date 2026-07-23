@@ -4,6 +4,7 @@ import {
   cancelTerminalLayoutRefresh,
   refreshFocusedTerminal,
   shouldFocusTerminalInput,
+  terminalActivationFocusAction,
   terminalFrameDisposition,
   type TerminalFocusState,
 } from "./TerminalPanel";
@@ -77,6 +78,51 @@ describe("TerminalPanel focus refresh helpers", () => {
 
     expect(handle.refreshLayout).toHaveBeenCalledWith({ focus: false });
     expect(handle.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("terminalActivationFocusAction", () => {
+  function action(
+    overrides: Partial<Parameters<typeof terminalActivationFocusAction>[0]> = {},
+  ) {
+    return terminalActivationFocusAction({
+      seededTabId: null,
+      focusedTabId: "tab-1",
+      ownsFocus: false,
+      activeElementIsBody: true,
+      focusState: focusState(),
+      ...overrides,
+    });
+  }
+
+  it("repairs a first activation whose click landed on the terminal", () => {
+    // The first-mouse bug: DOM focus on the textarea, no seeded tab. This
+    // case used to bail and leave the terminal key-dead.
+    expect(action({ ownsFocus: true, seededTabId: null })).toBe("reattach");
+    expect(action({ ownsFocus: true, activeElementIsBody: false })).toBe("reattach");
+  });
+
+  it("restores the seeded tab on non-click activation (dock icon, Cmd+Tab)", () => {
+    expect(action({ seededTabId: "tab-1" })).toBe("reattach");
+  });
+
+  it("never steals focus without click ownership or a seeded match", () => {
+    expect(action({ seededTabId: null })).toBe("none");
+    expect(action({ seededTabId: "tab-2" })).toBe("none");
+    expect(action({ seededTabId: "tab-1", activeElementIsBody: false })).toBe("none");
+    expect(action({ focusedTabId: null })).toBe("none");
+  });
+
+  it("yields to search and rename inputs", () => {
+    expect(
+      action({ ownsFocus: true, focusState: focusState({ searchOpen: true }) }),
+    ).toBe("none");
+    expect(
+      action({ ownsFocus: true, focusState: focusState({ renamingTaskId: "t" }) }),
+    ).toBe("none");
+    expect(action({ ownsFocus: true, focusState: focusState({ open: false }) })).toBe(
+      "none",
+    );
   });
 });
 
