@@ -771,6 +771,11 @@ export const NativeTerminalView = memo(
     // A reattach requested mid-gesture is deferred to the gesture's end
     // (blur during a drag cancels selection / synthesizes a mouse release).
     const pendingReattachRef = useRef(false);
+    // True only inside the synchronous blur->focus reattach cycle so
+    // onTextareaBlur can tell our synthetic blur from a real focus loss —
+    // resetting click chains / modifiers there would break the double-click
+    // that follows an activating click.
+    const reattachingRef = useRef(false);
     const mouseRef = useRef<TerminalMouseFlags | null>(null);
     const latestFrameRef = useRef<TerminalFrame | null>(frame ?? null);
 
@@ -1143,8 +1148,13 @@ export const NativeTerminalView = memo(
         pendingReattachRef.current = true;
         return;
       }
-      ta.blur();
-      ta.focus();
+      reattachingRef.current = true;
+      try {
+        ta.blur();
+        ta.focus();
+      } finally {
+        reattachingRef.current = false;
+      }
     }, []);
 
     useImperativeHandle(
@@ -1797,6 +1807,11 @@ export const NativeTerminalView = memo(
     }, [onFocusOwnership, requestPaint]);
 
     const onTextareaBlur = useCallback(() => {
+      // Our own reattach cycle: focus returns synchronously on the next line,
+      // so none of the real-blur bookkeeping (gesture cancel, click chain,
+      // modifier/composition reset) may run — it would break the double-click
+      // following an activating click.
+      if (reattachingRef.current) return;
       focusedRef.current = false;
       // An external blur (search overlay, editor) must never replay a stale
       // deferred reattach and steal focus later. Our own reattach cycle never
@@ -1867,9 +1882,11 @@ export const NativeTerminalView = memo(
         if (!wasFocusedRef.current || !focused || !active) return;
         const el = document.activeElement;
         if (el && el !== document.body && el !== textareaRef.current) return;
-        // reattach: after first-mouse activation the textarea may already be
-        // DOM-focused yet key-dead; a plain focus() would be a no-op.
-        focusTextarea({ reattach: true });
+        // Plain focus only: restores focus lost to body. The key-dead
+        // (DOM-focused) repair is owned by TerminalPanel's activation rAF —
+        // a second blur->focus cycle here would run the repair twice per
+        // activation.
+        textareaRef.current?.focus();
       };
       window.addEventListener("blur", onWindowBlur);
       window.addEventListener("focus", onWindowFocus);
@@ -1877,7 +1894,7 @@ export const NativeTerminalView = memo(
         window.removeEventListener("blur", onWindowBlur);
         window.removeEventListener("focus", onWindowFocus);
       };
-    }, [active, focused, focusTextarea, resetComposition, resetMods]);
+    }, [active, focused, resetComposition, resetMods]);
 
     useEffect(() => {
       if (!active) return;

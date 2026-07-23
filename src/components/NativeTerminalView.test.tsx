@@ -1175,15 +1175,31 @@ describe("NativeTerminalView first-mouse focus reattach", () => {
     expect(document.activeElement).toBe(textarea);
   });
 
-  it("reattaches on window focus while the textarea kept DOM focus", () => {
+  it("does not run the reattach cycle from the view's own window-focus net", () => {
+    // TerminalPanel's activation rAF owns the repair; a second cycle here
+    // would run it twice per activation.
     const { textarea, events } = renderForReattach();
-    // App switch that keeps DOM focus: window blurs, textarea does not.
     act(() => window.dispatchEvent(new Event("blur")));
     events.length = 0;
 
     act(() => window.dispatchEvent(new Event("focus")));
-    expect(events).toEqual(["focusout", "focusin"]);
+    expect(events).toEqual([]);
     expect(document.activeElement).toBe(textarea);
+  });
+
+  it("preserves the click chain across a reattach cycle", () => {
+    // The activating click is followed by the panel's reattach; the internal
+    // blur must not reset the chain, or the double-click that follows an
+    // activating click stops selecting words.
+    const { ref, view } = renderForReattach({
+      frame: frame([rowOf("cd /tmp/logs now")]),
+    });
+    firePointer(view, "pointerdown", { row: 0, col: 5 });
+    firePointer(view, "pointerup", { row: 0, col: 5 });
+    act(() => ref.current!.focus({ reattach: true }));
+    firePointer(view, "pointerdown", { row: 0, col: 5 });
+    firePointer(view, "pointerup", { row: 0, col: 5 });
+    expect(ref.current?.copySelection()).toBe("/tmp/logs");
   });
 
   it("defers the cycle during a pointer gesture and runs it on pointerup", () => {
