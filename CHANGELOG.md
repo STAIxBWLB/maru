@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased
+## v0.4.13 — 2026-07-23 — First-Click Terminal Input
 
 - **First-click terminal input fix.** On macOS the window-activating
   first-mouse click DOM-focused the terminal textarea, but WKWebView never
@@ -22,6 +22,14 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   the post-activation TUI mouse grace ends with the activating gesture instead
   of eating fast double-clicks, and a failed visibility send no longer caches
   as delivered (which could freeze a session's output until refocus).
+- **Activation repair fixes from adversarial review.** The reattach cycle's
+  synthetic blur no longer resets the click chain (double-click word selection
+  after an activating click survives), one activation runs the repair exactly
+  once (the view-level net yields to the panel), the repair targets the pane
+  the click actually landed on instead of a stale focused-tab ref, a late
+  native activation no longer re-arms the TUI mouse grace after the activating
+  gesture ended, and failed visibility sends retry on a paced nonce instead of
+  waiting for the next layout change.
 
 ## v0.4.12 — 2026-07-23 — Graph Workbench V5
 
