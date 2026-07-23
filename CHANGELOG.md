@@ -8,6 +8,16 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased
+
+- **Native responder re-arm replaces the blur→focus cycle.** v0.4.13's
+  synthetic blur→focus repair could leave WKWebView's key first responder
+  detached, so refocusing the terminal after an in-app focus change (editor,
+  search) went key-dead. The DOM cycle is removed; instead the panel asks the
+  native window to re-assert focus (`setFocus`) on activation repair and on
+  every terminal click, which re-arms the responder at the AppKit level while
+  DOM focus stays a plain `focus()`.
+
 ## v0.4.13 — 2026-07-23 — First-Click Terminal Input
 
 - **First-click terminal input fix.** On macOS the window-activating

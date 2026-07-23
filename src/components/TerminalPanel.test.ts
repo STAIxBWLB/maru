@@ -98,12 +98,12 @@ describe("terminalActivationFocusAction", () => {
   it("repairs a first activation whose click landed on the terminal", () => {
     // The first-mouse bug: DOM focus on the textarea, no seeded tab. This
     // case used to bail and leave the terminal key-dead.
-    expect(action({ ownsFocus: true, seededTabId: null })).toBe("reattach");
-    expect(action({ ownsFocus: true, activeElementIsBody: false })).toBe("reattach");
+    expect(action({ ownsFocus: true, seededTabId: null })).toBe("refocus");
+    expect(action({ ownsFocus: true, activeElementIsBody: false })).toBe("refocus");
   });
 
   it("restores the seeded tab on non-click activation (dock icon, Cmd+Tab)", () => {
-    expect(action({ seededTabId: "tab-1" })).toBe("reattach");
+    expect(action({ seededTabId: "tab-1" })).toBe("refocus");
   });
 
   it("never steals focus without click ownership or a seeded match", () => {
