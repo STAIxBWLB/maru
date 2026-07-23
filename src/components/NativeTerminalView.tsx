@@ -418,6 +418,22 @@ export function selectionForSelectDrag(
     : { anchor: { row: base.end.row, col: lastCol }, focus: { row: point.row, col: 0 } };
 }
 
+// WebKit's default mousedown focus-fixup blurs the focused element when a
+// press lands on non-focusable content, silently undoing the focus() the
+// press handlers just made (field trace: pointerdown -> focus -> blur ->
+// keystrokes to body). Cancel it on terminal presses. Right-clicks are
+// exempt: canceling the press suppresses the contextmenu event the custom
+// menu depends on (onContextMenu refocuses the textarea itself). The press
+// bubbles through both the view grid and the panel's instance chrome, and a
+// preventDefault at either level cancels the fixup for the whole press — so
+// BOTH handlers must route through this one guard, or the chrome-level
+// cancel silently overrides the view-level right-click exemption.
+export function cancelTerminalPressFixup(
+  event: Pick<React.PointerEvent, "button" | "preventDefault">,
+): void {
+  if (event.button !== 2) event.preventDefault();
+}
+
 export function terminalKeyEventToInput(
   event: Pick<
     KeyboardEvent,
@@ -1335,13 +1351,7 @@ export const NativeTerminalView = memo(
       (event: React.PointerEvent<HTMLDivElement>) => {
         pointerClientRef.current = { x: event.clientX, y: event.clientY };
         textareaRef.current?.focus();
-        // Cancel the default mousedown focus-fixup: WebKit blurs the focused
-        // element when a press lands on non-focusable content, silently
-        // undoing the focus() above once the handlers return (field trace:
-        // pointerdown -> focus -> blur -> keystrokes to body). Right-clicks
-        // are exempt so the contextmenu event keeps firing — onContextMenu
-        // refocuses the textarea itself.
-        if (event.button !== 2) event.preventDefault();
+        cancelTerminalPressFixup(event);
         rectRef.current = rootRef.current?.getBoundingClientRect() ?? rectRef.current;
         const point = cellFromClient(event.clientX, event.clientY);
         if (!point) return;

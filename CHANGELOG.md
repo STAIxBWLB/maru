@@ -10,6 +10,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 
 ## Unreleased
 
+- **Terminal right-click exemption now survives the instance chrome.** The
+  focus-fixup cancel added for in-app clicks exempted right-clicks at the
+  view level (canceling the press suppresses the `contextmenu` event the
+  terminal's custom menu opens from), but the instance chrome's handler
+  canceled the same bubbling press unconditionally, overriding the
+  exemption. Both handlers now route through one shared guard.
 - **In-app terminal refocus fix (field-traced).** Clicking back into the
   terminal after focusing the editor left it key-dead: the pointerdown
   handler focused the hidden textarea, but WebKit's default mousedown
