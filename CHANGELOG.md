@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased
+## v0.4.15 — 2026-07-23 — Today Workspace & Calendar Sync
 
 - **Today workspace resizing, readable task metadata, and calendar safety.**
   Today navigation, task filters, calendar agenda, and task details can be
@@ -19,15 +19,16 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   03:30 logical-day rollover refreshes visible state, Calendar Sync is a real
   explicit-select/publish surface, and stored per-item calendar destinations
   take precedence when publishing.
-
-## v0.4.14 — 2026-07-23 — In-App Terminal Refocus
-
 - **Terminal right-click exemption now survives the instance chrome.** The
   focus-fixup cancel added for in-app clicks exempted right-clicks at the
   view level (canceling the press suppresses the `contextmenu` event the
   terminal's custom menu opens from), but the instance chrome's handler
   canceled the same bubbling press unconditionally, overriding the
-  exemption. Both handlers now route through one shared guard.
+  exemption. Both handlers now route through one shared guard. (Merged
+  after the v0.4.14 tag; first shipped in this release.)
+
+## v0.4.14 — 2026-07-23 — In-App Terminal Refocus
+
 - **In-app terminal refocus fix (field-traced).** Clicking back into the
   terminal after focusing the editor left it key-dead: the pointerdown
   handler focused the hidden textarea, but WebKit's default mousedown
