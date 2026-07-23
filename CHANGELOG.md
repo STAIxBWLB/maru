@@ -19,13 +19,31 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   03:30 logical-day rollover refreshes visible state, Calendar Sync is a real
   explicit-select/publish surface, and stored per-item calendar destinations
   take precedence when publishing.
+
+## v0.4.14 — 2026-07-23 — In-App Terminal Refocus
+
+- **Terminal right-click exemption now survives the instance chrome.** The
+  focus-fixup cancel added for in-app clicks exempted right-clicks at the
+  view level (canceling the press suppresses the `contextmenu` event the
+  terminal's custom menu opens from), but the instance chrome's handler
+  canceled the same bubbling press unconditionally, overriding the
+  exemption. Both handlers now route through one shared guard.
+- **In-app terminal refocus fix (field-traced).** Clicking back into the
+  terminal after focusing the editor left it key-dead: the pointerdown
+  handler focused the hidden textarea, but WebKit's default mousedown
+  focus-fixup then blurred it again (a press on non-focusable canvas
+  content), so keystrokes went to the document body. Terminal presses now
+  cancel that default (right-clicks exempt so the context menu keeps
+  working), and the native window `setFocus` call (whose resolution itself
+  blurs the webview's focused element) no longer runs on in-app clicks and
+  re-asserts DOM focus after it settles on the activation path.
 - **Native responder re-arm replaces the blur→focus cycle.** v0.4.13's
   synthetic blur→focus repair could leave WKWebView's key first responder
   detached, so refocusing the terminal after an in-app focus change (editor,
   search) went key-dead. The DOM cycle is removed; instead the panel asks the
-  native window to re-assert focus (`setFocus`) on activation repair and on
-  every terminal click, which re-arms the responder at the AppKit level while
-  DOM focus stays a plain `focus()`.
+  native window to re-assert focus (`setFocus`) on the activation repair,
+  which re-arms the responder at the AppKit level while DOM focus stays a
+  plain `focus()`.
 
 ## v0.4.13 — 2026-07-23 — First-Click Terminal Input
 

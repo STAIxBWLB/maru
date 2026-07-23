@@ -55,7 +55,11 @@ import { useTranslation } from "../lib/i18n";
 import type { MaruSettings, TerminalDock } from "../lib/settings";
 import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
 import { TerminalInputPump } from "../lib/terminalInputPump";
-import { NativeTerminalView, type NativeTerminalViewHandle } from "./NativeTerminalView";
+import {
+  NativeTerminalView,
+  type NativeTerminalViewHandle,
+  cancelTerminalPressFixup,
+} from "./NativeTerminalView";
 import {
   activeItemMention,
   buildAgentContextArgs,
@@ -361,13 +365,17 @@ export const TerminalPanel = memo(
     const headerCwd = activeTask?.cwd ?? cwd;
 
     // WKWebView can leave the window's key first-responder detached from the
-    // webview (first-mouse activation, or focus churn), and no DOM focus()
-    // call can repair that — the textarea looks focused but receives no keys.
-    // Asking the native window to re-assert focus re-arms the responder at
-    // the AppKit level. Fire-and-forget; a no-op when already attached.
-    const nativeWindowRefocus = useCallback(() => {
-      if (!canRunTerminal) return;
-      void import("@tauri-apps/api/window")
+    // webview after a first-mouse activation, and no DOM focus() call can
+    // repair that — the textarea looks focused but receives no keys. Asking
+    // the native window to re-assert focus re-arms the responder at the
+    // AppKit level. CAUTION: setFocus resolving can reset the webview's DOM
+    // focus (observed as a textarea blur right after the call), so callers
+    // MUST re-assert DOM focus after the returned promise settles, and this
+    // must never run on ordinary in-app clicks where the window is already
+    // key — there it only destroys the focus the click just established.
+    const nativeWindowRefocus = useCallback((): Promise<void> => {
+      if (!canRunTerminal) return Promise.resolve();
+      return import("@tauri-apps/api/window")
         .then(({ getCurrentWindow }) => getCurrentWindow().setFocus())
         .catch(() => {});
     }, [canRunTerminal]);
@@ -1239,8 +1247,12 @@ export const TerminalPanel = memo(
             focusState: terminalFocusStateRef.current,
           });
           if (action === "refocus") {
-            nativeWindowRefocus();
             handle.focus();
+            // Re-assert DOM focus after the native re-arm settles: setFocus
+            // itself can blur the webview's focused element.
+            void nativeWindowRefocus().then(() => {
+              if (shouldFocusTerminalInput(terminalFocusStateRef.current)) handle.focus();
+            });
           }
         });
       };
@@ -2002,13 +2014,16 @@ export const TerminalPanel = memo(
                     key={tab.id}
                     className={className}
                     onMouseMoveCapture={handleTerminalMouseMoveCapture}
-                    onPointerDown={() => {
+                    onPointerDown={(event) => {
+                      // Cancel the focus-fixup (right-clicks exempt — an
+                      // unconditional preventDefault here would override the
+                      // view-level exemption on the bubbling press and kill
+                      // the contextmenu event). No nativeWindowRefocus here
+                      // either: on an in-app click the window is already key,
+                      // and setFocus resolving blurs the textarea this click
+                      // focused.
+                      cancelTerminalPressFixup(event);
                       setFocusedGroup(isRight ? "right" : "left");
-                      // The responder can be detached even though the window
-                      // is key (post-activation churn); a DOM focus alone
-                      // cannot re-arm it, so every terminal click re-asserts
-                      // native window focus too.
-                      nativeWindowRefocus();
                       handlesRef.current.get(tab.id)?.focus();
                     }}
                   >
