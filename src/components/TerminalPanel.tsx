@@ -180,14 +180,14 @@ export function terminalActivationFocusAction(args: {
   ownsFocus: boolean;
   activeElementIsBody: boolean;
   focusState: TerminalFocusState;
-}): "reattach" | "none" {
+}): "refocus" | "none" {
   if (!args.focusedTabId) return "none";
   if (!shouldFocusTerminalInput(args.focusState)) return "none";
   if (!args.ownsFocus) {
     if (args.seededTabId !== args.focusedTabId) return "none";
     if (!args.activeElementIsBody) return "none";
   }
-  return "reattach";
+  return "refocus";
 }
 
 export function cancelTerminalLayoutRefresh(
@@ -359,6 +359,18 @@ export const TerminalPanel = memo(
     const splitLeftTab = activeTaskTabs.find((tab) => tab.id === splitLeftTabId) ?? null;
     const canRunTerminal = useMemo(() => terminalAvailable(), []);
     const headerCwd = activeTask?.cwd ?? cwd;
+
+    // WKWebView can leave the window's key first-responder detached from the
+    // webview (first-mouse activation, or focus churn), and no DOM focus()
+    // call can repair that — the textarea looks focused but receives no keys.
+    // Asking the native window to re-assert focus re-arms the responder at
+    // the AppKit level. Fire-and-forget; a no-op when already attached.
+    const nativeWindowRefocus = useCallback(() => {
+      if (!canRunTerminal) return;
+      void import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) => getCurrentWindow().setFocus())
+        .catch(() => {});
+    }, [canRunTerminal]);
 
     useEffect(() => {
       setDraftHeight(height);
@@ -1226,7 +1238,10 @@ export const TerminalPanel = memo(
             activeElementIsBody: !el || el === document.body,
             focusState: terminalFocusStateRef.current,
           });
-          if (action === "reattach") handle.focus({ reattach: true });
+          if (action === "refocus") {
+            nativeWindowRefocus();
+            handle.focus();
+          }
         });
       };
       const deactivate = () => {
@@ -1269,7 +1284,7 @@ export const TerminalPanel = memo(
         window.removeEventListener("blur", onWindowBlur);
         window.removeEventListener("focus", onWindowFocus);
       };
-    }, [canRunTerminal]);
+    }, [canRunTerminal, nativeWindowRefocus]);
 
     useEffect(() => {
       if (!open) {
@@ -1989,6 +2004,11 @@ export const TerminalPanel = memo(
                     onMouseMoveCapture={handleTerminalMouseMoveCapture}
                     onPointerDown={() => {
                       setFocusedGroup(isRight ? "right" : "left");
+                      // The responder can be detached even though the window
+                      // is key (post-activation churn); a DOM focus alone
+                      // cannot re-arm it, so every terminal click re-asserts
+                      // native window focus too.
+                      nativeWindowRefocus();
                       handlesRef.current.get(tab.id)?.focus();
                     }}
                   >
