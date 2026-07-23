@@ -6700,7 +6700,7 @@ function MainApp() {
       return;
     }
     const ta =
-      focusedEditorGroup === "right"
+      focusedDocumentGroup === "right"
         ? rightEditorTextareaRef.current
         : editorTextareaRef.current;
     if (!ta) {
@@ -6727,7 +6727,7 @@ function MainApp() {
       if (raf) window.cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
+  }, [outlineOpen, rightPaneTab, editorViewMode, focusedDocumentGroup, document?.path]);
 
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
     const workspaceRoot = activeDocumentWorkspacePath;

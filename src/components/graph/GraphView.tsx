@@ -845,9 +845,6 @@ export function GraphView({
       }
       if (isInEditable(event.target)) return;
       if (event.key === "Escape") {
-        // Toolbar popovers close on their own bubble-phase Esc listener; let
-        // the event through so they get priority over the cascade below.
-        if (rootRef.current?.querySelector('[role="menu"]')) return;
         // Consume Esc only when the graph actually closes something —
         // otherwise dialogs and global handlers must still see it. The scoped
         // shortcut stops propagation on preventDefault, so each branch closes
@@ -857,6 +854,9 @@ export function GraphView({
           setMenu(null);
           return;
         }
+        // Toolbar popovers close on their own bubble-phase Esc listener; let
+        // the event through so they get priority over the cascade below.
+        if (rootRef.current?.querySelector('[role="menu"]')) return;
         if (toolsOpen) {
           event.preventDefault();
           setToolsOpen(false);

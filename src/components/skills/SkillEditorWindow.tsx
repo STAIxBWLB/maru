@@ -242,6 +242,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
   }, [t]);
 
   useEffect(() => {
+    let disposed = false;
     let dispose: (() => void) | null = null;
     void listenForMenuCommand((id) => {
       if (id !== "file.close_active" && id !== "window.close") return;
@@ -250,9 +251,13 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
         .then(({ getCurrentWindow }) => getCurrentWindow().close())
         .catch(() => {});
     }).then((off) => {
-      dispose = off;
+      if (disposed) off();
+      else dispose = off;
     });
-    return () => dispose?.();
+    return () => {
+      disposed = true;
+      dispose?.();
+    };
   }, []);
 
   const emitUpdated = useCallback(async (payload: SkillsUpdatedPayload) => {
