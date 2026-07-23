@@ -2423,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "maru"
-version = "0.4.12"
+version = "0.4.13"
 dependencies = [
  "alacritty_terminal",
  "base64 0.22.1",
