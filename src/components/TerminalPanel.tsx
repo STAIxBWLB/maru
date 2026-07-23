@@ -55,7 +55,11 @@ import { useTranslation } from "../lib/i18n";
 import type { MaruSettings, TerminalDock } from "../lib/settings";
 import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
 import { TerminalInputPump } from "../lib/terminalInputPump";
-import { NativeTerminalView, type NativeTerminalViewHandle } from "./NativeTerminalView";
+import {
+  NativeTerminalView,
+  type NativeTerminalViewHandle,
+  cancelTerminalPressFixup,
+} from "./NativeTerminalView";
 import {
   activeItemMention,
   buildAgentContextArgs,
@@ -2011,13 +2015,14 @@ export const TerminalPanel = memo(
                     className={className}
                     onMouseMoveCapture={handleTerminalMouseMoveCapture}
                     onPointerDown={(event) => {
-                      // Cancel the default mousedown focus-fixup (WebKit
-                      // blurs the focused element on presses over
-                      // non-focusable content — it would undo the focus()
-                      // below). No nativeWindowRefocus here either: on an
-                      // in-app click the window is already key, and setFocus
-                      // resolving blurs the textarea this click focused.
-                      event.preventDefault();
+                      // Cancel the focus-fixup (right-clicks exempt — an
+                      // unconditional preventDefault here would override the
+                      // view-level exemption on the bubbling press and kill
+                      // the contextmenu event). No nativeWindowRefocus here
+                      // either: on an in-app click the window is already key,
+                      // and setFocus resolving blurs the textarea this click
+                      // focused.
+                      cancelTerminalPressFixup(event);
                       setFocusedGroup(isRight ? "right" : "left");
                       handlesRef.current.get(tab.id)?.focus();
                     }}
