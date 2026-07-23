@@ -133,16 +133,24 @@ function buildTheme(read: (name: string, fallback: string) => string): GraphThem
 
 let activeTheme: GraphTheme = buildTheme((_name, fallback) => fallback);
 
+// Every theme token ends up in Sigma's parseColor, which only understands
+// hex/rgb/rgba; unevaluated tokens like `color-mix(...)` or `var(...)` (as
+// returned by getPropertyValue for custom properties) would silently become
+// opaque black. Only concrete colors may pass through.
+function isConcreteColor(value: string): boolean {
+  return /^(#[0-9a-f]{3,8}|rgba?\([^)]*\))$/i.test(value);
+}
+
 export function refreshGraphTheme(element?: Element | null): GraphTheme {
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     const style = getComputedStyle(element ?? document.documentElement);
     const resolvedBackground = style.backgroundColor.trim();
     activeTheme = buildTheme((name, fallback) => {
       const value = style.getPropertyValue(name).trim();
-      if (name === "--graph-canvas" && (!value || value.includes("var("))) {
+      if (name === "--graph-canvas" && !isConcreteColor(value)) {
         return resolvedBackground || fallback;
       }
-      return value || fallback;
+      return isConcreteColor(value) ? value : fallback;
     });
   }
   return activeTheme;

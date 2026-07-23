@@ -59,6 +59,20 @@ describe("graph theme", () => {
     expect(theme.bg).toBe("rgb(30, 30, 30)");
   });
 
+  it("falls back when tokens hold unevaluated color-mix()/var() values", () => {
+    // getPropertyValue returns custom-property token streams unevaluated;
+    // Sigma's parseColor would turn them into opaque black.
+    setTokens({
+      ...DARK,
+      "--graph-edge": "color-mix(in srgb, var(--ink) 7%, transparent)",
+      "--graph-line": "var(--line)",
+    });
+    const theme = refreshGraphTheme();
+    expect(theme.dark).toBe(true);
+    expect(theme.edge).toBe("#292a29"); // dark fallback, not the raw token text
+    expect(theme.line).toBe("#30322f"); // DARK_DEFAULTS.line fallback
+  });
+
   it("keeps a community on the same slot index across themes", () => {
     setTokens(LIGHT);
     const light = refreshGraphTheme().communityColors;

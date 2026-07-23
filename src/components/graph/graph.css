@@ -1693,6 +1693,10 @@
   background: var(--graph-canvas);
 }
 
+/* Forced graph themes also remap the app tokens (--ink/--panel/--muted/...)
+   to that theme's palette: drawer/inspector/panel rules below still use the
+   app variables, and inheriting them from a light app under a dark graph
+   rendered unreadable text (and vice versa). Values mirror styles.css. */
 .graph-view[data-graph-theme="dark"] {
   --graph-canvas: #1e1e1e;
   --graph-surface: rgba(35, 36, 34, 0.94);
@@ -1702,6 +1706,20 @@
   --graph-edge: #292a29;
   --graph-label: rgba(242, 240, 232, 0.3);
   --graph-label-strong: #f2f0e8;
+  --bg: #181a18;
+  --panel: #252723;
+  --panel-2: #2a2c28;
+  --line: #3a3d36;
+  --line-strong: #50534b;
+  --ink: #f2f0e8;
+  --ink-2: #dedbd0;
+  --muted: #a19c8f;
+  --faint: #777368;
+  --accent: #7faf86;
+  --accent-soft: #2a3b2d;
+  --accent-tint: #2f4434;
+  --warn: #d6b070;
+  --on-accent: #101510;
   color-scheme: dark;
 }
 
@@ -1714,7 +1732,25 @@
   --graph-edge: #d8d6cf;
   --graph-label: rgba(31, 29, 24, 0.38);
   --graph-label-strong: #1f1d18;
+  --bg: #f4f3ee;
+  --panel: #ffffff;
+  --panel-2: #f9f8f4;
+  --line: #dedbd1;
+  --line-strong: #bfb8aa;
+  --ink: #1f1d18;
+  --ink-2: #3d3a32;
+  --muted: #69645b;
+  --faint: #969085;
+  --accent: #2f5a3c;
+  --accent-soft: #d8e6d2;
+  --accent-tint: #eaf1e3;
+  --warn: #7a5520;
+  --on-accent: #fbfcf8;
   color-scheme: light;
+}
+
+.graph-view:focus {
+  outline: none;
 }
 
 .graph-view[data-graph-accent="green"] {
