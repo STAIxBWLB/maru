@@ -88,6 +88,7 @@ pub struct TaskNoteRow {
     pub path: String,
     pub rel_path: String,
     pub file_name: String,
+    pub display_title: String,
     pub bucket: TaskBucket,
     pub size_bytes: u64,
     pub updated_at: Option<String>,
@@ -476,14 +477,18 @@ fn task_row_for_path(work: &Path, path: &Path, bucket: TaskBucket) -> Result<Tas
         .metadata()
         .map_err(|err| format!("Cannot read task note metadata: {err}"))?;
     let rel_path = rel_path_for(work, path);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&rel_path)
+        .to_string();
+    let frontmatter = normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta));
+    let display_title = task_display_title(&frontmatter, &parts.body, &file_name);
     Ok(TaskNoteRow {
         path: path.to_string_lossy().to_string(),
         rel_path: rel_path.clone(),
-        file_name: path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or(&rel_path)
-            .to_string(),
+        file_name,
+        display_title,
         bucket,
         size_bytes: metadata.len(),
         updated_at: metadata
@@ -491,8 +496,27 @@ fn task_row_for_path(work: &Path, path: &Path, bucket: TaskBucket) -> Result<Tas
             .ok()
             .map(DateTime::<Utc>::from)
             .map(|value| value.to_rfc3339()),
-        frontmatter: normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta)),
+        frontmatter,
     })
+}
+
+fn task_display_title(frontmatter: &JsonValue, body: &str, file_name: &str) -> String {
+    string_field(frontmatter, "title")
+        .or_else(|| string_field(frontmatter, "name"))
+        .or_else(|| {
+            body.lines().find_map(|line| {
+                let trimmed = line.trim_start();
+                let title = trimmed.strip_prefix("# ")?.trim();
+                (!title.is_empty()).then(|| title.to_string())
+            })
+        })
+        .unwrap_or_else(|| {
+            Path::new(file_name)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or(file_name)
+                .to_string()
+        })
 }
 
 fn parse_tasks_log_line(raw: &str) -> TasksLogLine {
@@ -677,16 +701,15 @@ pub(crate) fn normalize_task_frontmatter_aliases(mut frontmatter: JsonValue) -> 
         return frontmatter;
     };
     if !map.contains_key("project") {
-        if let Some(first) = map
-            .get("projects")
-            .and_then(JsonValue::as_array)
-            .and_then(|items| {
-                items
-                    .iter()
-                    .filter_map(JsonValue::as_str)
-                    .map(str::trim)
-                    .find(|value| !value.is_empty())
-            })
+        if let Some(first) = map.get("projects").and_then(|value| match value {
+            JsonValue::String(text) if !text.trim().is_empty() => Some(text.trim()),
+            JsonValue::Array(items) => items
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .map(str::trim)
+                .find(|value| !value.is_empty()),
+            _ => None,
+        })
         {
             map.insert(
                 "project".to_string(),
@@ -1313,7 +1336,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_rows_normalize_legacy_projects_alias_to_first_entry() {
+    fn scan_rows_normalize_scalar_and_list_project_aliases() {
         let tmp = tempdir().unwrap();
         let active = tmp.path().join("tasks/active");
         fs::create_dir_all(&active).unwrap();
@@ -1322,13 +1345,51 @@ mod tests {
             "---\nstatus: open\nprojects:\n  - alpha\n  - beta\n---\n# Task",
         )
         .unwrap();
+        fs::write(
+            active.join("scalar.md"),
+            "---\nstatus: active\nprojects: gamma\n---\n# Scalar project",
+        )
+        .unwrap();
 
         let rows = scan_task_notes(tmp.path().to_string_lossy().to_string(), None).unwrap();
 
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].frontmatter["project"], json!("alpha"));
+        assert_eq!(rows.len(), 2);
+        let list = rows.iter().find(|row| row.file_name == "task.md").unwrap();
+        let scalar = rows.iter().find(|row| row.file_name == "scalar.md").unwrap();
+        assert_eq!(list.frontmatter["project"], json!("alpha"));
+        assert_eq!(scalar.frontmatter["project"], json!("gamma"));
         // Original alias key stays untouched; writers never see `project` here.
-        assert!(rows[0].frontmatter["projects"].is_array());
+        assert!(list.frontmatter["projects"].is_array());
+        assert_eq!(scalar.frontmatter["projects"], json!("gamma"));
+    }
+
+    #[test]
+    fn scan_rows_use_title_name_h1_then_filename_for_display() {
+        let tmp = tempdir().unwrap();
+        let active = tmp.path().join("tasks/active");
+        fs::create_dir_all(&active).unwrap();
+        fs::write(
+            active.join("title.md"),
+            "---\ntitle: Frontmatter title\nname: Name\n---\n# Heading",
+        )
+        .unwrap();
+        fs::write(
+            active.join("name.md"),
+            "---\nname: Frontmatter name\n---\n# Heading",
+        )
+        .unwrap();
+        fs::write(active.join("heading.md"), "---\nstatus: active\n---\n# Body heading").unwrap();
+        fs::write(active.join("filename-only.md"), "---\nstatus: active\n---\nBody").unwrap();
+
+        let rows = scan_task_notes(tmp.path().to_string_lossy().to_string(), None).unwrap();
+        let titles = rows
+            .into_iter()
+            .map(|row| (row.file_name, row.display_title))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(titles["title.md"], "Frontmatter title");
+        assert_eq!(titles["name.md"], "Frontmatter name");
+        assert_eq!(titles["heading.md"], "Body heading");
+        assert_eq!(titles["filename-only.md"], "filename-only");
     }
 
     #[test]

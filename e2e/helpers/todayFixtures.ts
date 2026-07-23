@@ -54,6 +54,7 @@ export interface TodaySeedOverrides {
   inboxEntries?: unknown[];
   documents?: Record<string, { content: string; revision?: string }>;
   brainDump?: string;
+  rolloverFailures?: number;
 }
 
 export interface TodayInvokeCall {
@@ -414,9 +415,8 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
         activeAppMode: overrides.persistedMode ?? "pkm",
         themeMode: overrides.themeMode ?? "light",
         // The reference shell has no right pane. The app auto-closes it on
-        // mode *change* into tasks, but a straight boot into tasks keeps it —
-        // and the 280px column would squeeze the today pane into its compact
-        // breakpoints. Seed it closed to match the reference layout.
+        // mode *change* into tasks, but a straight boot into tasks keeps it.
+        // Seed it closed to match the reference layout.
         layout: { outlineOpen: false },
       },
       tasks: {
@@ -436,6 +436,7 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
     events: overrides.events ?? defaultEvents(),
     outbox: overrides.outbox ?? defaultOutbox(),
     commitments: overrides.commitments ?? defaultCommitments(),
+    rolloverFailures: overrides.rolloverFailures ?? 0,
     taskRows: overrides.taskRows ?? defaultTaskRows(),
     inboxEntries:
       overrides.inboxEntries ??
@@ -491,6 +492,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       inboxEntries: clone(injected.inboxEntries),
       documents: clone(injected.documents) as Record<string, { content: string; revision?: string }>,
       transitionCounter: 0,
+      rolloverFailures: injected.rolloverFailures,
     };
 
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
@@ -623,11 +625,17 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
           frontmatter: { title, status: "active", ...(draft.frontmatter ?? {}) },
         };
       },
-      today_rollover: () => ({
-        closedDay: state.previousLogicalDay,
-        newDay: state.logicalDay,
-        seeded: 0,
-      }),
+      today_rollover: () => {
+        if (state.rolloverFailures > 0) {
+          state.rolloverFailures -= 1;
+          throw new Error("mock rollover failure");
+        }
+        return {
+          closedDay: state.previousLogicalDay,
+          newDay: state.logicalDay,
+          seeded: 0,
+        };
+      },
       today_notify_new_day: () => ({ sent: true, permission: "granted" }),
       read_task_events: (args) => {
         const day = typeof args.day === "string" ? args.day : null;

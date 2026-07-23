@@ -650,6 +650,7 @@ pub struct ProjectPickerEntry {
     pub name: String,
     pub path: String,
     pub status: String,
+    pub vault_note: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1131,13 @@ fn collect_project_picker_entries_json(
                             name: name.to_string(),
                             path: path.to_string(),
                             status: status.to_string(),
+                            vault_note: map
+                                .get("vaultNote")
+                                .or_else(|| map.get("vault_note"))
+                                .and_then(JsonValue::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(str::to_string),
                         });
                     }
                 }
@@ -1181,6 +1189,11 @@ fn collect_project_picker_entries_yaml(
                             name: name.to_string(),
                             path: path.to_string(),
                             status: status.to_string(),
+                            vault_note: yaml_key_string(map, "vault_note")
+                                .or_else(|| yaml_key_string(map, "vaultNote"))
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(str::to_string),
                         });
                     }
                 }

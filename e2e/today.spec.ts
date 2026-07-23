@@ -298,6 +298,160 @@ test("review: planned-vs-completed groups render and the reflection saves", asyn
   await expect(page.locator(".today-review-saved")).toHaveText("저장됨");
 });
 
+test("calendar sync is a functional route with explicit selection and publish", async ({ page }) => {
+  const plan = {
+    logicalDay: FIXTURE_DAY,
+    inputRevision: "rev-1",
+    top: [
+      {
+        itemRef: { kind: "task", taskId: TASK_A },
+        lane: "top",
+        order: 0,
+        outcome: null,
+        estimateMinutes: 45,
+        estimateProvisional: false,
+        pinned: false,
+        proposedBlock: {
+          startIso: `${FIXTURE_DAY}T09:00:00+09:00`,
+          endIso: `${FIXTURE_DAY}T09:45:00+09:00`,
+        },
+        calendarSync: { status: "none" },
+      },
+    ],
+    flexible: [],
+    overflow: [],
+    reasons: [],
+    warnings: [],
+  };
+  await installTodayMocks(page, buildTodaySeed({ ...AUTO_OPEN_SEED, plan }));
+  await gotoTodayPrepare(page);
+
+  await page.locator(".today-sidebar").getByRole("button", { name: "캘린더 연동" }).click();
+  const panel = page.locator(".today-calendar-sync");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "연결된 일정" })).toBeVisible();
+  await expect(panel.locator(".today-calendar-commitment-list li")).toHaveCount(2);
+  await expect(panel).toContainText(TASK_A_TITLE);
+
+  const publish = panel.getByRole("button", { name: "선택 항목 게시 (0)" });
+  await expect(publish).toBeDisabled();
+  await panel.getByRole("button", { name: "캘린더에 추가" }).click();
+  await expect
+    .poll(
+      async () =>
+        mutationCalls(await readTodayCalls(page), "setCalendarSync").length,
+    )
+    .toBe(1);
+  await expect(panel.getByRole("button", { name: "선택 항목 게시 (1)" })).toBeEnabled();
+
+  await panel.getByRole("button", { name: "선택 항목 게시 (1)" }).click();
+  await expect
+    .poll(async () => callsOf(await readTodayCalls(page), "today_calendar_publish").length)
+    .toBe(1);
+});
+
+test("all tasks shows readable metadata and persists keyboard-resized regions", async ({ page }) => {
+  await page.setViewportSize({ width: 1700, height: 920 });
+  const taskRows = [
+    {
+      path: `${FIXTURE_WORK_PATH}/tasks/active/260723-admin-ai.md`,
+      relPath: "tasks/active/260723-admin-ai.md",
+      fileName: "260723-admin-ai.md",
+      displayTitle: "AI혁신처 운영 점검",
+      bucket: "active",
+      sizeBytes: 320,
+      updatedAt: "2026-07-21T09:00:00+09:00",
+      frontmatter: {
+        status: "active",
+        priority: "high",
+        project: "[[admin-ai-innovation]]",
+        due: FIXTURE_DAY,
+      },
+    },
+    {
+      path: `${FIXTURE_WORK_PATH}/tasks/active/260723-saltlux.md`,
+      relPath: "tasks/active/260723-saltlux.md",
+      fileName: "260723-saltlux.md",
+      displayTitle: "에이전틱 AI 협력안 정리",
+      bucket: "active",
+      sizeBytes: 320,
+      updatedAt: "2026-07-21T09:10:00+09:00",
+      frontmatter: {
+        status: "active",
+        priority: "medium",
+        project: "[[agentic-ai-education-platform-with-saltlux-luxia|솔트룩스 협력]]",
+      },
+    },
+  ];
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...AUTO_OPEN_SEED, persistedMode: "tasks", taskRows }),
+  );
+  await gotoTodayPrepare(page);
+  await page.locator(".today-sidebar").getByRole("button", { name: "전체 태스크" }).click();
+
+  await expect(page.locator(".tasks-pane")).toBeVisible();
+  await expect(page.locator(".tasks-sidebar")).toContainText("Admin AI innovation");
+  await expect(page.locator(".tasks-sidebar")).toContainText("솔트룩스 협력");
+  await expect(page.locator(".tasks-pane")).toContainText("AI혁신처 운영 점검");
+  await expect(page.locator(".tasks-pane")).not.toContainText("[[admin-ai-innovation]]");
+
+  const todaySidebar = page.locator(".today-sidebar");
+  const resizeToday = page.getByRole("separator", { name: "Today 탐색 영역 크기 조절" });
+  await expect(resizeToday).toHaveAttribute("aria-valuenow", "240");
+  await resizeToday.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(resizeToday).toHaveAttribute("aria-valuenow", "252");
+  await expect
+    .poll(async () => Math.round((await todaySidebar.boundingBox())?.width ?? 0))
+    .toBe(252);
+
+  const resizeFilters = page.getByRole("separator", { name: "태스크 필터 영역 크기 조절" });
+  await resizeFilters.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(resizeFilters).toHaveAttribute("aria-valuenow", "252");
+
+  const resizeAgenda = page.getByRole("separator", { name: "일정 목록 영역 크기 조절" });
+  await resizeAgenda.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(resizeAgenda).toHaveAttribute("aria-valuenow", "292");
+
+  await page
+    .locator(".cal-agenda-pane")
+    .getByRole("button", { name: "AI혁신처 운영 점검", exact: true })
+    .click();
+  await expect(page.locator(".task-detail-drawer")).toBeVisible();
+  const resizeDetails = page.getByRole("separator", { name: "태스크 상세 영역 크기 조절" });
+  await resizeDetails.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(resizeDetails).toHaveAttribute("aria-valuenow", "412");
+
+  await page.reload();
+  await expect(page.locator(".tasks-pane")).toBeVisible();
+  await expect
+    .poll(async () => Math.round((await page.locator(".today-sidebar").boundingBox())?.width ?? 0))
+    .toBe(252);
+  await expect(
+    page.getByRole("separator", { name: "태스크 필터 영역 크기 조절" }),
+  ).toHaveAttribute("aria-valuenow", "252");
+  await expect(
+    page.getByRole("separator", { name: "일정 목록 영역 크기 조절" }),
+  ).toHaveAttribute("aria-valuenow", "292");
+  await page
+    .locator(".cal-agenda-pane")
+    .getByRole("button", { name: "AI혁신처 운영 점검", exact: true })
+    .click();
+  await expect(
+    page.getByRole("separator", { name: "태스크 상세 영역 크기 조절" }),
+  ).toHaveAttribute("aria-valuenow", "412");
+
+  const metrics = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+});
+
 test("rollover: a mocked day change surfaces exactly one new-day notification", async ({ page }) => {
   // Fake timers drive the 60s watcher deterministically — no real waiting.
   await page.clock.install();
@@ -331,7 +485,38 @@ test("rollover: a mocked day change surfaces exactly one new-day notification", 
   expect(notify.args.logicalDay).toBe("2026-07-22");
 });
 
-test("layout smoke at 1440x920: rail, 350px sidebar, two-panel prepare grid", async ({ page }) => {
+test("rollover retries after a transient failure before notifying or refreshing", async ({ page }) => {
+  await page.clock.install();
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ markerDay: FIXTURE_DAY, rolloverFailures: 1 }),
+  );
+  await page.goto("/");
+  await expect
+    .poll(async () => callsOf(await readTodayCalls(page), "today_logical_day").length)
+    .toBeGreaterThan(0);
+
+  await page.evaluate(() =>
+    (
+      window as unknown as { __MARU_TODAY_MOCK__: { setLogicalDay: (day: string) => void } }
+    ).__MARU_TODAY_MOCK__.setLogicalDay("2026-07-22"),
+  );
+  await page.clock.runFor(60_000);
+  await expect
+    .poll(async () => callsOf(await readTodayCalls(page), "today_rollover").length)
+    .toBeGreaterThanOrEqual(2);
+  await expect
+    .poll(async () => callsOf(await readTodayCalls(page), "today_notify_new_day").length)
+    .toBe(1);
+  const calls = await readTodayCalls(page);
+  const rolloverIndexes = calls
+    .map((call, index) => (call.command === "today_rollover" ? index : -1))
+    .filter((index) => index >= 0);
+  const notifyIndex = calls.findIndex((call) => call.command === "today_notify_new_day");
+  expect(notifyIndex).toBeGreaterThan(rolloverIndexes[1] ?? -1);
+});
+
+test("layout smoke at 1440x920: rail, 240px sidebar, two-panel prepare grid", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 920 });
   await installTodayMocks(page, buildTodaySeed(AUTO_OPEN_SEED));
   await gotoTodayPrepare(page);
@@ -345,7 +530,7 @@ test("layout smoke at 1440x920: rail, 350px sidebar, two-panel prepare grid", as
   if (!topbar || !rail || !sidebar) return;
   expect(Math.abs(topbar.height - 44)).toBeLessThanOrEqual(2);
   expect(Math.abs(rail.width - 48)).toBeLessThanOrEqual(2);
-  expect(Math.abs(sidebar.width - 350)).toBeLessThanOrEqual(2);
+  expect(Math.abs(sidebar.width - 240)).toBeLessThanOrEqual(2);
 
   // Brain dump and capture panels sit side by side (39.5/60.5 split).
   const brainDump = await page.locator(".today-panel-braindump").boundingBox();
@@ -372,11 +557,11 @@ test("layout smoke at 1024x720: compact one-column layout, no horizontal scroll"
   if (!brainDump || !capture) return;
   expect(capture.y).toBeGreaterThanOrEqual(brainDump.y + brainDump.height - 1);
 
-  // Compact breakpoint: the sidebar column narrows to 280px (labels kept).
+  // The persisted default remains 240px while labels still fit.
   const sidebar = await page.locator(".today-sidebar").boundingBox();
   expect(sidebar).not.toBeNull();
   if (!sidebar) return;
-  expect(Math.abs(sidebar.width - 280)).toBeLessThanOrEqual(2);
+  expect(Math.abs(sidebar.width - 240)).toBeLessThanOrEqual(2);
 
   // No horizontal scrollbar, on the document or inside the today pane.
   const docMetrics = await page.evaluate(() => ({
@@ -403,4 +588,12 @@ test("layout smoke at 1024x720: compact one-column layout, no horizontal scroll"
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(narrowMetrics.scrollWidth).toBeLessThanOrEqual(narrowMetrics.clientWidth);
+
+  // Regression: the hidden sidebar resize handle must keep its grid slot
+  // (visibility, not display) — otherwise .today-main auto-places into the
+  // 9px handle track and collapses.
+  const mainBox = await page.locator(".today-main").boundingBox();
+  expect(mainBox).not.toBeNull();
+  if (!mainBox) return;
+  expect(mainBox.width).toBeGreaterThan(700);
 });

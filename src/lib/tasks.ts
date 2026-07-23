@@ -1,10 +1,12 @@
 import type {
   MissionRecord,
+  ProjectPickerEntry,
   TaskBucket,
   TaskNoteRow,
   TaskStatus,
 } from "./types";
 import type { TasksSettings } from "./settings";
+import { resolveTaskProjects } from "./taskProjectLabels";
 
 export type TaskPriority = "highest" | "high" | "medium" | "low" | "none";
 
@@ -19,6 +21,9 @@ export interface TaskEntry {
   status: TaskStatus;
   priority: TaskPriority;
   project: string | null;
+  projects: string[];
+  projectKeys: string[];
+  projectLabels: string[];
   topics: string[];
   due: string | null;
   calendarStart: string | null;
@@ -81,8 +86,13 @@ export function rowsToTaskEntries(rows: TaskNoteRow[]): TaskEntry[] {
 
 export function rowToTaskEntry(row: TaskNoteRow): TaskEntry {
   const fm = row.frontmatter ?? {};
+  const projects = scalarString(fm.project)
+    ? [scalarString(fm.project)!]
+    : scalarStringList(fm.projects);
+  const resolvedProjects = resolveTaskProjects(projects);
   const title =
-    scalarString(fm.title)
+    scalarString(row.displayTitle)
+    ?? scalarString(fm.title)
     ?? scalarString(fm.name)
     ?? row.fileName.replace(/\.md$/i, "");
   return {
@@ -93,7 +103,10 @@ export function rowToTaskEntry(row: TaskNoteRow): TaskEntry {
     title,
     status: normalizeTaskStatus(fm.status, row.bucket),
     priority: normalizeTaskPriority(fm.priority),
-    project: scalarString(fm.project) ?? firstProjectAlias(fm.projects),
+    project: projects[0] ?? null,
+    projects,
+    projectKeys: resolvedProjects.map((project) => project.key),
+    projectLabels: resolvedProjects.map((project) => project.label),
     topics: scalarStringList(fm.topics).concat(scalarStringList(fm.tags)),
     due: normalizeDateLike(fm.due) ?? normalizeDateLike(fm.date),
     calendarStart:
@@ -109,6 +122,20 @@ export function rowToTaskEntry(row: TaskNoteRow): TaskEntry {
     frontmatter: fm,
     ...todayTaskFields(fm),
   };
+}
+
+export function resolveTaskEntryProjects(
+  entries: readonly TaskEntry[],
+  projects: readonly ProjectPickerEntry[],
+): TaskEntry[] {
+  return entries.map((entry) => {
+    const resolved = resolveTaskProjects(entry.projects, projects);
+    return {
+      ...entry,
+      projectKeys: resolved.map((project) => project.key),
+      projectLabels: resolved.map((project) => project.label),
+    };
+  });
 }
 
 /** Optional Today-integration fields carried on task frontmatter. Only set
@@ -181,7 +208,13 @@ export function filterTasksByQuery(
   return entries.filter((entry) => {
     if (statuses && !statuses.has(entry.status)) return false;
     if (buckets && !buckets.has(entry.bucket)) return false;
-    if (projects && !projects.has((entry.project ?? "").toLowerCase())) return false;
+    if (
+      projects
+      && !entry.projects.some((project) => projects.has(project.toLowerCase()))
+      && !entry.projectKeys.some((project) => projects.has(project.toLowerCase()))
+    ) {
+      return false;
+    }
     if (priorities && !priorities.has(entry.priority)) return false;
     if (filters.due === "today" && scheduledDate(entry) !== today) return false;
     if (filters.due === "overdue" && !isOverdue(entry, today)) return false;
@@ -193,6 +226,8 @@ export function filterTasksByQuery(
       entry.status,
       entry.priority,
       entry.project,
+      entry.projects.join(" "),
+      entry.projectLabels.join(" "),
       entry.topics.join(" "),
       entry.due,
       entry.relPath,
@@ -287,7 +322,7 @@ export function groupTasksByStatus(entries: TaskEntry[]): Map<TaskStatus, TaskEn
 }
 
 export function groupTasksByProject(entries: TaskEntry[]): Map<string, TaskEntry[]> {
-  return groupBy(entries, (entry) => entry.project ?? "No project");
+  return groupBy(entries, (entry) => entry.projectLabels[0] ?? "No project");
 }
 
 export function isOverdue(entry: TaskEntry, today: string = todayIso()): boolean {
@@ -435,16 +470,6 @@ function groupBy<K extends string>(entries: TaskEntry[], keyFn: (entry: TaskEntr
 function scalarString(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return null;
-}
-
-/** Legacy `projects: [a, b]` alias — first non-empty entry becomes `project`. */
-function firstProjectAlias(value: unknown): string | null {
-  if (!Array.isArray(value)) return null;
-  for (const item of value) {
-    const text = scalarString(item);
-    if (text) return text;
-  }
   return null;
 }
 

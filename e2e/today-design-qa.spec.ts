@@ -102,7 +102,7 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   const anchors: AnchorMeasurement[] = [
     await measure(".topbar", "height", 44, 2),
     await measure(".activity-rail", "width", 48, 2),
-    await measure(".today-sidebar", "width", 350, 2),
+    await measure(".today-sidebar", "width", 240, 2),
     await measure(".today-stage-header", "height", 116, 4),
     ...splitMeasurements,
   ];
@@ -126,6 +126,13 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   await expect(page.locator(".today-panel-summary")).toBeVisible();
   await expect(page.locator(".today-review-reflection-input")).toBeVisible();
   await page.screenshot({ path: path.join(OUT_DIR, "today-review-1487.png") });
+
+  // --- All Tasks at the reference viewport ---------------------------------
+  await page.locator(".today-sidebar").getByRole("button", { name: "전체 태스크" }).click();
+  await expect(page.locator(".tasks-pane")).toBeVisible();
+  await expect(page.getByRole("separator", { name: "태스크 필터 영역 크기 조절" })).toBeVisible();
+  await expect(page.getByRole("separator", { name: "일정 목록 영역 크기 조절" })).toBeVisible();
+  await page.screenshot({ path: path.join(OUT_DIR, "today-tasks-1487.png") });
 
   // --- Prepare at 1440x920 (responsive note) --------------------------------
   await page.setViewportSize(WIDE_VIEWPORT);
@@ -204,7 +211,7 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   }
   expect(compact.stacked).toBe(true);
   expect(compact.docScrollWidth).toBeLessThanOrEqual(compact.docClientWidth);
-  // Compact breakpoint: 280px labeled sidebar (icon-only kicks in ≤959px
-  // container, i.e. below this viewport).
-  expect(Math.abs(compact.sidebarWidth - 280)).toBeLessThanOrEqual(2);
+  // The persisted 240px default remains labeled here (icon-only kicks in
+  // at a ≤959px Today container).
+  expect(Math.abs(compact.sidebarWidth - 240)).toBeLessThanOrEqual(2);
 });

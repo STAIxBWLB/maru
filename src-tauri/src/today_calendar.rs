@@ -450,11 +450,11 @@ pub fn today_calendar_publish(
             // Concurrent edit unselected or removed the item — skip.
             continue;
         };
-        let destination_id = destination
+        let destination_id = item_destination
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .or(item_destination.as_deref().map(str::trim).filter(|value| !value.is_empty()))
+            .or(destination.as_deref().map(str::trim).filter(|value| !value.is_empty()))
             .unwrap_or(FALLBACK_DESTINATION);
         let output = Command::new(&gws_bin)
             .env("PATH", augmented_path())
@@ -822,6 +822,47 @@ mod tests {
 
         let events = fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
         assert!(events.contains("\"kind\":\"calendar_blocks_published\""));
+    }
+
+    #[test]
+    fn publish_keeps_the_destination_captured_when_the_item_was_selected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("gws-destination.log");
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-destination",
+            &format!(
+                "#!/bin/sh\necho \"$@\" >> {}\necho '{{\"id\":\"evt-42\"}}'\nexit 0\n",
+                log.display()
+            ),
+        );
+        let snapshot = open_with_plan(
+            &tmp,
+            vec![plan_item(
+                "a",
+                Some(block(
+                    "2026-07-21T10:00:00+09:00",
+                    "2026-07-21T11:00:00+09:00",
+                )),
+            )],
+        );
+        // `select` captures cal-1. A later command-level default must not
+        // redirect the already-approved write to cal-2.
+        let snapshot = select(&tmp, &snapshot, "a", true).unwrap();
+        let outcome = today_calendar_publish(
+            work(&tmp),
+            snapshot.logical_day.clone(),
+            snapshot.revision.clone(),
+            Some("cal-2".to_string()),
+            Some(fake.to_string_lossy().to_string()),
+            NOW.to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.published, 1);
+        let logged = fs::read_to_string(log).unwrap();
+        assert!(logged.contains(r#"{"calendarId":"cal-1"}"#));
+        assert!(!logged.contains(r#"{"calendarId":"cal-2"}"#));
     }
 
     #[test]

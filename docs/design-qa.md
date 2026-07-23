@@ -38,6 +38,7 @@ branch `feat/today-morning-ritual`.
 - `docs/design-qa/today-prepare-1487.png` — Prepare at the reference viewport
 - `docs/design-qa/today-execute-1487.png` — Execute
 - `docs/design-qa/today-review-1487.png` — Review
+- `docs/design-qa/today-tasks-1487.png` — All Tasks with nested resizable regions
 - `docs/design-qa/today-prepare-1440.png` — Prepare at 1440x920
 - `docs/design-qa/today-prepare-1024.png` — Prepare at 1024x720
 - `docs/design-qa/side-by-side.png` — reference (left) vs implementation (right)
@@ -49,10 +50,10 @@ branch `feat/today-morning-ritual`.
 | --- | --- | --- | --- |
 | Topbar height | 44px | 44px | pass |
 | Activity rail width | 48px | 48px | pass |
-| Today sidebar width | 350px ±2 | 350px | pass |
+| Today sidebar width | 240px ±2 | 240px | pass |
 | Workflow header height | ~116px ±4 | 116px | pass |
-| Brain-dump panel width | 39.5% of grid (401.7px) ±4 | 401.7px | pass |
-| Capture panel width | 60.5% of grid (615.3px) ±4 | 615.3px | pass |
+| Brain-dump panel width | 39.5% of grid (441.6px) ±4 | 441.6px | pass |
+| Capture panel width | 60.5% of grid (676.4px) ±4 | 676.4px | pass |
 | Brain-dump / capture split | 39.5/60.5 | 39.5/60.5 | pass |
 | Horizontal overflow | none | scrollWidth == clientWidth (1487) | pass |
 
@@ -71,37 +72,40 @@ branch `feat/today-morning-ritual`.
 
 ## Responsive notes
 
-- **1440x920**: sidebar 350px, brain-dump/capture side by side
-  (383.1px / 586.9px), no overflow. See `today-prepare-1440.png`.
-- **1024x720** (today pane 976px, ≤1239px container breakpoint): one-column
-  grid (capture stacks under brain dump), sidebar 280px with labels,
+- **1440x920**: sidebar defaults to 240px, brain-dump/capture side by side
+  (423.0px / 648.0px), no overflow. See `today-prepare-1440.png`.
+- **1024x720** (Today pane 976px): one-column grid (capture stacks under
+  brain dump), sidebar remains 240px with labels,
   `scrollWidth == clientWidth` (1024). See `today-prepare-1024.png`.
 - **960x720** (today pane ≤959px breakpoint): sidebar collapses to 56px
   icon-only, labels hidden, still no horizontal scroll (asserted in
   `today.spec.ts` layout smoke).
 - The icon-only breakpoint needs a viewport of ~1007px or below (today pane
   = viewport − 48px rail with the right pane closed), so at exactly 1024 the
-  correct state is the 280px labeled sidebar, not icon-only.
+  correct state is the 240px labeled sidebar, not icon-only.
+- Today navigation, task filters, calendar agenda, and task details expose
+  keyboard/pointer resize handles. Committed widths persist in workspace
+  settings; double-click restores the region default.
+- When docking would make the workbench unusable, task filters, agenda, and
+  details switch to overlays instead of forcing horizontal overflow.
 
 ## Mismatches
 
 ### Fixed
 
-- **P1 — compact sidebar breakpoints were dead CSS.** An element cannot match
-  its own container query, so `.today-pane { grid-template-columns: 280px/56px … }`
-  inside `@container todaypane (…)` never applied: the sidebar stayed 350px
-  at every width and the icon-only collapse never happened. Fixed in
-  `src/styles.css`: the pane track is now `auto minmax(0, 1fr)` and the width
-  lives on the descendant `.today-sidebar` (350px → 280px ≤1239px → 56px
-  ≤959px), which *can* match the container query. Re-shot all screenshots;
-  anchor table above is post-fix.
+- **P1 — fixed nested columns made the Today workspace rigid.** The Today
+  sidebar, task filters, calendar agenda, and task-detail drawer now use one
+  accessible resize primitive with bounded keyboard/pointer resizing and
+  workspace-scoped persistence. The Today sidebar defaults to 240px and
+  collapses to a 56px icon rail at the compact container breakpoint. Nested
+  task regions use overlay fallbacks before space becomes unusable. Re-shot
+  all screenshots; the anchor table above is post-fix.
 
 ### Open (P2, cosmetic / structural deltas from the reference mock)
 
 - **P2-1** Reference left column shows workspace explorer rows (Private /
   Public 추가, Documents / Files) above the Today nav; the implementation's
-  today sidebar contains the Today nav only. The 350px column geometry
-  itself matches.
+  today sidebar contains the Today nav only.
 - **P2-2** Reference capture chips include `회의 1`. Meeting-derived
   captures are intentionally not implemented (documented TODO in
   `src/lib/todayCapture.ts`); the fixture's 5th capture is Outlook 1. The

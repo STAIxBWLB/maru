@@ -94,7 +94,7 @@ export function TaskDetailDrawer({
     <aside className="task-detail-drawer">
       <header className="task-detail-header">
         <div>
-          <span>{entry.project ?? t("tasks.project.none")}</span>
+          <span>{entry.projectLabels.join(", ") || t("tasks.project.none")}</span>
           <h2>{resolveDisplayLabel(entry.title, entry.fileName, labelMode).primary}</h2>
           <p>{entry.relPath}</p>
         </div>

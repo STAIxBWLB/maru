@@ -30,12 +30,10 @@ import type {
 } from "../../lib/today";
 import {
   isTaskConflict,
-  isTodayConflict,
   readTaskEvents,
   readTaskIntegrations,
   sha256Hex,
   taskTransition,
-  todayCalendarPublish,
 } from "../../lib/today";
 import { planItemRefKey, TOP_LANE_SIZE } from "../../lib/todayPlan";
 import { TaskSheet } from "./TaskSheet";
@@ -44,6 +42,7 @@ import { TodaySyncStatus } from "./TodaySyncStatus";
 import { useToday } from "./todayContext";
 import { resolveRefTitle, taskKeyOf } from "./todayPrepareUtils";
 import { useTodayTasks } from "./useTodayTasks";
+import { useTodayCalendarSync } from "./useTodayCalendarSync";
 
 interface TodayExecuteProps {
   onNavigate: (route: TodayRoute) => void;
@@ -75,15 +74,21 @@ function outboxToSyncStatus(record: OutboxRecord): TaskSyncStatus {
 
 export function TodayExecute({ onNavigate }: TodayExecuteProps) {
   const { t } = useTranslation();
-  const { workPath, settings, defaultCalendar, gwsBinary, snapshot, mutate, reload } = useToday();
+  const { workPath, snapshot, mutate, reload } = useToday();
   const { tasks, refresh } = useTodayTasks();
+  const {
+    notice: calendarNotice,
+    publishing,
+    publishSelected,
+    retryItem: retryCalendarItem,
+    setSelected: setCalendarSelected,
+  } = useTodayCalendarSync();
 
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [outbox, setOutbox] = useState<OutboxRecord[]>([]);
   /** Optimistic completions/reopens keyed by the plan ref task id. */
   const [optimistic, setOptimistic] = useState<Record<string, DoneRow | null>>({});
-  const [notice, setNotice] = useState<"conflict" | "error" | "calendarBlocked" | null>(null);
-  const [publishing, setPublishing] = useState(false);
+  const [taskNotice, setTaskNotice] = useState<"conflict" | "error" | null>(null);
   const [sheetTaskId, setSheetTaskId] = useState<string | null>(null);
 
   const logicalDay = snapshot?.logicalDay ?? "";
@@ -211,7 +216,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
         date: snapshot.logicalDay,
         nowIso,
       });
-      setNotice(null);
+      setTaskNotice(null);
       if (kind === "complete") {
         // Optimistic: local completion shows immediately, never rolls back.
         setOptimistic((prev) => ({
@@ -233,10 +238,10 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
         .catch(() => {});
     } catch (err) {
       if (isTaskConflict(err)) {
-        setNotice("conflict");
+        setTaskNotice("conflict");
         void reload();
       } else {
-        setNotice("error");
+        setTaskNotice("error");
       }
     }
   };
@@ -278,66 +283,6 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
 
   const openSheet = (item: DailyPlanItem) => {
     if (item.itemRef.kind === "task") setSheetTaskId(item.itemRef.taskId);
-  };
-
-  // --- Selective calendar sync (always explicit; nothing auto-publishes) ----
-
-  /** calendarDestination "defaultCalendar" points at TasksSettings.defaultCalendar. */
-  const resolvedDestination = useCallback((): string | null => {
-    const configured = settings.calendarDestination?.trim() ?? "";
-    if (!configured || configured === "defaultCalendar") {
-      return defaultCalendar?.trim() || null;
-    }
-    return configured;
-  }, [settings.calendarDestination, defaultCalendar]);
-
-  /** Per-block opt-in: flag one item `selected` (never publishes). */
-  const selectForCalendar = (item: DailyPlanItem) => {
-    void mutate({
-      type: "setCalendarSync",
-      itemRef: item.itemRef,
-      selected: true,
-      destination: resolvedDestination(),
-    });
-  };
-
-  /** Publish every `selected` block for the day (per-item selection already
-   *  scopes what gets published). */
-  const publishSelected = async (revisionOverride?: string) => {
-    if (!workPath || !snapshot || publishing) return;
-    setPublishing(true);
-    try {
-      const outcome = await todayCalendarPublish(
-        workPath,
-        snapshot.logicalDay,
-        revisionOverride ?? snapshot.revision,
-        resolvedDestination(),
-        gwsBinary ?? null,
-      );
-      setNotice(outcome.blocked ? "calendarBlocked" : null);
-      await reload();
-    } catch (err) {
-      if (isTodayConflict(err)) {
-        setNotice("conflict");
-        void reload();
-      } else {
-        setNotice("error");
-      }
-    } finally {
-      setPublishing(false);
-    }
-  };
-
-  /** Error retry: re-select (clears the error state), then republish with the
-   *  fresh revision the mutation returned. */
-  const retryCalendarItem = async (item: DailyPlanItem) => {
-    const next = await mutate({
-      type: "setCalendarSync",
-      itemRef: item.itemRef,
-      selected: true,
-      destination: resolvedDestination(),
-    });
-    if (next) void publishSelected(next.revision);
   };
 
   const renderCalendarControl = (item: DailyPlanItem) => {
@@ -396,7 +341,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
           <button
             type="button"
             className="today-panel-link today-calendar-add"
-            onClick={() => selectForCalendar(item)}
+            onClick={() => void setCalendarSelected(item, true)}
           >
             <CalendarPlus size={12} strokeWidth={1.9} aria-hidden="true" />
             {t("today.calendar.add")}
@@ -486,12 +431,12 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
       onSelectStep={(id) => onNavigate(id as TodayRoute)}
     >
       <div className="today-content">
-        {notice ? (
+        {taskNotice || calendarNotice ? (
           <p className="today-notice" role="alert">
             <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
-            {notice === "conflict"
+            {(taskNotice ?? calendarNotice) === "conflict"
               ? t("today.execute.conflict")
-              : notice === "calendarBlocked"
+              : calendarNotice === "calendarBlocked"
                 ? t("today.calendar.blocked")
                 : t("today.execute.error")}
           </p>

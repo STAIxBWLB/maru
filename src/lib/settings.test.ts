@@ -920,6 +920,33 @@ describe("normalizeMaruSettings", () => {
       .terminalWidth).toBe(4096);
   });
 
+  it("defaults and clamps Today workspace pane widths", () => {
+    const defaults = normalizeMaruSettings({});
+    expect(defaults.ui.layout).toMatchObject({
+      todaySidebarWidth: 240,
+      tasksSidebarWidth: 240,
+      calendarAgendaWidth: 280,
+      taskDetailsWidth: 400,
+    });
+
+    const clamped = normalizeMaruSettings({
+      ui: {
+        layout: {
+          todaySidebarWidth: 20,
+          tasksSidebarWidth: 999,
+          calendarAgendaWidth: 40,
+          taskDetailsWidth: 999,
+        },
+      },
+    });
+    expect(clamped.ui.layout).toMatchObject({
+      todaySidebarWidth: 200,
+      tasksSidebarWidth: 360,
+      calendarAgendaWidth: 200,
+      taskDetailsWidth: 520,
+    });
+  });
+
   it("migrates legacy AI runtime labels into terminal launcher settings", () => {
     const settings = normalizeMaruSettings({
       ai: {

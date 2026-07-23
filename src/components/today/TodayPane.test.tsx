@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
@@ -49,9 +49,15 @@ interface RenderOptions {
   route: TodayRoute;
   workPath?: string | null;
   onRouteChange?: (route: TodayRoute) => void;
+  rolloverEpoch?: number;
 }
 
-async function renderPane({ route, workPath = null, onRouteChange = () => {} }: RenderOptions) {
+async function renderPane({
+  route,
+  workPath = null,
+  onRouteChange = () => {},
+  rolloverEpoch = 0,
+}: RenderOptions) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -69,10 +75,41 @@ async function renderPane({ route, workPath = null, onRouteChange = () => {} }: 
           onRouteChange={onRouteChange}
           workPath={workPath}
           effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
+          rolloverEpoch={rolloverEpoch}
           tasksProps={{} as unknown as TasksPaneProps}
         />
       </LocaleContext.Provider>,
     );
+  });
+  return { container, root };
+}
+
+async function renderManagedPane() {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  function Harness() {
+    const [route, setRoute] = useState<TodayRoute>("prepare");
+    return (
+      <LocaleContext.Provider
+        value={{
+          locale: "ko",
+          setLocale: () => {},
+          t: (key, vars) => translate("ko", key, vars),
+        }}
+      >
+        <TodayPane
+          route={route}
+          onRouteChange={setRoute}
+          workPath="/tmp/work"
+          effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
+          tasksProps={{} as unknown as TasksPaneProps}
+        />
+      </LocaleContext.Provider>
+    );
+  }
+  await act(async () => {
+    root.render(<Harness />);
   });
   return { container, root };
 }
@@ -92,6 +129,25 @@ describe("TodayPane", () => {
   it("renders the existing tasks experience on route 'all'", async () => {
     const { container } = await renderPane({ route: "all" });
     expect(container.querySelector('[data-testid="tasks-pane-stub"]')).not.toBeNull();
+  });
+
+  it("renders a real Calendar Sync surface instead of the placeholder", async () => {
+    const { container } = await renderPane({ route: "calendar" });
+    expect(container.querySelector(".today-calendar-sync")).not.toBeNull();
+    expect(container.querySelector(".today-sub-panel")).toBeNull();
+    expect(container.querySelector(".today-calendar-sync-header h2")?.textContent).toBe(
+      translate("ko", "today.calendar.panel.title"),
+    );
+  });
+
+  it("normalizes retired placeholder routes to All Tasks", async () => {
+    const { container } = await renderPane({ route: "capture" });
+    expect(container.querySelector('[data-testid="tasks-pane-stub"]')).not.toBeNull();
+    expect(
+      Array.from(container.querySelectorAll(".today-sidebar .today-nav-item")).some(
+        (item) => item.getAttribute("aria-label") === translate("ko", "today.nav.inbox"),
+      ),
+    ).toBe(false);
   });
 
   it("renders the stepper with 3 steps and an active step on route 'prepare'", async () => {
@@ -150,5 +206,117 @@ describe("TodayPane", () => {
       reviewButton!.click();
     });
     expect(vi.mocked(todayMutate)).not.toHaveBeenCalled();
+  });
+
+  it("serializes a route change with the pending Brain Dump flush", async () => {
+    let server = { ...SNAPSHOT };
+    let mutationIndex = 0;
+    let releaseFirst: (() => void) | null = null;
+    const applyMutation = (mutation: Parameters<typeof todayMutate>[3]) => {
+      mutationIndex += 1;
+      server = {
+        ...server,
+        revision: `rev-${mutationIndex + 1}`,
+        route: mutation.type === "setRoute" ? mutation.route : server.route,
+        brainDump:
+          mutation.type === "setBrainDump" ? mutation.brainDump : server.brainDump,
+      };
+      return server;
+    };
+    vi.mocked(todayMutate).mockImplementation(
+      async (_workPath, _logicalDay, _revision, mutation) => {
+        if (mutationIndex === 0) {
+          return new Promise<TodaySnapshot>((resolve) => {
+            releaseFirst = () => resolve(applyMutation(mutation));
+          });
+        }
+        return applyMutation(mutation);
+      },
+    );
+
+    const { container } = await renderManagedPane();
+    const textarea = container.querySelector<HTMLTextAreaElement>(
+      ".today-braindump-textarea",
+    )!;
+    const execute = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".today-sidebar .today-nav-item"),
+    ).find((button) => button.getAttribute("aria-label") === translate("ko", "today.nav.execute"))!;
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )!.set!;
+      valueSetter.call(textarea, "끝까지 저장할 내용");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      execute.click();
+    });
+
+    expect(vi.mocked(todayMutate)).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      releaseFirst!();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(todayMutate)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(todayMutate).mock.calls[1][2]).toBe("rev-2");
+    expect(server.route).toBe("execute");
+    expect(server.brainDump).toBe("끝까지 저장할 내용");
+  });
+
+  it("reloads and re-routes when the logical day rolls over", async () => {
+    const onRouteChange = vi.fn();
+    const { root } = await renderPane({
+      route: "execute",
+      workPath: "/tmp/work",
+      onRouteChange,
+    });
+    const nextDay = {
+      ...SNAPSHOT,
+      logicalDay: "2026-07-22",
+      generatedAt: "2026-07-22T03:30:00+09:00",
+      revision: "day-22",
+      dayState: "unstarted" as const,
+      route: "prepare" as const,
+    };
+    vi.mocked(todayOpen).mockResolvedValue(nextDay);
+
+    await act(async () => {
+      root.render(
+        <LocaleContext.Provider
+          value={{
+            locale: "ko",
+            setLocale: () => {},
+            t: (key, vars) => translate("ko", key, vars),
+          }}
+        >
+          <TodayPane
+            route="execute"
+            onRouteChange={onRouteChange}
+            workPath="/tmp/work"
+            effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
+            tasksProps={{} as unknown as TasksPaneProps}
+            rolloverEpoch={1}
+          />
+        </LocaleContext.Provider>,
+      );
+    });
+
+    expect(vi.mocked(todayOpen)).toHaveBeenCalledTimes(2);
+    expect(onRouteChange).toHaveBeenCalledWith("prepare");
+  });
+
+  it("does not re-route on a fresh mount after an earlier rollover", async () => {
+    // A mode switch remounts the pane; a rollover that happened before the
+    // mount must not override the route the user navigated to.
+    const onRouteChange = vi.fn();
+    await renderPane({
+      route: "review",
+      workPath: "/tmp/work",
+      onRouteChange,
+      rolloverEpoch: 3,
+    });
+    expect(onRouteChange).not.toHaveBeenCalled();
   });
 });
