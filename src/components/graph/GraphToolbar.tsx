@@ -339,7 +339,21 @@ export function GraphToolbar({
                       }}
                     >
                       <span>{view.name}</span>
-                      <small>{view.source} · {view.mode}</small>
+                      <small>
+                        {t(
+                          view.source === "workspace"
+                            ? "graph.source.workspace"
+                            : "graph.source.vault",
+                        )}
+                        {" · "}
+                        {t(
+                          view.mode === "local"
+                            ? "graph.view.local"
+                            : view.mode === "chains"
+                              ? "graph.view.chains"
+                              : "graph.view.graph",
+                        )}
+                      </small>
                     </button>
                     <button
                       type="button"
@@ -491,7 +505,6 @@ export function GraphZoomCluster({
   onZoomOut,
   onFit,
 }: {
-  zoomPercent: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;

@@ -4,7 +4,7 @@
 // GraphCanvas renders; layout.worker.ts computes positions (warm-started +
 // disk-cached).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Pin, PinOff, X } from "lucide-react";
 import {
@@ -130,10 +130,31 @@ export function GraphView({
   // re-render on a theme flip instead of showing a stale palette.
   const [themeEpoch, setThemeEpoch] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // Prime the theme cache before GraphCanvas's first build (layout effects run
+  // before child passive effects), so mount needs no epoch bump — bumping on
+  // mount rebuilt Sigma twice and restarted layout from scratch.
+  const themeReadyRef = useRef(false);
+  useLayoutEffect(() => {
+    refreshGraphTheme(rootRef.current);
+  }, []);
+  // The root carries tabIndex=-1 so any click inside (canvas included) grants
+  // it focus for the focus-scoped shortcuts. On mount, take focus unless the
+  // user is typing elsewhere, so ⌘F works in full graph mode without a click.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      (isInEditable(active) || active.closest(".terminal-panel"))
+    ) {
+      return;
+    }
+    rootRef.current?.focus({ preventScroll: true });
+  }, []);
   useEffect(() => {
     const apply = () => {
       refreshGraphTheme(rootRef.current);
-      setThemeEpoch((epoch) => epoch + 1);
+      if (themeReadyRef.current) setThemeEpoch((epoch) => epoch + 1);
+      themeReadyRef.current = true;
     };
     apply();
     const observer = new MutationObserver(apply);
@@ -227,7 +248,6 @@ export function GraphView({
   const [pathSourceId, setPathSourceId] = useState<string | null>(null);
   const [pathIds, setPathIds] = useState<string[]>([]);
   const [highlightPair, setHighlightPair] = useState<{ a: string; b: string } | null>(null);
-  const [zoomPercent, setZoomPercent] = useState(100);
   const [fitSignal, setFitSignal] = useState(0);
   const [zoomSignal, setZoomSignal] = useState<{ dir: 1 | -1; nonce: number } | null>(null);
   const [centerSignal, setCenterSignal] = useState<{ id: string; nonce: number } | null>(null);
@@ -806,8 +826,15 @@ export function GraphView({
     });
   }, []);
 
-  // Mode-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom.
-  const shortcutPredicate = useCallback(() => effectiveMode !== "chains", [effectiveMode]);
+  // Surface-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom. Gated on
+  // the graph owning focus — the same window may show a document editor beside
+  // an embedded graph split, and a mode-only gate stole the app-wide ⌘F/Esc.
+  const shortcutPredicate = useCallback(
+    () =>
+      effectiveMode !== "chains" &&
+      (rootRef.current?.contains(document.activeElement) ?? false),
+    [effectiveMode],
+  );
   const shortcutHandler = useCallback(
     (event: KeyboardEvent) => {
       if (matchesShortcut(event, { key: "f", mod: true })) {
@@ -818,33 +845,44 @@ export function GraphView({
       }
       if (isInEditable(event.target)) return;
       if (event.key === "Escape") {
-        event.preventDefault();
-        // The scoped shortcut runs capture-phase and stops propagation, so it
-        // must close the context menu itself (the menu's own Esc handler and the
-        // window listener never see the event).
+        // Toolbar popovers close on their own bubble-phase Esc listener; let
+        // the event through so they get priority over the cascade below.
+        if (rootRef.current?.querySelector('[role="menu"]')) return;
+        // Consume Esc only when the graph actually closes something —
+        // otherwise dialogs and global handlers must still see it. The scoped
+        // shortcut stops propagation on preventDefault, so each branch closes
+        // its own surface (the window listeners never see the event).
         if (menu) {
+          event.preventDefault();
           setMenu(null);
           return;
         }
         if (toolsOpen) {
+          event.preventDefault();
           setToolsOpen(false);
           return;
         }
         if (searchOpen) {
+          event.preventDefault();
           if (search) setSearch("");
           else setSearchOpen(false);
           return;
         }
         if (pathSourceId || pathIds.length > 0) {
+          event.preventDefault();
           setPathSourceId(null);
           setPathIds([]);
           return;
         }
         if (selectedId) {
+          event.preventDefault();
           selectById(null);
           return;
         }
-        if (localTarget) clearFocus();
+        if (localTarget) {
+          event.preventDefault();
+          clearFocus();
+        }
       } else if (event.key === "=" || event.key === "+") {
         event.preventDefault();
         setZoomSignal({ dir: 1, nonce: Date.now() });
@@ -1020,6 +1058,7 @@ export function GraphView({
   return (
     <div
       ref={rootRef}
+      tabIndex={-1}
       className={`graph-view tier-${tier}`}
       data-testid="graph-mode"
       data-graph-theme={display.theme}
@@ -1173,7 +1212,6 @@ export function GraphView({
                     />
                   ) : null}
                   <GraphZoomCluster
-                    zoomPercent={zoomPercent}
                     onZoomIn={() => setZoomSignal({ dir: 1, nonce: Date.now() })}
                     onZoomOut={() => setZoomSignal({ dir: -1, nonce: Date.now() })}
                     onFit={() => setFitSignal((s) => s + 1)}
@@ -1203,7 +1241,6 @@ export function GraphView({
                   ) : null}
                 </>
               }
-              onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
             /> : <div className="graph-canvas-loading" role="status">{t("graph.layout.running")}</div>}
           </div>
           {toolsDocked ? (

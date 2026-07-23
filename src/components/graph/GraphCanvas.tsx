@@ -77,7 +77,7 @@ type SigmaNodeAttributes = {
 
 type SigmaEdgeAttributes = {
   size: number;
-  /** Unscaled size (frontmatter 1 / body 0.6) — edgeScale reapplies from this. */
+  /** Unscaled size (frontmatter 0.55 / body 0.35) — edgeScale reapplies from this. */
   baseSize: number;
   color: string;
   type: "line" | "arrow";
@@ -127,7 +127,6 @@ interface GraphCanvasProps {
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
   overlay?: ReactNode;
-  onViewportReport?: (zoom: number) => void;
 }
 
 type InteractionState = {
@@ -547,7 +546,6 @@ export function GraphCanvas({
   favoriteIds = new Set<string>(),
   exportControllerRef,
   overlay,
-  onViewportReport,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -623,8 +621,8 @@ export function GraphCanvas({
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
   };
-  const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport });
-  callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport };
+  const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu });
+  callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu };
 
   useEffect(() => {
     pinnedIdsRef.current = new Set(initialPinnedIds);
@@ -704,8 +702,8 @@ export function GraphCanvas({
           labelFont: "Pretendard, sans-serif",
           labelSize: 11,
           labelWeight: "500",
-          labelRenderedSizeThreshold: 3,
-          labelDensity: 0.55,
+          labelRenderedSizeThreshold: LABEL_THRESHOLD[displayRef.current.labels],
+          labelDensity: LABEL_DENSITY[displayRef.current.labels],
           defaultDrawNodeLabel: drawMaruNodeLabel,
           defaultDrawNodeHover: drawMaruNodeHover,
           hideEdgesOnMove: nodes.length > 5_000,
@@ -1156,7 +1154,6 @@ export function GraphCanvas({
       };
       mouse.on("mousedown", markManualCamera);
       mouse.on("wheel", markManualCamera);
-      renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
       renderer.once("afterRender", () => {
         applyRendererState(layoutRef.current ? "layout-running" : "ready");
         // First render after creation: fit the finite visible bounds once.
