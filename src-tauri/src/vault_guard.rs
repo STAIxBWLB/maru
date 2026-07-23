@@ -9,8 +9,9 @@
 //!   - topics: non-empty array, every item containing a `[[wikilink]]`
 //! Unknown fields pass through untouched — a frontmatter field carrying a
 //! wikilink IS a relation (vault README principle); validation must not strip
-//! or reject it. Files outside `notes/` (log.md, reports/, templates/) are
-//! not schema-validated (log.md append stays an MCP-domain practice).
+//! or reject it. Files outside `notes/` (the vault log, reports/, templates/)
+//! are not schema-validated (the extensionless `log` is a plain logfile
+//! appended via fs, the sole exception to MCP-only vault writes).
 
 use serde::Serialize;
 
@@ -244,7 +245,7 @@ mod tests {
 
     #[test]
     fn paths_outside_notes_skip_validation() {
-        let report = vault_validate_note("no frontmatter".to_string(), "log.md".to_string()).unwrap();
+        let report = vault_validate_note("no frontmatter".to_string(), "log".to_string()).unwrap();
         assert!(report.valid);
         let report =
             vault_validate_note("junk".to_string(), "templates/decision-note.md".to_string())

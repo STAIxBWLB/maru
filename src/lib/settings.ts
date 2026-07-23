@@ -381,6 +381,8 @@ export const GRAPH_WORKBENCH_WIDTH_MAX = 480;
 export const GRAPH_SCALE_MIN = 0.5;
 export const GRAPH_SCALE_MAX = 2;
 
+// "log.md" covers legacy vaults only; the current extensionless vault log is
+// not a document node (vault listing skips extensionless files), so it needs no pattern.
 export const DEFAULT_GRAPH_GENERATED_PATTERNS = ["reports/", "log.md"];
 
 export function defaultGraphFilterProfile(): GraphFilterProfile {
