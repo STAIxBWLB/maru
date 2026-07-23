@@ -938,7 +938,6 @@ function MainApp() {
   const [editorPaneViewModes, setEditorPaneViewModes] = useState<EditorPaneViewModes>(
     DEFAULT_MARU_SETTINGS.ui.editorPaneViewModes,
   );
-  const editorViewMode = editorPaneViewModes[focusedEditorGroup];
   // HTML document tabs: per pane+tab view mode, never persisted. Keyed
   // `${group}:${tabId}` so the two split panes stay independent.
   const [htmlPaneModes, setHtmlPaneModes] = useState<
@@ -1041,6 +1040,12 @@ function MainApp() {
   const todayAutoOpenPathRef = useRef<string | null>(null);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
+  const visibleAppMode: AppMode =
+    appMode === "e2e" && !e2eFlowEnabled
+      ? "pkm"
+      : appMode === "diagram" && !diagramEnabled
+        ? "pkm"
+        : appMode;
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
   const [graphOpenTarget, setGraphOpenTarget] = useState<GraphOpenTarget | null>(null);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
@@ -1256,6 +1261,11 @@ function MainApp() {
     (layoutSettings.editorSplitSurface === "graph" || Boolean(rightActiveTabId));
   const rightGraphOpen =
     editorSplitOpen && layoutSettings.editorSplitSurface === "graph";
+  // View-mode reads/writes target the pane that actually shows a document;
+  // while the graph owns the right pane, that is always the left pane.
+  const focusedDocumentGroup: EditorGroupId =
+    focusedEditorGroup === "right" && rightGraphOpen ? "left" : focusedEditorGroup;
+  const editorViewMode = editorPaneViewModes[focusedDocumentGroup];
   const firstTabId = orderedAnyTabs[0]?.id ?? null;
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
   const rightResolvedTabId =
@@ -2141,7 +2151,7 @@ function MainApp() {
   }, [appMode, diagramEnabled, setPersistedAppMode]);
 
   const setPersistedEditorViewMode = useCallback(
-    (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedEditorGroup) => {
+    (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedDocumentGroup) => {
       setEditorPaneViewModes((current) => ({ ...current, [group]: editorViewMode }));
       updateSettings((current) => ({
         ...current,
@@ -2156,7 +2166,7 @@ function MainApp() {
         },
       }));
     },
-    [focusedEditorGroup, updateSettings],
+    [focusedDocumentGroup, updateSettings],
   );
 
   const setPersistedRightPaneTab = useCallback(
@@ -6506,14 +6516,14 @@ function MainApp() {
       terminalPanel.closeFocusedTab();
       return;
     }
-    if (appMode !== "pkm") return;
+    if (visibleAppMode !== "pkm") return;
     if (focusedEditorGroup === "right" && (rightResolvedTabId || rightGraphOpen)) {
       closeRightEditorPane();
       return;
     }
     if (leftResolvedTabId) closeTab(leftResolvedTabId);
   }, [
-    appMode,
+    visibleAppMode,
     closeRightEditorPane,
     closeTab,
     focusedEditorGroup,
@@ -6560,8 +6570,14 @@ function MainApp() {
   }, [activeTab, leftTab, orderedAnyTabs, updateLayoutSettings]);
 
   const openGraphRight = useCallback(
-    (target?: GraphOpenTarget) => {
-      setGraphOpenTarget(target ?? null);
+    (rawTarget?: GraphOpenTarget) => {
+      // Reject non-target values (e.g. a MouseEvent when passed as an onClick
+      // handler directly) so a plain toolbar click never rewrites graph.source.
+      const target =
+        rawTarget && typeof rawTarget.source === "string" && rawTarget.localTarget
+          ? rawTarget
+          : null;
+      setGraphOpenTarget(target);
       setRightActiveTabId(null);
       setFocusedEditorGroup("right");
       setPersistedAppMode("pkm");
@@ -6654,7 +6670,7 @@ function MainApp() {
   const jumpToOutlineLine = useCallback((line: number) => {
     const jump = () => {
       const ta =
-        focusedEditorGroup === "right"
+        focusedDocumentGroup === "right"
           ? rightEditorTextareaRef.current
           : editorTextareaRef.current;
       if (!ta) return false;
@@ -6672,7 +6688,7 @@ function MainApp() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(jump);
     });
-  }, [focusedEditorGroup, setPersistedEditorViewMode]);
+  }, [focusedDocumentGroup, setPersistedEditorViewMode]);
 
   // Track which heading the source editor is scrolled to so the outline can
   // highlight the active one. Source mode only — the textarea has a uniform
@@ -7158,12 +7174,6 @@ function MainApp() {
     sites: " sites-mode",
     graph: " graph-mode",
   };
-  const visibleAppMode: AppMode =
-    appMode === "e2e" && !e2eFlowEnabled
-      ? "pkm"
-      : appMode === "diagram" && !diagramEnabled
-        ? "pkm"
-        : appMode;
   const graphVaultPath =
     workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
   const graphWorkspacePath =

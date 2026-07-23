@@ -389,7 +389,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           <button
             type="button"
             className="icon-button"
-            onClick={onOpenGraphRight}
+            onClick={() => onOpenGraphRight()}
             title={t("editor.openGraphRight")}
             aria-label={t("editor.openGraphRight")}
           >
