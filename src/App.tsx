@@ -1251,11 +1251,17 @@ function MainApp() {
     [tabOrder, unorderedAnyTabs],
   );
   const layoutSettings = maruSettings.ui.layout;
-  const editorSplitOpen = layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
+  const editorSplitOpen =
+    layoutSettings.editorSplitOpen &&
+    (layoutSettings.editorSplitSurface === "graph" || Boolean(rightActiveTabId));
+  const rightGraphOpen =
+    editorSplitOpen && layoutSettings.editorSplitSurface === "graph";
   const firstTabId = orderedAnyTabs[0]?.id ?? null;
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
   const rightResolvedTabId =
-    editorSplitOpen && rightActiveTabId
+    editorSplitOpen &&
+    layoutSettings.editorSplitSurface === "document" &&
+    rightActiveTabId
       ? rightActiveTabId
       : null;
   const resolvedActiveTabId =
@@ -4290,7 +4296,7 @@ function MainApp() {
   );
 
   const selectEntry = useCallback(
-    async (entry: VaultEntry) => {
+    async (entry: VaultEntry, requestedGroup?: EditorGroupId) => {
       const owner =
         workspaceRegistry.workspaces
           .filter(
@@ -4310,6 +4316,9 @@ function MainApp() {
         (tab) => tab.workspacePath === workspacePath && tab.entry.path === entry.path,
       );
       const isSameEntry = selectedEntry?.path === entry.path;
+      const targetGroup =
+        requestedGroup ??
+        (editorSplitOpen && !rightGraphOpen ? focusedEditorGroup : "left");
       // Push the *previous* selection onto history before we replace it.
       // Skip when navigateBack/Forward is the caller — they manage manually.
       const skipHistoryPush = skipNextHistoryPushRef.current;
@@ -4318,7 +4327,7 @@ function MainApp() {
         setNavHistory((h) => pushHistory(h, selectedEntry.path));
       }
       if (existingTab) {
-        activateEditorTab(existingTab.id, editorSplitOpen ? focusedEditorGroup : "left");
+        activateEditorTab(existingTab.id, targetGroup);
         setExplorerVisibility(existingTab.visibility);
         setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
@@ -4343,7 +4352,7 @@ function MainApp() {
           draftContent: payload.content,
         };
         setTabs((prev) => [...prev, newTab]);
-        activateEditorTab(newTab.id, editorSplitOpen ? focusedEditorGroup : "left");
+        activateEditorTab(newTab.id, targetGroup);
         setExplorerVisibility(visibility);
         setPendingSelectedPath(null);
         if (typeof window !== "undefined") {
@@ -4366,6 +4375,7 @@ function MainApp() {
       focusedEditorGroup,
       lastOpenKeyForWorkspace,
       pushRecent,
+      rightGraphOpen,
       selectedEntry,
       t,
       tabs,
@@ -4396,7 +4406,8 @@ function MainApp() {
     (entry: WorkspaceFileEntry, workspacePath: string, visibility: WorkspaceVisibility) => {
       const tabId = tabIdForWorkspaceFile(entry);
       const existing = binaryTabs.find((tab) => tab.id === tabId);
-      const targetGroup = editorSplitOpen ? focusedEditorGroup : "left";
+      const targetGroup =
+        editorSplitOpen && !rightGraphOpen ? focusedEditorGroup : "left";
       setExplorerVisibility(visibility);
       if (existing) {
         activateEditorTab(existing.id, targetGroup);
@@ -4444,6 +4455,7 @@ function MainApp() {
       binaryViewerPrepareAsset,
       editorSplitOpen,
       focusedEditorGroup,
+      rightGraphOpen,
     ],
   );
 
@@ -6495,7 +6507,7 @@ function MainApp() {
       return;
     }
     if (appMode !== "pkm") return;
-    if (focusedEditorGroup === "right" && rightResolvedTabId) {
+    if (focusedEditorGroup === "right" && (rightResolvedTabId || rightGraphOpen)) {
       closeRightEditorPane();
       return;
     }
@@ -6506,6 +6518,7 @@ function MainApp() {
     closeTab,
     focusedEditorGroup,
     leftResolvedTabId,
+    rightGraphOpen,
     rightResolvedTabId,
   ]);
 
@@ -6540,8 +6553,36 @@ function MainApp() {
     setRightActiveTabId(target.id);
     setActiveTabId(target.id);
     setFocusedEditorGroup("right");
-    updateLayoutSettings({ editorSplitOpen: true });
+    updateLayoutSettings({
+      editorSplitOpen: true,
+      editorSplitSurface: "document",
+    });
   }, [activeTab, leftTab, orderedAnyTabs, updateLayoutSettings]);
+
+  const openGraphRight = useCallback(
+    (target?: GraphOpenTarget) => {
+      setGraphOpenTarget(target ?? null);
+      setRightActiveTabId(null);
+      setFocusedEditorGroup("right");
+      setPersistedAppMode("pkm");
+      updateLayoutSettings({
+        editorSplitOpen: true,
+        editorSplitSurface: "graph",
+        outlineOpen: false,
+      });
+      if (target) {
+        updateSettings((current) => ({
+          ...current,
+          graph: {
+            ...current.graph,
+            source: target.source,
+            mode: "local",
+          },
+        }));
+      }
+    },
+    [setPersistedAppMode, updateLayoutSettings, updateSettings],
+  );
 
   const splitTerminalRight = useCallback(() => {
     updateLayoutSettings({ terminalOpen: true, terminalSplitOpen: true });
@@ -6748,6 +6789,9 @@ function MainApp() {
         case "open-graph":
           setPersistedAppMode("graph");
           break;
+        case "open-graph-right":
+          openGraphRight();
+          break;
         case "open-scratchpad":
         case "new-scratchpad-memo":
         case "new-scratchpad-idea":
@@ -6877,6 +6921,7 @@ function MainApp() {
       setPersistedRightPaneTab,
       updateLayoutSettings,
       outlineOpen,
+      openGraphRight,
       openSkillCompose,
       skills,
       exportActiveDocumentBundle,
@@ -7131,9 +7176,10 @@ function MainApp() {
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
-  const vaultWatchPath = visibleAppMode === "graph" ? graphDataPath : activeDocumentWorkspacePath;
+  const graphSurfaceVisible = visibleAppMode === "graph" || rightGraphOpen;
+  const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
   useEffect(() => {
-    if (visibleAppMode !== "graph" || !graphDataPath) return;
+    if (!graphSurfaceVisible || !graphDataPath) return;
     const current = workspaceStates[graphDataPath];
     if (current?.startupIoReady || current?.loading || current?.refreshing) return;
     let cancelled = false;
@@ -7154,9 +7200,9 @@ function MainApp() {
     return () => {
       cancelled = true;
     };
-  }, [graphDataPath, scanOptions, updateWorkspaceState, visibleAppMode, workspaceStates]);
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, workspaceStates]);
   useEffect(() => {
-    if (visibleAppMode !== "graph" || !graphDataPath || !vaultWatchPath) return;
+    if (!graphSurfaceVisible || !graphDataPath || !vaultWatchPath) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -7184,7 +7230,7 @@ function MainApp() {
       unlisten?.();
       void stopVaultWatcher().catch(() => undefined);
     };
-  }, [scanOptions, updateWorkspaceState, vaultWatchPath]);
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, vaultWatchPath]);
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -7243,6 +7289,8 @@ function MainApp() {
             ? layoutSettings.terminalOpen
               ? visibleAppMode === "graph"
                 ? `min(${layoutSettings.terminalWidth}px, calc(100vw - 468px))`
+                : rightGraphOpen
+                  ? `min(${layoutSettings.terminalWidth}px, max(40px, calc(100vw - 48px - var(--documents-col) - 720px)))`
                 : `${layoutSettings.terminalWidth}px`
               : "40px"
             : "0px",
@@ -7255,12 +7303,13 @@ function MainApp() {
       layoutSettings.terminalOpen,
       layoutSettings.terminalWidth,
       outlineOpen,
+      rightGraphOpen,
       themeVars,
       visibleAppMode,
     ],
   );
   const editorSplitStyle =
-    editorSplitOpen && rightTab
+    editorSplitOpen && (rightTab || rightGraphOpen)
       ? {
           gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr 6px ${1 - layoutSettings.editorSplitRatio}fr`,
         }
@@ -7393,6 +7442,69 @@ function MainApp() {
     [updateLayoutSettings],
   );
 
+  const renderGraphSurface = (placement: "full" | "right") => (
+    <LazyGraphView
+      key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
+      workspacePath={graphDataPath}
+      overlayPath={graphOverlayPath}
+      entries={graphEntries}
+      focusTarget={graphOpenTarget}
+      onFocusTargetChange={setGraphOpenTarget}
+      onOpenEntry={(entry) => {
+        if (placement === "full") setPersistedAppMode("pkm");
+        void selectEntry(entry, "left");
+      }}
+      onCreateNote={handleWikilinkClick}
+      graphSettings={maruSettings.graph}
+      onGraphSettingsChange={(graph) =>
+        updateSettings((current) => ({ ...current, graph }))
+      }
+      isFavorite={isFavorite}
+      onToggleFavorite={toggleFavorite}
+      onError={setError}
+      onGraphChanged={() => {
+        if (!graphDataPath) return;
+        void scanVault(graphDataPath, scanOptions).then((fresh) =>
+          updateWorkspaceState(graphDataPath, { entries: fresh }),
+        );
+      }}
+    />
+  );
+
+  const renderRightGraphPane = () => (
+    <section
+      className="editor-pane graph-split-pane"
+      data-testid="graph-split-pane"
+      tabIndex={-1}
+      onPointerDownCapture={() => setFocusedEditorGroup("right")}
+      onFocusCapture={() => setFocusedEditorGroup("right")}
+    >
+      <div className="document-tabs-row" aria-label={t("editor.tabs.label")}>
+        <div className="document-tab active graph-split-tab">
+          <button
+            type="button"
+            className="document-tab-main"
+            aria-current="page"
+            onClick={() => setFocusedEditorGroup("right")}
+          >
+            <Waypoints size={13} aria-hidden />
+            <span className="document-tab-title">{t("mode.graph")}</span>
+          </button>
+          <button
+            type="button"
+            className="document-tab-close"
+            onClick={closeRightEditorPane}
+            aria-label={t("editor.tabs.close", { title: t("mode.graph") })}
+            title={t("editor.tabs.close", { title: t("mode.graph") })}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </div>
+      <div className="graph-split-body">{renderGraphSurface("right")}</div>
+    </section>
+  );
+
   const renderEditorPane = (
     group: EditorGroupId,
     tab: AnyTab | null,
@@ -7477,6 +7589,7 @@ function MainApp() {
         onSave={() => void saveTab(tabId)}
         onSnapshot={() => void snapshotTab(tabId)}
         onSplitRight={splitEditorRight}
+        onOpenGraphRight={openGraphRight}
         onFocusPane={() => {
           if (tabId) activateEditorTab(tabId, group);
         }}
@@ -7830,32 +7943,7 @@ function MainApp() {
             }}
           />
         ) : visibleAppMode === "graph" ? (
-          <LazyGraphView
-            key={`${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
-            workspacePath={graphDataPath}
-            overlayPath={graphOverlayPath}
-            entries={graphEntries}
-            focusTarget={graphOpenTarget}
-            onFocusTargetChange={setGraphOpenTarget}
-            onOpenEntry={(entry) => {
-              setPersistedAppMode("pkm");
-              void selectEntry(entry);
-            }}
-            onCreateNote={handleWikilinkClick}
-            graphSettings={maruSettings.graph}
-            onGraphSettingsChange={(graph) =>
-              updateSettings((current) => ({ ...current, graph }))
-            }
-            isFavorite={isFavorite}
-            onToggleFavorite={toggleFavorite}
-            onError={setError}
-            onGraphChanged={() => {
-              if (!graphDataPath) return;
-              void scanVault(graphDataPath, scanOptions).then((fresh) =>
-                updateWorkspaceState(graphDataPath, { entries: fresh }),
-              );
-            }}
-          />
+          renderGraphSurface("full")
         ) : visibleAppMode === "sites" ? (
           <LazySitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
         ) : visibleAppMode === "studio" ? (
@@ -8222,12 +8310,16 @@ function MainApp() {
             ) : null}
 
             <div
-              className={editorSplitOpen && rightTab ? "editor-split-shell split" : "editor-split-shell"}
+              className={
+                editorSplitOpen && (rightTab || rightGraphOpen)
+                  ? "editor-split-shell split"
+                  : "editor-split-shell"
+              }
               style={editorSplitStyle}
               ref={editorSplitShellRef}
             >
               {renderEditorPane("left", leftTab, leftResolvedTabId)}
-              {editorSplitOpen && rightTab ? (
+              {editorSplitOpen && (rightTab || rightGraphOpen) ? (
                 <div
                   className="editor-split-resize-handle"
                   role="separator"
@@ -8238,9 +8330,11 @@ function MainApp() {
                   onPointerDown={startEditorSplitResize}
                 />
               ) : null}
-              {editorSplitOpen && rightTab
-                ? renderEditorPane("right", rightTab, rightResolvedTabId)
-                : null}
+              {rightGraphOpen
+                ? renderRightGraphPane()
+                : editorSplitOpen && rightTab
+                  ? renderEditorPane("right", rightTab, rightResolvedTabId)
+                  : null}
             </div>
 
           </>

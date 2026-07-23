@@ -8,6 +8,7 @@ import {
   GitCommit,
   PanelRightOpen,
   Save,
+  Waypoints,
   X,
 } from "lucide-react";
 import {
@@ -95,6 +96,7 @@ interface EditorPaneProps {
   onSave: () => void;
   onSnapshot: () => void;
   onSplitRight: () => void;
+  onOpenGraphRight: () => void;
   onFocusPane?: () => void;
   onToggleOutline: () => void;
   onViewModeChange: (mode: EditorViewMode) => void;
@@ -152,6 +154,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onSave,
     onSnapshot,
     onSplitRight,
+    onOpenGraphRight,
     onFocusPane,
     onToggleOutline,
     onViewModeChange,
@@ -382,6 +385,15 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             aria-label={t("editor.splitRight")}
           >
             <Columns2 size={13} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onOpenGraphRight}
+            title={t("editor.openGraphRight")}
+            aria-label={t("editor.openGraphRight")}
+          >
+            <Waypoints size={13} />
           </button>
           <button
             type="button"

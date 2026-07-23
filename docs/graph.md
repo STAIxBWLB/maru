@@ -14,7 +14,8 @@ lifecycle (state machine, mount gating, camera-fit rules, real-Sigma e2e).
 **V6** makes the canvas primary: compact floating controls, one
 progressive-disclosure tools surface, dark neutral defaults with a selectable
 accent, dense-graph visual LOD, and safe recovery while the canvas container is
-temporarily zero-sized.
+temporarily zero-sized. Graph can also stay open as a persistent, resizable
+right editor split while documents remain editable on the left.
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -126,6 +127,11 @@ overlay is produced out-of-band by the `vault-graph` skill
   empty-filter / layout running→done, and `prefers-reduced-motion` turns all
   camera animations instant. Docked panel separators also resize with the
   left/right arrow keys, and static fallback nodes are keyboard-operable.
+- In Docs mode, the editor tab toolbar and command palette action "Open graph
+  on right" create a resizable document/Graph split. The selected split surface
+  persists across restart. Graph interactions keep focus on the right; opening
+  a graph node or selecting a document routes the document to the left pane.
+  Cmd/Ctrl+W closes only the focused Graph split.
 
 ## Local targets and saved views
 
@@ -155,8 +161,8 @@ overlay is produced out-of-band by the `vault-graph` skill
 - **Favorites**: favorite a node from the context menu or inspector; favorited
   nodes carry a ★ marker (shares `settings.ui.favorites` with the Explorer).
 - Filters, view and search-mode **persist** in `MaruSettings.graph` and
-  survive mode switches / restart; command palette has an **open-graph**
-  action.
+  survive mode switches / restart; command palette has **open-graph** and
+  **open-graph-right** actions.
 
 ### Performance (V4)
 

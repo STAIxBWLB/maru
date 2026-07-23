@@ -405,6 +405,7 @@ fn default_settings_json() -> JsonValue {
                 "terminalHeight": 260,
                 "terminalMaximized": false,
                 "editorSplitOpen": false,
+                "editorSplitSurface": "document",
                 "editorSplitRatio": 0.5,
                 "terminalSplitOpen": false,
                 "terminalSplitRatio": 0.5,

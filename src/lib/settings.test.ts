@@ -126,6 +126,7 @@ describe("normalizeMaruSettings", () => {
           documentsPaneWidth: 999,
           outlinePaneWidth: 100,
           editorSplitOpen: true,
+          editorSplitSurface: "graph",
           editorSplitRatio: 0.9,
           terminalDock: "right",
           terminalWidth: 2048,
@@ -195,6 +196,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
     expect(settings.ui.layout.editorSplitOpen).toBe(true);
+    expect(settings.ui.layout.editorSplitSurface).toBe("graph");
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
@@ -940,6 +942,7 @@ describe("normalizeMaruSettings", () => {
           terminalWidth: 1800,
           terminalMaximized: true,
           editorSplitOpen: true,
+          editorSplitSurface: "graph",
           editorSplitRatio: 0.4,
           terminalSplitOpen: true,
           terminalSplitRatio: 0.6,
@@ -964,6 +967,7 @@ describe("normalizeMaruSettings", () => {
       terminalWidth: 1800,
       terminalMaximized: true,
       editorSplitOpen: true,
+      editorSplitSurface: "graph",
       editorSplitRatio: 0.4,
       terminalSplitOpen: true,
       terminalSplitRatio: 0.6,
@@ -972,6 +976,14 @@ describe("normalizeMaruSettings", () => {
     });
     expect(settings.terminal.defaultPanelOpen).toBe(true);
     expect(settings.terminal.lastHeight).toBe(300);
+  });
+
+  it("defaults invalid editor split surfaces to documents", () => {
+    expect(
+      normalizeMaruSettings({
+        ui: { layout: { editorSplitSurface: "preview" } },
+      }).ui.layout.editorSplitSurface,
+    ).toBe("document");
   });
 
   it("normalizes terminal dock while preserving uncapped right-dock widths", () => {

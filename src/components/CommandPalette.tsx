@@ -57,6 +57,7 @@ export const CommandPalette = memo(function CommandPalette({
       { id: "open-studio", label: t("cmdk.action.openStudio") },
       ...(diagramEnabled ? [{ id: "open-diagram", label: t("cmdk.action.openDiagram") }] : []),
       { id: "open-graph", label: t("cmdk.action.openGraph") },
+      { id: "open-graph-right", label: t("cmdk.action.openGraphRight") },
       { id: "open-scratchpad", label: t("cmdk.action.openScratchpad") },
       { id: "new-scratchpad-memo", label: t("cmdk.action.newScratchpadMemo") },
       { id: "new-scratchpad-idea", label: t("cmdk.action.newScratchpadIdea") },

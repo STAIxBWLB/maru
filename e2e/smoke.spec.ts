@@ -1074,6 +1074,85 @@ test("keeps split editor modes independent and constrained to their pane widths"
     .toBe(true);
 });
 
+test("opens a persistent Graph surface in the right editor split", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+
+  await page.getByLabel("오른쪽에 그래프 열기").click();
+
+  const splitShell = page.locator(".editor-split-shell.split");
+  const graphPane = page.getByTestId("graph-split-pane");
+  await expect(splitShell).toBeVisible();
+  await expect(splitShell.locator(".editor-pane")).toHaveCount(2);
+  await expect(graphPane).toBeVisible();
+  await expect(graphPane.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".document-tab.active").first()).toBeVisible();
+
+  await graphPane.getByTestId("graph-search-toggle").click();
+  await expect(graphPane.getByTestId("graph-search")).toBeVisible();
+
+  const documentList = page.locator(".document-list");
+  await documentList.getByRole("button", { name: "모두 펴기" }).click();
+  await documentList.getByRole("button", { name: /Maru 용어집/ }).click();
+  await expect(graphPane).toBeVisible();
+  await expect(
+    splitShell.locator(".editor-pane").first().locator(".document-tab-title", {
+      hasText: "Maru 용어집",
+    }),
+  ).toBeVisible();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some(
+          (value) =>
+            value?.includes('"editorSplitOpen":true') &&
+            value.includes('"editorSplitSurface":"graph"'),
+        ),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+  await expect(page.getByTestId("graph-split-pane")).toBeVisible();
+  await expect(page.getByTestId("graph-split-pane").getByTestId("graph-mode")).toBeVisible();
+
+  await page
+    .getByTestId("graph-split-pane")
+    .locator(".graph-split-tab .document-tab-main")
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from({ length: window.localStorage.length }, (_, index) =>
+          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
+        ).some((value) => value?.includes('"focusedGroup":"right"')),
+      ),
+    )
+    .toBe(true);
+
+  const shortcutHandled = await page.getByTestId("graph-split-pane").evaluate((element) => {
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const event = new KeyboardEvent("keydown", {
+      key: "w",
+      code: "KeyW",
+      metaKey: isMac,
+      ctrlKey: !isMac,
+      bubbles: true,
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(shortcutHandled).toBe(true);
+
+  await expect(page.getByTestId("graph-split-pane")).toHaveCount(0);
+  await expect(page.locator(".editor-split-shell.split")).toHaveCount(0);
+  await expect(page.locator(".document-tab.active")).toBeVisible();
+});
+
 test("closes the focused right editor pane with Cmd/Ctrl+W", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("오른쪽으로 분할").first().click();

@@ -126,6 +126,8 @@ export interface WindowBoundsSettings {
   height: number;
 }
 
+export type EditorSplitSurface = "document" | "graph";
+
 export interface LayoutSettings {
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
@@ -141,6 +143,7 @@ export interface LayoutSettings {
   terminalWidth: number;
   terminalMaximized: boolean;
   editorSplitOpen: boolean;
+  editorSplitSurface: EditorSplitSurface;
   editorSplitRatio: number;
   terminalSplitOpen: boolean;
   terminalSplitRatio: number;
@@ -475,6 +478,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       terminalWidth: 640,
       terminalMaximized: false,
       editorSplitOpen: false,
+      editorSplitSurface: "document",
       editorSplitRatio: 0.5,
       terminalSplitOpen: false,
       terminalSplitRatio: 0.5,
@@ -2028,6 +2032,8 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       typeof layout.editorSplitOpen === "boolean"
         ? layout.editorSplitOpen
         : DEFAULT_MARU_SETTINGS.ui.layout.editorSplitOpen,
+    editorSplitSurface:
+      layout.editorSplitSurface === "graph" ? "graph" : "document",
     editorSplitRatio: normalizeSplitRatio(layout.editorSplitRatio),
     terminalSplitOpen:
       typeof layout.terminalSplitOpen === "boolean"
