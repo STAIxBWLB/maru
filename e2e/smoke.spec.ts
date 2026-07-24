@@ -261,7 +261,7 @@ test("docks the terminal to a resizable uncapped right column", async ({ page })
   await expect(shell).toHaveClass(/terminal-dock-bottom/);
   await expect(terminalPanel).toHaveClass(/collapsed/);
 
-  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
 
   await expect(shell).toHaveClass(/terminal-dock-right/);
   await expect(terminalPanel).not.toHaveClass(/collapsed/);
@@ -293,7 +293,7 @@ test("docks the terminal to a resizable uncapped right column", async ({ page })
     )
     .toBeGreaterThan(150);
 
-  await runCommandPaletteAction(page, "터미널을 하단에 배치");
+  await runCommandPaletteAction(page, "패널을 하단에 배치");
   await expect(shell).toHaveClass(/terminal-dock-bottom/);
   await expect(terminalPanel).not.toHaveClass(/collapsed/);
 });
@@ -1080,32 +1080,60 @@ test("keeps split editor modes independent and constrained to their pane widths"
     .toBe(true);
 });
 
-test("opens a persistent Graph surface in the right editor split", async ({ page }) => {
+test("manages Terminal and Graph in one persistent bottom or right panel", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
 
-  await page.getByLabel("오른쪽에 그래프 열기").click();
+  await page.getByLabel("패널에서 그래프 열기").click();
 
-  const splitShell = page.locator(".editor-split-shell.split");
-  const graphPane = page.getByTestId("graph-split-pane");
-  await expect(splitShell).toBeVisible();
-  await expect(splitShell.locator(".editor-pane")).toHaveCount(2);
-  await expect(graphPane).toBeVisible();
-  await expect(graphPane.getByTestId("graph-mode")).toBeVisible();
-  await expect(page.locator(".document-tab.active").first()).toBeVisible();
+  const panel = page.locator(".terminal-panel");
+  const graphSurface = page.getByTestId("panel-graph-surface");
+  await expect(panel).not.toHaveClass(/collapsed/);
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-bottom/);
+  await expect(page.getByTestId("panel-graph-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(graphSurface).toBeVisible();
+  await expect(graphSurface.getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".document-tab.active")).toBeVisible();
 
-  await graphPane.getByTestId("graph-search-toggle").click();
-  await expect(graphPane.getByTestId("graph-search")).toBeVisible();
+  await graphSurface.getByTestId("graph-search-toggle").click();
+  await expect(graphSurface.getByTestId("graph-search")).toBeVisible();
 
   const documentList = page.locator(".document-list");
   await documentList.getByRole("button", { name: "모두 펴기" }).click();
   await documentList.getByRole("button", { name: /Maru 용어집/ }).click();
-  await expect(graphPane).toBeVisible();
+  await expect(graphSurface).toBeVisible();
   await expect(
-    splitShell.locator(".editor-pane").first().locator(".document-tab-title", {
+    page.locator(".editor-pane").locator(".document-tab-title", {
       hasText: "Maru 용어집",
     }),
   ).toBeVisible();
+
+  await panel.getByRole("tab", { name: "터미널" }).click();
+  await expect(panel.getByRole("tab", { name: "터미널" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".terminal-workspace")).toBeVisible();
+  await expect(graphSurface).toBeHidden();
+  await page.getByTestId("terminal-theme-select").selectOption("light");
+  await expect(panel).toHaveAttribute("data-terminal-theme", "light");
+  await expect
+    .poll(() =>
+      page
+        .locator(".terminal-workspace")
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    )
+    .toBe("rgb(255, 255, 255)");
+
+  await page.getByTestId("panel-graph-tab").click();
+  await page.getByTestId("panel-graph-theme-select").selectOption("light");
+  await expect(graphSurface.locator(".graph-view")).toHaveAttribute(
+    "data-graph-theme",
+    "light",
+  );
+
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-right/);
 
   await expect
     .poll(() =>
@@ -1115,8 +1143,14 @@ test("opens a persistent Graph surface in the right editor split", async ({ page
         ).some((value) => {
           if (!value) return false;
           try {
-            const layout = JSON.parse(value)?.ui?.layout;
-            return layout?.editorSplitOpen === true && layout?.editorSplitSurface === "graph";
+            const parsed = JSON.parse(value);
+            const layout = parsed?.ui?.layout;
+            return (
+              layout?.terminalOpen === true &&
+              layout?.terminalDock === "right" &&
+              layout?.toolPanelSurface === "graph" &&
+              parsed?.graph?.display?.theme === "light"
+            );
           } catch {
             return false;
           }
@@ -1126,31 +1160,17 @@ test("opens a persistent Graph surface in the right editor split", async ({ page
     .toBe(true);
 
   await page.reload();
-  await expect(page.getByTestId("graph-split-pane")).toBeVisible();
-  await expect(page.getByTestId("graph-split-pane").getByTestId("graph-mode")).toBeVisible();
+  await expect(page.locator(".terminal-panel")).not.toHaveClass(/collapsed/);
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-right/);
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("panel-graph-surface").getByTestId("graph-mode")).toBeVisible();
+  await expect(page.getByTestId("panel-graph-theme-select")).toHaveValue("light");
 
   await page
-    .getByTestId("graph-split-pane")
-    .locator(".graph-split-tab .document-tab-main")
+    .getByTestId("panel-graph-surface")
     .click();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        Array.from({ length: window.localStorage.length }, (_, index) =>
-          window.localStorage.getItem(window.localStorage.key(index) ?? ""),
-        ).some((value) => {
-          if (!value) return false;
-          try {
-            return JSON.parse(value)?.focusedGroup === "right";
-          } catch {
-            return false;
-          }
-        }),
-      ),
-    )
-    .toBe(true);
 
-  const shortcutHandled = await page.getByTestId("graph-split-pane").evaluate((element) => {
+  const shortcutHandled = await page.getByTestId("panel-graph-surface").evaluate((element) => {
     const isMac = navigator.platform.toLowerCase().includes("mac");
     const event = new KeyboardEvent("keydown", {
       key: "w",
@@ -1165,8 +1185,8 @@ test("opens a persistent Graph surface in the right editor split", async ({ page
   });
   expect(shortcutHandled).toBe(true);
 
-  await expect(page.getByTestId("graph-split-pane")).toHaveCount(0);
-  await expect(page.locator(".editor-split-shell.split")).toHaveCount(0);
+  await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
+  await expect(page.getByTestId("panel-graph-surface")).toBeHidden();
   await expect(page.locator(".document-tab.active")).toBeVisible();
 });
 

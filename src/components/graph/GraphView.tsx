@@ -142,10 +142,10 @@ export function GraphView({
   // user is typing elsewhere, so ⌘F works in full graph mode without a click.
   useEffect(() => {
     const active = document.activeElement;
-    if (
-      active instanceof HTMLElement &&
-      (isInEditable(active) || active.closest(".terminal-panel"))
-    ) {
+    // Typing surfaces keep focus (isInEditable covers the PTY textarea too);
+    // plain buttons — like the tool-panel surface tab that just opened this
+    // graph — yield it, so the focus-scoped shortcuts work immediately.
+    if (active instanceof HTMLElement && isInEditable(active)) {
       return;
     }
     rootRef.current?.focus({ preventScroll: true });

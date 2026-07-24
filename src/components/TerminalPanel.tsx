@@ -9,9 +9,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
+  Palette,
   Plus,
   Search,
   SquareTerminal,
+  Waypoints,
   X,
 } from "lucide-react";
 import type React from "react";
@@ -52,7 +54,12 @@ import {
 } from "../lib/api";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
-import type { MaruSettings, TerminalDock } from "../lib/settings";
+import type {
+  MaruSettings,
+  TerminalDock,
+  TerminalTheme,
+  ToolPanelSurface,
+} from "../lib/settings";
 import { terminalShortcutActionForEvent } from "../lib/terminalShortcuts";
 import { TerminalInputPump } from "../lib/terminalInputPump";
 import {
@@ -104,6 +111,9 @@ interface TerminalPanelProps {
   splitOpen: boolean;
   splitRatio: number;
   maximized: boolean;
+  activeSurface: ToolPanelSurface;
+  graphNode: React.ReactNode;
+  graphTheme: "dark" | "light" | "app";
   onOpenChange: (open: boolean) => void;
   onHeightChange: (height: number) => void;
   onDockChange: (dock: TerminalDock) => void;
@@ -111,6 +121,9 @@ interface TerminalPanelProps {
   onSplitOpenChange: (open: boolean) => void;
   onSplitRatioChange: (ratio: number) => void;
   onMaximizedChange: (maximized: boolean) => void;
+  onSurfaceChange: (surface: ToolPanelSurface) => void;
+  onTerminalThemeChange: (theme: TerminalTheme) => void;
+  onGraphThemeChange: (theme: "dark" | "light" | "app") => void;
 }
 
 export interface TerminalLaunchRequest {
@@ -130,7 +143,7 @@ export interface TerminalLaunchRequest {
 export interface TerminalPanelHandle {
   hasFocusedAgent: () => boolean;
   hasFocus: () => boolean;
-  closeFocusedTab: () => boolean;
+  closeFocusedSurface: () => boolean;
   attachActiveItem: () => boolean;
   attachPath: (relPath: string | null, absPath: string | null) => boolean;
 }
@@ -245,6 +258,9 @@ export const TerminalPanel = memo(
       splitOpen,
       splitRatio,
       maximized,
+      activeSurface,
+      graphNode,
+      graphTheme,
       onOpenChange,
       onHeightChange,
       onDockChange,
@@ -252,6 +268,9 @@ export const TerminalPanel = memo(
       onSplitOpenChange,
       onSplitRatioChange,
       onMaximizedChange,
+      onSurfaceChange,
+      onTerminalThemeChange,
+      onGraphThemeChange,
     },
     ref,
   ) {
@@ -323,6 +342,7 @@ export const TerminalPanel = memo(
     const [searchMatchesBySession, setSearchMatchesBySession] = useState<
       Record<string, TerminalSearchMatch | null>
     >({});
+    const [graphMounted, setGraphMounted] = useState(activeSurface === "graph");
     const [resizeReadySessions, setResizeReadySessions] = useState<Record<string, true>>({});
     const seqRef = useRef(1);
     const taskSeqRef = useRef(1);
@@ -341,11 +361,38 @@ export const TerminalPanel = memo(
     // click's pointerup — arming then would eat a fast second TUI click.
     const inactiveGestureRef = useRef<"none" | "down" | "done">("none");
     const layoutRefreshRafRef = useRef<number | null>(null);
+    const terminalVisible = open && activeSurface === "terminal";
     const terminalFocusStateRef = useRef<TerminalFocusState>({
-      open,
+      open: terminalVisible,
       searchOpen,
       renamingTaskId,
     });
+
+    useEffect(() => {
+      if (activeSurface === "graph") setGraphMounted(true);
+      // Keep-alive spans surface toggles while the panel is open (preserves
+      // graph layout state); a closed panel releases the hidden Sigma/worker.
+      else if (!open) setGraphMounted(false);
+    }, [activeSurface, open]);
+
+    // Surface activation moves focus into the graph root so its focus-scoped
+    // shortcuts work without requiring a canvas click first (the keep-alive
+    // above means GraphView's own mount-focus only fires once per mount).
+    const graphHostRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+      if (!open || activeSurface !== "graph") return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
+      ) {
+        return;
+      }
+      graphHostRef.current
+        ?.querySelector<HTMLElement>(".graph-view")
+        ?.focus({ preventScroll: true });
+    }, [open, activeSurface]);
 
     const injectContext = settings.terminal.injectActiveContext ?? true;
     const attachStyle: AttachMentionStyle = settings.terminal.attachMentionStyle ?? "mention";
@@ -728,16 +775,20 @@ export const TerminalPanel = memo(
     );
 
     useEffect(() => {
-      if (!open) {
+      if (!terminalVisible) {
         autoLaunchRef.current = false;
         return;
       }
       if (splitOpen) return;
-      const launcher = shouldAutoLaunchTerminal(settings, open, state.tabs.length);
+      const launcher = shouldAutoLaunchTerminal(
+        settings,
+        terminalVisible,
+        state.tabs.length,
+      );
       if (!launcher || autoLaunchRef.current) return;
       autoLaunchRef.current = true;
       void launch(launcher);
-    }, [launch, open, settings, splitOpen, state.tabs.length]);
+    }, [launch, settings, splitOpen, state.tabs.length, terminalVisible]);
 
     useEffect(() => {
       if (!launchRequest) return;
@@ -747,6 +798,10 @@ export const TerminalPanel = memo(
     }, [focusedGroup, launch, launchRequest]);
 
     useEffect(() => {
+      // Keep split session topology dormant while Graph owns the shared panel.
+      // Otherwise a persisted terminal split can spawn a new hidden PTY when
+      // the user opens Graph, even though no Terminal surface is visible.
+      if (!terminalVisible) return;
       if (!splitOpen) {
         setRightTabId(null);
         setFocusedGroup("left");
@@ -785,6 +840,7 @@ export const TerminalPanel = memo(
       splitLeftTab,
       splitOpen,
       state.activeTabId,
+      terminalVisible,
     ]);
 
     const closeTab = useCallback(
@@ -1029,6 +1085,10 @@ export const TerminalPanel = memo(
     const dockTarget = dock === "right" ? "bottom" : "right";
     const dockTitle =
       dockTarget === "right" ? t("terminal.dockRight") : t("terminal.dockBottom");
+    const activateSurface = (surface: ToolPanelSurface) => {
+      onSurfaceChange(surface);
+      if (!open) onOpenChange(true);
+    };
     const splitMode = splitOpen && Boolean(rightTab);
     // Use CSS variables instead of wrapper columns so terminal-instance divs
     // stay direct children of terminal-body across split toggles.
@@ -1052,7 +1112,7 @@ export const TerminalPanel = memo(
 
     useEffect(() => {
       const visibleTabs = new Set<string>();
-      if (open) {
+      if (terminalVisible) {
         if (splitMode) {
           if (splitLeftTabId) visibleTabs.add(splitLeftTabId);
           if (rightTabId) visibleTabs.add(rightTabId);
@@ -1080,7 +1140,7 @@ export const TerminalPanel = memo(
         });
       }
     }, [
-      open,
+      terminalVisible,
       resizeReadySessions,
       rightTabId,
       splitLeftTabId,
@@ -1123,12 +1183,13 @@ export const TerminalPanel = memo(
       ref,
       (): TerminalPanelHandle => ({
         hasFocusedAgent: () =>
-          focusedKind === "claude" || focusedKind === "codex",
+          activeSurface === "terminal" &&
+          (focusedKind === "claude" || focusedKind === "codex"),
         hasFocus: () =>
           open &&
           terminalPanelRootRef.current != null &&
           terminalPanelRootRef.current.contains(document.activeElement),
-        closeFocusedTab: () => {
+        closeFocusedSurface: () => {
           if (
             !open ||
             terminalPanelRootRef.current == null ||
@@ -1136,16 +1197,27 @@ export const TerminalPanel = memo(
           ) {
             return false;
           }
-          const tabId = focusedTabIdRef.current;
-          if (!tabId) return false;
-          closeTab(tabId);
+          if (activeSurface === "terminal" && focusedTabIdRef.current) {
+            closeTab(focusedTabIdRef.current);
+          } else {
+            onOpenChange(false);
+          }
           return true;
         },
         attachActiveItem: () => attachMention(activeItemMention(activeContext, attachStyle)),
         attachPath: (relPath, absPath) =>
           attachMention(pathMention(relPath, absPath, attachStyle)),
       }),
-      [activeContext, attachMention, attachStyle, closeTab, focusedKind, open],
+      [
+        activeContext,
+        activeSurface,
+        attachMention,
+        attachStyle,
+        closeTab,
+        focusedKind,
+        onOpenChange,
+        open,
+      ],
     );
 
     const contextChip = useMemo(
@@ -1181,8 +1253,12 @@ export const TerminalPanel = memo(
     }, [cancelFocusedTerminalRefresh, getFocusedTerminalHandle]);
 
     useEffect(() => {
-      terminalFocusStateRef.current = { open, searchOpen, renamingTaskId };
-    }, [open, renamingTaskId, searchOpen]);
+      terminalFocusStateRef.current = {
+        open: terminalVisible,
+        searchOpen,
+        renamingTaskId,
+      };
+    }, [renamingTaskId, searchOpen, terminalVisible]);
 
     useEffect(() => {
       const onFocusIn = (event: FocusEvent) => {
@@ -1319,7 +1395,7 @@ export const TerminalPanel = memo(
     }, [canRunTerminal, nativeWindowRefocus]);
 
     useEffect(() => {
-      if (!open) {
+      if (!terminalVisible) {
         cancelFocusedTerminalRefresh();
         return;
       }
@@ -1333,7 +1409,7 @@ export const TerminalPanel = memo(
       focusedGroup,
       focusedTabId,
       maximized,
-      open,
+      terminalVisible,
       renamingTaskId,
       scheduleFocusedTerminalRefresh,
       searchOpen,
@@ -1342,11 +1418,19 @@ export const TerminalPanel = memo(
 
     const keepTerminalFocusOnToolbarPointerDown = useCallback(
       (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (!shouldFocusTerminalInput({ open, searchOpen, renamingTaskId })) return;
+        if (
+          !shouldFocusTerminalInput({
+            open: terminalVisible,
+            searchOpen,
+            renamingTaskId,
+          })
+        ) {
+          return;
+        }
         event.preventDefault();
         getFocusedTerminalHandle()?.focus();
       },
-      [getFocusedTerminalHandle, open, renamingTaskId, searchOpen],
+      [getFocusedTerminalHandle, renamingTaskId, searchOpen, terminalVisible],
     );
 
     const keepSearchFocusOnPointerDown = useCallback(
@@ -1433,6 +1517,7 @@ export const TerminalPanel = memo(
 
     const handleTerminalKeyDownCapture = useCallback(
       (event: React.KeyboardEvent<HTMLElement>) => {
+        if (activeSurface !== "terminal") return;
         if (isTextEditingTarget(event.target)) return;
         const isMac = navigator.platform.toLowerCase().includes("mac");
         const action = terminalShortcutActionForEvent(
@@ -1539,6 +1624,7 @@ export const TerminalPanel = memo(
       },
       [
         activeTaskTabs,
+        activeSurface,
         closeTab,
         focusedGroup,
         focusedTabId,
@@ -1845,67 +1931,149 @@ export const TerminalPanel = memo(
               : `terminal-panel dock-${dock}`
             : `terminal-panel dock-${dock} collapsed`
         }
+        data-terminal-theme={settings.terminal.theme}
         style={panelStyle}
         onKeyDownCapture={handleTerminalKeyDownCapture}
       >
         <div className="terminal-resize-handle" onPointerDown={startResize} />
         <header className="terminal-header">
-          <button
-            type="button"
-            className="terminal-title"
-            onClick={toggleOpen}
-            aria-expanded={open}
-            title={open ? t("terminal.collapse") : t("terminal.expand")}
-            aria-label={open ? t("terminal.collapse") : t("terminal.expand")}
-          >
-            {dock === "right" ? <PanelRight size={14} /> : <PanelBottom size={14} />}
-            <span>{t("terminal.title")}</span>
-            {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
-          <div className="terminal-launchers" role="group" aria-label={t("terminal.launchers")}>
-            {TERMINAL_LAUNCHERS.map((launcher) => {
-              const enabled = settings.terminal.launchers[launcher.id]?.enabled ?? true;
-              return (
-                <button
-                  key={launcher.id}
-                  type="button"
-                  disabled={!canRunTerminal || !enabled}
-                  onPointerDown={keepTerminalFocusOnToolbarPointerDown}
-                  onClick={() => void launch(launcher.id, focusedGroup)}
-                  title={
-                    canRunTerminal
-                      ? terminalCommandPreview(launcher.id, headerCwd ?? "")
-                      : t("terminal.tauriRequired")
-                  }
-                  aria-label={t(launcher.titleKey)}
-                >
-                  {launcher.id === "codex" ? <Code2 size={13} /> : <SquareTerminal size={13} />}
-                  <span>{t(launcher.titleKey)}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="terminal-header-right">
+          <div className="tool-panel-tabs" role="tablist" aria-label={t("panel.tabs")}>
             <button
               type="button"
-              className="terminal-context-chip"
-              disabled={!contextChip.enabled}
-              onPointerDown={keepTerminalFocusOnToolbarPointerDown}
-              onClick={() => attachMention(activeItemMention(activeContext, attachStyle))}
-              title={
-                contextChip.enabled
-                  ? t("terminal.context.attach", { item: contextChip.label })
-                  : t("terminal.context.disabled")
+              className={
+                activeSurface === "terminal"
+                  ? "terminal-title tool-panel-tab active"
+                  : "terminal-title tool-panel-tab"
               }
-              aria-label={t("terminal.context.attach", { item: contextChip.label })}
+              role="tab"
+              aria-selected={activeSurface === "terminal"}
+              aria-expanded={open}
+              onClick={() => activateSurface("terminal")}
+              title={t("terminal.title")}
             >
-              <FileText size={12} />
-              <span>{contextChip.label}</span>
+              <SquareTerminal size={14} />
+              <span>{t("terminal.title")}</span>
             </button>
-            <div className="terminal-cwd" title={headerCwd ?? t("terminal.cwd.none")}>
-              {headerCwd ?? t("terminal.cwd.none")}
-            </div>
+            <button
+              type="button"
+              className={
+                activeSurface === "graph"
+                  ? "tool-panel-tab active"
+                  : "tool-panel-tab"
+              }
+              role="tab"
+              aria-selected={activeSurface === "graph"}
+              aria-expanded={open}
+              onClick={() => activateSurface("graph")}
+              title={t("mode.graph")}
+              data-testid="panel-graph-tab"
+            >
+              <Waypoints size={14} />
+              <span>{t("mode.graph")}</span>
+            </button>
           </div>
+
+          {activeSurface === "terminal" ? (
+            <>
+              <div
+                className="terminal-launchers"
+                role="group"
+                aria-label={t("terminal.launchers")}
+              >
+                {TERMINAL_LAUNCHERS.map((launcher) => {
+                  const enabled = settings.terminal.launchers[launcher.id]?.enabled ?? true;
+                  return (
+                    <button
+                      key={launcher.id}
+                      type="button"
+                      disabled={!canRunTerminal || !enabled}
+                      onPointerDown={keepTerminalFocusOnToolbarPointerDown}
+                      onClick={() => void launch(launcher.id, focusedGroup)}
+                      title={
+                        canRunTerminal
+                          ? terminalCommandPreview(launcher.id, headerCwd ?? "")
+                          : t("terminal.tauriRequired")
+                      }
+                      aria-label={t(launcher.titleKey)}
+                    >
+                      {launcher.id === "codex" ? (
+                        <Code2 size={13} />
+                      ) : (
+                        <SquareTerminal size={13} />
+                      )}
+                      <span>{t(launcher.titleKey)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="terminal-header-right">
+                <button
+                  type="button"
+                  className="terminal-context-chip"
+                  disabled={!contextChip.enabled}
+                  onPointerDown={keepTerminalFocusOnToolbarPointerDown}
+                  onClick={() => attachMention(activeItemMention(activeContext, attachStyle))}
+                  title={
+                    contextChip.enabled
+                      ? t("terminal.context.attach", { item: contextChip.label })
+                      : t("terminal.context.disabled")
+                  }
+                  aria-label={t("terminal.context.attach", { item: contextChip.label })}
+                >
+                  <FileText size={12} />
+                  <span>{contextChip.label}</span>
+                </button>
+                <div className="terminal-cwd" title={headerCwd ?? t("terminal.cwd.none")}>
+                  {headerCwd ?? t("terminal.cwd.none")}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="tool-panel-spacer" />
+          )}
+
+          <label className="tool-panel-theme" title={t("panel.theme")}>
+            <Palette size={13} aria-hidden />
+            <span className="sr-only">{t("panel.theme")}</span>
+            {activeSurface === "terminal" ? (
+              <select
+                value={settings.terminal.theme}
+                onChange={(event) =>
+                  onTerminalThemeChange(event.target.value as TerminalTheme)
+                }
+                aria-label={t("terminal.theme")}
+                data-testid="terminal-theme-select"
+              >
+                <option value="dark">{t("terminal.theme.dark")}</option>
+                <option value="light">{t("terminal.theme.light")}</option>
+                <option value="solarized">{t("terminal.theme.solarized")}</option>
+              </select>
+            ) : (
+              <select
+                value={graphTheme}
+                onChange={(event) =>
+                  onGraphThemeChange(
+                    event.target.value as "dark" | "light" | "app",
+                  )
+                }
+                aria-label={t("graph.display.theme")}
+                data-testid="panel-graph-theme-select"
+              >
+                <option value="dark">{t("graph.display.theme.dark")}</option>
+                <option value="light">{t("graph.display.theme.light")}</option>
+                <option value="app">{t("graph.display.theme.app")}</option>
+              </select>
+            )}
+          </label>
+          <button
+            type="button"
+            className="terminal-icon-button"
+            onClick={toggleOpen}
+            aria-label={open ? t("panel.collapse") : t("panel.expand")}
+            title={open ? t("panel.collapse") : t("panel.expand")}
+          >
+            {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
           <button
             type="button"
             className="terminal-icon-button"
@@ -1934,7 +2102,8 @@ export const TerminalPanel = memo(
           className={
             sidebarCollapsed ? "terminal-workspace sidebar-collapsed" : "terminal-workspace"
           }
-          hidden={!open}
+          data-terminal-theme={settings.terminal.theme}
+          hidden={!terminalVisible}
         >
           <aside
             className={
@@ -2012,7 +2181,8 @@ export const TerminalPanel = memo(
                 const isLeftActive =
                   !isRight &&
                   (splitMode ? splitLeftTabId === tab.id : state.activeTabId === tab.id);
-                const isVisible = inActiveTask && (isRight || isLeftActive);
+                const isVisible =
+                  terminalVisible && inActiveTask && (isRight || isLeftActive);
                 const isFocused =
                   isVisible &&
                   (splitMode
@@ -2056,6 +2226,7 @@ export const TerminalPanel = memo(
                           active={isVisible}
                           focused={isFocused}
                           resizeReady={resizeReadySessions[sessionId] === true}
+                          theme={settings.terminal.theme}
                           inputLabel={t("terminal.input")}
                           copyOnSelect={settings.terminal.copyOnSelect}
                           searchMatch={searchMatchesBySession[sessionId] ?? null}
@@ -2172,6 +2343,24 @@ export const TerminalPanel = memo(
               ) : null}
             </div>
           </div>
+        </div>
+        <div
+          ref={graphHostRef}
+          className="tool-panel-graph"
+          hidden={!open || activeSurface !== "graph"}
+          data-testid="panel-graph-surface"
+          tabIndex={-1}
+          onPointerDown={(event) => {
+            const target = event.target;
+            if (
+              target instanceof HTMLElement &&
+              !target.closest("button, input, select, textarea, [tabindex]")
+            ) {
+              event.currentTarget.focus({ preventScroll: true });
+            }
+          }}
+        >
+          {graphMounted ? graphNode : null}
         </div>
         {open && error ? <div className="terminal-error">{error}</div> : null}
       </section>

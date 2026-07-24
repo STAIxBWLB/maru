@@ -228,8 +228,51 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
 }
 
 async function hoverNode(page: Page, id: string) {
-  const point = await nodePoint(page, id);
-  await page.mouse.move(point.x, point.y, { steps: 5 });
+  // Sigma resolves hover against its most recent GPU picking buffer. Filters
+  // can change visible nodes before that buffer has caught up. Refresh it,
+  // then sweep a few CSS pixels around the reported center: software WebGL
+  // quantizes the color-picking buffer differently from viewport coordinates
+  // after several contexts have been created in the same browser process.
+  const offsets = [
+    [0, 0],
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+    [-2, 0],
+    [2, 0],
+    [0, -2],
+    [0, 2],
+    [-3, -1],
+    [3, 1],
+    [-1, 3],
+    [1, -3],
+  ] as const;
+  for (let attempt = 0; ; attempt += 1) {
+    const frame = await page.evaluate(() => {
+      const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+      const current = bridge.frames();
+      bridge.requestRender();
+      return current;
+    });
+    await page.waitForFunction(
+      (previousFrame) =>
+        (window as unknown as { __maruGraph: Bridge }).__maruGraph.frames() >
+        previousFrame,
+      frame,
+    );
+    const point = await nodePoint(page, id);
+    await page.mouse.move(Math.round(point.x - 8), Math.round(point.y), {
+      steps: 2,
+    });
+    for (const [dx, dy] of offsets) {
+      await page.mouse.move(Math.round(point.x + dx), Math.round(point.y + dy));
+      await page.waitForTimeout(32);
+      if ((await hoveredId(page)) === id) return;
+    }
+    if (attempt >= 3) break;
+  }
+  await expect.poll(() => hoveredId(page), { timeout: 500 }).toBe(id);
 }
 
 const screenState = (page: Page, id: string) =>
@@ -261,6 +304,13 @@ test("enters graph mode, shows degraded hint, and renders the live graph", async
   await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(3);
+  // Close the overlay before pointer interaction. The fitted meeting node can
+  // legitimately sit beneath the right-side filter controls while they are
+  // open, where a real pointer cannot reach the canvas.
+  const filtersToggle = page.getByTestId("graph-toggle-filters");
+  await filtersToggle.click();
+  await expect(filtersToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("graph-filter-panel")).toBeHidden();
   await expect.poll(() => screenState(page, "maru-project").then((s) => s.visible)).toBe(true);
 
   expect(forbidden).toEqual([]);
@@ -359,7 +409,7 @@ test("hover highlights the 1-hop neighborhood and dims the rest", async ({ page 
   expect(ghostNeighbor.color).toBe(ghostBefore.color);
 
   // Leaving the canvas clears the highlight.
-  await page.getByTestId("graph-filter-panel").hover();
+  await page.getByTestId("graph-toggle-filters").hover();
   await expect.poll(() => hoveredId(page)).toBe(null);
   const glossaryRestored = await screenState(page, "maru-glossary");
   expect(glossaryRestored.color).toBe(glossaryBefore.color);

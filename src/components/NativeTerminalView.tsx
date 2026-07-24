@@ -6,6 +6,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -19,6 +20,7 @@ import type {
   TerminalSelectionSpan,
   TerminalSearchMatch,
 } from "../lib/api";
+import type { TerminalTheme } from "../lib/settings";
 
 export interface NativeTerminalViewHandle {
   focus: () => void;
@@ -37,6 +39,7 @@ interface NativeTerminalViewProps {
   active: boolean;
   focused: boolean;
   resizeReady: boolean;
+  theme?: TerminalTheme;
   inputLabel: string;
   copyOnSelect?: boolean;
   searchMatch?: TerminalSearchMatch | null;
@@ -132,59 +135,72 @@ export interface ClickChain {
  *  hair after `compositionend`. We drop it only inside this tight window; a
  *  fresh composition of the same syllable starts a new session and is kept. */
 const COMPOSITION_TRAILING_MS = 100;
-const DEFAULT_FG = "#d4d4d4";
-const DEFAULT_BG = "#111111";
-const SELECTION_FILL = "rgba(56, 99, 161, 0.40)";
-const SEARCH_FILL = "rgba(221, 171, 53, 0.34)";
-const CURSOR_COLOR = "#d4d4d4";
+export interface TerminalThemePalette {
+  foreground: string;
+  background: string;
+  cursor: string;
+  selection: string;
+  search: string;
+  ansi: readonly string[];
+}
 
-const ANSI_COLORS: Record<string, string> = {
-  Black: "#111111",
-  Red: "#f87171",
-  Green: "#8bc891",
-  Yellow: "#e5c07b",
-  Blue: "#7aa2f7",
-  Magenta: "#c792ea",
-  Cyan: "#70c0ba",
-  White: "#d4d4d4",
-  BrightBlack: "#5f5f5f",
-  BrightRed: "#ff8f8f",
-  BrightGreen: "#a8d8ae",
-  BrightYellow: "#f0d38c",
-  BrightBlue: "#9bbcff",
-  BrightMagenta: "#d7a4f3",
-  BrightCyan: "#89d8d1",
-  BrightWhite: "#ffffff",
-  Foreground: "#d4d4d4",
-  Background: "#111111",
+const TERMINAL_THEME_PALETTES: Record<TerminalTheme, TerminalThemePalette> = {
+  dark: {
+    foreground: "#d4d4d4",
+    background: "#111111",
+    cursor: "#d4d4d4",
+    selection: "rgba(56, 99, 161, 0.40)",
+    search: "rgba(221, 171, 53, 0.34)",
+    ansi: [
+      "#111111", "#f87171", "#8bc891", "#e5c07b",
+      "#7aa2f7", "#c792ea", "#70c0ba", "#d4d4d4",
+      "#5f5f5f", "#ff8f8f", "#a8d8ae", "#f0d38c",
+      "#9bbcff", "#d7a4f3", "#89d8d1", "#ffffff",
+    ],
+  },
+  light: {
+    foreground: "#24292f",
+    background: "#ffffff",
+    cursor: "#24292f",
+    selection: "rgba(9, 105, 218, 0.22)",
+    search: "rgba(191, 135, 0, 0.24)",
+    ansi: [
+      "#24292f", "#cf222e", "#116329", "#9a6700",
+      "#0969da", "#8250df", "#1b7c83", "#6e7781",
+      "#57606a", "#a40e26", "#1a7f37", "#bf8700",
+      "#218bff", "#a475f9", "#3192aa", "#8c959f",
+    ],
+  },
+  solarized: {
+    foreground: "#93a1a1",
+    background: "#002b36",
+    cursor: "#eee8d5",
+    selection: "rgba(38, 139, 210, 0.32)",
+    search: "rgba(181, 137, 0, 0.34)",
+    ansi: [
+      "#073642", "#dc322f", "#859900", "#b58900",
+      "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+      "#002b36", "#cb4b16", "#586e75", "#657b83",
+      "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+    ],
+  },
 };
 
-const INDEXED_COLORS = [
-  "#111111",
-  "#f87171",
-  "#8bc891",
-  "#e5c07b",
-  "#7aa2f7",
-  "#c792ea",
-  "#70c0ba",
-  "#d4d4d4",
-  "#5f5f5f",
-  "#ff8f8f",
-  "#a8d8ae",
-  "#f0d38c",
-  "#9bbcff",
-  "#d7a4f3",
-  "#89d8d1",
-  "#ffffff",
-];
+export function terminalThemePalette(theme: TerminalTheme): TerminalThemePalette {
+  return TERMINAL_THEME_PALETTES[theme];
+}
 
 /** xterm-256 cube levels for indices 16-231 (6x6x6). */
 const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
 
 /** Resolve an xterm-256 indexed color: 0-15 themed table, 16-231 color cube,
  *  232-255 grayscale ramp. */
-export function indexedColorToCss(index: number, fallback: string): string {
-  if (index < 16) return INDEXED_COLORS[index] ?? fallback;
+export function indexedColorToCss(
+  index: number,
+  fallback: string,
+  palette: TerminalThemePalette = TERMINAL_THEME_PALETTES.dark,
+): string {
+  if (index < 16) return palette.ansi[index] ?? fallback;
   if (index <= 231) {
     const offset = index - 16;
     const r = CUBE_LEVELS[Math.floor(offset / 36)];
@@ -199,11 +215,25 @@ export function indexedColorToCss(index: number, fallback: string): string {
   return fallback;
 }
 
-export function terminalColorToCss(color: TerminalColor, fallback: string): string {
+export function terminalColorToCss(
+  color: TerminalColor,
+  fallback: string,
+  palette: TerminalThemePalette = TERMINAL_THEME_PALETTES.dark,
+): string {
   if (color.kind === "rgb") return `rgb(${color.r}, ${color.g}, ${color.b})`;
-  if (color.kind === "indexed") return indexedColorToCss(color.index, fallback);
-  return ANSI_COLORS[color.name] ?? fallback;
+  if (color.kind === "indexed") return indexedColorToCss(color.index, fallback, palette);
+  if (color.name === "Foreground") return palette.foreground;
+  if (color.name === "Background") return palette.background;
+  const index = ANSI_NAME_ORDER.indexOf(color.name);
+  return index >= 0 ? palette.ansi[index] ?? fallback : fallback;
 }
+
+// Module-level: terminalColorToCss runs in the per-cell paint hot path.
+const ANSI_NAME_ORDER = [
+  "Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White",
+  "BrightBlack", "BrightRed", "BrightGreen", "BrightYellow",
+  "BrightBlue", "BrightMagenta", "BrightCyan", "BrightWhite",
+];
 
 export function frameLineToText(line: TerminalCell[]): string {
   return line
@@ -729,6 +759,7 @@ export const NativeTerminalView = memo(
       active,
       focused,
       resizeReady,
+      theme = "dark",
       inputLabel,
       copyOnSelect = false,
       searchMatch = null,
@@ -807,6 +838,7 @@ export const NativeTerminalView = memo(
     const selectionCommandTailRef = useRef<Promise<void>>(Promise.resolve());
     const autoScrollRafRef = useRef<number | null>(null);
     const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
+    const palette = useMemo(() => terminalThemePalette(theme), [theme]);
 
     // Paint scheduling.
     const pendingPaintRef = useRef<"all" | Set<number> | null>(null);
@@ -865,14 +897,14 @@ export const NativeTerminalView = memo(
             c += 1;
             continue;
           }
-          const bg = cellBg(cell);
+          const bg = cellBg(cell, palette);
           let end = c;
           while (end + 1 < cols) {
             const next = cells[end + 1];
-            if (!next || cellBg(next) !== bg) break;
+            if (!next || cellBg(next, palette) !== bg) break;
             end += 1;
           }
-          if (bg !== DEFAULT_BG) {
+          if (bg !== palette.background) {
             ctx.fillStyle = bg;
             ctx.fillRect(m.padLeft + c * m.charWidth, y, (end - c + 1) * m.charWidth, m.lineHeight);
           }
@@ -881,7 +913,7 @@ export const NativeTerminalView = memo(
 
         const searchSpan = terminalSearchSpanForRow(searchMatchRef.current, r, cols);
         if (searchSpan) {
-          ctx.fillStyle = SEARCH_FILL;
+          ctx.fillStyle = palette.search;
           ctx.fillRect(
             m.padLeft + searchSpan.start * m.charWidth,
             y,
@@ -896,7 +928,7 @@ export const NativeTerminalView = memo(
           const cell = cells[col];
           if (!cell || cell.width === 0) continue;
           const x = m.padLeft + col * m.charWidth;
-          const fg = cellFg(cell);
+          const fg = cellFg(cell, palette);
           if (cell.ch && cell.ch !== " ") {
             ctx.font = cellFont(cell, m);
             ctx.fillStyle = fg;
@@ -919,15 +951,15 @@ export const NativeTerminalView = memo(
           const cx = m.padLeft + cursor.col * m.charWidth;
           const cw = (cell?.width === 2 ? 2 : 1) * m.charWidth;
           if (focusedRef.current) {
-            ctx.fillStyle = CURSOR_COLOR;
+            ctx.fillStyle = palette.cursor;
             ctx.fillRect(cx, y, cw, m.lineHeight);
             if (cell?.ch && cell.ch !== " ") {
               ctx.font = cellFont(cell, m);
-              ctx.fillStyle = DEFAULT_BG;
+              ctx.fillStyle = palette.background;
               ctx.fillText(cell.ch, cx, ty);
             }
           } else {
-            ctx.strokeStyle = CURSOR_COLOR;
+            ctx.strokeStyle = palette.cursor;
             ctx.lineWidth = 1;
             ctx.strokeRect(cx + 0.5, y + 0.5, cw - 1, m.lineHeight - 1);
           }
@@ -937,7 +969,7 @@ export const NativeTerminalView = memo(
         if (sel) {
           const span = selectionSpanForRow(sel, r, cols);
           if (span) {
-            ctx.fillStyle = SELECTION_FILL;
+            ctx.fillStyle = palette.selection;
             ctx.fillRect(
               m.padLeft + span.start * m.charWidth,
               y,
@@ -949,7 +981,7 @@ export const NativeTerminalView = memo(
       }
 
       ctx.font = m.fontCss;
-    }, []);
+    }, [palette]);
 
     const requestPaint = useCallback(
       (which: "all" | number[]) => {
@@ -976,6 +1008,12 @@ export const NativeTerminalView = memo(
       },
       [paint],
     );
+
+    useLayoutEffect(() => {
+      const textarea = textareaRef.current;
+      if (textarea && composingRef.current) textarea.style.background = palette.background;
+      requestPaint("all");
+    }, [palette, requestPaint]);
 
     const scheduleLocalSelection = useCallback((next: CellSelection | null) => {
       selectionRef.current = next;
@@ -1991,10 +2029,10 @@ export const NativeTerminalView = memo(
       compositionSessionRef.current = null;
       enterDuringCompositionRef.current = null;
       const ta = textareaRef.current;
-      if (ta) ta.style.background = DEFAULT_BG;
+      if (ta) ta.style.background = palette.background;
       // Drawn cursor hides while composing; refresh its row.
       requestPaint([cursorRef.current.row]);
-    }, [requestPaint]);
+    }, [palette.background, requestPaint]);
 
     const onCompositionEnd = useCallback(
       (event: React.CompositionEvent<HTMLTextAreaElement>) => {
@@ -2079,6 +2117,7 @@ export const NativeTerminalView = memo(
         ref={rootRef}
         className="native-terminal-view"
         data-session-id={sessionId}
+        data-terminal-theme={theme}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -2113,7 +2152,7 @@ export const NativeTerminalView = memo(
             if (!composingRef.current) {
               composingRef.current = true;
               const ta = textareaRef.current;
-              if (ta) ta.style.background = DEFAULT_BG;
+              if (ta) ta.style.background = palette.background;
               requestPaint([cursorRef.current.row]);
             }
           }}
@@ -2192,16 +2231,16 @@ function rangeRows(from: number, to: number): number[] {
   return out;
 }
 
-function cellFg(cell: TerminalCell): string {
+function cellFg(cell: TerminalCell, palette: TerminalThemePalette): string {
   return cell.inverse
-    ? terminalColorToCss(cell.bg, DEFAULT_BG)
-    : terminalColorToCss(cell.fg, DEFAULT_FG);
+    ? terminalColorToCss(cell.bg, palette.background, palette)
+    : terminalColorToCss(cell.fg, palette.foreground, palette);
 }
 
-function cellBg(cell: TerminalCell): string {
+function cellBg(cell: TerminalCell, palette: TerminalThemePalette): string {
   return cell.inverse
-    ? terminalColorToCss(cell.fg, DEFAULT_FG)
-    : terminalColorToCss(cell.bg, DEFAULT_BG);
+    ? terminalColorToCss(cell.fg, palette.foreground, palette)
+    : terminalColorToCss(cell.bg, palette.background, palette);
 }
 
 function cellFont(cell: TerminalCell, m: TerminalMetrics): string {

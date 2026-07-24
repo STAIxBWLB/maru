@@ -32,6 +32,7 @@ import {
   selectionFromSpans,
   selectionSpanForRow,
   terminalSearchSpanForRow,
+  terminalThemePalette,
   terminalBeforeInputToText,
   terminalColorToCss,
   terminalEnterAlreadyHandled,
@@ -818,6 +819,20 @@ describe("NativeTerminalView helpers", () => {
     expect(terminalColorToCss({ kind: "rgb", r: 1, g: 2, b: 3 }, "#fff")).toBe(
       "rgb(1, 2, 3)",
     );
+  });
+
+  it("applies independent light and Solarized terminal palettes", () => {
+    const light = terminalThemePalette("light");
+    const solarized = terminalThemePalette("solarized");
+
+    expect(terminalColorToCss({ kind: "named", name: "Foreground" }, "#fff", light))
+      .toBe("#24292f");
+    expect(terminalColorToCss({ kind: "indexed", index: 1 }, "#fff", light))
+      .toBe("#cf222e");
+    expect(terminalColorToCss({ kind: "named", name: "Background" }, "#fff", solarized))
+      .toBe("#002b36");
+    expect(terminalColorToCss({ kind: "indexed", index: 4 }, "#fff", solarized))
+      .toBe("#268bd2");
   });
 
   it("resolves the full xterm-256 indexed palette, not just the 16 themed entries", () => {

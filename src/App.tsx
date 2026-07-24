@@ -311,6 +311,8 @@ import {
   type FilesSortKey,
   type RightPaneTab,
   type TerminalDock,
+  type TerminalTheme,
+  type ToolPanelSurface,
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
@@ -1257,21 +1259,14 @@ function MainApp() {
   );
   const layoutSettings = maruSettings.ui.layout;
   const editorSplitOpen =
-    layoutSettings.editorSplitOpen &&
-    (layoutSettings.editorSplitSurface === "graph" || Boolean(rightActiveTabId));
-  const rightGraphOpen =
-    editorSplitOpen && layoutSettings.editorSplitSurface === "graph";
-  // View-mode reads/writes target the pane that actually shows a document;
-  // while the graph owns the right pane, that is always the left pane.
-  const focusedDocumentGroup: EditorGroupId =
-    focusedEditorGroup === "right" && rightGraphOpen ? "left" : focusedEditorGroup;
-  const editorViewMode = editorPaneViewModes[focusedDocumentGroup];
+    layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
+  const panelGraphOpen =
+    layoutSettings.terminalOpen && layoutSettings.toolPanelSurface === "graph";
+  const editorViewMode = editorPaneViewModes[focusedEditorGroup];
   const firstTabId = orderedAnyTabs[0]?.id ?? null;
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
   const rightResolvedTabId =
-    editorSplitOpen &&
-    layoutSettings.editorSplitSurface === "document" &&
-    rightActiveTabId
+    editorSplitOpen && rightActiveTabId
       ? rightActiveTabId
       : null;
   const resolvedActiveTabId =
@@ -1958,7 +1953,7 @@ function MainApp() {
         kind,
         nonce: Date.now(),
       });
-      updateLayoutSettings({ terminalOpen: true });
+      updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
     },
     [updateLayoutSettings],
   );
@@ -1979,7 +1974,10 @@ function MainApp() {
             command: payload.command,
             extraArgs: payload.args,
           });
-          updateLayoutSettingsRef.current({ terminalOpen: true });
+          updateLayoutSettingsRef.current({
+            terminalOpen: true,
+            toolPanelSurface: "terminal",
+          });
         }),
       )
       .then((off) => {
@@ -1997,20 +1995,34 @@ function MainApp() {
   }, []);
 
   const attachActiveItemToTerminal = useCallback(() => {
-    if (!maruSettings.ui.layout.terminalOpen) {
-      updateLayoutSettings({ terminalOpen: true });
+    if (
+      !maruSettings.ui.layout.terminalOpen ||
+      maruSettings.ui.layout.toolPanelSurface !== "terminal"
+    ) {
+      updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
     }
     return terminalPanelRef.current?.attachActiveItem() ?? false;
-  }, [maruSettings.ui.layout.terminalOpen, updateLayoutSettings]);
+  }, [
+    maruSettings.ui.layout.terminalOpen,
+    maruSettings.ui.layout.toolPanelSurface,
+    updateLayoutSettings,
+  ]);
 
   const attachPathToTerminal = useCallback(
     (relPath: string | null, absPath: string | null) => {
-      if (!maruSettings.ui.layout.terminalOpen) {
-        updateLayoutSettings({ terminalOpen: true });
+      if (
+        !maruSettings.ui.layout.terminalOpen ||
+        maruSettings.ui.layout.toolPanelSurface !== "terminal"
+      ) {
+        updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
       }
       return terminalPanelRef.current?.attachPath(relPath, absPath) ?? false;
     },
-    [maruSettings.ui.layout.terminalOpen, updateLayoutSettings],
+    [
+      maruSettings.ui.layout.terminalOpen,
+      maruSettings.ui.layout.toolPanelSurface,
+      updateLayoutSettings,
+    ],
   );
 
   const toggleAgentStatusHooks = useCallback(async () => {
@@ -2134,8 +2146,17 @@ function MainApp() {
           ? { ...current.graph, source: target.source, mode: "local" }
           : current.graph,
       }));
+      // Full graph mode replaces a graph-surfaced tool panel (same rule as
+      // openGraphWorkspace) so two canvases never show at once.
+      if (layoutSettings.toolPanelSurface === "graph") {
+        updateLayoutSettings({
+          terminalOpen: false,
+          toolPanelSurface: "terminal",
+          terminalMaximized: false,
+        });
+      }
     },
-    [updateSettings],
+    [layoutSettings.toolPanelSurface, updateSettings, updateLayoutSettings],
   );
 
   useEffect(() => {
@@ -2151,7 +2172,7 @@ function MainApp() {
   }, [appMode, diagramEnabled, setPersistedAppMode]);
 
   const setPersistedEditorViewMode = useCallback(
-    (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedDocumentGroup) => {
+    (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedEditorGroup) => {
       setEditorPaneViewModes((current) => ({ ...current, [group]: editorViewMode }));
       updateSettings((current) => ({
         ...current,
@@ -2166,7 +2187,7 @@ function MainApp() {
         },
       }));
     },
-    [focusedDocumentGroup, updateSettings],
+    [focusedEditorGroup, updateSettings],
   );
 
   const setPersistedRightPaneTab = useCallback(
@@ -4327,8 +4348,7 @@ function MainApp() {
       );
       const isSameEntry = selectedEntry?.path === entry.path;
       const targetGroup =
-        requestedGroup ??
-        (editorSplitOpen && !rightGraphOpen ? focusedEditorGroup : "left");
+        requestedGroup ?? (editorSplitOpen ? focusedEditorGroup : "left");
       // Push the *previous* selection onto history before we replace it.
       // Skip when navigateBack/Forward is the caller — they manage manually.
       const skipHistoryPush = skipNextHistoryPushRef.current;
@@ -4385,7 +4405,6 @@ function MainApp() {
       focusedEditorGroup,
       lastOpenKeyForWorkspace,
       pushRecent,
-      rightGraphOpen,
       selectedEntry,
       t,
       tabs,
@@ -4416,8 +4435,7 @@ function MainApp() {
     (entry: WorkspaceFileEntry, workspacePath: string, visibility: WorkspaceVisibility) => {
       const tabId = tabIdForWorkspaceFile(entry);
       const existing = binaryTabs.find((tab) => tab.id === tabId);
-      const targetGroup =
-        editorSplitOpen && !rightGraphOpen ? focusedEditorGroup : "left";
+      const targetGroup = editorSplitOpen ? focusedEditorGroup : "left";
       setExplorerVisibility(visibility);
       if (existing) {
         activateEditorTab(existing.id, targetGroup);
@@ -4465,7 +4483,6 @@ function MainApp() {
       binaryViewerPrepareAsset,
       editorSplitOpen,
       focusedEditorGroup,
-      rightGraphOpen,
     ],
   );
 
@@ -4766,7 +4783,7 @@ function MainApp() {
       extraArgs: spec.extraArgs,
       extraEnv: spec.extraEnv,
     });
-    updateLayoutSettings({ terminalOpen: true });
+    updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
   }, [updateLayoutSettings]);
 
   const addFileQueueSources = useCallback(
@@ -5779,7 +5796,7 @@ function MainApp() {
       command: command.command,
       extraArgs: command.args,
     });
-    updateLayoutSettings({ terminalOpen: true });
+    updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath, updateLayoutSettings]);
 
   const startGwsAuth = useCallback(() => {
@@ -5792,7 +5809,7 @@ function MainApp() {
       command: command.command,
       extraArgs: command.args,
     });
-    updateLayoutSettings({ terminalOpen: true });
+    updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
   }, [inboxRuntimeConfig.gmail?.gws_path, inboxWorkspacePath, updateLayoutSettings]);
 
   const startMsoLogin = useCallback(() => {
@@ -5805,7 +5822,7 @@ function MainApp() {
       command: command.command,
       extraArgs: command.args,
     });
-    updateLayoutSettings({ terminalOpen: true });
+    updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
   }, [effectiveCommsSettings.outlook.m365Path, inboxWorkspacePath, updateLayoutSettings]);
 
   const refreshMigrationServices = useCallback(() => {
@@ -6513,11 +6530,11 @@ function MainApp() {
   const closeActiveSurface = useCallback(() => {
     const terminalPanel = terminalPanelRef.current;
     if (terminalPanel?.hasFocus()) {
-      terminalPanel.closeFocusedTab();
+      terminalPanel.closeFocusedSurface();
       return;
     }
     if (visibleAppMode !== "pkm") return;
-    if (focusedEditorGroup === "right" && (rightResolvedTabId || rightGraphOpen)) {
+    if (focusedEditorGroup === "right" && rightResolvedTabId) {
       closeRightEditorPane();
       return;
     }
@@ -6528,7 +6545,6 @@ function MainApp() {
     closeTab,
     focusedEditorGroup,
     leftResolvedTabId,
-    rightGraphOpen,
     rightResolvedTabId,
   ]);
 
@@ -6565,11 +6581,10 @@ function MainApp() {
     setFocusedEditorGroup("right");
     updateLayoutSettings({
       editorSplitOpen: true,
-      editorSplitSurface: "document",
     });
   }, [activeTab, leftTab, orderedAnyTabs, updateLayoutSettings]);
 
-  const openGraphRight = useCallback(
+  const openGraphPanel = useCallback(
     (rawTarget?: GraphOpenTarget) => {
       // Reject non-target values (e.g. a MouseEvent when passed as an onClick
       // handler directly) so a plain toolbar click never rewrites graph.source.
@@ -6578,13 +6593,11 @@ function MainApp() {
           ? rawTarget
           : null;
       setGraphOpenTarget(target);
-      setRightActiveTabId(null);
-      setFocusedEditorGroup("right");
       setPersistedAppMode("pkm");
       updateLayoutSettings({
-        editorSplitOpen: true,
-        editorSplitSurface: "graph",
-        outlineOpen: false,
+        terminalOpen: true,
+        toolPanelSurface: "graph",
+        terminalMaximized: false,
       });
       if (target) {
         updateSettings((current) => ({
@@ -6600,8 +6613,58 @@ function MainApp() {
     [setPersistedAppMode, updateLayoutSettings, updateSettings],
   );
 
+  const openGraphWorkspace = useCallback(() => {
+    setPersistedAppMode("graph");
+    if (layoutSettings.toolPanelSurface === "graph") {
+      updateLayoutSettings({
+        terminalOpen: false,
+        toolPanelSurface: "terminal",
+        terminalMaximized: false,
+      });
+    }
+  }, [
+    layoutSettings.toolPanelSurface,
+    setPersistedAppMode,
+    updateLayoutSettings,
+  ]);
+
+  const handleToolPanelSurfaceChange = useCallback(
+    (toolPanelSurface: ToolPanelSurface) => {
+      if (toolPanelSurface === "graph") setPersistedAppMode("pkm");
+      updateLayoutSettings({ toolPanelSurface, terminalOpen: true }, { flush: true });
+    },
+    [setPersistedAppMode, updateLayoutSettings],
+  );
+
+  const handleTerminalThemeChange = useCallback(
+    (theme: TerminalTheme) => {
+      updateSettings((current) => ({
+        ...current,
+        terminal: { ...current.terminal, theme },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const handlePanelGraphThemeChange = useCallback(
+    (theme: "dark" | "light" | "app") => {
+      updateSettings((current) => ({
+        ...current,
+        graph: {
+          ...current.graph,
+          display: { ...current.graph.display, theme },
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
   const splitTerminalRight = useCallback(() => {
-    updateLayoutSettings({ terminalOpen: true, terminalSplitOpen: true });
+    updateLayoutSettings({
+      terminalOpen: true,
+      toolPanelSurface: "terminal",
+      terminalSplitOpen: true,
+    });
   }, [updateLayoutSettings]);
 
   const dockTerminal = useCallback(
@@ -6644,11 +6707,20 @@ function MainApp() {
   const splitActiveSurfaceRight = useCallback(() => {
     const active = window.document.activeElement as HTMLElement | null;
     if (active?.closest(".terminal-panel")) {
+      if (layoutSettings.toolPanelSurface === "graph") {
+        dockTerminal("right");
+        return;
+      }
       splitTerminalRight();
       return;
     }
     splitEditorRight();
-  }, [splitEditorRight, splitTerminalRight]);
+  }, [
+    dockTerminal,
+    layoutSettings.toolPanelSurface,
+    splitEditorRight,
+    splitTerminalRight,
+  ]);
 
   const selectTabByIndex = useCallback(
     (index: number) => {
@@ -6670,7 +6742,7 @@ function MainApp() {
   const jumpToOutlineLine = useCallback((line: number) => {
     const jump = () => {
       const ta =
-        focusedDocumentGroup === "right"
+        focusedEditorGroup === "right"
           ? rightEditorTextareaRef.current
           : editorTextareaRef.current;
       if (!ta) return false;
@@ -6688,7 +6760,7 @@ function MainApp() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(jump);
     });
-  }, [focusedDocumentGroup, setPersistedEditorViewMode]);
+  }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
   // Track which heading the source editor is scrolled to so the outline can
   // highlight the active one. Source mode only — the textarea has a uniform
@@ -6700,7 +6772,7 @@ function MainApp() {
       return;
     }
     const ta =
-      focusedDocumentGroup === "right"
+      focusedEditorGroup === "right"
         ? rightEditorTextareaRef.current
         : editorTextareaRef.current;
     if (!ta) {
@@ -6727,7 +6799,7 @@ function MainApp() {
       if (raf) window.cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outlineOpen, rightPaneTab, editorViewMode, focusedDocumentGroup, document?.path]);
+  }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
 
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
     const workspaceRoot = activeDocumentWorkspacePath;
@@ -6803,10 +6875,10 @@ function MainApp() {
           if (diagramEnabled) setPersistedAppMode("diagram");
           break;
         case "open-graph":
-          setPersistedAppMode("graph");
+          openGraphWorkspace();
           break;
         case "open-graph-right":
-          openGraphRight();
+          openGraphPanel();
           break;
         case "open-scratchpad":
         case "new-scratchpad-memo":
@@ -6937,7 +7009,8 @@ function MainApp() {
       setPersistedRightPaneTab,
       updateLayoutSettings,
       outlineOpen,
-      openGraphRight,
+      openGraphPanel,
+      openGraphWorkspace,
       openSkillCompose,
       skills,
       exportActiveDocumentBundle,
@@ -7186,7 +7259,7 @@ function MainApp() {
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
-  const graphSurfaceVisible = visibleAppMode === "graph" || rightGraphOpen;
+  const graphSurfaceVisible = visibleAppMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath) return;
@@ -7299,9 +7372,9 @@ function MainApp() {
             ? layoutSettings.terminalOpen
               ? visibleAppMode === "graph"
                 ? `min(${layoutSettings.terminalWidth}px, calc(100vw - 468px))`
-                : rightGraphOpen
-                  ? `min(${layoutSettings.terminalWidth}px, max(40px, calc(100vw - 48px - var(--documents-col) - 720px)))`
-                : `${layoutSettings.terminalWidth}px`
+                : panelGraphOpen
+                  ? `min(${layoutSettings.terminalWidth}px, max(40px, calc(100vw - 48px - var(--documents-col) - var(--outline-col) - 720px)))`
+                  : `${layoutSettings.terminalWidth}px`
               : "40px"
             : "0px",
       }) as React.CSSProperties & Record<`--${string}`, string>,
@@ -7313,13 +7386,13 @@ function MainApp() {
       layoutSettings.terminalOpen,
       layoutSettings.terminalWidth,
       outlineOpen,
-      rightGraphOpen,
+      panelGraphOpen,
       themeVars,
       visibleAppMode,
     ],
   );
   const editorSplitStyle =
-    editorSplitOpen && (rightTab || rightGraphOpen)
+    editorSplitOpen && rightTab
       ? {
           gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr 6px ${1 - layoutSettings.editorSplitRatio}fr`,
         }
@@ -7452,67 +7525,58 @@ function MainApp() {
     [updateLayoutSettings],
   );
 
-  const renderGraphSurface = (placement: "full" | "right") => (
-    <LazyGraphView
-      key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
-      workspacePath={graphDataPath}
-      overlayPath={graphOverlayPath}
-      entries={graphEntries}
-      focusTarget={graphOpenTarget}
-      onFocusTargetChange={setGraphOpenTarget}
-      onOpenEntry={(entry) => {
-        if (placement === "full") setPersistedAppMode("pkm");
-        void selectEntry(entry, "left");
-      }}
-      onCreateNote={handleWikilinkClick}
-      graphSettings={maruSettings.graph}
-      onGraphSettingsChange={(graph) =>
-        updateSettings((current) => ({ ...current, graph }))
-      }
-      isFavorite={isFavorite}
-      onToggleFavorite={toggleFavorite}
-      onError={setError}
-      onGraphChanged={() => {
-        if (!graphDataPath) return;
-        void scanVault(graphDataPath, scanOptions).then((fresh) =>
-          updateWorkspaceState(graphDataPath, { entries: fresh }),
-        );
-      }}
-    />
+  const renderGraphSurface = useCallback(
+    (placement: "full" | "panel") => (
+      <LazyGraphView
+        key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
+        workspacePath={graphDataPath}
+        overlayPath={graphOverlayPath}
+        entries={graphEntries}
+        focusTarget={graphOpenTarget}
+        onFocusTargetChange={setGraphOpenTarget}
+        onOpenEntry={(entry) => {
+          // Panel opens must surface the editor too — the panel is visible in
+          // every app mode, but the opened document only shows in pkm.
+          setPersistedAppMode("pkm");
+          void selectEntry(entry, "left");
+        }}
+        onCreateNote={handleWikilinkClick}
+        graphSettings={maruSettings.graph}
+        onGraphSettingsChange={(graph) =>
+          updateSettings((current) => ({ ...current, graph }))
+        }
+        isFavorite={isFavorite}
+        onToggleFavorite={toggleFavorite}
+        onError={setError}
+        onGraphChanged={() => {
+          if (!graphDataPath) return;
+          void scanVault(graphDataPath, scanOptions).then((fresh) =>
+            updateWorkspaceState(graphDataPath, { entries: fresh }),
+          );
+        }}
+      />
+    ),
+    [
+      maruSettings.graph,
+      graphDataPath,
+      graphOverlayPath,
+      graphEntries,
+      graphOpenTarget,
+      selectEntry,
+      handleWikilinkClick,
+      isFavorite,
+      toggleFavorite,
+      scanOptions,
+      updateWorkspaceState,
+      updateSettings,
+      setPersistedAppMode,
+    ],
   );
-
-  const renderRightGraphPane = () => (
-    <section
-      className="editor-pane graph-split-pane"
-      data-testid="graph-split-pane"
-      tabIndex={-1}
-      onPointerDownCapture={() => setFocusedEditorGroup("right")}
-      onFocusCapture={() => setFocusedEditorGroup("right")}
-    >
-      <div className="document-tabs-row" aria-label={t("editor.tabs.label")}>
-        <div className="document-tab active graph-split-tab">
-          <button
-            type="button"
-            className="document-tab-main"
-            aria-current="page"
-            onClick={() => setFocusedEditorGroup("right")}
-          >
-            <Waypoints size={13} aria-hidden />
-            <span className="document-tab-title">{t("mode.graph")}</span>
-          </button>
-          <button
-            type="button"
-            className="document-tab-close"
-            onClick={closeRightEditorPane}
-            aria-label={t("editor.tabs.close", { title: t("mode.graph") })}
-            title={t("editor.tabs.close", { title: t("mode.graph") })}
-          >
-            <X size={12} />
-          </button>
-        </div>
-      </div>
-      <div className="graph-split-body">{renderGraphSurface("right")}</div>
-    </section>
+  // Stable element so TerminalPanel's memo() keeps working; null while the
+  // full graph mode is visible so two Sigma instances never run at once.
+  const panelGraphNode = useMemo(
+    () => (visibleAppMode === "graph" ? null : renderGraphSurface("panel")),
+    [renderGraphSurface, visibleAppMode],
   );
 
   const renderEditorPane = (
@@ -7599,7 +7663,7 @@ function MainApp() {
         onSave={() => void saveTab(tabId)}
         onSnapshot={() => void snapshotTab(tabId)}
         onSplitRight={splitEditorRight}
-        onOpenGraphRight={openGraphRight}
+        onOpenGraphRight={openGraphPanel}
         onFocusPane={() => {
           if (tabId) activateEditorTab(tabId, group);
         }}
@@ -7867,7 +7931,7 @@ function MainApp() {
           <button
             type="button"
             className={visibleAppMode === "graph" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("graph")}
+            onClick={openGraphWorkspace}
             title={t("mode.graph")}
             aria-label={t("mode.graph")}
           >
@@ -8321,7 +8385,7 @@ function MainApp() {
 
             <div
               className={
-                editorSplitOpen && (rightTab || rightGraphOpen)
+                editorSplitOpen && rightTab
                   ? "editor-split-shell split"
                   : "editor-split-shell"
               }
@@ -8329,7 +8393,7 @@ function MainApp() {
               ref={editorSplitShellRef}
             >
               {renderEditorPane("left", leftTab, leftResolvedTabId)}
-              {editorSplitOpen && (rightTab || rightGraphOpen) ? (
+              {editorSplitOpen && rightTab ? (
                 <div
                   className="editor-split-resize-handle"
                   role="separator"
@@ -8340,11 +8404,9 @@ function MainApp() {
                   onPointerDown={startEditorSplitResize}
                 />
               ) : null}
-              {rightGraphOpen
-                ? renderRightGraphPane()
-                : editorSplitOpen && rightTab
-                  ? renderEditorPane("right", rightTab, rightResolvedTabId)
-                  : null}
+              {editorSplitOpen && rightTab
+                ? renderEditorPane("right", rightTab, rightResolvedTabId)
+                : null}
             </div>
 
           </>
@@ -8485,6 +8547,9 @@ function MainApp() {
           splitOpen={maruSettings.ui.layout.terminalSplitOpen}
           splitRatio={maruSettings.ui.layout.terminalSplitRatio}
           maximized={maruSettings.ui.layout.terminalMaximized}
+          activeSurface={maruSettings.ui.layout.toolPanelSurface}
+          graphNode={panelGraphNode}
+          graphTheme={maruSettings.graph.display.theme}
           onOpenChange={handleTerminalOpenChange}
           onHeightChange={handleTerminalHeightChange}
           onDockChange={dockTerminal}
@@ -8492,6 +8557,9 @@ function MainApp() {
           onSplitOpenChange={handleTerminalSplitOpenChange}
           onSplitRatioChange={handleTerminalSplitRatioChange}
           onMaximizedChange={handleTerminalMaximizedChange}
+          onSurfaceChange={handleToolPanelSurfaceChange}
+          onTerminalThemeChange={handleTerminalThemeChange}
+          onGraphThemeChange={handlePanelGraphThemeChange}
         />
 
         <div className="toast-stack">

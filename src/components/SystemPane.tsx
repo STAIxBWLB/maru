@@ -69,6 +69,7 @@ import type {
   FilesListAttribute,
   FilesSortKey,
   TerminalDock,
+  TerminalTheme,
   TerminalLauncherId,
   ThemeMode,
   WorkspaceFileFilter,
@@ -1891,6 +1892,18 @@ function PreferencesTab({
     );
   };
 
+  const updateTerminalTheme = (theme: TerminalTheme) => {
+    onSettingsChange(
+      normalizeMaruSettings({
+        ...settings,
+        terminal: {
+          ...settings.terminal,
+          theme,
+        },
+      }),
+    );
+  };
+
   const updateTerminalCopyOnSelect = (copyOnSelect: boolean) => {
     onSettingsChange(
       normalizeMaruSettings({
@@ -2079,6 +2092,19 @@ function PreferencesTab({
           >
             <option value="bottom">{t("terminal.dock.bottom")}</option>
             <option value="right">{t("terminal.dock.right")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("system.preferences.terminalTheme")}</span>
+          <select
+            value={settings.terminal.theme}
+            onChange={(event) =>
+              updateTerminalTheme(event.target.value as TerminalTheme)
+            }
+          >
+            <option value="dark">{t("terminal.theme.dark")}</option>
+            <option value="light">{t("terminal.theme.light")}</option>
+            <option value="solarized">{t("terminal.theme.solarized")}</option>
           </select>
         </label>
         <label className="checkbox-field">

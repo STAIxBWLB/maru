@@ -475,7 +475,7 @@ a {
 .app-shell.terminal-maximized .catalog-pane,
 .app-shell.terminal-maximized .studio-pane,
 .app-shell.terminal-maximized .e2e-pane,
-.app-shell.terminal-maximized .graph-view {
+.app-shell.terminal-maximized > .graph-view {
   display: none;
 }
 
@@ -3754,27 +3754,6 @@ a {
   grid-area: auto;
   min-width: 0;
   min-height: 0;
-}
-
-.editor-split-shell .graph-split-pane {
-  grid-template-rows: auto minmax(0, 1fr);
-  background: var(--bg);
-}
-
-.graph-split-tab .document-tab-main {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.graph-split-body {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.graph-split-body .graph-view {
-  grid-area: auto;
 }
 
 .editor-split-resize-handle {
@@ -10788,20 +10767,59 @@ button.git-badge:hover {
   color: var(--panel);
 }
 
-/* ─── Integrated terminal ──────────────────────────────────────────────
-   Intentionally fixed dark palette in BOTH app themes (VS Code style):
-   matches NativeTerminalView DEFAULT_BG #111111 and its ANSI palette.
-   Do not tokenize these hex values. */
+/* ─── VS Code-style tool panel (Terminal + Graph) ────────────────────── */
 
 .terminal-panel {
+  --terminal-bg: #111111;
+  --terminal-bg-raised: #181818;
+  --terminal-bg-muted: #151515;
+  --terminal-bg-hover: #252525;
+  --terminal-bg-active: #232323;
+  --terminal-line: #2e2e2e;
+  --terminal-line-soft: #242424;
+  --terminal-ink: #d4d4d4;
+  --terminal-muted: #9d9d9d;
+  --terminal-faint: #777777;
+  --terminal-control: #202020;
+  --terminal-focus: #3d5a44;
   position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 36px;
-  border-top: 1px solid #2e2e2e;
-  background: #111111;
-  color: #d4d4d4;
+  border-top: 1px solid var(--terminal-line);
+  background: var(--terminal-bg);
+  color: var(--terminal-ink);
+}
+
+.terminal-workspace[data-terminal-theme="light"] {
+  --terminal-bg: #ffffff;
+  --terminal-bg-raised: #f6f8fa;
+  --terminal-bg-muted: #f0f3f6;
+  --terminal-bg-hover: #eaeef2;
+  --terminal-bg-active: #dfe7ef;
+  --terminal-line: #d0d7de;
+  --terminal-line-soft: #d8dee4;
+  --terminal-ink: #24292f;
+  --terminal-muted: #57606a;
+  --terminal-faint: #6e7781;
+  --terminal-control: #f6f8fa;
+  --terminal-focus: #0969da;
+}
+
+.terminal-workspace[data-terminal-theme="solarized"] {
+  --terminal-bg: #002b36;
+  --terminal-bg-raised: #073642;
+  --terminal-bg-muted: #073642;
+  --terminal-bg-hover: #164650;
+  --terminal-bg-active: #1b4e59;
+  --terminal-line: #31545c;
+  --terminal-line-soft: #244952;
+  --terminal-ink: #93a1a1;
+  --terminal-muted: #839496;
+  --terminal-faint: #657b83;
+  --terminal-control: #0b3b46;
+  --terminal-focus: #2aa198;
 }
 
 .terminal-panel.collapsed {
@@ -10817,7 +10835,7 @@ button.git-badge:hover {
 .terminal-panel.dock-right {
   height: auto;
   border-top: 0;
-  border-left: 1px solid #2e2e2e;
+  border-left: 1px solid var(--terminal-line);
 }
 
 .terminal-panel.dock-right.collapsed {
@@ -10832,6 +10850,8 @@ button.git-badge:hover {
   min-height: 0;
   min-width: 0;
   display: flex;
+  background: var(--terminal-bg);
+  color: var(--terminal-ink);
 }
 
 .terminal-workspace[hidden] {
@@ -10854,8 +10874,8 @@ button.git-badge:hover {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #242424;
-  background: #151515;
+  border-right: 1px solid var(--terminal-line-soft);
+  background: var(--terminal-bg-muted);
 }
 
 .terminal-session-sidebar.collapsed {
@@ -10868,7 +10888,7 @@ button.git-badge:hover {
   gap: 6px;
   height: 30px;
   padding: 0 6px;
-  border-bottom: 1px solid #242424;
+  border-bottom: 1px solid var(--terminal-line-soft);
 }
 
 .terminal-session-sidebar.collapsed .terminal-session-sidebar-header {
@@ -10888,7 +10908,7 @@ button.git-badge:hover {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #8a8a8a;
+  color: var(--terminal-faint);
 }
 
 .terminal-sidebar-btn {
@@ -10898,12 +10918,12 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   border-radius: 5px;
-  color: #c8c8c8;
+  color: var(--terminal-muted);
 }
 
 .terminal-sidebar-btn:hover:not(:disabled) {
-  background: #2a2a2a;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-sidebar-btn:disabled {
@@ -10923,7 +10943,7 @@ button.git-badge:hover {
 
 .terminal-task-empty {
   padding: 8px 6px;
-  color: #777777;
+  color: var(--terminal-faint);
   font-size: 11px;
 }
 
@@ -10939,17 +10959,17 @@ button.git-badge:hover {
   height: 36px;
   padding: 0 6px;
   border-radius: 6px;
-  color: #9d9d9d;
+  color: var(--terminal-muted);
   cursor: pointer;
 }
 
 .terminal-task-row:hover {
-  background: #1d1d1d;
+  background: var(--terminal-bg-hover);
 }
 
 .terminal-task-row.active {
-  background: #232323;
-  color: #ffffff;
+  background: var(--terminal-bg-active);
+  color: var(--terminal-ink);
 }
 
 .terminal-task-row.attention {
@@ -10989,7 +11009,7 @@ button.git-badge:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #7a7a7a;
+  color: var(--terminal-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
 }
@@ -10998,10 +11018,10 @@ button.git-badge:hover {
   min-width: 0;
   height: 22px;
   padding: 0 6px;
-  border: 1px solid #3d5a44;
+  border: 1px solid var(--terminal-focus);
   border-radius: 4px;
-  background: #111111;
-  color: #ffffff;
+  background: var(--terminal-bg);
+  color: var(--terminal-ink);
   font-size: 11.5px;
 }
 
@@ -11011,12 +11031,12 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   border-radius: 4px;
-  color: #858585;
+  color: var(--terminal-faint);
 }
 
 .terminal-task-close:hover {
-  background: #333333;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 /* ─── Status dots (sessions + task rows) ───────────────────────────── */
@@ -11087,8 +11107,8 @@ button.git-badge:hover {
   gap: 8px;
   min-width: 0;
   padding: 0 10px;
-  border-bottom: 1px solid #2a2a2a;
-  background: #181818;
+  border-bottom: 1px solid var(--terminal-line);
+  background: var(--terminal-bg-raised);
 }
 
 .terminal-panel.dock-right.collapsed .terminal-header {
@@ -11096,20 +11116,51 @@ button.git-badge:hover {
   padding: 0 6px;
 }
 
-.terminal-title {
+.tool-panel-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.tool-panel-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 5px;
-  color: #d4d4d4;
+  height: 30px;
+  padding: 0 9px;
+  color: var(--terminal-muted);
   font-size: 12px;
   font-weight: 650;
 }
 
-.terminal-title:hover {
-  background: #252525;
+.tool-panel-tab::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 0;
+  left: 8px;
+  height: 1px;
+  background: transparent;
+}
+
+.tool-panel-tab:hover {
+  color: var(--terminal-ink);
+  background: var(--terminal-bg-hover);
+}
+
+.tool-panel-tab.active {
+  color: var(--terminal-ink);
+}
+
+.tool-panel-tab.active::after {
+  background: var(--terminal-focus);
+}
+
+.tool-panel-spacer {
+  flex: 1;
+  min-width: 0;
 }
 
 .terminal-panel.dock-right.collapsed .terminal-title {
@@ -11119,11 +11170,47 @@ button.git-badge:hover {
 }
 
 .terminal-panel.dock-right.collapsed .terminal-title span,
-.terminal-panel.dock-right.collapsed .terminal-title svg:last-child,
+.terminal-panel.dock-right.collapsed .tool-panel-tab span,
+.terminal-panel.dock-right.collapsed .tool-panel-tab:not(.active),
 .terminal-panel.dock-right.collapsed .terminal-launchers,
 .terminal-panel.dock-right.collapsed .terminal-header-right,
+.terminal-panel.dock-right.collapsed .tool-panel-spacer,
+.terminal-panel.dock-right.collapsed .tool-panel-theme,
 .terminal-panel.dock-right.collapsed .terminal-icon-button {
   display: none;
+}
+
+.terminal-panel.dock-right.collapsed .tool-panel-tab {
+  width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.tool-panel-theme {
+  flex: none;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 7px;
+  border: 1px solid var(--terminal-line);
+  border-radius: 5px;
+  color: var(--terminal-muted);
+  background: var(--terminal-control);
+}
+
+.tool-panel-theme select {
+  height: 23px;
+  max-width: 112px;
+  border: 0;
+  padding: 0 22px 0 2px;
+  color: var(--terminal-ink);
+  background: transparent;
+  font-size: 11px;
+}
+
+.tool-panel-theme:focus-within {
+  border-color: var(--terminal-focus);
 }
 
 .terminal-launchers {
@@ -11138,17 +11225,17 @@ button.git-badge:hover {
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid #303030;
+  border: 1px solid var(--terminal-line);
   border-radius: 5px;
-  background: #202020;
-  color: #c8c8c8;
+  background: var(--terminal-control);
+  color: var(--terminal-muted);
   font-size: 11.5px;
   font-weight: 600;
 }
 
 .terminal-launchers button:hover:not(:disabled) {
-  background: #2a2a2a;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-launchers button:disabled {
@@ -11172,10 +11259,10 @@ button.git-badge:hover {
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid #303030;
+  border: 1px solid var(--terminal-line);
   border-radius: 5px;
-  background: #1c1c1c;
-  color: #b8b8b8;
+  background: var(--terminal-control);
+  color: var(--terminal-muted);
   font-size: 11px;
   font-weight: 600;
 }
@@ -11188,8 +11275,8 @@ button.git-badge:hover {
 }
 
 .terminal-context-chip:hover:not(:disabled) {
-  background: #262626;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-context-chip:disabled {
@@ -11202,7 +11289,7 @@ button.git-badge:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #858585;
+  color: var(--terminal-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
@@ -11213,13 +11300,13 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   border-radius: 5px;
-  color: #c8c8c8;
+  color: var(--terminal-muted);
   flex: none;
 }
 
 .terminal-icon-button:hover {
-  background: #2a2a2a;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-tabs {
@@ -11229,14 +11316,14 @@ button.git-badge:hover {
   min-width: 0;
   overflow-x: auto;
   padding: 4px 8px;
-  border-bottom: 1px solid #242424;
-  background: #151515;
+  border-bottom: 1px solid var(--terminal-line-soft);
+  background: var(--terminal-bg-muted);
   --terminal-split-left: 50%;
   --terminal-split-right: 50%;
 }
 
 .terminal-tab-placeholder {
-  color: #777777;
+  color: var(--terminal-faint);
   font-size: 11.5px;
   padding-left: 4px;
 }
@@ -11246,12 +11333,12 @@ button.git-badge:hover {
   grid-template-columns: minmax(84px, 180px) 22px;
   align-items: center;
   border-radius: 5px;
-  color: #9d9d9d;
+  color: var(--terminal-muted);
 }
 
 .terminal-tab.active {
-  background: #232323;
-  color: #ffffff;
+  background: var(--terminal-bg-active);
+  color: var(--terminal-ink);
 }
 
 .terminal-tab-main {
@@ -11292,12 +11379,12 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   border-radius: 4px;
-  color: #858585;
+  color: var(--terminal-faint);
 }
 
 .terminal-tab-close:hover {
-  background: #333333;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-body {
@@ -11305,7 +11392,7 @@ button.git-badge:hover {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #111111;
+  background: var(--terminal-bg);
   /* Belt-and-suspenders with the selectstart guard + .terminal-instance:
      selection/copy are owned by the native terminal renderer. */
   user-select: none;
@@ -11326,7 +11413,7 @@ button.git-badge:hover {
   bottom: 0;
   left: var(--terminal-split-left);
   width: 1px;
-  background: #2a2a2a;
+  background: var(--terminal-line);
   pointer-events: none;
   z-index: 1;
 }
@@ -11354,13 +11441,13 @@ button.git-badge:hover {
 
 .terminal-split-resize-handle:hover::after,
 .terminal-split-resize-handle:active::after {
-  background: #5f7d64;
+  background: var(--terminal-focus);
 }
 
 .terminal-instance {
   position: absolute;
   inset: 0;
-  background: #111111;
+  background: var(--terminal-bg);
   visibility: hidden;
   pointer-events: none;
   /* The native terminal renderer owns selection state. */
@@ -11382,7 +11469,7 @@ button.git-badge:hover {
 }
 
 .terminal-instance.focused {
-  outline: 1px solid #3d5a44;
+  outline: 1px solid var(--terminal-focus);
   outline-offset: -1px;
 }
 
@@ -11401,8 +11488,8 @@ button.git-badge:hover {
   font-family: "JetBrains Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.25;
-  color: #d4d4d4;
-  background: #111111;
+  color: var(--terminal-ink);
+  background: var(--terminal-bg);
   outline: none;
 }
 
@@ -11434,7 +11521,7 @@ button.git-badge:hover {
   overflow: hidden !important;
   white-space: pre !important;
   background: transparent;
-  color: #d4d4d4;
+  color: var(--terminal-ink);
   caret-color: transparent;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
@@ -11447,9 +11534,9 @@ button.git-badge:hover {
   z-index: 20;
   width: 152px;
   padding: 4px;
-  border: 1px solid rgb(255 255 255 / 14%);
+  border: 1px solid var(--terminal-line);
   border-radius: 6px;
-  background: #252525;
+  background: var(--terminal-bg-raised);
   box-shadow: 0 8px 24px rgb(0 0 0 / 42%);
 }
 
@@ -11459,7 +11546,7 @@ button.git-badge:hover {
   padding: 6px 9px;
   border: 0;
   border-radius: 4px;
-  color: #f0f0f0;
+  color: var(--terminal-ink);
   background: transparent;
   font: inherit;
   text-align: left;
@@ -11467,7 +11554,7 @@ button.git-badge:hover {
 
 .terminal-context-menu button:hover,
 .terminal-context-menu button:focus-visible {
-  background: rgb(255 255 255 / 10%);
+  background: var(--terminal-bg-hover);
   outline: none;
 }
 
@@ -11482,10 +11569,10 @@ button.git-badge:hover {
   height: 30px;
   max-width: min(520px, calc(100% - 56px));
   padding: 0 6px 0 9px;
-  border: 1px solid #3b3b3b;
+  border: 1px solid var(--terminal-line);
   border-radius: 6px;
-  background: rgba(30, 30, 30, 0.96);
-  color: #d4d4d4;
+  background: color-mix(in srgb, var(--terminal-bg-raised) 96%, transparent);
+  color: var(--terminal-ink);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
 }
 
@@ -11497,7 +11584,7 @@ button.git-badge:hover {
   padding: 0 6px;
   border: 0;
   background: transparent;
-  color: #eeeeee;
+  color: var(--terminal-ink);
   font-size: 12px;
 }
 
@@ -11513,12 +11600,12 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   border-radius: 5px;
-  color: #cfcfcf;
+  color: var(--terminal-muted);
 }
 
 .terminal-search-button:hover {
-  background: #343434;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
 }
 
 .terminal-search-case {
@@ -11527,7 +11614,7 @@ button.git-badge:hover {
   gap: 4px;
   height: 24px;
   padding: 0 4px;
-  color: #bdbdbd;
+  color: var(--terminal-muted);
   font-size: 11px;
 }
 
@@ -11542,7 +11629,7 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   padding: 18px;
-  color: #858585;
+  color: var(--terminal-faint);
   font-size: 12px;
 }
 
@@ -11552,7 +11639,7 @@ button.git-badge:hover {
   z-index: 2;
   display: grid;
   place-items: center;
-  background: #111111;
+  background: var(--terminal-bg);
 }
 
 .terminal-relaunch-button {
@@ -11561,17 +11648,35 @@ button.git-badge:hover {
   gap: 6px;
   height: 30px;
   padding: 0 14px;
-  border: 1px solid #3d5a44;
+  border: 1px solid var(--terminal-focus);
   border-radius: 6px;
-  background: #1c241d;
-  color: #d4d4d4;
+  background: color-mix(in srgb, var(--terminal-focus) 18%, var(--terminal-bg));
+  color: var(--terminal-ink);
   font-size: 12px;
   font-weight: 600;
 }
 
 .terminal-relaunch-button:hover {
-  background: #243026;
-  color: #ffffff;
+  background: var(--terminal-bg-hover);
+  color: var(--terminal-ink);
+}
+
+.tool-panel-graph {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--terminal-bg);
+}
+
+.tool-panel-graph[hidden] {
+  display: none;
+}
+
+.tool-panel-graph .graph-view {
+  grid-area: auto;
+  width: 100%;
+  height: 100%;
 }
 
 .terminal-error {

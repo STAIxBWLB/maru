@@ -103,7 +103,7 @@ test("bottom-docked terminal keeps graph geometry", async ({ page }) => {
 test("right-docked terminal keeps the graph canvas alive (original bug)", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 920 });
   await page.goto("/");
-  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
   await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-right/);
 
   await page.getByRole("button", { name: "그래프", exact: true }).click();
@@ -134,7 +134,7 @@ test("right-docked terminal keeps the graph canvas alive (original bug)", async 
 test("right-docked terminal resize keeps the graph canvas minimum", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
-  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
   await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-right/);
   await page.getByRole("button", { name: "그래프", exact: true }).click();
   await expect(page.getByTestId("graph-mode")).toBeVisible();
@@ -161,7 +161,7 @@ test("right-docked terminal resize keeps the graph canvas minimum", async ({ pag
 test("terminal maximize hides and restore revives the graph canvas", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 920 });
   await page.goto("/");
-  await runCommandPaletteAction(page, "터미널을 오른쪽에 배치");
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
   await page.getByRole("button", { name: "그래프", exact: true }).click();
   await expect(page.getByTestId("graph-mode")).toBeVisible();
 
