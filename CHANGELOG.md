@@ -8,6 +8,20 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.18 — 2026-07-24 — Files Scan Freeze Hotfix
+
+- **Files no longer freezes the app on symlinked cloud trees.** Opening the
+  new Files mode could hard-freeze the app (macOS "Not Responding") on
+  workspaces that symlink into cloud-streamed trees (Dropbox, Google Drive
+  File Stream): the entries scan followed symlinks and binary-sniffed every
+  file, turning the walk into an unbounded network fetch, and it ran as a
+  synchronous Tauri command on the main thread. The scanner no longer
+  follows symlinks — links stay listed with their target kind but are never
+  traversed, and symlinked folders open in Finder instead of navigating to
+  an empty listing. The scan and bulk mutation commands (duplicate, paste,
+  trash, queue apply) now run off the main thread, so long IO shows the
+  loading skeleton instead of freezing the window.
+
 ## v0.4.17 — 2026-07-24 — Standalone Files Workspace
 
 - **Files becomes a standalone app mode.** Files splits out of the combined
