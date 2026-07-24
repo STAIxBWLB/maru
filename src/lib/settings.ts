@@ -16,6 +16,8 @@ export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git"
 export type FavoriteKind = "file" | "directory";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
 export type TerminalDock = "bottom" | "right";
+export type ToolPanelSurface = "terminal" | "graph";
+export type TerminalTheme = "dark" | "light" | "solarized";
 export type TerminalAttachMentionStyle = "mention" | "path" | "read";
 export type ThemeMode = "system" | "light" | "dark";
 export type MaruAppMode =
@@ -126,8 +128,6 @@ export interface WindowBoundsSettings {
   height: number;
 }
 
-export type EditorSplitSurface = "document" | "graph";
-
 export interface LayoutSettings {
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
@@ -142,8 +142,8 @@ export interface LayoutSettings {
   terminalDock: TerminalDock;
   terminalWidth: number;
   terminalMaximized: boolean;
+  toolPanelSurface: ToolPanelSurface;
   editorSplitOpen: boolean;
-  editorSplitSurface: EditorSplitSurface;
   editorSplitRatio: number;
   terminalSplitOpen: boolean;
   terminalSplitRatio: number;
@@ -197,6 +197,7 @@ export interface MaruSettings {
     // settings files. Do not consume them in new code.
     defaultPanelOpen: boolean;
     lastHeight: number;
+    theme: TerminalTheme;
     autoLaunch: TerminalLauncherId | null;
     launchers: Record<TerminalLauncherId, TerminalLauncherSettings>;
     copyOnSelect: boolean;
@@ -477,8 +478,8 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       terminalDock: "bottom",
       terminalWidth: 640,
       terminalMaximized: false,
+      toolPanelSurface: "terminal",
       editorSplitOpen: false,
-      editorSplitSurface: "document",
       editorSplitRatio: 0.5,
       terminalSplitOpen: false,
       terminalSplitRatio: 0.5,
@@ -492,6 +493,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
   terminal: {
     defaultPanelOpen: false,
     lastHeight: 260,
+    theme: "dark",
     autoLaunch: "shell",
     launchers: {
       claude: {
@@ -673,6 +675,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
     terminal: {
       defaultPanelOpen: layout.terminalOpen,
       lastHeight: layout.terminalHeight,
+      theme:
+        terminal.theme === "light" || terminal.theme === "solarized"
+          ? terminal.theme
+          : "dark",
       autoLaunch: parseAutoLaunch(terminal.autoLaunch),
       launchers: {
         claude: normalizeLauncher(
@@ -1968,8 +1974,12 @@ function normalizePatternList(values: unknown[], fallback: readonly string[]): s
 
 function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>): LayoutSettings {
   const layout = isRecord(value) ? value : {};
+  const legacyGraphSplit =
+    layout.editorSplitOpen === true && layout.editorSplitSurface === "graph";
   const terminalOpen =
-    typeof layout.terminalOpen === "boolean"
+    legacyGraphSplit
+      ? true
+      : typeof layout.terminalOpen === "boolean"
       ? layout.terminalOpen
       : typeof legacyTerminal.defaultPanelOpen === "boolean"
         ? legacyTerminal.defaultPanelOpen
@@ -2025,19 +2035,26 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
     terminalOpen,
     terminalHeight,
     terminalDock:
-      parseTerminalDock(layout.terminalDock) ??
-      DEFAULT_MARU_SETTINGS.ui.layout.terminalDock,
+      legacyGraphSplit
+        ? "right"
+        : parseTerminalDock(layout.terminalDock) ??
+          DEFAULT_MARU_SETTINGS.ui.layout.terminalDock,
     terminalWidth: normalizeTerminalWidth(layout.terminalWidth),
-    terminalMaximized:
-      typeof layout.terminalMaximized === "boolean"
+    terminalMaximized: legacyGraphSplit
+      ? // Match openGraphPanel: a migrated graph split lands as a normal-size
+        // panel, never a full-screen one.
+        false
+      : typeof layout.terminalMaximized === "boolean"
         ? layout.terminalMaximized
         : DEFAULT_MARU_SETTINGS.ui.layout.terminalMaximized,
+    toolPanelSurface:
+      layout.toolPanelSurface === "graph" || legacyGraphSplit ? "graph" : "terminal",
     editorSplitOpen:
-      typeof layout.editorSplitOpen === "boolean"
+      legacyGraphSplit
+        ? false
+        : typeof layout.editorSplitOpen === "boolean"
         ? layout.editorSplitOpen
         : DEFAULT_MARU_SETTINGS.ui.layout.editorSplitOpen,
-    editorSplitSurface:
-      layout.editorSplitSurface === "graph" ? "graph" : "document",
     editorSplitRatio: normalizeSplitRatio(layout.editorSplitRatio),
     terminalSplitOpen:
       typeof layout.terminalSplitOpen === "boolean"

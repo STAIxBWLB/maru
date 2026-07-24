@@ -10,6 +10,15 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 
 ## Unreleased
 
+- **Graph moves into the right tool panel; terminal themes.** The embedded
+  graph now lives in the shared right tool panel as a switchable surface
+  beside the terminal (replacing the short-lived right editor split home;
+  legacy split settings migrate to a right-docked panel), with keep-alive
+  across surface toggles, focus handoff so graph shortcuts work immediately,
+  and a per-panel graph theme select. The terminal gains dark/light/solarized
+  themes with full ANSI palettes, live repaint of running sessions, and a
+  Settings picker. PTY lifecycle keys to actual terminal visibility so hidden
+  splits never spawn and a hidden terminal never steals focus.
 - **Canvas-first Graph redesign with a right-split Graph surface.** Graph
   becomes a canvas-first workspace with compact floating controls, one
   progressive tools drawer, dense-graph visual LOD, and saved-view/profile

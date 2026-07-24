@@ -403,9 +403,11 @@ fn default_settings_json() -> JsonValue {
                 "outlinePaneWidth": 280,
                 "terminalOpen": false,
                 "terminalHeight": 260,
+                "terminalDock": "bottom",
+                "terminalWidth": 640,
                 "terminalMaximized": false,
+                "toolPanelSurface": "terminal",
                 "editorSplitOpen": false,
-                "editorSplitSurface": "document",
                 "editorSplitRatio": 0.5,
                 "terminalSplitOpen": false,
                 "terminalSplitRatio": 0.5,
@@ -416,6 +418,7 @@ fn default_settings_json() -> JsonValue {
         "terminal": {
             "defaultPanelOpen": false,
             "lastHeight": 260,
+            "theme": "dark",
             "autoLaunch": "shell",
             "launchers": {
                 "claude": {

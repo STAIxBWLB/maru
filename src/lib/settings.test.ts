@@ -195,8 +195,8 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.fileQueueDefaultOperation).toBe("move");
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
-    expect(settings.ui.layout.editorSplitOpen).toBe(true);
-    expect(settings.ui.layout.editorSplitSurface).toBe("graph");
+    expect(settings.ui.layout.editorSplitOpen).toBe(false);
+    expect(settings.ui.layout.toolPanelSurface).toBe("graph");
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
@@ -204,9 +204,9 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.terminalWidth).toBe(2048);
     expect(settings.ui.layout.terminalSplitOpen).toBe(true);
     expect(settings.ui.layout.terminalSplitRatio).toBe(0.3);
-    expect(settings.ui.layout.terminalOpen).toBe(false);
+    expect(settings.ui.layout.terminalOpen).toBe(true);
     expect(settings.ui.layout.terminalHeight).toBe(520);
-    expect(settings.terminal.defaultPanelOpen).toBe(false);
+    expect(settings.terminal.defaultPanelOpen).toBe(true);
     expect(settings.terminal.lastHeight).toBe(520);
     expect(settings.terminal.autoLaunch).toBe("codex");
     expect(settings.terminal.launchers.codex.enabled).toBe(false);
@@ -947,7 +947,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.rightPaneTab).toBe("evidence");
   });
 
-  it("uses persisted layout over legacy terminal defaults", () => {
+  it("migrates the legacy right Graph split into the shared right tool panel", () => {
     const settings = normalizeMaruSettings({
       ui: {
         layout: {
@@ -984,9 +984,10 @@ describe("normalizeMaruSettings", () => {
       terminalHeight: 300,
       terminalDock: "right",
       terminalWidth: 1800,
-      terminalMaximized: true,
-      editorSplitOpen: true,
-      editorSplitSurface: "graph",
+      // Matches openGraphPanel: migrated graph splits never boot maximized.
+      terminalMaximized: false,
+      toolPanelSurface: "graph",
+      editorSplitOpen: false,
       editorSplitRatio: 0.4,
       terminalSplitOpen: true,
       terminalSplitRatio: 0.6,
@@ -997,12 +998,12 @@ describe("normalizeMaruSettings", () => {
     expect(settings.terminal.lastHeight).toBe(300);
   });
 
-  it("defaults invalid editor split surfaces to documents", () => {
+  it("defaults invalid tool panel surfaces to terminal", () => {
     expect(
       normalizeMaruSettings({
-        ui: { layout: { editorSplitSurface: "preview" } },
-      }).ui.layout.editorSplitSurface,
-    ).toBe("document");
+        ui: { layout: { toolPanelSurface: "preview" } },
+      }).ui.layout.toolPanelSurface,
+    ).toBe("terminal");
   });
 
   it("normalizes terminal dock while preserving uncapped right-dock widths", () => {
@@ -1109,6 +1110,7 @@ describe("normalizeMaruSettings", () => {
   it("normalizes terminal reliability settings", () => {
     const settings = normalizeMaruSettings({
       terminal: {
+        theme: "solarized",
         copyOnSelect: true,
         shortcuts: {
           paste: "mod+shift+v",
@@ -1119,12 +1121,14 @@ describe("normalizeMaruSettings", () => {
     });
 
     expect(settings.terminal.copyOnSelect).toBe(true);
+    expect(settings.terminal.theme).toBe("solarized");
     expect(settings.terminal.shortcuts.paste).toBe("mod+shift+v");
     expect(settings.terminal.shortcuts.find).toBeNull();
     expect(settings.terminal.shortcuts.copy).toBe("mod+c");
 
     const round = normalizeMaruSettings(serializeMaruSettings(settings));
     expect(round.terminal.copyOnSelect).toBe(true);
+    expect(round.terminal.theme).toBe("solarized");
     expect(round.terminal.shortcuts).toEqual(settings.terminal.shortcuts);
   });
 

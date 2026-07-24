@@ -18,12 +18,12 @@ the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane, in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color). Rayon-parallel workspace scan + cache-backed warm startup. Multi-tab editor (⌘1..⌘8 / ⌘W, dirty stash). BlockNote rich + source + preview modes persist independently per split pane; ⌘W closes the focused editor or terminal tab. Browser smoke e2e. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | ✅ write loop live | Polling scan + notify watcher + Korean date parser + Claude CLI bridge + classifier + Gmail via `gws`, plus `InboxPane` (classify/accept/reject/process, approval gate, Maru labels, `a`/`r`/`p`, bulk actions, mission log tails). |
-| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Documents/Files Explorer, VS Code-style file tree + copy/move queue, Cursor-style activity rail, split panes (⌘D), Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
+| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Documents/Files Explorer, VS Code-style file tree + copy/move queue, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
 | 3 — Unified document ops (M1–M7) | ✅ W1–W6 + skills SSOT | Operations Catalog mode (`ops_catalog::scan`, fs watcher, Hub HTTP read + ETag/offline fallback, drilldown + Reveal), Hub Library client + template-aware new doc, Writing Guideline sidebar. Rust `skill_host` owns tiers (core/public/private/imported/managed), doctor validation, dirty/reconcile. maru-hub backs shared catalog (REST + Alembic + seeds). |
 | 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
 | 5 — Evidence Binder | ✅ W13 shipped | Right-pane Evidence Binder tab keyed by doc id, state under `<workspace>/.maru/binder/<doc-id>.json`, seeds from inbox-processed files + `<binary>.evidence.yaml` sidecars scoped to the active BU, `kordoc_lite` format detection + HWPX field previews. W14–W18 (section/KPI/checklist bindings + Deck Studio) planned. |
 | D — Concept-map Diagram mode | ✅ shipped (Phase 0–7, hardened) + Report Pattern Studio (v8) | `diagram` mode: HWP-style 9-tab ribbon, 13 node kinds, 4-port edges, smart-guide snap, 11 templates, version history, viewport culling for 1000-node smoothness. Report Pattern Studio: v8 schema (report datasets + pattern views, one-time v7 backup at `.maru/diagrams/backups/`), typed table editing, pattern gallery + conversion preview, codec-registry import/export (lossless/structural/visual), and "Insert/Update in report" — managed `maru-diagram:v1` Markdown blocks with rendered assets at `attachments/diagrams/<docId>/`. Storage: `diagrams/*.cmd.json`, `.maru/diagram-patterns/`. New commands: `diagram_backup_document`, `diagram_pattern_save/list/delete`, `diagram_write_report_asset`. See [docs/diagram.md](docs/diagram.md). |
-| 8 — Knowledge graph | ✅ 8a/8b/8c + V6 shipped | `graph` mode: stable Sigma WebGL + Graphology multi-directed model, Barnes-Hut ForceAtlas2 worker, visibility reducers, 10k+ node target, vault/workspace sources, canonical Local targets, local depth/direction controls, background insights, saved views, reviewed relationship writes, incremental cache/watch refresh. V6: canvas-first floating controls, one progressive-disclosure tools drawer, dark neutral Obsidian-style defaults, selectable accent/color modes, dense-graph visual LOD, zero-size container recovery, and a persistent right-editor Graph split. Managed writes remain schema-gated, revision-checked, snapshotted, and atomic. See [docs/graph.md](docs/graph.md). |
+| 8 — Knowledge graph | ✅ 8a/8b/8c + V6 shipped | `graph` mode: stable Sigma WebGL + Graphology multi-directed model, Barnes-Hut ForceAtlas2 worker, visibility reducers, 10k+ node target, vault/workspace sources, canonical Local targets, local depth/direction controls, background insights, saved views, reviewed relationship writes, incremental cache/watch refresh. V6: canvas-first floating controls, one progressive-disclosure tools drawer, dark neutral Obsidian-style defaults, selectable accent/color modes, dense-graph visual LOD, zero-size container recovery, and a persistent Graph tab in the shared bottom/right Panel. Managed writes remain schema-gated, revision-checked, snapshotted, and atomic. See [docs/graph.md](docs/graph.md). |
 | M0 — Anchor → Maru rename | ✅ shipped (v0.3.0) | Full rename across app id, dirs, CLI, tap. One-time on-disk migration (`~/.anchor → ~/.maru`, `com.anchor.app → com.maru.app`) with back-compat symlink; `.maruignore` preferred with `.anchorignore` fallback read. |
 
 Rule SSOTs live in the work repo at
@@ -140,7 +140,7 @@ make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
 │   Activity rail (11 modes):                                  │
 │     Docs / Inbox / Messages / Meetings / Tasks /             │
 │     Catalog / Studio / Diagram / Graph / Sites / E2E         │
-│   Explorer + editor tabs + copy/move queue + terminal panel   │
+│   Explorer + editor tabs + copy/move queue + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
@@ -179,8 +179,11 @@ make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
 
 ### Integrated terminal reliability contract
 
-- The terminal panel mounts eagerly and keeps its textarea/canvas identity
-  across collapse and tab switches. macOS first-mouse activation focuses a
+- Terminal and Graph share one VS Code-style Panel that docks at the bottom or
+  right, persists its active tab/size/position, and exposes independent theme
+  selectors. The terminal workspace mounts eagerly and keeps its
+  textarea/canvas identity across collapse and Graph tab switches. macOS
+  first-mouse activation focuses a
   terminal in one click; activation clicks are not forwarded to a TUI, while
   Shift always forces local selection.
 - Each PTY session streams ordered, generation-tagged frames through a Tauri

@@ -14,8 +14,10 @@ lifecycle (state machine, mount gating, camera-fit rules, real-Sigma e2e).
 **V6** makes the canvas primary: compact floating controls, one
 progressive-disclosure tools surface, dark neutral defaults with a selectable
 accent, dense-graph visual LOD, and safe recovery while the canvas container is
-temporarily zero-sized. Graph can also stay open as a persistent, resizable
-right editor split while documents remain editable on the left.
+temporarily zero-sized. Graph also shares a persistent, resizable Panel with
+Terminal. The Panel behaves like VS Code: switch Terminal/Graph tabs, dock the
+whole Panel at the bottom or right, collapse/maximize it, and keep the document
+editor available in the main area.
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -161,9 +163,11 @@ overlay is produced out-of-band by the `vault-graph` skill
   1-hop neighbors, instead of only highlighting the first match.
 - **Favorites**: favorite a node from the context menu or inspector; favorited
   nodes carry a ★ marker (shares `settings.ui.favorites` with the Explorer).
-- Filters, view and search-mode **persist** in `MaruSettings.graph` and
-  survive mode switches / restart; command palette has **open-graph** and
-  **open-graph-right** actions.
+- Filters, view, search-mode, and Graph theme **persist** in
+  `MaruSettings.graph` and survive mode switches / restart; command palette has
+  **open-graph** and **open-graph-right** (shown as "Open Graph in panel")
+  actions. `ui.layout.toolPanelSurface` remembers whether Terminal or Graph was
+  active, while the existing panel dock/size settings apply to both surfaces.
 
 ### Performance (V4)
 
