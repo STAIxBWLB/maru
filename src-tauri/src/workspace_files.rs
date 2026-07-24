@@ -227,7 +227,9 @@ pub fn rename_workspace_entry(
     if source == target {
         return Ok(success_outcome(Some(&source), Some(&target)));
     }
-    if path_entry_exists(&target) {
+    // On case-insensitive filesystems (macOS default) a case-only rename sees
+    // its own file at the target path — allow it instead of reporting a clash.
+    if path_entry_exists(&target) && !is_same_entry(&source, &target) {
         return Err(format!("An item named {new_name} already exists"));
     }
     journaled_rename(&vault, &source, &target)?;
@@ -763,6 +765,23 @@ fn path_entry_exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
+#[cfg(unix)]
+fn is_same_entry(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (fs::symlink_metadata(a), fs::symlink_metadata(b)) {
+        (Ok(left), Ok(right)) => left.dev() == right.dev() && left.ino() == right.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn is_same_entry(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
 fn entry_name(path: &Path) -> Result<String, String> {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -891,7 +910,9 @@ fn copy_symlink(source: &Path, target: &Path) -> Result<(), String> {
 }
 
 fn transaction_dir(vault: &Path) -> PathBuf {
-    vault.join(".maru-rename-txn")
+    // Lives inside the existing per-workspace .maru dir so an interrupted
+    // rename does not leave a new dot-directory in the user's repo root.
+    vault.join(".maru").join("rename-txn")
 }
 
 fn journaled_rename(vault: &Path, source: &Path, target: &Path) -> Result<(), String> {
@@ -1088,7 +1109,9 @@ fn resolve_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn unique_path(candidate: PathBuf) -> PathBuf {
-    if !candidate.exists() {
+    // symlink-aware existence: exists() follows links, so a broken symlink at
+    // the candidate name would be silently overwritten.
+    if !path_entry_exists(&candidate) {
         return candidate;
     }
     let parent = candidate
@@ -1111,7 +1134,7 @@ pub(crate) fn unique_path(candidate: PathBuf) -> PathBuf {
             _ => format!("{stem}-{suffix}"),
         };
         let next = parent.join(file_name);
-        if !next.exists() {
+        if !path_entry_exists(&next) {
             return next;
         }
     }
@@ -1264,6 +1287,29 @@ mod tests {
             b"source"
         );
         assert!(!tmp.path().join("folder").exists());
+    }
+
+    #[test]
+    fn rename_supports_case_only_changes() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path().to_string_lossy().to_string();
+        write_file(tmp.path(), "notes.txt", b"case");
+
+        let outcome = rename_workspace_entry(
+            vault,
+            tmp.path().join("notes.txt").to_string_lossy().to_string(),
+            "Notes.txt".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.status, WorkspaceMutationStatus::Done);
+        let name = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .find(|name| name.eq_ignore_ascii_case("notes.txt"))
+            .unwrap();
+        assert_eq!(name, "Notes.txt");
     }
 
     #[test]

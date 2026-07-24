@@ -29,6 +29,7 @@ import type React from "react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -79,6 +80,8 @@ import {
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
 import { useTranslation } from "../lib/i18n";
+import { clampMenuPosition } from "../lib/menu";
+import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { BinaryViewerPane } from "./BinaryViewerPane";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 import { HtmlPreviewFrame } from "./HtmlVisualEditor";
@@ -229,6 +232,39 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
   const selectionRef = useRef(selectedPaths);
   const rangeAnchorRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const handleContextMenuKeyDown = useContextMenuKeyboard(
+    contextMenuRef,
+    !!contextMenu,
+    () => setContextMenu(null),
+  );
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const menu = contextMenuRef.current;
+    if (!menu) return;
+    const next = clampMenuPosition(
+      { x: contextMenu.x, y: contextMenu.y },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (next.x === contextMenu.x && next.y === contextMenu.y) return;
+    setContextMenu({ ...contextMenu, ...next });
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     selectionRef.current = selectedPaths;
@@ -258,13 +294,16 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
   );
 
   useEffect(() => {
+    // Before the first scan lands, entries is empty and every saved location
+    // would look missing — bail so the restored folder is not wiped.
+    if (entries.length === 0) return;
     if (currentFolder && !directoryPaths.has(currentFolder)) {
       setCurrentFolder("");
       setBackStack([]);
       setForwardStack([]);
       onSelectionChange([]);
     }
-  }, [currentFolder, directoryPaths, onSelectionChange]);
+  }, [currentFolder, directoryPaths, entries.length, onSelectionChange]);
 
   const fileEntries = useMemo(
     () =>
@@ -289,7 +328,9 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
   const contents = useMemo(
     () =>
       listFilesDirectoryContents(entries, currentFolder, query, filter, sortKey).filter(
-        (entry) => isDirectoryNode(entry) || allowedFilePaths.has(entry.path),
+        // Keep non-file nodes (directories, broken symlinks) visible; pane
+        // filters only narrow real files.
+        (entry) => !isFileNode(entry) || allowedFilePaths.has(entry.path),
       ),
     [allowedFilePaths, currentFolder, entries, filter, query, sortKey],
   );
@@ -998,6 +1039,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
                 placeholder={t("files.operations.newFolderPlaceholder")}
                 onChange={(event) => setNewFolderName(event.target.value)}
                 onKeyDown={(event) => {
+                  event.stopPropagation();
                   if (event.key === "Enter") void createFolder();
                   if (event.key === "Escape") setCreatingFolder(false);
                 }}
@@ -1195,9 +1237,14 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
 
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="files-context-menu"
           role="menu"
+          tabIndex={-1}
           style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
+          onClick={() => setContextMenu(null)}
         >
           <button type="button" role="menuitem" onClick={() => primaryEntry && activateEntry(primaryEntry)}>
             <ExternalLink size={13} />
