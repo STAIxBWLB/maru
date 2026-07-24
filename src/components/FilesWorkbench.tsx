@@ -400,6 +400,12 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
   const activateEntry = useCallback(
     (entry: WorkspaceEntryNode) => {
       if (isDirectoryNode(entry)) {
+        // Symlinked directories are never scanned into (cloud-streamed
+        // targets), so hand them to the OS instead of an empty listing.
+        if (entry.kind === "symlink") {
+          onRevealInFinder(entry.path);
+          return;
+        }
         navigateTo(entry.relPath);
         return;
       }
@@ -413,7 +419,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
         );
       }
     },
-    [navigateTo, onError, onOpenDocument, workspacePath],
+    [navigateTo, onError, onOpenDocument, onRevealInFinder, workspacePath],
   );
 
   const handleRowSelection = (

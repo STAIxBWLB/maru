@@ -55,8 +55,10 @@ export function buildFilesDirectoryTree(
     children: [],
   };
   const byPath = new Map<string, FilesDirectoryTreeNode>([["", root]]);
+  // Symlinked directories stay out of the tree: the scanner never descends
+  // into them, so they have no navigable children.
   const directories = entries
-    .filter(isDirectoryNode)
+    .filter((entry) => entry.kind === "directory")
     .sort((a, b) => pathDepth(a.relPath) - pathDepth(b.relPath) || compareName(a, b));
 
   for (const entry of directories) {

@@ -162,7 +162,7 @@ pub struct FileQueueSourceInfo {
     pub source_kind: FileQueueSourceKind,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_workspace_files(
     vault_path: String,
     scan_options: Option<ScanOptions>,
@@ -172,7 +172,7 @@ pub fn scan_workspace_files(
     scan_workspace_files_at(&vault, &scan_filter)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_workspace_entries(
     vault_path: String,
     scan_options: Option<ScanOptions>,
@@ -236,7 +236,7 @@ pub fn rename_workspace_entry(
     Ok(success_outcome(Some(&source), Some(&target)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicate_workspace_entries(
     vault_path: String,
     source_paths: Vec<String>,
@@ -267,7 +267,7 @@ pub fn duplicate_workspace_entries(
     Ok(outcomes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paste_workspace_entries(
     vault_path: String,
     source_paths: Vec<String>,
@@ -323,7 +323,7 @@ pub fn paste_workspace_entries(
     Ok(outcomes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trash_workspace_entries(
     vault_path: String,
     target_paths: Vec<String>,
@@ -396,7 +396,7 @@ pub fn describe_file_queue_sources(paths: Vec<String>) -> Result<Vec<FileQueueSo
     Ok(sources)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_file_queue(
     vault_path: String,
     items: Vec<FileQueueApplyItem>,
@@ -627,8 +627,12 @@ fn scan_workspace_entries_at(
     let ignore_patterns = load_maruignore(vault);
     let tracked = git_tracked_paths(vault);
     let mut entries = Vec::new();
+    // follow_links stays off: workspaces symlink into cloud-streamed trees
+    // (Dropbox, Google Drive File Stream), and descending into them turns the
+    // scan into an unbounded network fetch. Symlinks are still reported as
+    // entries with their target kind; their contents are never traversed.
     for entry in WalkDir::new(vault)
-        .follow_links(true)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|entry| {
             let path = entry.path();
@@ -1287,6 +1291,27 @@ mod tests {
             b"source"
         );
         assert!(!tmp.path().join("folder").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entry_scanner_does_not_descend_into_symlinked_directories() {
+        let tmp = TempDir::new().unwrap();
+        write_file(tmp.path(), "real/inner.txt", b"data");
+        std::os::unix::fs::symlink("real", tmp.path().join("linked")).unwrap();
+
+        let snapshot = scan_workspace_entries_at(tmp.path(), &ScanFilter::default()).unwrap();
+
+        let linked = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.rel_path == "linked")
+            .unwrap();
+        assert_eq!(linked.target_kind, Some(WorkspaceEntryTargetKind::Directory));
+        assert!(!snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.rel_path.starts_with("linked/")));
     }
 
     #[test]

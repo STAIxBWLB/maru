@@ -43,13 +43,12 @@ describe("Files workbench navigation", () => {
     entry("readme.md", "file", { gitTracked: true }),
   ];
 
-  it("keeps empty and symlinked directories as first-class tree nodes", () => {
+  it("keeps empty directories in the tree but leaves symlinked directories out", () => {
     const tree = buildFilesDirectoryTree(entries, "Workspace");
 
     expect(tree.children.map((node) => node.relPath)).toEqual(["assets", "docs"]);
     expect(tree.children[0].children.map((node) => node.relPath)).toEqual([
       "assets/empty",
-      "assets/icons",
     ]);
   });
 
