@@ -790,6 +790,39 @@ export interface WorkspaceFileEntry {
   binary: boolean;
 }
 
+export type WorkspaceEntryKind = "file" | "directory" | "symlink";
+export type WorkspaceEntryTargetKind = "file" | "directory" | "missing";
+
+export interface WorkspaceEntryNode {
+  kind: WorkspaceEntryKind;
+  targetKind: WorkspaceEntryTargetKind | null;
+  path: string;
+  relPath: string;
+  parentRelPath: string;
+  name: string;
+  extension: string | null;
+  fileKind: string;
+  sizeBytes: number;
+  updatedAt: string | null;
+  gitTracked: boolean;
+  binary: boolean;
+}
+
+export interface WorkspaceEntriesSnapshot {
+  revision: string;
+  entries: WorkspaceEntryNode[];
+}
+
+export type WorkspaceMutationStatus = "done" | "error";
+
+export interface WorkspaceMutationOutcome {
+  sourcePath: string | null;
+  targetPath: string | null;
+  name: string;
+  status: WorkspaceMutationStatus;
+  error: string | null;
+}
+
 export interface FileQueueApplyItem {
   id: string;
   sourcePath: string;

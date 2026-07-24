@@ -3,7 +3,6 @@ import {
   ChevronsUpDown,
   ChevronRight,
   FileText,
-  Files,
   Folder,
   List,
   PanelLeftClose,
@@ -59,7 +58,6 @@ import type {
   DocumentViewDefinition,
   FavoriteItem,
 } from "../lib/settings";
-import type { ExplorerPaneMode } from "../lib/settings";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 
 const GROUP_ROW_HEIGHT = 28;
@@ -104,8 +102,6 @@ interface DocumentListProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   paneRef?: React.RefObject<HTMLElement | null>;
   vaultPath?: string | null;
-  paneMode: ExplorerPaneMode;
-  onPaneModeChange: (mode: ExplorerPaneMode) => void;
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
   favorites: FavoriteItem[];
@@ -150,8 +146,6 @@ export const DocumentList = memo(function DocumentList({
   searchInputRef,
   paneRef,
   vaultPath,
-  paneMode,
-  onPaneModeChange,
   pendingRevealTargetPath = null,
   onRevealHandled,
   favorites,
@@ -459,28 +453,6 @@ export const DocumentList = memo(function DocumentList({
             {t("workspace.addPublic.short")}
           </button>
         )}
-      </div>
-      <div className="explorer-mode-toggle" role="group" aria-label={t("explorer.mode.label")}>
-        <button
-          type="button"
-          className={paneMode === "documents" ? "active" : ""}
-          onClick={() => onPaneModeChange("documents")}
-          title={t("explorer.mode.documents")}
-          aria-label={t("explorer.mode.documents")}
-        >
-          <FileText size={13} />
-          <span>{t("explorer.mode.documents")}</span>
-        </button>
-        <button
-          type="button"
-          className={paneMode === "files" ? "active" : ""}
-          onClick={() => onPaneModeChange("files")}
-          title={t("explorer.mode.files")}
-          aria-label={t("explorer.mode.files")}
-        >
-          <Files size={13} />
-          <span>{t("explorer.mode.files")}</span>
-        </button>
       </div>
       <div className="list-header">
         <div>

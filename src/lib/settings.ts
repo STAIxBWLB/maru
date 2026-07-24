@@ -22,6 +22,7 @@ export type TerminalAttachMentionStyle = "mention" | "path" | "read";
 export type ThemeMode = "system" | "light" | "dark";
 export type MaruAppMode =
   | "pkm"
+  | "files"
   | "inbox"
   | "comms"
   | "meetings"
@@ -131,6 +132,10 @@ export interface WindowBoundsSettings {
 export interface LayoutSettings {
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
+  filesTreeOpen: boolean;
+  filesTreeWidth: number;
+  filesPreviewOpen: boolean;
+  filesPreviewWidth: number;
   todaySidebarWidth: number;
   tasksSidebarWidth: number;
   calendarAgendaWidth: number;
@@ -451,7 +456,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     documentBrowserMode: "tree",
     documentLabelMode: "title",
     workspaceFileFilter: "all",
-    filesBrowserMode: "tree",
+    filesBrowserMode: "list",
     filesSortKey: "name",
     filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
@@ -467,6 +472,10 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     layout: {
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
+      filesTreeOpen: true,
+      filesTreeWidth: 260,
+      filesPreviewOpen: true,
+      filesPreviewWidth: 440,
       todaySidebarWidth: TODAY_LAYOUT_LIMITS.todaySidebarWidth.defaultValue,
       tasksSidebarWidth: TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
       calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
@@ -635,7 +644,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
   return {
     version: 1,
     ui: {
-      activeAppMode: parseMaruAppMode(ui.activeAppMode) ?? "pkm",
+      activeAppMode: normalizeActiveAppMode(ui),
       activeWorkspaceVisibility:
         parseWorkspaceVisibilitySetting(ui.activeWorkspaceVisibility) ?? "private",
       // Legacy mirror always equals the normalized left pane so both fields
@@ -647,7 +656,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
       workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
-      filesBrowserMode: parseFilesBrowserMode(ui.filesBrowserMode) ?? "tree",
+      filesBrowserMode: "list",
       filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
       filesListAttributes: normalizeFilesListAttributes(ui.filesListAttributes),
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
@@ -1711,11 +1720,17 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 }
 
 function parseMaruAppMode(value: unknown): MaruAppMode | null {
-  return value === "pkm" || value === "inbox" || value === "comms" || value === "meetings"
+  return value === "pkm" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "tasks" || value === "catalog" || value === "studio" || value === "e2e"
     || value === "diagram" || value === "sites" || value === "graph"
     ? value
     : null;
+}
+
+function normalizeActiveAppMode(ui: Record<string, unknown>): MaruAppMode {
+  const mode = parseMaruAppMode(ui.activeAppMode) ?? "pkm";
+  const legacyExplorerMode = parseExplorerPaneMode(ui.explorerPaneMode);
+  return mode === "pkm" && legacyExplorerMode === "files" ? "files" : mode;
 }
 
 function parseTasksDefaultView(value: unknown): TasksDefaultView | null {
@@ -1997,6 +2012,26 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       DEFAULT_MARU_SETTINGS.ui.layout.documentsPaneWidth,
       260,
       560,
+    ),
+    filesTreeOpen:
+      typeof layout.filesTreeOpen === "boolean"
+        ? layout.filesTreeOpen
+        : DEFAULT_MARU_SETTINGS.ui.layout.filesTreeOpen,
+    filesTreeWidth: normalizePaneWidth(
+      layout.filesTreeWidth,
+      DEFAULT_MARU_SETTINGS.ui.layout.filesTreeWidth,
+      220,
+      420,
+    ),
+    filesPreviewOpen:
+      typeof layout.filesPreviewOpen === "boolean"
+        ? layout.filesPreviewOpen
+        : DEFAULT_MARU_SETTINGS.ui.layout.filesPreviewOpen,
+    filesPreviewWidth: normalizePaneWidth(
+      layout.filesPreviewWidth,
+      DEFAULT_MARU_SETTINGS.ui.layout.filesPreviewWidth,
+      320,
+      720,
     ),
     todaySidebarWidth: clampTodayLayoutWidth(
       "todaySidebarWidth",

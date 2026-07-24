@@ -27,15 +27,14 @@ test.beforeEach(async ({ page }) => {
 
 const VISUAL_FRAME = '[data-testid="html-editor-frame"]';
 
-/** Open an HTML fixture file from the Files explorer as a document tab. */
+/** Open an HTML fixture file from the standalone Files workspace as a document tab. */
 async function openHtmlDocument(page: Page, name: RegExp, relPath: string) {
   await page.goto("/?mockHtml=1");
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "전체" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name }).dblclick();
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await expect(files).toBeVisible();
+  await files.locator(".files-list-row", { hasText: name }).dblclick();
 
   await expect(page.locator(`.document-tab[title='${relPath}']`)).toBeVisible();
 }
@@ -145,9 +144,10 @@ test("preserves the document shell through visual editing and saving", async ({ 
     .click();
   await expect(page.locator(".document-tab[title='sample-page.html']")).toHaveCount(0);
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /sample-page\.html/ }).dblclick();
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  await page
+    .locator(".files-workbench .files-list-row", { hasText: "sample-page.html" })
+    .dblclick();
   await expect(page.locator(".document-tab[title='sample-page.html']")).toBeVisible();
   await page.locator(".tab-trigger", { hasText: "원문" }).click();
   await expect(page.locator("textarea.source-editor")).toHaveValue(/E2E 추가 문장/);

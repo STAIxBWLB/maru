@@ -226,7 +226,11 @@ use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
-use workspace_files::{apply_file_queue, describe_file_queue_sources, scan_workspace_files};
+use workspace_files::{
+    apply_file_queue, create_workspace_directory, describe_file_queue_sources,
+    duplicate_workspace_entries, paste_workspace_entries, rename_workspace_entry,
+    scan_workspace_entries, scan_workspace_files, trash_workspace_entries,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -440,8 +444,14 @@ pub fn run() {
             register_workspace_roots,
             list_workspaces,
             scan_workspace_files,
+            scan_workspace_entries,
             describe_file_queue_sources,
             apply_file_queue,
+            create_workspace_directory,
+            rename_workspace_entry,
+            duplicate_workspace_entries,
+            paste_workspace_entries,
+            trash_workspace_entries,
             binary_viewer_classify,
             binary_viewer_prepare_asset,
             binary_viewer_read_text,

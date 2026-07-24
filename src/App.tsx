@@ -16,6 +16,7 @@ import {
   Code2,
   Command,
   FileText,
+  FolderOpen,
   Globe,
   Inbox,
   LayoutGrid,
@@ -61,7 +62,6 @@ import {
   type ActiveTerminalContext,
 } from "./lib/terminal";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
-import { WorkspaceFilesPane } from "./components/WorkspaceFilesPane";
 import type { FavoriteTarget } from "./components/FavoritesSection";
 import { useApprovalGate } from "./approval/ApprovalDialog";
 import { markStartup, measureStartup, scheduleStartupIdle } from "./lib/startupProfile";
@@ -120,7 +120,7 @@ import {
   scanInboxDrop,
   scanInboxEntries,
   scanInboxProcessedItems,
-  scanWorkspaceFiles,
+  scanWorkspaceEntries,
   scanVault,
   setActiveWorkspaceRoot,
   stageGmailItems,
@@ -277,6 +277,8 @@ import type {
   MissionRecord,
   VaultEntry,
   WorkspaceFileEntry,
+  WorkspaceEntryNode,
+  WorkspaceMutationOutcome,
   WorkspaceConfig,
   WorkspaceRegistry,
   WorkspaceRootEntry,
@@ -306,7 +308,6 @@ import {
   type FavoriteItem,
   type FavoriteKind,
   type GraphOpenTarget,
-  type FilesBrowserMode,
   type FilesListAttribute,
   type FilesSortKey,
   type RightPaneTab,
@@ -358,9 +359,6 @@ import {
 } from "./lib/documentTree";
 import {
   EMPTY_WORKSPACE_FILES_PANE_FILTERS,
-  expandWorkspaceFileAncestors,
-  isOpenableDocumentFile,
-  isOpenableFile,
   type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
 import { usesAssetProtocol } from "./lib/binaryViewer";
@@ -393,6 +391,11 @@ const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((mo
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
+const LazyFilesWorkbench = lazy(() =>
+  import("./components/FilesWorkbench").then((module) => ({
+    default: module.FilesWorkbench,
+  })),
+);
 
 interface ProviderRefreshCache {
   fetchedAt: number | null;
@@ -498,12 +501,14 @@ const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
 
 interface WorkspaceFilesState {
   entries: WorkspaceFileEntry[];
+  nodes: WorkspaceEntryNode[];
   loading: boolean;
   refreshing: boolean;
 }
 
 const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
   entries: [],
+  nodes: [],
   loading: false,
   refreshing: false,
 };
@@ -1170,6 +1175,7 @@ function MainApp() {
     EMPTY_WORKSPACE_FILES_STATE;
   const entries = explorerWorkspaceState.entries;
   const fileEntries = explorerWorkspaceFilesState.entries;
+  const workspaceEntryNodes = explorerWorkspaceFilesState.nodes;
   const query = queryByVisibility[explorerVisibility];
   const fileQuery = fileQueryByVisibility[explorerVisibility];
   const documentFilter = documentFilterByVisibility[explorerVisibility];
@@ -1251,6 +1257,32 @@ function MainApp() {
   const selectedWorkspaceFileEntries = useMemo(
     () => fileEntries.filter((entry) => selectedFilePathSet.has(entry.path)),
     [fileEntries, selectedFilePathSet],
+  );
+  const explorerOpenDocumentPaths = useMemo(
+    () =>
+      explorerWorkspacePath
+        ? tabs
+            .filter((tab) => tab.workspacePath === explorerWorkspacePath)
+            .map((tab) => tab.entry.path)
+        : [],
+    [explorerWorkspacePath, tabs],
+  );
+  const explorerDirtyDocumentPaths = useMemo(
+    () =>
+      explorerWorkspacePath
+        ? tabs
+            .filter(
+              (tab) =>
+                tab.workspacePath === explorerWorkspacePath &&
+                tab.draftContent !== tab.document.content,
+            )
+            .map((tab) => tab.entry.path)
+        : [],
+    [explorerWorkspacePath, tabs],
+  );
+  const explorerWorkspaceCaps = useMemo(
+    () => workspaceCapabilities(explorerWorkspace),
+    [explorerWorkspace],
   );
   const unorderedAnyTabs = useMemo<AnyTab[]>(() => [...tabs, ...binaryTabs], [tabs, binaryTabs]);
   const orderedAnyTabs = useMemo(
@@ -1349,7 +1381,8 @@ function MainApp() {
   ]);
   const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
-    paneMode: maruSettings.ui.explorerPaneMode,
+    paneMode:
+      visibleAppMode === "files" ? "files" : maruSettings.ui.explorerPaneMode,
     startupIoReady: explorerWorkspaceState.startupIoReady,
     hasEntries: explorerWorkspaceFilesState.entries.length > 0,
     loading: explorerWorkspaceFilesState.loading,
@@ -2128,6 +2161,12 @@ function MainApp() {
         ui: {
           ...current.ui,
           activeAppMode,
+          explorerPaneMode:
+            activeAppMode === "files"
+              ? "files"
+              : activeAppMode === "pkm"
+                ? "documents"
+                : current.ui.explorerPaneMode,
         },
       }));
     },
@@ -2352,19 +2391,6 @@ function MainApp() {
     [updateSettings],
   );
 
-  const setExplorerPaneMode = useCallback(
-    (mode: ExplorerPaneMode) => {
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          explorerPaneMode: mode,
-        },
-      }));
-    },
-    [updateSettings],
-  );
-
   const setWorkspaceFileFilter = useCallback(
     (workspaceFileFilter: WorkspaceFileFilter) => {
       updateSettings((current) => ({
@@ -2372,19 +2398,6 @@ function MainApp() {
         ui: {
           ...current.ui,
           workspaceFileFilter,
-        },
-      }));
-    },
-    [updateSettings],
-  );
-
-  const setFilesBrowserMode = useCallback(
-    (filesBrowserMode: FilesBrowserMode) => {
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          filesBrowserMode,
         },
       }));
     },
@@ -3812,9 +3825,27 @@ function MainApp() {
     async (path: string, initial = false) => {
       updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
       try {
-        const files = await scanWorkspaceFiles(path, scanOptions);
+        const snapshot = await scanWorkspaceEntries(path, scanOptions);
+        const files = snapshot.entries
+          .filter(
+            (entry) =>
+              entry.kind === "file" ||
+              (entry.kind === "symlink" && entry.targetKind === "file"),
+          )
+          .map((entry) => ({
+            path: entry.path,
+            relPath: entry.relPath,
+            name: entry.name,
+            extension: entry.extension,
+            fileKind: entry.fileKind,
+            sizeBytes: entry.sizeBytes,
+            updatedAt: entry.updatedAt,
+            gitTracked: entry.gitTracked,
+            binary: entry.binary,
+          }));
         updateWorkspaceFileState(path, {
           entries: files,
+          nodes: snapshot.entries,
           loading: false,
           refreshing: false,
         });
@@ -4412,21 +4443,13 @@ function MainApp() {
     ],
   );
 
-  const selectWorkspaceFile = useCallback(
-    (entry: WorkspaceFileEntry, additive: boolean) => {
+  const setWorkspaceFileSelection = useCallback(
+    (paths: string[]) => {
       if (!explorerWorkspacePath) return;
-      setSelectedFilePathsByWorkspace((current) => {
-        const existing = current[explorerWorkspacePath] ?? [];
-        const next = additive
-          ? existing.includes(entry.path)
-            ? existing.filter((path) => path !== entry.path)
-            : [...existing, entry.path]
-          : [entry.path];
-        return {
-          ...current,
-          [explorerWorkspacePath]: next,
-        };
-      });
+      setSelectedFilePathsByWorkspace((current) => ({
+        ...current,
+        [explorerWorkspacePath]: paths,
+      }));
     },
     [explorerWorkspacePath],
   );
@@ -4483,35 +4506,6 @@ function MainApp() {
       binaryViewerPrepareAsset,
       editorSplitOpen,
       focusedEditorGroup,
-    ],
-  );
-
-  const openWorkspaceFile = useCallback(
-    (entry: WorkspaceFileEntry) => {
-      if (isOpenableDocumentFile(entry)) {
-        const docEntry =
-          entries.find((item) => item.path === entry.path || item.relPath === entry.relPath) ??
-          null;
-        if (!docEntry) {
-          setError(t("files.openUnavailable"));
-          return;
-        }
-        void selectEntry(docEntry);
-        return;
-      }
-      if (!explorerWorkspacePath) {
-        setError(t("files.openUnavailable"));
-        return;
-      }
-      openBinaryWorkspaceFile(entry, explorerWorkspacePath, explorerVisibility);
-    },
-    [
-      entries,
-      explorerVisibility,
-      explorerWorkspacePath,
-      openBinaryWorkspaceFile,
-      selectEntry,
-      t,
     ],
   );
 
@@ -4619,102 +4613,33 @@ function MainApp() {
       const targetPath = joinWorkspaceRelPath(workspacePath, relPath);
 
       void (async () => {
-        setPersistedAppMode("pkm");
-        if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
+        setPersistedAppMode("files");
         setExplorerVisibility(visibility);
-
-        let scannedFiles = workspaceFileStates[workspacePath]?.entries ?? [];
-        const scanFilesIfNeeded = async () => {
-          if (scannedFiles.length > 0) return scannedFiles;
-          updateWorkspaceFileState(workspacePath, { loading: true, refreshing: true });
-          try {
-            scannedFiles = await scanWorkspaceFiles(workspacePath, scanOptions);
-            updateWorkspaceFileState(workspacePath, {
-              entries: scannedFiles,
-              loading: false,
-              refreshing: false,
-            });
-          } catch (err) {
-            updateWorkspaceFileState(workspacePath, { loading: false, refreshing: false });
-            throw err;
-          }
-          return scannedFiles;
-        };
-
         try {
-          if (favorite.kind === "directory") {
-            const docEntries = workspaceStates[workspacePath]?.entries ?? [];
-            const files = await scanFilesIfNeeded();
-            const prefix = `${relPath}/`;
-            const exists =
-              docEntries.some((entry) => entry.relPath.startsWith(prefix)) ||
-              files.some((entry) => entry.relPath.startsWith(prefix));
-            if (!exists) {
-              setError(t("favorites.openMissing", { path: relPath }));
-              return;
-            }
-            setExplorerPaneMode("files");
-            setFilesBrowserMode("tree");
-            setWorkspaceFileFilter("all");
-            setFileQueryByVisibility((current) => ({
-              ...current,
-              [visibility]: "",
-            }));
-            setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
-            setCollapsedFileFoldersByVisibility((current) => {
-              const existing = current[visibility] ?? [];
-              return {
-                ...current,
-                [visibility]: expandWorkspaceFileAncestors(existing, `${relPath}/__favorite__`),
-              };
-            });
-            setPendingExplorerReveal({ pane: "files", targetPath });
-            return;
+          if ((workspaceFileStates[workspacePath]?.nodes ?? []).length === 0) {
+            await refreshWorkspaceFiles(workspacePath, true);
           }
-
-          const docEntries = workspaceStates[workspacePath]?.entries ?? [];
-          const docEntry =
-            docEntries.find((entry) => entry.relPath === relPath || entry.path === targetPath) ??
-            null;
-          if (docEntry) {
-            void selectEntry(docEntry);
-            return;
-          }
-          const files = await scanFilesIfNeeded();
-          const fileEntry =
-            files.find((entry) => entry.relPath === relPath || entry.path === targetPath) ?? null;
-          if (!fileEntry) {
-            setError(t("favorites.openMissing", { path: relPath }));
-            return;
-          }
-          setSelectedFilePathsByWorkspace((current) => ({
+          setWorkspaceFileFilter("all");
+          setFileQueryByVisibility((current) => ({
             ...current,
-            [workspacePath]: [fileEntry.path],
+            [visibility]: "",
           }));
-          openBinaryWorkspaceFile(fileEntry, workspacePath, visibility);
+          setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
+          setPendingExplorerReveal({ pane: "files", targetPath });
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         }
       })();
     },
     [
-      documentsPaneOpen,
       explorerVisibility,
       explorerWorkspacePath,
-      openBinaryWorkspaceFile,
-      scanOptions,
-      selectEntry,
-      setExplorerPaneMode,
-      setFilesBrowserMode,
+      refreshWorkspaceFiles,
       setPersistedAppMode,
       setWorkspaceFileFilter,
       settingsWorkPath,
-      t,
-      updateLayoutSettings,
-      updateWorkspaceFileState,
       workspaceFileStates,
       workspaceRegistry.workspaces,
-      workspaceStates,
     ],
   );
 
@@ -4813,8 +4738,10 @@ function MainApp() {
         return additions.length > 0 ? [...current, ...additions] : current;
       });
       if (addedIds.length > 0) setSelectedFileQueueItemIds(addedIds);
-      setPersistedAppMode("pkm");
-      if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+      if (visibleAppMode !== "files") {
+        setPersistedAppMode("pkm");
+        if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
+      }
       setPersistedRightPaneTab("files");
     },
     [
@@ -4823,24 +4750,8 @@ function MainApp() {
       setPersistedAppMode,
       setPersistedRightPaneTab,
       updateLayoutSettings,
+      visibleAppMode,
     ],
-  );
-
-  const queueWorkspaceFiles = useCallback(
-    (files: WorkspaceFileEntry[]) => {
-      const workspacePath = explorerWorkspacePath;
-      if (!workspacePath || files.length === 0) return;
-      addFileQueueSources(
-        files.map((file) => ({
-          path: file.path,
-          sourceRelPath: file.relPath,
-          fileName: file.name,
-          sourceKind: "file",
-        })),
-        workspacePath,
-      );
-    },
-    [addFileQueueSources, explorerWorkspacePath],
   );
 
   const queueExternalFiles = useCallback(
@@ -5411,6 +5322,10 @@ function MainApp() {
 
   const refreshCurrent = useCallback(async () => {
     if (!explorerWorkspacePath) return;
+    if (visibleAppMode === "files") {
+      await refreshWorkspaceFiles(explorerWorkspacePath);
+      return;
+    }
     const lastRel =
       typeof window !== "undefined"
         ? window.localStorage.getItem(lastOpenKeyForWorkspace(explorerWorkspacePath))
@@ -5421,6 +5336,8 @@ function MainApp() {
     explorerWorkspacePath,
     lastOpenKeyForWorkspace,
     loadWorkspace,
+    refreshWorkspaceFiles,
+    visibleAppMode,
   ]);
 
   const installUpdate = useCallback(
@@ -6236,6 +6153,105 @@ function MainApp() {
     ],
   );
 
+  const handleFilesFilesystemMutated = useCallback(
+    (
+      outcomes: WorkspaceMutationOutcome[],
+      effect: "refresh" | "move" | "trash",
+    ) => {
+      const completed = outcomes.filter(
+        (outcome) => outcome.status === "done" && outcome.sourcePath,
+      );
+      if (effect === "trash") {
+        const sources = completed.map((outcome) => outcome.sourcePath as string);
+        const affectedIds = orderedAnyTabs
+          .filter((tab) => {
+            const path = isBinaryTab(tab) ? tab.fileEntry.path : tab.entry.path;
+            return sources.some(
+              (source) => path === source || path.startsWith(`${source}/`),
+            );
+          })
+          .map((tab) => tab.id);
+        closeTabsByIds(affectedIds);
+      } else if (effect === "move") {
+        const mappings = completed
+          .filter((outcome) => outcome.targetPath)
+          .map((outcome) => ({
+            source: outcome.sourcePath as string,
+            target: outcome.targetPath as string,
+          }))
+          .sort((a, b) => b.source.length - a.source.length);
+        const remapPath = (path: string) => {
+          const mapping = mappings.find(
+            (item) => path === item.source || path.startsWith(`${item.source}/`),
+          );
+          if (!mapping) return path;
+          return `${mapping.target}${path.slice(mapping.source.length)}`;
+        };
+        const remapId = (id: string) => {
+          if (id.startsWith("binary:")) {
+            return `binary:${remapPath(id.slice("binary:".length))}`;
+          }
+          return remapPath(id);
+        };
+        const remapEditorTab = (tab: EditorTab): EditorTab => {
+          const path = remapPath(tab.entry.path);
+          if (path === tab.entry.path) return tab;
+          const relPath = path
+            .slice(tab.workspacePath.replace(/\/+$/, "").length)
+            .replace(/^\/+/, "");
+          return {
+            ...tab,
+            id: path,
+            entry: { ...tab.entry, path, relPath },
+            document: { ...tab.document, path, relPath },
+          };
+        };
+        setTabs((current) => {
+          const next = current.map(remapEditorTab);
+          tabsRef.current = next;
+          return next;
+        });
+        setBinaryTabs((current) =>
+          current.map((tab) => {
+            const path = remapPath(tab.fileEntry.path);
+            if (path === tab.fileEntry.path) return tab;
+            const relPath = path
+              .slice(tab.workspacePath.replace(/\/+$/, "").length)
+              .replace(/^\/+/, "");
+            return {
+              ...tab,
+              id: `binary:${path}`,
+              fileEntry: { ...tab.fileEntry, path, relPath },
+            };
+          }),
+        );
+        setTabOrder((current) => current.map(remapId));
+        setActiveTabId((current) => (current ? remapId(current) : current));
+        setLeftActiveTabId((current) => (current ? remapId(current) : current));
+        setRightActiveTabId((current) => (current ? remapId(current) : current));
+      }
+
+      if (!explorerWorkspacePath) return;
+      void (async () => {
+        await refreshWorkspaceFiles(explorerWorkspacePath);
+        try {
+          const fresh = await scanVault(explorerWorkspacePath, scanOptions);
+          updateWorkspaceState(explorerWorkspacePath, { entries: fresh });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [
+      closeTabsByIds,
+      explorerWorkspacePath,
+      orderedAnyTabs,
+      refreshWorkspaceFiles,
+      scanOptions,
+      updateWorkspaceState,
+    ],
+  );
+
   const closeOtherTabs = useCallback(
     (tabId: string) => {
       if (!orderedAnyTabs.some((tab) => tab.id === tabId)) return;
@@ -6465,14 +6481,10 @@ function MainApp() {
       const workspacePath = docTab?.workspacePath ?? binaryTab!.workspacePath;
       const relPath = docTab?.entry.relPath ?? binaryTab!.fileEntry.relPath;
       const targetPath = docTab?.document.path ?? binaryTab!.fileEntry.path;
-      const activePane = binaryTab ? "files" : maruSettings.ui.explorerPaneMode;
-      setPersistedAppMode("pkm");
-      if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
-      if (binaryTab && maruSettings.ui.explorerPaneMode !== "files") {
-        setExplorerPaneMode("files");
-      }
       setExplorerVisibility(visibility);
-      if (activePane === "documents") {
+      if (docTab) {
+        setPersistedAppMode("pkm");
+        if (!documentsPaneOpen) updateLayoutSettings({ documentsPaneOpen: true });
         setDocumentBrowserMode("tree");
         setExplorerQuery("");
         setExplorerDocumentFilter({ kind: "all" });
@@ -6484,15 +6496,9 @@ function MainApp() {
           };
         });
       } else {
+        setPersistedAppMode("files");
         setWorkspaceFileFilter("all");
         setWorkspaceFileQuery("");
-        setCollapsedFileFoldersByVisibility((current) => {
-          const existing = current[visibility] ?? [];
-          return {
-            ...current,
-            [visibility]: expandWorkspaceFileAncestors(existing, relPath),
-          };
-        });
         setSelectedFilePathsByWorkspace((current) => ({
           ...current,
           [workspacePath]: [targetPath],
@@ -6500,16 +6506,14 @@ function MainApp() {
         void refreshWorkspaceFiles(workspacePath);
       }
       selectTab(tabId, group);
-      setPendingExplorerReveal({ pane: activePane, targetPath });
+      setPendingExplorerReveal({ pane: binaryTab ? "files" : "documents", targetPath });
     },
     [
-      maruSettings.ui.explorerPaneMode,
       binaryTabs,
       documentsPaneOpen,
       refreshWorkspaceFiles,
       selectTab,
       setDocumentBrowserMode,
-      setExplorerPaneMode,
       setExplorerQuery,
       setExplorerDocumentFilter,
       setWorkspaceFileFilter,
@@ -7125,12 +7129,13 @@ function MainApp() {
           openPreferences();
           break;
         case "view.documents":
-          setExplorerPaneMode("documents");
+          setPersistedAppMode("pkm");
           break;
         case "view.files":
-          setExplorerPaneMode("files");
+          setPersistedAppMode("files");
           break;
         case "view.toggle_documents":
+          if (visibleAppMode !== "pkm") setPersistedAppMode("pkm");
           updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen });
           break;
         case "view.toggle_right":
@@ -7205,12 +7210,13 @@ function MainApp() {
       revealTargetInFinder,
       saveCurrent,
       selectAdjacentTab,
-      setExplorerPaneMode,
+      setPersistedAppMode,
       snapshotCurrent,
       splitTerminalRight,
       dockTerminal,
       switchActiveWorkspace,
       updateLayoutSettings,
+      visibleAppMode,
       workspaceRegistry.activeByVisibility.private,
       workspaceRegistry.activeByVisibility.public,
     ],
@@ -7246,6 +7252,7 @@ function MainApp() {
     diagram: " diagram-mode",
     sites: " sites-mode",
     graph: " graph-mode",
+    files: " files-mode",
   };
   const graphVaultPath =
     workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
@@ -7325,6 +7332,7 @@ function MainApp() {
       previous !== visibleAppMode &&
       visibleAppMode !== "pkm" &&
       visibleAppMode !== "inbox" &&
+      visibleAppMode !== "files" &&
       outlineOpen
     ) {
       updateLayoutSettings({ outlineOpen: false });
@@ -7843,6 +7851,15 @@ function MainApp() {
           </button>
           <button
             type="button"
+            className={visibleAppMode === "files" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("files")}
+            title={t("mode.files")}
+            aria-label={t("mode.files")}
+          >
+            <FolderOpen size={20} />
+          </button>
+          <button
+            type="button"
             className={visibleAppMode === "inbox" ? "activity-button active" : "activity-button"}
             onClick={openInboxAndFocus}
             title={t("mode.inbox")}
@@ -7946,28 +7963,30 @@ function MainApp() {
           >
             <Command size={19} />
           </button>
-          <button
-            type="button"
-            className={outlineOpen ? "activity-button active" : "activity-button"}
-            onClick={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
-            title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
-            aria-label={
-              outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")
-            }
-          >
-            {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
-          </button>
-          <button
-            type="button"
-            className={documentsPaneOpen ? "activity-button active" : "activity-button"}
-            onClick={() => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen })}
-            title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}
-            aria-label={
-              documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")
-            }
-          >
-            <FileText size={19} />
-          </button>
+          {visibleAppMode === "pkm" || visibleAppMode === "inbox" ? (
+            <button
+              type="button"
+              className={outlineOpen ? "activity-button active" : "activity-button"}
+              onClick={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
+              title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
+              aria-label={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
+            >
+              {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
+            </button>
+          ) : null}
+          {visibleAppMode === "pkm" ? (
+            <button
+              type="button"
+              className={documentsPaneOpen ? "activity-button active" : "activity-button"}
+              onClick={() => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen })}
+              title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}
+              aria-label={
+                documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")
+              }
+            >
+              <FileText size={19} />
+            </button>
+          ) : null}
           <span className="activity-spacer" />
           {settingsWorkPath ? (
             <button
@@ -8020,6 +8039,94 @@ function MainApp() {
           renderGraphSurface("full")
         ) : visibleAppMode === "sites" ? (
           <LazySitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
+        ) : visibleAppMode === "files" ? (
+          <LazyFilesWorkbench
+            entries={workspaceEntryNodes}
+            selectedPaths={selectedFilePaths}
+            query={fileQuery}
+            loading={
+              (booting ||
+                explorerWorkspaceFilesState.loading ||
+                shouldScanExplorerWorkspaceFiles) &&
+              workspaceEntryNodes.length === 0
+            }
+            refreshing={explorerWorkspaceFilesState.refreshing}
+            workspacePath={explorerWorkspacePath}
+            workspaceVisibility={explorerVisibility}
+            publicWorkspaceAvailable={publicWorkspaceAvailable}
+            activeWorkspaceLabel={explorerWorkspaceCaption}
+            filter={maruSettings.ui.workspaceFileFilter}
+            sortKey={maruSettings.ui.filesSortKey}
+            filesListAttributes={maruSettings.ui.filesListAttributes}
+            paneFilters={filesPaneFilters}
+            queuedSourcePaths={queuedSourcePaths}
+            collapsedFolders={collapsedFileFolders}
+            treeOpen={layoutSettings.filesTreeOpen}
+            treeWidth={layoutSettings.filesTreeWidth}
+            previewOpen={layoutSettings.filesPreviewOpen}
+            previewWidth={layoutSettings.filesPreviewWidth}
+            favorites={maruSettings.ui.favorites}
+            canCreate={
+              explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed"
+            }
+            canRenameMove={
+              explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed"
+            }
+            canDelete={
+              explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed"
+            }
+            openDocumentPaths={explorerOpenDocumentPaths}
+            dirtyDocumentPaths={explorerDirtyDocumentPaths}
+            pendingRevealTargetPath={
+              pendingExplorerReveal?.pane === "files"
+                ? pendingExplorerReveal.targetPath
+                : null
+            }
+            onRevealHandled={() => setPendingExplorerReveal(null)}
+            onWorkspaceVisibilityChange={(visibility) => {
+              setExplorerVisibility(visibility);
+              const nextPath = workspaceRegistry.activeByVisibility[visibility];
+              if (nextPath && !workspaceStates[nextPath]?.entries.length) {
+                void loadWorkspace(nextPath, visibility);
+              }
+            }}
+            onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
+            onQueryChange={setWorkspaceFileQuery}
+            onFilterChange={setWorkspaceFileFilter}
+            onSortKeyChange={setFilesSortKey}
+            onFilesListAttributesChange={setFilesListAttributes}
+            onPaneFiltersChange={setFilesPaneFilters}
+            onCollapsedFoldersChange={setCollapsedFileFolders}
+            onSelectionChange={setWorkspaceFileSelection}
+            onOpenDocument={(entry) => {
+              const docEntry =
+                entries.find(
+                  (candidate) =>
+                    candidate.path === entry.path || candidate.relPath === entry.relPath,
+                ) ?? null;
+              if (!docEntry) {
+                setError(t("files.openUnavailable"));
+                return;
+              }
+              setPersistedAppMode("pkm");
+              void selectEntry(docEntry);
+            }}
+            onQueuePaths={(paths) => void queueExternalFiles(paths)}
+            onRevealInFinder={revealTargetInFinder}
+            onRefresh={() => {
+              if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
+            }}
+            onFilesystemMutated={handleFilesFilesystemMutated}
+            onLayoutChange={updateLayoutSettings}
+            onOpenFavorite={openFavorite}
+            onRemoveFavorite={removeFavorite}
+            onToggleFavorite={toggleFavorite}
+            isFavoriteMissing={isFavoriteMissing}
+            isFavorite={isFavorite}
+            onApplySkillToTarget={applySkillToFileTarget}
+            onAttachToTerminal={attachPathToTerminal}
+            onError={setError}
+          />
         ) : visibleAppMode === "studio" ? (
           <LazyStudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
@@ -8220,7 +8327,7 @@ function MainApp() {
           />
         ) : (
           <>
-            {documentsPaneOpen && maruSettings.ui.explorerPaneMode === "documents" ? (
+            {documentsPaneOpen ? (
               <DocumentList
                 documentIndex={documentIndex}
                 selectedPath={selectedPath}
@@ -8253,8 +8360,6 @@ function MainApp() {
                 searchInputRef={searchInputRef}
                 paneRef={documentsPaneRef}
                 vaultPath={explorerWorkspacePath}
-                paneMode={maruSettings.ui.explorerPaneMode}
-                onPaneModeChange={setExplorerPaneMode}
                 pendingRevealTargetPath={
                   pendingExplorerReveal?.pane === "documents"
                     ? pendingExplorerReveal.targetPath
@@ -8284,88 +8389,6 @@ function MainApp() {
                     operation,
                   );
                 }}
-              />
-            ) : null}
-            {documentsPaneOpen && maruSettings.ui.explorerPaneMode === "files" ? (
-              <WorkspaceFilesPane
-                entries={fileEntries}
-                selectedPaths={selectedFilePaths}
-                query={fileQuery}
-                loading={
-                  (booting ||
-                    explorerWorkspaceFilesState.loading ||
-                    shouldScanExplorerWorkspaceFiles) &&
-                  fileEntries.length === 0
-                }
-                refreshing={explorerWorkspaceFilesState.refreshing}
-                workspaceVisibility={explorerVisibility}
-                publicWorkspaceAvailable={publicWorkspaceAvailable}
-                activeWorkspaceLabel={explorerWorkspaceCaption}
-                paneMode={maruSettings.ui.explorerPaneMode}
-                filter={maruSettings.ui.workspaceFileFilter}
-                browserMode={maruSettings.ui.filesBrowserMode}
-                sortKey={maruSettings.ui.filesSortKey}
-                filesListAttributes={maruSettings.ui.filesListAttributes}
-                paneFilters={filesPaneFilters}
-                queuedSourcePaths={queuedSourcePaths}
-                binaryIncludePatterns={maruSettings.ui.binaryFileIncludePatterns}
-                collapsedFileFolders={collapsedFileFolders}
-                workspacePath={explorerWorkspacePath}
-                onWorkspaceVisibilityChange={(visibility) => {
-                  setExplorerVisibility(visibility);
-                  const nextPath = workspaceRegistry.activeByVisibility[visibility];
-                  if (nextPath && !workspaceStates[nextPath]?.entries.length) {
-                    void loadWorkspace(nextPath, visibility);
-                  }
-                }}
-                onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
-                onPaneModeChange={setExplorerPaneMode}
-                onQueryChange={setWorkspaceFileQuery}
-                onFilterChange={setWorkspaceFileFilter}
-                onBrowserModeChange={setFilesBrowserMode}
-                onSortKeyChange={setFilesSortKey}
-                onFilesListAttributesChange={setFilesListAttributes}
-                onCollapsedFileFoldersChange={setCollapsedFileFolders}
-                onSelectFile={selectWorkspaceFile}
-                onOpenFile={openWorkspaceFile}
-                onQueueFiles={queueWorkspaceFiles}
-                onRevealInFinder={revealTargetInFinder}
-                onRefresh={() => {
-                  if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
-                }}
-                onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}
-                paneRef={documentsPaneRef}
-                pendingRevealTargetPath={
-                  pendingExplorerReveal?.pane === "files"
-                    ? pendingExplorerReveal.targetPath
-                    : null
-                }
-                onRevealHandled={() => setPendingExplorerReveal(null)}
-                favorites={maruSettings.ui.favorites}
-                onOpenFavorite={openFavorite}
-                onRemoveFavorite={removeFavorite}
-                onToggleFavorite={toggleFavorite}
-                isFavorite={isFavorite}
-                isFavoriteMissing={isFavoriteMissing}
-                selectedFileQueueCount={selectedQueuedFileQueueItems.length}
-                onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
-                  void applySelectedFileQueueToDestination(
-                    targetPath,
-                    targetKind,
-                    operation,
-                    itemIds,
-                  );
-                }}
-                onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
-                  void applyExplorerDragSourcesToDestination(
-                    payload,
-                    targetPath,
-                    targetKind,
-                    operation,
-                  );
-                }}
-                onApplySkillToTarget={applySkillToFileTarget}
-                onAttachToTerminal={attachPathToTerminal}
               />
             ) : null}
             {documentsPaneOpen ? (
@@ -8413,7 +8436,7 @@ function MainApp() {
         )}
         </Suspense>
 
-        {outlineOpen ? (
+        {outlineOpen && visibleAppMode !== "files" ? (
           <div
             className="pane-resize-handle outline-pane-resize"
             role="separator"
@@ -8428,7 +8451,7 @@ function MainApp() {
           />
         ) : null}
 
-        {outlineOpen ? (
+        {outlineOpen && visibleAppMode !== "files" ? (
           <OutlinePane
             document={document}
             draftContent={draftContent}

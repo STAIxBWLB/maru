@@ -96,7 +96,10 @@ import type {
   TasksLogLineRecord,
   ScanOptions,
   VaultEntry,
+  WorkspaceEntriesSnapshot,
+  WorkspaceEntryNode,
   WorkspaceFileEntry,
+  WorkspaceMutationOutcome,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -290,6 +293,52 @@ export async function scanWorkspaceFiles(
 ): Promise<WorkspaceFileEntry[]> {
   if (!isTauri()) return mockWorkspaceFiles(vaultPath);
   return invoke<WorkspaceFileEntry[]>("scan_workspace_files", { vaultPath, scanOptions: scanOptions ?? null });
+}
+
+export async function scanWorkspaceEntries(
+  vaultPath: string,
+  scanOptions?: ScanOptions,
+): Promise<WorkspaceEntriesSnapshot> {
+  if (!isTauri()) {
+    const entries: WorkspaceEntryNode[] = mockWorkspaceFiles(vaultPath).map((entry) => ({
+      kind: "file",
+      targetKind: null,
+      parentRelPath: entry.relPath.split("/").slice(0, -1).join("/"),
+      ...entry,
+    }));
+    const directories = new Map<string, WorkspaceEntryNode>();
+    for (const entry of entries) {
+      const parts = entry.parentRelPath.split("/").filter(Boolean);
+      for (let index = 0; index < parts.length; index += 1) {
+        const relPath = parts.slice(0, index + 1).join("/");
+        if (directories.has(relPath)) continue;
+        directories.set(relPath, {
+          kind: "directory",
+          targetKind: null,
+          path: `${vaultPath.replace(/\/$/, "")}/${relPath}`,
+          relPath,
+          parentRelPath: parts.slice(0, index).join("/"),
+          name: parts[index],
+          extension: null,
+          fileKind: "directory",
+          sizeBytes: 0,
+          updatedAt: null,
+          gitTracked: false,
+          binary: false,
+        });
+      }
+    }
+    return {
+      revision: `mock:${entries.length}`,
+      entries: [...directories.values(), ...entries].sort((a, b) =>
+        a.relPath.localeCompare(b.relPath),
+      ),
+    };
+  }
+  return invoke<WorkspaceEntriesSnapshot>("scan_workspace_entries", {
+    vaultPath,
+    scanOptions: scanOptions ?? null,
+  });
 }
 
 export async function scanMeetingNotes(
@@ -1169,6 +1218,117 @@ export async function applyFileQueue(
     });
   }
   return invoke<FileQueueApplyOutcome[]>("apply_file_queue", { vaultPath, items });
+}
+
+export async function createWorkspaceDirectory(
+  vaultPath: string,
+  parentPath: string,
+  name: string,
+): Promise<WorkspaceMutationOutcome> {
+  if (!isTauri()) {
+    const targetPath = `${parentPath.replace(/\/$/, "")}/${name}`;
+    return {
+      sourcePath: null,
+      targetPath,
+      name,
+      status: "done",
+      error: null,
+    };
+  }
+  return invoke<WorkspaceMutationOutcome>("create_workspace_directory", {
+    vaultPath,
+    parentPath,
+    name,
+  });
+}
+
+export async function renameWorkspaceEntry(
+  vaultPath: string,
+  sourcePath: string,
+  newName: string,
+): Promise<WorkspaceMutationOutcome> {
+  if (!isTauri()) {
+    const parent = sourcePath.split("/").slice(0, -1).join("/");
+    return {
+      sourcePath,
+      targetPath: `${parent}/${newName}`,
+      name: newName,
+      status: "done",
+      error: null,
+    };
+  }
+  return invoke<WorkspaceMutationOutcome>("rename_workspace_entry", {
+    vaultPath,
+    sourcePath,
+    newName,
+  });
+}
+
+export async function duplicateWorkspaceEntries(
+  vaultPath: string,
+  sourcePaths: string[],
+): Promise<WorkspaceMutationOutcome[]> {
+  if (!isTauri()) {
+    return sourcePaths.map((sourcePath) => {
+      const name = sourcePath.split("/").pop() ?? "item";
+      return {
+        sourcePath,
+        targetPath: `${sourcePath}-copy`,
+        name: `${name}-copy`,
+        status: "done" as const,
+        error: null,
+      };
+    });
+  }
+  return invoke<WorkspaceMutationOutcome[]>("duplicate_workspace_entries", {
+    vaultPath,
+    sourcePaths,
+  });
+}
+
+export async function pasteWorkspaceEntries(
+  vaultPath: string,
+  sourcePaths: string[],
+  targetDir: string,
+  operation: FileStoreOperation,
+): Promise<WorkspaceMutationOutcome[]> {
+  if (!isTauri()) {
+    return sourcePaths.map((sourcePath) => {
+      const name = sourcePath.split("/").pop() ?? "item";
+      return {
+        sourcePath,
+        targetPath: `${targetDir.replace(/\/$/, "")}/${name}`,
+        name,
+        status: "done" as const,
+        error: null,
+      };
+    });
+  }
+  return invoke<WorkspaceMutationOutcome[]>("paste_workspace_entries", {
+    vaultPath,
+    sourcePaths,
+    targetDir,
+    operation,
+  });
+}
+
+export async function trashWorkspaceEntries(
+  vaultPath: string,
+  targetPaths: string[],
+): Promise<WorkspaceMutationOutcome[]> {
+  if (!isTauri()) {
+    return targetPaths.map((sourcePath) => ({
+      sourcePath,
+      targetPath: null,
+      name: sourcePath.split("/").pop() ?? "item",
+      status: "done" as const,
+      error: null,
+    }));
+  }
+  return invoke<WorkspaceMutationOutcome[]>("trash_workspace_entries", {
+    vaultPath,
+    targetPaths,
+  });
 }
 
 export async function describeFileQueueSources(paths: string[]): Promise<FileQueueSourceInfo[]> {

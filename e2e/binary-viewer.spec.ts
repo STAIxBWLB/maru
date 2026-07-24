@@ -1,125 +1,78 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test("opens a binary file as a viewer tab", async ({ page }) => {
+async function openAttachments(page: Page) {
   await page.goto("/");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await expect(files).toBeVisible();
+  await files.locator(".files-list-row", { hasText: "attachments" }).dblclick();
+  await expect(files.locator(".files-breadcrumbs")).toContainText("attachments");
+  return files;
+}
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+test("previews a binary file without leaving Files", async ({ page }) => {
+  const files = await openAttachments(page);
 
-  const pdfRow = explorer.getByRole("button", { name: /rise-budget-review\.pdf/ });
-  await expect(pdfRow).toBeVisible();
-  await pdfRow.dblclick();
+  await files.locator(".files-list-row", { hasText: "rise-budget-review.pdf" }).click();
 
-  const pdfTab = page.locator(
-    ".document-tab-title",
-    { hasText: "rise-budget-review.pdf" },
-  );
-  await expect(pdfTab).toBeVisible();
-  await expect(page.locator(".binary-viewer-shell")).toBeVisible();
-  await expect(page.locator(".binary-viewer-header strong")).toHaveText(
+  await expect(files.locator(".binary-viewer-shell")).toBeVisible();
+  await expect(files.locator(".binary-viewer-header strong")).toHaveText(
     "rise-budget-review.pdf",
   );
-  await expect(page.locator(".binary-viewer-native-pdf")).toBeVisible();
-  await expect(page.locator(".binary-viewer--pdf")).toContainText("WebView");
-
-  // Closing the binary tab from the strip removes the viewer.
-  await page
-    .locator(".document-tab", { has: pdfTab })
-    .locator(".document-tab-close")
-    .click();
-  await expect(pdfTab).toHaveCount(0);
-  await expect(page.locator(".binary-viewer-shell")).toHaveCount(0);
+  await expect(files.locator(".binary-viewer-native-pdf")).toBeVisible();
+  await expect(files.locator(".binary-viewer--pdf")).toContainText("WebView");
+  await expect(page.locator(".files-workbench")).toBeVisible();
 });
 
-test("right-clicking a binary file exposes Open file menu item", async ({ page }) => {
-  await page.goto("/");
+test("right-clicking a binary file exposes file operations", async ({ page }) => {
+  const files = await openAttachments(page);
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-
-  await explorer
-    .getByRole("button", { name: /rise-budget-review\.pdf/ })
+  await files
+    .locator(".files-list-row", { hasText: "rise-budget-review.pdf" })
     .click({ button: "right" });
 
-  await expect(
-    page.locator(".context-menu").getByRole("menuitem", { name: "파일 열기" }),
-  ).toBeVisible();
+  const menu = page.locator(".files-context-menu");
+  await expect(menu.getByRole("menuitem", { name: "열기", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "이름 변경" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "휴지통으로 이동" })).toBeVisible();
 });
 
-test("opens unsupported binaries in a safe fallback viewer", async ({ page }) => {
-  await page.goto("/");
+test("previews unsupported binaries in a safe fallback", async ({ page }) => {
+  const files = await openAttachments(page);
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await files.locator(".files-list-row", { hasText: "raw-dump.bin" }).click();
 
-  await explorer.getByRole("button", { name: /raw-dump\.bin/ }).dblclick();
-
-  await expect(page.locator(".document-tab[title='attachments/raw-dump.bin']")).toBeVisible();
-  await expect(page.locator(".binary-viewer--unsupported")).toBeVisible();
-  await expect(page.locator(".binary-viewer--unsupported")).toContainText(
+  await expect(files.locator(".binary-viewer--unsupported")).toBeVisible();
+  await expect(files.locator(".binary-viewer--unsupported")).toContainText(
     "미리보기를 지원하지 않는 파일",
   );
-  await expect(page.locator(".binary-viewer--unsupported")).toContainText("시스템 미리보기");
+  await expect(files.locator(".binary-viewer--unsupported")).toContainText("시스템 미리보기");
 });
 
-test("opens Office binaries as system preview shells", async ({ page }) => {
-  await page.goto("/");
+test("previews Office binaries as system preview shells", async ({ page }) => {
+  const files = await openAttachments(page);
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
+  await files.locator(".files-list-row", { hasText: "sample-report.docx" }).click();
+  await expect(
+    files.locator(".binary-viewer--docx.binary-viewer--system-preview"),
+  ).toBeVisible();
+  await expect(files.locator(".binary-viewer--docx")).toContainText("시스템 미리보기");
 
-  await explorer.getByRole("button", { name: /sample-report\.docx/ }).dblclick();
-  await expect(page.locator(".document-tab[title='attachments/sample-report.docx']")).toBeVisible();
-  await expect(page.locator(".binary-viewer--docx.binary-viewer--system-preview")).toBeVisible();
-  await expect(page.locator(".binary-viewer--docx")).toContainText("시스템 미리보기");
-  await expect(page.locator(".binary-viewer-canvas--docx")).toHaveCount(0);
-
-  await explorer.getByRole("button", { name: /weekly-kpi\.xlsx/ }).dblclick();
-  await expect(page.locator(".document-tab[title='attachments/weekly-kpi.xlsx']")).toBeVisible();
-  await expect(page.locator(".binary-viewer--xlsx.binary-viewer--system-preview")).toBeVisible();
-  await expect(page.locator(".binary-viewer--xlsx")).toContainText("시스템 미리보기");
-  await expect(page.locator(".binary-viewer-canvas--xlsx")).toHaveCount(0);
+  await files.locator(".files-list-row", { hasText: "weekly-kpi.xlsx" }).click();
+  await expect(
+    files.locator(".binary-viewer--xlsx.binary-viewer--system-preview"),
+  ).toBeVisible();
+  await expect(files.locator(".binary-viewer--xlsx")).toContainText("시스템 미리보기");
 });
 
-test("keeps mixed document and binary tabs in visible order", async ({ page }) => {
-  await page.goto("/");
+test("summarizes multi-selection in the preview pane", async ({ page }) => {
+  const files = await openAttachments(page);
+  const pdf = files.locator(".files-list-row", { hasText: "rise-budget-review.pdf" });
+  const sheet = files.locator(".files-list-row", { hasText: "weekly-kpi.xlsx" });
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /rise-budget-review\.pdf/ }).dblclick();
-  await expect(page.locator(".document-tab[title='attachments/rise-budget-review.pdf']")).toBeVisible();
-  await explorer.getByRole("button", { name: /maru-glossary\.md/ }).dblclick();
+  await pdf.click();
+  await sheet.click({ modifiers: ["Meta"] });
 
-  const tabPaths = await page.locator(".document-tab").evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute("title")),
-  );
-  expect(tabPaths).toEqual([
-    "maru-weekly-meeting.md",
-    "attachments/rise-budget-review.pdf",
-    "references/maru-glossary.md",
-  ]);
-
-  await page.locator(".document-tab[title='attachments/rise-budget-review.pdf']").click({
-    button: "right",
-  });
-  await page.getByRole("menuitem", { name: "오른쪽 탭 닫기" }).click();
-  await expect(page.locator(".document-tab[title='references/maru-glossary.md']")).toHaveCount(0);
-  await expect(page.locator(".document-tab[title='attachments/rise-budget-review.pdf']")).toBeVisible();
-});
-
-test("can split a binary viewer to the right pane", async ({ page }) => {
-  await page.goto("/");
-
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /rise-budget-review\.pdf/ }).dblclick();
-
-  await page.getByRole("button", { name: "오른쪽으로 분할" }).click();
-  await expect(page.locator(".binary-viewer-shell")).toHaveCount(2);
+  await expect(files.locator(".files-preview-summary")).toContainText("2개 항목 선택");
+  await expect(files.locator(".files-preview-summary")).toContainText("파일");
 });

@@ -63,9 +63,7 @@ import type {
   MaruSettings,
   DocumentBrowserMode,
   DocumentLabelMode,
-  ExplorerPaneMode,
   FileQueueDefaultOperation,
-  FilesBrowserMode,
   FilesListAttribute,
   FilesSortKey,
   TerminalDock,
@@ -1735,18 +1733,6 @@ function PreferencesTab({
     );
   };
 
-  const updateExplorerPaneMode = (explorerPaneMode: ExplorerPaneMode) => {
-    onSettingsChange(
-      normalizeMaruSettings({
-        ...settings,
-        ui: {
-          ...settings.ui,
-          explorerPaneMode,
-        },
-      }),
-    );
-  };
-
   const updateWorkspaceFileFilter = (workspaceFileFilter: WorkspaceFileFilter) => {
     onSettingsChange(
       normalizeMaruSettings({
@@ -1754,18 +1740,6 @@ function PreferencesTab({
         ui: {
           ...settings.ui,
           workspaceFileFilter,
-        },
-      }),
-    );
-  };
-
-  const updateFilesBrowserMode = (filesBrowserMode: FilesBrowserMode) => {
-    onSettingsChange(
-      normalizeMaruSettings({
-        ...settings,
-        ui: {
-          ...settings.ui,
-          filesBrowserMode,
         },
       }),
     );
@@ -1939,16 +1913,6 @@ function PreferencesTab({
     <div className="system-detail" style={{ width: "100%" }}>
       <div className="settings-form">
         <label className="field">
-          <span>{t("system.preferences.explorerPane")}</span>
-          <select
-            value={settings.ui.explorerPaneMode}
-            onChange={(event) => updateExplorerPaneMode(event.target.value as ExplorerPaneMode)}
-          >
-            <option value="documents">{t("explorer.mode.documents")}</option>
-            <option value="files">{t("explorer.mode.files")}</option>
-          </select>
-        </label>
-        <label className="field">
           <span>{t("system.preferences.documentBrowser")}</span>
           <select
             value={settings.ui.documentBrowserMode}
@@ -1969,16 +1933,6 @@ function PreferencesTab({
             <option value="all">{t("files.filter.all")}</option>
             <option value="tracked">{t("files.filter.tracked")}</option>
             <option value="binary">{t("files.filter.binary")}</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>{t("system.preferences.filesBrowser")}</span>
-          <select
-            value={settings.ui.filesBrowserMode}
-            onChange={(event) => updateFilesBrowserMode(event.target.value as FilesBrowserMode)}
-          >
-            <option value="list">{t("files.view.list")}</option>
-            <option value="tree">{t("files.view.tree")}</option>
           </select>
         </label>
         <label className="field">

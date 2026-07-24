@@ -336,6 +336,31 @@ fn read_json(path: &Path) -> Result<JsonValue, String> {
 }
 
 fn default_settings_json() -> JsonValue {
+    // Keep the layout object separate so serde_json's recursive json! macro
+    // stays below the compiler recursion limit as this schema grows.
+    let layout = json!({
+        "documentTypesPaneOpen": true,
+        "documentsPaneOpen": true,
+        "documentsPaneWidth": 340,
+        "filesTreeOpen": true,
+        "filesTreeWidth": 260,
+        "filesPreviewOpen": true,
+        "filesPreviewWidth": 440,
+        "outlineOpen": true,
+        "outlinePaneWidth": 280,
+        "terminalOpen": false,
+        "terminalHeight": 260,
+        "terminalDock": "bottom",
+        "terminalWidth": 640,
+        "terminalMaximized": false,
+        "toolPanelSurface": "terminal",
+        "editorSplitOpen": false,
+        "editorSplitRatio": 0.5,
+        "terminalSplitOpen": false,
+        "terminalSplitRatio": 0.5,
+        "windowBounds": null,
+        "windowMaximized": null
+    });
     json!({
         "version": SCHEMA_VERSION,
         "ui": {
@@ -351,7 +376,7 @@ fn default_settings_json() -> JsonValue {
             "documentBrowserMode": "tree",
             "documentLabelMode": "title",
             "workspaceFileFilter": "all",
-            "filesBrowserMode": "tree",
+            "filesBrowserMode": "list",
             "filesSortKey": "name",
             "filesListAttributes": ["parent", "kind", "modified", "size"],
             "binaryFileIncludePatterns": [
@@ -395,25 +420,7 @@ fn default_settings_json() -> JsonValue {
             "fileQueueDefaultOperation": "copy",
             "themeMode": "system",
             "accentColor": "#2f5a3c",
-            "layout": {
-                "documentTypesPaneOpen": true,
-                "documentsPaneOpen": true,
-                "documentsPaneWidth": 340,
-                "outlineOpen": true,
-                "outlinePaneWidth": 280,
-                "terminalOpen": false,
-                "terminalHeight": 260,
-                "terminalDock": "bottom",
-                "terminalWidth": 640,
-                "terminalMaximized": false,
-                "toolPanelSurface": "terminal",
-                "editorSplitOpen": false,
-                "editorSplitRatio": 0.5,
-                "terminalSplitOpen": false,
-                "terminalSplitRatio": 0.5,
-                "windowBounds": null,
-                "windowMaximized": null
-            }
+            "layout": layout
         },
         "terminal": {
             "defaultPanelOpen": false,

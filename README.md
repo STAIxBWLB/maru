@@ -9,7 +9,7 @@ Code skills, drives Korean document (HWPX/DOCX/PDF) operations, and visualizes
 the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 **Anchor**; the M0 rename (`kr.maru.desktop`, `~/.maru/`) landed in v0.3.0.
 
-## Status (2026-07-11)
+## Status (2026-07-24)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -18,7 +18,7 @@ the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane, in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color). Rayon-parallel workspace scan + cache-backed warm startup. Multi-tab editor (⌘1..⌘8 / ⌘W, dirty stash). BlockNote rich + source + preview modes persist independently per split pane; ⌘W closes the focused editor or terminal tab. Browser smoke e2e. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | ✅ write loop live | Polling scan + notify watcher + Korean date parser + Claude CLI bridge + classifier + Gmail via `gws`, plus `InboxPane` (classify/accept/reject/process, approval gate, Maru labels, `a`/`r`/`p`, bulk actions, mission log tails). |
-| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Documents/Files Explorer, VS Code-style file tree + copy/move queue, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
+| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Separate Documents and Finder-style Files workspaces, file tree + direct-child list + inline preview, copy/move/rename/duplicate/system-Trash operations, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
 | 3 — Unified document ops (M1–M7) | ✅ W1–W6 + skills SSOT | Operations Catalog mode (`ops_catalog::scan`, fs watcher, Hub HTTP read + ETag/offline fallback, drilldown + Reveal), Hub Library client + template-aware new doc, Writing Guideline sidebar. Rust `skill_host` owns tiers (core/public/private/imported/managed), doctor validation, dirty/reconcile. maru-hub backs shared catalog (REST + Alembic + seeds). |
 | 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
 | 5 — Evidence Binder | ✅ W13 shipped | Right-pane Evidence Binder tab keyed by doc id, state under `<workspace>/.maru/binder/<doc-id>.json`, seeds from inbox-processed files + `<binary>.evidence.yaml` sidecars scoped to the active BU, `kordoc_lite` format detection + HWPX field previews. W14–W18 (section/KPI/checklist bindings + Deck Studio) planned. |
@@ -32,13 +32,14 @@ The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md)
 
 ## Modes
 
-The activity rail exposes eleven top-level modes (Settings opens as a separate
+The activity rail exposes twelve top-level modes (Settings opens as a separate
 window, so it is not an app mode). Diagram and Graph default on; E2E Flow is
 flag-gated.
 
 | Mode | Label (ko / en) | What it does |
 |------|-----------------|--------------|
-| `pkm` | 문서 / Docs | Default. Markdown editor + Documents/Files Explorer + right utility rail. |
+| `pkm` | 문서 / Docs | Default. Markdown/HTML document tree, editor, and right utility rail. |
+| `files` | 파일 / Files | Finder-style workspace with folder tree, direct-child list, selection preview, search/filter/sort, and filesystem operations. |
 | `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
@@ -98,6 +99,26 @@ Local assets:
   snapshots) preserve the original HTML extension, including case, and the
   vault scanner/watcher recognize HTML extensions case-insensitively.
 
+## Files workspace
+
+Files is independent from the Documents pane. It scans files, empty folders,
+and symlinks as first-class entries, then presents a resizable folder tree,
+the current folder's direct children, and a resizable preview pane. Searching
+within a folder includes its descendants; normal browsing remains direct-child
+only.
+
+- Single-click selects and previews; double-click opens a folder, a document
+  in Docs, or another file in its external app.
+- Multi-select, range select, keyboard navigation, drag/drop, rename, duplicate,
+  Maru-internal cut/copy/paste, and new-folder creation are supported.
+- Delete moves entries to the operating system Trash. Risky deletes require
+  confirmation, and deletes containing unsaved open documents are blocked.
+- Managed workspaces are read-only in Files. Read-only and delegated capability
+  policies are enforced again by the Rust command layer.
+- Rename/move uses the existing `.maru-rename-txn` journal and scan-time
+  recovery. Collisions never overwrite an existing item; copy/paste chooses a
+  `-copy` suffix.
+
 ## Install
 
 Maru ships the desktop app and CLI as separate artifacts. On macOS, both are
@@ -137,10 +158,10 @@ make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
 │   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
 │   Sigma WebGL + Graphology · CodeMirror · alacritty canvas    │
 │                                                               │
-│   Activity rail (11 modes):                                  │
-│     Docs / Inbox / Messages / Meetings / Tasks /             │
+│   Activity rail (12 modes):                                  │
+│     Docs / Files / Inbox / Messages / Meetings / Tasks /     │
 │     Catalog / Studio / Diagram / Graph / Sites / E2E         │
-│   Explorer + editor tabs + copy/move queue + Terminal/Graph Panel│
+│   Files tree/list/preview + editor tabs + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐

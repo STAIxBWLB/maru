@@ -321,7 +321,6 @@ test("restores the previous app state on startup", async ({ page }) => {
   await ensureRightPaneVisible(page);
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await page.getByLabel("오른쪽으로 분할").first().click();
-  await page.getByRole("button", { name: "Files" }).click();
   await page.getByRole("tab", { name: "파일" }).click();
   await expect
     .poll(() =>
@@ -356,7 +355,9 @@ test("restores the previous app state on startup", async ({ page }) => {
   await page.reload();
 
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Files" })).toHaveClass(/active/);
+  await expect(
+    page.locator(".activity-rail").getByRole("button", { name: "문서", exact: true }),
+  ).toHaveClass(/active/);
   await expect(page.getByRole("tab", { name: "파일" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -768,59 +769,50 @@ test("keeps macOS window controls outside custom drag regions", async ({ page })
   expect(dragRegion.guardWidth).toBeGreaterThanOrEqual(70);
 });
 
-test("switches between Documents and Files explorer modes", async ({ page }) => {
+test("switches between standalone Documents and Files workspaces", async ({ page }) => {
   await page.goto("/");
 
-  const explorer = page.locator(".document-list");
-  await expect(explorer.getByRole("button", { name: "Documents" })).toHaveClass(/active/);
-  await expect(explorer.getByRole("button", { name: "목록" })).toBeVisible();
+  await expect(page.locator(".document-list")).toBeVisible();
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
 
-  await explorer.getByRole("button", { name: "Files" }).click();
+  const files = page.locator(".files-workbench");
+  await expect(files).toBeVisible();
+  await expect(files.locator(".files-tree-pane")).toBeVisible();
+  await expect(files.locator(".files-collection-pane")).toBeVisible();
+  await expect(files.locator(".files-preview-pane")).toBeVisible();
+  await expect(files.locator(".files-list-row", { hasText: "attachments" })).toBeVisible();
+  await expect(
+    files.locator(".files-list-row", { hasText: "rise-budget-review.pdf" }),
+  ).toHaveCount(0);
 
-  await expect(explorer.getByRole("heading", { name: "파일" })).toBeVisible();
-  const filesViewControls = explorer.getByRole("group", { name: "파일 보기 방식" });
-  await expect(filesViewControls.getByRole("button", { name: "목록" })).toBeVisible();
-  await expect(filesViewControls.getByRole("button", { name: "트리" })).toHaveClass(/active/);
-  await expect(explorer.getByRole("button", { name: "Git tracked" })).toBeVisible();
-  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
-  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".files-workbench")).toBeVisible();
 
-  await explorer.getByRole("button", { name: "Binary" }).click();
-  await expect(explorer.getByRole("button", { name: /attachments/ })).toBeVisible();
-  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toBeVisible();
-  await explorer.getByRole("button", { name: "모두 접기" }).click();
-  await expect(explorer.getByRole("button", { name: /rise-budget-review\.pdf/ })).toHaveCount(0);
-  await expect(explorer.getByRole("button", { name: /maru-weekly-meeting\.md/ })).toHaveCount(0);
+  await files.getByRole("tree").getByRole("button", { name: "attachments", exact: true }).click();
+  const pdf = files.locator(".files-list-row", { hasText: "rise-budget-review.pdf" });
+  await expect(pdf).toBeVisible();
+  await pdf.click();
+  await expect(files.locator(".binary-viewer--pdf")).toBeVisible();
 
-  await explorer.getByRole("button", { name: "전체" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /maru-glossary\.md/ }).dblclick();
-  await expect(page.locator(".document-tab-title", { hasText: "Maru 용어집" })).toBeVisible();
-  await explorer.getByRole("button", { name: "모두 접기" }).click();
-  await expect(explorer.getByRole("button", { name: /maru-glossary\.md/ })).toHaveCount(0);
+  await files.getByRole("button", { name: "폴더 트리 숨기기" }).click();
+  await expect(files.locator(".files-tree-pane")).toHaveCount(0);
+  await files.getByRole("button", { name: "폴더 트리 보이기" }).click();
+  await expect(files.locator(".files-tree-pane")).toBeVisible();
 
-  await page.locator(".document-tab[title='references/maru-glossary.md']").click({
-    button: "right",
-  });
-  await page
-    .locator(".document-tab-context-menu")
-    .getByRole("menuitem", { name: "Explorer View에서 보기" })
-    .click();
-  const revealedFile = explorer.getByRole("button", { name: /maru-glossary\.md/ });
-  await expect(explorer.getByRole("button", { name: "Files" })).toHaveClass(/active/);
-  await expect(revealedFile).toBeVisible();
-  await expect(revealedFile).toBeFocused();
+  await page.locator(".activity-rail").getByRole("button", { name: "문서", exact: true }).click();
+  await expect(page.locator(".document-list")).toBeVisible();
+  await expect(page.locator(".files-workbench")).toHaveCount(0);
 });
 
 test("queues selected files in the right Files pane and applies explicitly", async ({ page }) => {
   await page.goto("/");
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: /maru-weekly-meeting\.md/ }).click();
-  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" }).click();
+  await files.getByRole("button", { name: "선택 파일 추가" }).click();
+  await rail.getByRole("button", { name: "문서", exact: true }).click();
 
   const rightPane = page.locator(".outline-pane");
   await expect(rightPane.getByRole("tab", { name: "파일" })).toHaveAttribute("aria-selected", "true");
@@ -837,13 +829,15 @@ test("queues selected files in the right Files pane and applies explicitly", asy
 test("clears selected and all file shelf items explicitly", async ({ page }) => {
   await page.goto("/");
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /maru-weekly-meeting\.md/ }).click();
-  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
-  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
-  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" }).click();
+  await files.getByRole("button", { name: "선택 파일 추가" }).click();
+  await files.getByPlaceholder("파일명, 경로 검색").fill("minutes-template");
+  await files.locator(".files-list-row", { hasText: "minutes-template.md" }).click();
+  await files.getByRole("button", { name: "선택 파일 추가" }).click();
+  await rail.getByRole("button", { name: "문서", exact: true }).click();
 
   const rightPane = page.locator(".outline-pane");
   await rightPane.getByRole("tab", { name: "파일" }).click();
@@ -859,34 +853,22 @@ test("clears selected and all file shelf items explicitly", async ({ page }) => 
   await expect(rightPane.locator(".outline-empty", { hasText: "대기 중인 파일 작업이 없습니다." })).toBeVisible();
 });
 
-test("copies selected Files shelf items into a tree context target", async ({ page }) => {
+test("copies selected Files items with the internal clipboard", async ({ page }) => {
   await page.goto("/");
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /maru-weekly-meeting\.md/ }).click();
-  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
-  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click();
-  await explorer.getByRole("button", { name: "선택 파일 추가" }).click();
-
-  const rightPane = page.locator(".outline-pane");
-  await rightPane.getByRole("tab", { name: "파일" }).click();
-  const weeklyItem = rightPane.locator(".right-list-item.queue", {
-    hasText: "maru-weekly-meeting.md",
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.getByPlaceholder("파일명, 경로 검색").fill(".md");
+  await files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" }).click();
+  await files.locator(".files-list-row", { hasText: "minutes-template.md" }).click({
+    modifiers: ["Meta"],
   });
-  const templateItem = rightPane.locator(".right-list-item.queue", {
-    hasText: "minutes-template.md",
-  });
-  await expect(weeklyItem).toBeVisible();
-  await expect(templateItem).toBeVisible();
-  await weeklyItem.click();
-  await templateItem.click({ modifiers: ["Meta"] });
-  await expect(rightPane.getByRole("button", { name: "선택 항목 2개 비우기" })).toBeEnabled();
+  await files.getByRole("button", { name: "복사", exact: true }).click();
+  await expect(files.locator(".files-statusbar")).toContainText("2개 항목 복사 대기");
 
-  await explorer.getByRole("button", { name: /templates/ }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "선택 항목 2개 여기에 복사" }).click();
-  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
+  await files.getByRole("tree").getByRole("button", { name: "templates", exact: true }).click();
+  await files.getByRole("button", { name: "붙여넣기", exact: true }).click();
+  await expect(page.locator(".toast")).toHaveCount(0);
 });
 
 test("drags a Documents list item into the right Files shelf", async ({ page }) => {
@@ -925,14 +907,14 @@ test("drags explorer items directly onto left tree targets", async ({ page }) =>
   await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(1);
 });
 
-test("drags multi-selected Files rows and folder rows", async ({ page }) => {
+test("drags multi-selected Files rows onto a folder tree target", async ({ page }) => {
   await page.goto("/");
 
-  const explorer = page.locator(".document-list");
-  await explorer.getByRole("button", { name: "Files" }).click();
-  await explorer.getByRole("button", { name: "모두 펴기" }).click();
-  await explorer.getByRole("button", { name: /maru-weekly-meeting\.md/ }).click();
-  await explorer.getByRole("button", { name: /minutes-template\.md/ }).click({
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.getByPlaceholder("파일명, 경로 검색").fill(".md");
+  await files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" }).click();
+  await files.locator(".files-list-row", { hasText: "minutes-template.md" }).click({
     modifiers: ["Meta"],
   });
 
@@ -941,23 +923,14 @@ test("drags multi-selected Files rows and folder rows", async ({ page }) => {
   // pointer and starts the drag from the wrong row.
   await dispatchDrag(
     page,
-    ".document-list .tree-row.file",
+    ".files-list .files-list-row",
     "maru-weekly-meeting.md",
-    ".document-list .tree-row.folder",
+    ".files-tree-scroll .files-tree-row",
     "attachments",
   );
 
-  const rightPane = page.locator(".outline-pane");
-  await expect(rightPane.locator(".right-list-item.queue.done")).toHaveCount(2);
-  await rightPane.getByRole("button", { name: "전체 비우기" }).click();
-
-  await page
-    .locator(".document-list .tree-row.folder", { hasText: "attachments" })
-    .dragTo(page.getByRole("tab", { name: "파일" }));
-  await expect(
-    rightPane.locator(".right-list-item.queue", { hasText: "attachments" }),
-  ).toBeVisible();
-  await expect(rightPane.locator('.queue-file-icon[data-kind="directory"]')).toBeVisible();
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await expect(files.locator(".files-statusbar")).toContainText("0개 선택");
 });
 
 test("blocks moving dirty open documents by drag and drop", async ({ page }) => {

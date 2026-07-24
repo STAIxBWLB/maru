@@ -16,6 +16,29 @@ describe("normalizeMaruSettings", () => {
     expect(normalizeMaruSettings("not-json")).toEqual(DEFAULT_MARU_SETTINGS);
   });
 
+  it("migrates the legacy Files explorer pane into the standalone Files mode", () => {
+    const settings = normalizeMaruSettings({
+      ui: {
+        activeAppMode: "pkm",
+        explorerPaneMode: "files",
+        filesBrowserMode: "tree",
+        layout: {
+          filesTreeOpen: false,
+          filesTreeWidth: 100,
+          filesPreviewOpen: false,
+          filesPreviewWidth: 900,
+        },
+      },
+    });
+
+    expect(settings.ui.activeAppMode).toBe("files");
+    expect(settings.ui.filesBrowserMode).toBe("list");
+    expect(settings.ui.layout.filesTreeOpen).toBe(false);
+    expect(settings.ui.layout.filesTreeWidth).toBe(220);
+    expect(settings.ui.layout.filesPreviewOpen).toBe(false);
+    expect(settings.ui.layout.filesPreviewWidth).toBe(720);
+  });
+
   it("accepts the 'both' document label mode and falls back for unknown values", () => {
     expect(normalizeMaruSettings({ ui: { documentLabelMode: "both" } }).ui.documentLabelMode).toBe(
       "both",
@@ -925,6 +948,10 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.terminalOpen).toBe(false);
     expect(settings.ui.layout.terminalDock).toBe("bottom");
     expect(settings.ui.layout.terminalWidth).toBe(640);
+    expect(settings.ui.layout.filesTreeOpen).toBe(true);
+    expect(settings.ui.layout.filesTreeWidth).toBe(260);
+    expect(settings.ui.layout.filesPreviewOpen).toBe(true);
+    expect(settings.ui.layout.filesPreviewWidth).toBe(440);
     expect(settings.terminal.defaultPanelOpen).toBe(false);
     expect(settings.terminal.autoLaunch).toBe("shell");
   });
