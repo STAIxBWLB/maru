@@ -3108,6 +3108,15 @@ function MainApp() {
     refreshSourceRuns,
   ]);
 
+  // Latest-callback ref so the comms-mode effect below re-runs only on mode or
+  // workspace changes — not every time a filter recreates the dashboard
+  // callback (which would re-subscribe the telegram listener and re-run the
+  // provider auth CLI checks on each keystroke).
+  const refreshCommsDashboardRef = useRef(refreshCommsDashboard);
+  useEffect(() => {
+    refreshCommsDashboardRef.current = refreshCommsDashboard;
+  }, [refreshCommsDashboard]);
+
   const updateInboxCarry = useCallback(
     (id: string, patch: Partial<InboxCarry>) => {
       setInboxCarry((prev) => {
@@ -3839,7 +3848,7 @@ function MainApp() {
     if (appMode !== "comms") return;
     let disposed = false;
     let unlistenTelegram: (() => void) | null = null;
-    void refreshCommsDashboard();
+    void refreshCommsDashboardRef.current();
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
         listen("telegram://messages", (event) => {
@@ -3864,10 +3873,12 @@ function MainApp() {
       disposed = true;
       unlistenTelegram?.();
     };
-  }, [appMode, inboxWorkspacePath, refreshCommsDashboard]);
+  }, [appMode, inboxWorkspacePath]);
 
   useEffect(() => {
-    if (appMode === "inbox") void refreshProcessedItems();
+    // In comms this is also the filter/search refetch path: the callback
+    // identity changes with the query and channel, re-running this effect.
+    if (appMode === "inbox" || appMode === "comms") void refreshProcessedItems();
     if (!booting && settingsWorkspaceStartupReady && (
       appMode === "inbox" ||
       appMode === "meetings" ||

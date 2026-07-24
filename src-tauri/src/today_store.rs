@@ -120,6 +120,21 @@ struct FinalizeJournal {
     outcome: Option<TodayFinalizeSetupOutcome>,
 }
 
+/// Terminal journals only matter for near-term replays; drop them once they
+/// age out so the finalize directory does not grow forever.
+const FINALIZE_JOURNAL_RETENTION_SECS: u64 = 30 * 24 * 60 * 60;
+
+fn prune_stale_finalize_journal(path: &Path) {
+    let stale = fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age.as_secs() > FINALIZE_JOURNAL_RETENTION_SECS);
+    if stale {
+        let _ = fs::remove_file(path);
+    }
+}
+
 fn write_finalize_journal(path: &Path, journal: &FinalizeJournal) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(journal)
         .map_err(|err| format!("Cannot serialize today finalize journal: {err}"))?;
@@ -192,7 +207,10 @@ fn recover_finalize_journals(work: &Path) -> Result<(), String> {
             continue;
         };
         match journal.phase {
-            FinalizeJournalPhase::Committed | FinalizeJournalPhase::RolledBack => continue,
+            FinalizeJournalPhase::Committed | FinalizeJournalPhase::RolledBack => {
+                prune_stale_finalize_journal(&path);
+                continue;
+            }
             FinalizeJournalPhase::Committing => {
                 let committed = journal.outcome.as_ref().is_some_and(|outcome| {
                     fs::read_to_string(state_path(work, &journal.request.logical_day))
@@ -663,7 +681,12 @@ pub fn today_finalize_setup(
     if let Ok(raw) = fs::read_to_string(&journal_path) {
         let existing: FinalizeJournal = serde_json::from_str(&raw)
             .map_err(|err| format!("today_finalize_journal_corrupt: {err}"))?;
-        if existing.request_hash != request_hash {
+        // A rolled-back journal is terminal: its key is free for a corrected
+        // retry even when the request bytes changed. Only a committed receipt
+        // (replay) or an in-flight journal pins the original request.
+        if existing.phase != FinalizeJournalPhase::RolledBack
+            && existing.request_hash != request_hash
+        {
             return Err("today_finalize_idempotency_conflict".to_string());
         }
         if existing.phase == FinalizeJournalPhase::Committed {
@@ -1676,6 +1699,39 @@ mod tests {
             Some(YesterdayResolution::KeepLater)
         );
         assert!(!tmp.path().join("tasks/active").exists());
+    }
+
+    #[test]
+    fn finalize_retries_with_a_modified_request_after_rollback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let snapshot = open_day(&work, "2026-07-21T09:00:00+09:00");
+        let request = TodayFinalizeSetupRequest {
+            logical_day: snapshot.logical_day.clone(),
+            expected_revision: snapshot.revision.clone(),
+            idempotency_key: "retry-after-rollback".to_string(),
+            action: TodayFinalizeAction::Skip,
+            plan: None,
+            captures: vec![],
+            unresolved_policy: UnresolvedPolicy::KeepLater,
+        };
+        write_finalize_journal(
+            &finalize_journal_path(tmp.path(), &request.idempotency_key),
+            &FinalizeJournal {
+                request_hash: "different-earlier-request".to_string(),
+                request: request.clone(),
+                phase: FinalizeJournalPhase::RolledBack,
+                created_files: vec![],
+                materialized: vec![],
+                outcome: None,
+            },
+        )
+        .unwrap();
+
+        let outcome = today_finalize_setup(work, request).unwrap();
+
+        assert!(!outcome.replayed);
+        assert_eq!(outcome.snapshot.day_state, DayState::Skipped);
     }
 
     #[test]

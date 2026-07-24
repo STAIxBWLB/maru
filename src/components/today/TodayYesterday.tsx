@@ -18,7 +18,7 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { readDocument } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
@@ -91,6 +91,20 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
   const [menuTaskId, setMenuTaskId] = useState<string | null>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!menuTaskId) return;
+    const close = () => setMenuTaskId(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuTaskId]);
 
   const filteredItems = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -258,7 +272,10 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
     );
     const topFull = !topContainsItem && (snapshot?.plan?.top.length ?? 0) >= 3;
     return (
-      <div className="today-yesterday-menu-wrap">
+      <div
+        className="today-yesterday-menu-wrap"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <button
           type="button"
           className="today-icon-button today-icon-button-sm"

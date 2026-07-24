@@ -8980,6 +8980,15 @@ button.git-badge:hover {
   cursor: not-allowed;
 }
 
+.today-refresh-error {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--danger);
+}
+
 .today-quick-skip:focus-visible,
 .today-refresh-action:focus-visible {
   outline: 2px solid var(--focus-ring);

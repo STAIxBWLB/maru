@@ -35,17 +35,17 @@
     {
       "selector": ".today-panel-braindump",
       "property": "width",
-      "expected": 441.61,
+      "expected": 447.2,
       "tolerance": 4,
-      "measured": 441.61,
+      "measured": 447.19,
       "within": true
     },
     {
       "selector": ".today-panel-capture",
       "property": "width",
-      "expected": 676.39,
+      "expected": 670.8,
       "tolerance": 4,
-      "measured": 676.39,
+      "measured": 670.81,
       "within": true
     }
   ],
@@ -54,9 +54,9 @@
       "width": 1487,
       "height": 1058
     },
-    "brainDumpWidth": 441.61,
-    "captureWidth": 676.39,
-    "measuredSplit": "39.5/60.5",
+    "brainDumpWidth": 447.19,
+    "captureWidth": 670.81,
+    "measuredSplit": "40.0/60.0",
     "docScrollWidth": 1487,
     "docClientWidth": 1487
   },
@@ -65,8 +65,8 @@
       "width": 1440,
       "height": 920
     },
-    "brainDumpWidth": 423.03,
-    "captureWidth": 647.97,
+    "brainDumpWidth": 428.39,
+    "captureWidth": 642.61,
     "sideBySide": true
   },
   "compact": {

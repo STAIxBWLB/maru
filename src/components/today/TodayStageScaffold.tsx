@@ -73,6 +73,11 @@ export function TodayStageScaffold({
             </span>
           </p>
           <div className="today-header-actions">
+            {refreshError ? (
+              <span className="today-refresh-error" role="alert">
+                {refreshError}
+              </span>
+            ) : null}
             <button
               type="button"
               className="today-refresh-action"

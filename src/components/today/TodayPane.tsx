@@ -285,11 +285,15 @@ export function TodayPane({
         const outcome = await todayFinalizeSetup(workPath, request);
         if (identity === paneIdentityRef.current) {
           applySnapshot(outcome.snapshot);
+          setRefreshError(null);
         }
         return outcome;
       } catch (err) {
         if (isTodayConflict(err)) await reload();
         else console.warn("today finalize setup failed", err);
+        if (identity === paneIdentityRef.current) {
+          setRefreshError(err instanceof Error ? err.message : String(err));
+        }
         return null;
       }
     },
