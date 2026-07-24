@@ -1675,3 +1675,574 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* === V6 canvas-first graph shell ========================================= */
+
+.graph-view {
+  --graph-canvas: var(--bg);
+  --graph-surface: color-mix(in srgb, var(--panel) 94%, transparent);
+  --graph-ink: var(--ink);
+  --graph-muted: var(--muted);
+  --graph-line: color-mix(in srgb, var(--ink) 10%, transparent);
+  --graph-edge: color-mix(in srgb, var(--ink) 7%, transparent);
+  --graph-label: color-mix(in srgb, var(--ink) 30%, transparent);
+  --graph-label-strong: var(--ink);
+  --graph-accent: #8b5cf6;
+  position: relative;
+  isolation: isolate;
+  background: var(--graph-canvas);
+}
+
+/* Forced graph themes also remap the app tokens (--ink/--panel/--muted/...)
+   to that theme's palette: drawer/inspector/panel rules below still use the
+   app variables, and inheriting them from a light app under a dark graph
+   rendered unreadable text (and vice versa). Values mirror styles.css. */
+.graph-view[data-graph-theme="dark"] {
+  --graph-canvas: #1e1e1e;
+  --graph-surface: rgba(35, 36, 34, 0.94);
+  --graph-ink: #f2f0e8;
+  --graph-muted: #8f918c;
+  --graph-line: rgba(242, 240, 232, 0.09);
+  --graph-edge: #292a29;
+  --graph-label: rgba(242, 240, 232, 0.3);
+  --graph-label-strong: #f2f0e8;
+  --bg: #181a18;
+  --panel: #252723;
+  --panel-2: #2a2c28;
+  --line: #3a3d36;
+  --line-strong: #50534b;
+  --ink: #f2f0e8;
+  --ink-2: #dedbd0;
+  --muted: #a19c8f;
+  --faint: #777368;
+  --accent: #7faf86;
+  --accent-soft: #2a3b2d;
+  --accent-tint: #2f4434;
+  --warn: #d6b070;
+  --on-accent: #101510;
+  color-scheme: dark;
+}
+
+.graph-view[data-graph-theme="light"] {
+  --graph-canvas: #f4f3ee;
+  --graph-surface: rgba(255, 255, 252, 0.95);
+  --graph-ink: #1f1d18;
+  --graph-muted: #69645b;
+  --graph-line: rgba(31, 29, 24, 0.1);
+  --graph-edge: #d8d6cf;
+  --graph-label: rgba(31, 29, 24, 0.38);
+  --graph-label-strong: #1f1d18;
+  --bg: #f4f3ee;
+  --panel: #ffffff;
+  --panel-2: #f9f8f4;
+  --line: #dedbd1;
+  --line-strong: #bfb8aa;
+  --ink: #1f1d18;
+  --ink-2: #3d3a32;
+  --muted: #69645b;
+  --faint: #969085;
+  --accent: #2f5a3c;
+  --accent-soft: #d8e6d2;
+  --accent-tint: #eaf1e3;
+  --warn: #7a5520;
+  --on-accent: #fbfcf8;
+  color-scheme: light;
+}
+
+.graph-view:focus {
+  outline: none;
+}
+
+.graph-view[data-graph-accent="green"] {
+  --graph-accent: #7faf86;
+}
+
+.graph-view[data-graph-accent="violet"] {
+  --graph-accent: #8b5cf6;
+}
+
+.graph-view .graph-toolbar {
+  position: absolute;
+  inset: 12px 12px auto;
+  z-index: 12;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.graph-view-menu,
+.graph-toolbar-actions,
+.graph-search-popover {
+  pointer-events: auto;
+}
+
+.graph-view-menu,
+.graph-more {
+  position: relative;
+}
+
+.graph-view-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--graph-line);
+  border-radius: 7px;
+  background: var(--graph-surface);
+  color: var(--graph-muted);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(14px);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.graph-view-pill:hover,
+.graph-view-pill:focus-visible {
+  border-color: color-mix(in srgb, var(--graph-accent) 55%, var(--graph-line));
+  color: var(--graph-ink);
+}
+
+.graph-view-pill strong {
+  color: var(--graph-ink);
+  font-weight: 600;
+}
+
+.graph-view-pill-divider,
+.graph-view-pill-count {
+  color: var(--graph-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-view-pill-count {
+  margin-left: 3px;
+  font-size: 10.5px;
+}
+
+.graph-toolbar-actions {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--graph-line);
+  border-radius: 8px;
+  background: var(--graph-surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.graph-view .graph-icon-button,
+.graph-drawer-action {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--graph-muted);
+}
+
+.graph-view .graph-icon-button:hover:not(:disabled),
+.graph-drawer-action:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--graph-ink) 8%, transparent);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-icon-button.active {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--graph-accent) 18%, transparent);
+  color: var(--graph-accent);
+}
+
+.graph-view-popover,
+.graph-view .graph-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 230px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--graph-line);
+  border-radius: 8px;
+  background: var(--graph-surface);
+  color: var(--graph-ink);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+}
+
+.graph-view-popover {
+  left: 0;
+}
+
+.graph-view .graph-more-menu {
+  right: 0;
+  left: auto;
+}
+
+.graph-view-popover > button,
+.graph-view .graph-more-menu > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--graph-ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.graph-view-popover > button:hover,
+.graph-view-popover > button.active,
+.graph-view .graph-more-menu > button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--graph-accent) 15%, transparent);
+}
+
+.graph-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 8px 4px;
+  color: var(--graph-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graph-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--graph-line);
+}
+
+.graph-search-popover {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  width: min(360px, calc(100% - 120px));
+  transform: translateX(-50%);
+}
+
+.graph-view .graph-search-field {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+  padding: 0 8px 0 11px;
+  border: 1px solid var(--graph-line);
+  border-radius: 8px;
+  background: var(--graph-surface);
+  color: var(--graph-muted);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.graph-view .graph-search-field:focus-within {
+  border-color: color-mix(in srgb, var(--graph-accent) 65%, var(--graph-line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--graph-accent) 18%, transparent),
+    0 14px 38px rgba(0, 0, 0, 0.28);
+}
+
+.graph-search-clear {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--graph-muted);
+  cursor: pointer;
+}
+
+.graph-view .graph-search-results {
+  left: 0;
+  right: 0;
+  top: calc(100% + 5px);
+  border-color: var(--graph-line);
+  background: var(--graph-surface);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-search-result.active,
+.graph-view .graph-search-result[aria-selected="true"] {
+  background: color-mix(in srgb, var(--graph-accent) 16%, transparent);
+}
+
+.graph-view .graph-search-result-label,
+.graph-view .graph-search-field input {
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-search-result-path {
+  color: var(--graph-muted);
+}
+
+.graph-view .graph-body {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: var(--graph-canvas);
+}
+
+.graph-view .graph-canvas,
+.graph-view .graph-canvas-loading,
+.graph-view .graph-canvas-wrap,
+.graph-view .graph-canvas-column {
+  background: var(--graph-canvas);
+}
+
+.graph-view .graph-degraded-bar,
+.graph-view .graph-focus-bar,
+.graph-view .graph-path-bar {
+  position: absolute;
+  left: 12px;
+  z-index: 10;
+  max-width: min(520px, calc(100% - 96px));
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--graph-line);
+  border-radius: 7px;
+  background: var(--graph-surface);
+  color: var(--graph-muted);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(14px);
+}
+
+.graph-view .graph-degraded-bar {
+  top: 52px;
+}
+
+.graph-view .graph-focus-bar {
+  top: 86px;
+}
+
+.graph-view .graph-path-bar {
+  top: 120px;
+}
+
+.graph-view[data-graph-search-open="true"] .graph-degraded-bar:not(.graph-empty-bar) {
+  top: 96px;
+}
+
+.graph-view[data-graph-search-open="true"] .graph-focus-bar {
+  top: 130px;
+}
+
+.graph-view[data-graph-search-open="true"] .graph-path-bar {
+  top: 164px;
+}
+
+.graph-view .graph-empty-bar {
+  top: 50%;
+  left: 50%;
+  max-width: min(440px, calc(100% - 48px));
+  transform: translate(-50%, -50%);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-panel-docked,
+.graph-view .graph-panel-overlay {
+  border-color: var(--graph-line);
+  background: var(--graph-surface);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-panel-overlay-right {
+  top: 54px;
+  right: 12px;
+  bottom: 12px;
+  width: 320px;
+  overflow: hidden;
+  border: 1px solid var(--graph-line);
+  border-radius: 9px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+}
+
+.graph-view .graph-tools-drawer,
+.graph-view .graph-filter-panel {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-right-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--graph-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.graph-view .graph-right-tabs button {
+  color: var(--graph-muted);
+}
+
+.graph-view .graph-right-tabs button[data-state="active"] {
+  background: color-mix(in srgb, var(--graph-accent) 17%, transparent);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-right-tabs button:disabled {
+  opacity: 0.35;
+}
+
+.graph-drawer-action {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.graph-view .graph-display-field select,
+.graph-view .graph-facet-search,
+.graph-view .graph-saved-create input {
+  border-color: var(--graph-line);
+  background: color-mix(in srgb, var(--graph-ink) 5%, transparent);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-saved-heading {
+  margin: 0;
+}
+
+.graph-view .graph-saved-list {
+  max-height: 180px;
+}
+
+.graph-view .graph-legend,
+.graph-view .graph-legend-icon,
+.graph-view .graph-zoom-floating {
+  border-color: var(--graph-line);
+  background: var(--graph-surface);
+  color: var(--graph-muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(14px);
+}
+
+.graph-view .graph-zoom-floating {
+  right: 12px;
+  bottom: 12px;
+  gap: 0;
+  padding: 2px;
+  opacity: 0.56;
+  transition: opacity 140ms ease;
+}
+
+.graph-view .graph-canvas-wrap:hover .graph-zoom-floating,
+.graph-view .graph-zoom-floating:focus-within {
+  opacity: 1;
+}
+
+.graph-selection-shelf {
+  position: absolute;
+  left: 50%;
+  bottom: 13px;
+  z-index: 4;
+  display: flex;
+  max-width: min(620px, calc(100% - 190px));
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 4px 5px 4px 11px;
+  border: 1px solid var(--graph-line);
+  border-radius: 8px;
+  background: var(--graph-surface);
+  color: var(--graph-ink);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.graph-selection-shelf > span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-selection-shelf small {
+  color: var(--graph-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-selection-shelf button {
+  min-height: 27px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--graph-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.graph-selection-shelf button:hover {
+  background: color-mix(in srgb, var(--graph-accent) 16%, transparent);
+  color: var(--graph-ink);
+}
+
+.graph-view .graph-node-context-menu {
+  max-width: min(260px, calc(100% - 16px));
+  max-height: min(360px, calc(100% - 16px));
+  overflow: auto;
+}
+
+.tier-standard.graph-view .graph-panel-overlay-right {
+  width: min(320px, calc(100% - 24px));
+}
+
+.tier-compact.graph-view .graph-toolbar {
+  inset: 8px 8px auto;
+  flex-wrap: nowrap;
+}
+
+.tier-compact.graph-view .graph-view-pill-count,
+.tier-compact.graph-view .graph-view-pill > span:first-child,
+.tier-compact.graph-view .graph-view-pill-divider {
+  display: none;
+}
+
+.tier-compact.graph-view .graph-search-popover {
+  top: 39px;
+  width: 100%;
+}
+
+.tier-compact.graph-view .graph-panel-overlay-right {
+  inset: auto 8px 8px;
+  width: auto;
+  height: min(52%, 420px);
+  border-radius: 10px;
+}
+
+.tier-compact.graph-view .graph-selection-shelf {
+  left: 8px;
+  right: 8px;
+  bottom: 48px;
+  max-width: none;
+  transform: none;
+}
+
+.tier-compact.graph-view .graph-selection-shelf small {
+  display: none;
+}

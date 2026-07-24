@@ -8,6 +8,7 @@ import {
   GitCommit,
   PanelRightOpen,
   Save,
+  Waypoints,
   X,
 } from "lucide-react";
 import {
@@ -95,6 +96,7 @@ interface EditorPaneProps {
   onSave: () => void;
   onSnapshot: () => void;
   onSplitRight: () => void;
+  onOpenGraphRight: () => void;
   onFocusPane?: () => void;
   onToggleOutline: () => void;
   onViewModeChange: (mode: EditorViewMode) => void;
@@ -152,6 +154,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onSave,
     onSnapshot,
     onSplitRight,
+    onOpenGraphRight,
     onFocusPane,
     onToggleOutline,
     onViewModeChange,
@@ -292,7 +295,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   if (!bodyOverride && openingEntry && openingEntry.path !== document?.path) {
     return (
-      <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
+      <main
+        className="editor-pane editor-empty"
+        ref={ref}
+        onPointerDown={onFocusPane}
+        onFocusCapture={onFocusPane}
+      >
         <div className="empty-document-plate">
           <div className="icon-circle" title={openingEntry.title}>
             <FileText size={26} />
@@ -306,7 +314,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 
   if (!document && !bodyOverride) {
     return (
-      <main className="editor-pane editor-empty" ref={ref} onPointerDown={onFocusPane}>
+      <main
+        className="editor-pane editor-empty"
+        ref={ref}
+        onPointerDown={onFocusPane}
+        onFocusCapture={onFocusPane}
+      >
         <div className="empty-document-plate">
           <div className="icon-circle" title={t("editor.empty.title")}>
             <FileText size={26} />
@@ -324,7 +337,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const headerTitle = documentLabel ?? document?.title ?? "";
 
   return (
-    <main className="editor-pane" ref={ref} onPointerDown={onFocusPane}>
+    <main
+      className="editor-pane"
+      ref={ref}
+      onPointerDown={onFocusPane}
+      onFocusCapture={onFocusPane}
+    >
       <div className="document-tabs-row" aria-label={t("editor.tabs.label")}>
         {tabs.map((tab, index) => (
           <div
@@ -367,6 +385,15 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             aria-label={t("editor.splitRight")}
           >
             <Columns2 size={13} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => onOpenGraphRight()}
+            title={t("editor.openGraphRight")}
+            aria-label={t("editor.openGraphRight")}
+          >
+            <Waypoints size={13} />
           </button>
           <button
             type="button"

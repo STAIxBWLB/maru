@@ -126,6 +126,7 @@ describe("normalizeMaruSettings", () => {
           documentsPaneWidth: 999,
           outlinePaneWidth: 100,
           editorSplitOpen: true,
+          editorSplitSurface: "graph",
           editorSplitRatio: 0.9,
           terminalDock: "right",
           terminalWidth: 2048,
@@ -149,6 +150,10 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.activeAppMode).toBe("inbox");
     expect(settings.ui.activeWorkspaceVisibility).toBe("public");
     expect(settings.ui.editorViewMode).toBe("preview");
+    expect(settings.ui.editorPaneViewModes).toEqual({
+      left: "preview",
+      right: "preview",
+    });
     expect(settings.ui.rightPaneTab).toBe("files");
     expect(settings.ui.explorerPaneMode).toBe("files");
     expect(settings.ui.documentBrowserMode).toBe("tree");
@@ -191,6 +196,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.themeMode).toBe("dark");
     expect(settings.ui.accentColor).toBe("#445566");
     expect(settings.ui.layout.editorSplitOpen).toBe(true);
+    expect(settings.ui.layout.editorSplitSurface).toBe("graph");
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
@@ -471,7 +477,35 @@ describe("normalizeMaruSettings", () => {
     expect(settings.diagram.recentPatterns[0]).toBe("pattern-0");
   });
 
-  it("round-trips graph V2 settings", () => {
+  it("persists independent editor pane modes while mirroring the left pane", () => {
+    const settings = normalizeMaruSettings({
+      ui: {
+        editorViewMode: "rich",
+        editorPaneViewModes: { left: "source", right: "preview" },
+      },
+    });
+    expect(settings.ui.editorPaneViewModes).toEqual({
+      left: "source",
+      right: "preview",
+    });
+    expect(settings.ui.editorViewMode).toBe("source");
+
+    const partial = normalizeMaruSettings({
+      ui: {
+        editorViewMode: "preview",
+        editorPaneViewModes: { left: "invalid", right: "rich" },
+      },
+    });
+    expect(partial.ui.editorPaneViewModes).toEqual({
+      left: "preview",
+      right: "rich",
+    });
+    // The legacy mirror must equal the normalized left pane even when the raw
+    // left value was junk, or the two fields desync.
+    expect(partial.ui.editorViewMode).toBe("preview");
+  });
+
+  it("migrates graph V2 settings to the canvas-first V3 contract", () => {
     const settings = normalizeMaruSettings({
       graph: {
         schemaVersion: 2,
@@ -514,7 +548,7 @@ describe("normalizeMaruSettings", () => {
       },
     });
 
-    expect(settings.graph.schemaVersion).toBe(2);
+    expect(settings.graph.schemaVersion).toBe(3);
     expect(settings.graph.source).toBe("workspace");
     expect(settings.graph.mode).toBe("chains");
     expect(settings.graph.localDepth).toBe(3);
@@ -538,19 +572,22 @@ describe("normalizeMaruSettings", () => {
       community: null,
       showUnresolved: false,
       showGenerated: false,
-      minVisibleNeighbors: 1,
+      minVisibleNeighbors: 0,
     });
     expect(settings.graph.display).toEqual({
       arrows: "all",
       labels: "high",
+      colorMode: "community",
+      relationColors: true,
+      // Pre-V3 graphs followed the app theme; migration preserves that.
+      theme: "app",
+      accent: "violet",
       nodeScale: 1.4,
       edgeScale: 0.8,
     });
     expect(settings.graph.panels).toEqual({
-      filtersOpen: false,
-      workbenchOpen: true,
-      filterWidth: 300,
-      workbenchWidth: 400,
+      pinned: false,
+      width: 400,
     });
     expect(settings.graph.savedViews).toHaveLength(1);
     expect(settings.graph.savedViews[0].localTarget).toEqual({
@@ -561,7 +598,54 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.savedViews[0].display.labels).toBe("balanced");
   });
 
-  it("migrates V1 graph settings to V2", () => {
+  it("keeps migrated default-display V2 graphs on the app theme", () => {
+    const settings = normalizeMaruSettings({
+      graph: { schemaVersion: 2, source: "vault" },
+    });
+    expect(settings.graph.schemaVersion).toBe(3);
+    expect(settings.graph.display.theme).toBe("app");
+  });
+
+  it("gives fresh installs the dark graph theme without a migration pass", () => {
+    const settings = normalizeMaruSettings({});
+    expect(settings.graph.schemaVersion).toBe(3);
+    expect(settings.graph.display.theme).toBe("dark");
+    expect(settings.graph.savedViews).toEqual([]);
+  });
+
+  it("round-trips graph V3 appearance and drawer settings", () => {
+    const settings = normalizeMaruSettings({
+      graph: {
+        schemaVersion: 3,
+        display: {
+          arrows: "typed",
+          labels: "balanced",
+          colorMode: "domain",
+          relationColors: true,
+          theme: "light",
+          accent: "green",
+          nodeScale: 1.2,
+          edgeScale: 1.1,
+        },
+        panels: { pinned: true, width: 372 },
+      },
+    });
+
+    expect(settings.graph.schemaVersion).toBe(3);
+    expect(settings.graph.display).toEqual({
+      arrows: "typed",
+      labels: "balanced",
+      colorMode: "domain",
+      relationColors: true,
+      theme: "light",
+      accent: "green",
+      nodeScale: 1.2,
+      edgeScale: 1.1,
+    });
+    expect(settings.graph.panels).toEqual({ pinned: true, width: 372 });
+  });
+
+  it("migrates V1 graph settings through V2 to V3", () => {
     const settings = normalizeMaruSettings({
       graph: {
         source: "all",
@@ -582,7 +666,7 @@ describe("normalizeMaruSettings", () => {
       },
     });
 
-    expect(settings.graph.schemaVersion).toBe(2);
+    expect(settings.graph.schemaVersion).toBe(3);
     // all -> workspace; legacy profile lands only in the previously active source.
     expect(settings.graph.source).toBe("workspace");
     expect(settings.graph.mode).toBe("chains");
@@ -598,7 +682,7 @@ describe("normalizeMaruSettings", () => {
       // max(minDegree 2, scope "all" ? 0) = 2.
       minVisibleNeighbors: 2,
     });
-    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(0);
     expect(settings.graph.profiles.vault.domains).toEqual([]);
   });
 
@@ -606,8 +690,8 @@ describe("normalizeMaruSettings", () => {
     const connected = normalizeMaruSettings({
       graph: { scope: "connected", filters: { minDegree: 0, types: ["unknown"] } },
     });
-    // max(minDegree 0, connected ? 1 : 0) = 1.
-    expect(connected.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    // The untouched legacy connectivity default migrates to sparse-safe zero.
+    expect(connected.graph.profiles.vault.minVisibleNeighbors).toBe(0);
     // A lone "unknown" selection was a hidden chip — discarded, not resurrected.
     expect(connected.graph.profiles.vault.types).toEqual([]);
 
@@ -650,15 +734,15 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.display.labels).toBe("balanced");
     expect(settings.graph.display.nodeScale).toBe(2);
     expect(settings.graph.display.edgeScale).toBe(0.5);
-    expect(settings.graph.panels.filterWidth).toBe(200);
-    expect(settings.graph.panels.workbenchWidth).toBe(480);
+    expect(settings.graph.panels.pinned).toBe(false);
+    expect(settings.graph.panels.width).toBe(480);
     expect(settings.graph.generatedPatterns).toEqual(["reports/", "log.md"]);
   });
 
   it("keeps graph back-compat: absent keys get defaults, explicit empties are preserved", () => {
     const settings = normalizeMaruSettings({ graph: { filters: {} } });
-    // Absent scope/minDegree -> connected behavior (1).
-    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(1);
+    // Absent scope/minDegree migrates to the sparse-safe V3 default.
+    expect(settings.graph.profiles.vault.minVisibleNeighbors).toBe(0);
     expect(settings.graph.profiles.vault.showGenerated).toBe(false);
     expect(settings.graph.generatedPatterns).toEqual(["reports/", "log.md"]);
     // A deliberately empty pattern list is respected, not replaced by defaults.
@@ -877,6 +961,7 @@ describe("normalizeMaruSettings", () => {
           terminalWidth: 1800,
           terminalMaximized: true,
           editorSplitOpen: true,
+          editorSplitSurface: "graph",
           editorSplitRatio: 0.4,
           terminalSplitOpen: true,
           terminalSplitRatio: 0.6,
@@ -901,6 +986,7 @@ describe("normalizeMaruSettings", () => {
       terminalWidth: 1800,
       terminalMaximized: true,
       editorSplitOpen: true,
+      editorSplitSurface: "graph",
       editorSplitRatio: 0.4,
       terminalSplitOpen: true,
       terminalSplitRatio: 0.6,
@@ -909,6 +995,14 @@ describe("normalizeMaruSettings", () => {
     });
     expect(settings.terminal.defaultPanelOpen).toBe(true);
     expect(settings.terminal.lastHeight).toBe(300);
+  });
+
+  it("defaults invalid editor split surfaces to documents", () => {
+    expect(
+      normalizeMaruSettings({
+        ui: { layout: { editorSplitSurface: "preview" } },
+      }).ui.layout.editorSplitSurface,
+    ).toBe("document");
   });
 
   it("normalizes terminal dock while preserving uncapped right-dock widths", () => {

@@ -82,8 +82,9 @@ const containerRect = (page: Page) =>
 const hoveredId = (page: Page) =>
   page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.hoveredId());
 
-/** Enter graph mode at the wide tier (filter panel + workbench docked), wait
- *  for the real renderer's first frame, then freeze FA2 for determinism. */
+/** Enter graph mode at the wide tier, wait for the real renderer's first
+ * frame, then freeze FA2 for determinism. Panels are canvas-first and open
+ * only when a test needs them. */
 async function enterGraph(page: Page) {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
@@ -104,6 +105,52 @@ async function enterGraph(page: Page) {
     bridge.freezeLayout();
     bridge.fitView();
   });
+}
+
+async function openFilters(page: Page) {
+  const panel = page.getByTestId("graph-filter-panel");
+  if (!(await panel.isVisible())) {
+    await page.getByTestId("graph-toggle-filters").click();
+  }
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+async function openSearch(page: Page) {
+  const input = page.getByTestId("graph-search");
+  if (!(await input.isVisible())) {
+    await page.getByTestId("graph-search-toggle").click();
+  }
+  await expect(input).toBeVisible();
+  return input;
+}
+
+async function openMore(page: Page) {
+  const toggle = page.getByTestId("graph-more-menu");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+}
+
+async function openViewMenu(page: Page) {
+  const toggle = page.getByTestId("graph-view-menu");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+}
+
+async function openSelectionDetails(page: Page) {
+  const shelf = page.getByTestId("graph-selection-shelf");
+  await expect(shelf).toBeVisible();
+  await shelf.getByRole("button", { name: "선택", exact: true }).click();
+  await expect(activeInspector(page)).toBeVisible();
+}
+
+async function openSelectedNode(page: Page, id: string) {
+  await clickNode(page, id);
+  const shelf = page.getByTestId("graph-selection-shelf");
+  await expect(shelf).toBeVisible();
+  await shelf.getByRole("button", { name: /열기/ }).click();
 }
 
 async function nodePoint(page: Page, id: string): Promise<{ x: number; y: number }> {
@@ -202,7 +249,6 @@ test("enters graph mode, shows degraded hint, and renders the live graph", async
 
   // Web mode has no vault-graph.json → degraded hint, no communities badge.
   await expect(page.getByTestId("graph-degraded-hint")).toBeVisible();
-  await expect(page.getByTestId("graph-filter-panel")).toBeVisible();
   await expect(page.getByTestId("graph-canvas")).toBeVisible();
 
   // 2 resolved mock notes are visible; the unresolved "[[Maru Project]]"
@@ -212,6 +258,7 @@ test("enters graph mode, shows degraded hint, and renders the live graph", async
   expect(await screenState(page, "maru-project")).toMatchObject({ visible: false });
 
   // Show ghosts → the unresolved target appears.
+  await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(3);
   await expect.poll(() => screenState(page, "maru-project").then((s) => s.visible)).toBe(true);
@@ -225,19 +272,19 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   expect((await stats(page)).visibleNodes).toBe(2);
 
   // Type chip filter (mock notes: meeting + reference).
-  const panel = page.getByTestId("graph-filter-panel");
+  const panel = await openFilters(page);
   await panel.getByRole("button", { name: "reference", exact: true }).click();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(1);
   await panel.getByRole("button", { name: "reference", exact: true }).click();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(2);
 
   // Search combobox lists the match; Enter selects + centers it.
-  await page.getByTestId("graph-search").fill("용어집");
+  await (await openSearch(page)).fill("용어집");
   const results = page.getByTestId("graph-search-results");
   await expect(results).toBeVisible();
   await expect(results.getByRole("option")).toHaveCount(1);
   await page.getByTestId("graph-search").press("Enter");
-  await expect(activeInspector(page)).toBeVisible();
+  await openSelectionDetails(page);
   await expect(activeInspector(page)).toContainText("Maru 용어집");
   // Centered: the camera animation settles with the node near the viewport
   // center (page coordinates).
@@ -266,12 +313,15 @@ test("ghost node click seeds the note-creation dialog (F3b) and chain view toggl
   await enterGraph(page);
 
   // Decision-chain view — mock vault has no decisions → empty lanes message.
+  await openViewMenu(page);
   await page.getByTestId("graph-chain-toggle").click();
   await expect(page.getByTestId("decision-chains")).toBeVisible();
   await expect(page.getByText("supersedes 연결이 있는 결정이 없습니다")).toBeVisible();
+  await openViewMenu(page);
   await page.getByTestId("graph-view-graph").click();
 
   // Ghost double-click → NewDocumentDialog opens seeded with the unresolved target.
+  await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(() => screenState(page, "maru-project").then((s) => s.visible)).toBe(true);
   await dblclickNode(page, "maru-project", { fit: true });
@@ -289,6 +339,7 @@ test("hover highlights the 1-hop neighborhood and dims the rest", async ({ page 
 
   // The only edge in the mock vault runs meeting → ghost, so show ghosts to
   // give the meeting note a visible neighbor to highlight.
+  await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(3);
 
@@ -345,12 +396,13 @@ test("search-as-filter narrows the graph to matches", async ({ page }) => {
   expect((await stats(page)).visibleNodes).toBe(2);
 
   // Off: search only highlights, count unchanged.
-  await page.getByTestId("graph-search").fill("용어집");
+  await (await openSearch(page)).fill("용어집");
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(2);
 
   // On: the graph narrows to the match (glossary is an orphan, so no neighbors).
+  await openMore(page);
   await page.getByTestId("graph-search-filter-toggle").click();
-  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-checked", "true");
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(1);
   await expect.poll(() => screenState(page, "maru-glossary").then((s) => s.visible)).toBe(true);
 
@@ -361,18 +413,47 @@ test("graph view/filter settings persist across a mode switch", async ({ page })
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
 
+  await openMore(page);
   await page.getByTestId("graph-search-filter-toggle").click();
+  await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
 
   // Leave graph (open a note), then return via the activity rail.
-  await dblclickNode(page, "maru-glossary");
+  await openSelectedNode(page, "maru-glossary");
   await expect(page.getByTestId("graph-mode")).toHaveCount(0);
   await page.getByRole("button", { name: "그래프", exact: true }).click();
   await expect(page.getByTestId("graph-mode")).toBeVisible();
 
   // Both settings survived (seeded from persisted MaruSettings).
-  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-pressed", "true");
+  await openMore(page);
+  await expect(page.getByTestId("graph-search-filter-toggle")).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("graph-more-menu").click();
+  await openFilters(page);
   await expect(page.getByLabel("미해소 링크 표시")).toBeChecked();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("keeps filter profiles isolated when switching graph sources", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  const filters = await openFilters(page);
+  await filters.getByLabel("미해소 링크 표시").check();
+
+  await openViewMenu(page);
+  await page.getByRole("menuitemradio", { name: "지식", exact: true }).click();
+  await expect(page.getByTestId("graph-view-menu")).toContainText("지식");
+  await expect((await openFilters(page)).getByLabel("미해소 링크 표시")).not.toBeChecked();
+
+  await openViewMenu(page);
+  await page.getByRole("menuitemradio", { name: "Workspace", exact: true }).click();
+  await expect(page.getByTestId("graph-view-menu")).toContainText("Workspace");
+  await expect((await openFilters(page)).getByLabel("미해소 링크 표시")).toBeChecked();
+
+  await openViewMenu(page);
+  await page.getByRole("menuitemradio", { name: "지식", exact: true }).click();
+  await expect((await openFilters(page)).getByLabel("미해소 링크 표시")).not.toBeChecked();
 
   expect(forbidden).toEqual([]);
 });
@@ -381,24 +462,25 @@ test("saved views restore the current profile and can be deleted", async ({ page
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
 
+  await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(async () => (await stats(page)).visibleEdges).toBe(1);
 
-  await page.getByTestId("graph-saved-views").click();
+  await openViewMenu(page);
   await page.getByLabel("보기 이름").fill("Ghost review");
   await page.getByTitle("현재 보기 저장").click();
   await expect(page.getByText("Ghost review", { exact: true })).toBeVisible();
-  await page.getByTestId("graph-saved-views").click();
+  await page.getByTestId("graph-view-menu").click();
 
   await page.getByLabel("미해소 링크 표시").uncheck();
   await expect.poll(async () => (await stats(page)).visibleEdges).toBe(0);
 
-  await page.getByTestId("graph-saved-views").click();
+  await openViewMenu(page);
   await page.getByText("Ghost review", { exact: true }).click();
   await expect(page.getByLabel("미해소 링크 표시")).toBeChecked();
   await expect.poll(async () => (await stats(page)).visibleEdges).toBe(1);
 
-  await page.getByTestId("graph-saved-views").click();
+  await openViewMenu(page);
   await page.getByLabel("저장된 보기 삭제").click();
   await expect(page.getByText("저장된 보기가 없습니다")).toBeVisible();
 
@@ -409,7 +491,7 @@ test("Neighborhood opens the exact note as a Local graph target", async ({ page 
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
 
-  await dblclickNode(page, "maru-glossary");
+  await openSelectedNode(page, "maru-glossary");
   await expect(page.getByTestId("graph-mode")).toHaveCount(0);
   const showOutline = page.getByRole("button", { name: "오른쪽 패널 보이기" });
   if (await showOutline.count()) await showOutline.click();
@@ -420,7 +502,8 @@ test("Neighborhood opens the exact note as a Local graph target", async ({ page 
 
   await expect(page.getByTestId("graph-mode")).toBeVisible();
   await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
-  await expect(page.getByTestId("graph-view-local")).toHaveAttribute("aria-selected", "true");
+  await openViewMenu(page);
+  await expect(page.getByTestId("graph-view-local")).toHaveAttribute("aria-checked", "true");
 
   expect(forbidden).toEqual([]);
 });
@@ -445,12 +528,11 @@ test("favoriting a node from the inspector marks it on the canvas", async ({ pag
   await enterGraph(page);
 
   await clickNode(page, "maru-glossary");
-  await expect(activeInspector(page)).toBeVisible();
+  await openSelectionDetails(page);
   expect((await screenState(page, "maru-glossary")).favorite).toBe(false);
 
-  // Favorite → the nodeReducer flags the node (the ★ label is canvas text;
-  // the flag is the bridge-observable cue — border color is dominated by the
-  // selection emphasis while the node stays selected).
+  // Favorite → the nodeReducer flags the node. The bridge-observable cue is
+  // stable even though selection emphasis owns the visible border.
   await page.getByTestId("graph-inspector-favorite").click();
   await expect
     .poll(() => screenState(page, "maru-glossary").then((s) => s.favorite))
@@ -508,11 +590,14 @@ test("enriched overlay renders the communities badge, legend, and color groups",
   });
   await enterGraph(page);
 
-  // Enriched → communities badge shown, no degraded hint.
-  await expect(page.getByTestId("graph-enriched-badge")).toBeVisible();
+  // Neutral rendering keeps the canvas free of a meaningless color legend.
+  await expect(page.getByTestId("graph-legend")).toHaveCount(0);
   await expect(page.getByTestId("graph-degraded-hint")).toHaveCount(0);
 
-  // Legend lists the two mock communities.
+  // Default rendering is neutral. Opt into community colors and confirm the
+  // legend expands to the two mock communities.
+  const filters = await openFilters(page);
+  await filters.getByTestId("graph-display-color-mode").selectOption("community");
   const legend = page.getByTestId("graph-legend");
   await expect(legend).toBeVisible();
   await expect(legend.locator(".graph-legend-item")).toHaveCount(2);
@@ -534,14 +619,24 @@ test("toolbar, insights panel, and inspector surfaces render and respond", async
 
   await expect(page.getByTestId("graph-toolbar")).toBeVisible();
 
-  // Insights panel is the default workbench tab.
+  // The global search layer must not cover graph status/focus guidance.
+  await openSearch(page);
+  const searchBox = await page.locator(".graph-search-popover").boundingBox();
+  const statusBox = await page.getByTestId("graph-degraded-hint").boundingBox();
+  expect(searchBox).not.toBeNull();
+  expect(statusBox).not.toBeNull();
+  if (searchBox && statusBox) {
+    expect(searchBox.y + searchBox.height).toBeLessThanOrEqual(statusBox.y);
+  }
+
+  // Insights are lazy and open only on demand.
+  await page.getByTestId("graph-toggle-workbench").click();
   await expect(page.getByTestId("graph-insights")).toBeVisible();
 
-  // Selecting a node flips the workbench to the inspector. (Node clicks run
-  // BEFORE the zoom check: zooming repositions nodes under the floating
-  // overlays, which makes hit targets viewport-luck.)
+  // Selecting a node keeps the canvas primary and offers an explicit Details
+  // action in the selection shelf.
   await clickNode(page, "maru-glossary");
-  await expect(activeInspector(page)).toBeVisible();
+  await openSelectionDetails(page);
   await expect(activeInspector(page)).toContainText("Maru 용어집");
 
   // Switch back to insights (Radix tabs keep role=tab).
@@ -549,8 +644,7 @@ test("toolbar, insights panel, and inspector surfaces render and respond", async
   await expect(page.getByTestId("graph-insights")).toBeVisible();
 
   // Floating zoom cluster (zoom-in decreases the camera ratio).
-  const zoom = page.getByTestId("graph-zoom-value");
-  await expect(zoom).toBeVisible();
+  await page.getByTestId("graph-toggle-workbench").click();
   const ratioBefore = (await cameraState(page)).ratio;
   await page.getByRole("button", { name: "확대" }).click();
   await expect.poll(async () => (await cameraState(page)).ratio).toBeLessThan(ratioBefore);

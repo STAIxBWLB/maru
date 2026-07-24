@@ -1,18 +1,12 @@
-// Graph mode toolbar (V5): mode segmented control (Global / Local / Chains),
-// source select, search combobox over the current filtered graph, and (right)
-// visible/total counts, Filters + Workbench toggles, and a More menu (refresh
-// overlay, export, re-layout). The zoom cluster moved out of the toolbar into
-// a floating cluster (GraphZoomCluster) rendered inside the canvas wrap.
-
 import {
   Bookmark,
+  ChevronDown,
   FileDown,
   ImageDown,
   ListFilter,
   Maximize2,
   Minus,
   MoreHorizontal,
-  PanelLeft,
   PanelRight,
   Plus,
   RefreshCw,
@@ -20,6 +14,7 @@ import {
   Save,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
@@ -35,9 +30,6 @@ interface GraphSearchBoxProps {
   onActiveChange: (id: string | null) => void;
 }
 
-/** Search combobox: exact → prefix → substring → relPath results (ranked by
- *  the caller), arrow-key navigation, Enter selects, Escape closes the list
- *  then clears the query. */
 function GraphSearchBox({
   search,
   onSearchChange,
@@ -47,10 +39,8 @@ function GraphSearchBox({
   onActiveChange,
 }: GraphSearchBoxProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const rootRef = useRef<HTMLLabelElement>(null);
-  const activeId = open && results.length > 0 ? results[Math.min(active, results.length - 1)]?.id ?? null : null;
+  const activeId = results[Math.min(active, results.length - 1)]?.id ?? null;
 
   useEffect(() => {
     setActive(0);
@@ -61,57 +51,58 @@ function GraphSearchBox({
 
   const select = (id: string) => {
     onSelect(id);
-    setOpen(false);
+    onActiveChange(null);
   };
 
   return (
-    <label className="graph-search-field" ref={rootRef}>
-      <Search size={14} aria-hidden />
+    <label className="graph-search-field">
+      <Search size={15} aria-hidden />
       <input
         ref={inputRef}
         type="search"
         role="combobox"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={results.length > 0}
         aria-controls="graph-search-listbox"
         aria-activedescendant={activeId ? `graph-search-option-${activeId}` : undefined}
         aria-autocomplete="list"
+        aria-label={t("graph.searchPlaceholder")}
         placeholder={t("graph.searchPlaceholder")}
         value={search}
         data-testid="graph-search"
-        onChange={(event) => {
-          onSearchChange(event.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          // Delay so an option click (mousedown → click) lands before close.
-          setTimeout(() => setOpen(false), 120);
-        }}
+        onChange={(event) => onSearchChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             if (results.length === 0) return;
             event.preventDefault();
-            setOpen(true);
             setActive((current) => {
               const delta = event.key === "ArrowDown" ? 1 : -1;
               return (current + delta + results.length) % results.length;
             });
-          } else if (event.key === "Enter") {
-            if (activeId) {
-              event.preventDefault();
-              select(activeId);
-            }
-          } else if (event.key === "Escape") {
+          } else if (event.key === "Enter" && activeId) {
             event.preventDefault();
-            event.stopPropagation();
-            if (open) setOpen(false);
-            else onSearchChange("");
+            select(activeId);
           }
         }}
       />
-      {open && results.length > 0 ? (
-        <ul className="graph-search-results" role="listbox" id="graph-search-listbox" data-testid="graph-search-results">
-          {results.map((result, index) => (
+      {search ? (
+        <button
+          type="button"
+          className="graph-search-clear"
+          aria-label={t("graph.search.clear")}
+          title={t("graph.search.clear")}
+          onClick={() => onSearchChange("")}
+        >
+          <X size={14} />
+        </button>
+      ) : null}
+      {results.length > 0 ? (
+        <ul
+          className="graph-search-results"
+          role="listbox"
+          id="graph-search-listbox"
+          data-testid="graph-search-results"
+        >
+          {results.slice(0, 8).map((result, index) => (
             <li
               key={result.id}
               id={`graph-search-option-${result.id}`}
@@ -125,7 +116,9 @@ function GraphSearchBox({
               }}
             >
               <span className="graph-search-result-label">{result.label}</span>
-              {result.relPath ? <span className="graph-search-result-path">{result.relPath}</span> : null}
+              {result.relPath ? (
+                <span className="graph-search-result-path">{result.relPath}</span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -136,13 +129,13 @@ function GraphSearchBox({
 
 interface GraphToolbarProps {
   mode: GraphMode;
-  /** True when a local focus anchor exists (Local stays selectable). */
-  localAvailable: boolean;
   onModeChange: (mode: GraphMode) => void;
   source: GraphSource;
   onSourceChange: (next: GraphSource) => void;
   search: string;
   onSearchChange: (next: string) => void;
+  searchOpen: boolean;
+  onSearchOpenChange: (open: boolean) => void;
   searchInputRef?: React.Ref<HTMLInputElement>;
   searchResults: GraphSearchResult[];
   onSearchSelect: (id: string) => void;
@@ -151,8 +144,6 @@ interface GraphToolbarProps {
   onSearchAsFilterChange: (next: boolean) => void;
   visibleCount: number;
   totalCount: number;
-  enriched: boolean;
-  communityCount: number;
   filtersOpen: boolean;
   activeFilterCount: number;
   onToggleFilters: () => void;
@@ -169,122 +160,15 @@ interface GraphToolbarProps {
   onDeleteView: (id: string) => void;
 }
 
-function GraphSavedViewsMenu({
-  views,
-  onSave,
-  onApply,
-  onDelete,
-}: {
-  views: GraphSavedView[];
-  onSave: (name: string) => void;
-  onApply: (view: GraphSavedView) => void;
-  onDelete: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: Event) => {
-      if (rootRef.current && event.target instanceof Node && rootRef.current.contains(event.target)) return;
-      setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const submit = () => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onSave(trimmed);
-    setName("");
-  };
-
-  return (
-    <div className="graph-saved-views" ref={rootRef}>
-      <button
-        type="button"
-        className={open ? "graph-icon-button active" : "graph-icon-button"}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={t("graph.saved.title")}
-        data-testid="graph-saved-views"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Bookmark size={14} />
-        {views.length > 0 ? <span className="graph-icon-count">{views.length}</span> : null}
-      </button>
-      {open ? (
-        <div className="graph-saved-menu" role="dialog" aria-label={t("graph.saved.title")}>
-          <div className="graph-saved-heading">{t("graph.saved.title")}</div>
-          <div className="graph-saved-create">
-            <input
-              value={name}
-              placeholder={t("graph.saved.name")}
-              aria-label={t("graph.saved.name")}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submit();
-              }}
-            />
-            <button type="button" disabled={!name.trim()} title={t("graph.saved.save")} onClick={submit}>
-              <Save size={13} />
-            </button>
-          </div>
-          {views.length === 0 ? (
-            <div className="graph-saved-empty">{t("graph.saved.empty")}</div>
-          ) : (
-            <div className="graph-saved-list">
-              {views.map((view) => (
-                <div key={view.id} className="graph-saved-row">
-                  <button
-                    type="button"
-                    className="graph-saved-apply"
-                    onClick={() => {
-                      onApply(view);
-                      setOpen(false);
-                    }}
-                    title={`${view.name} · ${view.source} · ${view.mode}`}
-                  >
-                    <span>{view.name}</span>
-                    <small>{view.source} · {view.mode}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="graph-saved-delete"
-                    aria-label={t("graph.saved.delete")}
-                    title={t("graph.saved.delete")}
-                    onClick={() => onDelete(view.id)}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function GraphToolbar({
   mode,
-  localAvailable,
   onModeChange,
   source,
   onSourceChange,
   search,
   onSearchChange,
+  searchOpen,
+  onSearchOpenChange,
   searchInputRef,
   searchResults,
   onSearchSelect,
@@ -293,8 +177,6 @@ export function GraphToolbar({
   onSearchAsFilterChange,
   visibleCount,
   totalCount,
-  enriched,
-  communityCount,
   filtersOpen,
   activeFilterCount,
   onToggleFilters,
@@ -311,17 +193,27 @@ export function GraphToolbar({
   onDeleteView,
 }: GraphToolbarProps) {
   const { t } = useTranslation();
+  const [viewOpen, setViewOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [savedName, setSavedName] = useState("");
+  const viewRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!moreOpen) return;
+    if (!viewOpen && !moreOpen) return;
     const close = (event: Event) => {
-      if (moreRef.current && event.target instanceof Node && moreRef.current.contains(event.target)) return;
+      if (event.target instanceof Node) {
+        if (viewRef.current?.contains(event.target) || moreRef.current?.contains(event.target)) {
+          return;
+        }
+      }
+      setViewOpen(false);
       setMoreOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMoreOpen(false);
+      if (event.key !== "Escape") return;
+      setViewOpen(false);
+      setMoreOpen(false);
     };
     window.addEventListener("pointerdown", close);
     window.addEventListener("keydown", onKey);
@@ -329,201 +221,320 @@ export function GraphToolbar({
       window.removeEventListener("pointerdown", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [moreOpen]);
+  }, [moreOpen, viewOpen]);
 
-  const modeButton = (value: GraphMode, label: string, testid: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={mode === value}
-      className={mode === value ? "active" : ""}
-      data-testid={testid}
-      onClick={() => onModeChange(value)}
-    >
-      {label}
-    </button>
-  );
+  const saveCurrentView = () => {
+    const value = savedName.trim();
+    if (!value) return;
+    onSaveView(value);
+    setSavedName("");
+  };
+
+  const modeLabel =
+    mode === "local"
+      ? t("graph.view.local")
+      : mode === "chains"
+        ? t("graph.view.chains")
+        : t("graph.view.graph");
 
   return (
     <div className="graph-toolbar" data-testid="graph-toolbar">
-      <div className="graph-view-toggle" role="tablist" aria-label={t("graph.view.label")}>
-        {modeButton("global", t("graph.view.graph"), "graph-view-graph")}
-        {modeButton("local", t("graph.view.local"), "graph-view-local")}
-        {modeButton("chains", t("graph.view.chains"), "graph-chain-toggle")}
-      </div>
-      <select
-        className="graph-source-select"
-        aria-label={t("graph.source.label")}
-        value={source}
-        onChange={(event) => onSourceChange(event.target.value as GraphSource)}
-      >
-        <option value="vault">{t("graph.source.vault")}</option>
-        <option value="workspace">{t("graph.source.workspace")}</option>
-      </select>
-
-      <GraphSavedViewsMenu
-        views={savedViews}
-        onSave={onSaveView}
-        onApply={onApplyView}
-        onDelete={onDeleteView}
-      />
-
-      <GraphSearchBox
-        search={search}
-        onSearchChange={onSearchChange}
-        inputRef={searchInputRef}
-        results={searchResults}
-        onSelect={onSearchSelect}
-        onActiveChange={onSearchActiveChange}
-      />
-
-      <button
-        type="button"
-        className={searchAsFilter ? "graph-icon-button active" : "graph-icon-button"}
-        aria-pressed={searchAsFilter}
-        title={t("graph.search.filterToggle")}
-        data-testid="graph-search-filter-toggle"
-        onClick={() => onSearchAsFilterChange(!searchAsFilter)}
-      >
-        <ListFilter size={14} />
-      </button>
-
-      <div className="graph-toolbar-spacer" />
-
-      {enriched ? (
-        <span className="graph-badge" data-testid="graph-enriched-badge">
-          {communityCount} {t("graph.badge.communities")}
-        </span>
-      ) : null}
-      <span className="graph-stats" data-testid="graph-stats" title={t("graph.stats.title")}>
-        {visibleCount} / {totalCount}
-      </span>
-
-      <button
-        type="button"
-        className={filtersOpen ? "graph-icon-button active" : "graph-icon-button"}
-        aria-pressed={filtersOpen}
-        title={activeFilterCount > 0
-          ? t("graph.filter.activeCount", { count: activeFilterCount })
-          : t("graph.panels.filters")}
-        aria-label={activeFilterCount > 0
-          ? t("graph.filter.activeCount", { count: activeFilterCount })
-          : t("graph.panels.filters")}
-        data-testid="graph-toggle-filters"
-        onClick={onToggleFilters}
-      >
-        <PanelLeft size={14} />
-        {activeFilterCount > 0 ? <span className="graph-icon-count">{activeFilterCount}</span> : null}
-      </button>
-      <button
-        type="button"
-        className={workbenchOpen ? "graph-icon-button active" : "graph-icon-button"}
-        aria-pressed={workbenchOpen}
-        title={t("graph.panels.workbench")}
-        data-testid="graph-toggle-workbench"
-        onClick={onToggleWorkbench}
-      >
-        <PanelRight size={14} />
-      </button>
-
-      <div className="graph-more" ref={moreRef}>
+      <div className="graph-view-menu" ref={viewRef}>
         <button
           type="button"
-          className={moreOpen ? "graph-icon-button active" : "graph-icon-button"}
+          className="graph-view-pill"
           aria-haspopup="menu"
-          aria-expanded={moreOpen}
-          title={t("graph.more")}
-          data-testid="graph-more-menu"
-          onClick={() => setMoreOpen((open) => !open)}
+          aria-expanded={viewOpen}
+          data-testid="graph-view-menu"
+          onClick={() => setViewOpen((open) => !open)}
         >
-          <MoreHorizontal size={14} />
+          <span>{source === "vault" ? t("graph.source.vault") : t("graph.source.workspace")}</span>
+          <span className="graph-view-pill-divider">·</span>
+          <strong>{modeLabel}</strong>
+          <span className="graph-view-pill-count">{visibleCount}/{totalCount}</span>
+          <ChevronDown size={13} aria-hidden />
         </button>
-        {moreOpen ? (
-          <div className="graph-more-menu" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="graph-refresh-overlay"
-              disabled={refreshing}
-              onClick={() => {
-                setMoreOpen(false);
-                onRefreshOverlay();
-              }}
-            >
-              <RefreshCw size={13} className={refreshing ? "spin" : ""} /> {t("graph.overlay.refresh")}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="graph-export-png"
-              onClick={() => {
-                setMoreOpen(false);
-                onExportPng();
-              }}
-            >
-              <ImageDown size={13} /> {t("graph.export.png")}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="graph-export-svg"
-              onClick={() => {
-                setMoreOpen(false);
-                onExportSvg();
-              }}
-            >
-              <FileDown size={13} /> {t("graph.export.svg")}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="graph-relayout"
-              onClick={() => {
-                setMoreOpen(false);
-                onRelayout();
-              }}
-            >
-              <RotateCcw size={13} /> {t("graph.relayout")}
-            </button>
+        {viewOpen ? (
+          <div className="graph-view-popover" role="menu">
+            <div className="graph-menu-label">{t("graph.view.label")}</div>
+            {(["global", "local", "chains"] as GraphMode[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={mode === value}
+                className={mode === value ? "active" : ""}
+                data-testid={
+                  value === "global"
+                    ? "graph-view-graph"
+                    : value === "local"
+                      ? "graph-view-local"
+                      : "graph-chain-toggle"
+                }
+                onClick={() => {
+                  onModeChange(value);
+                  setViewOpen(false);
+                }}
+              >
+                {value === "global"
+                  ? t("graph.view.graph")
+                  : value === "local"
+                    ? t("graph.view.local")
+                    : t("graph.view.chains")}
+              </button>
+            ))}
+            <div className="graph-menu-separator" />
+            <div className="graph-menu-label">{t("graph.source.label")}</div>
+            {(["vault", "workspace"] as GraphSource[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={source === value}
+                className={source === value ? "active" : ""}
+                onClick={() => {
+                  onSourceChange(value);
+                  setViewOpen(false);
+                }}
+              >
+                {value === "vault" ? t("graph.source.vault") : t("graph.source.workspace")}
+              </button>
+            ))}
+            <div className="graph-menu-separator" />
+            <div className="graph-menu-label graph-saved-heading">
+              <Bookmark size={12} aria-hidden />
+              {t("graph.saved.title")}
+            </div>
+            <div className="graph-saved-create">
+              <input
+                value={savedName}
+                placeholder={t("graph.saved.name")}
+                aria-label={t("graph.saved.name")}
+                onChange={(event) => setSavedName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") saveCurrentView();
+                }}
+              />
+              <button
+                type="button"
+                disabled={!savedName.trim()}
+                title={t("graph.saved.save")}
+                onClick={saveCurrentView}
+              >
+                <Save size={13} />
+              </button>
+            </div>
+            {savedViews.length === 0 ? (
+              <div className="graph-saved-empty">{t("graph.saved.empty")}</div>
+            ) : (
+              <div className="graph-saved-list">
+                {savedViews.map((view) => (
+                  <div key={view.id} className="graph-saved-row">
+                    <button
+                      type="button"
+                      className="graph-saved-apply"
+                      onClick={() => {
+                        onApplyView(view);
+                        setViewOpen(false);
+                      }}
+                    >
+                      <span>{view.name}</span>
+                      <small>
+                        {t(
+                          view.source === "workspace"
+                            ? "graph.source.workspace"
+                            : "graph.source.vault",
+                        )}
+                        {" · "}
+                        {t(
+                          view.mode === "local"
+                            ? "graph.view.local"
+                            : view.mode === "chains"
+                              ? "graph.view.chains"
+                              : "graph.view.graph",
+                        )}
+                      </small>
+                    </button>
+                    <button
+                      type="button"
+                      className="graph-saved-delete"
+                      aria-label={t("graph.saved.delete")}
+                      title={t("graph.saved.delete")}
+                      onClick={() => onDeleteView(view.id)}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : null}
       </div>
+
+      <div className="graph-toolbar-actions">
+        <button
+          type="button"
+          className={searchOpen ? "graph-icon-button active" : "graph-icon-button"}
+          aria-expanded={searchOpen}
+          title={t("graph.searchPlaceholder")}
+          data-testid="graph-search-toggle"
+          onClick={() => onSearchOpenChange(!searchOpen)}
+        >
+          <Search size={15} />
+        </button>
+        <button
+          type="button"
+          className={filtersOpen ? "graph-icon-button active" : "graph-icon-button"}
+          aria-pressed={filtersOpen}
+          title={
+            activeFilterCount > 0
+              ? t("graph.filter.activeCount", { count: activeFilterCount })
+              : t("graph.panels.filters")
+          }
+          data-testid="graph-toggle-filters"
+          onClick={onToggleFilters}
+        >
+          <ListFilter size={15} />
+          {activeFilterCount > 0 ? (
+            <span className="graph-icon-count">{activeFilterCount}</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          className={workbenchOpen ? "graph-icon-button active" : "graph-icon-button"}
+          aria-pressed={workbenchOpen}
+          title={t("graph.tab.insights")}
+          data-testid="graph-toggle-workbench"
+          onClick={onToggleWorkbench}
+        >
+          <PanelRight size={15} />
+        </button>
+        <div className="graph-more" ref={moreRef}>
+          <button
+            type="button"
+            className={moreOpen ? "graph-icon-button active" : "graph-icon-button"}
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            title={t("graph.more")}
+            data-testid="graph-more-menu"
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+          {moreOpen ? (
+            <div className="graph-more-menu" role="menu">
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={searchAsFilter}
+                data-testid="graph-search-filter-toggle"
+                onClick={() => onSearchAsFilterChange(!searchAsFilter)}
+              >
+                <ListFilter size={13} /> {t("graph.search.filterToggle")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="graph-refresh-overlay"
+                disabled={refreshing}
+                onClick={() => {
+                  setMoreOpen(false);
+                  onRefreshOverlay();
+                }}
+              >
+                <RefreshCw size={13} className={refreshing ? "spin" : ""} />
+                {t("graph.overlay.refresh")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="graph-export-png"
+                onClick={() => {
+                  setMoreOpen(false);
+                  onExportPng();
+                }}
+              >
+                <ImageDown size={13} /> {t("graph.export.png")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="graph-export-svg"
+                onClick={() => {
+                  setMoreOpen(false);
+                  onExportSvg();
+                }}
+              >
+                <FileDown size={13} /> {t("graph.export.svg")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="graph-relayout"
+                onClick={() => {
+                  setMoreOpen(false);
+                  onRelayout();
+                }}
+              >
+                <RotateCcw size={13} /> {t("graph.relayout")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {searchOpen ? (
+        <div className="graph-search-popover">
+          <GraphSearchBox
+            search={search}
+            onSearchChange={onSearchChange}
+            inputRef={searchInputRef}
+            results={searchResults}
+            onSelect={onSearchSelect}
+            onActiveChange={onSearchActiveChange}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Floating zoom cluster — rendered inside .graph-canvas-wrap (bottom-right,
- *  above the legend), not in the toolbar. */
 export function GraphZoomCluster({
-  zoomPercent,
   onZoomIn,
   onZoomOut,
   onFit,
-  onRelayout,
 }: {
-  zoomPercent: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
-  onRelayout: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <div className="graph-zoom-cluster graph-zoom-floating" data-testid="graph-zoom-cluster">
-      <button type="button" className="graph-icon-button" title={t("graph.zoom.out")} onClick={onZoomOut}>
+      <button
+        type="button"
+        className="graph-icon-button"
+        title={t("graph.zoom.out")}
+        onClick={onZoomOut}
+      >
         <Minus size={14} />
       </button>
-      <span className="graph-zoom-value" data-testid="graph-zoom-value">
-        {Math.round(zoomPercent)}%
-      </span>
-      <button type="button" className="graph-icon-button" title={t("graph.zoom.in")} onClick={onZoomIn}>
-        <Plus size={14} />
-      </button>
-      <button type="button" className="graph-icon-button" title={t("graph.zoom.fit")} onClick={onFit}>
+      <button
+        type="button"
+        className="graph-icon-button"
+        title={t("graph.zoom.fit")}
+        onClick={onFit}
+      >
         <Maximize2 size={14} />
       </button>
-      <button type="button" className="graph-icon-button" title={t("graph.relayout")} onClick={onRelayout}>
-        <RotateCcw size={14} />
+      <button
+        type="button"
+        className="graph-icon-button"
+        title={t("graph.zoom.in")}
+        onClick={onZoomIn}
+      >
+        <Plus size={14} />
       </button>
     </div>
   );

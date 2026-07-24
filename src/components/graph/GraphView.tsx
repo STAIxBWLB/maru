@@ -4,8 +4,9 @@
 // GraphCanvas renders; layout.worker.ts computes positions (warm-started +
 // disk-cached).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
+import { Pin, PinOff, X } from "lucide-react";
 import {
   chooseSaveFile,
   isTauri,
@@ -43,10 +44,8 @@ import {
 import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
 import {
   defaultGraphFilterProfile,
-  GRAPH_FILTER_WIDTH_MAX,
-  GRAPH_FILTER_WIDTH_MIN,
-  GRAPH_WORKBENCH_WIDTH_MAX,
-  GRAPH_WORKBENCH_WIDTH_MIN,
+  GRAPH_PANEL_WIDTH_MAX,
+  GRAPH_PANEL_WIDTH_MIN,
   type FavoriteKind,
   type GraphDisplaySettings,
   type GraphMode,
@@ -54,7 +53,7 @@ import {
   type GraphLocalTarget,
   type GraphSavedView,
   type GraphPanelSettings,
-  type GraphSettingsV2,
+  type GraphSettingsV3,
   type GraphSource,
 } from "../../lib/settings";
 import type { FavoriteTarget } from "../FavoritesSection";
@@ -87,8 +86,8 @@ interface GraphViewProps {
   onFocusTargetChange: (target: GraphOpenTarget | null) => void;
   onOpenEntry: (entry: VaultEntry) => void;
   onCreateNote: (target: string) => void;
-  graphSettings: GraphSettingsV2;
-  onGraphSettingsChange: (next: GraphSettingsV2) => void;
+  graphSettings: GraphSettingsV3;
+  onGraphSettingsChange: (next: GraphSettingsV3) => void;
   isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
   onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
@@ -115,8 +114,8 @@ export function GraphView({
 }: GraphViewProps) {
   const { t } = useTranslation();
   const source = graphSettings.source;
-  const [localDepth, setLocalDepth] = useState<GraphSettingsV2["localDepth"]>(graphSettings.localDepth);
-  const [localDirection, setLocalDirection] = useState<GraphSettingsV2["localDirection"]>(graphSettings.localDirection);
+  const [localDepth, setLocalDepth] = useState<GraphSettingsV3["localDepth"]>(graphSettings.localDepth);
+  const [localDirection, setLocalDirection] = useState<GraphSettingsV3["localDirection"]>(graphSettings.localDirection);
   // Seeded from persisted settings; changes are written back (skip-first) below.
   // Stored mode ("global" | "local" | "chains"); effective mode is "local"
   // whenever a focus node is set.
@@ -129,16 +128,35 @@ export function GraphView({
   // Theme subscription lives here (not GraphCanvas) so GraphLegend/GraphFilterPanel/
   // GraphInspector — which read the module-level theme cache at render time — also
   // re-render on a theme flip instead of showing a stale palette.
-  const [themeEpoch, setThemeEpoch] = useState(() => {
-    // Refresh during first render so children (canvas + panels) mount with live tokens.
-    refreshGraphTheme();
-    return 0;
-  });
+  const [themeEpoch, setThemeEpoch] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Prime the theme cache before GraphCanvas's first build (layout effects run
+  // before child passive effects), so mount needs no epoch bump — bumping on
+  // mount rebuilt Sigma twice and restarted layout from scratch.
+  const themeReadyRef = useRef(false);
+  useLayoutEffect(() => {
+    refreshGraphTheme(rootRef.current);
+  }, []);
+  // The root carries tabIndex=-1 so any click inside (canvas included) grants
+  // it focus for the focus-scoped shortcuts. On mount, take focus unless the
+  // user is typing elsewhere, so ⌘F works in full graph mode without a click.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      (isInEditable(active) || active.closest(".terminal-panel"))
+    ) {
+      return;
+    }
+    rootRef.current?.focus({ preventScroll: true });
+  }, []);
   useEffect(() => {
     const apply = () => {
-      refreshGraphTheme();
-      setThemeEpoch((epoch) => epoch + 1);
+      refreshGraphTheme(rootRef.current);
+      if (themeReadyRef.current) setThemeEpoch((epoch) => epoch + 1);
+      themeReadyRef.current = true;
     };
+    apply();
     const observer = new MutationObserver(apply);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -147,7 +165,7 @@ export function GraphView({
       observer.disconnect();
       media.removeEventListener("change", apply);
     };
-  }, []);
+  }, [graphSettings.display.theme, graphSettings.display.accent]);
   const exportControllerRef = useRef<GraphExportController | null>(null);
   // Right-click node context menu (spec §F2 usability).
   const [menu, setMenu] = useState<{ x: number; y: number; node: GraphNode; index: number } | null>(null);
@@ -161,12 +179,17 @@ export function GraphView({
   onGraphSettingsChangeRef.current = onGraphSettingsChange;
   const graphSettingsRef = useRef(graphSettings);
   graphSettingsRef.current = graphSettings;
+  // Filters are source-scoped. Keep the source that the current filter state
+  // belongs to so a source prop change cannot persist the previous source's
+  // profile into the newly selected source before the re-seed effect runs.
+  const filtersSourceRef = useRef(source);
   const persistSkipRef = useRef(true);
   useEffect(() => {
     if (persistSkipRef.current) {
       persistSkipRef.current = false;
       return;
     }
+    if (filtersSourceRef.current !== source) return;
     const current = graphSettingsRef.current;
     onGraphSettingsChangeRef.current({
       ...current,
@@ -190,13 +213,17 @@ export function GraphView({
     if (graphSettings.localDirection !== localDirection) setLocalDirection(graphSettings.localDirection);
     if (graphSettings.mode !== mode) setMode(graphSettings.mode);
     if (graphSettings.searchAsFilter !== searchAsFilter) setSearchAsFilter(graphSettings.searchAsFilter);
-    // The [source] effect above loads the profile on a source switch; here we
-    // only track external edits to the currently active source's profile.
+    const sourceChanged = filtersSourceRef.current !== graphSettings.source;
     const activeProfile = graphSettings.profiles[graphSettings.source];
-    if (
+    if (sourceChanged) {
+      filtersSourceRef.current = graphSettings.source;
+      setFilters(filtersFromSettings(activeProfile));
+    } else if (
       graphSettings.source === source &&
       JSON.stringify(activeProfile) !== JSON.stringify(filtersToSettings(filters))
     ) {
+      // Same-source external edit, for example another window changing this
+      // workspace's graph profile.
       setFilters(filtersFromSettings(activeProfile));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,11 +245,9 @@ export function GraphView({
   // --- separated interaction state (V5): selection / local focus / path ----
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [relationPair, setRelationPair] = useState<{ source: GraphNode; target: GraphNode } | null>(null);
-  const [rightTab, setRightTab] = useState<"insights" | "selected">("insights");
   const [pathSourceId, setPathSourceId] = useState<string | null>(null);
   const [pathIds, setPathIds] = useState<string[]>([]);
   const [highlightPair, setHighlightPair] = useState<{ a: string; b: string } | null>(null);
-  const [zoomPercent, setZoomPercent] = useState(100);
   const [fitSignal, setFitSignal] = useState(0);
   const [zoomSignal, setZoomSignal] = useState<{ dir: 1 | -1; nonce: number } | null>(null);
   const [centerSignal, setCenterSignal] = useState<{ id: string; nonce: number } | null>(null);
@@ -238,8 +263,7 @@ export function GraphView({
   useEffect(() => {
     setLocalTarget(focusTarget?.source === source ? focusTarget.localTarget : null);
   }, [focusTarget, source]);
-  // --- adaptive tiers + panel layout (V5) -----------------------------------
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  // --- adaptive tiers + progressive Graph tools drawer ----------------------
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [tier, setTier] = useState<"wide" | "standard" | "compact">("wide");
   useEffect(() => {
@@ -247,7 +271,7 @@ export function GraphView({
     if (!el) return;
     const observer = new ResizeObserver(() => {
       const width = el.clientWidth;
-      const next = width >= 1280 ? "wide" : width >= 920 ? "standard" : "compact";
+      const next = width >= 1280 ? "wide" : width >= 720 ? "standard" : "compact";
       setTier((prev) => (prev === next ? prev : next));
     });
     observer.observe(el);
@@ -257,33 +281,35 @@ export function GraphView({
   const panelsRef = useRef(panels);
   panelsRef.current = panels;
   const display = graphSettings.display;
-  // Overlay panel open state is session-only (never persisted); the compact
-  // tier's mutual exclusion falls out of the single-slot value.
-  const [overlayPanel, setOverlayPanel] = useState<"filters" | "workbench" | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [rightTab, setRightTab] = useState<"filters" | "insights" | "selected">("filters");
+  const [searchOpen, setSearchOpen] = useState(false);
   const persistPanels = useCallback((next: GraphPanelSettings) => {
     onGraphSettingsChangeRef.current({ ...graphSettingsRef.current, panels: next });
   }, []);
   const persistDisplay = useCallback((next: GraphDisplaySettings) => {
     onGraphSettingsChangeRef.current({ ...graphSettingsRef.current, display: next });
   }, []);
-  const filtersDocked = tier === "wide" && panels.filtersOpen;
-  const workbenchDocked = tier !== "compact" && panels.workbenchOpen;
-  const filtersVisible = tier === "wide" ? panels.filtersOpen : overlayPanel === "filters";
-  const workbenchVisible = tier === "compact" ? overlayPanel === "workbench" : panels.workbenchOpen;
+  const toolsDocked = tier === "wide" && panels.pinned && toolsOpen;
+  const filtersVisible = toolsOpen && rightTab === "filters";
+  const workbenchVisible = toolsOpen && rightTab !== "filters";
   const toggleFiltersPanel = useCallback(() => {
-    if (tier === "wide") persistPanels({ ...panelsRef.current, filtersOpen: !panelsRef.current.filtersOpen });
-    else setOverlayPanel((current) => (current === "filters" ? null : "filters"));
-  }, [tier, persistPanels]);
+    setRightTab("filters");
+    setToolsOpen((open) => (open && rightTab === "filters" ? false : true));
+  }, [rightTab]);
   const toggleWorkbenchPanel = useCallback(() => {
-    if (tier === "compact") setOverlayPanel((current) => (current === "workbench" ? null : "workbench"));
-    else persistPanels({ ...panelsRef.current, workbenchOpen: !panelsRef.current.workbenchOpen });
-  }, [tier, persistPanels]);
+    setRightTab("insights");
+    setToolsOpen((open) => (open && rightTab === "insights" ? false : true));
+  }, [rightTab]);
   const clampPanelWidth = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, Math.round(value)));
-  const filterWidth = clampPanelWidth(panels.filterWidth, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX);
-  const workbenchWidth = clampPanelWidth(panels.workbenchWidth, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX);
+  const panelWidth = clampPanelWidth(
+    panels.width,
+    GRAPH_PANEL_WIDTH_MIN,
+    GRAPH_PANEL_WIDTH_MAX,
+  );
   const startPanelResize = useCallback(
-    (kind: "filters" | "workbench") => (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
       const handle = event.currentTarget;
@@ -293,17 +319,14 @@ export function GraphView({
         const rect = bodyRef.current?.getBoundingClientRect();
         if (!rect) return;
         const current = panelsRef.current;
-        if (kind === "filters") {
-          persistPanels({
-            ...current,
-            filterWidth: clampPanelWidth(clientX - rect.left, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX),
-          });
-        } else {
-          persistPanels({
-            ...current,
-            workbenchWidth: clampPanelWidth(rect.right - clientX, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX),
-          });
-        }
+        persistPanels({
+          ...current,
+          width: clampPanelWidth(
+            rect.right - clientX,
+            GRAPH_PANEL_WIDTH_MIN,
+            GRAPH_PANEL_WIDTH_MAX,
+          ),
+        });
       };
       update(event.clientX);
       const onMove = (move: PointerEvent) => {
@@ -325,30 +348,20 @@ export function GraphView({
     [persistPanels],
   );
   const resizePanelByKey = useCallback(
-    (kind: "filters" | "workbench") => (event: React.KeyboardEvent<HTMLDivElement>) => {
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
-      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const direction = event.key === "ArrowRight" ? -1 : 1;
+      const step = event.shiftKey ? 32 : 8;
       const current = panelsRef.current;
-      if (kind === "filters") {
-        persistPanels({
-          ...current,
-          filterWidth: clampPanelWidth(
-            current.filterWidth + direction * 12,
-            GRAPH_FILTER_WIDTH_MIN,
-            GRAPH_FILTER_WIDTH_MAX,
-          ),
-        });
-      } else {
-        persistPanels({
-          ...current,
-          workbenchWidth: clampPanelWidth(
-            current.workbenchWidth - direction * 12,
-            GRAPH_WORKBENCH_WIDTH_MIN,
-            GRAPH_WORKBENCH_WIDTH_MAX,
-          ),
-        });
-      }
+      persistPanels({
+        ...current,
+        width: clampPanelWidth(
+          current.width + direction * step,
+          GRAPH_PANEL_WIDTH_MIN,
+          GRAPH_PANEL_WIDTH_MAX,
+        ),
+      });
     },
     [persistPanels],
   );
@@ -358,25 +371,40 @@ export function GraphView({
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!searchOpen) return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [searchOpen]);
 
   const index = useMemo(() => buildEntryIndex(entries), [entries]);
   const liveModel = useMemo(() => buildVaultGraph(entries, index), [entries, index]);
+  const overlayRequestRef = useRef(0);
 
   const loadOverlay = useCallback(
     (path: string, live: GraphModel) => {
+      const request = ++overlayRequestRef.current;
       setRefreshing(true);
       vaultGraphRead(path, source)
         .then((file) => {
+          if (request !== overlayRequestRef.current) return;
           if (file) setEnrichment({ model: enrichGraph(live, file), hint: null });
           else setEnrichment({ model: null, hint: t("graph.hint.noEnrichment") });
         })
-        .catch((err: unknown) => setEnrichment({ model: null, hint: String(err) }))
-        .finally(() => setRefreshing(false));
+        .catch((err: unknown) => {
+          if (request === overlayRequestRef.current) {
+            setEnrichment({ model: null, hint: String(err) });
+          }
+        })
+        .finally(() => {
+          if (request === overlayRequestRef.current) setRefreshing(false);
+        });
     },
     [t, source],
   );
 
   useEffect(() => {
+    overlayRequestRef.current += 1;
     setEnrichment({ model: null, hint: null });
     const root = overlayPath ?? workspacePath;
     if (root) loadOverlay(root, liveModel);
@@ -536,10 +564,9 @@ export function GraphView({
       setSelectedId(id);
       setHighlightPair(null);
       setPathIds([]);
-      if (id) setRightTab("selected");
-      else setRightTab("insights");
+      if (toolsOpen) setRightTab(id ? "selected" : "insights");
     },
-    [],
+    [toolsOpen],
   );
 
   const focusNode = useCallback(
@@ -668,7 +695,7 @@ export function GraphView({
       const source = pathSourceId ?? selectedId;
       if (!source || source === node.id) {
         setPathSourceId(node.id);
-        setRightTab("selected");
+        if (toolsOpen) setRightTab("selected");
         return;
       }
       const path = shortestPath(derived.analysisModel, source, node.id);
@@ -680,7 +707,7 @@ export function GraphView({
       setHighlightPair(null);
       setPathSourceId(null);
     },
-    [derived.analysisModel, pathSourceId, selectedId, onError, t],
+    [derived.analysisModel, pathSourceId, selectedId, onError, t, toolsOpen],
   );
 
   const handleInsightNode = useCallback(
@@ -713,22 +740,16 @@ export function GraphView({
     onFocusTargetChange(null);
   }, [onFocusTargetChange]);
 
-  const clearOverlays = useCallback(() => {
-    setSelectedId(null);
-    setHighlightPair(null);
-    setPathIds([]);
-    setPathSourceId(null);
-    setRightTab("insights");
-    if (localTarget) clearFocus();
-  }, [localTarget, clearFocus]);
-
   // Toolbar mode segmented control: Local with no anchor keeps Global and
   // focuses the search box (the user picks a node there first).
   const effectiveMode: GraphMode = localTarget ? "local" : mode === "local" ? "global" : mode;
   const handleModeChange = useCallback(
     (next: GraphMode) => {
       if (next === "local") {
-        if (!localTarget) searchRef.current?.focus();
+        if (!localTarget) {
+          setSearchOpen(true);
+          requestAnimationFrame(() => searchRef.current?.focus());
+        }
         return;
       }
       if (localTarget) clearFocus();
@@ -805,26 +826,63 @@ export function GraphView({
     });
   }, []);
 
-  // Mode-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom.
-  const shortcutPredicate = useCallback(() => effectiveMode !== "chains", [effectiveMode]);
+  // Surface-scoped shortcuts: ⌘F focus search, Esc clears, +/-/0 zoom. Gated on
+  // the graph owning focus — the same window may show a document editor beside
+  // an embedded graph split, and a mode-only gate stole the app-wide ⌘F/Esc.
+  const shortcutPredicate = useCallback(
+    () =>
+      effectiveMode !== "chains" &&
+      (rootRef.current?.contains(document.activeElement) ?? false),
+    [effectiveMode],
+  );
   const shortcutHandler = useCallback(
     (event: KeyboardEvent) => {
       if (matchesShortcut(event, { key: "f", mod: true })) {
         event.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen(true);
+        requestAnimationFrame(() => searchRef.current?.focus());
         return;
       }
       if (isInEditable(event.target)) return;
       if (event.key === "Escape") {
-        event.preventDefault();
-        // The scoped shortcut runs capture-phase and stops propagation, so it
-        // must close the context menu itself (the menu's own Esc handler and the
-        // window listener never see the event).
+        // Consume Esc only when the graph actually closes something —
+        // otherwise dialogs and global handlers must still see it. The scoped
+        // shortcut stops propagation on preventDefault, so each branch closes
+        // its own surface (the window listeners never see the event).
         if (menu) {
+          event.preventDefault();
           setMenu(null);
           return;
         }
-        clearOverlays();
+        // Toolbar popovers close on their own bubble-phase Esc listener; let
+        // the event through so they get priority over the cascade below.
+        if (rootRef.current?.querySelector('[role="menu"]')) return;
+        if (toolsOpen) {
+          event.preventDefault();
+          setToolsOpen(false);
+          return;
+        }
+        if (searchOpen) {
+          event.preventDefault();
+          if (search) setSearch("");
+          else setSearchOpen(false);
+          return;
+        }
+        if (pathSourceId || pathIds.length > 0) {
+          event.preventDefault();
+          setPathSourceId(null);
+          setPathIds([]);
+          return;
+        }
+        if (selectedId) {
+          event.preventDefault();
+          selectById(null);
+          return;
+        }
+        if (localTarget) {
+          event.preventDefault();
+          clearFocus();
+        }
       } else if (event.key === "=" || event.key === "+") {
         event.preventDefault();
         setZoomSignal({ dir: 1, nonce: Date.now() });
@@ -836,7 +894,18 @@ export function GraphView({
         setFitSignal((s) => s + 1);
       }
     },
-    [clearOverlays, menu],
+    [
+      clearFocus,
+      localTarget,
+      menu,
+      pathIds.length,
+      pathSourceId,
+      search,
+      searchOpen,
+      selectById,
+      selectedId,
+      toolsOpen,
+    ],
   );
   useScopedKeyboardShortcuts(shortcutPredicate, shortcutHandler);
 
@@ -880,9 +949,6 @@ export function GraphView({
     return null;
   }, [pathIds, highlightPair]);
 
-  const enrichedCount = model.enriched
-    ? new Set(model.nodes.map((n) => n.community).filter((c) => c != null)).size
-    : 0;
   const activeFilterCount =
     filters.domains.size +
     filters.types.size +
@@ -893,60 +959,81 @@ export function GraphView({
     (filters.minVisibleNeighbors === defaultGraphFilterProfile().minVisibleNeighbors ? 0 : 1) +
     (searchAsFilter && search.trim() ? 1 : 0);
 
-  const filterPanel = (
-    <GraphFilterPanel
-      filters={filters}
-      domains={derived.facets.domains}
-      types={derived.facets.types}
-      relations={derived.facets.relations}
-      communities={derived.facets.communities}
-      enriched={model.enriched}
-      maxVisibleNeighbors={derived.facets.maxVisibleNeighbors}
-      pausedFilters={derived.pausedFilters}
-      onRemovePaused={removePausedFilter}
-      display={display}
-      onDisplayChange={persistDisplay}
-      onFiltersChange={setFilters}
-    />
-  );
-
-  const workbench = (
+  const toolsDrawer = (
     <Tabs.Root
       value={rightTab}
-      onValueChange={(value) => setRightTab(value as "insights" | "selected")}
-      className="graph-right"
+      onValueChange={(value) =>
+        setRightTab(value as "filters" | "insights" | "selected")
+      }
+      className="graph-right graph-tools-drawer"
       data-testid="graph-right"
     >
       <Tabs.List className="graph-right-tabs" aria-label={t("graph.tab.insights")}>
+        <Tabs.Trigger value="filters" className="graph-right-tab">
+          {t("graph.panels.filters")}
+        </Tabs.Trigger>
         <Tabs.Trigger value="insights" className="graph-right-tab">
           {t("graph.tab.insights")}
         </Tabs.Trigger>
-        <Tabs.Trigger value="selected" className="graph-right-tab">
+        <Tabs.Trigger value="selected" className="graph-right-tab" disabled={!selectedNode}>
           {t("graph.tab.selected")}
         </Tabs.Trigger>
+        {tier === "wide" ? (
+          <button
+            type="button"
+            className="graph-drawer-action"
+            aria-pressed={panels.pinned}
+            title={panels.pinned ? t("graph.panels.unpin") : t("graph.panels.pin")}
+            onClick={() =>
+              persistPanels({ ...panelsRef.current, pinned: !panelsRef.current.pinned })
+            }
+          >
+            {panels.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="graph-drawer-action"
+          title={t("graph.focus.exit")}
+          onClick={() => setToolsOpen(false)}
+        >
+          <X size={14} />
+        </button>
       </Tabs.List>
-      {/* forceMount keeps the insights worker + inspector state alive across
-          tab switches; Radix hides the inactive panel via the hidden attr. */}
-      <Tabs.Content
-        value="insights"
-        forceMount
-        hidden={rightTab !== "insights"}
-        className="graph-right-content"
-      >
-        <GraphInsightsPanel
-          model={derived.analysisModel}
-          now={now}
-          onHighlightPair={handleHighlightPair}
-          onSelectNode={handleInsightNode}
-          onCopyWikilink={copyWikilink}
-          onOpenNode={openNodeById}
-          onConnect={handleConnect}
+      <Tabs.Content value="filters" className="graph-right-content">
+        <GraphFilterPanel
+          filters={filters}
+          domains={derived.facets.domains}
+          types={derived.facets.types}
+          relations={derived.facets.relations}
+          communities={derived.facets.communities}
+          enriched={model.enriched}
+          maxVisibleNeighbors={derived.facets.maxVisibleNeighbors}
+          pausedFilters={derived.pausedFilters}
+          onRemovePaused={removePausedFilter}
+          display={display}
+          onDisplayChange={persistDisplay}
+          onFiltersChange={setFilters}
         />
       </Tabs.Content>
       <Tabs.Content
+        value="insights"
+        className="graph-right-content"
+      >
+        {rightTab === "insights" ? (
+          <GraphInsightsPanel
+            model={derived.analysisModel}
+            now={now}
+            onHighlightPair={handleHighlightPair}
+            onSelectNode={handleInsightNode}
+            onCopyWikilink={copyWikilink}
+            onOpenNode={openNodeById}
+            onConnect={handleConnect}
+          />
+        ) : null}
+      </Tabs.Content>
+      <Tabs.Content
         value="selected"
-        forceMount
-        hidden={rightTab !== "selected"}
         className="graph-right-content"
       >
         <GraphInspector
@@ -969,15 +1056,25 @@ export function GraphView({
   );
 
   return (
-    <div ref={rootRef} className={`graph-view tier-${tier}`} data-testid="graph-mode">
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className={`graph-view tier-${tier}`}
+      data-testid="graph-mode"
+      data-graph-theme={display.theme}
+      data-graph-accent={display.accent}
+      data-graph-colors={display.colorMode}
+      data-graph-search-open={searchOpen ? "true" : undefined}
+    >
       <GraphToolbar
         mode={effectiveMode}
-        localAvailable={localTarget != null}
         onModeChange={handleModeChange}
         source={source}
         onSourceChange={changeSource}
         search={search}
         onSearchChange={setSearch}
+        searchOpen={searchOpen}
+        onSearchOpenChange={setSearchOpen}
         searchInputRef={searchRef}
         searchResults={searchResults}
         onSearchSelect={handleSearchSelect}
@@ -986,8 +1083,6 @@ export function GraphView({
         onSearchAsFilterChange={setSearchAsFilter}
         visibleCount={filtered.nodes.length}
         totalCount={model.nodes.length}
-        enriched={model.enriched}
-        communityCount={enrichedCount}
         filtersOpen={filtersVisible}
         activeFilterCount={activeFilterCount}
         onToggleFilters={toggleFiltersPanel}
@@ -1029,7 +1124,7 @@ export function GraphView({
           </label>
           <label>
             {t("graph.focus.direction")}
-            <select value={localDirection} onChange={(event) => setLocalDirection(event.target.value as GraphSettingsV2["localDirection"])}>
+            <select value={localDirection} onChange={(event) => setLocalDirection(event.target.value as GraphSettingsV3["localDirection"])}>
               <option value="both">{t("graph.focus.both")}</option>
               <option value="incoming">{t("graph.focus.incoming")}</option>
               <option value="outgoing">{t("graph.focus.outgoing")}</option>
@@ -1069,26 +1164,6 @@ export function GraphView({
         <DecisionChainLanes model={model} onNodeClick={handleOpen} />
       ) : (
         <div className="graph-body" ref={bodyRef}>
-          {filtersDocked ? (
-            <div className="graph-panel-docked" style={{ width: filterWidth }}>
-              {filterPanel}
-            </div>
-          ) : null}
-          {filtersDocked ? (
-            <div
-              className="pane-resize-handle graph-panel-resize"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("graph.panels.filters")}
-              title={t("graph.panels.filters")}
-              aria-valuemin={GRAPH_FILTER_WIDTH_MIN}
-              aria-valuemax={GRAPH_FILTER_WIDTH_MAX}
-              aria-valuenow={filterWidth}
-              tabIndex={0}
-              onPointerDown={startPanelResize("filters")}
-              onKeyDown={resizePanelByKey("filters")}
-            />
-          ) : null}
           <div className="graph-canvas-column">
             {layoutCacheReady ? <GraphCanvas
               nodes={model.nodes}
@@ -1125,51 +1200,76 @@ export function GraphView({
               exportControllerRef={exportControllerRef}
               overlay={
                 <>
-                  <GraphLegend
-                    enriched={model.enriched}
-                    domains={derived.facets.domains}
-                    communities={derived.facets.communities}
-                    filters={filters}
-                    onFiltersChange={setFilters}
-                    iconOnly={tier !== "wide"}
-                  />
+                  {display.colorMode === "domain" ||
+                  (display.colorMode === "community" && model.enriched) ? (
+                    <GraphLegend
+                      mode={display.colorMode}
+                      domains={derived.facets.domains}
+                      communities={derived.facets.communities}
+                      filters={filters}
+                      onFiltersChange={setFilters}
+                      iconOnly={tier !== "wide"}
+                    />
+                  ) : null}
                   <GraphZoomCluster
-                    zoomPercent={zoomPercent}
                     onZoomIn={() => setZoomSignal({ dir: 1, nonce: Date.now() })}
                     onZoomOut={() => setZoomSignal({ dir: -1, nonce: Date.now() })}
                     onFit={() => setFitSignal((s) => s + 1)}
-                    onRelayout={() => setLayoutEpoch((e) => e + 1)}
                   />
+                  {selectedNode ? (
+                    <div className="graph-selection-shelf" data-testid="graph-selection-shelf">
+                      <span title={selectedNode.relPath ?? selectedNode.label}>
+                        {selectedNode.label}
+                      </span>
+                      <small>{selectedNode.degree}</small>
+                      <button type="button" onClick={() => handleOpen(selectedNode)}>
+                        {t("graph.inspector.open")}
+                      </button>
+                      <button type="button" onClick={() => focusNode(selectedNode)}>
+                        {t("graph.inspector.focus")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRightTab("selected");
+                          setToolsOpen(true);
+                        }}
+                      >
+                        {t("graph.tab.selected")}
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               }
-              onViewportReport={(zoom) => setZoomPercent(zoom * 100)}
             /> : <div className="graph-canvas-loading" role="status">{t("graph.layout.running")}</div>}
           </div>
-          {workbenchDocked ? (
+          {toolsDocked ? (
             <div
               className="pane-resize-handle graph-panel-resize"
               role="separator"
               aria-orientation="vertical"
               aria-label={t("graph.panels.workbench")}
               title={t("graph.panels.workbench")}
-              aria-valuemin={GRAPH_WORKBENCH_WIDTH_MIN}
-              aria-valuemax={GRAPH_WORKBENCH_WIDTH_MAX}
-              aria-valuenow={workbenchWidth}
+              aria-valuemin={GRAPH_PANEL_WIDTH_MIN}
+              aria-valuemax={GRAPH_PANEL_WIDTH_MAX}
+              aria-valuenow={panelWidth}
               tabIndex={0}
-              onPointerDown={startPanelResize("workbench")}
-              onKeyDown={resizePanelByKey("workbench")}
+              onPointerDown={startPanelResize}
+              onKeyDown={resizePanelByKey}
             />
           ) : null}
-          {workbenchDocked ? (
-            <div className="graph-panel-docked" style={{ width: workbenchWidth }}>
-              {workbench}
+          {toolsDocked ? (
+            <div className="graph-panel-docked" style={{ width: panelWidth }}>
+              {toolsDrawer}
             </div>
           ) : null}
-          {!filtersDocked && filtersVisible ? (
-            <div className="graph-panel-overlay graph-panel-overlay-left">{filterPanel}</div>
-          ) : null}
-          {!workbenchDocked && workbenchVisible ? (
-            <div className="graph-panel-overlay graph-panel-overlay-right">{workbench}</div>
+          {!toolsDocked && toolsOpen ? (
+            <div
+              className="graph-panel-overlay graph-panel-overlay-right"
+              style={tier === "compact" ? undefined : { width: panelWidth }}
+            >
+              {toolsDrawer}
+            </div>
           ) : null}
         </div>
       )}

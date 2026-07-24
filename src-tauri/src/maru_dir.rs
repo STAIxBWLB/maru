@@ -39,6 +39,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["ui", "activeAppMode"],
     &["ui", "activeWorkspaceVisibility"],
     &["ui", "editorViewMode"],
+    &["ui", "editorPaneViewModes"],
     &["ui", "rightPaneTab"],
     &["ui", "explorerPaneMode"],
     &["ui", "documentBrowserMode"],
@@ -341,6 +342,10 @@ fn default_settings_json() -> JsonValue {
             "activeAppMode": "pkm",
             "activeWorkspaceVisibility": "private",
             "editorViewMode": "source",
+            "editorPaneViewModes": {
+                "left": "source",
+                "right": "source"
+            },
             "rightPaneTab": "outline",
             "explorerPaneMode": "documents",
             "documentBrowserMode": "tree",
@@ -400,6 +405,7 @@ fn default_settings_json() -> JsonValue {
                 "terminalHeight": 260,
                 "terminalMaximized": false,
                 "editorSplitOpen": false,
+                "editorSplitSurface": "document",
                 "editorSplitRatio": 0.5,
                 "terminalSplitOpen": false,
                 "terminalSplitRatio": 0.5,

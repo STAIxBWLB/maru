@@ -1,15 +1,15 @@
-// Canvas legend overlay (spec §F2 비주얼라이제이션): a collapsible color key that
-// doubles as a filter. Shows communities when the overlay is present, else
-// domains. Clicking a swatch toggles the matching filter.
+// Canvas legend overlay (spec §F2 비주얼라이제이션): a collapsible color key
+// that doubles as a filter. Its content follows the selected color mode, so
+// the key always describes the colors currently drawn on the canvas.
 
 import { ChevronDown, ChevronUp, Palette } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { communityColor, domainColor } from "./graphStyle";
 import type { FacetItem, GraphFilters } from "./GraphFilterPanel";
 
 interface GraphLegendProps {
-  enriched: boolean;
+  mode: "domain" | "community";
   domains: FacetItem<string>[];
   communities: FacetItem<number>[];
   filters: GraphFilters;
@@ -19,7 +19,7 @@ interface GraphLegendProps {
 }
 
 export function GraphLegend({
-  enriched,
+  mode,
   domains,
   communities,
   filters,
@@ -29,7 +29,11 @@ export function GraphLegend({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(iconOnly);
 
-  const items = enriched
+  useEffect(() => {
+    if (!iconOnly) setCollapsed(false);
+  }, [iconOnly]);
+
+  const items = mode === "community"
     ? communities.map((c) => ({
         key: `c${c.value}`,
         label: `#${c.value}`,
@@ -64,7 +68,7 @@ export function GraphLegend({
         type="button"
         className="graph-legend-icon"
         data-testid="graph-legend"
-        title={enriched ? t("graph.legend.community") : t("graph.legend.domain")}
+        title={mode === "community" ? t("graph.legend.community") : t("graph.legend.domain")}
         aria-expanded={false}
         onClick={() => setCollapsed(false)}
       >
@@ -74,14 +78,14 @@ export function GraphLegend({
   }
 
   return (
-    <div className="graph-legend" data-testid={iconOnly ? undefined : "graph-legend"}>
+    <div className="graph-legend" data-testid="graph-legend">
       <button
         type="button"
         className="graph-legend-head"
         onClick={() => setCollapsed((c) => !c)}
         aria-expanded={!collapsed}
       >
-        <span>{enriched ? t("graph.legend.community") : t("graph.legend.domain")}</span>
+        <span>{mode === "community" ? t("graph.legend.community") : t("graph.legend.domain")}</span>
         {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {!collapsed ? (

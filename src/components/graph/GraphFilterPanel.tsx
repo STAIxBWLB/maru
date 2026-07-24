@@ -291,6 +291,67 @@ export function GraphFilterPanel({
       <section className="graph-filter-section">
         <h4>{t("graph.display.title")}</h4>
         <label className="graph-display-field">
+          <span>{t("graph.display.theme")}</span>
+          <select
+            value={display.theme}
+            data-testid="graph-display-theme"
+            onChange={(event) =>
+              onDisplayChange({
+                ...display,
+                theme: event.target.value as GraphDisplaySettings["theme"],
+              })
+            }
+          >
+            <option value="dark">{t("graph.display.theme.dark")}</option>
+            <option value="light">{t("graph.display.theme.light")}</option>
+            <option value="app">{t("graph.display.theme.app")}</option>
+          </select>
+        </label>
+        <label className="graph-display-field">
+          <span>{t("graph.display.accent")}</span>
+          <select
+            value={display.accent}
+            data-testid="graph-display-accent"
+            onChange={(event) =>
+              onDisplayChange({
+                ...display,
+                accent: event.target.value as GraphDisplaySettings["accent"],
+              })
+            }
+          >
+            <option value="violet">{t("graph.display.accent.violet")}</option>
+            <option value="green">{t("graph.display.accent.green")}</option>
+          </select>
+        </label>
+        <label className="graph-display-field">
+          <span>{t("graph.display.colors")}</span>
+          <select
+            value={display.colorMode}
+            data-testid="graph-display-color-mode"
+            onChange={(event) =>
+              onDisplayChange({
+                ...display,
+                colorMode: event.target.value as GraphDisplaySettings["colorMode"],
+              })
+            }
+          >
+            <option value="neutral">{t("graph.display.colors.neutral")}</option>
+            <option value="domain">{t("graph.display.colors.domain")}</option>
+            <option value="community">{t("graph.display.colors.community")}</option>
+          </select>
+        </label>
+        <label className="graph-check">
+          <input
+            type="checkbox"
+            checked={display.relationColors}
+            data-testid="graph-display-relation-colors"
+            onChange={(event) =>
+              onDisplayChange({ ...display, relationColors: event.target.checked })
+            }
+          />
+          <span>{t("graph.display.relationColors")}</span>
+        </label>
+        <label className="graph-display-field">
           <span>{t("graph.display.arrows")}</span>
           <select
             value={display.arrows}

@@ -11,6 +11,11 @@ ForceAtlas2 worker, incremental index refresh, reviewed relationship writes).
 **V5** reworked the workspace UI (adaptive tiers, per-source filter profiles,
 display controls, a single derivation pipeline) and hardened the renderer
 lifecycle (state machine, mount gating, camera-fit rules, real-Sigma e2e).
+**V6** makes the canvas primary: compact floating controls, one
+progressive-disclosure tools surface, dark neutral defaults with a selectable
+accent, dense-graph visual LOD, and safe recovery while the canvas container is
+temporarily zero-sized. Graph can also stay open as a persistent, resizable
+right editor split while documents remain editable on the left.
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -31,7 +36,7 @@ layer alone — the graph still renders, just without community coloring. The
 overlay is produced out-of-band by the `vault-graph` skill
 (`skills/lib/build-graph.py`), not by the app.
 
-## Rendering (V4, hardened in V5)
+## Rendering (V4, hardened in V5/V6)
 
 - `src/components/graph/GraphView.tsx` — mode shell; owns the model,
   adaptive tier/panel layout, filter/search/selection/path state, and one
@@ -46,15 +51,17 @@ overlay is produced out-of-band by the `vault-graph` skill
   camera-fit rules (fit on first frame, on topology change after settle, and
   when every visible node leaves the viewport — ordinary resizes/filter
   changes never move the camera), and pins synced to FA2's native `fixed`
-  node attribute.
-- `src/components/graph/GraphLegend.tsx` — collapsible color key overlay
-  (communities when enriched, else domains); collapses to an icon button
-  outside the wide tier.
-- `src/components/graph/GraphToolbar.tsx` — Global/Local/Chains segmented
-  control, source select, search combobox (ranked results over the current
-  filtered graph, full keyboard/ARIA), search-as-filter toggle, visible/total
-  counts, Filters/Workbench toggles, More menu (refresh overlay, export,
-  re-layout). The zoom cluster floats bottom-right inside the canvas wrap.
+  node attribute. V6 also enables Sigma's invalid-container guard so hiding or
+  maximizing another pane cannot crash the entire app while Graph is mounted.
+- `src/components/graph/GraphLegend.tsx` — collapsible color key overlay,
+  shown only when it describes the active canvas colors (domain color mode, or
+  community color mode on an enriched graph; hidden for neutral); collapses to
+  an icon button outside the wide tier.
+- `src/components/graph/GraphToolbar.tsx` — compact floating view/source/saved
+  selector, search combobox (ranked results over the current filtered graph,
+  full keyboard/ARIA), search-as-filter toggle, visible/total counts, one Tools
+  toggle, and a More menu (refresh overlay, export, re-layout). The zoom cluster
+  floats bottom-right inside the canvas wrap.
 - `src/components/graph/GraphFilterPanel.tsx` — Data (generated/unresolved
   toggles, min-visible-neighbors), searchable Domain/Type/Relation/Community
   facet groups, paused-filter chips, Display (arrows/labels/scales).
@@ -67,7 +74,7 @@ overlay is produced out-of-band by the `vault-graph` skill
 - `NeighborhoodPane` gains a "그래프에서 보기" (view in graph) button that focuses
   the graph on the active document.
 
-## Derivation pipeline & settings V2 (V5)
+## Derivation pipeline & settings V3 (V6)
 
 - `src/lib/graph/derive.ts` — one pure pipeline: node facet filter → relation
   filter (before traversal/counting) → local k-hop → `minVisibleNeighbors`
@@ -81,35 +88,39 @@ overlay is produced out-of-band by the `vault-graph` skill
   and visible authored content. Only paths matching `generatedPatterns`
   (trailing `/` = prefix, else exact filename, case-insensitive) count as
   generated (`isGeneratedNode`).
-- `MaruSettings.graph` is `GraphSettingsV2` (`schemaVersion: 2`): `source`
+- `MaruSettings.graph` is `GraphSettingsV3` (`schemaVersion: 3`): `source`
   (vault|workspace), `mode` (global|local|chains), `localDepth`/
   `localDirection`, `searchAsFilter`, `generatedPatterns`, per-source
   `profiles` (domains/types/relations/community/showUnresolved/showGenerated/
   minVisibleNeighbors — `minVisibleNeighbors` replaces the old scope toggle
   and minDegree; the V1→V2 migration maps `all`→workspace and
   `max(minDegree, connected ? 1 : 0)`), `display` (arrows typed|all|none,
-  label density low|balanced|high, node/edge scale 0.5–2), `panels`
-  (filtersOpen/workbenchOpen + docked widths, clamped 200–340 / 280–480), and
-  `savedViews` (source/mode/localTarget/profile/display per view). The toolbar
+  label density low|balanced|high, neutral|domain|community colors, optional
+  relation colors, dark|light|app theme, violet|green accent, node/edge scale
+  0.5–2), `panels` (one optional pinned Tools drawer with a width clamped
+  280–480), and `savedViews` (source/mode/localTarget/profile/display per
+  view). V2 settings migrate without losing filters or saved views. Legacy
+  default displays adopt the V6 dark/neutral/violet canvas defaults. The toolbar
   menu creates, applies, replaces by name, and deletes views; query, selection,
   path, camera, and overlay state remain transient.
 - Display wiring is hot-applied: arrows/labels via `setSetting` or attribute
   updates + `refresh()`, never a graph rebuild. Frontmatter edges carry a
   stable `relationColor` (palette hash); body `wiki_link` edges stay neutral.
 
-## Adaptive workspace (V5)
+## Canvas-first workspace (V6)
 
-- The shell measures `.graph-view` itself (ResizeObserver): **wide ≥1280**
-  (Filters docked left + Workbench docked right, persisted widths, drag
-  resize handles), **standard 920–1279** (Filters becomes a left overlay,
-  Workbench docked), **compact <920** (both overlays, mutually exclusive;
-  overlay open state is session-only). Docked visibility and widths persist
-  in `graphSettings.panels`. The compact toolbar wraps instead of clipping,
-  with search on its own row.
-- Workbench = Radix Tabs (Insights / Details); selecting a node opens
-  Details, clearing returns to Insights. Insight sections preview 6 rows with
+- The graph stays edge-to-edge at every width. Filters, display controls,
+  Insights, and selected-node Details share one Tools surface. It docks as a
+  resizable drawer when pinned on wide layouts, overlays the canvas by default,
+  and becomes a bottom sheet on compact layouts. Escape closes transient
+  layers in order without changing persisted filters.
+- Selecting a node exposes a compact selection shelf and moves the shared Tools
+  surface to Details; clearing returns it to Insights. Insight sections preview 6 rows with
   a "more" expander; hidden-link rows show shared-neighbor `via` evidence and
   the prediction score.
+- Dark, neutral, low-label output is the default. Dense graphs reduce node and
+  edge prominence before Sigma draws them, preserving a readable focal
+  selection instead of a bright edge mass.
 - Favorites render a ★ above the node in the production canvas label drawer
   (plus the warn border ring), not only in the e2e overlay.
 - A11y: arrow-key camera pan on the focused canvas (shift for larger steps),
@@ -117,6 +128,11 @@ overlay is produced out-of-band by the `vault-graph` skill
   empty-filter / layout running→done, and `prefers-reduced-motion` turns all
   camera animations instant. Docked panel separators also resize with the
   left/right arrow keys, and static fallback nodes are keyboard-operable.
+- In Docs mode, the editor tab toolbar and command palette action "Open graph
+  on right" create a resizable document/Graph split. The selected split surface
+  persists across restart. Graph interactions keep focus on the right; opening
+  a graph node or selecting a document routes the document to the left pane.
+  Cmd/Ctrl+W closes only the focused Graph split.
 
 ## Local targets and saved views
 
@@ -146,8 +162,8 @@ overlay is produced out-of-band by the `vault-graph` skill
 - **Favorites**: favorite a node from the context menu or inspector; favorited
   nodes carry a ★ marker (shares `settings.ui.favorites` with the Explorer).
 - Filters, view and search-mode **persist** in `MaruSettings.graph` and
-  survive mode switches / restart; command palette has an **open-graph**
-  action.
+  survive mode switches / restart; command palette has **open-graph** and
+  **open-graph-right** actions.
 
 ### Performance (V4)
 

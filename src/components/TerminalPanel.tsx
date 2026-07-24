@@ -129,6 +129,8 @@ export interface TerminalLaunchRequest {
 /** Imperative surface so App can attach files to a focused agent session. */
 export interface TerminalPanelHandle {
   hasFocusedAgent: () => boolean;
+  hasFocus: () => boolean;
+  closeFocusedTab: () => boolean;
   attachActiveItem: () => boolean;
   attachPath: (relPath: string | null, absPath: string | null) => boolean;
 }
@@ -268,6 +270,7 @@ export const TerminalPanel = memo(
     const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const handlesRef = useRef<Map<string, NativeTerminalViewHandle>>(new Map());
+    const terminalPanelRootRef = useRef<HTMLElement | null>(null);
     const terminalBodyRef = useRef<HTMLDivElement | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const sessionByTabRef = useRef<Map<string, string>>(new Map());
@@ -1121,11 +1124,28 @@ export const TerminalPanel = memo(
       (): TerminalPanelHandle => ({
         hasFocusedAgent: () =>
           focusedKind === "claude" || focusedKind === "codex",
+        hasFocus: () =>
+          open &&
+          terminalPanelRootRef.current != null &&
+          terminalPanelRootRef.current.contains(document.activeElement),
+        closeFocusedTab: () => {
+          if (
+            !open ||
+            terminalPanelRootRef.current == null ||
+            !terminalPanelRootRef.current.contains(document.activeElement)
+          ) {
+            return false;
+          }
+          const tabId = focusedTabIdRef.current;
+          if (!tabId) return false;
+          closeTab(tabId);
+          return true;
+        },
         attachActiveItem: () => attachMention(activeItemMention(activeContext, attachStyle)),
         attachPath: (relPath, absPath) =>
           attachMention(pathMention(relPath, absPath, attachStyle)),
       }),
-      [activeContext, attachMention, attachStyle, focusedKind],
+      [activeContext, attachMention, attachStyle, closeTab, focusedKind, open],
     );
 
     const contextChip = useMemo(
@@ -1817,6 +1837,7 @@ export const TerminalPanel = memo(
 
     return (
       <section
+        ref={terminalPanelRootRef}
         className={
           open
             ? maximized

@@ -1,4 +1,5 @@
 import type { GraphEdge, GraphNode } from "../../lib/graph/model";
+import type { GraphDisplaySettings } from "../../lib/settings";
 
 // dataviz-validated categorical palettes (12 slots, same hue per slot across
 // themes). Light: min adjacent deutan dE 13.3 on #f4f3ee. Dark: 14.8 on
@@ -39,31 +40,64 @@ export interface GraphTheme {
   communityColors: string[];
   domainColors: Record<string, string>;
   fallback: string;
+  neutralNode: string;
+  neutralNodeStrong: string;
 }
 
-const LIGHT_DEFAULTS = { bg: "#f4f3ee", ink: "#1f1d18", muted: "#69645b", line: "#dedbd1", accent: "#2f5a3c" };
-const DARK_DEFAULTS = { bg: "#181a18", ink: "#f2f0e8", muted: "#a19c8f", line: "#3a3d36", accent: "#7faf86" };
+const LIGHT_DEFAULTS = {
+  bg: "#f4f3ee",
+  ink: "#1f1d18",
+  muted: "#69645b",
+  line: "#dedbd1",
+  accent: "#7c5ce7",
+};
+const DARK_DEFAULTS = {
+  bg: "#1e1e1e",
+  ink: "#f2f0e8",
+  muted: "#8f918c",
+  line: "#30322f",
+  accent: "#8b5cf6",
+};
 
-function hexLuminance(hex: string): number {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!match) return 1;
-  const value = parseInt(match[1], 16);
+function colorLuminance(color: string): number {
+  const value = color.trim();
+  const shortHex = /^#([0-9a-f]{3})$/i.exec(value);
+  const longHex = /^#?([0-9a-f]{6})$/i.exec(value);
+  let channels: [number, number, number] | null = null;
+  if (shortHex) {
+    channels = shortHex[1]
+      .split("")
+      .map((digit) => parseInt(`${digit}${digit}`, 16)) as [number, number, number];
+  } else if (longHex) {
+    const packed = parseInt(longHex[1], 16);
+    channels = [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff];
+  } else if (/^rgba?\(/i.test(value)) {
+    const components = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+    if (components?.length === 3 && components.every(Number.isFinite)) {
+      channels = components.map((component) => Math.min(255, Math.max(0, component))) as [
+        number,
+        number,
+        number,
+      ];
+    }
+  }
+  if (!channels) return 1;
   const channel = (component: number) => {
     const c = component / 255;
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
-  return 0.2126 * channel((value >> 16) & 0xff)
-    + 0.7152 * channel((value >> 8) & 0xff)
-    + 0.0722 * channel(value & 0xff);
+  return 0.2126 * channel(channels[0])
+    + 0.7152 * channel(channels[1])
+    + 0.0722 * channel(channels[2]);
 }
 
 function buildTheme(read: (name: string, fallback: string) => string): GraphTheme {
-  const bgProbe = read("--bg", LIGHT_DEFAULTS.bg);
-  const dark = hexLuminance(bgProbe) < 0.5;
+  const bgProbe = read("--graph-canvas", read("--bg", LIGHT_DEFAULTS.bg));
+  const dark = colorLuminance(bgProbe) < 0.5;
   const defaults = dark ? DARK_DEFAULTS : LIGHT_DEFAULTS;
-  const bg = read("--bg", defaults.bg);
-  const ink = read("--ink", defaults.ink);
-  const line = read("--line", defaults.line);
+  const bg = read("--graph-canvas", defaults.bg);
+  const ink = read("--graph-ink", defaults.ink);
+  const line = read("--graph-line", defaults.line);
   const communityColors = dark ? DARK_COMMUNITY_COLORS : LIGHT_COMMUNITY_COLORS;
   const domainColors = Object.fromEntries(
     Object.entries(DOMAIN_SLOTS).map(([domain, slot]) => [domain, communityColors[slot]]),
@@ -71,30 +105,53 @@ function buildTheme(read: (name: string, fallback: string) => string): GraphThem
   return {
     bg,
     ink,
-    muted: read("--muted", defaults.muted),
+    muted: read("--graph-muted", defaults.muted),
     line,
-    accent: read("--accent", defaults.accent),
+    accent: read("--graph-accent", defaults.accent),
     warn: dark ? "#d6b070" : "#b8690f",
-    labelColor: dark ? "rgba(242, 240, 232, 0.82)" : "rgba(31, 29, 24, 0.82)",
-    edge: line,
-    edgeStrong: dark ? "#4c5049" : "#c8c4b8",
-    edgeDim: dark ? "rgba(58, 61, 54, 0.35)" : "rgba(222, 219, 209, 0.4)",
+    labelColor: read(
+      "--graph-label-strong",
+      dark ? "rgba(242, 240, 232, 0.92)" : "rgba(31, 29, 24, 0.9)",
+    ),
+    // Sigma/WebGL blends thousands of overlapping strokes. Opaque,
+    // near-background colors stay restrained on dense graphs more reliably
+    // than rgba strings, which some GPU paths flatten too brightly.
+    edge: read("--graph-edge", dark ? "#292a29" : "#d8d6cf"),
+    edgeStrong: dark ? "#555854" : "#8d8980",
+    edgeDim: dark ? "#232423" : "#e7e5df",
     nodeBorder: bg,
     ghostFill: bg,
-    dimNode: dark ? "#2e312d" : "#dcdad2",
+    dimNode: dark ? "#30332f" : "#dedbd3",
     dark,
     communityColors,
     domainColors,
-    fallback: dark ? "#9aa0a8" : "#8a8f98",
+    fallback: dark ? "#686b66" : "#aaa69c",
+    neutralNode: dark ? "#686b66" : "#aaa69c",
+    neutralNodeStrong: dark ? "#d2d5cf" : "#565248",
   };
 }
 
 let activeTheme: GraphTheme = buildTheme((_name, fallback) => fallback);
 
-export function refreshGraphTheme(): GraphTheme {
+// Every theme token ends up in Sigma's parseColor, which only understands
+// hex/rgb/rgba; unevaluated tokens like `color-mix(...)` or `var(...)` (as
+// returned by getPropertyValue for custom properties) would silently become
+// opaque black. Only concrete colors may pass through.
+function isConcreteColor(value: string): boolean {
+  return /^(#[0-9a-f]{3,8}|rgba?\([^)]*\))$/i.test(value);
+}
+
+export function refreshGraphTheme(element?: Element | null): GraphTheme {
   if (typeof window !== "undefined" && typeof document !== "undefined") {
-    const style = getComputedStyle(document.documentElement);
-    activeTheme = buildTheme((name, fallback) => style.getPropertyValue(name).trim() || fallback);
+    const style = getComputedStyle(element ?? document.documentElement);
+    const resolvedBackground = style.backgroundColor.trim();
+    activeTheme = buildTheme((name, fallback) => {
+      const value = style.getPropertyValue(name).trim();
+      if (name === "--graph-canvas" && !isConcreteColor(value)) {
+        return resolvedBackground || fallback;
+      }
+      return isConcreteColor(value) ? value : fallback;
+    });
   }
   return activeTheme;
 }
@@ -106,16 +163,24 @@ export function graphTheme(): GraphTheme {
 export function nodeRadius(degree: number): number {
   // Keep isolated notes large enough to see and reliably pick on HiDPI/WebGL
   // canvases; degree still adds hierarchy without letting hubs dominate.
-  return Math.min(12, Math.max(5, 5 + 1.2 * Math.sqrt(degree)));
+  return Math.min(14, Math.max(5, 5 + 1.2 * Math.sqrt(degree)));
 }
 
-export function nodeColor(node: GraphNode, enriched: boolean): string {
+export function nodeColor(
+  node: GraphNode,
+  enriched: boolean,
+  colorMode: GraphDisplaySettings["colorMode"] = "neutral",
+): string {
   const theme = activeTheme;
   if (node.type === "unresolved") return theme.ghostFill;
-  if (enriched && node.community != null) {
+  if (colorMode === "neutral") return theme.neutralNode;
+  if (colorMode === "community" && enriched && node.community != null) {
     return theme.communityColors[node.community % theme.communityColors.length];
   }
-  return node.domain ? (theme.domainColors[node.domain] ?? theme.fallback) : theme.fallback;
+  if (colorMode === "domain" && node.domain) {
+    return theme.domainColors[node.domain] ?? theme.fallback;
+  }
+  return theme.fallback;
 }
 
 export function communityColor(community: number): string {

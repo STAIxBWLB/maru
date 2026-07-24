@@ -13,8 +13,8 @@ const FADE_END = 12;
 export function labelAlpha(renderedSize: number, forced: boolean): number {
   if (forced) return 1;
   if (renderedSize <= FADE_START) return 0;
-  if (renderedSize >= FADE_END) return 1;
-  return (renderedSize - FADE_START) / (FADE_END - FADE_START);
+  if (renderedSize >= FADE_END) return 0.3;
+  return ((renderedSize - FADE_START) / (FADE_END - FADE_START)) * 0.3;
 }
 
 function drawLabelText<
@@ -55,18 +55,6 @@ export function drawMaruNodeLabel<
 >(context: CanvasRenderingContext2D, data: NodeLabelData, settings: Settings<N, E, G>): void {
   const forced = data.forceLabel === true || data.highlighted === true;
   drawLabelText(context, data, settings, labelAlpha(data.size, forced), settings.labelSize, settings.labelWeight);
-  // Favorite marker: small star above the node (production counterpart of the
-  // e2e overlay star; the warn border ring stays the primary cue).
-  if ((data as { favorite?: boolean }).favorite === true) {
-    const theme = graphTheme();
-    context.save();
-    context.font = `600 ${Math.max(8, settings.labelSize - 1)}px ${settings.labelFont}`;
-    context.textAlign = "center";
-    context.textBaseline = "bottom";
-    context.fillStyle = theme.warn;
-    context.fillText("★", data.x, data.y - data.size - 2);
-    context.restore();
-  }
 }
 
 export function drawMaruNodeHover<

@@ -8,6 +8,34 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased
+
+- **Canvas-first Graph redesign with a right-split Graph surface.** Graph
+  becomes a canvas-first workspace with compact floating controls, one
+  progressive tools drawer, dense-graph visual LOD, and saved-view/profile
+  persistence migrated to settings schema V3 (customized profiles and saved
+  views survive; migrated graphs keep following the app theme, fresh installs
+  default to the new dark canvas). A persistent, resizable Graph surface can
+  open in the right editor split from the editor toolbar or command palette,
+  while document opens keep routing to the left pane.
+- **Per-pane editor view modes and surface-aware close shortcuts.** Rich,
+  Source, and Preview persist independently for the left and right editor
+  panes (the legacy single mode mirrors the left pane for downgrade
+  compatibility). Cmd/Ctrl+W closes the focused terminal tab, right split, or
+  active document; Cmd/Ctrl+Shift+W closes the window. Native menu items are
+  macOS-accelerated only, so Ctrl+W keeps deleting words in Windows/Linux
+  shells; menu commands now act on the focused window only, and the Settings
+  and Skill Editor windows both honor Close Active/Close Window with their
+  dirty guards.
+- **Adversarial-review fixes for the Graph shell.** App-theme edge colors no
+  longer collapse to opaque black (unevaluated `color-mix()` tokens fall back
+  to concrete colors), forced dark/light graph themes remap the app palette so
+  drawer text stays readable under any app theme, graph shortcuts (Cmd/Ctrl+F,
+  Escape, zoom keys) only fire when the graph surface owns focus, Escape is
+  consumed only when the graph actually closes something, renderer re-inits
+  keep the configured label density, and the graph mount no longer builds the
+  renderer twice.
+
 ## v0.4.15 — 2026-07-23 — Today Workspace & Calendar Sync
 
 - **Today workspace resizing, readable task metadata, and calendar safety.**

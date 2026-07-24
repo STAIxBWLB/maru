@@ -77,7 +77,7 @@ type SigmaNodeAttributes = {
 
 type SigmaEdgeAttributes = {
   size: number;
-  /** Unscaled size (frontmatter 1 / body 0.6) — edgeScale reapplies from this. */
+  /** Unscaled size (frontmatter 0.55 / body 0.35) — edgeScale reapplies from this. */
   baseSize: number;
   color: string;
   type: "line" | "arrow";
@@ -127,7 +127,6 @@ interface GraphCanvasProps {
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
   overlay?: ReactNode;
-  onViewportReport?: (zoom: number) => void;
 }
 
 type InteractionState = {
@@ -228,7 +227,7 @@ function buildSigmaGraph(
       y,
       size: nodeRadius(node.degree) * display.nodeScale,
       label: node.label,
-      color: nodeColor(node, enriched),
+      color: nodeColor(node, enriched, display.colorMode),
       borderColor: node.type === "unresolved" ? graphTheme().muted : graphTheme().nodeBorder,
       type: "border",
       forceLabel: node.isGodNode,
@@ -238,13 +237,16 @@ function buildSigmaGraph(
   });
   edges.forEach((edge, index) => {
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
-    const baseSize = edge.fromFrontmatter ? 1 : 0.6;
+    const baseSize = edge.fromFrontmatter ? 0.55 : 0.35;
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
       size: baseSize * display.edgeScale,
       baseSize,
       // Frontmatter edges carry their relation color; body wiki_link edges
       // stay neutral. Highlight/dim rules in the reducer stay dominant.
-      color: edge.fromFrontmatter ? relationColor(edge.relation) : graphTheme().edge,
+      color:
+        display.relationColors && edge.fromFrontmatter
+          ? relationColor(edge.relation)
+          : graphTheme().edge,
       type: edgeArrowType(edge, display.arrows),
       relation: edge.relation,
       fromFrontmatter: edge.fromFrontmatter,
@@ -341,17 +343,20 @@ function fallbackGraphToSvg(
     const source = pointById.get(edge.source);
     const target = pointById.get(edge.target);
     if (!source || !target) return [];
-    const color = edge.fromFrontmatter ? relationColor(edge.relation) : graphTheme().edge;
+    const color =
+      display.relationColors && edge.fromFrontmatter
+        ? relationColor(edge.relation)
+        : graphTheme().edge;
     const marker = edgeArrowType(edge, display.arrows) === "arrow"
       ? ' marker-end="url(#graph-arrow)"'
       : "";
-    return [`<line x1="${source[0]}" y1="${source[1]}" x2="${target[0]}" y2="${target[1]}" stroke="${xmlEscape(color)}" stroke-width="${(edge.fromFrontmatter ? 1 : 0.6) * display.edgeScale}" stroke-opacity="0.55"${marker}/>`];
+    return [`<line x1="${source[0]}" y1="${source[1]}" x2="${target[0]}" y2="${target[1]}" stroke="${xmlEscape(color)}" stroke-width="${(edge.fromFrontmatter ? 0.55 : 0.35) * display.edgeScale}" stroke-opacity="0.55"${marker}/>`];
   });
   const nodeParts = nodes.flatMap((node) => {
     const point = pointById.get(node.id);
     if (!point) return [];
     const radius = nodeRadius(node.degree) * display.nodeScale;
-    return [`<g><circle cx="${point[0]}" cy="${point[1]}" r="${radius}" fill="${xmlEscape(nodeColor(node, enriched))}" stroke="${xmlEscape(graphTheme().nodeBorder)}"/><text x="${point[0]}" y="${point[1] + radius + 12}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(node.label)}</text></g>`];
+    return [`<g><circle cx="${point[0]}" cy="${point[1]}" r="${radius}" fill="${xmlEscape(nodeColor(node, enriched, display.colorMode))}" stroke="${xmlEscape(graphTheme().nodeBorder)}"/><text x="${point[0]}" y="${point[1] + radius + 12}" text-anchor="middle" font-family="Pretendard, sans-serif" font-size="10" fill="${xmlEscape(graphTheme().ink)}">${xmlEscape(node.label)}</text></g>`];
   });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX - pad} ${minY - pad} ${width} ${height}"><defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs><rect x="${minX - pad}" y="${minY - pad}" width="${width}" height="${height}" fill="${xmlEscape(graphTheme().bg)}"/>${edgeParts.join("")}${nodeParts.join("")}</svg>`;
   return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
@@ -468,7 +473,7 @@ function StaticGraphFallback({
           if (!isVisible(nodes[si]) || !isVisible(nodes[ti])) return null;
           const [x1, y1] = point(si);
           const [x2, y2] = point(ti);
-          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" stroke={edge.fromFrontmatter ? relationColor(edge.relation) : undefined} strokeWidth={(edge.fromFrontmatter ? 1 : 0.6) * display.edgeScale} />;
+          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" stroke={display.relationColors && edge.fromFrontmatter ? relationColor(edge.relation) : undefined} strokeWidth={(edge.fromFrontmatter ? 0.55 : 0.35) * display.edgeScale} />;
         })}
       </g>
       <g className="graph-nodes labels-on">
@@ -495,9 +500,9 @@ function StaticGraphFallback({
                 }
               }}
             >
-              <circle r={r} fill={nodeColor(node, enriched)} data-node-id={node.id} />
+              <circle r={r} fill={nodeColor(node, enriched, display.colorMode)} data-node-id={node.id} />
               <text className="graph-node-label" dy={r + 12}>
-                {favoriteIds.has(node.id) ? `★ ${node.label}` : node.label}
+                {node.label}
               </text>
             </g>
           );
@@ -541,7 +546,6 @@ export function GraphCanvas({
   favoriteIds = new Set<string>(),
   exportControllerRef,
   overlay,
-  onViewportReport,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -617,8 +621,8 @@ export function GraphCanvas({
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
   };
-  const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport });
-  callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu, onViewportReport };
+  const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu });
+  callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu };
 
   useEffect(() => {
     pinnedIdsRef.current = new Set(initialPinnedIds);
@@ -686,6 +690,11 @@ export function GraphCanvas({
       let renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>;
       try {
         renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
+          // The canvas is intentionally hidden while the integrated terminal
+          // is maximized. Sigma's own resize observer otherwise throws when
+          // the container reaches 0x0 and tears down the entire React tree.
+          // Our observer below skips invalid sizes and refreshes on restore.
+          allowInvalidContainer: true,
           defaultNodeType: "border",
           defaultEdgeType: "line",
           nodeProgramClasses: { border: MaruNodeBorderProgram },
@@ -693,8 +702,8 @@ export function GraphCanvas({
           labelFont: "Pretendard, sans-serif",
           labelSize: 11,
           labelWeight: "500",
-          labelRenderedSizeThreshold: 3,
-          labelDensity: 0.55,
+          labelRenderedSizeThreshold: LABEL_THRESHOLD[displayRef.current.labels],
+          labelDensity: LABEL_DENSITY[displayRef.current.labels],
           defaultDrawNodeLabel: drawMaruNodeLabel,
           defaultDrawNodeHover: drawMaruNodeHover,
           hideEdgesOnMove: nodes.length > 5_000,
@@ -708,6 +717,8 @@ export function GraphCanvas({
           nodeReducer: (node, data) => {
             const state = interactionRef.current;
             const patch: Partial<SigmaNodeAttributes> & { highlighted?: boolean } = {};
+            const dense = (state.visibleNodeIds?.size ?? graph.order) > 800;
+            if (dense) patch.size = data.size * 0.62;
             if (state.visibleNodeIds && !state.visibleNodeIds.has(node)) {
               return { ...data, hidden: true };
             }
@@ -717,13 +728,23 @@ export function GraphCanvas({
             const overlayVisible = !overlayIds || overlayIds.has(node);
             if (!hoverVisible || !overlayVisible) patch.color = graphTheme().dimNode;
             if (node === state.hoverId) {
-              patch.size = data.size * 1.15;
+              patch.size = data.size * (dense ? 0.82 : 1.12);
+              patch.borderColor = graphTheme().accent;
+              patch.forceLabel = true;
             }
-            const emphasized = node === state.selectedId || node === state.focusNodeId || node === state.searchHighlightId || node === state.pathSourceId || overlayIds?.has(node);
+            const activeNode =
+              node === state.selectedId ||
+              node === state.focusNodeId ||
+              node === state.pathSourceId;
+            const emphasized =
+              activeNode ||
+              node === state.searchHighlightId ||
+              overlayIds?.has(node);
             if (emphasized) {
               patch.borderColor = overlayIds?.has(node) ? graphTheme().warn : graphTheme().accent;
               patch.forceLabel = true;
-              patch.size = data.size * 1.18;
+              patch.size = data.size * (dense ? 0.9 : 1.18);
+              if (activeNode) patch.color = graphTheme().accent;
             } else if (state.favoriteIds.has(node)) {
               patch.borderColor = graphTheme().warn;
               patch.forceLabel = true;
@@ -747,10 +768,33 @@ export function GraphCanvas({
             }
             const hovered = state.hoverId;
             const overlayEdges = state.highlightEdgeKeys;
+            const dense = (state.visibleNodeIds?.size ?? graph.order) > 800;
             let active = true;
-            if (hovered) active = data.sourceId === hovered || data.targetId === hovered;
-            if (overlayEdges) active = overlayEdges.has(edgeKey(data.sourceId, data.targetId));
-            return active ? { ...data, color: overlayEdges ? graphTheme().accent : data.color, size: overlayEdges ? Math.max(2.2, data.size) : data.size } : { ...data, color: graphTheme().edgeDim, size: 0.4 };
+            let emphasized = false;
+            if (hovered) {
+              active = data.sourceId === hovered || data.targetId === hovered;
+              emphasized = active;
+            } else if (overlayEdges) {
+              active = overlayEdges.has(edgeKey(data.sourceId, data.targetId));
+              emphasized = active;
+            } else {
+              const focus = state.selectedId ?? state.focusNodeId;
+              if (focus) {
+                active = data.sourceId === focus || data.targetId === focus;
+                emphasized = active;
+              }
+            }
+            return active
+              ? {
+                  ...data,
+                  color: emphasized ? graphTheme().accent : data.color,
+                  size: emphasized
+                    ? Math.max(dense ? 1.05 : 1.6, data.size)
+                    : dense
+                      ? data.size * 0.55
+                      : data.size,
+                }
+              : { ...data, color: graphTheme().edgeDim, size: dense ? 0.18 : 0.35 };
           },
         });
       } catch (err) {
@@ -1110,7 +1154,6 @@ export function GraphCanvas({
       };
       mouse.on("mousedown", markManualCamera);
       mouse.on("wheel", markManualCamera);
-      renderer.getCamera().on("updated", (state) => callbacksRef.current.onViewportReport?.(1 / state.ratio));
       renderer.once("afterRender", () => {
         applyRendererState(layoutRef.current ? "layout-running" : "ready");
         // First render after creation: fit the finite visible bounds once.
@@ -1243,6 +1286,36 @@ export function GraphCanvas({
     });
     renderer.refresh();
   }, [display.arrows]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph) return;
+    graph.forEachNode((key, attrs) => {
+      graph.setNodeAttribute(
+        key,
+        "color",
+        nodeColor(attrs.node, enriched, display.colorMode),
+      );
+    });
+    renderer.refresh();
+  }, [display.colorMode, enriched]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph) return;
+    graph.forEachEdge((key, attrs) => {
+      graph.setEdgeAttribute(
+        key,
+        "color",
+        display.relationColors && attrs.fromFrontmatter
+          ? relationColor(attrs.relation)
+          : graphTheme().edge,
+      );
+    });
+    renderer.refresh();
+  }, [display.relationColors]);
 
   useEffect(() => {
     const renderer = rendererRef.current;

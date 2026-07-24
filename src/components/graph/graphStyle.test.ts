@@ -29,8 +29,8 @@ function setTokens(tokens: Record<string, string>) {
   }
 }
 
-const LIGHT = { "--bg": "#f4f3ee", "--ink": "#1f1d18", "--muted": "#69645b", "--line": "#dedbd1", "--accent": "#2f5a3c" };
-const DARK = { "--bg": "#181a18", "--ink": "#f2f0e8", "--muted": "#a19c8f", "--line": "#3a3d36", "--accent": "#7faf86" };
+const LIGHT = { "--graph-canvas": "#f4f3ee", "--graph-ink": "#1f1d18", "--graph-muted": "#69645b", "--graph-line": "#dedbd1", "--graph-accent": "#7c5ce7" };
+const DARK = { "--graph-canvas": "#1e1e1e", "--graph-ink": "#f2f0e8", "--graph-muted": "#8f918c", "--graph-line": "#30322f", "--graph-accent": "#8b5cf6" };
 
 describe("graph theme", () => {
   beforeEach(() => setTokens(LIGHT));
@@ -39,7 +39,7 @@ describe("graph theme", () => {
     const theme = refreshGraphTheme();
     expect(theme.dark).toBe(false);
     expect(theme.bg).toBe("#f4f3ee");
-    expect(theme.accent).toBe("#2f5a3c");
+    expect(theme.accent).toBe("#7c5ce7");
     expect(theme.communityColors).toHaveLength(12);
     expect(new Set(theme.communityColors).size).toBe(12);
     for (const hex of theme.communityColors) expect(hex).toMatch(/^#[0-9a-f]{6}$/i);
@@ -50,6 +50,27 @@ describe("graph theme", () => {
     const theme = refreshGraphTheme();
     expect(theme.dark).toBe(true);
     expect(theme.communityColors).not.toEqual((() => { setTokens(LIGHT); return refreshGraphTheme().communityColors; })());
+  });
+
+  it("recognizes computed rgb backgrounds used by the app theme", () => {
+    setTokens({ ...DARK, "--graph-canvas": "rgb(30, 30, 30)" });
+    const theme = refreshGraphTheme();
+    expect(theme.dark).toBe(true);
+    expect(theme.bg).toBe("rgb(30, 30, 30)");
+  });
+
+  it("falls back when tokens hold unevaluated color-mix()/var() values", () => {
+    // getPropertyValue returns custom-property token streams unevaluated;
+    // Sigma's parseColor would turn them into opaque black.
+    setTokens({
+      ...DARK,
+      "--graph-edge": "color-mix(in srgb, var(--ink) 7%, transparent)",
+      "--graph-line": "var(--line)",
+    });
+    const theme = refreshGraphTheme();
+    expect(theme.dark).toBe(true);
+    expect(theme.edge).toBe("#292a29"); // dark fallback, not the raw token text
+    expect(theme.line).toBe("#30322f"); // DARK_DEFAULTS.line fallback
   });
 
   it("keeps a community on the same slot index across themes", () => {
@@ -63,12 +84,13 @@ describe("graph theme", () => {
     expect(communityColor(0)).toBe(dark[0]);
   });
 
-  it("nodeColor: ghost uses theme bg, community wins when enriched, domain otherwise", () => {
+  it("nodeColor supports neutral, community, and domain appearance modes", () => {
     const theme = refreshGraphTheme();
     expect(nodeColor(node({ type: "unresolved" }), false)).toBe(theme.bg);
-    expect(nodeColor(node({ community: 2 }), true)).toBe(theme.communityColors[2]);
-    expect(nodeColor(node({ domain: "research" }), false)).toBe(theme.domainColors.research);
-    expect(nodeColor(node({}), false)).toBe(theme.fallback);
+    expect(nodeColor(node({}), false, "neutral")).toBe(theme.neutralNode);
+    expect(nodeColor(node({ community: 2 }), true, "community")).toBe(theme.communityColors[2]);
+    expect(nodeColor(node({ domain: "research" }), false, "domain")).toBe(theme.domainColors.research);
+    expect(nodeColor(node({}), false, "domain")).toBe(theme.fallback);
   });
 
   it("domainColor falls back for unknown domains", () => {

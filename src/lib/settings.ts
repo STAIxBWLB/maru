@@ -32,6 +32,10 @@ export type MaruAppMode =
   | "graph";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
+export interface EditorPaneViewModes {
+  left: EditorViewModeSetting;
+  right: EditorViewModeSetting;
+}
 export type RightPaneTab =
   | "workspace"
   | "outline"
@@ -122,6 +126,8 @@ export interface WindowBoundsSettings {
   height: number;
 }
 
+export type EditorSplitSurface = "document" | "graph";
+
 export interface LayoutSettings {
   documentsPaneOpen: boolean;
   documentsPaneWidth: number;
@@ -137,6 +143,7 @@ export interface LayoutSettings {
   terminalWidth: number;
   terminalMaximized: boolean;
   editorSplitOpen: boolean;
+  editorSplitSurface: EditorSplitSurface;
   editorSplitRatio: number;
   terminalSplitOpen: boolean;
   terminalSplitRatio: number;
@@ -156,7 +163,9 @@ export interface MaruSettings {
   ui: {
     activeAppMode: MaruAppMode;
     activeWorkspaceVisibility: WorkspaceVisibilitySetting;
+    /** Legacy mirror of the left pane mode for downgrade compatibility. */
     editorViewMode: EditorViewModeSetting;
+    editorPaneViewModes: EditorPaneViewModes;
     rightPaneTab: RightPaneTab;
     explorerPaneMode: ExplorerPaneMode;
     documentBrowserMode: DocumentBrowserMode;
@@ -202,7 +211,7 @@ export interface MaruSettings {
   meetings: MeetingsSettings;
   tasks: TasksSettings;
   diagram: DiagramSettings;
-  graph: GraphSettingsV2;
+  graph: GraphSettingsV3;
   inboxChannels: Record<string, unknown>;
   composer: ComposerSettings;
   connectors: Record<string, unknown>;
@@ -328,6 +337,10 @@ export interface GraphFilterProfile {
 export interface GraphDisplaySettings {
   arrows: "typed" | "all" | "none";
   labels: "low" | "balanced" | "high";
+  colorMode: "neutral" | "domain" | "community";
+  relationColors: boolean;
+  theme: "dark" | "light" | "app";
+  accent: "violet" | "green";
   nodeScale: number;
   edgeScale: number;
 }
@@ -357,14 +370,12 @@ export interface GraphSavedView {
 }
 
 export interface GraphPanelSettings {
-  filtersOpen: boolean;
-  workbenchOpen: boolean;
-  filterWidth: number;
-  workbenchWidth: number;
+  pinned: boolean;
+  width: number;
 }
 
-export interface GraphSettingsV2 {
-  schemaVersion: 2;
+export interface GraphSettingsV3 {
+  schemaVersion: 3;
   source: GraphSource;
   mode: GraphMode;
   localDepth: 1 | 2 | 3;
@@ -379,10 +390,8 @@ export interface GraphSettingsV2 {
   savedViews: GraphSavedView[];
 }
 
-export const GRAPH_FILTER_WIDTH_MIN = 200;
-export const GRAPH_FILTER_WIDTH_MAX = 340;
-export const GRAPH_WORKBENCH_WIDTH_MIN = 280;
-export const GRAPH_WORKBENCH_WIDTH_MAX = 480;
+export const GRAPH_PANEL_WIDTH_MIN = 280;
+export const GRAPH_PANEL_WIDTH_MAX = 480;
 export const GRAPH_SCALE_MIN = 0.5;
 export const GRAPH_SCALE_MAX = 2;
 
@@ -398,12 +407,21 @@ export function defaultGraphFilterProfile(): GraphFilterProfile {
     community: null,
     showUnresolved: false,
     showGenerated: false,
-    minVisibleNeighbors: 1,
+    minVisibleNeighbors: 0,
   };
 }
 
 export function defaultGraphDisplay(): GraphDisplaySettings {
-  return { arrows: "typed", labels: "balanced", nodeScale: 1, edgeScale: 1 };
+  return {
+    arrows: "none",
+    labels: "low",
+    colorMode: "neutral",
+    relationColors: false,
+    theme: "dark",
+    accent: "violet",
+    nodeScale: 1,
+    edgeScale: 0.8,
+  };
 }
 
 export const DEFAULT_GRAPH_NOISE_PATTERNS = DEFAULT_GRAPH_GENERATED_PATTERNS;
@@ -423,6 +441,10 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     activeAppMode: "pkm",
     activeWorkspaceVisibility: "private",
     editorViewMode: "source",
+    editorPaneViewModes: {
+      left: "source",
+      right: "source",
+    },
     rightPaneTab: "workspace",
     explorerPaneMode: "documents",
     documentBrowserMode: "tree",
@@ -456,6 +478,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       terminalWidth: 640,
       terminalMaximized: false,
       editorSplitOpen: false,
+      editorSplitSurface: "document",
       editorSplitRatio: 0.5,
       terminalSplitOpen: false,
       terminalSplitRatio: 0.5,
@@ -569,7 +592,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     recentPatterns: [],
   },
   graph: {
-    schemaVersion: 2,
+    schemaVersion: 3,
     source: "vault",
     mode: "global",
     localDepth: 2,
@@ -582,10 +605,8 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     },
     display: defaultGraphDisplay(),
     panels: {
-      filtersOpen: true,
-      workbenchOpen: true,
-      filterWidth: 248,
-      workbenchWidth: 344,
+      pinned: false,
+      width: 320,
     },
     savedViews: [],
   },
@@ -604,6 +625,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
   const legacyAi = isRecord(value.ai) ? value.ai : {};
   const legacyRuntimes = isRecord(legacyAi.runtimes) ? legacyAi.runtimes : {};
   const layout = normalizeLayout(ui.layout, terminal);
+  const editorPaneViewModes = normalizeEditorPaneViewModes(
+    ui.editorPaneViewModes,
+    parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
+  );
 
   return {
     version: 1,
@@ -611,7 +636,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       activeAppMode: parseMaruAppMode(ui.activeAppMode) ?? "pkm",
       activeWorkspaceVisibility:
         parseWorkspaceVisibilitySetting(ui.activeWorkspaceVisibility) ?? "private",
-      editorViewMode: parseEditorViewModeSetting(ui.editorViewMode) ?? "source",
+      // Legacy mirror always equals the normalized left pane so both fields
+      // can never desync, whatever junk the raw input contained.
+      editorViewMode: editorPaneViewModes.left,
+      editorPaneViewModes,
       rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "workspace",
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
@@ -1091,11 +1119,46 @@ function normalizeGraphFilterProfile(value: unknown): GraphFilterProfile {
 
 function normalizeGraphDisplay(value: unknown): GraphDisplaySettings {
   const display = isRecord(value) ? value : {};
+  const defaults = defaultGraphDisplay();
+  return {
+    arrows:
+      display.arrows === "all" || display.arrows === "typed" ? display.arrows : defaults.arrows,
+    labels:
+      display.labels === "balanced" || display.labels === "high" ? display.labels : defaults.labels,
+    colorMode:
+      display.colorMode === "domain" || display.colorMode === "community"
+        ? display.colorMode
+        : defaults.colorMode,
+    relationColors:
+      typeof display.relationColors === "boolean"
+        ? display.relationColors
+        : defaults.relationColors,
+    theme:
+      display.theme === "light" || display.theme === "app" ? display.theme : defaults.theme,
+    accent: display.accent === "green" ? "green" : defaults.accent,
+    nodeScale: clampNumber(display.nodeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
+    edgeScale: clampNumber(
+      display.edgeScale,
+      GRAPH_SCALE_MIN,
+      GRAPH_SCALE_MAX,
+      defaults.edgeScale,
+    ),
+  };
+}
+
+function normalizeLegacyGraphDisplay(value: unknown): GraphDisplaySettings {
+  const display = isRecord(value) ? value : {};
   return {
     arrows:
       display.arrows === "all" || display.arrows === "none" ? display.arrows : "typed",
     labels:
       display.labels === "low" || display.labels === "high" ? display.labels : "balanced",
+    colorMode: "community",
+    relationColors: true,
+    // Pre-V3 graphs always followed the app theme; keep that for migrated data.
+    // Only fresh installs adopt the new dark default.
+    theme: "app",
+    accent: "violet",
     nodeScale: clampNumber(display.nodeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
     edgeScale: clampNumber(display.edgeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
   };
@@ -1104,14 +1167,30 @@ function normalizeGraphDisplay(value: unknown): GraphDisplaySettings {
 function normalizeGraphPanels(value: unknown): GraphPanelSettings {
   const panels = isRecord(value) ? value : {};
   return {
-    filtersOpen: panels.filtersOpen !== false,
-    workbenchOpen: panels.workbenchOpen !== false,
-    filterWidth: Math.round(
-      clampNumber(panels.filterWidth, GRAPH_FILTER_WIDTH_MIN, GRAPH_FILTER_WIDTH_MAX, 248),
+    pinned: panels.pinned === true,
+    width: Math.round(
+      clampNumber(panels.width, GRAPH_PANEL_WIDTH_MIN, GRAPH_PANEL_WIDTH_MAX, 320),
     ),
-    workbenchWidth: Math.round(
-      clampNumber(panels.workbenchWidth, GRAPH_WORKBENCH_WIDTH_MIN, GRAPH_WORKBENCH_WIDTH_MAX, 344),
-    ),
+  };
+}
+
+function migrateLegacyGraphPanels(value: unknown): GraphPanelSettings {
+  const panels = isRecord(value) ? value : {};
+  const filterWidth = clampNumber(
+    panels.filterWidth,
+    GRAPH_PANEL_WIDTH_MIN,
+    GRAPH_PANEL_WIDTH_MAX,
+    320,
+  );
+  const workbenchWidth = clampNumber(
+    panels.workbenchWidth,
+    GRAPH_PANEL_WIDTH_MIN,
+    GRAPH_PANEL_WIDTH_MAX,
+    320,
+  );
+  return {
+    pinned: false,
+    width: Math.round(Math.max(filterWidth, workbenchWidth)),
   };
 }
 
@@ -1128,7 +1207,7 @@ function normalizeGraphLocalTarget(value: unknown): GraphLocalTarget | null {
   };
 }
 
-function normalizeGraphSavedViews(value: unknown): GraphSavedView[] {
+function normalizeGraphSavedViews(value: unknown, legacy = false): GraphSavedView[] {
   if (!Array.isArray(value)) return [];
   const views: GraphSavedView[] = [];
   for (const item of value) {
@@ -1143,7 +1222,7 @@ function normalizeGraphSavedViews(value: unknown): GraphSavedView[] {
       mode: item.mode === "local" || item.mode === "chains" ? item.mode : "global",
       localTarget: normalizeGraphLocalTarget(item.localTarget),
       profile: normalizeGraphFilterProfile(item.profile),
-      display: normalizeGraphDisplay(item.display),
+      display: legacy ? normalizeLegacyGraphDisplay(item.display) : normalizeGraphDisplay(item.display),
     });
   }
   return views.slice(0, 50);
@@ -1171,6 +1250,34 @@ interface GraphSettingsV1 {
 /** V1 -> V2 migration: `all` -> workspace; showGhosts -> showUnresolved;
  *  showNoise -> showGenerated; connectivity -> max(minDegree, connected ? 1 : 0).
  *  Legacy filters copy only into the previously active source's profile. */
+interface GraphSettingsV2 {
+  schemaVersion: 2;
+  source: GraphSource;
+  mode: GraphMode;
+  localDepth: 1 | 2 | 3;
+  localDirection: "both" | "incoming" | "outgoing";
+  searchAsFilter: boolean;
+  generatedPatterns: string[];
+  profiles: Record<GraphSource, GraphFilterProfile>;
+  display: {
+    arrows: "typed" | "all" | "none";
+    labels: "low" | "balanced" | "high";
+    nodeScale: number;
+    edgeScale: number;
+  };
+  panels: {
+    filtersOpen: boolean;
+    workbenchOpen: boolean;
+    filterWidth: number;
+    workbenchWidth: number;
+  };
+  savedViews: unknown[];
+}
+
+function legacyDefaultGraphFilterProfile(): GraphFilterProfile {
+  return { ...defaultGraphFilterProfile(), minVisibleNeighbors: 1 };
+}
+
 function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
   const filters = isRecord(graph.filters) ? graph.filters : {};
   const community = filters.community;
@@ -1215,23 +1322,85 @@ function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
         ? DEFAULT_GRAPH_GENERATED_PATTERNS
         : parseStringArray(graph.noisePatterns).map((p) => p.trim()).filter(Boolean),
     profiles: {
-      vault: source === "vault" ? profile : defaultGraphFilterProfile(),
-      workspace: source === "workspace" ? profile : defaultGraphFilterProfile(),
+      vault: source === "vault" ? profile : legacyDefaultGraphFilterProfile(),
+      workspace: source === "workspace" ? profile : legacyDefaultGraphFilterProfile(),
     },
-    display: defaultGraphDisplay(),
-    panels: normalizeGraphPanels(undefined),
+    display: { arrows: "typed", labels: "balanced", nodeScale: 1, edgeScale: 1 },
+    panels: {
+      filtersOpen: true,
+      workbenchOpen: true,
+      filterWidth: 248,
+      workbenchWidth: 344,
+    },
     savedViews: [],
   };
 }
 
-function normalizeGraphSettings(value: unknown): GraphSettingsV2 {
+function isLegacyDefaultProfile(profile: GraphFilterProfile): boolean {
+  return (
+    profile.domains.length === 0 &&
+    profile.types.length === 0 &&
+    profile.relations.length === 0 &&
+    profile.community == null &&
+    !profile.showUnresolved &&
+    !profile.showGenerated &&
+    profile.minVisibleNeighbors === 1
+  );
+}
+
+function migrateGraphSettingsV2(graph: Record<string, unknown>): GraphSettingsV3 {
+  const profiles = isRecord(graph.profiles) ? graph.profiles : {};
+  const migrateProfile = (value: unknown) => {
+    const normalized = normalizeGraphFilterProfile(value);
+    return isLegacyDefaultProfile(normalized)
+      ? { ...normalized, minVisibleNeighbors: 0 }
+      : normalized;
+  };
+  const legacyDisplay = normalizeLegacyGraphDisplay(graph.display);
+  const isDefaultDisplay =
+    legacyDisplay.arrows === "typed" &&
+    legacyDisplay.labels === "balanced" &&
+    legacyDisplay.nodeScale === 1 &&
+    legacyDisplay.edgeScale === 1;
+  return {
+    schemaVersion: 3,
+    source: graph.source === "workspace" ? "workspace" : "vault",
+    mode: graph.mode === "local" || graph.mode === "chains" ? graph.mode : "global",
+    localDepth: graph.localDepth === 1 || graph.localDepth === 3 ? graph.localDepth : 2,
+    localDirection:
+      graph.localDirection === "incoming" || graph.localDirection === "outgoing"
+        ? graph.localDirection
+        : "both",
+    searchAsFilter: graph.searchAsFilter === true,
+    generatedPatterns:
+      graph.generatedPatterns === undefined
+        ? DEFAULT_GRAPH_GENERATED_PATTERNS
+        : parseStringArray(graph.generatedPatterns).map((p) => p.trim()).filter(Boolean),
+    profiles: {
+      vault: migrateProfile(profiles.vault),
+      workspace: migrateProfile(profiles.workspace),
+    },
+    display: isDefaultDisplay ? { ...defaultGraphDisplay(), theme: "app" } : legacyDisplay,
+    panels: migrateLegacyGraphPanels(graph.panels),
+    savedViews: normalizeGraphSavedViews(graph.savedViews, true),
+  };
+}
+
+function normalizeGraphSettings(value: unknown): GraphSettingsV3 {
   const graph = isRecord(value) ? value : {};
-  if (graph.schemaVersion !== 2) {
-    return migrateGraphSettingsV1(graph as GraphSettingsV1);
+  if (graph.schemaVersion === 2) {
+    return migrateGraphSettingsV2(graph);
+  }
+  // Fresh installs (no stored graph settings) skip migration and take the V3
+  // defaults below; only real pre-V3 data routes through the migration chain.
+  if (graph.schemaVersion !== 3 && Object.keys(graph).length > 0) {
+    return migrateGraphSettingsV2(
+      migrateGraphSettingsV1(graph as GraphSettingsV1) as unknown as Record<string, unknown>,
+    );
   }
   const profiles = isRecord(graph.profiles) ? graph.profiles : {};
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     source: graph.source === "workspace" ? "workspace" : "vault",
     mode: graph.mode === "local" || graph.mode === "chains" ? graph.mode : "global",
     localDepth: graph.localDepth === 1 || graph.localDepth === 3 ? graph.localDepth : 2,
@@ -1563,6 +1732,17 @@ function parseEditorViewModeSetting(value: unknown): EditorViewModeSetting | nul
   return value === "rich" || value === "source" || value === "preview" ? value : null;
 }
 
+function normalizeEditorPaneViewModes(
+  value: unknown,
+  legacy: EditorViewModeSetting,
+): EditorPaneViewModes {
+  const modes = isRecord(value) ? value : {};
+  return {
+    left: parseEditorViewModeSetting(modes.left) ?? legacy,
+    right: parseEditorViewModeSetting(modes.right) ?? legacy,
+  };
+}
+
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
   return value === "workspace" || value === "outline" || value === "files" || value === "memo"
     || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
@@ -1856,6 +2036,8 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       typeof layout.editorSplitOpen === "boolean"
         ? layout.editorSplitOpen
         : DEFAULT_MARU_SETTINGS.ui.layout.editorSplitOpen,
+    editorSplitSurface:
+      layout.editorSplitSurface === "graph" ? "graph" : "document",
     editorSplitRatio: normalizeSplitRatio(layout.editorSplitRatio),
     terminalSplitOpen:
       typeof layout.terminalSplitOpen === "boolean"
