@@ -8,7 +8,7 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased
+## v0.4.16 — 2026-07-24 — Graph Tool Panel & Terminal Themes
 
 - **Graph moves into the right tool panel; terminal themes.** The embedded
   graph now lives in the shared right tool panel as a switchable surface
@@ -24,9 +24,9 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   progressive tools drawer, dense-graph visual LOD, and saved-view/profile
   persistence migrated to settings schema V3 (customized profiles and saved
   views survive; migrated graphs keep following the app theme, fresh installs
-  default to the new dark canvas). A persistent, resizable Graph surface can
-  open in the right editor split from the editor toolbar or command palette,
-  while document opens keep routing to the left pane.
+  default to the new dark canvas). The embedded Graph surface opens from the
+  editor toolbar or command palette (hosted in the tool panel per the entry
+  above), while document opens keep routing to the left editor pane.
 - **Per-pane editor view modes and surface-aware close shortcuts.** Rich,
   Source, and Preview persist independently for the left and right editor
   panes (the legacy single mode mirrors the left pane for downgrade

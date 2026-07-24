@@ -1,6 +1,6 @@
 {
   "name": "maru",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "private": true,
   "type": "module",
   "description": "Local-first Maru Workspace and AI editing desktop app.",
