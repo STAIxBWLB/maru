@@ -16,7 +16,7 @@ export interface TodayTasks {
 }
 
 export function useTodayTasks(): TodayTasks {
-  const { workPath } = useToday();
+  const { workPath, refreshEpoch } = useToday();
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
 
   const refresh = useCallback(async (): Promise<TaskEntry[]> => {
@@ -28,7 +28,7 @@ export function useTodayTasks(): TodayTasks {
     } catch {
       return [];
     }
-  }, [workPath]);
+  }, [workPath, refreshEpoch]);
 
   useEffect(() => {
     void refresh();

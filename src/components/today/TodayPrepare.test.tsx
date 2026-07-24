@@ -123,12 +123,26 @@ interface RenderResult {
   container: HTMLElement;
   root: ReturnType<typeof createRoot>;
   mutate: ReturnType<typeof vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>>;
+  finalizeSetup: ReturnType<typeof vi.fn>;
+  onNavigate: ReturnType<typeof vi.fn>;
 }
 
 async function renderPrepare(snapshot: TodaySnapshot = SNAPSHOT): Promise<RenderResult> {
   const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(
     async () => ({ ...snapshot, revision: "rev-2" }),
   );
+  const finalizeSetup = vi.fn(async () => ({
+    snapshot: {
+      ...snapshot,
+      dayState: "planned" as const,
+      stage: "execute" as const,
+      route: "execute" as const,
+      revision: "rev-final",
+    },
+    materialized: [],
+    replayed: false,
+  }));
+  const onNavigate = vi.fn();
   const contextValue: TodayContextValue = {
     workPath: "/tmp/work",
     settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
@@ -136,7 +150,8 @@ async function renderPrepare(snapshot: TodaySnapshot = SNAPSHOT): Promise<Render
     snapshot,
     loading: false,
     mutate,
-    reload: async () => {},
+    reload: async () => snapshot,
+    finalizeSetup,
   };
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -147,12 +162,12 @@ async function renderPrepare(snapshot: TodaySnapshot = SNAPSHOT): Promise<Render
         value={{ locale: "ko", setLocale: () => {}, t: (key, vars) => translate("ko", key, vars) }}
       >
         <TodayContext.Provider value={contextValue}>
-          <TodayPrepare onNavigate={() => {}} />
+          <TodayPrepare onNavigate={onNavigate} />
         </TodayContext.Provider>
       </LocaleContext.Provider>,
     );
   });
-  return { container, root, mutate };
+  return { container, root, mutate, finalizeSetup, onNavigate };
 }
 
 function typeText(el: HTMLTextAreaElement, value: string) {
@@ -310,17 +325,58 @@ describe("TodayPrepare", () => {
     const carryoverRow = Array.from(
       container.querySelectorAll<HTMLElement>(".today-yesterday-row"),
     ).find((row) => row.textContent?.includes("이월된 일"))!;
-    const todayButton = Array.from(carryoverRow.querySelectorAll<HTMLButtonElement>("button")).find(
-      (b) => b.textContent?.includes(translate("ko", "today.yesterday.decision.today")),
+    const menuButton = carryoverRow.querySelector<HTMLButtonElement>(
+      'button[aria-label="이월 작업 동작"]',
     )!;
     await act(async () => {
-      todayButton.click();
+      menuButton.click();
+    });
+    const flexibleButton = Array.from(
+      carryoverRow.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) =>
+      button.textContent?.includes(
+        translate("ko", "today.yesterday.decision.flexible"),
+      ),
+    )!;
+    await act(async () => {
+      flexibleButton.click();
     });
     expect(mutate).toHaveBeenCalledWith({
       type: "applyYesterdayDecision",
       taskId: "y3",
-      resolution: "today",
+      resolution: "flexible",
     });
+  });
+
+  it("preflights unresolved carryovers and finalizes setup with one atomic request", async () => {
+    const { container, finalizeSetup, mutate, onNavigate } = await renderPrepare();
+    const finish = container.querySelector<HTMLButtonElement>(".today-finish-setup")!;
+    await act(async () => {
+      finish.click();
+    });
+    const dialog = container.querySelector<HTMLElement>(".today-preflight-dialog")!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain(
+      translate("ko", "today.preflight.title"),
+    );
+    const continueButton = Array.from(
+      dialog.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("나중에 결정하고 계속"))!;
+    await act(async () => {
+      continueButton.click();
+    });
+
+    expect(finalizeSetup).toHaveBeenCalledTimes(1);
+    expect(finalizeSetup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "confirm",
+        logicalDay: SNAPSHOT.logicalDay,
+        expectedRevision: SNAPSHOT.revision,
+        unresolvedPolicy: "keepLater",
+      }),
+    );
+    expect(mutate).not.toHaveBeenCalledWith({ type: "confirmSetup" });
+    expect(onNavigate).toHaveBeenCalledWith("execute");
   });
 
   it("shows the over-capacity warning when the plan exceeds the focus cap", async () => {

@@ -1,3 +1,5 @@
+use crate::atomic_file::write_atomic;
+use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::vault::{
     lexical_normalize, normalize_existing_dir, parse_frontmatter, resolve_inside_vault, slugify,
@@ -115,6 +117,23 @@ pub struct CreateTaskDraft {
     pub frontmatter: BTreeMap<String, JsonValue>,
     pub body: String,
     pub bucket: TaskBucket,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MaterializedTaskWrite {
+    pub row: TaskNoteRow,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedCaptureTask {
+    path: PathBuf,
+    pub rel_path: String,
+    bucket: TaskBucket,
+    capture_id: String,
+    content: String,
+    pub content_hash: String,
+    pub will_create: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -263,6 +282,101 @@ pub fn create_task_note(
     let content = serialize_task_note(&frontmatter, &draft.body)?;
     fs::write(&path, content).map_err(|err| format!("Cannot write task note: {err}"))?;
     task_row_for_path(&work, &path, draft.bucket)
+}
+
+/// Build the deterministic path and bytes before writing. The Today finalize
+/// journal records this plan first, closing the crash window between creating
+/// the note and remembering how to roll it back.
+pub(crate) fn prepare_capture_task_materialization(
+    work: &Path,
+    logical_day: &str,
+    capture_id: &str,
+    mut draft: CreateTaskDraft,
+) -> Result<PreparedCaptureTask, String> {
+    let tasks_root = resolve_tasks_root(work, "tasks")?;
+    let bucket_root = tasks_root.join(draft.bucket.as_str());
+    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
+
+    let capture_hash = revision_for(capture_id);
+    let suffix = capture_hash.get(..10).unwrap_or(&capture_hash);
+    let day_prefix = logical_day.replace('-', "");
+    let day_prefix = day_prefix.get(2..).unwrap_or(&day_prefix);
+    let title_slug = slugify(&draft.title);
+    let title_slug = if title_slug == "untitled" {
+        "capture".to_string()
+    } else {
+        title_slug
+    };
+    let path = bucket_root.join(format!("{day_prefix}-{title_slug}-{suffix}.md"));
+    let task_id = format!("capture-{suffix}");
+
+    draft
+        .frontmatter
+        .insert("taskId".to_string(), JsonValue::String(task_id));
+    draft.frontmatter.insert(
+        "maruCaptureId".to_string(),
+        JsonValue::String(capture_id.to_string()),
+    );
+    if !draft.frontmatter.contains_key("title") && !draft.title.trim().is_empty() {
+        draft.frontmatter.insert(
+            "title".to_string(),
+            JsonValue::String(draft.title.trim().to_string()),
+        );
+    }
+    if !draft.frontmatter.contains_key("status") {
+        draft.frontmatter.insert(
+            "status".to_string(),
+            JsonValue::String(default_status_for_bucket(draft.bucket).to_string()),
+        );
+    }
+    let content = serialize_task_note(&draft.frontmatter, &draft.body)?;
+    let rel_path = path
+        .strip_prefix(work)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .to_string();
+    let content_hash = revision_for(&content);
+    let will_create = !path.exists();
+    Ok(PreparedCaptureTask {
+        path,
+        rel_path,
+        bucket: draft.bucket,
+        capture_id: capture_id.to_string(),
+        content,
+        content_hash,
+        will_create,
+    })
+}
+
+/// Commit a prepared capture-derived task note. Replaying the same capture
+/// returns the original row; an unrelated file at that path is never
+/// overwritten.
+pub(crate) fn materialize_capture_task(
+    work: &Path,
+    prepared: &PreparedCaptureTask,
+) -> Result<MaterializedTaskWrite, String> {
+    if prepared.path.exists() {
+        let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
+        let stored_capture = row
+            .frontmatter
+            .get("maruCaptureId")
+            .and_then(JsonValue::as_str);
+        if stored_capture != Some(prepared.capture_id.as_str()) {
+            return Err(format!("today_capture_path_conflict: {}", row.rel_path));
+        }
+        return Ok(MaterializedTaskWrite {
+            row,
+            created: false,
+        });
+    }
+
+    write_atomic(&prepared.path, prepared.content.as_bytes())
+        .map_err(|err| format!("Cannot write capture task note: {err}"))?;
+    let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
+    Ok(MaterializedTaskWrite {
+        row,
+        created: true,
+    })
 }
 
 #[tauri::command]

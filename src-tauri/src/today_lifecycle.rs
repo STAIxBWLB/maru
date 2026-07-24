@@ -151,7 +151,10 @@ fn outcome_for(
     })
 }
 
-fn run_complete(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOutcome, String> {
+fn run_complete(
+    ctx: TransitionContext,
+    request: &TaskTransitionRequest,
+) -> Result<TaskTransitionOutcome, String> {
     // 1. Durable prepared record FIRST (see module docs for recovery rules).
     let prepared = match &ctx.google_task_id {
         Some(google_task_id) => Some(prepare_complete_op(
@@ -199,12 +202,25 @@ fn run_complete(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionO
         &ctx.work,
         &ctx.date,
         "task_completed",
-        Some(task_id.to_string()),
-        json!({ "taskPath": final_rel, "bucket": "archive" }),
+        Some(request.task_id.clone()),
+        json!({
+            "taskPath": final_rel,
+            "bucket": "archive",
+            "displayTitle": request
+                .payload
+                .get("displayTitle")
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+        }),
         ctx.now_iso.clone(),
     );
-    let _ = note_task_transition(&ctx.work, &ctx.date, task_id, "done");
-    outcome_for(&final_path, TaskBucket::Archive, sync_status, task_id)
+    let _ = note_task_transition(&ctx.work, &ctx.date, &request.task_id, "done");
+    outcome_for(
+        &final_path,
+        TaskBucket::Archive,
+        sync_status,
+        &request.task_id,
+    )
 }
 
 fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOutcome, String> {
@@ -343,7 +359,7 @@ pub fn task_transition(
     match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_complete(ctx, &request.task_id)
+            run_complete(ctx, &request)
         }
         TaskTransitionKind::Reopen => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
@@ -494,8 +510,9 @@ mod tests {
         let (tmp, hash, rel) = setup_task(
             "---\ntitle: Ship\nstatus: active\nowner: Luca\n# a comment\n---\n# Body\n",
         );
-        let outcome = task_transition(work(&tmp), request(TaskTransitionKind::Complete, &hash, &rel))
-            .unwrap();
+        let mut request = request(TaskTransitionKind::Complete, &hash, &rel);
+        request.payload = json!({ "displayTitle": "Ship the release" });
+        let outcome = task_transition(work(&tmp), request).unwrap();
 
         assert_eq!(outcome.bucket, "archive");
         assert_eq!(outcome.sync_status, TaskSyncStatus::Local);
@@ -517,6 +534,7 @@ mod tests {
         .unwrap();
         assert!(events.contains("\"kind\":\"task_completed\""));
         assert!(events.contains("\"taskId\":\"task-1\""));
+        assert!(events.contains("\"displayTitle\":\"Ship the release\""));
     }
 
     #[test]

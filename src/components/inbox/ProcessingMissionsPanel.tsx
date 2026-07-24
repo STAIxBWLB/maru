@@ -1,4 +1,4 @@
-import { Clock3, Square } from "lucide-react";
+import { Clock3, Square, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useElapsed } from "../../lib/missionProgress";
@@ -11,12 +11,14 @@ export function ProcessingMissionsPanel({
   missions,
   logLines,
   onStop,
+  onDismiss,
   emptyLabel,
   waitingLabel,
 }: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   onStop: (id: string) => void | Promise<void>;
+  onDismiss?: (id: string) => void;
   emptyLabel?: string;
   waitingLabel?: string;
 }) {
@@ -38,6 +40,7 @@ export function ProcessingMissionsPanel({
           lines={logLines[mission.id] ?? EMPTY_LINES}
           waitingLabel={resolvedWaitingLabel}
           onStop={onStop}
+          onDismiss={onDismiss}
         />
       ))}
     </div>
@@ -49,11 +52,13 @@ function MissionCard({
   lines,
   waitingLabel,
   onStop,
+  onDismiss,
 }: {
   mission: MissionRecord;
   lines: string[];
   waitingLabel: string;
   onStop: (id: string) => void | Promise<void>;
+  onDismiss?: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const logRef = useRef<HTMLPreElement>(null);
@@ -74,15 +79,27 @@ function MissionCard({
             {mission.status} · {elapsed ?? formatShortDate(mission.startedAt)}
           </span>
         </div>
-        <button
-          type="button"
-          className="button button-ghost button-sm"
-          onClick={() => void onStop(mission.id)}
-          title={t("mission.stop")}
-        >
-          <Square size={12} />
-          <span>{t("inbox.progress.stop")}</span>
-        </button>
+        {active ? (
+          <button
+            type="button"
+            className="button button-ghost button-sm"
+            onClick={() => void onStop(mission.id)}
+            title={t("mission.stop")}
+          >
+            <Square size={12} />
+            <span>{t("inbox.progress.stop")}</span>
+          </button>
+        ) : onDismiss ? (
+          <button
+            type="button"
+            className="button button-ghost button-sm"
+            onClick={() => onDismiss(mission.id)}
+            aria-label={t("comms.progress.dismiss")}
+            title={t("comms.progress.dismiss")}
+          >
+            <X size={12} />
+          </button>
+        ) : null}
       </div>
       <pre className="processing-log" ref={logRef}>
         {lines.length > 0 ? lines.join("\n") : waitingLabel}

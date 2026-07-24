@@ -11,13 +11,15 @@ import { useToday } from "./todayContext";
 export interface CalendarCommitmentsState {
   commitments: CalendarCommitment[];
   loading: boolean;
+  error: string | null;
 }
 
 export function useCalendarCommitments(): CalendarCommitmentsState {
-  const { workPath, settings, timezone, snapshot } = useToday();
+  const { workPath, settings, timezone, snapshot, refreshEpoch } = useToday();
   const [state, setState] = useState<CalendarCommitmentsState>({
     commitments: [],
     loading: false,
+    error: null,
   });
 
   const logicalDay = snapshot?.logicalDay ?? "";
@@ -27,11 +29,11 @@ export function useCalendarCommitments(): CalendarCommitmentsState {
 
   useEffect(() => {
     if (!workPath || !logicalDay) {
-      setState({ commitments: [], loading: false });
+      setState({ commitments: [], loading: false, error: null });
       return;
     }
     let cancelled = false;
-    setState((prev) => ({ ...prev, loading: true }));
+    setState((prev) => ({ ...prev, loading: true, error: null }));
     todayCalendarCommitments(
       workPath,
       logicalDay,
@@ -41,16 +43,30 @@ export function useCalendarCommitments(): CalendarCommitmentsState {
       settings.availabilityCalendars,
     )
       .then((commitments) => {
-        if (!cancelled) setState({ commitments, loading: false });
+        if (!cancelled) setState({ commitments, loading: false, error: null });
       })
-      .catch(() => {
-        if (!cancelled) setState({ commitments: [], loading: false });
+      .catch((err) => {
+        if (!cancelled) {
+          setState((prev) => ({
+            commitments: prev.commitments,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          }));
+        }
       });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workPath, logicalDay, timezone, dayStart, sleepStart, calendarsKey]);
+  }, [
+    workPath,
+    logicalDay,
+    timezone,
+    dayStart,
+    sleepStart,
+    calendarsKey,
+    refreshEpoch,
+  ]);
 
   return state;
 }

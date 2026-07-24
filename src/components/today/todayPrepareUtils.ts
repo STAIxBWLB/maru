@@ -34,11 +34,31 @@ export function resolveRefTitle(
   ref: PlanItemRef,
   tasks: TaskEntry[],
   captures: CaptureCandidate[],
+  untitled = "Untitled task",
 ): string {
   if (ref.kind === "task") {
-    return tasks.find((task) => taskKeyOf(task) === ref.taskId)?.title ?? ref.taskId;
+    return (
+      tasks.find(
+        (task) => taskKeyOf(task) === ref.taskId || task.relPath === ref.taskId,
+      )?.title ?? humanizeTaskIdentifier(ref.taskId, untitled)
+    );
   }
-  return captures.find((capture) => capture.captureId === ref.captureId)?.title ?? ref.captureId;
+  return (
+    captures.find((capture) => capture.captureId === ref.captureId)?.title ??
+    humanizeTaskIdentifier(ref.captureId, untitled)
+  );
+}
+
+/** Last-resort readable label for legacy events/plans that stored only a
+ *  path. Scanner titles remain the primary source of truth. */
+export function humanizeTaskIdentifier(value: string | null | undefined, untitled: string): string {
+  const file = (value ?? "").split(/[\\/]/).pop()?.replace(/\.(md|markdown|mdx)$/i, "") ?? "";
+  const readable = file
+    .replace(/^(?:\d{6}|\d{8})[-_]+/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return readable || untitled;
 }
 
 /** YYYY-MM-DD `days` after the given logical day (plain date math, no tz). */

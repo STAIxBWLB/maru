@@ -3,14 +3,14 @@
 // with decision actions, medium/low behind a collapsed "제안" toggle.
 
 import { format } from "date-fns";
-import { Check, ChevronDown, ChevronUp, Clock, Info, Mail, Pencil, Settings, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Clock, Info, Mail, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { IconType } from "react-icons";
 import { BsMicrosoft } from "react-icons/bs";
 import { SiGmail, SiKakaotalk, SiTelegram } from "react-icons/si";
 import { useTranslation } from "../../lib/i18n";
 import { isInboxSourceChannel, SOURCE_LABEL_KEY } from "../../lib/inboxSources";
-import type { CaptureCandidate, CaptureConfidence, TodayRoute } from "../../lib/today";
+import type { CaptureCandidate, CaptureConfidence } from "../../lib/today";
 import { captureChannel } from "./todayPrepareUtils";
 import type { TodayCaptures } from "./useTodayCaptures";
 
@@ -50,10 +50,9 @@ function formatReceivedAt(receivedAt: string): string {
 
 interface TodayCaptureProps {
   captures: TodayCaptures;
-  onNavigate: (route: TodayRoute) => void;
 }
 
-export function TodayCapture({ captures, onNavigate }: TodayCaptureProps) {
+export function TodayCapture({ captures }: TodayCaptureProps) {
   const { t } = useTranslation();
   const { capture, suggestions, loading, session, decide } = captures;
   const [filter, setFilter] = useState<string | null>(null); // null = all
@@ -134,15 +133,6 @@ export function TodayCapture({ captures, onNavigate }: TodayCaptureProps) {
           <button
             type="button"
             className="today-icon-button"
-            aria-label={t("today.capture.action.edit")}
-            title={t("today.capture.editUnavailable")}
-            disabled
-          >
-            <Pencil size={16} strokeWidth={1.9} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="today-icon-button"
             aria-label={t("today.capture.action.defer")}
             title={t("today.capture.action.defer")}
             onClick={() => void decide(candidate, "defer")}
@@ -165,13 +155,16 @@ export function TodayCapture({ captures, onNavigate }: TodayCaptureProps) {
   };
 
   return (
-    <section className="today-panel today-panel-capture" data-today-section="braindump">
+    <section className="today-panel today-panel-capture" data-today-section="capture">
       <header className="today-panel-header">
         <h3 className="today-panel-title">{t("today.panel.capture.title")}</h3>
         <button
           type="button"
           className="today-panel-link today-panel-header-link"
-          onClick={() => onNavigate("capture")}
+          onClick={() => {
+            setFilter(null);
+            setShowSuggestions(true);
+          }}
         >
           {t("today.capture.viewAll", { count: total })}
         </button>
@@ -236,15 +229,6 @@ export function TodayCapture({ captures, onNavigate }: TodayCaptureProps) {
         ) : null}
         <footer className="today-capture-footer">
           <span className="today-braindump-hint">{t("today.capture.footer")}</span>
-          <button
-            type="button"
-            className="today-panel-link"
-            disabled
-            title={t("today.capture.settingsUnavailable")}
-          >
-            <Settings size={12} strokeWidth={1.9} aria-hidden="true" />
-            {t("today.capture.settings")}
-          </button>
         </footer>
       </div>
     </section>

@@ -214,7 +214,9 @@ use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_c
 use today_lifecycle::{task_transition, task_trash};
 use today_notify::today_notify_new_day;
 use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
-use today_store::{read_task_events, today_mutate, today_open, today_rollover};
+use today_store::{
+    read_task_events, today_finalize_setup, today_mutate, today_open, today_rollover,
+};
 use vault::{read_vault_cache, sample_workspace_path, scan_vault};
 use vault_graph::{vault_graph_layout_read, vault_graph_layout_save, vault_graph_read};
 use vault_guard::vault_validate_note;
@@ -347,6 +349,7 @@ pub fn run() {
             today_logical_day,
             today_open,
             today_mutate,
+            today_finalize_setup,
             today_rollover,
             read_task_events,
             // Maru Today (AI planning contracts)

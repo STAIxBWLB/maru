@@ -20,8 +20,10 @@ import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
 import { resolveRouteForDayState } from "../../lib/todayRouting";
 import {
   isTodayConflict,
+  todayFinalizeSetup,
   todayMutate,
   todayOpen,
+  type TodayFinalizeSetupRequest,
   type TodayMutation,
   type TodayRoute,
   type TodaySnapshot,
@@ -61,6 +63,7 @@ interface TodayPaneProps {
     >,
   ) => void;
   rolloverEpoch?: number;
+  refreshRequestEpoch?: number;
   /** Props bundle for the existing TasksPane (route "all"), computed by App. */
   tasksProps: TasksPaneProps;
   /** Optional sidebar counts — rendered only when provided. */
@@ -77,6 +80,7 @@ export function TodayPane({
   layout,
   onLayoutChange,
   rolloverEpoch = 0,
+  refreshRequestEpoch = 0,
   tasksProps,
   calendarCount,
   inboxCount,
@@ -106,14 +110,18 @@ export function TodayPane({
 
   const [snapshot, setSnapshot] = useState<TodaySnapshot | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadTick, setLoadTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshEpoch, setRefreshEpoch] = useState(0);
   const snapshotRef = useRef<TodaySnapshot | null>(null);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const paneIdentityRef = useRef(0);
+  const refreshGenerationRef = useRef(0);
   // Seeded with the mount-time epoch: only rollovers that happen while this
   // pane is mounted re-route; a remount after an earlier rollover keeps the
   // route the user was on (the fresh todayOpen already loads the new day).
   const appliedRolloverEpochRef = useRef(rolloverEpoch);
+  const appliedRefreshRequestRef = useRef(refreshRequestEpoch);
 
   const applySnapshot = useCallback((next: TodaySnapshot | null) => {
     snapshotRef.current = next;
@@ -122,58 +130,89 @@ export function TodayPane({
 
   useEffect(() => {
     paneIdentityRef.current += 1;
+    refreshGenerationRef.current += 1;
     mutationQueueRef.current = Promise.resolve();
     applySnapshot(null);
+    setRefreshError(null);
+    setRefreshEpoch(0);
   }, [applySnapshot, workPath]);
 
-  // Load (or reload) the day snapshot. Defensive: any failure leaves the
-  // shell in degraded read-only mode instead of breaking the pane.
-  useEffect(() => {
-    let cancelled = false;
+  const reload = useCallback(async () => {
+    const identity = paneIdentityRef.current;
+    const generation = ++refreshGenerationRef.current;
     if (!workPath || !todaySettings.enabled) {
       applySnapshot(null);
-      return;
+      setLoading(false);
+      setRefreshing(false);
+      return null;
     }
-    setLoading(true);
-    todayOpen(
-      workPath,
-      new Date().toISOString(),
-      timezone,
-      todaySettings.dayStart,
-      todaySettings.sleepStart,
-    )
-      .then((loaded) => {
-        if (!cancelled) {
-          applySnapshot(loaded);
-          if (rolloverEpoch > appliedRolloverEpochRef.current) {
-            appliedRolloverEpochRef.current = rolloverEpoch;
-            onRouteChange(resolveRouteForDayState(loaded.dayState));
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn("today open failed", err);
-        if (!cancelled) applySnapshot(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    const firstLoad = snapshotRef.current === null;
+    if (firstLoad) setLoading(true);
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const loaded = await todayOpen(
+        workPath,
+        new Date().toISOString(),
+        timezone,
+        todaySettings.dayStart,
+        todaySettings.sleepStart,
+      );
+      if (
+        identity !== paneIdentityRef.current ||
+        generation !== refreshGenerationRef.current
+      ) {
+        return null;
+      }
+      applySnapshot(loaded);
+      setRefreshEpoch((epoch) => epoch + 1);
+      if (rolloverEpoch > appliedRolloverEpochRef.current) {
+        appliedRolloverEpochRef.current = rolloverEpoch;
+        onRouteChange(resolveRouteForDayState(loaded.dayState));
+      }
+      return loaded;
+    } catch (err) {
+      if (
+        identity !== paneIdentityRef.current ||
+        generation !== refreshGenerationRef.current
+      ) {
+        return null;
+      }
+      console.warn("today open failed", err);
+      setRefreshError(err instanceof Error ? err.message : String(err));
+      // Preserve the last good snapshot. Only the first failed load enters
+      // degraded mode.
+      if (snapshotRef.current === null) applySnapshot(null);
+      return null;
+    } finally {
+      if (
+        identity === paneIdentityRef.current &&
+        generation === refreshGenerationRef.current
+      ) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
   }, [
     workPath,
     todaySettings,
     timezone,
-    loadTick,
     rolloverEpoch,
     applySnapshot,
     onRouteChange,
   ]);
 
-  const reload = useCallback(async () => {
-    setLoadTick((tick) => tick + 1);
-  }, []);
+  // Load on mount/workspace/settings changes. The generation guard ensures a
+  // slower prior workspace cannot overwrite the active one.
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    if (refreshRequestEpoch <= appliedRefreshRequestRef.current) return;
+    appliedRefreshRequestRef.current = refreshRequestEpoch;
+    void reload();
+  }, [refreshRequestEpoch, reload]);
 
   const mutate = useCallback(
     (mutation: TodayMutation): Promise<TodaySnapshot | null> => {
@@ -238,6 +277,29 @@ export function TodayPane({
     [workPath, timezone, todaySettings, applySnapshot],
   );
 
+  const finalizeSetup = useCallback(
+    async (request: TodayFinalizeSetupRequest) => {
+      const identity = paneIdentityRef.current;
+      if (!workPath || identity !== paneIdentityRef.current) return null;
+      try {
+        const outcome = await todayFinalizeSetup(workPath, request);
+        if (identity === paneIdentityRef.current) {
+          applySnapshot(outcome.snapshot);
+          setRefreshError(null);
+        }
+        return outcome;
+      } catch (err) {
+        if (isTodayConflict(err)) await reload();
+        else console.warn("today finalize setup failed", err);
+        if (identity === paneIdentityRef.current) {
+          setRefreshError(err instanceof Error ? err.message : String(err));
+        }
+        return null;
+      }
+    },
+    [workPath, applySnapshot, reload],
+  );
+
   // Navigation stays immediate, while persistence joins the same serialized
   // mutation queue as autosave and plan edits.
   const handleRouteChange = useCallback(
@@ -266,10 +328,27 @@ export function TodayPane({
       gwsBinary: effectiveSettings.gwsBinary,
       snapshot,
       loading,
+      refreshing,
+      refreshError,
+      refreshEpoch,
       mutate,
+      finalizeSetup,
       reload,
     }),
-    [workPath, todaySettings, timezone, effectiveSettings, snapshot, loading, mutate, reload],
+    [
+      workPath,
+      todaySettings,
+      timezone,
+      effectiveSettings,
+      snapshot,
+      loading,
+      refreshing,
+      refreshError,
+      refreshEpoch,
+      mutate,
+      finalizeSetup,
+      reload,
+    ],
   );
 
   const content = (() => {

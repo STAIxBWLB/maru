@@ -14,13 +14,20 @@ interface TodayCapacityCardsProps {
   onNavigate: (route: TodayRoute) => void;
   /** The logical day's busy intervals (local calendar notes). */
   commitments?: CalendarCommitment[];
+  calendarLoading?: boolean;
+  calendarError?: string | null;
 }
 
 /** How many merged busy ranges the constraints card spells out before
  *  collapsing the rest into a "+N more" suffix. */
 const MAX_SHOWN_RANGES = 2;
 
-export function TodayCapacityCards({ onNavigate, commitments = [] }: TodayCapacityCardsProps) {
+export function TodayCapacityCards({
+  onNavigate,
+  commitments = [],
+  calendarLoading = false,
+  calendarError = null,
+}: TodayCapacityCardsProps) {
   const { t } = useTranslation();
   const { settings, snapshot } = useToday();
 
@@ -73,7 +80,7 @@ export function TodayCapacityCards({ onNavigate, commitments = [] }: TodayCapaci
   ];
 
   return (
-    <section className="today-panel today-panel-capacity" data-today-section="confirm">
+    <section className="today-panel today-panel-capacity" data-today-section="capacity">
       <div className="today-capacity-layout">
         <div className="today-capacity-card">
           <h4 className="today-capacity-card-title">{t("today.capacity.focusTitle")}</h4>
@@ -100,8 +107,17 @@ export function TodayCapacityCards({ onNavigate, commitments = [] }: TodayCapaci
                 <p className="today-capacity-side-text">
                   {busy.length > 0
                     ? t("today.capacity.constraints.reflected", { count: busy.length })
-                    : t("today.capacity.constraints.none")}
+                    : calendarLoading
+                      ? t("today.capacity.constraints.loading")
+                      : calendarError
+                        ? t("today.capacity.constraints.unavailable")
+                        : t("today.capacity.constraints.none")}
                 </p>
+                {calendarError ? (
+                  <p className="today-capacity-warning" role="alert">
+                    {calendarError}
+                  </p>
+                ) : null}
                 {rangesSummary ? (
                   <p className="today-capacity-side-text today-capacity-ranges">{rangesSummary}</p>
                 ) : null}
@@ -124,14 +140,6 @@ export function TodayCapacityCards({ onNavigate, commitments = [] }: TodayCapaci
                   {t("today.capacity.sleep.body", { time: summary.sleepStart })}
                 </p>
               </div>
-              <button
-                type="button"
-                className="today-panel-link"
-                disabled
-                title={t("today.capacity.sleep.settingsUnavailable")}
-              >
-                {t("today.capacity.sleep.changeSettings")}
-              </button>
             </div>
           </div>
         </div>

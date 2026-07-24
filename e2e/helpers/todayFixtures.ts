@@ -400,6 +400,7 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
     yesterday: overrides.yesterday ?? defaultYesterday(),
     capacity: null,
     carryovers: [],
+    captureDecisions: {},
     sources: [],
     unconfirmedContent: false,
   };
@@ -514,9 +515,14 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       itemRef?: { kind: string; taskId?: string; captureId?: string };
       selected?: boolean;
       destination?: string | null;
+      captureId?: string;
+      decision?: string;
+      taskId?: string | null;
+      taskPath?: string | null;
     }) => {
       const snap = state.snapshot as Record<string, unknown> & {
         yesterday: Array<Record<string, unknown>>;
+        captureDecisions: Record<string, Record<string, unknown>>;
         plan: {
           top: Array<Record<string, unknown>>;
           flexible: Array<Record<string, unknown>>;
@@ -547,6 +553,16 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
           }
           break;
         }
+        case "setCaptureDecision":
+          if (mutation.captureId && mutation.decision) {
+            snap.captureDecisions[mutation.captureId] = {
+              decision: mutation.decision,
+              deferDate: mutation.deferDate ?? null,
+              taskId: mutation.taskId ?? null,
+              taskPath: mutation.taskPath ?? null,
+            };
+          }
+          break;
         case "setCalendarSync": {
           if (snap.plan && mutation.itemRef) {
             const key = refKey(mutation.itemRef);
@@ -607,6 +623,100 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
         }
         applyMutation(args.mutation as never);
         return clone(state.snapshot);
+      },
+      today_finalize_setup: (args) => {
+        const request = args.request as {
+          logicalDay: string;
+          expectedRevision: string;
+          action: "confirm" | "skip";
+          plan: {
+            top: Array<Record<string, unknown>>;
+            flexible: Array<Record<string, unknown>>;
+            overflow: Array<Record<string, unknown>>;
+          } | null;
+          captures: Array<{
+            captureId: string;
+            title: string;
+            summary?: string | null;
+          }>;
+        };
+        const snap = state.snapshot as Record<string, unknown> & {
+          revision: string;
+          yesterday: Array<Record<string, unknown>>;
+          captureDecisions: Record<string, Record<string, unknown>>;
+          plan: typeof request.plan;
+        };
+        if (request.logicalDay !== state.logicalDay) {
+          throw new Error(`today_plan_day_mismatch: ${request.logicalDay} != ${state.logicalDay}`);
+        }
+        if (request.expectedRevision !== snap.revision) {
+          throw new Error(
+            `today_conflict: expected revision ${request.expectedRevision}, found ${snap.revision}`,
+          );
+        }
+
+        const materialized: Array<{
+          captureId: string;
+          taskId: string;
+          taskPath: string;
+        }> = [];
+        const captureById = new Map(request.captures.map((capture) => [capture.captureId, capture]));
+        const plan = request.action === "confirm" ? clone(request.plan) : null;
+        if (plan) {
+          for (const item of [...plan.top, ...plan.flexible, ...plan.overflow]) {
+            const itemRef = item.itemRef as
+              | { kind: "capture"; captureId: string }
+              | { kind: "task"; taskId: string };
+            if (itemRef.kind !== "capture") continue;
+            const capture = captureById.get(itemRef.captureId);
+            if (!capture) {
+              throw new Error(`today_finalize_capture_missing: ${itemRef.captureId}`);
+            }
+            const relPath = `tasks/active/e2e-capture-${itemRef.captureId}.md`;
+            const taskId = `e2e-task-${itemRef.captureId}`;
+            materialized.push({ captureId: itemRef.captureId, taskId, taskPath: relPath });
+            item.itemRef = { kind: "task", taskId };
+            snap.captureDecisions[itemRef.captureId] = {
+              decision: "materialized",
+              taskId,
+              taskPath: relPath,
+            };
+            if (
+              !state.taskRows.some(
+                (row) => (row as { taskId?: string }).taskId === taskId,
+              )
+            ) {
+              state.taskRows.push({
+                path: `${injected.workPath}/${relPath}`,
+                relPath,
+                fileName: relPath.split("/").pop(),
+                bucket: "active",
+                taskId,
+                title: capture.title,
+                sizeBytes: 128,
+                updatedAt: "2026-07-21T09:00:00+09:00",
+                frontmatter: {
+                  taskId,
+                  title: capture.title,
+                  status: "active",
+                },
+              });
+            }
+          }
+        }
+        for (const item of snap.yesterday) {
+          if (item.resolution == null) item.resolution = "keepLater";
+        }
+        snap.plan = plan;
+        snap.dayState = request.action === "confirm" ? "planned" : "skipped";
+        snap.stage = "execute";
+        snap.route = "execute";
+        snap.revision = bumpRevision();
+        return {
+          snapshot: clone(state.snapshot),
+          materialized,
+          replayed: false,
+        };
       },
       create_task_note: (args) => {
         const draft = args.draft as {

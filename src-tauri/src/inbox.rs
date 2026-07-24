@@ -327,13 +327,14 @@ pub fn scan_inbox_entries(
 #[tauri::command]
 pub fn scan_inbox_processed_items(
     work_path: String,
+    channel: Option<String>,
     statuses: Option<Vec<String>>,
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<InboxProcessedItem>, String> {
     let work = normalize_existing_dir(&work_path)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
-    scan_processed_items_with_config(&work, &config, statuses, query, limit)
+    scan_processed_items_with_config(&work, &config, channel, statuses, query, limit)
 }
 
 #[tauri::command]
@@ -1033,11 +1034,15 @@ fn scan_inbox_entries_with_config(
 fn scan_processed_items_with_config(
     work: &Path,
     config: &InboxRuntimeConfig,
+    channel: Option<String>,
     statuses: Option<Vec<String>>,
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<InboxProcessedItem>, String> {
     let root = inbox_settings::resolve_runtime_root(work, config)?;
+    let channel = channel
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
     let statuses = normalize_processed_statuses(statuses)?;
     let query = query
         .map(|value| value.trim().to_lowercase())
@@ -1071,6 +1076,12 @@ fn scan_processed_items_with_config(
                 Ok(item) => item,
                 Err(err) => error_processed_item(work, config, &item_dir, &status, err),
             };
+            if channel
+                .as_deref()
+                .is_some_and(|expected| item.channel.to_lowercase() != expected)
+            {
+                continue;
+            }
             if query
                 .as_deref()
                 .map(|needle| processed_item_matches_query(&item, needle))
@@ -2631,7 +2642,7 @@ inbox:
         .unwrap();
 
         let items =
-            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None)
+            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None, None)
                 .unwrap();
 
         assert_eq!(items.len(), 3);
@@ -2660,6 +2671,7 @@ inbox:
 
         let items = scan_inbox_processed_items(
             root.to_string_lossy().to_string(),
+            None,
             Some(vec!["done".to_string()]),
             Some("special".to_string()),
             Some(10),
@@ -2673,6 +2685,28 @@ inbox:
             .unwrap()
             .ends_with("digest.md"));
         assert_eq!(items[0].project.as_deref(), Some("Special Project"));
+    }
+
+    #[test]
+    fn scan_processed_items_filters_channel_before_applying_limit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "a-kakao", "kakao", "A", "summary");
+        write_processed_item(root, "done", "z-gws", "gws", "Z", "summary");
+
+        let items = scan_inbox_processed_items(
+            root.to_string_lossy().to_string(),
+            Some("gws".to_string()),
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "z-gws");
+        assert_eq!(items[0].channel, "gws");
     }
 
     #[test]
@@ -2800,7 +2834,7 @@ inbox:
         .unwrap();
 
         let items =
-            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None)
+            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None, None)
                 .unwrap();
 
         assert_eq!(items.len(), 1);
@@ -2833,7 +2867,7 @@ files:
         .unwrap();
 
         let items =
-            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None)
+            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None, None)
                 .unwrap();
 
         assert_eq!(items.len(), 1);
@@ -2868,7 +2902,7 @@ files:
         .unwrap();
 
         let items =
-            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None)
+            scan_inbox_processed_items(root.to_string_lossy().to_string(), None, None, None, None)
                 .unwrap();
 
         assert_eq!(items.len(), 1);
@@ -2898,6 +2932,7 @@ files:
 
         let items = scan_inbox_processed_items(
             root.to_string_lossy().to_string(),
+            None,
             Some(vec!["failed".to_string()]),
             None,
             None,

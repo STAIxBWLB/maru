@@ -10,17 +10,23 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
+use crate::tasks::{
+    materialize_capture_task, prepare_capture_task_materialization, resolve_tasks_root,
+    CreateTaskDraft, TaskBucket,
+};
 use crate::today::{
-    logical_day, parse_day_start, parse_sleep_start, parse_timezone, validate_plan, CalendarSyncState,
-    CarryoverRef, DayState, PlanItemRef, TaskEvent, TodayMutation, TodaySnapshot, TodayStage,
-    YesterdayItem,
+    logical_day, parse_day_start, parse_sleep_start, parse_timezone, validate_plan,
+    CalendarSyncState, CaptureDecisionRecord, CarryoverRef, DayState, MaterializedCapture,
+    PersistedCaptureDecision, PlanItemRef, TaskEvent, TodayFinalizeAction,
+    TodayFinalizeSetupOutcome, TodayFinalizeSetupRequest, TodayMutation, TodaySnapshot, TodayStage,
+    UnresolvedPolicy, YesterdayItem, YesterdayResolution,
 };
 use crate::vault::normalize_existing_dir;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -56,6 +62,14 @@ fn events_path(work: &Path, month: &str) -> PathBuf {
     today_dir(work).join("events").join(format!("{month}.jsonl"))
 }
 
+fn finalize_dir(work: &Path) -> PathBuf {
+    today_dir(work).join("finalize")
+}
+
+fn finalize_journal_path(work: &Path, idempotency_key: &str) -> PathBuf {
+    finalize_dir(work).join(format!("{}.json", revision_for(idempotency_key)))
+}
+
 fn validate_logical_day(day: &str) -> Result<(), String> {
     let parsed = NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .map_err(|_| format!("today_invalid_logical_day: {day}"))?;
@@ -73,6 +87,153 @@ fn validate_month(month: &str) -> Result<(), String> {
         return Ok(());
     }
     Err(format!("today_invalid_month: {month}"))
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum FinalizeJournalPhase {
+    Prepared,
+    Materializing,
+    Committing,
+    Committed,
+    RolledBack,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinalizeCreatedFile {
+    rel_path: String,
+    content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinalizeJournal {
+    request_hash: String,
+    request: TodayFinalizeSetupRequest,
+    phase: FinalizeJournalPhase,
+    #[serde(default)]
+    created_files: Vec<FinalizeCreatedFile>,
+    #[serde(default)]
+    materialized: Vec<MaterializedCapture>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    outcome: Option<TodayFinalizeSetupOutcome>,
+}
+
+/// Terminal journals only matter for near-term replays; drop them once they
+/// age out so the finalize directory does not grow forever.
+const FINALIZE_JOURNAL_RETENTION_SECS: u64 = 30 * 24 * 60 * 60;
+
+fn prune_stale_finalize_journal(path: &Path) {
+    let stale = fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age.as_secs() > FINALIZE_JOURNAL_RETENTION_SECS);
+    if stale {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn write_finalize_journal(path: &Path, journal: &FinalizeJournal) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(journal)
+        .map_err(|err| format!("Cannot serialize today finalize journal: {err}"))?;
+    write_atomic(path, raw.as_bytes())
+}
+
+fn safe_finalize_created_path(work: &Path, rel_path: &str) -> Option<PathBuf> {
+    let rel = Path::new(rel_path);
+    if rel.is_absolute()
+        || rel.components().any(|component| {
+            !matches!(component, std::path::Component::Normal(_))
+        })
+    {
+        return None;
+    }
+    let path = work.join(rel);
+    let active_root = resolve_tasks_root(work, "tasks").ok()?.join("active");
+    if path.extension().and_then(|value| value.to_str()) != Some("md")
+        || !path.starts_with(active_root)
+    {
+        return None;
+    }
+    Some(path)
+}
+
+/// Remove only files this transaction created and only while their content
+/// still matches the recorded hash. A user edit converts the file into
+/// recoverable user data and is never deleted.
+fn rollback_finalize_created_files(
+    work: &Path,
+    created_files: &[FinalizeCreatedFile],
+) -> Vec<String> {
+    let mut preserved = Vec::new();
+    for created in created_files.iter().rev() {
+        let Some(path) = safe_finalize_created_path(work, &created.rel_path) else {
+            preserved.push(created.rel_path.clone());
+            continue;
+        };
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if revision_for(&raw) == created.content_hash {
+            if fs::remove_file(&path).is_err() {
+                preserved.push(created.rel_path.clone());
+            }
+        } else {
+            preserved.push(created.rel_path.clone());
+        }
+    }
+    preserved
+}
+
+/// Reconcile crash-interrupted Finish setup journals. `Committing` is
+/// considered committed only when the persisted snapshot revision matches the
+/// recorded outcome; all earlier phases roll back unchanged created files.
+fn recover_finalize_journals(work: &Path) -> Result<(), String> {
+    let dir = finalize_dir(work);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut journal) = serde_json::from_str::<FinalizeJournal>(&raw) else {
+            continue;
+        };
+        match journal.phase {
+            FinalizeJournalPhase::Committed | FinalizeJournalPhase::RolledBack => {
+                prune_stale_finalize_journal(&path);
+                continue;
+            }
+            FinalizeJournalPhase::Committing => {
+                let committed = journal.outcome.as_ref().is_some_and(|outcome| {
+                    fs::read_to_string(state_path(work, &journal.request.logical_day))
+                        .ok()
+                        .and_then(|raw| serde_json::from_str::<TodaySnapshot>(&raw).ok())
+                        .is_some_and(|snapshot| snapshot.revision == outcome.snapshot.revision)
+                });
+                if committed {
+                    journal.phase = FinalizeJournalPhase::Committed;
+                    write_finalize_journal(&path, &journal)?;
+                    continue;
+                }
+            }
+            FinalizeJournalPhase::Prepared | FinalizeJournalPhase::Materializing => {}
+        }
+        let preserved = rollback_finalize_created_files(work, &journal.created_files);
+        journal.phase = FinalizeJournalPhase::RolledBack;
+        journal
+            .created_files
+            .retain(|entry| preserved.contains(&entry.rel_path));
+        write_finalize_journal(&path, &journal)?;
+    }
+    Ok(())
 }
 
 // --- Canonical serialization + revision ------------------------------------
@@ -393,6 +554,15 @@ pub fn today_open(
     }
     let lock = work_lock_for(&work)?;
     let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    if let Err(err) = recover_finalize_journals(&work) {
+        let _ = append_task_event(
+            &work,
+            &day,
+            "finalize_recovery_failed",
+            None,
+            json!({ "error": err }),
+        );
+    }
     if let Ok(raw) = fs::read_to_string(state_path(&work, &day)) {
         let parsed = serde_json::from_str::<TodaySnapshot>(&raw)
             .ok()
@@ -484,6 +654,316 @@ pub fn today_mutate(
     Ok(snapshot)
 }
 
+/// Atomically finish (or skip) Prepare. Capture task notes and the rewritten
+/// day snapshot are coordinated through a durable journal so retrying the same
+/// request is safe and crash recovery never removes user-modified files.
+#[tauri::command]
+pub fn today_finalize_setup(
+    work_path: String,
+    request: TodayFinalizeSetupRequest,
+) -> Result<TodayFinalizeSetupOutcome, String> {
+    validate_logical_day(&request.logical_day)?;
+    if request.idempotency_key.trim().is_empty() {
+        return Err("today_finalize_idempotency_key_required".to_string());
+    }
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let lock = work_lock_for(&work)?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
+    recover_finalize_journals(&work)?;
+
+    let request_raw = serde_json::to_string(&request)
+        .map_err(|err| format!("Cannot serialize today finalize request: {err}"))?;
+    let request_hash = revision_for(&request_raw);
+    let journal_path = finalize_journal_path(&work, &request.idempotency_key);
+    if let Ok(raw) = fs::read_to_string(&journal_path) {
+        let existing: FinalizeJournal = serde_json::from_str(&raw)
+            .map_err(|err| format!("today_finalize_journal_corrupt: {err}"))?;
+        // A rolled-back journal is terminal: its key is free for a corrected
+        // retry even when the request bytes changed. Only a committed receipt
+        // (replay) or an in-flight journal pins the original request.
+        if existing.phase != FinalizeJournalPhase::RolledBack
+            && existing.request_hash != request_hash
+        {
+            return Err("today_finalize_idempotency_conflict".to_string());
+        }
+        if existing.phase == FinalizeJournalPhase::Committed {
+            let mut outcome = existing
+                .outcome
+                .ok_or_else(|| "today_finalize_receipt_missing".to_string())?;
+            outcome.replayed = true;
+            return Ok(outcome);
+        }
+    }
+
+    let raw = fs::read_to_string(state_path(&work, &request.logical_day))
+        .map_err(|_| "today_state_missing".to_string())?;
+    let mut snapshot: TodaySnapshot =
+        serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))?;
+    check_revision(&snapshot, &request.expected_revision)?;
+    if !matches!(
+        snapshot.day_state,
+        DayState::Unstarted | DayState::Preparing
+    ) {
+        return Err(format!(
+            "today_invalid_transition: finalizeSetup from {:?}",
+            snapshot.day_state
+        ));
+    }
+
+    let mut plan = match request.action {
+        TodayFinalizeAction::Confirm => request.plan.clone().or_else(|| snapshot.plan.clone()),
+        TodayFinalizeAction::Skip => None,
+    };
+    if let Some(candidate_plan) = plan.as_mut() {
+        candidate_plan.input_revision = snapshot.revision.clone();
+        if candidate_plan.logical_day != snapshot.logical_day {
+            return Err(format!(
+                "today_plan_day_mismatch: {} != {}",
+                candidate_plan.logical_day, snapshot.logical_day
+            ));
+        }
+        validate_plan(
+            candidate_plan,
+            parse_sleep_start(&snapshot.sleep_start)?,
+            parse_timezone(&snapshot.timezone)?,
+        )?;
+    }
+
+    let capture_inputs: HashMap<String, _> = request
+        .captures
+        .iter()
+        .map(|capture| (capture.capture_id.clone(), capture))
+        .collect();
+    if let Some(capture) = request
+        .captures
+        .iter()
+        .find(|capture| capture.capture_id.trim().is_empty())
+    {
+        return Err(format!(
+            "today_finalize_capture_id_required: {}",
+            capture.title.trim()
+        ));
+    }
+    if let Some(capture) = request
+        .captures
+        .iter()
+        .find(|capture| capture.title.trim().is_empty())
+    {
+        return Err(format!(
+            "today_finalize_capture_title_required: {}",
+            capture.capture_id
+        ));
+    }
+    if capture_inputs.len() != request.captures.len() {
+        return Err("today_finalize_duplicate_capture".to_string());
+    }
+    let capture_refs: BTreeSet<String> = plan
+        .as_ref()
+        .into_iter()
+        .flat_map(|plan| plan.items())
+        .filter_map(|item| match &item.item_ref {
+            PlanItemRef::Capture { capture_id } => Some(capture_id.clone()),
+            PlanItemRef::Task { .. } => None,
+        })
+        .collect();
+    if let Some(missing) = capture_refs
+        .iter()
+        .find(|capture_id| !capture_inputs.contains_key(*capture_id))
+    {
+        return Err(format!("today_finalize_capture_missing: {missing}"));
+    }
+
+    let mut journal = FinalizeJournal {
+        request_hash,
+        request: request.clone(),
+        phase: FinalizeJournalPhase::Prepared,
+        created_files: Vec::new(),
+        materialized: Vec::new(),
+        outcome: None,
+    };
+    write_finalize_journal(&journal_path, &journal)?;
+
+    let commit_result = (|| -> Result<TodayFinalizeSetupOutcome, String> {
+        let mut materialized_by_capture = HashMap::<String, MaterializedCapture>::new();
+        if request.action == TodayFinalizeAction::Confirm {
+            journal.phase = FinalizeJournalPhase::Materializing;
+            write_finalize_journal(&journal_path, &journal)?;
+            for capture_id in &capture_refs {
+                let capture = capture_inputs
+                    .get(capture_id)
+                    .ok_or_else(|| format!("today_finalize_capture_missing: {capture_id}"))?;
+                let mut frontmatter = BTreeMap::new();
+                frontmatter.insert("title".to_string(), json!(capture.title.trim()));
+                frontmatter.insert("status".to_string(), json!("active"));
+                frontmatter.insert("priority".to_string(), json!("medium"));
+                if let Some(project) = capture
+                    .project
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    frontmatter.insert("project".to_string(), json!(project.trim()));
+                }
+                if let Some(due_date) = capture
+                    .due_date
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    frontmatter.insert("due".to_string(), json!(due_date.trim()));
+                }
+                if let Some(minutes) = capture.estimate_minutes {
+                    frontmatter.insert("estimateMinutes".to_string(), json!(minutes));
+                }
+                let body = if capture.summary.trim().is_empty() {
+                    format!("# {}\n", capture.title.trim())
+                } else {
+                    format!("# {}\n\n{}\n", capture.title.trim(), capture.summary.trim())
+                };
+                let prepared = prepare_capture_task_materialization(
+                    &work,
+                    &request.logical_day,
+                    capture_id,
+                    CreateTaskDraft {
+                        slug: capture.title.clone(),
+                        title: capture.title.clone(),
+                        frontmatter,
+                        body,
+                        bucket: TaskBucket::Active,
+                    },
+                )?;
+                if prepared.will_create {
+                    journal.created_files.push(FinalizeCreatedFile {
+                        rel_path: prepared.rel_path.clone(),
+                        content_hash: prepared.content_hash.clone(),
+                    });
+                    write_finalize_journal(&journal_path, &journal)?;
+                }
+                let write = materialize_capture_task(&work, &prepared)?;
+                let task_id = write
+                    .row
+                    .frontmatter
+                    .get("taskId")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or(&write.row.rel_path)
+                    .to_string();
+                let materialized = MaterializedCapture {
+                    capture_id: capture_id.clone(),
+                    task_id,
+                    task_path: write.row.rel_path.clone(),
+                };
+                if prepared.will_create && !write.created {
+                    journal
+                        .created_files
+                        .retain(|entry| entry.rel_path != prepared.rel_path);
+                }
+                journal.materialized.push(materialized.clone());
+                materialized_by_capture.insert(capture_id.clone(), materialized);
+                write_finalize_journal(&journal_path, &journal)?;
+            }
+        }
+
+        if let Some(next_plan) = plan.as_mut() {
+            for item in next_plan.items_mut() {
+                if let PlanItemRef::Capture { capture_id } = &item.item_ref {
+                    let materialized =
+                        materialized_by_capture.get(capture_id).ok_or_else(|| {
+                            format!("today_finalize_capture_not_materialized: {capture_id}")
+                        })?;
+                    item.item_ref = PlanItemRef::Task {
+                        task_id: materialized.task_id.clone(),
+                    };
+                }
+            }
+        }
+        for materialized in materialized_by_capture.values() {
+            snapshot.capture_decisions.insert(
+                materialized.capture_id.clone(),
+                CaptureDecisionRecord {
+                    decision: PersistedCaptureDecision::Materialized,
+                    defer_date: None,
+                    task_id: Some(materialized.task_id.clone()),
+                    task_path: Some(materialized.task_path.clone()),
+                },
+            );
+        }
+
+        match request.unresolved_policy {
+            UnresolvedPolicy::KeepLater => {
+                for item in snapshot.yesterday.iter_mut() {
+                    if item.resolution.is_none() {
+                        item.resolution = Some(YesterdayResolution::KeepLater);
+                        item.defer_date = None;
+                    }
+                }
+            }
+        }
+        snapshot.plan = plan;
+        snapshot.day_state = match request.action {
+            TodayFinalizeAction::Confirm => DayState::Planned,
+            TodayFinalizeAction::Skip => DayState::Skipped,
+        };
+        snapshot.stage = Some(TodayStage::Execute);
+        snapshot.route = crate::today::TodayRoute::Execute;
+        snapshot.unconfirmed_content = false;
+        snapshot.generated_at = Utc::now().to_rfc3339();
+        snapshot_revision(&work, &snapshot, &raw)?;
+        snapshot.revision = revision_for(&canonical_json(&snapshot)?);
+
+        let outcome = TodayFinalizeSetupOutcome {
+            snapshot: snapshot.clone(),
+            materialized: journal.materialized.clone(),
+            replayed: false,
+        };
+        journal.phase = FinalizeJournalPhase::Committing;
+        journal.outcome = Some(outcome.clone());
+        write_finalize_journal(&journal_path, &journal)?;
+        persist_snapshot(&work, &mut snapshot)?;
+
+        let committed = TodayFinalizeSetupOutcome {
+            snapshot: snapshot.clone(),
+            ..outcome
+        };
+        journal.phase = FinalizeJournalPhase::Committed;
+        journal.outcome = Some(committed.clone());
+        // The state commit is authoritative. If this last receipt rewrite
+        // fails, today_open promotes the matching `committing` journal.
+        let _ = write_finalize_journal(&journal_path, &journal);
+        Ok(committed)
+    })();
+
+    let outcome = match commit_result {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let preserved = rollback_finalize_created_files(&work, &journal.created_files);
+            journal.phase = FinalizeJournalPhase::RolledBack;
+            journal
+                .created_files
+                .retain(|entry| preserved.contains(&entry.rel_path));
+            let _ = write_finalize_journal(&journal_path, &journal);
+            return Err(err);
+        }
+    };
+
+    let _ = append_task_event(
+        &work,
+        &request.logical_day,
+        match request.action {
+            TodayFinalizeAction::Confirm => "setup_confirmed",
+            TodayFinalizeAction::Skip => "day_skipped",
+        },
+        None,
+        json!({
+            "idempotencyKey": request.idempotency_key,
+            "materialized": outcome.materialized,
+            "unresolvedPolicy": request.unresolved_policy,
+        }),
+    );
+    let _ = project_journal(&work, &work.join("tasks"), &outcome.snapshot);
+    Ok(outcome)
+}
+
 fn apply_mutation(
     snapshot: &mut TodaySnapshot,
     mutation: &TodayMutation,
@@ -549,6 +1029,25 @@ fn apply_mutation(
             item.resolution = Some(*resolution);
             item.defer_date = defer_date.clone();
             Ok("yesterday_decision")
+        }
+        TodayMutation::SetCaptureDecision {
+            capture_id,
+            decision,
+            defer_date,
+        } => {
+            if capture_id.trim().is_empty() {
+                return Err("today_capture_id_required".to_string());
+            }
+            snapshot.capture_decisions.insert(
+                capture_id.clone(),
+                CaptureDecisionRecord {
+                    decision: *decision,
+                    defer_date: defer_date.clone(),
+                    task_id: None,
+                    task_path: None,
+                },
+            );
+            Ok("capture_decision")
         }
         TodayMutation::SetPlan { plan } => {
             if plan.input_revision != snapshot.revision {
@@ -682,6 +1181,7 @@ fn is_untouched(snapshot: &TodaySnapshot) -> bool {
         && snapshot.brain_dump.trim().is_empty()
         && snapshot.plan.is_none()
         && snapshot.yesterday.iter().all(|item| item.resolution.is_none())
+        && snapshot.capture_decisions.is_empty()
 }
 
 /// Newest persisted day state strictly before `new_day`. Rollover closes
@@ -770,9 +1270,11 @@ fn rollover_inner(
         let prior_day = prior_day.expect("read implies a prior day");
         if let Ok(prior) = serde_json::from_str::<TodaySnapshot>(&raw) {
             if !is_untouched(&prior) {
+                snapshot.capture_decisions = prior.capture_decisions.clone();
                 // Journal first: projection only happens for planned/skipped
                 // days and must see the pre-close state.
                 project_journal(work, &work.join("tasks"), &prior)?;
+                let mut seeded_task_ids = HashSet::new();
                 if let Some(plan) = &prior.plan {
                     for item in plan.items() {
                         snapshot.carryovers.push(CarryoverRef {
@@ -780,6 +1282,7 @@ fn rollover_inner(
                             carried_from: prior_day.clone(),
                         });
                         if let PlanItemRef::Task { task_id } = &item.item_ref {
+                            seeded_task_ids.insert(task_id.clone());
                             snapshot.yesterday.push(YesterdayItem {
                                 task_id: task_id.clone(),
                                 title: item.outcome.clone().unwrap_or_default(),
@@ -790,6 +1293,29 @@ fn rollover_inner(
                             });
                         }
                     }
+                }
+                // Items explicitly left for later are not forced back into a
+                // plan, but remain available for the next Prepare resolver.
+                for item in &prior.yesterday {
+                    if !matches!(item.resolution, Some(YesterdayResolution::KeepLater) | None)
+                        || !seeded_task_ids.insert(item.task_id.clone())
+                    {
+                        continue;
+                    }
+                    snapshot.carryovers.push(CarryoverRef {
+                        item_ref: PlanItemRef::Task {
+                            task_id: item.task_id.clone(),
+                        },
+                        carried_from: prior_day.clone(),
+                    });
+                    snapshot.yesterday.push(YesterdayItem {
+                        task_id: item.task_id.clone(),
+                        title: item.title.clone(),
+                        status: item.status.clone(),
+                        progress: item.progress,
+                        resolution: None,
+                        defer_date: None,
+                    });
                 }
                 seeded = snapshot.yesterday.len();
                 let unconfirmed = (!prior.brain_dump.trim().is_empty() || prior.plan.is_some())
@@ -993,8 +1519,8 @@ pub fn project_journal(
 mod tests {
     use super::*;
     use crate::today::{
-        CalendarSyncState, DailyPlanItem, DailyPlanV1, PlanLane, ProposedBlock, TodayRoute,
-        YesterdayResolution,
+        CalendarSyncState, CaptureMaterializationInput, DailyPlanItem, DailyPlanV1, PlanLane,
+        ProposedBlock, TodayRoute, YesterdayResolution,
     };
 
     const SEOUL: &str = "Asia/Seoul";
@@ -1048,6 +1574,259 @@ mod tests {
             reasons: vec![],
             warnings: vec![],
         }
+    }
+
+    fn plan_with_capture(snapshot: &TodaySnapshot, capture_id: &str) -> DailyPlanV1 {
+        DailyPlanV1 {
+            logical_day: snapshot.logical_day.clone(),
+            input_revision: snapshot.revision.clone(),
+            top: vec![],
+            flexible: vec![DailyPlanItem {
+                item_ref: PlanItemRef::Capture {
+                    capture_id: capture_id.to_string(),
+                },
+                lane: PlanLane::Flexible,
+                order: 0,
+                outcome: Some("Review the captured request".to_string()),
+                estimate_minutes: Some(30),
+                estimate_provisional: false,
+                pinned: false,
+                proposed_block: None,
+                calendar_sync: CalendarSyncState::none(),
+            }],
+            overflow: vec![],
+            reasons: vec![],
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn finalize_setup_materializes_capture_once_and_replays_receipt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let snapshot = open_day(&work, "2026-07-21T09:00:00+09:00");
+        let request = TodayFinalizeSetupRequest {
+            logical_day: snapshot.logical_day.clone(),
+            expected_revision: snapshot.revision.clone(),
+            idempotency_key: "finish-capture-once".to_string(),
+            action: TodayFinalizeAction::Confirm,
+            plan: Some(plan_with_capture(&snapshot, "capture-1")),
+            captures: vec![CaptureMaterializationInput {
+                capture_id: "capture-1".to_string(),
+                title: "Review shared budget".to_string(),
+                summary: "Reply with the approved numbers.".to_string(),
+                project: Some("Shared University".to_string()),
+                due_date: Some("2026-07-21".to_string()),
+                estimate_minutes: Some(30),
+            }],
+            unresolved_policy: UnresolvedPolicy::KeepLater,
+        };
+
+        let first = today_finalize_setup(work.clone(), request.clone()).unwrap();
+        assert!(!first.replayed);
+        assert_eq!(first.snapshot.day_state, DayState::Planned);
+        assert_eq!(first.snapshot.stage, Some(TodayStage::Execute));
+        assert_eq!(first.materialized.len(), 1);
+        assert!(matches!(
+            first.snapshot.plan.as_ref().unwrap().flexible[0].item_ref,
+            PlanItemRef::Task { .. }
+        ));
+        assert_eq!(
+            first
+                .snapshot
+                .capture_decisions
+                .get("capture-1")
+                .map(|record| record.decision),
+            Some(PersistedCaptureDecision::Materialized)
+        );
+        let task_path = tmp.path().join(&first.materialized[0].task_path);
+        assert!(task_path.exists());
+
+        let replay = today_finalize_setup(work, request).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.materialized, first.materialized);
+        assert_eq!(replay.snapshot.revision, first.snapshot.revision);
+        let task_count = fs::read_dir(tmp.path().join("tasks/active"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("md"))
+            .count();
+        assert_eq!(task_count, 1);
+    }
+
+    #[test]
+    fn finalize_skip_keeps_unresolved_items_without_creating_tasks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let snapshot = open_day(&work, "2026-07-21T09:00:00+09:00");
+        let mut seeded = snapshot.clone();
+        seeded.yesterday.push(YesterdayItem {
+            task_id: "carry-1".to_string(),
+            title: "Carry this later".to_string(),
+            status: "active".to_string(),
+            progress: None,
+            resolution: None,
+            defer_date: None,
+        });
+        persist_snapshot(tmp.path(), &mut seeded).unwrap();
+
+        let outcome = today_finalize_setup(
+            work,
+            TodayFinalizeSetupRequest {
+                logical_day: seeded.logical_day.clone(),
+                expected_revision: seeded.revision.clone(),
+                idempotency_key: "skip-without-materializing".to_string(),
+                action: TodayFinalizeAction::Skip,
+                plan: Some(plan_with_capture(&seeded, "capture-unused")),
+                captures: vec![CaptureMaterializationInput {
+                    capture_id: "capture-unused".to_string(),
+                    title: "Do not create me".to_string(),
+                    summary: String::new(),
+                    project: None,
+                    due_date: None,
+                    estimate_minutes: None,
+                }],
+                unresolved_policy: UnresolvedPolicy::KeepLater,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.snapshot.day_state, DayState::Skipped);
+        assert!(outcome.snapshot.plan.is_none());
+        assert!(outcome.materialized.is_empty());
+        assert_eq!(
+            outcome.snapshot.yesterday[0].resolution,
+            Some(YesterdayResolution::KeepLater)
+        );
+        assert!(!tmp.path().join("tasks/active").exists());
+    }
+
+    #[test]
+    fn finalize_retries_with_a_modified_request_after_rollback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().to_string_lossy().to_string();
+        let snapshot = open_day(&work, "2026-07-21T09:00:00+09:00");
+        let request = TodayFinalizeSetupRequest {
+            logical_day: snapshot.logical_day.clone(),
+            expected_revision: snapshot.revision.clone(),
+            idempotency_key: "retry-after-rollback".to_string(),
+            action: TodayFinalizeAction::Skip,
+            plan: None,
+            captures: vec![],
+            unresolved_policy: UnresolvedPolicy::KeepLater,
+        };
+        write_finalize_journal(
+            &finalize_journal_path(tmp.path(), &request.idempotency_key),
+            &FinalizeJournal {
+                request_hash: "different-earlier-request".to_string(),
+                request: request.clone(),
+                phase: FinalizeJournalPhase::RolledBack,
+                created_files: vec![],
+                materialized: vec![],
+                outcome: None,
+            },
+        )
+        .unwrap();
+
+        let outcome = today_finalize_setup(work, request).unwrap();
+
+        assert!(!outcome.replayed);
+        assert_eq!(outcome.snapshot.day_state, DayState::Skipped);
+    }
+
+    #[test]
+    fn finalize_recovery_preserves_user_modified_created_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path();
+        let task_path = work.join("tasks/active/recovery.md");
+        fs::create_dir_all(task_path.parent().unwrap()).unwrap();
+        fs::write(&task_path, "initial").unwrap();
+        let snapshot = open_day(&work.to_string_lossy(), "2026-07-21T09:00:00+09:00");
+        let journal_path = finalize_journal_path(work, "recovery-preserves-user-edit");
+        write_finalize_journal(
+            &journal_path,
+            &FinalizeJournal {
+                request_hash: "request-hash".to_string(),
+                request: TodayFinalizeSetupRequest {
+                    logical_day: snapshot.logical_day,
+                    expected_revision: snapshot.revision,
+                    idempotency_key: "recovery-preserves-user-edit".to_string(),
+                    action: TodayFinalizeAction::Skip,
+                    plan: None,
+                    captures: vec![],
+                    unresolved_policy: UnresolvedPolicy::KeepLater,
+                },
+                phase: FinalizeJournalPhase::Materializing,
+                created_files: vec![FinalizeCreatedFile {
+                    rel_path: "tasks/active/recovery.md".to_string(),
+                    content_hash: revision_for("initial"),
+                }],
+                materialized: vec![],
+                outcome: None,
+            },
+        )
+        .unwrap();
+
+        fs::write(&task_path, "user edit").unwrap();
+        recover_finalize_journals(work).unwrap();
+
+        assert_eq!(fs::read_to_string(&task_path).unwrap(), "user edit");
+        let recovered: FinalizeJournal =
+            serde_json::from_str(&fs::read_to_string(journal_path).unwrap()).unwrap();
+        assert_eq!(recovered.phase, FinalizeJournalPhase::RolledBack);
+        assert_eq!(recovered.created_files.len(), 1);
+    }
+
+    #[test]
+    fn finalize_recovery_removes_only_unchanged_active_task_notes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path();
+        let task_path = work.join("tasks/active/unchanged.md");
+        fs::create_dir_all(task_path.parent().unwrap()).unwrap();
+        fs::write(&task_path, "transaction bytes").unwrap();
+        let snapshot = open_day(&work.to_string_lossy(), "2026-07-21T09:00:00+09:00");
+        let journal_path = finalize_journal_path(work, "recovery-removes-unchanged");
+        write_finalize_journal(
+            &journal_path,
+            &FinalizeJournal {
+                request_hash: "request-hash".to_string(),
+                request: TodayFinalizeSetupRequest {
+                    logical_day: snapshot.logical_day,
+                    expected_revision: snapshot.revision,
+                    idempotency_key: "recovery-removes-unchanged".to_string(),
+                    action: TodayFinalizeAction::Skip,
+                    plan: None,
+                    captures: vec![],
+                    unresolved_policy: UnresolvedPolicy::KeepLater,
+                },
+                phase: FinalizeJournalPhase::Materializing,
+                created_files: vec![
+                    FinalizeCreatedFile {
+                        rel_path: "tasks/active/unchanged.md".to_string(),
+                        content_hash: revision_for("transaction bytes"),
+                    },
+                    FinalizeCreatedFile {
+                        rel_path: "notes/must-not-delete.md".to_string(),
+                        content_hash: revision_for("transaction bytes"),
+                    },
+                ],
+                materialized: vec![],
+                outcome: None,
+            },
+        )
+        .unwrap();
+        fs::create_dir_all(work.join("notes")).unwrap();
+        fs::write(work.join("notes/must-not-delete.md"), "transaction bytes").unwrap();
+
+        recover_finalize_journals(work).unwrap();
+
+        assert!(!task_path.exists());
+        assert!(work.join("notes/must-not-delete.md").exists());
+        let recovered: FinalizeJournal =
+            serde_json::from_str(&fs::read_to_string(journal_path).unwrap()).unwrap();
+        assert_eq!(recovered.phase, FinalizeJournalPhase::RolledBack);
+        assert_eq!(recovered.created_files.len(), 1);
+        assert_eq!(recovered.created_files[0].rel_path, "notes/must-not-delete.md");
     }
 
     #[test]

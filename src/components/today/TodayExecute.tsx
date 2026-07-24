@@ -40,7 +40,11 @@ import { TaskSheet } from "./TaskSheet";
 import { TodayStageScaffold } from "./TodayStageScaffold";
 import { TodaySyncStatus } from "./TodaySyncStatus";
 import { useToday } from "./todayContext";
-import { resolveRefTitle, taskKeyOf } from "./todayPrepareUtils";
+import {
+  humanizeTaskIdentifier,
+  resolveRefTitle,
+  taskKeyOf,
+} from "./todayPrepareUtils";
 import { useTodayTasks } from "./useTodayTasks";
 import { useTodayCalendarSync } from "./useTodayCalendarSync";
 
@@ -163,11 +167,24 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
     for (const event of events) {
       if (!event.taskId) continue;
       if (event.kind === "task_completed") {
-        const payload = (event.payload ?? {}) as { taskPath?: string };
-        const entry = tasks.find((task) => taskKeyOf(task) === event.taskId);
+        const payload = (event.payload ?? {}) as {
+          taskPath?: string;
+          displayTitle?: string;
+        };
+        const entry = tasks.find(
+          (task) =>
+            taskKeyOf(task) === event.taskId ||
+            (payload.taskPath != null && task.relPath === payload.taskPath),
+        );
         rows.set(event.taskId, {
           taskId: event.taskId,
-          title: entry?.title ?? event.taskId,
+          title:
+            entry?.title ||
+            payload.displayTitle ||
+            humanizeTaskIdentifier(
+              payload.taskPath ?? event.taskId,
+              t("today.task.untitled"),
+            ),
           completedAt: event.ts,
           relPath: entry?.relPath ?? payload.taskPath ?? null,
           syncStatus: null,
@@ -198,7 +215,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
       ...row,
       syncStatus: syncStatusFor(row.relPath, row.syncStatus),
     }));
-  }, [events, tasks, logicalDay, optimistic, syncStatusFor]);
+  }, [events, tasks, logicalDay, optimistic, syncStatusFor, t]);
 
   const doneIds = useMemo(() => new Set(doneRows.map((row) => row.taskId)), [doneRows]);
 
@@ -215,6 +232,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
         expectedTaskHash,
         date: snapshot.logicalDay,
         nowIso,
+        payload: { displayTitle: entry.title },
       });
       setTaskNotice(null);
       if (kind === "complete") {
@@ -379,9 +397,12 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
       >
         {rank !== null ? <span className="today-exec-rank">{rank}</span> : null}
         <span className="today-exec-title">
-          {item.outcome || resolveRefTitle(item.itemRef, tasks, [])}
+          {item.outcome ||
+            resolveRefTitle(item.itemRef, tasks, [], t("today.task.untitled"))}
           {item.outcome ? (
-            <span className="today-exec-subtitle">{resolveRefTitle(item.itemRef, tasks, [])}</span>
+            <span className="today-exec-subtitle">
+              {resolveRefTitle(item.itemRef, tasks, [], t("today.task.untitled"))}
+            </span>
           ) : null}
         </span>
         {item.estimateMinutes ? (

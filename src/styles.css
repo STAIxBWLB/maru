@@ -5156,10 +5156,32 @@ button.git-badge:hover {
 }
 
 .processed-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 42%);
+  display: block;
   gap: 10px;
   align-items: start;
+}
+
+.processed-layout.has-detail {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 1.05fr);
+}
+
+.processed-state-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.processed-state-line.error {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line-soft));
+  color: var(--danger);
 }
 
 .processed-row {
@@ -5377,6 +5399,10 @@ button.git-badge:hover {
     grid-template-columns: 1fr;
   }
 
+  .processed-layout.has-detail {
+    display: grid;
+  }
+
   .processed-detail {
     position: static;
   }
@@ -5404,6 +5430,8 @@ button.git-badge:hover {
   flex-direction: column;
   background: var(--panel);
   min-width: 0;
+  container-type: inline-size;
+  container-name: commspane;
 }
 
 .comms-header {
@@ -5472,6 +5500,11 @@ button.git-badge:hover {
   min-height: 0;
   overflow: auto;
   padding: 18px 22px 28px;
+}
+
+.comms-body > * {
+  width: min(100%, 1180px);
+  margin-inline: auto;
 }
 
 .comms-preview {
@@ -5660,6 +5693,60 @@ button.git-badge:hover {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.comms-confirm-backdrop,
+.today-preflight-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--overlay) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.comms-confirm-dialog,
+.today-preflight-dialog {
+  width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+}
+
+.comms-confirm-dialog > svg,
+.today-preflight-dialog > svg {
+  color: var(--warn);
+}
+
+.comms-confirm-dialog h2,
+.today-preflight-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.comms-confirm-dialog p,
+.today-preflight-dialog p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.comms-confirm-actions,
+.today-preflight-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .auth-status-badge {
@@ -8864,7 +8951,8 @@ button.git-badge:hover {
   gap: 8px;
 }
 
-.today-quick-skip {
+.today-quick-skip,
+.today-refresh-action {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -8880,12 +8968,29 @@ button.git-badge:hover {
   cursor: pointer;
 }
 
-.today-quick-skip:hover {
+.today-quick-skip:hover,
+.today-refresh-action:hover {
   background: var(--accent-tint);
   color: var(--accent);
 }
 
-.today-quick-skip:focus-visible {
+.today-quick-skip:disabled,
+.today-refresh-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.today-refresh-error {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.today-quick-skip:focus-visible,
+.today-refresh-action:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -8991,7 +9096,7 @@ button.git-badge:hover {
 .today-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: 39.5fr 60.5fr;
+  grid-template-columns: minmax(340px, 0.8fr) minmax(480px, 1.2fr);
   grid-template-areas:
     "braindump capture"
     "top3 capacity"
@@ -10087,6 +10192,66 @@ button.git-badge:hover {
   gap: 18px;
 }
 
+.today-yesterday-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.today-yesterday-search {
+  min-width: min(100%, 260px);
+  flex: 1 1 220px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.today-yesterday-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.today-yesterday-bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 11.5px;
+}
+
+.today-yesterday-bulk strong {
+  margin-right: auto;
+}
+
+.today-yesterday-bulk button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
 .today-yesterday-group-header {
   display: flex;
   align-items: baseline;
@@ -10117,10 +10282,11 @@ button.git-badge:hover {
 }
 
 .today-yesterday-row {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 0;
+  padding: 6px 32px 6px 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -10169,22 +10335,46 @@ button.git-badge:hover {
 }
 
 .today-yesterday-decisions {
+  position: absolute;
+  z-index: 12;
+  top: 28px;
+  right: 0;
+  min-width: 168px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
 .today-yesterday-decisions button {
+  width: 100%;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
   border: 1px solid var(--line-soft);
-  border-radius: 999px;
-  background: var(--panel);
-  padding: 3px 9px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 6px 8px;
   color: var(--muted);
   cursor: pointer;
   font-size: 11px;
+}
+
+.today-yesterday-decisions button:disabled,
+.today-yesterday-bulk button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.today-yesterday-menu-wrap {
+  position: absolute;
+  top: 4px;
+  right: 0;
 }
 
 .today-yesterday-decisions button:hover {
@@ -10194,6 +10384,10 @@ button.git-badge:hover {
 
 .today-yesterday-more {
   margin-top: 6px;
+}
+
+.today-yesterday-load-more {
+  margin-top: 12px;
 }
 
 .today-progress {
@@ -10228,6 +10422,11 @@ button.git-badge:hover {
   }
 
   .today-capacity-layout {
+    flex-direction: column;
+  }
+
+  .today-yesterday-toolbar {
+    align-items: stretch;
     flex-direction: column;
   }
 }

@@ -84,18 +84,18 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
     {
       selector: ".today-panel-braindump",
       property: "width",
-      expected: Math.round(gridInnerWidth * 0.395 * 100) / 100,
+      expected: Math.round(gridInnerWidth * 0.4 * 100) / 100,
       tolerance: 4,
       measured: Math.round(brainBox.width * 100) / 100,
-      within: Math.abs(brainBox.width - gridInnerWidth * 0.395) <= 4,
+      within: Math.abs(brainBox.width - gridInnerWidth * 0.4) <= 4,
     },
     {
       selector: ".today-panel-capture",
       property: "width",
-      expected: Math.round(gridInnerWidth * 0.605 * 100) / 100,
+      expected: Math.round(gridInnerWidth * 0.6 * 100) / 100,
       tolerance: 4,
       measured: Math.round(captureBox.width * 100) / 100,
-      within: Math.abs(captureBox.width - gridInnerWidth * 0.605) <= 4,
+      within: Math.abs(captureBox.width - gridInnerWidth * 0.6) <= 4,
     },
   ];
 

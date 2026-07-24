@@ -101,6 +101,24 @@ export interface CaptureCandidate {
 
 export type CaptureDecision = "addToToday" | "keep" | "edit" | "defer" | "dismiss";
 
+export type PersistedCaptureDecision = "deferred" | "dismissed" | "materialized";
+
+export interface CaptureDecisionRecord {
+  decision: PersistedCaptureDecision;
+  deferDate?: string | null;
+  taskId?: string | null;
+  taskPath?: string | null;
+}
+
+export interface CaptureMaterializationInput {
+  captureId: string;
+  title: string;
+  summary: string;
+  project?: string | null;
+  dueDate?: string | null;
+  estimateMinutes?: number | null;
+}
+
 export interface CalendarCommitment {
   title: string;
   startIso: string;
@@ -128,7 +146,7 @@ export interface SourceFreshness {
   stale: boolean;
 }
 
-export type YesterdayResolution = "today" | "flexible" | "defer" | "cancel";
+export type YesterdayResolution = "today" | "flexible" | "defer" | "cancel" | "keepLater";
 
 export interface YesterdayItem {
   taskId: string;
@@ -163,6 +181,7 @@ export interface TodaySnapshot {
   yesterday: YesterdayItem[];
   capacity?: CapacitySummary | null;
   carryovers: CarryoverRef[];
+  captureDecisions?: Record<string, CaptureDecisionRecord>;
   sources: SourceFreshness[];
   /** True when rollover carried preparation content across a day boundary
    *  before the user confirmed or skipped it. */
@@ -218,6 +237,12 @@ export type TodayMutation =
       resolution: YesterdayResolution;
       deferDate?: string | null;
     }
+  | {
+      type: "setCaptureDecision";
+      captureId: string;
+      decision: PersistedCaptureDecision;
+      deferDate?: string | null;
+    }
   | { type: "setPlan"; plan: DailyPlanV1 }
   | {
       type: "setCalendarSync";
@@ -239,6 +264,54 @@ export interface TodayRolloverOutcome {
   closedDay: string | null;
   newDay: string;
   seeded: number;
+}
+
+export interface TodayFinalizeSetupRequest {
+  logicalDay: string;
+  expectedRevision: string;
+  idempotencyKey: string;
+  action: "confirm" | "skip";
+  plan: DailyPlanV1 | null;
+  captures: CaptureMaterializationInput[];
+  unresolvedPolicy: "keepLater";
+}
+
+export interface MaterializedCapture {
+  captureId: string;
+  taskId: string;
+  taskPath: string;
+}
+
+export interface TodayFinalizeSetupOutcome {
+  snapshot: TodaySnapshot;
+  materialized: MaterializedCapture[];
+  replayed: boolean;
+}
+
+export function todayFinalizeIdempotencyKey(
+  snapshot: Pick<TodaySnapshot, "logicalDay" | "revision">,
+  action: TodayFinalizeSetupRequest["action"],
+  plan: DailyPlanV1 | null,
+  captures: CaptureMaterializationInput[],
+): string {
+  const captureIds = captures.map((capture) => capture.captureId).sort().join(",");
+  const planRefs = plan
+    ? [...plan.top, ...plan.flexible, ...plan.overflow]
+        .map((item) =>
+          item.itemRef.kind === "task"
+            ? `task:${item.itemRef.taskId}`
+            : `capture:${item.itemRef.captureId}`,
+        )
+        .join(",")
+    : "";
+  return [
+    "today-finalize-v1",
+    snapshot.logicalDay,
+    action,
+    snapshot.revision,
+    planRefs,
+    captureIds,
+  ].join("|");
 }
 
 export interface TaskTrashOutcome {
@@ -325,6 +398,16 @@ export async function todayMutate(
     logicalDay,
     expectedRevision,
     mutation,
+  });
+}
+
+export async function todayFinalizeSetup(
+  workPath: string,
+  request: TodayFinalizeSetupRequest,
+): Promise<TodayFinalizeSetupOutcome> {
+  return todayInvoke<TodayFinalizeSetupOutcome>("today_finalize_setup", {
+    workPath,
+    request,
   });
 }
 

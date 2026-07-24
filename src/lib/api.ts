@@ -668,17 +668,34 @@ export async function scanInboxEntries(workPath: string, scanOptions?: ScanOptio
   return invoke<InboxEntry[]>("scan_inbox_entries", { workPath, scanOptions: scanOptions ?? null });
 }
 
-export async function scanInboxProcessedItems(
-  workPath: string,
-  statuses?: InboxProcessedStatus[] | null,
-  query?: string | null,
-  limit = 100,
-): Promise<InboxProcessedItem[]> {
-  if (!isTauri()) return [];
+export interface InboxProcessedQuery {
+  workPath: string;
+  channel: string | null;
+  statuses: InboxProcessedStatus[];
+  query: string | null;
+  limit: number;
+}
+
+export async function scanInboxProcessedItems({
+  workPath,
+  channel,
+  statuses,
+  query,
+  limit,
+}: InboxProcessedQuery): Promise<InboxProcessedItem[]> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<InboxProcessedItem[]>(
+      "scan_inbox_processed_items",
+      { workPath, channel, statuses, query, limit },
+    );
+    if (override) return override;
+    return [];
+  }
   return invoke<InboxProcessedItem[]>("scan_inbox_processed_items", {
     workPath,
-    statuses: statuses ?? null,
-    query: query ?? null,
+    channel,
+    statuses,
+    query,
     limit,
   });
 }
@@ -688,20 +705,38 @@ export async function readInboxProcessedItem(
   itemDir: string,
 ): Promise<InboxProcessedItemDetail> {
   if (!isTauri()) {
+    const override = await invokeE2EOverride<InboxProcessedItemDetail>(
+      "read_inbox_processed_item",
+      { workPath, itemDir },
+    );
+    if (override) return override;
     throw new Error("Processed inbox item details require the Tauri shell.");
   }
   return invoke<InboxProcessedItemDetail>("read_inbox_processed_item", { workPath, itemDir });
 }
 
 export async function readInboxSourceRuns(workPath: string): Promise<InboxSourceRun[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<InboxSourceRun[]>("read_inbox_source_runs", {
+      workPath,
+    });
+    if (override) return override;
+    return [];
+  }
   return invoke<InboxSourceRun[]>("read_inbox_source_runs", { workPath });
 }
 
 export async function countInboxProcessedByChannel(
   workPath: string,
 ): Promise<Record<string, number>> {
-  if (!isTauri()) return {};
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<Record<string, number>>(
+      "count_inbox_processed_by_channel",
+      { workPath },
+    );
+    if (override) return override;
+    return {};
+  }
   return invoke<Record<string, number>>("count_inbox_processed_by_channel", { workPath });
 }
 

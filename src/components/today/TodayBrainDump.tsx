@@ -21,6 +21,9 @@ interface TodayBrainDumpProps {
   onAutoPlan: () => void;
   /** Called after a brain-dump autosave lands (auto-plan trigger). */
   onSaved: () => void;
+  /** Register a flush hook so Finish/Quick skip can persist the typed tail
+   *  before the atomic finalize command reads the snapshot revision. */
+  onRegisterFlush?: (flush: () => Promise<void>) => () => void;
 }
 
 export function TodayBrainDump({
@@ -28,6 +31,7 @@ export function TodayBrainDump({
   lastDiffCount,
   onAutoPlan,
   onSaved,
+  onRegisterFlush,
 }: TodayBrainDumpProps) {
   const { t } = useTranslation();
   const { snapshot, mutate } = useToday();
@@ -110,6 +114,17 @@ export function TodayBrainDump({
       void save(capped);
     }, AUTOSAVE_DEBOUNCE_MS);
   };
+
+  const flush = useCallback(async () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const pending = pendingTextRef.current;
+    if (pending !== null) await save(pending);
+  }, [save]);
+
+  useEffect(() => onRegisterFlush?.(flush), [flush, onRegisterFlush]);
 
   const handleUndo = async () => {
     if (timerRef.current !== null) {

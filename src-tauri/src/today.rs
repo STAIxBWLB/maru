@@ -8,6 +8,7 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveTime, TimeZone, Timelike};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 
 /// Hard cap on the "top" lane of a daily plan.
 pub const TOP_LANE_MAX: usize = 3;
@@ -233,6 +234,46 @@ pub enum CaptureDecision {
     Dismiss,
 }
 
+/// Persisted capture disposition. `AddToToday` remains a reversible plan
+/// edit; only durable terminal/deferred states live here.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PersistedCaptureDecision {
+    Deferred,
+    Dismissed,
+    Materialized,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureDecisionRecord {
+    pub decision: PersistedCaptureDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_path: Option<String>,
+}
+
+/// Capture payload supplied to the atomic Finish setup command. This is
+/// intentionally smaller than the inbox candidate: only task-note fields
+/// cross the persistence boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureMaterializationInput {
+    pub capture_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_minutes: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarCommitment {
@@ -275,6 +316,7 @@ pub enum YesterdayResolution {
     Flexible,
     Defer,
     Cancel,
+    KeepLater,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -333,6 +375,11 @@ pub struct TodaySnapshot {
     pub capacity: Option<CapacitySummary>,
     #[serde(default)]
     pub carryovers: Vec<CarryoverRef>,
+    /// Durable capture decisions survive a rollover. Deferred captures become
+    /// visible again when their target date arrives; dismissed/materialized
+    /// captures stay hidden.
+    #[serde(default)]
+    pub capture_decisions: BTreeMap<String, CaptureDecisionRecord>,
     #[serde(default)]
     pub sources: Vec<SourceFreshness>,
     /// True when rollover carried preparation content across a day boundary
@@ -376,10 +423,54 @@ impl TodaySnapshot {
             yesterday: Vec::new(),
             capacity: None,
             carryovers: Vec::new(),
+            capture_decisions: BTreeMap::new(),
             sources: Vec::new(),
             unconfirmed_content: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TodayFinalizeAction {
+    Confirm,
+    Skip,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UnresolvedPolicy {
+    KeepLater,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TodayFinalizeSetupRequest {
+    pub logical_day: String,
+    pub expected_revision: String,
+    pub idempotency_key: String,
+    pub action: TodayFinalizeAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<DailyPlanV1>,
+    #[serde(default)]
+    pub captures: Vec<CaptureMaterializationInput>,
+    pub unresolved_policy: UnresolvedPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterializedCapture {
+    pub capture_id: String,
+    pub task_id: String,
+    pub task_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TodayFinalizeSetupOutcome {
+    pub snapshot: TodaySnapshot,
+    pub materialized: Vec<MaterializedCapture>,
+    pub replayed: bool,
 }
 
 /// Append-only event line in `<work>/.maru/today/events/YYYY-MM.jsonl`.
@@ -417,6 +508,12 @@ pub enum TodayMutation {
     ApplyYesterdayDecision {
         task_id: String,
         resolution: YesterdayResolution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        defer_date: Option<String>,
+    },
+    SetCaptureDecision {
+        capture_id: String,
+        decision: PersistedCaptureDecision,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         defer_date: Option<String>,
     },

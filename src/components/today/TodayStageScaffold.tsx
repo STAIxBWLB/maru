@@ -5,7 +5,14 @@
 import { format, parseISO } from "date-fns";
 import { enUS } from "date-fns/locale/en-US";
 import { ko } from "date-fns/locale/ko";
-import { CheckCheck, MoonStar, SkipForward, Sun, Sunrise } from "lucide-react";
+import {
+  CheckCheck,
+  MoonStar,
+  RefreshCcw,
+  SkipForward,
+  Sun,
+  Sunrise,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useToday } from "./todayContext";
@@ -34,7 +41,7 @@ export function TodayStageScaffold({
   children,
 }: TodayStageScaffoldProps) {
   const { t, locale } = useTranslation();
-  const { snapshot, settings } = useToday();
+  const { snapshot, settings, reload, refreshing, refreshError } = useToday();
 
   const now = new Date();
   const hour = now.getHours();
@@ -66,8 +73,33 @@ export function TodayStageScaffold({
             </span>
           </p>
           <div className="today-header-actions">
+            {refreshError ? (
+              <span className="today-refresh-error" role="alert">
+                {refreshError}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="today-refresh-action"
+              onClick={() => void reload()}
+              disabled={Boolean(refreshing)}
+              aria-label={t("today.header.refresh")}
+              title={refreshError ?? t("today.header.refresh")}
+            >
+              <RefreshCcw
+                size={14}
+                className={refreshing ? "today-spin" : undefined}
+                aria-hidden="true"
+              />
+              {t("today.header.refresh")}
+            </button>
             {onQuickSkip ? (
-              <button type="button" className="today-quick-skip" onClick={onQuickSkip}>
+              <button
+                type="button"
+                className="today-quick-skip"
+                onClick={onQuickSkip}
+                disabled={finishSetupBusy}
+              >
                 {t("today.header.quickSkip")}
                 <SkipForward size={14} strokeWidth={1.9} aria-hidden="true" />
               </button>

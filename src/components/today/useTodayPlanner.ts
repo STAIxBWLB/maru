@@ -54,7 +54,7 @@ interface UseTodayPlannerArgs {
 const DIFF_SUMMARY_MS = 6000;
 
 export function useTodayPlanner({ getCaptureCandidates, commitments }: UseTodayPlannerArgs): TodayPlanner {
-  const { workPath, settings, snapshot, mutate } = useToday();
+  const { workPath, settings, snapshot, mutate, refreshEpoch } = useToday();
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [planning, setPlanning] = useState(false);
   const [lastDiffCount, setLastDiffCount] = useState<number | null>(null);
@@ -75,7 +75,7 @@ export function useTodayPlanner({ getCaptureCandidates, commitments }: UseTodayP
     } catch {
       return [];
     }
-  }, [workPath]);
+  }, [workPath, refreshEpoch]);
 
   useEffect(() => {
     void refreshTasks();

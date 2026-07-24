@@ -1,5 +1,5 @@
 import { RefreshCcw, Settings } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { LegacyLaunchdService } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import { enumerateSourceChannels, sourceRunByChannel } from "../lib/inboxSources";
@@ -11,6 +11,7 @@ import type {
   InboxRuntimeConfig,
   InboxSourceRun,
   MissionRecord,
+  ProviderAuthStatus,
   TelegramPollingStatus,
 } from "../lib/types";
 import { ProcessedItemsBrowser } from "./inbox/ProcessedItemsBrowser";
@@ -31,6 +32,7 @@ interface CommsPaneProps {
   processedCounts: Record<string, number>;
   processedItems: InboxProcessedItem[];
   processedLoading: boolean;
+  processedRefreshing: boolean;
   processedError: string | null;
   processedStatusFilter: InboxProcessedStatus | "all";
   processedQuery: string;
@@ -40,6 +42,8 @@ interface CommsPaneProps {
   sourceFilter: string | null;
   actionBusy?: boolean;
   telegramPollingStatus: TelegramPollingStatus;
+  authStatuses: Record<string, ProviderAuthStatus | null>;
+  refreshing: boolean;
   migrationServices: LegacyLaunchdService[];
   migrationBusy: boolean;
   onSourceFilter: (channel: string | null) => void;
@@ -51,7 +55,6 @@ interface CommsPaneProps {
   onSelectProcessedItem: (item: InboxProcessedItem) => void | Promise<void>;
   onStopProcessingMission: (id: string) => void | Promise<void>;
   onRevealPath: (path: string) => void;
-  onRefreshTelegram: () => void;
   onGwsReauth: () => void;
   onMsoReauth: () => void;
   onStartTelegramPolling: () => void;
@@ -60,7 +63,7 @@ interface CommsPaneProps {
   onDeepProcess: (channel: string) => void;
   onOpenCommsSettings: () => void;
   onRefreshMigration: () => void;
-  onUnloadMigration: (plistPath: string) => void;
+  onUnloadMigration: (plistPaths: string[]) => void;
 }
 
 export function CommsPane({
@@ -69,6 +72,7 @@ export function CommsPane({
   processedCounts,
   processedItems,
   processedLoading,
+  processedRefreshing,
   processedError,
   processedStatusFilter,
   processedQuery,
@@ -78,6 +82,8 @@ export function CommsPane({
   sourceFilter,
   actionBusy = false,
   telegramPollingStatus,
+  authStatuses,
+  refreshing,
   migrationServices,
   migrationBusy,
   onSourceFilter,
@@ -89,7 +95,6 @@ export function CommsPane({
   onSelectProcessedItem,
   onStopProcessingMission,
   onRevealPath,
-  onRefreshTelegram,
   onGwsReauth,
   onMsoReauth,
   onStartTelegramPolling,
@@ -101,6 +106,9 @@ export function CommsPane({
   onUnloadMigration,
 }: CommsPaneProps) {
   const { t } = useTranslation();
+  const [dismissedMissions, setDismissedMissions] = useState<Set<string>>(
+    () => new Set(),
+  );
   const channels = useMemo(() => enumerateSourceChannels(runtimeConfig), [runtimeConfig]);
   const runByChannel = useMemo(() => sourceRunByChannel(sourceRuns), [sourceRuns]);
   // Stable, unfiltered per-channel totals from the backend — independent of the
@@ -117,7 +125,12 @@ export function CommsPane({
     const set = new Set<string>();
     for (const mission of processingMissions) {
       const channel = inboxProcessChannel(mission);
-      if (channel) set.add(channel);
+      if (
+        channel &&
+        (mission.status === "running" || mission.status === "idle")
+      ) {
+        set.add(channel);
+      }
     }
     return set;
   }, [processingMissions]);
@@ -126,6 +139,9 @@ export function CommsPane({
     for (const mission of processingMissions) {
       const channel = inboxProcessChannel(mission);
       if (!channel) continue;
+      const current = map.get(channel);
+      const active = mission.status === "running" || mission.status === "idle";
+      if (current && !active) continue;
       map.set(channel, {
         missionId: mission.id,
         status: mission.status,
@@ -138,9 +154,13 @@ export function CommsPane({
   const missionsForActive = useMemo(
     () =>
       sourceFilter
-        ? processingMissions.filter((mission) => inboxProcessChannel(mission) === sourceFilter)
+        ? processingMissions.filter(
+            (mission) =>
+              inboxProcessChannel(mission) === sourceFilter &&
+              !dismissedMissions.has(mission.id),
+          )
         : [],
-    [processingMissions, sourceFilter],
+    [dismissedMissions, processingMissions, sourceFilter],
   );
 
   return (
@@ -155,10 +175,11 @@ export function CommsPane({
             type="button"
             className="icon-button"
             onClick={onRefresh}
+            disabled={refreshing}
             title={t("comms.refresh")}
             aria-label={t("comms.refresh")}
           >
-            <RefreshCcw size={14} />
+            <RefreshCcw size={14} className={refreshing ? "spin" : undefined} />
           </button>
           <button
             type="button"
@@ -209,9 +230,11 @@ export function CommsPane({
             />
             <SourceControls
               channel={sourceFilter}
+              authStatus={authStatuses[sourceFilter] ?? null}
               pollingStatus={sourceFilter === "telegram" ? telegramPollingStatus : null}
               actionBusy={actionBusy}
-              onRefresh={sourceFilter === "telegram" ? onRefreshTelegram : onRefresh}
+              refreshing={refreshing}
+              onRefresh={onRefresh}
               onReauth={
                 sourceFilter === "gws"
                   ? onGwsReauth
@@ -221,7 +244,6 @@ export function CommsPane({
                       ? onTelegramLogin
                       : undefined
               }
-              onProcessNow={onProcessNow}
               onDeepProcess={sourceFilter === "telegram" ? onDeepProcess : undefined}
               onStartPolling={onStartTelegramPolling}
               onStopPolling={onStopTelegramPolling}
@@ -231,6 +253,9 @@ export function CommsPane({
               missions={missionsForActive}
               logLines={processingLogLines}
               onStop={onStopProcessingMission}
+              onDismiss={(id) =>
+                setDismissedMissions((current) => new Set(current).add(id))
+              }
               emptyLabel={t("comms.source.noActiveProcess")}
               waitingLabel={t("comms.progress.waiting")}
             />
@@ -239,11 +264,11 @@ export function CommsPane({
               <ProcessedItemsBrowser
                 items={processedItems}
                 loading={processedLoading}
+                refreshing={processedRefreshing}
                 error={processedError}
                 statusFilter={processedStatusFilter}
                 query={processedQuery}
                 detail={processedDetail}
-                channelFilter={sourceFilter}
                 emptyTitle={t("comms.results.empty.title")}
                 emptyDescription={t("comms.results.empty.description")}
                 onStatusFilter={onProcessedStatusFilter}

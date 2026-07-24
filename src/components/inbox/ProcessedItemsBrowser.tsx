@@ -1,5 +1,5 @@
 import { AlertTriangle, FileText, FolderOpen, RefreshCcw, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type React from "react";
 import { useTranslation } from "../../lib/i18n";
 import type {
@@ -13,12 +13,11 @@ import { formatShortDate, statusLabel } from "./processedFormat";
 interface ProcessedItemsBrowserProps {
   items: InboxProcessedItem[];
   loading: boolean;
+  refreshing?: boolean;
   error: string | null;
   statusFilter: InboxProcessedStatus | "all";
   query: string;
   detail: InboxProcessedItemDetail | null;
-  /** When set, only items whose `channel` matches are shown (client-side). */
-  channelFilter?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
   searchPlaceholder?: string;
@@ -33,11 +32,11 @@ interface ProcessedItemsBrowserProps {
 export function ProcessedItemsBrowser({
   items,
   loading,
+  refreshing = false,
   error,
   statusFilter,
   query,
   detail,
-  channelFilter = null,
   emptyTitle,
   emptyDescription,
   searchPlaceholder,
@@ -53,13 +52,12 @@ export function ProcessedItemsBrowser({
   const resolvedEmptyTitle = emptyTitle ?? t("inbox.processed.empty.title");
   const resolvedEmptyDescription = emptyDescription ?? t("inbox.processed.empty.description");
   const resolvedSearchPlaceholder = searchPlaceholder ?? t("inbox.processed.searchPlaceholder");
-  const visibleItems = useMemo(
-    () => (channelFilter ? items.filter((item) => item.channel === channelFilter) : items),
-    [items, channelFilter],
-  );
+  const filtered = statusFilter !== "all" || query.trim().length > 0;
+  const initialLoading = loading && items.length === 0;
+  const staleError = error && items.length > 0;
   return (
     <>
-      <div className="processed-toolbar">
+      <div className="processed-toolbar" aria-busy={loading || refreshing}>
         <div className="processed-status-chips" role="toolbar" aria-label={t("inbox.processed.statusFilter")}>
           {(["all", "done", "failed", "duplicate"] as Array<InboxProcessedStatus | "all">).map((status) => (
             <button
@@ -88,21 +86,43 @@ export function ProcessedItemsBrowser({
           title={t("inbox.processed.refresh")}
           aria-label={t("inbox.processed.refresh")}
         >
-          <RefreshCcw size={14} />
+          <RefreshCcw size={14} className={refreshing ? "spin" : undefined} />
         </button>
       </div>
-      <div className="processed-layout">
+      {refreshing ? (
+        <div className="processed-state-line" role="status">
+          <RefreshCcw size={13} className="spin" aria-hidden="true" />
+          {t("inbox.processed.refreshing")}
+        </div>
+      ) : null}
+      {staleError ? (
+        <div className="processed-state-line error" role="alert">
+          <AlertTriangle size={13} aria-hidden="true" />
+          {error}
+        </div>
+      ) : null}
+      <div className={detail ? "processed-layout has-detail" : "processed-layout"}>
         <div className="processed-list">
-          {loading ? <div className="inbox-empty">{t("inbox.processed.loading")}</div> : null}
-          {error ? <div className="inbox-error gmail-error">{error}</div> : null}
-          {!loading && !error && visibleItems.length === 0 ? (
+          {initialLoading ? (
+            <div className="inbox-empty">{t("inbox.processed.loading")}</div>
+          ) : null}
+          {error && items.length === 0 ? (
+            <div className="inbox-error gmail-error">{error}</div>
+          ) : null}
+          {!initialLoading && !error && items.length === 0 ? (
             <div className="inbox-empty">
               <FileText size={22} />
-              <strong>{resolvedEmptyTitle}</strong>
-              <span>{resolvedEmptyDescription}</span>
+              <strong>
+                {filtered ? t("inbox.processed.filteredEmpty.title") : resolvedEmptyTitle}
+              </strong>
+              <span>
+                {filtered
+                  ? t("inbox.processed.filteredEmpty.description")
+                  : resolvedEmptyDescription}
+              </span>
             </div>
           ) : null}
-          {visibleItems.map((item) => (
+          {items.map((item) => (
             <div className="processed-row-wrap" key={`${item.status}:${item.id}`}>
               <button
                 type="button"

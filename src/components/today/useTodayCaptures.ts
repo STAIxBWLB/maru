@@ -1,9 +1,8 @@
 // Maru Today — capture lane state for the Prepare stage. Loads capture
 // candidates from local pending inbox items (read-only; no provider fan-out)
-// and tracks session-local decisions. Persistence follows the mapping
-// documented in todayCapture.ts: only addToToday is persisted (as a
-// reversible capture plan item via setPlan); defer/dismiss stay session-local
-// until the snapshot schema grows a capture-decision field.
+// and tracks optimistic session state. Defer/dismiss decisions persist in the
+// day snapshot; accepted captures stay reversible plan items until the atomic
+// Finish setup command materializes them.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -39,7 +38,7 @@ interface UseTodayCapturesArgs {
 }
 
 export function useTodayCaptures({ onChanged }: UseTodayCapturesArgs): TodayCaptures {
-  const { workPath, snapshot, mutate } = useToday();
+  const { workPath, snapshot, mutate, refreshEpoch } = useToday();
   const [candidates, setCandidates] = useState<CaptureCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<Map<string, CaptureSessionEntry>>(new Map());
@@ -64,12 +63,28 @@ export function useTodayCaptures({ onChanged }: UseTodayCapturesArgs): TodayCapt
     return () => {
       cancelled = true;
     };
-  }, [workPath]);
+  }, [workPath, refreshEpoch]);
 
-  const visible = useMemo(
-    () => candidates.filter((candidate) => session.get(candidate.captureId)?.decision !== "dismiss"),
-    [candidates, session],
-  );
+  const visible = useMemo(() => {
+    const decisions = snapshot?.captureDecisions ?? {};
+    return candidates.filter((candidate) => {
+      const local = session.get(candidate.captureId);
+      if (local?.decision === "dismiss") return false;
+      const persisted = decisions[candidate.captureId];
+      if (!persisted) return true;
+      if (persisted.decision === "dismissed" || persisted.decision === "materialized") {
+        return false;
+      }
+      if (persisted.decision === "deferred") {
+        return Boolean(
+          persisted.deferDate &&
+            snapshot?.logicalDay &&
+            persisted.deferDate <= snapshot.logicalDay,
+        );
+      }
+      return true;
+    });
+  }, [candidates, session, snapshot]);
   const { capture, suggestions } = useMemo(() => partitionCandidates(visible), [visible]);
 
   const decide = useCallback(
@@ -91,26 +106,37 @@ export function useTodayCaptures({ onChanged }: UseTodayCapturesArgs): TodayCapt
         return;
       }
       if (decision === "defer") {
-        // UI-local for now per the lib's documented mapping: the snapshot
-        // schema has no capture-defer field yet, so this only marks the row.
         const deferDate = snapshot ? addDaysIso(snapshot.logicalDay, 1) : null;
-        applyCaptureDecision({
-          plan: snapshot?.plan ?? null,
-          candidate,
-          decision,
+        if (!deferDate) return;
+        const next = await mutate({
+          type: "setCaptureDecision",
+          captureId: candidate.captureId,
+          decision: "deferred",
           deferDate,
         });
-        setSession((prev) => new Map(prev).set(candidate.captureId, { decision, deferDate }));
+        if (next) {
+          setSession((prev) =>
+            new Map(prev).set(candidate.captureId, { decision, deferDate }),
+          );
+          onChanged("capture");
+        }
         return;
       }
       if (decision === "dismiss") {
-        applyCaptureDecision({ plan: snapshot?.plan ?? null, candidate, decision });
-        setSession((prev) =>
-          new Map(prev).set(candidate.captureId, { decision, deferDate: null }),
-        );
+        const next = await mutate({
+          type: "setCaptureDecision",
+          captureId: candidate.captureId,
+          decision: "dismissed",
+        });
+        if (next) {
+          setSession((prev) =>
+            new Map(prev).set(candidate.captureId, { decision, deferDate: null }),
+          );
+          onChanged("capture");
+        }
       }
-      // keep / edit: keep is the default state; edit is surfaced as disabled
-      // in the UI (no capture edit surface exists yet) — nothing to record.
+      // keep / edit: keep is the default state; edits happen after the task is
+      // materialized, so no separate capture editor is advertised here.
     },
     [snapshot, mutate, onChanged],
   );

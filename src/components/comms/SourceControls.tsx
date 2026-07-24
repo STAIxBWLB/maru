@@ -8,9 +8,9 @@ interface SourceControlsProps {
   authStatus?: ProviderAuthStatus | null;
   pollingStatus?: TelegramPollingStatus | null;
   actionBusy?: boolean;
+  refreshing?: boolean;
   onRefresh: () => void;
   onReauth?: () => void;
-  onProcessNow: (channel: string) => void;
   onDeepProcess?: (channel: string) => void;
   onStartPolling?: () => void;
   onStopPolling?: () => void;
@@ -22,9 +22,9 @@ export function SourceControls({
   authStatus,
   pollingStatus,
   actionBusy = false,
+  refreshing = false,
   onRefresh,
   onReauth,
-  onProcessNow,
   onDeepProcess,
   onStartPolling,
   onStopPolling,
@@ -34,7 +34,7 @@ export function SourceControls({
   const isTelegram = channel === "telegram";
   return (
     <div className="source-controls">
-      <AuthStatusBadge status={authStatus} />
+      {channel !== "kakao" ? <AuthStatusBadge status={authStatus} /> : null}
       {isTelegram && pollingStatus ? (
         <>
           <span className={pollingStatus.running ? "status-dot active" : "status-dot"} />
@@ -45,8 +45,13 @@ export function SourceControls({
           </span>
         </>
       ) : null}
-      <button type="button" className="secondary-button" onClick={onRefresh}>
-        <RefreshCcw size={14} />
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={refreshing}
+        onClick={onRefresh}
+      >
+        <RefreshCcw size={14} className={refreshing ? "spin" : undefined} />
         <span>{t("comms.source.refresh")}</span>
       </button>
       {onReauth ? (
@@ -68,15 +73,6 @@ export function SourceControls({
           </button>
         )
       ) : null}
-      <button
-        type="button"
-        className="button button-primary button-sm"
-        disabled={actionBusy}
-        onClick={() => onProcessNow(channel)}
-      >
-        <Play size={14} />
-        <span>{t("comms.source.processNow")}</span>
-      </button>
       {isTelegram && onDeepProcess ? (
         <button
           type="button"

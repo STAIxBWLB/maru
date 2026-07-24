@@ -221,8 +221,16 @@ function taskSeed(
   }
   // Deferred into the future — not part of this day.
   if (task.deferDate && task.deferDate > logicalDay) return null;
-  // Yesterday review already routed this task away from today.
-  if (yesterday?.resolution === "defer" || yesterday?.resolution === "cancel") return null;
+  // Carryovers never enter the planner until the user explicitly routes them.
+  // This prevents a pending/Keep later decision from being silently undone by
+  // auto-plan.
+  if (
+    yesterday &&
+    yesterday.resolution !== "today" &&
+    yesterday.resolution !== "flexible"
+  ) {
+    return null;
+  }
 
   const ref: PlanItemRef = { kind: "task", taskId: taskKey(task) };
   const prior = existing.get(planItemRefKey(ref));

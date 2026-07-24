@@ -229,6 +229,7 @@ describe("TodayExecute", () => {
       expectedTaskHash: "hash-abc",
       date: DAY,
       nowIso: expect.any(String),
+      payload: { displayTitle: "알파 작업" },
     });
   });
 

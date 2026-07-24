@@ -79,6 +79,9 @@ import {
   acceptInboxItems,
   binaryViewerClassify,
   binaryViewerPrepareAsset,
+  checkGwsAuth,
+  checkMsoAuth,
+  checkTelegramAuth,
   createDocument,
   createVersion,
   DEFAULT_INBOX_RUNTIME_CONFIG,
@@ -209,7 +212,6 @@ import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
   buildInboxProcessPrompt,
   buildInboxItemStates,
-  activeInboxProcessMissions,
   inboxProcessMissions,
   isInboxProcessMission,
   type InboxDecision,
@@ -275,6 +277,7 @@ import type {
   InboxRuntimeConfig,
   InboxTrashTarget,
   MissionRecord,
+  ProviderAuthStatus,
   VaultEntry,
   WorkspaceFileEntry,
   WorkspaceEntryNode,
@@ -619,13 +622,18 @@ function matchesActiveMission(record: MissionRecord): boolean {
 function upsertMission(current: MissionRecord[], next: MissionRecord): MissionRecord[] {
   const merged = current.filter((mission) => mission.id !== next.id);
   merged.unshift(next);
-  return activeTrackedMissions(merged);
+  return trackedMissions(merged);
 }
 
-function activeTrackedMissions(missions: MissionRecord[]): MissionRecord[] {
-  return activeTrackedAgentMissions(missions).sort(
-    (a, b) => b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt),
-  );
+function trackedMissions(missions: MissionRecord[]): MissionRecord[] {
+  return missions
+    .filter(isTrackedAgentMission)
+    .sort(
+      (a, b) =>
+        b.lastOutputAt.localeCompare(a.lastOutputAt) ||
+        b.startedAt.localeCompare(a.startedAt),
+    )
+    .slice(0, 80);
 }
 
 function formatGmailTtl(seconds: number): string {
@@ -987,9 +995,17 @@ function MainApp() {
   const gmailLoadingRef = useRef(false);
   const gmailRequestSeqRef = useRef(0);
   const outlookLoadingRef = useRef(false);
+  const outlookRequestSeqRef = useRef(0);
   const outlookRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
   const telegramLoadingRef = useRef(false);
+  const telegramRequestSeqRef = useRef(0);
   const telegramRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
+  const processedRequestSeqRef = useRef(0);
+  const processedDetailRequestSeqRef = useRef(0);
+  const processedItemsRef = useRef<InboxProcessedItem[]>([]);
+  const processedItemsKeyRef = useRef("");
+  const commsReadinessRequestSeqRef = useRef(0);
+  const commsDashboardRequestSeqRef = useRef(0);
   const migrationCheckedRef = useRef(false);
   const processingMissionIdsRef = useRef<Set<string>>(new Set());
 
@@ -1038,6 +1054,7 @@ function MainApp() {
   const [todayBannerPending, setTodayBannerPending] = useState(false);
   const [todayBannerVisible, setTodayBannerVisible] = useState(false);
   const [todayRolloverEpoch, setTodayRolloverEpoch] = useState(0);
+  const [todayRefreshEpoch, setTodayRefreshEpoch] = useState(0);
   // Last logical day seen by the new-day watcher (boot seeds it too).
   const todayLogicalDayRef = useRef<string | null>(null);
   // Workspace whose boot auto-opened Today this launch. The settings-load
@@ -1064,10 +1081,12 @@ function MainApp() {
   const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
   const [processedItems, setProcessedItems] = useState<InboxProcessedItem[]>([]);
   const [processedLoading, setProcessedLoading] = useState(false);
+  const [processedRefreshing, setProcessedRefreshing] = useState(false);
   const [processedError, setProcessedError] = useState<string | null>(null);
   const [processedStatusFilter, setProcessedStatusFilter] =
     useState<InboxProcessedStatus | "all">("all");
   const [processedQuery, setProcessedQuery] = useState("");
+  const [processedDeferredQuery, setProcessedDeferredQuery] = useState("");
   const [processedDetail, setProcessedDetail] = useState<InboxProcessedItemDetail | null>(null);
   const [processingMissions, setProcessingMissions] = useState<MissionRecord[]>([]);
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
@@ -1075,6 +1094,10 @@ function MainApp() {
   const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
   const [processedCounts, setProcessedCounts] = useState<Record<string, number>>({});
   const [commsSourceFilter, setCommsSourceFilter] = useState<string | null>(null);
+  const [commsAuthStatuses, setCommsAuthStatuses] = useState<
+    Record<string, ProviderAuthStatus | null>
+  >({});
+  const [commsRefreshing, setCommsRefreshing] = useState(false);
 
   // Gmail surface (gws CLI). List state is memory-only in Comms, while
   // accept/reject calls write labels/archive through gws.
@@ -2705,6 +2728,7 @@ function MainApp() {
 
   const refreshOutlook = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!inboxWorkspacePath || !effectiveCommsSettings.outlook.enabled) {
+      outlookRequestSeqRef.current += 1;
       outlookLoadingRef.current = false;
       outlookRefreshCacheRef.current = { fetchedAt: null, key: "" };
       setOutlookMessages([]);
@@ -2730,6 +2754,7 @@ function MainApp() {
       return;
     }
     outlookLoadingRef.current = true;
+    const requestId = ++outlookRequestSeqRef.current;
     setOutlookLoading(true);
     setOutlookError(null);
     const startedAt = Date.now();
@@ -2739,6 +2764,7 @@ function MainApp() {
         effectiveCommsSettings.outlook.maxResults,
         effectiveCommsSettings.outlook.m365Path,
       );
+      if (requestId !== outlookRequestSeqRef.current) return;
       setOutlookMessages(messages);
       outlookRefreshCacheRef.current = {
         fetchedAt: Date.now(),
@@ -2746,16 +2772,20 @@ function MainApp() {
       };
       setOutlookStatus(`${messages.length.toLocaleString(locale)} · ${Date.now() - startedAt}ms`);
     } catch (err) {
+      if (requestId !== outlookRequestSeqRef.current) return;
       setOutlookError(err instanceof Error ? err.message : String(err));
       setOutlookStatus("");
     } finally {
-      outlookLoadingRef.current = false;
-      setOutlookLoading(false);
+      if (requestId === outlookRequestSeqRef.current) {
+        outlookLoadingRef.current = false;
+        setOutlookLoading(false);
+      }
     }
   }, [effectiveCommsSettings.outlook, inboxWorkspacePath, locale]);
 
   const refreshTelegram = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!inboxWorkspacePath || !effectiveCommsSettings.telegram.enabled) {
+      telegramRequestSeqRef.current += 1;
       telegramLoadingRef.current = false;
       telegramRefreshCacheRef.current = { fetchedAt: null, key: "" };
       setTelegramMessages([]);
@@ -2784,32 +2814,59 @@ function MainApp() {
       return;
     }
     telegramLoadingRef.current = true;
+    const requestId = ++telegramRequestSeqRef.current;
     setTelegramLoading(true);
     setTelegramError(null);
     try {
       const messages = await fetchTelegramRecent(
         telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
       );
+      if (requestId !== telegramRequestSeqRef.current) return;
       setTelegramMessages(messages);
       telegramRefreshCacheRef.current = {
         fetchedAt: Date.now(),
         key: refreshKey,
       };
     } catch (err) {
+      if (requestId !== telegramRequestSeqRef.current) return;
       setTelegramError(err instanceof Error ? err.message : String(err));
     } finally {
-      telegramLoadingRef.current = false;
-      setTelegramLoading(false);
+      if (requestId === telegramRequestSeqRef.current) {
+        telegramLoadingRef.current = false;
+        setTelegramLoading(false);
+      }
     }
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
 
-  const refreshCommsProviders = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    await Promise.allSettled([
-      refreshGmail({ force }),
-      refreshOutlook({ force }),
-      refreshTelegram({ force }),
-    ]);
-  }, [refreshGmail, refreshOutlook, refreshTelegram]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setProcessedDeferredQuery(processedQuery.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [processedQuery]);
+
+  useEffect(() => {
+    processedDetailRequestSeqRef.current += 1;
+    setProcessedDetail(null);
+  }, [
+    processedDeferredQuery,
+    processedStatusFilter,
+    commsSourceFilter,
+    inboxSourceFilter,
+  ]);
+
+  useEffect(() => {
+    processedRequestSeqRef.current += 1;
+    processedDetailRequestSeqRef.current += 1;
+    commsReadinessRequestSeqRef.current += 1;
+    commsDashboardRequestSeqRef.current += 1;
+    processedItemsRef.current = [];
+    processedItemsKeyRef.current = "";
+    setProcessedItems([]);
+    setProcessedDetail(null);
+    setProcessedError(null);
+    setCommsRefreshing(false);
+  }, [inboxWorkspacePath]);
 
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
@@ -2834,31 +2891,76 @@ function MainApp() {
   }, [inboxWorkspacePath, scanOptions]);
 
   const refreshProcessedItems = useCallback(async () => {
+    const requestId = ++processedRequestSeqRef.current;
     if (!inboxWorkspacePath) {
+      processedItemsRef.current = [];
+      processedItemsKeyRef.current = "";
       setProcessedItems([]);
       setProcessedDetail(null);
+      setProcessedLoading(false);
+      setProcessedRefreshing(false);
       return;
     }
     const statuses =
       processedStatusFilter === "all"
         ? (["done", "failed", "duplicate"] as InboxProcessedStatus[])
         : [processedStatusFilter];
-    setProcessedLoading(true);
+    const channel =
+      appMode === "comms"
+        ? commsSourceFilter
+        : appMode === "inbox"
+          ? inboxSourceFilter
+          : null;
+    const requestKey = JSON.stringify([
+      inboxWorkspacePath,
+      channel,
+      statuses,
+      processedDeferredQuery,
+    ]);
+    const sameQuery = processedItemsKeyRef.current === requestKey;
+    if (!sameQuery) {
+      processedItemsRef.current = [];
+      setProcessedItems([]);
+      setProcessedDetail(null);
+    }
+    const hasLastGood = sameQuery && processedItemsRef.current.length > 0;
+    setProcessedLoading(!hasLastGood);
+    setProcessedRefreshing(hasLastGood);
     setProcessedError(null);
     try {
-      const items = await scanInboxProcessedItems(
-        inboxWorkspacePath,
+      const items = await scanInboxProcessedItems({
+        workPath: inboxWorkspacePath,
+        channel,
         statuses,
-        processedQuery,
-        120,
-      );
+        query: processedDeferredQuery || null,
+        limit: 120,
+      });
+      if (requestId !== processedRequestSeqRef.current) return;
+      processedItemsRef.current = items;
+      processedItemsKeyRef.current = requestKey;
       setProcessedItems(items);
+      setProcessedDetail((current) =>
+        current && items.some((item) => item.itemDir === current.item.itemDir)
+          ? current
+          : null,
+      );
     } catch (err) {
+      if (requestId !== processedRequestSeqRef.current) return;
       setProcessedError(err instanceof Error ? err.message : String(err));
     } finally {
-      setProcessedLoading(false);
+      if (requestId === processedRequestSeqRef.current) {
+        setProcessedLoading(false);
+        setProcessedRefreshing(false);
+      }
     }
-  }, [inboxWorkspacePath, processedQuery, processedStatusFilter]);
+  }, [
+    appMode,
+    commsSourceFilter,
+    inboxSourceFilter,
+    inboxWorkspacePath,
+    processedDeferredQuery,
+    processedStatusFilter,
+  ]);
 
   const refreshSourceRuns = useCallback(async () => {
     if (!inboxWorkspacePath) {
@@ -2878,14 +2980,61 @@ function MainApp() {
     }
   }, [inboxWorkspacePath]);
 
+  const refreshCommsReadiness = useCallback(async () => {
+    const requestId = ++commsReadinessRequestSeqRef.current;
+    if (!inboxWorkspacePath) {
+      setCommsAuthStatuses({});
+      return;
+    }
+    const checks: Array<Promise<ProviderAuthStatus>> = [];
+    if (inboxRuntimeConfig.gmail?.enabled !== false) {
+      checks.push(checkGwsAuth(inboxWorkspacePath));
+    }
+    if (effectiveCommsSettings.outlook.enabled) {
+      checks.push(
+        checkMsoAuth(
+          inboxWorkspacePath,
+          effectiveCommsSettings.outlook.m365Path,
+        ),
+      );
+    }
+    if (effectiveCommsSettings.telegram.enabled) {
+      checks.push(
+        checkTelegramAuth(
+          telegramFetchOptions(
+            inboxWorkspacePath,
+            effectiveCommsSettings.telegram,
+          ),
+        ),
+      );
+    }
+    const results = await Promise.allSettled(checks);
+    if (requestId !== commsReadinessRequestSeqRef.current) return;
+    const statuses: Record<string, ProviderAuthStatus | null> = {};
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        statuses[result.value.provider] = result.value;
+      }
+    }
+    setCommsAuthStatuses(statuses);
+  }, [
+    effectiveCommsSettings.outlook,
+    effectiveCommsSettings.telegram,
+    inboxRuntimeConfig.gmail?.enabled,
+    inboxWorkspacePath,
+  ]);
+
   const selectProcessedItem = useCallback(
     async (item: InboxProcessedItem) => {
       if (!inboxWorkspacePath) return;
+      const requestId = ++processedDetailRequestSeqRef.current;
       setProcessedError(null);
       try {
         const detail = await readInboxProcessedItem(inboxWorkspacePath, item.itemDir);
+        if (requestId !== processedDetailRequestSeqRef.current) return;
         setProcessedDetail(detail);
       } catch (err) {
+        if (requestId !== processedDetailRequestSeqRef.current) return;
         setProcessedError(err instanceof Error ? err.message : String(err));
       }
     },
@@ -2894,7 +3043,7 @@ function MainApp() {
 
   const refreshProcessingMissions = useCallback(async () => {
     try {
-      const missions = activeTrackedMissions(await listAiMissions());
+      const missions = trackedMissions(await listAiMissions());
       setProcessingMissions(missions);
       processingMissionIdsRef.current = new Set(missions.map((mission) => mission.id));
       const tails = await Promise.all(
@@ -2912,6 +3061,61 @@ function MainApp() {
       // Mission listing is a secondary diagnostic surface.
     }
   }, []);
+
+  const refreshCommsDashboard = useCallback(async () => {
+    const requestId = ++commsDashboardRequestSeqRef.current;
+    setCommsRefreshing(true);
+    try {
+      const polling = telegramPollingStatus()
+        .then((status) => {
+          if (requestId === commsDashboardRequestSeqRef.current) {
+            setTelegramPolling(status);
+          }
+        })
+        .catch(() => {});
+      const migration = isMac
+        ? detectLegacyTelegramLaunchd()
+            .then((services) => {
+              if (requestId === commsDashboardRequestSeqRef.current) {
+                setMigrationServices(services);
+                migrationCheckedRef.current = true;
+              }
+            })
+            .catch(() => {})
+        : Promise.resolve().then(() => {
+            if (requestId === commsDashboardRequestSeqRef.current) {
+              setMigrationServices([]);
+            }
+          });
+      await Promise.allSettled([
+        refreshCommsReadiness(),
+        refreshSourceRuns(),
+        refreshProcessedItems(),
+        refreshProcessingMissions(),
+        polling,
+        migration,
+      ]);
+    } finally {
+      if (requestId === commsDashboardRequestSeqRef.current) {
+        setCommsRefreshing(false);
+      }
+    }
+  }, [
+    isMac,
+    refreshCommsReadiness,
+    refreshProcessedItems,
+    refreshProcessingMissions,
+    refreshSourceRuns,
+  ]);
+
+  // Latest-callback ref so the comms-mode effect below re-runs only on mode or
+  // workspace changes — not every time a filter recreates the dashboard
+  // callback (which would re-subscribe the telegram listener and re-run the
+  // provider auth CLI checks on each keystroke).
+  const refreshCommsDashboardRef = useRef(refreshCommsDashboard);
+  useEffect(() => {
+    refreshCommsDashboardRef.current = refreshCommsDashboard;
+  }, [refreshCommsDashboard]);
 
   const updateInboxCarry = useCallback(
     (id: string, patch: Partial<InboxCarry>) => {
@@ -3644,21 +3848,7 @@ function MainApp() {
     if (appMode !== "comms") return;
     let disposed = false;
     let unlistenTelegram: (() => void) | null = null;
-    void telegramPollingStatus()
-      .then((status) => {
-        if (!disposed) setTelegramPolling(status);
-      })
-      .catch(() => {});
-    if (!isMac) {
-      setMigrationServices([]);
-    } else if (!migrationCheckedRef.current) {
-      migrationCheckedRef.current = true;
-      void detectLegacyTelegramLaunchd()
-        .then((services) => {
-          if (!disposed) setMigrationServices(services);
-        })
-        .catch(() => {});
-    }
+    void refreshCommsDashboardRef.current();
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
         listen("telegram://messages", (event) => {
@@ -3683,14 +3873,14 @@ function MainApp() {
       disposed = true;
       unlistenTelegram?.();
     };
-  }, [appMode, inboxWorkspacePath, isMac]);
+  }, [appMode, inboxWorkspacePath]);
 
   useEffect(() => {
+    // In comms this is also the filter/search refetch path: the callback
+    // identity changes with the query and channel, re-running this effect.
     if (appMode === "inbox" || appMode === "comms") void refreshProcessedItems();
-    if (appMode === "comms") void refreshSourceRuns();
     if (!booting && settingsWorkspaceStartupReady && (
       appMode === "inbox" ||
-      appMode === "comms" ||
       appMode === "meetings" ||
       appMode === "tasks" ||
       rightPaneTab === "skills"
@@ -3702,7 +3892,6 @@ function MainApp() {
     booting,
     refreshProcessedItems,
     refreshProcessingMissions,
-    refreshSourceRuns,
     rightPaneTab,
     settingsWorkspaceStartupReady,
   ]);
@@ -5755,17 +5944,34 @@ function MainApp() {
       .finally(() => setMigrationBusy(false));
   }, [isMac]);
 
-  const unloadMigrationService = useCallback(
-    (plistPath: string) => {
-      if (!isMac) return;
-      const ok = window.confirm(t("comms.migration.confirm"));
-      if (!ok) return;
+  const unloadMigrationServices = useCallback(
+    async (plistPaths: string[]) => {
+      if (!isMac || plistPaths.length === 0) return;
       setMigrationBusy(true);
-      void unloadLegacyTelegramLaunchd(plistPath)
-        .then(() => detectLegacyTelegramLaunchd())
-        .then(setMigrationServices)
-        .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-        .finally(() => setMigrationBusy(false));
+      const failures: string[] = [];
+      try {
+        for (const plistPath of plistPaths) {
+          try {
+            await unloadLegacyTelegramLaunchd(plistPath);
+          } catch (err) {
+            failures.push(
+              `${plistPath}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+        const remaining = await detectLegacyTelegramLaunchd();
+        setMigrationServices(remaining);
+        if (failures.length > 0) {
+          setError(
+            t("comms.migration.partialFailure", {
+              count: failures.length,
+              details: failures.join("\n"),
+            }),
+          );
+        }
+      } finally {
+        setMigrationBusy(false);
+      }
     },
     [isMac, t],
   );
@@ -5780,13 +5986,11 @@ function MainApp() {
       void refreshProcessedItems();
       void refreshProcessingMissions();
     } else if (appMode === "comms") {
-      void refreshCommsProviders({ force: true });
-      void refreshProcessedItems();
-      void refreshSourceRuns();
-      void refreshProcessingMissions();
+      void refreshCommsDashboard();
     } else if (appMode === "meetings") {
       void refreshProcessingMissions();
     } else if (appMode === "tasks") {
+      setTodayRefreshEpoch((epoch) => epoch + 1);
       void refreshProcessingMissions();
     } else if (maruSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
@@ -5798,7 +6002,7 @@ function MainApp() {
     appMode,
     explorerWorkspacePath,
     refreshCurrent,
-    refreshCommsProviders,
+    refreshCommsDashboard,
     refreshInbox,
     refreshProcessedItems,
     refreshProcessingMissions,
@@ -8234,15 +8438,18 @@ function MainApp() {
             processedCounts={processedCounts}
             processedItems={processedItems}
             processedLoading={processedLoading}
+            processedRefreshing={processedRefreshing}
             processedError={processedError}
             processedStatusFilter={processedStatusFilter}
             processedQuery={processedQuery}
             processedDetail={processedDetail}
-            processingMissions={activeInboxProcessMissions(processingMissions)}
+            processingMissions={inboxProcessMissions(processingMissions)}
             processingLogLines={processingLogLines}
             sourceFilter={commsSourceFilter}
             actionBusy={inboxActionBusy}
             telegramPollingStatus={telegramPolling}
+            authStatuses={commsAuthStatuses}
+            refreshing={commsRefreshing}
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onSourceFilter={setCommsSourceFilter}
@@ -8256,7 +8463,6 @@ function MainApp() {
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
-            onRefreshTelegram={() => void refreshTelegram({ force: true })}
             onGwsReauth={startGwsAuth}
             onMsoReauth={startMsoLogin}
             onStartTelegramPolling={startTelegramPollingFromSettings}
@@ -8265,7 +8471,7 @@ function MainApp() {
             onDeepProcess={(channel) => void deepProcessCommsChannel(channel)}
             onOpenCommsSettings={openCommsSettings}
             onRefreshMigration={refreshMigrationServices}
-            onUnloadMigration={unloadMigrationService}
+            onUnloadMigration={(paths) => void unloadMigrationServices(paths)}
           />
         ) : visibleAppMode === "meetings" ? (
           <LazyMeetingsPane
@@ -8302,6 +8508,7 @@ function MainApp() {
             layout={layoutSettings}
             onLayoutChange={updateLayoutSettings}
             rolloverEpoch={todayRolloverEpoch}
+            refreshRequestEpoch={todayRefreshEpoch}
             tasksProps={{
               workPath: inboxWorkspacePath,
               effectiveSettings: effectiveTasksSettings,

@@ -145,16 +145,27 @@ test("prepare: brain dump autosave, capture add-to-today, keyboard reorder, quic
     `${TASK_A_TITLE}, 2번째로 이동`,
   );
 
-  // Quick skip issues the quickSkip mutation and lands on Execute.
+  // Quick skip uses the same atomic finalize boundary. Unresolved carryovers
+  // are kept for later and no accepted capture is materialized on a skip.
   await page.locator(".today-quick-skip").click();
+  const skipPreflight = page.getByRole("dialog", {
+    name: "미결정 이월 작업이 있습니다",
+  });
+  await expect(skipPreflight).toBeVisible();
+  await skipPreflight.getByRole("button", { name: /나중에 결정하고 계속/ }).click();
   await expect
-    .poll(async () => mutationCalls(await readTodayCalls(page), "quickSkip").length)
+    .poll(async () => callsOf(await readTodayCalls(page), "today_finalize_setup").length)
     .toBe(1);
+  const skipRequest = callsOf(await readTodayCalls(page), "today_finalize_setup")[0].args
+    .request as { action?: string; captures?: unknown[] };
+  expect(skipRequest.action).toBe("skip");
+  expect(skipRequest.captures).toEqual([]);
+  expect(mutationCalls(await readTodayCalls(page), "quickSkip")).toHaveLength(0);
   await expect(page.locator(".today-panel-done")).toBeVisible();
   await expect(page.locator(".today-panel-done")).toContainText("오늘 완료한 항목");
 });
 
-test("finish setup materializes accepted captures as local task notes and confirms the day", async ({
+test("finish setup atomically materializes accepted captures and confirms the day", async ({
   page,
 }) => {
   await installTodayMocks(page, buildTodaySeed(AUTO_OPEN_SEED));
@@ -169,28 +180,28 @@ test("finish setup materializes accepted captures as local task notes and confir
     "create_task_note",
   );
 
-  // Finish setup: the accepted capture materializes as ONE local task note,
-  // its plan ref is rewritten to the new task, and the day is confirmed.
+  // Finish setup: unresolved carryovers are surfaced first. Continuing keeps
+  // them for later and sends ONE atomic finalize command.
   await page.locator(".today-finish-setup").click();
+  const preflight = page.getByRole("dialog", { name: "미결정 이월 작업이 있습니다" });
+  await expect(preflight).toBeVisible();
+  await preflight.getByRole("button", { name: /나중에 결정하고 계속/ }).click();
   await expect
-    .poll(async () => callsOf(await readTodayCalls(page), "create_task_note").length)
+    .poll(async () => callsOf(await readTodayCalls(page), "today_finalize_setup").length)
     .toBe(1);
-  const created = callsOf(await readTodayCalls(page), "create_task_note")[0];
-  const draft = created.args.draft as {
-    title?: string;
-    bucket?: string;
-    frontmatter?: Record<string, unknown>;
+  const finalized = callsOf(await readTodayCalls(page), "today_finalize_setup")[0];
+  const request = finalized.args.request as {
+    action?: string;
+    captures?: Array<{ captureId?: string; title?: string }>;
+    unresolvedPolicy?: string;
   };
-  expect(draft.title).toBeTruthy();
-  expect(draft.bucket).toBe("active");
-  expect(draft.frontmatter?.status).toBe("active");
-
-  await expect
-    .poll(async () => mutationCalls(await readTodayCalls(page), "confirmSetup").length)
-    .toBe(1);
-  const setPlans = mutationCalls(await readTodayCalls(page), "setPlan");
-  const finalPlan = setPlans.at(-1)?.args.mutation as { plan?: unknown };
-  expect(JSON.stringify(finalPlan?.plan ?? {})).not.toContain('"kind":"capture"');
+  expect(request.action).toBe("confirm");
+  expect(request.captures).toHaveLength(1);
+  expect(request.captures?.[0]?.captureId).toBeTruthy();
+  expect(request.captures?.[0]?.title).toBeTruthy();
+  expect(request.unresolvedPolicy).toBe("keepLater");
+  expect(callsOf(await readTodayCalls(page), "create_task_note")).toHaveLength(0);
+  expect(mutationCalls(await readTodayCalls(page), "confirmSetup")).toHaveLength(0);
 
   // Confirmed day lands on Execute.
   await expect(page.locator(".today-panel-done")).toBeVisible();
