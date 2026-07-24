@@ -8,6 +8,38 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.19 — 2026-07-25 — Today & Messages Hardening
+
+- **Atomic, crash-safe Today setup finalization.** Finish setup and Quick
+  skip now run as one journaled backend command: capture task notes
+  materialize deterministically (replaying the same request returns the
+  original receipt instead of duplicating notes), the plan, capture
+  decisions, and unresolved carryovers commit together, and crash recovery
+  rolls back only files the transaction created and the user never touched.
+  A failed attempt no longer blocks a corrected retry, terminal journals are
+  pruned after 30 days, and finalize failures surface as a visible alert in
+  the Today header.
+- **Durable capture and carryover decisions.** Deferred and dismissed
+  captures persist in the day snapshot and survive rollover — deferred
+  captures resurface when their target date arrives. Carryovers gain a
+  "Keep for later" resolution plus search, filtering, paging, and bulk
+  actions; unresolved items are kept for a later decision (with a preflight
+  dialog) instead of being silently dropped, and auto-plan no longer pulls
+  pending carryovers back into the day.
+- **Readable task titles and refresh states across Today.** Completed-task
+  history records a display title so legacy path-only events render as
+  humanized names, calendar loading/error states are shown instead of
+  silently clearing commitments, and a header Refresh re-opens the day with
+  race-safe last-good semantics.
+- **Messages dashboard hardening.** Processed results filter by channel,
+  search, and status on the backend (no more client-side truncation
+  artifacts), refreshes keep the last good list with a non-destructive
+  refreshing state, provider auth readiness shows per-source, terminal
+  mission history stays reviewable with a dismiss control, and the legacy
+  Telegram monitor migration uses an accessible in-app confirm dialog with
+  per-item failure reporting. Filter and search changes no longer
+  re-subscribe event listeners or re-run provider auth checks.
+
 ## v0.4.18 — 2026-07-24 — Files Scan Freeze Hotfix
 
 - **Files no longer freezes the app on symlinked cloud trees.** Opening the
