@@ -11135,27 +11135,52 @@ button.git-badge:hover {
   }
 }
 
-/* The tab strip takes a full row of its own; everything after it flows and
-   wraps. Without the 100% basis it loses the fight for space and collapses. */
+/* Row 1 keeps the surface tabs together with the theme control and the window
+   buttons — the same cluster the bottom dock carries on its single row. Row 2
+   takes the launchers and the context chip. `order` does the regrouping; DOM
+   order puts the launchers between the tabs and the theme control. */
 .terminal-panel.dock-right:not(.collapsed) .tool-panel-tabs {
+  order: 0;
+  /* Not `flex: 1 0 100%` any more, but it must still refuse to shrink — a
+     shrinkable tab strip is what collapsed to 0 width and vanished. */
+  flex: 0 0 auto;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-theme {
+  order: 1;
+  margin-left: auto;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .terminal-icon-button {
+  order: 2;
+}
+
+/* Flexbox has no "break before this item", so a zero-height full-basis item
+   ordered between the two clusters does the job. Giving the launchers a 100%
+   basis instead would break the line but also eat the whole row, pushing the
+   context chip onto a third one. */
+.terminal-panel.dock-right:not(.collapsed) .terminal-header::before {
+  content: "";
+  order: 3;
   flex: 1 0 100%;
+  height: 0;
+  margin: 0;
 }
 
-/* A flex:1 spacer and a margin-left:auto push both fight wrapping. */
-.terminal-panel.dock-right:not(.collapsed) .tool-panel-spacer {
-  display: none;
+.terminal-panel.dock-right:not(.collapsed) .terminal-launchers {
+  order: 4;
+  flex-wrap: wrap;
 }
 
-/* Everything after the tab strip flows naturally and wraps only when it must,
-   so a wide right dock still packs the launchers, theme, and buttons onto one
-   row instead of paying a full row each. */
 .terminal-panel.dock-right:not(.collapsed) .terminal-header-right {
+  order: 5;
   min-width: 0;
   margin-left: 0;
 }
 
-.terminal-panel.dock-right:not(.collapsed) .terminal-launchers {
-  flex-wrap: wrap;
+/* A flex:1 spacer fights the wrap; the graph surface simply has no row 2. */
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-spacer {
+  display: none;
 }
 
 /* Collapsed to a 40px rail the header is no longer a strip across the top —

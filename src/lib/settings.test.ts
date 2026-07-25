@@ -1039,7 +1039,7 @@ describe("normalizeMaruSettings", () => {
     expect(normalizeMaruSettings({ ui: { layout: { terminalDock: "side" } } }).ui.layout
       .terminalDock).toBe("bottom");
     expect(normalizeMaruSettings({ ui: { layout: { terminalWidth: 12 } } }).ui.layout
-      .terminalWidth).toBe(320);
+      .terminalWidth).toBe(400);
     expect(normalizeMaruSettings({ ui: { layout: { terminalWidth: 4096 } } }).ui.layout
       .terminalWidth).toBe(4096);
   });
