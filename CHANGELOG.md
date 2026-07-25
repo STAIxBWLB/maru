@@ -8,6 +8,26 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.22 - 2026-07-25 - Tabbed Browser and URL Bookmarks
+
+- **Sites is a browser now.** The address is an editable bar: type any
+  http(s) URL and press Enter, or a bare host and it resolves to https.
+  Escape reverts to the loaded page. Only http and https are accepted, the
+  same restriction the embedded view already enforced.
+- **Tabs.** Each tab is its own native child webview, so switching keeps that
+  tab's scroll position, forms, and page state rather than reloading it. Only
+  the active tab is shown, the tab count is capped because each one is a real
+  webview, and closing a tab destroys it. Remote content still has no IPC
+  surface.
+- **Bookmark the page you are on.** A star in the address bar saves the
+  current page, seeding the label from the page title; starring a page that
+  is already bookmarked opens it for editing instead of duplicating it.
+  Bookmarks can be dragged to reorder, and dragging one into another group
+  moves it to that category.
+- **Right-click a bookmark.** Open it here, open it in a new tab, open it in
+  the default browser, copy its address, edit, or delete. Files also gains an
+  explicit open-in-browser action for HTML files.
+
 ## v0.4.21 - 2026-07-25 - Files Tree Control and Responsiveness
 
 - **The Files folder tree can be driven.** Expand all, collapse all, expand
