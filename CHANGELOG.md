@@ -8,6 +8,34 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.21 - 2026-07-25 - Files Tree Control and Responsiveness
+
+- **The Files folder tree can be driven.** Expand all, collapse all, expand
+  current, and collapse current sit in the tree header; revealing a file now
+  opens that file's folder chain exclusively instead of leaving it hidden
+  under collapsed ancestors, and ordinary navigation opens the current chain
+  without closing anything else. The tree also starts fully collapsed: the
+  persisted setting has always held the *expanded* folder set, but the
+  standalone workspace read it as the collapsed set, so trees have been
+  showing inverted state since v0.4.17.
+- **The preview pane is no longer capped at 720px.** It is limited by a share
+  of the window instead, so it follows the viewport. The file list keeps a
+  360px floor in every layout, which previously existed only when both side
+  panes were open - without it a wide preview could squeeze the list to zero
+  and push its own resizer out of reach.
+- **Files stays responsive on large trees.** The list is virtualized, so a
+  folder with thousands of files no longer mounts every row; selection no
+  longer rebuilds a map of the whole workspace on each click; typing in the
+  search box paints immediately while the list updates from a deferred query;
+  and the workspace scan fans its per-file work across cores instead of
+  reading every file single-threaded.
+- **Files styling follows the app again.** Around 310 lines of dead
+  Files-list CSS are gone, literals were replaced with the shared radius,
+  shadow, focus-ring, and surface tokens (the raw shadows never adapted to
+  dark mode), the list header is sticky inside the scroller so it stops
+  desyncing from its columns on horizontal scroll, and metadata columns are
+  sized to their content with truncation instead of wrapping.
+
 ## v0.4.20 - 2026-07-25 - Evidence Binder V2
 
 - **Evidence bindings are explicit, durable, and conflict-safe.** Binder data
