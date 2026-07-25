@@ -30,12 +30,15 @@ import {
 } from "lucide-react";
 import type React from "react";
 import {
+  memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import {
   binaryViewerClassify,
@@ -93,6 +96,13 @@ import { HtmlPreviewFrame } from "./HtmlVisualEditor";
 
 const LOCATION_KEY = "maru:files-location:v1";
 const CLIPBOARD_KEY = "maru:files-clipboard:v1";
+
+// Row heights are fixed so the list virtualizes by index math. Mirrored by
+// --files-row-height in styles.css; the taller variant fits the parent-path
+// line that renders while searching or when the "parent" attribute is on.
+const FILES_ROW_HEIGHT = 34;
+const FILES_ROW_HEIGHT_WITH_PARENT = 44;
+const FILES_VIRTUAL_OVERSCAN = 480;
 
 // Shared by the drag clamp, the ARIA range, and settings normalization so the
 // three cannot drift. The preview has no fixed upper bound: it is capped by
@@ -179,7 +189,7 @@ interface FilesWorkbenchProps {
   onError: (message: string) => void;
 }
 
-export function FilesWorkbench(props: FilesWorkbenchProps) {
+export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbenchProps) {
   const { t, locale } = useTranslation();
   const {
     entries,
@@ -252,9 +262,22 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     path: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The typed value paints synchronously; only the shared query state (which
+  // drives the O(entries) list rebuild) goes through a transition, and the
+  // list itself reads the deferred value.
+  const [inputQuery, setInputQuery] = useState(query);
+  const [, startSearchTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
+  const lastSentQueryRef = useRef(query);
+  useEffect(() => {
+    if (query === lastSentQueryRef.current) return;
+    lastSentQueryRef.current = query;
+    setInputQuery(query);
+  }, [query]);
   const selectionRef = useRef(selectedPaths);
   const rangeAnchorRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [listViewport, setListViewport] = useState({ scrollTop: 0, height: 720 });
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const handleContextMenuKeyDown = useContextMenuKeyboard(
     contextMenuRef,
@@ -339,24 +362,34 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     () => ({ ...paneFilters, queuedPaths: queuedSourcePaths }),
     [paneFilters, queuedSourcePaths],
   );
+  // null when no pane filter is active, so the common case skips building a
+  // Set of every file path in the workspace and skips the per-row lookup.
   const allowedFilePaths = useMemo(
     () =>
-      new Set(
-        applyWorkspaceFilesPaneFilters(fileEntries, effectivePaneFilters).map(
-          (entry) => entry.path,
-        ),
-      ),
+      hasActiveWorkspaceFilesPaneFilters(effectivePaneFilters)
+        ? new Set(
+            applyWorkspaceFilesPaneFilters(fileEntries, effectivePaneFilters).map(
+              (entry) => entry.path,
+            ),
+          )
+        : null,
     [effectivePaneFilters, fileEntries],
   );
-  const contents = useMemo(
-    () =>
-      listFilesDirectoryContents(entries, currentFolder, query, filter, sortKey).filter(
-        // Keep non-file nodes (directories, broken symlinks) visible; pane
-        // filters only narrow real files.
-        (entry) => !isFileNode(entry) || allowedFilePaths.has(entry.path),
-      ),
-    [allowedFilePaths, currentFolder, entries, filter, query, sortKey],
-  );
+  const contents = useMemo(() => {
+    const listed = listFilesDirectoryContents(
+      entries,
+      currentFolder,
+      deferredQuery,
+      filter,
+      sortKey,
+    );
+    if (!allowedFilePaths) return listed;
+    // Keep non-file nodes (directories, broken symlinks) visible; pane
+    // filters only narrow real files.
+    return listed.filter(
+      (entry) => !isFileNode(entry) || allowedFilePaths.has(entry.path),
+    );
+  }, [allowedFilePaths, currentFolder, deferredQuery, entries, filter, sortKey]);
   const tree = useMemo(
     () => buildFilesDirectoryTree(entries, rootLabel),
     [entries, rootLabel],
@@ -381,19 +414,66 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     () => filesBreadcrumbs(currentFolder, rootLabel),
     [currentFolder, rootLabel],
   );
-  const selectedEntries = useMemo(() => {
-    const byPath = new Map(entries.map((entry) => [entry.path, entry]));
-    return selectedPaths
-      .map((path) => byPath.get(path))
-      .filter((entry): entry is WorkspaceEntryNode => Boolean(entry));
-  }, [entries, selectedPaths]);
+  // Keyed on entries alone: rebuilding this map on every selection change cost
+  // one Map insert per workspace entry per click.
+  const entriesByPath = useMemo(
+    () => new Map(entries.map((entry) => [entry.path, entry])),
+    [entries],
+  );
+  const selectedEntries = useMemo(
+    () =>
+      selectedPaths
+        .map((path) => entriesByPath.get(path))
+        .filter((entry): entry is WorkspaceEntryNode => Boolean(entry)),
+    [entriesByPath, selectedPaths],
+  );
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
+  const queuedSet = useMemo(() => new Set(queuedSourcePaths), [queuedSourcePaths]);
   const primaryEntry = selectedEntries.at(-1) ?? null;
   const openSet = useMemo(() => new Set(openDocumentPaths), [openDocumentPaths]);
   const dirtySet = useMemo(() => new Set(dirtyDocumentPaths), [dirtyDocumentPaths]);
   const extensionCounts = useMemo(
-    () => collectWorkspaceFileExtensionCounts(fileEntries).slice(0, 14),
-    [fileEntries],
+    () =>
+      filtersOpen
+        ? collectWorkspaceFileExtensionCounts(fileEntries).slice(0, 14)
+        : [],
+    [fileEntries, filtersOpen],
   );
+
+  const showParentLine =
+    Boolean(deferredQuery) || filesListAttributes.includes("parent");
+  const rowHeight = showParentLine ? FILES_ROW_HEIGHT_WITH_PARENT : FILES_ROW_HEIGHT;
+  // Only the rows near the viewport are mounted; a 5,000-file folder rendered
+  // every row before this (~11 DOM nodes each).
+  const virtualRows = useMemo(() => {
+    const first = Math.max(
+      0,
+      Math.floor((listViewport.scrollTop - FILES_VIRTUAL_OVERSCAN) / rowHeight),
+    );
+    const last = Math.min(
+      contents.length,
+      Math.ceil(
+        (listViewport.scrollTop + listViewport.height + FILES_VIRTUAL_OVERSCAN) /
+          rowHeight,
+      ),
+    );
+    return { first, items: contents.slice(first, last) };
+  }, [contents, listViewport, rowHeight]);
+
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node) return;
+    const update = () =>
+      setListViewport({
+        scrollTop: node.scrollTop,
+        height: node.clientHeight || 720,
+      });
+    update();
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, []);
 
   const selectPaths = useCallback(
     (paths: string[]) => {
@@ -766,17 +846,25 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     "--files-tree-width": treeOpen ? `${treeWidth}px` : "0px",
     "--files-preview-width": previewOpen ? `${previewWidth}px` : "0px",
   } as React.CSSProperties & Record<`--${string}`, string>;
-  const metadataColumns = filesListAttributes.filter(
-    (attribute): attribute is Exclude<FilesListAttribute, "parent"> =>
-      attribute !== "parent",
+  const metadataColumns = useMemo(
+    () =>
+      filesListAttributes.filter(
+        (attribute): attribute is Exclude<FilesListAttribute, "parent"> =>
+          attribute !== "parent",
+      ),
+    [filesListAttributes],
   );
-  const listColumnsStyle = {
-    "--files-list-columns": `minmax(220px, 1fr) ${metadataColumns
-      .map((attribute) =>
-        attribute === "modified" ? "minmax(130px, 0.42fr)" : "minmax(78px, 0.24fr)",
-      )
-      .join(" ")}`,
-  } as React.CSSProperties & Record<`--${string}`, string>;
+  // Content-sized metadata columns with no px floor: the name cell already
+  // truncates, so the table fits the pane instead of overflowing it.
+  const listColumnsStyle = useMemo(
+    () =>
+      ({
+        "--files-list-columns": `minmax(0, 1fr) ${metadataColumns
+          .map(() => "minmax(0, max-content)")
+          .join(" ")}`,
+      }) as React.CSSProperties & Record<`--${string}`, string>,
+    [metadataColumns],
+  );
 
   return (
     <main
@@ -1012,8 +1100,12 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
           <label>
             <Search size={14} />
             <input
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
+              value={inputQuery}
+              onChange={(event) => {
+                const next = event.target.value;
+                setInputQuery(next);
+                startSearchTransition(() => onQueryChange(next));
+              }}
               placeholder={t("files.searchPlaceholder")}
             />
           </label>
@@ -1117,23 +1209,30 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
           </button>
         </div>
 
-        <div className="files-list-header" style={listColumnsStyle} aria-hidden>
-          <span>{t("files.columns.name")}</span>
-          {metadataColumns.map((attribute) => (
-            <span key={attribute}>{t(`files.attributes.${attribute}`)}</span>
-          ))}
-        </div>
-
         <div
           className="files-list"
           ref={listRef}
           role="grid"
           aria-label={t("files.contents")}
           aria-multiselectable="true"
+          aria-rowcount={contents.length}
           tabIndex={0}
+          style={{ "--files-row-height": `${rowHeight}px` } as React.CSSProperties}
           onKeyDown={handleKeyDown}
+          onScroll={(event) =>
+            setListViewport({
+              scrollTop: event.currentTarget.scrollTop,
+              height: event.currentTarget.clientHeight || 720,
+            })
+          }
           onClick={() => setContextMenu(null)}
         >
+          <div className="files-list-header" style={listColumnsStyle} aria-hidden>
+            <span>{t("files.columns.name")}</span>
+            {metadataColumns.map((attribute) => (
+              <span key={attribute}>{t(`files.attributes.${attribute}`)}</span>
+            ))}
+          </div>
           {creatingFolder ? (
             <div className="files-list-row files-inline-edit" role="row">
               <Folder size={17} />
@@ -1162,10 +1261,17 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
               <span>{t("files.empty.description")}</span>
             </div>
           ) : (
-            contents.map((entry) => {
-              const selected = selectedPaths.includes(entry.path);
+            <div
+              className="files-virtual-spacer"
+              style={{
+                height: contents.length * rowHeight,
+                paddingTop: virtualRows.first * rowHeight,
+              }}
+            >
+              {virtualRows.items.map((entry) => {
+              const selected = selectedSet.has(entry.path);
               const directory = isDirectoryNode(entry);
-              const queued = queuedSourcePaths.includes(entry.path);
+              const queued = queuedSet.has(entry.path);
               return (
                 <div
                   key={entry.path}
@@ -1247,7 +1353,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
                     ) : (
                       <span>
                         <strong>{entry.name}</strong>
-                        {query || filesListAttributes.includes("parent") ? (
+                        {deferredQuery || filesListAttributes.includes("parent") ? (
                           <small>{entry.parentRelPath || rootLabel}</small>
                         ) : null}
                       </span>
@@ -1262,8 +1368,12 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
                     if (attribute === "kind") {
                       value = directory ? t("files.kind.folder") : entry.fileKind;
                     } else if (attribute === "modified") {
+                      // Short form: the full locale timestamp needed ~22
+                      // characters and forced a wide fixed column.
                       value = entry.updatedAt
-                        ? new Date(entry.updatedAt).toLocaleString(locale)
+                        ? new Date(entry.updatedAt).toLocaleDateString(locale, {
+                            dateStyle: "short",
+                          })
                         : "-";
                     } else if (attribute === "size") {
                       value = directory ? "-" : formatBytes(entry.sizeBytes);
@@ -1280,7 +1390,8 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
                   })}
                 </div>
               );
-            })
+              })}
+            </div>
           )}
         </div>
         <footer className="files-statusbar">
@@ -1443,7 +1554,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
       ) : null}
     </main>
   );
-}
+});
 
 function DirectoryTreeRow({
   node,
