@@ -20157,10 +20157,97 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
-.sites-url .sites-url-title {
-  flex: none;
-  max-width: 45%;
+.sites-url input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink);
+  font: inherit;
+  outline: 0;
+}
+
+.sites-url:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.sites-tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.sites-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--muted);
+}
+
+.sites-tab.active {
+  border-color: var(--line-soft);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.sites-tab > button:first-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sites-tab > button:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sites-tab-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.sites-tab-close:hover {
+  background: var(--panel-3);
+  color: var(--ink);
+}
+
+.sites-tab-new {
+  flex: none;
+}
+
+.sites-item.dragging {
+  opacity: 0.5;
 }
 
 /* Placeholder spacer only — the native child webview is positioned over this

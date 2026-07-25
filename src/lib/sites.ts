@@ -160,6 +160,24 @@ export function removeSite(sites: SiteEntry[], id: string): SiteEntry[] {
   return sites.filter((site) => site.id !== id);
 }
 
+/** Move `draggedId` to `targetId`'s slot and renumber `order` so the new
+ *  sequence survives the sort in `sortSites`. Reordering across categories
+ *  also adopts the target's category, which is how a drag between groups
+ *  reads to the user. */
+export function reorderSites(
+  sites: SiteEntry[],
+  draggedId: string,
+  targetId: string,
+): SiteEntry[] {
+  const from = sites.findIndex((site) => site.id === draggedId);
+  const to = sites.findIndex((site) => site.id === targetId);
+  if (from === -1 || to === -1 || from === to) return sites;
+  const next = [...sites];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, { ...moved, category: sites[to].category });
+  return next.map((site, index) => ({ ...site, order: index }));
+}
+
 export function touchSiteUsage(
   sites: SiteEntry[],
   id: string,
