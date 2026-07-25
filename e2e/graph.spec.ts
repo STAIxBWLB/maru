@@ -158,10 +158,21 @@ async function openSelectedNode(page: Page, id: string) {
 }
 
 async function nodePoint(page: Page, id: string): Promise<{ x: number; y: number }> {
-  const point = await page.evaluate(
-    (nodeId) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.nodeViewportPoint(nodeId),
-    id,
-  );
+  // A viewport point is only usable while the graph is still. enterGraph()
+  // freezes the layout, but that freeze does not stick: switching to the chain
+  // view and back, toggling a filter, or unpinning all restart FA2 through
+  // GraphCanvas's layoutEpoch/unpin effects. A running layout was measured
+  // moving maru-project 11px (974.4,80.0 -> 965.0,86.0) between two reads in
+  // one helper call — far enough for the click that follows to miss the node.
+  // Re-freeze and read in the same evaluate so nothing can drift in between.
+  const point = await page.evaluate((nodeId) => {
+    const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+    if (bridge.layoutRunning()) {
+      bridge.freezeLayout();
+      bridge.requestRender();
+    }
+    return bridge.nodeViewportPoint(nodeId);
+  }, id);
   if (!point) throw new Error(`node "${id}" has no viewport point (missing or hidden)`);
   return point;
 }
