@@ -338,7 +338,12 @@ import {
   todayAutoOpenKey,
 } from "./lib/todayRouting";
 import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
-import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
+import {
+  applyThemePreference,
+  applyThemeVars,
+  buildThemeVars,
+  subscribeToSystemTheme,
+} from "./lib/theme";
 import {
   openSettingsWindow,
   restoreMainWindowLayout,
@@ -378,7 +383,6 @@ import {
 const LAST_OPEN_KEY = "maru:lastOpenedNote:v1";
 const OPEN_TABS_KEY = "maru:openTabs:v1";
 const RECENT_KEY = "maru:recent:v1";
-const APP_ICON_URL = new URL("./assets/app-icon-dark.png", import.meta.url).href;
 const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
@@ -755,12 +759,14 @@ function SettingsWindowRoot({
     normalizeMaruSettings(DEFAULT_MARU_SETTINGS),
   );
   const [error, setError] = useState<string | null>(null);
-  const themeVars = useMemo(() => buildThemeVars(settings), [settings]);
-
   useEffect(() => {
-    applyThemePreference(settings.ui.themeMode);
-    applyThemeVars(themeVars);
-  }, [settings.ui.themeMode, themeVars]);
+    const apply = () => {
+      applyThemePreference(settings.ui.themeMode);
+      applyThemeVars(buildThemeVars(settings));
+    };
+    apply();
+    return subscribeToSystemTheme(settings.ui.themeMode, apply);
+  }, [settings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -826,7 +832,7 @@ function SettingsWindowRoot({
 
   return (
     <LocaleContext.Provider value={localeValue}>
-      <div className="settings-window-shell" style={themeVars}>
+      <div className="settings-window-shell">
         <SystemPane
           workPath={workPath}
           settings={settings}
@@ -1788,8 +1794,12 @@ function MainApp() {
   }, [settingsWorkPath]);
 
   useEffect(() => {
-    applyThemePreference(maruSettings.ui.themeMode);
-    applyThemeVars(buildThemeVars(maruSettings));
+    const apply = () => {
+      applyThemePreference(maruSettings.ui.themeMode);
+      applyThemeVars(buildThemeVars(maruSettings));
+    };
+    apply();
+    return subscribeToSystemTheme(maruSettings.ui.themeMode, apply);
   }, [maruSettings]);
 
   useEffect(() => {
@@ -7961,13 +7971,6 @@ function MainApp() {
           onPointerDown={handleTopbarPointerDown}
         >
           <div className="topbar-window-controls-guard" data-no-drag="true" aria-hidden="true" />
-          <div className="brand-mark" aria-hidden="true">
-            <img className="brand-mark-icon" src={APP_ICON_URL} alt="" draggable={false} />
-          </div>
-          <div className="brand-name">
-            {t("app.title")} <span>{t("app.subtitle.work")}</span>
-          </div>
-          <div className="topbar-system-spacer" />
           <WorkspaceSwitcher
             registry={workspaceRegistry}
             activePath={explorerWorkspacePath}

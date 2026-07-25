@@ -9,6 +9,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
 }
 
+interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  label: string;
+  children: ReactNode;
+  active?: boolean;
+  size?: "sm" | "md";
+}
+
 export function Button({
   className = "",
   variant = "secondary",
@@ -32,6 +39,28 @@ export function Button({
     >
       {icon ? <span className="button-icon">{icon}</span> : null}
       {children ? <span>{children}</span> : null}
+    </button>
+  );
+}
+
+export function IconButton({
+  label,
+  children,
+  active = false,
+  size = "md",
+  className = "",
+  title = label,
+  ...props
+}: IconButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`icon-button icon-button-${size}${active ? " active" : ""} ${className}`.trim()}
+      aria-label={label}
+      title={title}
+      {...props}
+    >
+      {children}
     </button>
   );
 }

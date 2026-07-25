@@ -3,6 +3,11 @@ import { X } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { CreateTaskDraft, TaskBucket } from "../../lib/types";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 interface NewTaskDialogProps {
   open: boolean;
@@ -22,8 +27,6 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
   const [bucket, setBucket] = useState<TaskBucket>("active");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!open) return null;
-
   const submit = async () => {
     if (!title.trim()) {
       setError(t("tasks.new.titleRequired"));
@@ -66,24 +69,28 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section className="task-new-dialog" role="dialog" aria-modal="true">
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      className="task-new-dialog"
+    >
         <header>
           <div>
-            <h2>{t("tasks.new.title")}</h2>
+            <DialogSurfaceTitle>{t("tasks.new.title")}</DialogSurfaceTitle>
             <p>{t("tasks.new.description")}</p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            title={t("app.close")}
-            aria-label={t("app.close")}
-          >
-            <X size={16} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              title={t("app.close")}
+              aria-label={t("app.close")}
+            >
+              <X size={16} />
+            </button>
+          </DialogSurfaceClose>
         </header>
         {error ? <div className="inbox-error">{error}</div> : null}
         <div className="settings-form">
@@ -157,8 +164,7 @@ export function NewTaskDialog({ open, onClose, onCreate }: NewTaskDialogProps) {
             {t("tasks.actions.create")}
           </Button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }
 

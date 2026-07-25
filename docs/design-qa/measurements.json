@@ -74,9 +74,9 @@
       "width": 1024,
       "height": 720
     },
-    "sidebarWidth": 240,
-    "brainDumpWidth": 671,
-    "captureWidth": 671,
+    "sidebarWidth": 56,
+    "brainDumpWidth": 855,
+    "captureWidth": 855,
     "stacked": true,
     "docScrollWidth": 1024,
     "docClientWidth": 1024

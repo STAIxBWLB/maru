@@ -470,7 +470,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     fileTreeStateInitialized: false,
     fileQueueDefaultOperation: "copy",
     themeMode: "system",
-    accentColor: "#2f5a3c",
+    accentColor: "#0071e3",
     layout: {
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
@@ -2160,7 +2160,10 @@ function normalizeTerminalWidth(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_MARU_SETTINGS.ui.layout.terminalWidth;
   }
-  return Math.max(320, Math.round(value));
+  // Keep in step with MIN_WIDTH in TerminalPanel.tsx: the right-docked header
+  // needs 390px to keep tabs, theme, and window buttons on one row. Widths
+  // stored below this by an older build are pulled up on load.
+  return Math.max(400, Math.round(value));
 }
 
 const AI_PERMISSION_MODES: AiPermissionMode[] = [

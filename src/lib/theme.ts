@@ -2,16 +2,21 @@ import type { CSSProperties } from "react";
 import type { MaruSettings, ThemeMode } from "./settings";
 
 export type ThemeVars = CSSProperties & Record<`--${string}`, string>;
+export type ResolvedThemeMode = "light" | "dark";
 
 export function buildThemeVars(settings: MaruSettings): ThemeVars {
   const accent = settings.ui.accentColor;
-  const dark =
-    settings.ui.themeMode === "dark" ||
-    (settings.ui.themeMode === "system" && prefersDarkMode());
+  const dark = resolveThemeMode(settings.ui.themeMode) === "dark";
+  const base = dark ? "#2c2c2e" : "#ffffff";
   return {
     "--accent": accent,
-    "--accent-soft": mixHex(accent, dark ? "#1b1a17" : "#ffffff", dark ? 0.68 : 0.78),
-    "--accent-tint": mixHex(accent, dark ? "#1b1a17" : "#ffffff", dark ? 0.78 : 0.88),
+    "--accent-soft": mixHex(accent, base, dark ? 0.68 : 0.78),
+    "--accent-tint": mixHex(accent, base, dark ? 0.8 : 0.9),
+    "--active-surface": mixHex(accent, base, dark ? 0.78 : 0.9),
+    "--button-primary-hover": mixHex(accent, dark ? "#ffffff" : "#000000", 0.14),
+    "--focus-ring": accent,
+    "--on-accent": contrastText(accent),
+    "--rail-indicator": accent,
   };
 }
 
@@ -23,20 +28,42 @@ function prefersDarkMode(): boolean {
   );
 }
 
+export function resolveThemeMode(
+  themeMode: ThemeMode,
+  systemPrefersDark = prefersDarkMode(),
+): ResolvedThemeMode {
+  if (themeMode === "system") return systemPrefersDark ? "dark" : "light";
+  return themeMode;
+}
+
 export function applyThemePreference(themeMode: ThemeMode): void {
   if (typeof document !== "undefined") {
     const root = document.documentElement;
-    if (themeMode === "system") {
-      root.removeAttribute("data-theme");
-    } else {
-      root.dataset.theme = themeMode;
-    }
+    root.dataset.theme = resolveThemeMode(themeMode);
+    root.dataset.themePreference = themeMode;
   }
 
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
   void import("@tauri-apps/api/app")
     .then(({ setTheme }) => setTheme(themeMode === "system" ? null : themeMode))
     .catch(() => {});
+}
+
+export function subscribeToSystemTheme(
+  themeMode: ThemeMode,
+  onChange: () => void,
+): () => void {
+  if (
+    themeMode !== "system" ||
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
+    return () => {};
+  }
+  const query = window.matchMedia("(prefers-color-scheme: dark)");
+  const listener = () => onChange();
+  query.addEventListener?.("change", listener);
+  return () => query.removeEventListener?.("change", listener);
 }
 
 export function applyThemeVars(vars: ThemeVars): void {
@@ -60,6 +87,22 @@ function mixHex(a: string, b: string, amountB: number): string {
     Math.round(ca[index] * amountA + cb[index] * amountB),
   );
   return `#${channels.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function contrastText(value: string): "#ffffff" | "#1d1d1f" {
+  const parsed = parseHex(value);
+  if (!parsed) return "#ffffff";
+  const [r, g, b] = parsed.map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // Crossover where white and #1d1d1f give equal WCAG contrast against the
+  // accent: (1.05)/(L+0.05) == (L+0.05)/(0.0123+0.05) => L ~= 0.206. The old
+  // 0.48 handed white text to every mid-tone accent at roughly 2:1.
+  return luminance > 0.206 ? "#1d1d1f" : "#ffffff";
 }
 
 function parseHex(value: string): [number, number, number] | null {

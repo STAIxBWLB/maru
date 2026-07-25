@@ -25,7 +25,12 @@ import {
   type SkillRecord,
   type SkillSource,
 } from "../../lib/skills";
-import { applyThemePreference, applyThemeVars, buildThemeVars } from "../../lib/theme";
+import {
+  applyThemePreference,
+  applyThemeVars,
+  buildThemeVars,
+  subscribeToSystemTheme,
+} from "../../lib/theme";
 import { Button } from "../ui/Button";
 
 interface SkillEditorWindowRootProps {
@@ -40,12 +45,14 @@ export function SkillEditorWindowRoot({ workPath, skillId }: SkillEditorWindowRo
     normalizeMaruSettings(DEFAULT_MARU_SETTINGS),
   );
   const [error, setError] = useState<string | null>(null);
-  const themeVars = useMemo(() => buildThemeVars(settings), [settings]);
-
   useEffect(() => {
-    applyThemePreference(settings.ui.themeMode);
-    applyThemeVars(themeVars);
-  }, [settings.ui.themeMode, themeVars]);
+    const apply = () => {
+      applyThemePreference(settings.ui.themeMode);
+      applyThemeVars(buildThemeVars(settings));
+    };
+    apply();
+    return subscribeToSystemTheme(settings.ui.themeMode, apply);
+  }, [settings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +90,7 @@ export function SkillEditorWindowRoot({ workPath, skillId }: SkillEditorWindowRo
 
   return (
     <LocaleContext.Provider value={localeValue}>
-      <div className="skill-editor-window-shell" style={themeVars}>
+      <div className="skill-editor-window-shell">
         <SkillEditorWindow initialWorkPath={workPath} initialSkillId={skillId} />
         {error ? (
           <div className="toast-stack">

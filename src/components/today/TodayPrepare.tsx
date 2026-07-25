@@ -12,6 +12,11 @@ import type {
   TodayRoute,
 } from "../../lib/today";
 import { todayFinalizeIdempotencyKey } from "../../lib/today";
+import {
+  DialogSurface,
+  DialogSurfaceDescription,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 import { TaskSheet } from "./TaskSheet";
 import { useToday } from "./todayContext";
 import { TodayBrainDump } from "./TodayBrainDump";
@@ -203,31 +208,23 @@ export function TodayPrepare({ onNavigate }: TodayPrepareProps) {
         onSaved={() => planner.notifyChange("tasks")}
       />
       {pendingFinalize ? (
-        <div
-          className="today-preflight-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !finishing) {
-              setPendingFinalize(null);
-            }
+        <DialogSurface
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen && !finishing) setPendingFinalize(null);
           }}
+          className="today-preflight-dialog dialog-surface-opaque"
+          overlayClassName="today-preflight-backdrop"
+          hasDescription
         >
-          <section
-            className="today-preflight-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="today-preflight-title"
-            aria-describedby="today-preflight-description"
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && !finishing) setPendingFinalize(null);
-            }}
-          >
             <AlertTriangle size={20} aria-hidden="true" />
             <div>
-              <h2 id="today-preflight-title">{t("today.preflight.title")}</h2>
-              <p id="today-preflight-description">
+              <DialogSurfaceTitle>
+                {t("today.preflight.title")}
+              </DialogSurfaceTitle>
+              <DialogSurfaceDescription>
                 {t("today.preflight.description", { count: unresolvedCount })}
-              </p>
+              </DialogSurfaceDescription>
             </div>
             <div className="today-preflight-actions">
               <button
@@ -236,7 +233,7 @@ export function TodayPrepare({ onNavigate }: TodayPrepareProps) {
                 disabled={finishing}
                 onClick={() => setPendingFinalize(null)}
               >
-                {t("common.cancel")}
+                {t("dialog.cancel")}
               </button>
               <button
                 type="button"
@@ -259,8 +256,7 @@ export function TodayPrepare({ onNavigate }: TodayPrepareProps) {
                 {t("today.preflight.continue", { count: unresolvedCount })}
               </button>
             </div>
-          </section>
-        </div>
+        </DialogSurface>
       ) : null}
     </TodayStageScaffold>
   );

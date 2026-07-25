@@ -1,0 +1,189 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "Pretendard Variable",
+    Pretendard,
+    "Inter Variable",
+    Inter,
+    "Geist",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-feature-settings: "ss01", "cv01";
+  font-optical-sizing: auto;
+  /* Korean words carry no internal spaces, so the default CJK rule happily
+     breaks "터미널" into "터미/널". `keep-all` moves breaks to the spaces
+     between eojeol, which is how Korean is meant to wrap. Latin is
+     unaffected; the existing `word-break: break-all` rules on paths and
+     hashes are more specific and still win. */
+  word-break: keep-all;
+
+  /* Stable shell geometry. */
+  --shell-topbar-height: 44px;
+  --shell-activity-width: 48px;
+  --shell-sidebar-expanded: 260px;
+  --shell-sidebar-compact: 56px;
+
+  /* Type roles for dense desktop UI. */
+  --type-display-size: 24px;
+  --type-display-leading: 1.15;
+  --type-title-size: 17px;
+  --type-title-leading: 1.25;
+  --type-heading-size: 14px;
+  --type-heading-leading: 1.35;
+  --type-body-size: 13px;
+  --type-body-leading: 1.5;
+  --type-label-size: 12px;
+  --type-label-leading: 1.35;
+  --type-meta-size: 11px;
+  --type-meta-leading: 1.4;
+
+  /* Spacing and shape. */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Motion is tokenized even when a component remains CSS-only. */
+  --motion-press: 100ms;
+  --motion-fast: 120ms;
+  --motion-state: 140ms;
+  --motion-enter: 180ms;
+  --motion-exit: 140ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-state: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Canonical light appearance. */
+  --foundation-bg: #f5f5f7;
+  --foundation-bg-tint: #eeeef0;
+  --foundation-panel: #ffffff;
+  --foundation-panel-2: #f9f9fb;
+  --foundation-panel-3: #ececef;
+  --foundation-panel-raised: #ffffff;
+  --foundation-line: #d1d1d6;
+  --foundation-line-strong: #aeaeb2;
+  --foundation-line-soft: #e5e5ea;
+  --foundation-ink: #1d1d1f;
+  --foundation-ink-2: #3a3a3c;
+  --foundation-muted: #636366;
+  --foundation-faint: #6e6e73;
+  --foundation-accent: #0071e3;
+  --foundation-accent-soft: #d9ecff;
+  --foundation-accent-tint: #edf6ff;
+  --foundation-active: #e8f3ff;
+  --foundation-focus-ring: #0071e3;
+  --foundation-overlay: rgba(29, 29, 31, 0.34);
+  --foundation-on-accent: #ffffff;
+  --foundation-button-hover: #0062c4;
+  --foundation-rail-bg: #242426;
+  --foundation-rail-fg: #aeaeb2;
+  --foundation-rail-fg-strong: #ffffff;
+  --foundation-rail-hover: rgba(255, 255, 255, 0.08);
+  --foundation-rail-active: rgba(255, 255, 255, 0.14);
+  --foundation-rail-indicator: #0a84ff;
+  --foundation-material-popover: rgba(255, 255, 255, 0.9);
+  --foundation-material-sheet: rgba(255, 255, 255, 0.94);
+  --foundation-material-modal: rgba(255, 255, 255, 0.96);
+  --foundation-shadow-sm: 0 1px 2px rgba(29, 29, 31, 0.08);
+  --foundation-shadow: 0 10px 30px -18px rgba(29, 29, 31, 0.24);
+  --foundation-shadow-lg: 0 28px 80px -32px rgba(29, 29, 31, 0.36);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --foundation-bg: #1c1c1e;
+  --foundation-bg-tint: #222224;
+  --foundation-panel: #2c2c2e;
+  --foundation-panel-2: #242426;
+  --foundation-panel-3: #3a3a3c;
+  --foundation-panel-raised: #323234;
+  --foundation-line: #48484a;
+  --foundation-line-strong: #636366;
+  --foundation-line-soft: #38383a;
+  --foundation-ink: #f5f5f7;
+  --foundation-ink-2: #e5e5ea;
+  --foundation-muted: #aeaeb2;
+  --foundation-faint: #98989d;
+  --foundation-accent: #0a84ff;
+  --foundation-accent-soft: #173a5e;
+  --foundation-accent-tint: #162d46;
+  --foundation-active: #173a5e;
+  --foundation-focus-ring: #0a84ff;
+  --foundation-overlay: rgba(0, 0, 0, 0.52);
+  --foundation-on-accent: #ffffff;
+  --foundation-button-hover: #409cff;
+  --foundation-rail-bg: #161618;
+  --foundation-rail-fg: #98989d;
+  --foundation-rail-fg-strong: #ffffff;
+  --foundation-rail-hover: rgba(255, 255, 255, 0.09);
+  --foundation-rail-active: rgba(255, 255, 255, 0.15);
+  --foundation-rail-indicator: #0a84ff;
+  --foundation-material-popover: rgba(44, 44, 46, 0.9);
+  --foundation-material-sheet: rgba(44, 44, 46, 0.94);
+  --foundation-material-modal: rgba(44, 44, 46, 0.96);
+  --foundation-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42);
+  --foundation-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.72);
+  --foundation-shadow-lg: 0 28px 80px -32px rgba(0, 0, 0, 0.88);
+}
+
+/* First-paint fallback. `data-theme` is only set once React mounts and the
+   settings file resolves, and the CSP forbids an inline bootstrap script, so
+   without this an OS-dark user gets a full light frame before the flip.
+   `:not([data-theme="light"])` keeps an explicit light choice winning; the
+   values match `:root[data-theme="dark"]` above and must be kept in step. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --foundation-bg: #1c1c1e;
+    --foundation-bg-tint: #222224;
+    --foundation-panel: #2c2c2e;
+    --foundation-panel-2: #242426;
+    --foundation-panel-3: #3a3a3c;
+    --foundation-panel-raised: #323234;
+    --foundation-line: #48484a;
+    --foundation-line-strong: #636366;
+    --foundation-line-soft: #38383a;
+    --foundation-ink: #f5f5f7;
+    --foundation-ink-2: #e5e5ea;
+    --foundation-muted: #aeaeb2;
+    --foundation-faint: #98989d;
+    --foundation-accent: #0a84ff;
+    --foundation-accent-soft: #173a5e;
+    --foundation-accent-tint: #162d46;
+    --foundation-active: #173a5e;
+    --foundation-focus-ring: #0a84ff;
+    --foundation-overlay: rgba(0, 0, 0, 0.52);
+    --foundation-on-accent: #ffffff;
+    --foundation-button-hover: #409cff;
+    --foundation-rail-bg: #161618;
+    --foundation-rail-fg: #98989d;
+    --foundation-rail-fg-strong: #ffffff;
+    --foundation-rail-hover: rgba(255, 255, 255, 0.09);
+    --foundation-rail-active: rgba(255, 255, 255, 0.15);
+    --foundation-rail-indicator: #0a84ff;
+    --foundation-material-popover: rgba(44, 44, 46, 0.9);
+    --foundation-material-sheet: rgba(44, 44, 46, 0.94);
+    --foundation-material-modal: rgba(44, 44, 46, 0.96);
+    --foundation-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42);
+    --foundation-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.72);
+    --foundation-shadow-lg: 0 28px 80px -32px rgba(0, 0, 0, 0.88);
+  }
+}

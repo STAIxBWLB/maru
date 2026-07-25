@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { markStartup } from "./lib/startupProfile";
+import "./foundations.css";
 import "./styles.css";
 
 markStartup("app:entry");

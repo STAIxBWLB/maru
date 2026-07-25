@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Field, TextArea, TextInput } from "../ui/Field";
+import { EmptyState, ModeHeader } from "../ui/ModeChrome";
 import { RichMarkdownEditor } from "../RichMarkdownEditor";
 import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
 import { useTranslation } from "../../lib/i18n";
@@ -672,11 +673,12 @@ export function StudioMode({
   if (!workspaceRoot) {
     return (
       <main className="studio-pane">
-        <div className="studio-empty">
-          <FileText size={24} />
-          <strong>{t("studio.empty.noWorkspace.title")}</strong>
-          <span>{t("studio.empty.noWorkspace.description")}</span>
-        </div>
+        <EmptyState
+          className="studio-empty"
+          icon={<FileText size={24} />}
+          title={t("studio.empty.noWorkspace.title")}
+          description={t("studio.empty.noWorkspace.description")}
+        />
       </main>
     );
   }
@@ -684,23 +686,25 @@ export function StudioMode({
   if (loading || !state) {
     return (
       <main className="studio-pane">
-        <div className="studio-empty">
-          <RefreshCcw size={24} />
-          <strong>{t("studio.loading")}</strong>
-        </div>
+        <EmptyState
+          className="studio-empty"
+          icon={<RefreshCcw size={24} />}
+          title={t("studio.loading")}
+        />
       </main>
     );
   }
 
   return (
     <main className="studio-pane">
-      <header className="studio-header">
-        <div>
-          <p className="studio-kicker">{t("studio.kicker")}</p>
-          <h1>{t("studio.title")}</h1>
-          <p>{t("studio.subtitle")}</p>
-        </div>
-        <div className="studio-header-actions">
+      <ModeHeader
+        className="studio-header"
+        titleAs="h1"
+        eyebrow={<span className="studio-kicker">{t("studio.kicker")}</span>}
+        title={t("studio.title")}
+        subtitle={t("studio.subtitle")}
+        actions={(
+          <div className="studio-header-actions">
           <Button
             variant="secondary"
             size="sm"
@@ -719,8 +723,9 @@ export function StudioMode({
           >
             {t("studio.reset")}
           </Button>
-        </div>
-      </header>
+          </div>
+        )}
+      />
 
       <div className="studio-layout">
         <aside className="studio-step-rail" aria-label={t("studio.steps.label")}>

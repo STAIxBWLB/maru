@@ -60,4 +60,41 @@ describe("PaneResizeHandle", () => {
 
     await act(async () => root.unmount());
   });
+
+  it("uses vertical movement and arrow keys for a horizontal separator", async () => {
+    const onCommit = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    function Harness() {
+      const [value, setValue] = useState(260);
+      return (
+        <PaneResizeHandle
+          label="Resize height"
+          orientation="horizontal"
+          value={value}
+          min={160}
+          max={520}
+          defaultValue={260}
+          onChange={setValue}
+          onCommit={onCommit}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(handle.getAttribute("aria-orientation")).toBe("horizontal");
+
+    await act(async () => {
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(handle.getAttribute("aria-valuenow")).toBe("272");
+    expect(onCommit).toHaveBeenLastCalledWith(272);
+
+    await act(async () => root.unmount());
+  });
 });

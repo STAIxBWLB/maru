@@ -3,6 +3,7 @@ import {
   ExternalLink,
   FolderSearch,
   Globe,
+  GripVertical,
   Pencil,
   Plus,
   Search,
@@ -13,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { clampMenuPosition } from "../../lib/menu";
 import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
+import { usePointerReorder } from "../ui/usePointerReorder";
 import {
   faviconUrlFor,
   filterSitesByQuery,
@@ -62,7 +64,7 @@ export function SitesSidebar({
   const [menu, setMenu] = useState<{ x: number; y: number; site: SiteEntry } | null>(
     null,
   );
-  const [dragId, setDragId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const handleMenuKeyDown = useContextMenuKeyboard(menuRef, !!menu, () => setMenu(null));
 
@@ -108,6 +110,44 @@ export function SitesSidebar({
     return filtered.filter((site) => (site.category ?? "") === categoryFilter);
   }, [sites, query, categoryFilter]);
   const groups = useMemo(() => groupSitesByCategory(visible), [visible]);
+  const visibleIndexById = useMemo(
+    () => new Map(visible.map((site, index) => [site.id, index])),
+    [visible],
+  );
+
+  const announceMove = (site: SiteEntry, rank: number) => {
+    setAnnouncement(t("sites.moved", { title: site.label, rank }));
+  };
+
+  const pointerReorder = usePointerReorder({
+    items: visible,
+    getId: (site) => site.id,
+    onCommit: ({ items, draggedId, targetId, toIndex }) => {
+      const moved = sites.find((site) => site.id === draggedId);
+      const target = sites.find((site) => site.id === targetId);
+      const visibleIds = new Set(items.map((site) => site.id));
+      const orderedVisible = items.map((site) => (
+        site.id === draggedId ? { ...site, category: target?.category ?? null } : site
+      ));
+      let visibleIndex = 0;
+      const next = sites
+        .map((site) => (
+          visibleIds.has(site.id) ? orderedVisible[visibleIndex++] : site
+        ))
+        .map((site, index) => ({ ...site, order: index }));
+      onReorder(next);
+      if (moved) announceMove(moved, toIndex + 1);
+    },
+  });
+
+  const moveWithKeyboard = (site: SiteEntry, direction: -1 | 1) => {
+    const index = visibleIndexById.get(site.id);
+    if (index === undefined) return;
+    const target = visible[index + direction];
+    if (!target) return;
+    onReorder(reorderSites(sites, site.id, target.id));
+    announceMove(site, index + direction + 1);
+  };
 
   return (
     <aside className="sites-sidebar">
@@ -162,6 +202,9 @@ export function SitesSidebar({
       ) : null}
 
       <div className="sites-list">
+        <div className="today-sr-only" aria-live="polite">
+          {announcement}
+        </div>
         {!loaded ? (
           <div className="sites-empty-hint">{t("sites.loading")}</div>
         ) : sites.length === 0 ? (
@@ -172,28 +215,34 @@ export function SitesSidebar({
               <span className="sites-group-label">
                 {group.category ?? t("sites.category.uncategorized")}
               </span>
-              {group.sites.map((site) => (
-                <SiteRow
-                  key={site.id}
-                  site={site}
-                  active={site.id === activeSiteId}
-                  dragging={dragId === site.id}
-                  onSelect={onSelect}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setMenu({ x: event.clientX, y: event.clientY, site });
-                  }}
-                  onDragStart={() => setDragId(site.id)}
-                  onDragEnd={() => setDragId(null)}
-                  onDropOn={(target) => {
-                    if (!dragId || dragId === target.id) return;
-                    onReorder(reorderSites(sites, dragId, target.id));
-                    setDragId(null);
-                  }}
-                />
-              ))}
+              {group.sites.map((site) => {
+                const reorderState = pointerReorder.rowState(site.id);
+                const index = visibleIndexById.get(site.id) ?? 0;
+                return (
+                  <SiteRow
+                    key={site.id}
+                    site={site}
+                    active={site.id === activeSiteId}
+                    dragging={reorderState.dragging}
+                    indicator={reorderState.indicator}
+                    dragStyle={reorderState.style}
+                    onSelect={onSelect}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setMenu({ x: event.clientX, y: event.clientY, site });
+                    }}
+                    onReorderPointerDown={(event) => pointerReorder.begin(event, site.id)}
+                    onMoveUp={index > 0 ? () => moveWithKeyboard(site, -1) : undefined}
+                    onMoveDown={
+                      index < visible.length - 1
+                        ? () => moveWithKeyboard(site, 1)
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </div>
           ))
         )}
@@ -246,74 +295,88 @@ export function SitesSidebar({
   );
 }
 
-// Row is a div role="button" rather than <button> because it nests buttons.
+// The row is structural; its primary action and reorder handle are real buttons.
 function SiteRow({
   site,
   active,
   dragging,
+  indicator,
+  dragStyle,
   onSelect,
   onEdit,
   onDelete,
   onContextMenu,
-  onDragStart,
-  onDragEnd,
-  onDropOn,
+  onReorderPointerDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   site: SiteEntry;
   active: boolean;
   dragging: boolean;
+  indicator: "reorder-indicator-before" | "reorder-indicator-after" | null;
+  dragStyle?: React.CSSProperties;
   onSelect: (site: SiteEntry) => void;
   onEdit: (site: SiteEntry) => void;
   onDelete: (site: SiteEntry) => void;
   onContextMenu: (event: React.MouseEvent) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDropOn: (site: SiteEntry) => void;
+  onReorderPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const { t } = useTranslation();
   const [faviconFailed, setFaviconFailed] = useState(false);
   const favicon = faviconUrlFor(site);
   return (
     <div
-      className={`sites-item${active ? " active" : ""}${dragging ? " dragging" : ""}`}
-      role="button"
-      tabIndex={0}
-      title={site.url}
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
-      onDragEnd={onDragEnd}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        onDropOn(site);
-      }}
+      className={[
+        "sites-item",
+        active ? "active" : "",
+        dragging ? "dragging is-dragging" : "",
+        indicator ?? "",
+      ].filter(Boolean).join(" ")}
+      data-reorder-id={site.id}
+      style={dragStyle}
+      title={`${site.label} - ${site.url}`}
       onContextMenu={onContextMenu}
-      onClick={() => onSelect(site)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect(site);
-        }
-      }}
     >
-      {favicon && !faviconFailed ? (
-        <img
-          className="sites-item-favicon"
-          src={favicon}
-          alt=""
-          loading="lazy"
-          onError={() => setFaviconFailed(true)}
-        />
-      ) : (
-        <Globe size={14} strokeWidth={1.8} />
-      )}
-      <span className="sites-item-label">{site.label}</span>
+      <button
+        type="button"
+        className="sites-item-grip"
+        aria-label={t("sites.reorder")}
+        title={t("sites.reorder")}
+        onPointerDown={onReorderPointerDown}
+      >
+        <GripVertical size={13} strokeWidth={1.8} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="sites-item-primary"
+        aria-current={active ? "page" : undefined}
+        onClick={() => onSelect(site)}
+        onKeyDown={(event) => {
+          if (!event.altKey) return;
+          if (event.key === "ArrowUp" && onMoveUp) {
+            event.preventDefault();
+            onMoveUp();
+          } else if (event.key === "ArrowDown" && onMoveDown) {
+            event.preventDefault();
+            onMoveDown();
+          }
+        }}
+      >
+        {favicon && !faviconFailed ? (
+          <img
+            className="sites-item-favicon"
+            src={favicon}
+            alt=""
+            loading="lazy"
+            onError={() => setFaviconFailed(true)}
+          />
+        ) : (
+          <Globe size={14} strokeWidth={1.8} />
+        )}
+        <span className="sites-item-label">{site.label}</span>
+      </button>
       <span className="sites-item-actions">
         <button
           type="button"

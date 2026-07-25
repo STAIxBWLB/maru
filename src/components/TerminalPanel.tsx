@@ -181,7 +181,10 @@ export function terminalFrameDisposition(
 
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 520;
-const MIN_WIDTH = 320;
+// Right-dock floor: below 390px the header's first row can no longer hold the
+// surface tabs together with the theme control and the window buttons, and
+// they wrap off onto a row of their own. Measured, plus a little headroom.
+const MIN_WIDTH = 400;
 const MIN_MAIN_WIDTH = 360;
 
 export function shouldFocusTerminalInput(state: TerminalFocusState): boolean {

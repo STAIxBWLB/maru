@@ -57,7 +57,7 @@
   font-weight: 600;
   color: inherit;
   outline: none;
-  transition: border-color 120ms;
+  transition: border-color var(--motion-fast);
 }
 
 .maru-diagram-title-input:hover,
@@ -130,7 +130,7 @@
   border-radius: 4px;
   cursor: pointer;
   color: inherit;
-  transition: background 100ms, border-color 100ms;
+  transition: background var(--motion-press), border-color var(--motion-press);
 }
 
 .maru-diagram-toolbar button:hover:not(:disabled) {
@@ -286,7 +286,7 @@
   cursor: col-resize;
   background: transparent;
   position: relative;
-  transition: background 120ms;
+  transition: background var(--motion-fast);
   touch-action: none;
 }
 
@@ -298,7 +298,7 @@
   left: 2px;
   width: 2px;
   background: transparent;
-  transition: background 120ms;
+  transition: background var(--motion-fast);
 }
 
 .maru-diagram-panel-resizer:hover::after,
@@ -1639,7 +1639,7 @@
 
 .maru-diagram-port {
   cursor: crosshair;
-  transition: r 80ms;
+  transition: r var(--motion-press);
 }
 
 .maru-diagram-port:hover {
@@ -1776,4 +1776,26 @@
   text-align: center;
   font-size: 12px;
   color: var(--maru-muted, #6b7280);
+}
+
+/* macOS-neutral chrome. The white editing canvas and semantic node palette
+   remain intentionally independent from these application-surface tokens. */
+.maru-diagram,
+.maru-diagram.is-dark {
+  --maru-bg: var(--bg);
+  --maru-fg: var(--ink);
+  --maru-surface: var(--panel);
+  --maru-border: var(--line);
+  --maru-soft: var(--panel-2);
+  --maru-muted: var(--muted);
+}
+
+.maru-diagram-toolbar-primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--on-accent) !important;
+}
+
+.maru-diagram-toolbar-primary:hover:not(:disabled) {
+  background: var(--button-primary-hover) !important;
 }

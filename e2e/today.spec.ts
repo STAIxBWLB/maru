@@ -568,11 +568,11 @@ test("layout smoke at 1024x720: compact one-column layout, no horizontal scroll"
   if (!brainDump || !capture) return;
   expect(capture.y).toBeGreaterThanOrEqual(brainDump.y + brainDump.height - 1);
 
-  // The persisted default remains 240px while labels still fit.
+  // Compact widths preserve the Today routes as a 56px icon rail.
   const sidebar = await page.locator(".today-sidebar").boundingBox();
   expect(sidebar).not.toBeNull();
   if (!sidebar) return;
-  expect(Math.abs(sidebar.width - 240)).toBeLessThanOrEqual(2);
+  expect(Math.abs(sidebar.width - 56)).toBeLessThanOrEqual(2);
 
   // No horizontal scrollbar, on the document or inside the today pane.
   const docMetrics = await page.evaluate(() => ({

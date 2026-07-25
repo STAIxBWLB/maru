@@ -1097,10 +1097,10 @@ a {
   color: var(--muted);
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 .catalog-pane__category-chips button:hover {
   border-color: var(--line-strong);
@@ -1515,7 +1515,11 @@ a {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 12px;
+  /* The left inset clears the macOS traffic lights, which the overlay title
+     bar draws over the first ~76px. It used to ride on the brand mark; with
+     the brand gone the topbar itself owns it so the first control still
+     starts clear of them. */
+  padding: 0 12px 0 82px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   -webkit-app-region: drag;
@@ -1555,40 +1559,6 @@ a {
   color: var(--muted);
 }
 
-.brand-mark {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  overflow: hidden;
-  background: transparent;
-  margin-left: 70px;
-}
-
-.brand-mark-icon {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.brand-name {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: var(--ink);
-}
-
-.brand-name span {
-  color: var(--faint);
-  font-weight: 500;
-  margin-left: 8px;
-  font-size: 12px;
-}
-
 .workspace-switcher {
   position: relative;
   display: flex;
@@ -1603,10 +1573,10 @@ a {
   font-size: 12.5px;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .workspace-switcher:hover {
@@ -1710,9 +1680,9 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .workspace-menu-item:hover {
@@ -1793,9 +1763,9 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .workspace-menu-action:hover {
@@ -1814,10 +1784,10 @@ a {
   color: var(--faint);
   opacity: 0;
   transition:
-    background 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .workspace-menu-item:hover .workspace-menu-refresh,
@@ -1849,10 +1819,10 @@ a {
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .topbar-pill:hover {
@@ -1965,10 +1935,10 @@ a {
   color: var(--rail-fg);
   cursor: pointer;
   transition:
-    background 120ms ease,
-    box-shadow 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .activity-button:hover {
@@ -2067,9 +2037,9 @@ a {
   border-radius: var(--radius-sm);
   color: var(--faint);
   transition:
-    background 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .sidebar-section-tool:hover,
@@ -2099,7 +2069,7 @@ a {
   font-weight: 650;
   letter-spacing: 0;
   box-shadow: var(--shadow-sm);
-  transition: background 140ms ease, transform 100ms ease;
+  transition: background var(--motion-state) ease, transform var(--motion-press) ease;
 }
 
 .sidebar-cta:hover {
@@ -2130,10 +2100,10 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .shortcut-row:hover {
@@ -2185,10 +2155,10 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .custom-view-row {
@@ -2259,10 +2229,10 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .recent-item:hover {
@@ -2322,6 +2292,19 @@ a {
 .pane-resize-handle:hover::after,
 .pane-resize-handle:active::after {
   background: var(--accent);
+}
+
+.pane-resize-handle[data-orientation="horizontal"] {
+  align-self: auto;
+  width: auto;
+  height: 9px;
+  cursor: row-resize;
+}
+
+.pane-resize-handle[data-orientation="horizontal"]::after {
+  inset: 4px 0 auto;
+  width: auto;
+  height: 1px;
 }
 
 .documents-pane-resize {
@@ -2442,10 +2425,10 @@ a {
   font-size: 11.5px;
   font-weight: 650;
   transition:
-    background 120ms ease,
-    color 120ms ease,
-    transform 100ms ease,
-    box-shadow 120ms ease;
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 .explorer-mode-toggle button:hover,
@@ -2490,10 +2473,10 @@ a {
   font-weight: 650;
   white-space: nowrap;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 @container (max-width: 320px) {
@@ -2651,7 +2634,7 @@ a {
   border-radius: var(--radius);
   background: var(--panel);
   color: var(--faint);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color var(--motion-state) ease, box-shadow var(--motion-state) ease;
 }
 
 .search-box:focus-within {
@@ -2719,9 +2702,9 @@ a {
   font-size: 12px;
   text-align: left;
   transition:
-    background 120ms ease,
-    color 120ms ease,
-  transform 100ms ease;
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+  transform var(--motion-press) ease;
 }
 
 .context-menu button span:first-child {
@@ -2845,10 +2828,10 @@ a {
   overflow: hidden;
   box-sizing: border-box;
   transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    box-shadow 140ms ease,
-    transform 100ms ease;
+    border-color var(--motion-state) ease,
+    background var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .doc-row:hover {
@@ -2999,10 +2982,10 @@ a {
   font-weight: 650;
   cursor: pointer;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .files-list-action-button:hover:not(:disabled) {
@@ -3166,10 +3149,10 @@ a {
   text-align: left;
   border: 1px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .tree-row:hover {
@@ -3205,7 +3188,7 @@ a {
 
 .tree-chevron {
   color: var(--faint);
-  transition: transform 120ms ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .tree-chevron.open {
@@ -3572,9 +3555,9 @@ a {
   background: transparent;
   color: var(--muted);
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .document-tab.active {
@@ -3629,9 +3612,9 @@ a {
   color: var(--faint);
   cursor: pointer;
   transition:
-    background 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .document-tab-close:hover {
@@ -3751,9 +3734,9 @@ a {
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   transition:
-    color 140ms ease,
-    border-color 140ms ease,
-    transform 100ms ease;
+    color var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .tab-trigger:hover {
@@ -4357,7 +4340,7 @@ a {
 button.git-badge {
   cursor: pointer;
   font: inherit;
-  transition: filter 120ms ease;
+  transition: filter var(--motion-fast) ease;
 }
 
 button.git-badge:hover {
@@ -5493,11 +5476,11 @@ button.git-badge:hover {
   font-size: 12px;
   font-weight: 700;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .primary-button {
@@ -5515,10 +5498,10 @@ button.git-badge:hover {
   font-weight: 750;
   box-shadow: var(--shadow-sm);
   transition:
-    background 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .primary-button:hover:not(:disabled) {
@@ -6068,9 +6051,9 @@ button.git-badge:hover {
   border-radius: 8px;
   color: var(--rail-fg);
   transition:
-    background 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .right-pane-tabs button:hover {
@@ -6156,10 +6139,10 @@ button.git-badge:hover {
   font-size: 11.5px;
   font-weight: 650;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .right-tool-actions button.active {
@@ -6373,10 +6356,10 @@ button.git-badge:hover {
   color: var(--muted);
   background: var(--panel);
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .queue-controls button.active {
@@ -6495,10 +6478,10 @@ button.git-badge:hover {
   color: var(--muted);
   text-align: left;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .memo-list-item:hover,
@@ -6551,9 +6534,9 @@ button.git-badge:hover {
   color: var(--ink);
   font-size: 12px;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 .memo-name input:focus,
@@ -6577,8 +6560,8 @@ button.git-badge:hover {
   font-size: 12px;
   line-height: 1.5;
   transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 .memo-autosave-status {
@@ -6633,10 +6616,10 @@ button.git-badge:hover {
   border-radius: 6px;
   color: var(--muted);
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .scratchpad-icon-button:hover {
@@ -6670,8 +6653,8 @@ button.git-badge:hover {
   background: var(--panel);
   color: var(--faint);
   transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 .scratchpad-search:focus-within {
@@ -6822,10 +6805,10 @@ button.git-badge:hover {
   color: var(--muted);
   text-align: left;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .scratchpad-list-item:hover {
@@ -6930,7 +6913,7 @@ button.git-badge:hover {
 }
 
 .scratchpad-skeleton span:nth-child(2) {
-  animation-delay: 120ms;
+  animation-delay: var(--motion-fast);
 }
 
 .scratchpad-skeleton span:nth-child(3) {
@@ -7317,10 +7300,10 @@ button.git-badge:hover {
   cursor: pointer;
   border-left: 2px solid transparent;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .outline-item:hover {
@@ -7459,7 +7442,7 @@ button.git-badge:hover {
   background: transparent;
   color: var(--ink);
   font-size: 12px;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 
 .inspector-input:hover {
@@ -7499,7 +7482,7 @@ button.git-badge:hover {
   border: 1px solid transparent;
   border-radius: 6px;
   min-height: 26px;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease;
 }
 
 .tag-chips:hover {
@@ -7584,11 +7567,11 @@ button.git-badge:hover {
   font-weight: 650;
   letter-spacing: 0;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease,
-    box-shadow 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .button:disabled {
@@ -7666,10 +7649,10 @@ button.git-badge:hover {
   background: transparent;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .icon-button:hover {
@@ -7721,7 +7704,7 @@ button.git-badge:hover {
   outline: 0;
   background: var(--panel);
   color: var(--ink);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color var(--motion-state) ease, box-shadow var(--motion-state) ease;
 }
 
 .text-input {
@@ -7772,10 +7755,10 @@ button.git-badge:hover {
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .chip:hover {
@@ -7809,7 +7792,7 @@ button.git-badge:hover {
   background: var(--overlay);
   backdrop-filter: blur(2px);
   z-index: 80;
-  animation: overlay-in 140ms ease forwards;
+  animation: overlay-in var(--motion-state) ease forwards;
 }
 
 .dialog-content {
@@ -7827,7 +7810,7 @@ button.git-badge:hover {
   transform: translate(-50%, -50%);
   overflow: auto;
   z-index: 90;
-  animation: dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: dialog-in var(--motion-enter) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .dialog-content--wide {
@@ -8382,7 +8365,7 @@ button.git-badge:hover {
   background: var(--panel);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
-  animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: toast-in var(--motion-enter) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .toast.notice {
@@ -8431,7 +8414,7 @@ button.git-badge:hover {
   background: var(--panel);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
-  animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: toast-in var(--motion-enter) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .today-banner p {
@@ -8491,8 +8474,8 @@ button.git-badge:hover {
   inset: 0 4px;
   background: var(--line-soft);
   transition:
-    inset 120ms ease,
-    background-color 120ms ease;
+    inset var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
 }
 
 .today-pane .pane-resize-handle:hover > span,
@@ -8587,9 +8570,9 @@ button.git-badge:hover {
   font-weight: 600;
   cursor: pointer;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .today-nav-item:hover {
@@ -8795,7 +8778,7 @@ button.git-badge:hover {
   font-weight: 650;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 120ms ease;
+  transition: color var(--motion-fast) ease;
 }
 
 .today-step-button:focus-visible {
@@ -8817,9 +8800,9 @@ button.git-badge:hover {
   font-size: 12px;
   font-weight: 700;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .today-step-label {
@@ -9393,7 +9376,7 @@ button.git-badge:hover {
   border-left: 1px solid var(--line-soft);
   background: var(--panel);
   box-shadow: var(--shadow-lg);
-  animation: task-sheet-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: task-sheet-in var(--motion-enter) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes task-sheet-in {
@@ -9729,6 +9712,7 @@ button.git-badge:hover {
 }
 
 .today-top3-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -9736,6 +9720,11 @@ button.git-badge:hover {
   border-radius: var(--radius-md, 8px);
   background: var(--panel);
   padding: 8px 10px;
+  transition:
+    transform var(--motion-enter) var(--ease-out),
+    background var(--motion-state) var(--ease-state),
+    border-color var(--motion-state) var(--ease-state),
+    box-shadow var(--motion-state) var(--ease-state);
 }
 
 .today-top3-row:focus-visible {
@@ -9743,9 +9732,28 @@ button.git-badge:hover {
 }
 
 .today-top3-grip {
+  width: 22px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  margin: -4px 0 -4px -5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   flex: 0 0 auto;
   color: var(--faint);
   cursor: grab;
+  touch-action: none;
+}
+
+.today-top3-grip:hover,
+.today-top3-grip:focus-visible {
+  background: var(--panel-3);
+  color: var(--ink);
+}
+
+.today-top3-grip:active {
+  cursor: grabbing;
 }
 
 .today-top3-rank {
@@ -10501,7 +10509,7 @@ button.git-badge:hover {
   display: grid;
   place-items: center;
   padding: 24px;
-  animation: overlay-in 120ms ease forwards;
+  animation: overlay-in var(--motion-fast) ease forwards;
 }
 
 .cmdk-shell {
@@ -10516,7 +10524,7 @@ button.git-badge:hover {
     0 24px 80px -40px rgba(33, 30, 25, 0.46),
     0 2px 12px -8px rgba(33, 30, 25, 0.3);
   overflow: hidden;
-  animation: cmdk-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: cmdk-in var(--motion-enter) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes cmdk-in {
@@ -10537,7 +10545,7 @@ button.git-badge:hover {
   height: 50px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line-soft);
-  transition: box-shadow 120ms ease;
+  transition: box-shadow var(--motion-fast) ease;
 }
 
 .cmdk-input:focus-within {
@@ -10597,10 +10605,10 @@ button.git-badge:hover {
   cursor: pointer;
   text-align: left;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 100ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-press) ease;
 }
 
 .cmdk-item:active {
@@ -11066,9 +11074,136 @@ button.git-badge:hover {
   background: var(--terminal-bg-raised);
 }
 
+/* Docked right the panel's long axis is vertical, so a single header row has
+   to fit tabs + launchers + theme select + three icon buttons into ~200px.
+   It cannot: the row overflowed the panel by 41px (icons clipped past the
+   edge) and flex squeezed .tool-panel-tabs to 0 width, hiding the tab strip
+   outright. Stack into rows instead and let the header grow downward. */
+.terminal-panel.dock-right:not(.collapsed) .terminal-header {
+  height: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 8px;
+  row-gap: 6px;
+}
+
+/* The panel is resized independently of the viewport, so the shedding rules
+   below key off its width, not a media query. The container is the panel and
+   not the header because @container only ever styles descendants of the
+   container — a query cannot restyle the container element itself. */
+.terminal-panel.dock-right:not(.collapsed) {
+  container-type: inline-size;
+  container-name: toolpanel;
+}
+
+/* Labelled launchers need ~200px and wrap to two rows before that. The icons
+   carry the meaning; each button keeps its aria-label and title, so dropping
+   the visible text costs no accessible name. */
+@container toolpanel (max-width: 358px) {
+  .terminal-panel.dock-right .terminal-launchers button span {
+    display: none;
+  }
+
+  .terminal-panel.dock-right .terminal-launchers button {
+    padding: 0 7px;
+  }
+}
+
+/* Narrower still: the theme select sheds its text so it can share a row with
+   the window buttons instead of claiming one of its own. The palette icon
+   stays, and the select keeps its arrow and remains directly clickable.
+   Scoped through .terminal-panel because @container adds no specificity and
+   the base `.tool-panel-theme select` rule is declared later in this file. */
+@container toolpanel (max-width: 258px) {
+  /* Tightening the column gap and the select together is what lets the theme
+     control and all three window buttons share one row instead of spilling a
+     fifth. The select still opens a native dropdown with the full names. */
+  .terminal-panel.dock-right:not(.collapsed) .terminal-header {
+    column-gap: 6px;
+  }
+
+  .terminal-panel.dock-right .tool-panel-theme select {
+    max-width: 40px;
+    padding-right: 16px;
+  }
+
+  /* An absolute path truncated into a ~160px column reads as noise, and its
+     long max-content width is what forced .terminal-header-right onto a row
+     of its own. The context chip beside it already names the active item. */
+  .terminal-panel.dock-right .terminal-cwd {
+    display: none;
+  }
+}
+
+/* Row 1 keeps the surface tabs together with the theme control and the window
+   buttons — the same cluster the bottom dock carries on its single row. Row 2
+   takes the launchers and the context chip. `order` does the regrouping; DOM
+   order puts the launchers between the tabs and the theme control. */
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-tabs {
+  order: 0;
+  /* Not `flex: 1 0 100%` any more, but it must still refuse to shrink — a
+     shrinkable tab strip is what collapsed to 0 width and vanished. */
+  flex: 0 0 auto;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-theme {
+  order: 1;
+  margin-left: auto;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .terminal-icon-button {
+  order: 2;
+}
+
+/* Flexbox has no "break before this item", so a zero-height full-basis item
+   ordered between the two clusters does the job. Giving the launchers a 100%
+   basis instead would break the line but also eat the whole row, pushing the
+   context chip onto a third one. */
+.terminal-panel.dock-right:not(.collapsed) .terminal-header::before {
+  content: "";
+  order: 3;
+  flex: 1 0 100%;
+  height: 0;
+  margin: 0;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .terminal-launchers {
+  order: 4;
+  flex-wrap: wrap;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .terminal-header-right {
+  order: 5;
+  min-width: 0;
+  margin-left: 0;
+}
+
+/* A flex:1 spacer fights the wrap; the graph surface simply has no row 2. */
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-spacer {
+  display: none;
+}
+
+/* Collapsed to a 40px rail the header is no longer a strip across the top —
+   it is the whole visible panel. Stack it so the surface tabs and the window
+   buttons run down the rail instead of hiding everything but one icon. */
 .terminal-panel.dock-right.collapsed .terminal-header {
-  justify-content: center;
-  padding: 0 6px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: auto;
+  padding: 6px 0;
+  gap: 6px;
+  /* The workspace below is [hidden] while collapsed, so a bottom rule would
+     read as a stray line across an empty rail. */
+  border-bottom: 0;
+}
+
+.terminal-panel.dock-right.collapsed .tool-panel-tabs {
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
 }
 
 .tool-panel-tabs {
@@ -11088,6 +11223,11 @@ button.git-badge:hover {
   color: var(--terminal-muted);
   font-size: 12px;
   font-weight: 650;
+  /* Korean has no spaces inside a word, so the default CJK break rule splits
+     "터미널" into "터미/널" as soon as the header runs short on room. These
+     labels are fixed-width chrome and must never wrap or shrink. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .tool-panel-tab::after {
@@ -11124,14 +11264,15 @@ button.git-badge:hover {
   padding: 0;
 }
 
+/* Labels, launchers, the context chip and the theme select have no room in a
+   40px rail. The surface tabs and the window buttons stay — they are the
+   controls you need to get the panel back. */
 .terminal-panel.dock-right.collapsed .terminal-title span,
 .terminal-panel.dock-right.collapsed .tool-panel-tab span,
-.terminal-panel.dock-right.collapsed .tool-panel-tab:not(.active),
 .terminal-panel.dock-right.collapsed .terminal-launchers,
 .terminal-panel.dock-right.collapsed .terminal-header-right,
 .terminal-panel.dock-right.collapsed .tool-panel-spacer,
-.terminal-panel.dock-right.collapsed .tool-panel-theme,
-.terminal-panel.dock-right.collapsed .terminal-icon-button {
+.terminal-panel.dock-right.collapsed .tool-panel-theme {
   display: none;
 }
 
@@ -11849,7 +11990,7 @@ button.git-badge:hover {
   background: var(--panel);
   color: var(--ink);
   outline: 0;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color var(--motion-state) ease, box-shadow var(--motion-state) ease;
 }
 
 .skills-system-detail input,
@@ -12053,9 +12194,9 @@ button.git-badge:hover {
 .skill-card {
   gap: 8px;
   transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    box-shadow 140ms ease;
+    border-color var(--motion-state) ease,
+    background var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .skill-card:hover,
@@ -12249,9 +12390,9 @@ button.git-badge:hover {
   padding: 2px 6px 2px 4px;
   text-align: left;
   transition:
-    background 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .skills-quick-group-head:hover {
@@ -12265,7 +12406,7 @@ button.git-badge:hover {
 
 .skills-quick-group-head svg {
   transform: rotate(90deg);
-  transition: transform 140ms ease;
+  transition: transform var(--motion-state) ease;
 }
 
 .skills-quick-group-head.collapsed svg {
@@ -12322,9 +12463,9 @@ button.git-badge:hover {
   padding: 8px 7px 8px 9px;
   text-align: left;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .skills-quick-row:hover {
@@ -12400,9 +12541,9 @@ button.git-badge:hover {
   background: var(--panel);
   color: var(--muted);
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease;
 }
 
 .skills-quick-row:hover .skills-quick-run {
@@ -13069,7 +13210,7 @@ button.git-badge:hover {
   }
 }
 
-@media (max-width: 880px) {
+@media (max-width: 759px) {
   body {
     overflow: auto;
   }
@@ -13079,7 +13220,6 @@ button.git-badge:hover {
     overflow: hidden;
   }
 
-  .brand-name span,
   .workspace-switcher .ws-status {
     display: none;
   }
@@ -13428,11 +13568,11 @@ button.git-badge:hover {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 .system-tab:hover {
   color: var(--ink);
@@ -13667,9 +13807,9 @@ button.git-badge:hover {
   outline: 0;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--panel) 80%, transparent);
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .settings-form input:focus,
@@ -14164,7 +14304,7 @@ button.git-badge:hover {
   color: var(--warn);
 }
 
-@media (max-width: 880px) {
+@media (max-width: 759px) {
   .app-shell.terminal-dock-right {
     grid-template-rows: 44px auto auto auto auto;
     grid-template-columns: 1fr;
@@ -14434,9 +14574,9 @@ button.git-badge:hover {
   font-size: 12.5px;
   font-weight: 700;
   transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    background-color 140ms ease;
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    background-color var(--motion-state) ease;
 }
 
 .inbox-source-select:hover {
@@ -14548,11 +14688,11 @@ button.git-badge:hover {
   color: var(--ink);
   text-align: left;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .meetings-sidebar-item {
@@ -14688,10 +14828,10 @@ button.git-badge:hover {
   padding: 0 9px;
   font-weight: 650;
   transition:
-    background 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .segmented-control button.active {
@@ -14722,8 +14862,8 @@ button.git-badge:hover {
   padding: 0 10px;
   outline: 0;
   transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .meetings-select:focus {
@@ -14841,11 +14981,11 @@ button.git-badge:hover {
   font-size: 12px;
   font-weight: 650;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 
 .meetings-calendar .rbc-toolbar button:hover {
@@ -15113,9 +15253,9 @@ button.git-badge:hover {
   outline: 0;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--panel) 80%, transparent);
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .meetings-metadata-panel input::placeholder {
@@ -17508,10 +17648,10 @@ button.git-badge:hover {
   font-size: 11px;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 100ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    color var(--motion-state) ease,
+    transform var(--motion-press) ease;
 }
 .inbox-decision-bulk-actions button:active,
 .inbox-decision-actions button:active {
@@ -17738,9 +17878,9 @@ button.git-badge:hover {
   font-family: inherit;
   line-height: 1.5;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease,
+    box-shadow var(--motion-state) ease;
 }
 
 .meetings-textarea:focus {
@@ -17849,7 +17989,7 @@ button.git-badge:hover {
   right: 22px;
   height: 1px;
   background: transparent;
-  transition: background 140ms ease;
+  transition: background var(--motion-state) ease;
 }
 
 .meetings-progress-resize-handle:hover::after,
@@ -18446,7 +18586,7 @@ button.git-badge:hover {
   text-align: left;
   cursor: pointer;
   border-radius: 6px;
-  transition: background 120ms ease;
+  transition: background var(--motion-fast) ease;
 }
 
 .cal-sidebar-row:hover,
@@ -19809,8 +19949,8 @@ button.git-badge:hover {
   font-size: 12px;
   cursor: pointer;
   transition:
-    background 140ms ease,
-    border-color 140ms ease;
+    background var(--motion-state) ease,
+    border-color var(--motion-state) ease;
 }
 .share-outbox-actions button:hover:not(:disabled),
 .share-outbox-apply:hover:not(:disabled) {
@@ -20063,6 +20203,7 @@ button.git-badge:hover {
 }
 
 .sites-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -20074,6 +20215,11 @@ button.git-badge:hover {
   padding: 0 8px;
   text-align: left;
   font-weight: 650;
+  transition:
+    transform var(--motion-enter) var(--ease-out),
+    background var(--motion-state) var(--ease-state),
+    border-color var(--motion-state) var(--ease-state),
+    box-shadow var(--motion-state) var(--ease-state);
 }
 
 .sites-item:hover {
@@ -20091,6 +20237,45 @@ button.git-badge:hover {
   border-radius: 4px;
   flex: none;
   object-fit: contain;
+}
+
+.sites-item-grip {
+  width: 18px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-left: -5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.sites-item-grip:hover,
+.sites-item-grip:focus-visible {
+  background: var(--panel-3);
+  color: var(--ink);
+}
+
+.sites-item-grip:active {
+  cursor: grabbing;
+}
+
+.sites-item-primary {
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
 }
 
 .sites-item-label {
@@ -20247,7 +20432,7 @@ button.git-badge:hover {
 }
 
 .sites-item.dragging {
-  opacity: 0.5;
+  opacity: 0.94;
 }
 
 /* Placeholder spacer only — the native child webview is positioned over this
@@ -20651,7 +20836,7 @@ button.git-badge:hover {
   position: absolute;
   inset: 0 2px;
   background: var(--line-soft);
-  transition: background 120ms ease;
+  transition: background var(--motion-fast) ease;
 }
 
 .files-pane-resizer:hover::after {
@@ -21261,7 +21446,7 @@ button.git-badge:hover {
   }
 }
 
-@media (max-width: 880px) {
+@media (max-width: 759px) {
   body {
     overflow: hidden;
   }
@@ -21344,5 +21529,715 @@ button.git-badge:hover {
   .files-action-strip button svg {
     width: 14px;
     height: 14px;
+  }
+}
+
+/* ========================================================================
+   macOS-neutral design foundation bridge
+   ======================================================================== */
+
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --bg: var(--foundation-bg);
+  --bg-tint: var(--foundation-bg-tint);
+  --panel: var(--foundation-panel);
+  --panel-2: var(--foundation-panel-2);
+  --panel-3: var(--foundation-panel-3);
+  --panel-raised: var(--foundation-panel-raised);
+  --line: var(--foundation-line);
+  --line-strong: var(--foundation-line-strong);
+  --line-soft: var(--foundation-line-soft);
+  --ink: var(--foundation-ink);
+  --ink-2: var(--foundation-ink-2);
+  --muted: var(--foundation-muted);
+  --faint: var(--foundation-faint);
+  --accent: var(--foundation-accent);
+  --accent-soft: var(--foundation-accent-soft);
+  --accent-tint: var(--foundation-accent-tint);
+  --active-surface: var(--foundation-active);
+  --focus-ring: var(--foundation-focus-ring);
+  --overlay: var(--foundation-overlay);
+  --on-accent: var(--foundation-on-accent);
+  --rail-bg: var(--foundation-rail-bg);
+  --rail-fg: var(--foundation-rail-fg);
+  --rail-fg-strong: var(--foundation-rail-fg-strong);
+  --rail-hover: var(--foundation-rail-hover);
+  --rail-active: var(--foundation-rail-active);
+  --rail-indicator: var(--foundation-rail-indicator);
+  --button-primary-hover: var(--foundation-button-hover);
+  --shadow-sm: var(--foundation-shadow-sm);
+  --shadow: var(--foundation-shadow);
+  --shadow-lg: var(--foundation-shadow-lg);
+  /* Compatibility aliases used by binary viewers and imported subsystems. */
+  --text: var(--ink);
+  --rule: var(--line);
+}
+
+.app-shell {
+  --activity-col: var(--shell-activity-width);
+}
+
+.topbar {
+  gap: var(--space-3);
+  border-bottom-color: var(--line-soft);
+  background: var(--panel);
+}
+
+.activity-rail {
+  gap: var(--space-2);
+  padding: 8px 6px;
+  background: var(--rail-bg);
+}
+
+.activity-button {
+  border-radius: var(--radius-sm);
+  transition:
+    background var(--motion-fast) var(--ease-state),
+    box-shadow var(--motion-fast) var(--ease-state),
+    color var(--motion-fast) var(--ease-state),
+    transform var(--motion-press) var(--ease-out);
+}
+
+.activity-button.active {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.activity-button.active::before {
+  left: -6px;
+  width: 3px;
+  height: 18px;
+}
+
+.mode-header,
+.inbox-header,
+.comms-header,
+.tasks-header,
+.meetings-header,
+.meetings-actions-bar,
+.catalog-pane__topbar,
+.studio-header {
+  min-height: 58px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+  padding: 10px 16px;
+}
+
+.mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.mode-header-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mode-header-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-title-size);
+  font-weight: 720;
+  letter-spacing: -0.012em;
+  line-height: var(--type-title-leading);
+}
+
+.mode-header-eyebrow,
+.mode-header-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-leading);
+}
+
+.mode-header-eyebrow {
+  color: var(--faint);
+  font-size: var(--type-meta-size);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mode-header-actions,
+.mode-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* `.terminal-header` deliberately stays out of this group. The tool panel is a
+   themed content surface — it carries its own theme switcher and its body is
+   painted from --terminal-*, not the app palette. Giving the header an app
+   background while its labels kept --terminal-muted put #9d9d9d on #f9f9fb
+   (~2.4:1), and left a white chip stranded on the black rail when docked right
+   and collapsed. Header and body must come from the same token family. */
+.mode-toolbar,
+.files-toolbar,
+.tasks-toolbar,
+.meetings-toolbar,
+.sites-toolbar {
+  border-bottom-color: var(--line-soft);
+  background: var(--panel-2);
+}
+
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-3);
+}
+
+.segmented-control button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--type-label-size);
+  font-weight: 620;
+  transition:
+    background var(--motion-fast) var(--ease-state),
+    color var(--motion-fast) var(--ease-state),
+    box-shadow var(--motion-fast) var(--ease-state),
+    transform var(--motion-press) var(--ease-out);
+}
+
+.segmented-control button:hover {
+  color: var(--ink);
+}
+
+.segmented-control button.active,
+.segmented-control button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.segmented-control button:active {
+  transform: scale(0.97);
+}
+
+.compact-select {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0 28px 0 9px;
+  font-size: var(--type-label-size);
+}
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 34px;
+  margin: 10px 16px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--type-label-size);
+}
+
+.status-banner-info {
+  border-color: color-mix(in srgb, var(--info) 36%, var(--line));
+  background: color-mix(in srgb, var(--info) 9%, var(--panel));
+  color: var(--info);
+}
+
+.status-banner-warning {
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--line));
+  background: color-mix(in srgb, var(--warn) 9%, var(--panel));
+  color: var(--warn);
+}
+
+.status-banner-danger {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--line));
+  background: color-mix(in srgb, var(--danger) 9%, var(--panel));
+  color: var(--danger);
+}
+
+.status-banner-success {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.empty-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--space-2);
+  min-height: 104px;
+  padding: var(--space-6);
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+.empty-state strong {
+  color: var(--ink);
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+}
+
+.empty-state > span:not(.empty-state-icon) {
+  max-width: 48ch;
+  font-size: var(--type-label-size);
+  line-height: var(--type-body-leading);
+}
+
+.button,
+.icon-button,
+.topbar-pill,
+.workspace-switcher,
+.chip {
+  transition:
+    background var(--motion-state) var(--ease-state),
+    border-color var(--motion-state) var(--ease-state),
+    color var(--motion-state) var(--ease-state),
+    transform var(--motion-press) var(--ease-out),
+    box-shadow var(--motion-state) var(--ease-state);
+}
+
+.icon-button-sm {
+  width: 26px;
+  height: 26px;
+}
+
+.icon-button-md {
+  width: 30px;
+  height: 30px;
+}
+
+.button:active:not(:disabled),
+.icon-button:active:not(:disabled),
+.topbar-pill:active,
+.activity-button:active {
+  transform: scale(0.97);
+}
+
+.dialog-overlay,
+.cmdk-overlay {
+  background: var(--overlay);
+  backdrop-filter: blur(12px) saturate(140%);
+  animation: overlay-in var(--motion-state) var(--ease-out) forwards;
+}
+
+.dialog-content,
+.cmdk-shell {
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: var(--foundation-material-modal);
+  backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+  animation: dialog-in var(--motion-enter) var(--ease-out) forwards;
+}
+
+.dialog-surface {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 90;
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+  background: var(--foundation-material-modal);
+  backdrop-filter: blur(18px) saturate(150%);
+  animation: dialog-in var(--motion-enter) var(--ease-out) forwards;
+}
+
+.dialog-surface-opaque {
+  background: var(--panel);
+  backdrop-filter: none;
+}
+
+.today-preflight-backdrop {
+  z-index: 120;
+}
+
+.today-preflight-dialog {
+  z-index: 121;
+}
+
+.compose-dialog.dialog-surface,
+.catalog-drilldown.dialog-surface {
+  overflow: hidden;
+}
+
+.workspace-menu,
+.context-menu {
+  background: var(--foundation-material-popover);
+  backdrop-filter: blur(16px) saturate(150%);
+}
+
+.task-sheet {
+  background: var(--foundation-material-sheet);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+.dialog-overlay[data-state="closed"] {
+  animation: overlay-out var(--motion-exit) var(--ease-in) forwards;
+}
+
+.dialog-content[data-state="closed"] {
+  animation: dialog-out var(--motion-exit) var(--ease-in) forwards;
+}
+
+.dialog-surface[data-state="closed"] {
+  animation: dialog-out var(--motion-exit) var(--ease-in) forwards;
+}
+
+.task-sheet[data-state="closed"] {
+  animation: task-sheet-out var(--motion-exit) var(--ease-in) forwards;
+}
+
+[data-reorder-id].is-dragging {
+  z-index: 24;
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  background: var(--panel-raised);
+  box-shadow: var(--shadow);
+  transition: none;
+  will-change: transform;
+}
+
+[data-reorder-id].reorder-indicator-before::before,
+[data-reorder-id].reorder-indicator-after::after {
+  content: "";
+  position: absolute;
+  z-index: 26;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+[data-reorder-id].reorder-indicator-before::before {
+  top: -4px;
+}
+
+[data-reorder-id].reorder-indicator-after::after {
+  bottom: -4px;
+}
+
+@keyframes overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+}
+
+@keyframes task-sheet-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.pane-resize-handle:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="menuitem"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.catalog-pane__category-chips {
+  border: 1px solid var(--line);
+  background: var(--panel-3);
+}
+
+.catalog-pane__topbar.mode-header {
+  flex-direction: row;
+}
+
+.catalog-pane__category-chips button {
+  border: 0;
+}
+
+.catalog-pane__columns {
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.catalog-column {
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+}
+
+.studio-header.mode-header {
+  padding: 10px 18px;
+}
+
+.today-panel:has(.today-panel-empty) {
+  min-height: 104px;
+}
+
+/* Neutral Diagram chrome; the white canvas and semantic node colors remain
+   intentionally independent. */
+.maru-diagram {
+  --maru-bg: var(--bg);
+  --maru-fg: var(--ink);
+  --maru-surface: var(--panel);
+  --maru-border: var(--line);
+  --maru-soft: var(--panel-2);
+  --maru-muted: var(--muted);
+}
+
+.maru-diagram.is-dark {
+  --maru-bg: var(--bg);
+  --maru-fg: var(--ink);
+  --maru-surface: var(--panel);
+  --maru-border: var(--line);
+  --maru-soft: var(--panel-2);
+  --maru-muted: var(--muted);
+}
+
+.maru-diagram-toolbar-primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--on-accent) !important;
+}
+
+.maru-diagram-toolbar-primary:hover:not(:disabled) {
+  background: var(--button-primary-hover) !important;
+}
+
+@container todaypane (max-width: 1099px) {
+  .today-sidebar {
+    width: var(--shell-sidebar-compact);
+    padding: 14px 8px;
+  }
+
+  .today-sidebar .today-sidebar-header,
+  .today-sidebar .today-sidebar-label,
+  .today-sidebar .today-nav-label,
+  .today-sidebar .today-nav-meta,
+  .today-sidebar .today-nav-count {
+    display: none;
+  }
+
+  .today-sidebar .today-nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .today-sidebar + .pane-resize-handle {
+    visibility: hidden;
+  }
+}
+
+@media (min-width: 760px) and (max-width: 1099px) {
+  .sites-pane {
+    grid-template-columns: var(--shell-sidebar-compact) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .sites-sidebar {
+    max-height: none;
+    padding: 8px;
+    border-right: 1px solid var(--line-soft);
+    border-bottom: 0;
+  }
+
+  .sites-sidebar-header {
+    justify-content: center;
+  }
+
+  .sites-sidebar-header h2,
+  .sites-sidebar-actions .icon-button:first-child,
+  .sites-search input,
+  .sites-sidebar > .field,
+  .sites-group-label,
+  .sites-item-label,
+  .sites-item-actions,
+  .sites-item-grip {
+    display: none;
+  }
+
+  .sites-search,
+  .sites-item {
+    width: 38px;
+    min-width: 38px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sites-search {
+    min-height: 34px;
+  }
+}
+
+@media (max-width: 759px) {
+  .app-shell.diagram-mode,
+  .app-shell.graph-mode,
+  .app-shell.sites-mode,
+  .app-shell.terminal-dock-right.diagram-mode,
+  .app-shell.terminal-dock-right.graph-mode,
+  .app-shell.terminal-dock-right.sites-mode {
+    height: 100dvh;
+    grid-template-rows: 44px 42px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .app-shell.diagram-mode,
+  .app-shell.terminal-dock-right.diagram-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "diagram"
+      "terminal";
+  }
+
+  .app-shell.graph-mode,
+  .app-shell.terminal-dock-right.graph-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "graph"
+      "terminal";
+  }
+
+  .app-shell.sites-mode,
+  .app-shell.terminal-dock-right.sites-mode {
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "sites"
+      "terminal";
+  }
+
+  .app-shell.terminal-maximized.diagram-mode,
+  .app-shell.terminal-maximized.graph-mode,
+  .app-shell.terminal-maximized.sites-mode {
+    grid-template-rows: 44px 42px minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "activity"
+      "terminal";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-press: 0.01ms;
+    --motion-fast: 0.01ms;
+    --motion-state: 0.01ms;
+    --motion-enter: 0.01ms;
+    --motion-exit: 0.01ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* Blur is killed universally rather than per-surface: an enumerated list
+     silently misses every translucent surface added later, and already missed
+     the graph chrome and three panel footers. */
+  *,
+  *::before,
+  *::after {
+    backdrop-filter: none !important;
+  }
+
+  .dialog-content,
+  .cmdk-shell,
+  .dialog-surface,
+  .task-sheet,
+  .workspace-menu,
+  .context-menu {
+    background: var(--panel) !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root,
+  :root[data-theme="light"],
+  :root[data-theme="dark"] {
+    --line: var(--line-strong);
+    --line-soft: var(--line);
+    --focus-ring: var(--accent);
+  }
+
+  .dialog-content,
+  .cmdk-shell,
+  .dialog-surface,
+  .task-sheet,
+  .workspace-menu,
+  .context-menu {
+    background: var(--panel);
+    border-color: var(--ink);
+  }
+}
+
+@media (forced-colors: active) {
+  *,
+  *::before,
+  *::after {
+    forced-color-adjust: auto;
+  }
+
+  .activity-button.active::before,
+  .cal-day-number-today,
+  .terminal-status-dot {
+    background: Highlight;
+  }
+
+  .activity-button.active,
+  .segmented-control button.active,
+  .sites-item.active,
+  .today-nav-item.active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

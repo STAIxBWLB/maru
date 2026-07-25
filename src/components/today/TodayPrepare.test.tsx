@@ -354,7 +354,7 @@ describe("TodayPrepare", () => {
     await act(async () => {
       finish.click();
     });
-    const dialog = container.querySelector<HTMLElement>(".today-preflight-dialog")!;
+    const dialog = document.body.querySelector<HTMLElement>(".today-preflight-dialog")!;
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain(
       translate("ko", "today.preflight.title"),

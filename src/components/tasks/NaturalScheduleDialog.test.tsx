@@ -53,7 +53,7 @@ describe("NaturalScheduleDialog", () => {
       );
     });
 
-    const textarea = container.querySelector("textarea")!;
+    const textarea = document.body.querySelector("textarea")!;
     await act(async () => {
       setTextareaValue(textarea, "내일 회의");
       await vi.advanceTimersByTimeAsync(300);
@@ -64,7 +64,7 @@ describe("NaturalScheduleDialog", () => {
     await act(async () => {
       setTextareaValue(textarea, "다음 주 금요일 회의");
     });
-    const submit = Array.from(container.querySelectorAll("button")).find(
+    const submit = Array.from(document.body.querySelectorAll("button")).find(
       (button) => button.textContent === translate("ko", "tasks.natural.submit"),
     )!;
     await act(async () => {

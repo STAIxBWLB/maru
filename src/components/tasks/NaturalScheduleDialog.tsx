@@ -3,6 +3,11 @@ import { X } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import { parseKoreanDate } from "../../lib/koreanDate";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 interface NaturalScheduleDialogProps {
   open: boolean;
@@ -46,8 +51,6 @@ export function NaturalScheduleDialog({
     };
   }, [rawText]);
 
-  if (!open) return null;
-
   const submit = async () => {
     const trimmed = rawText.trim();
     if (!trimmed) {
@@ -80,27 +83,28 @@ export function NaturalScheduleDialog({
     : null;
 
   return (
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
+      className="task-new-dialog task-natural-dialog"
     >
-      <section className="task-new-dialog task-natural-dialog" role="dialog" aria-modal="true">
         <header>
           <div>
-            <h2>{t("tasks.natural.title")}</h2>
+            <DialogSurfaceTitle>{t("tasks.natural.title")}</DialogSurfaceTitle>
             <p>{t("tasks.natural.description")}</p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            title={t("app.close")}
-            aria-label={t("app.close")}
-          >
-            <X size={16} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              title={t("app.close")}
+              aria-label={t("app.close")}
+            >
+              <X size={16} />
+            </button>
+          </DialogSurfaceClose>
         </header>
         {error ? <div className="inbox-error">{error}</div> : null}
         <label className="field">
@@ -125,7 +129,6 @@ export function NaturalScheduleDialog({
             {t("tasks.natural.submit")}
           </Button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

@@ -211,7 +211,7 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   }
   expect(compact.stacked).toBe(true);
   expect(compact.docScrollWidth).toBeLessThanOrEqual(compact.docClientWidth);
-  // The persisted 240px default remains labeled here (icon-only kicks in
-  // at a ≤959px Today container).
-  expect(Math.abs(compact.sidebarWidth - 240)).toBeLessThanOrEqual(2);
+  // Compact widths preserve the navigation as an icon rail so the working
+  // canvas keeps priority without introducing horizontal scroll.
+  expect(Math.abs(compact.sidebarWidth - 56)).toBeLessThanOrEqual(2);
 });

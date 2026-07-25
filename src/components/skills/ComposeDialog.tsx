@@ -31,6 +31,11 @@ import {
 import { chooseFiles } from "../../lib/api";
 import { appendSourceBlock } from "../../lib/meetingNotesPrompt";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 type ComposeMode = "terminal" | "background" | "structured";
 const EMPTY_RUNTIME_COMMANDS: Partial<Record<SkillDispatchRuntime, string | null>> = {};
@@ -228,8 +233,6 @@ export function ComposeDialog({
     };
   }, [effectiveContext, open, effectivePrompt, seed?.cwd, selectedSkill, skillValid]);
 
-  if (!open) return null;
-
   async function run() {
     if (!selectedSkill || !effectivePrompt.trim() || !runtimeReady) return;
     setBusy(true);
@@ -328,30 +331,32 @@ export function ComposeDialog({
   }
 
   return (
-    <div
-      className="compose-overlay"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
+      className="compose-dialog"
+      overlayClassName="compose-overlay"
     >
-      <section className="compose-dialog" role="dialog" aria-modal="true">
         <header className="compose-header">
           <div>
-            <h2>{t("skills.compose.title")}</h2>
+            <DialogSurfaceTitle>{t("skills.compose.title")}</DialogSurfaceTitle>
             <p>
               {effectiveContext.length > 0
                 ? t("skills.compose.selectedCount", { count: effectiveContext.length })
                 : t("skills.compose.noSelection")}
             </p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            aria-label={t("dialog.close")}
-          >
-            <X size={14} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={t("dialog.close")}
+            >
+              <X size={14} />
+            </button>
+          </DialogSurfaceClose>
         </header>
 
         <div className="compose-body">
@@ -592,8 +597,7 @@ export function ComposeDialog({
             {busy ? t("skills.compose.running") : t("skills.compose.run")}
           </Button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }
 

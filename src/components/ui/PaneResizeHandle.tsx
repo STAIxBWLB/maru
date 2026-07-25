@@ -6,6 +6,7 @@ interface PaneResizeHandleProps {
   min: number;
   max: number;
   defaultValue: number;
+  orientation?: "vertical" | "horizontal";
   direction?: 1 | -1;
   disabled?: boolean;
   onChange: (value: number) => void;
@@ -22,6 +23,7 @@ export function PaneResizeHandle({
   min,
   max,
   defaultValue,
+  orientation = "vertical",
   direction = 1,
   disabled = false,
   onChange,
@@ -43,13 +45,14 @@ export function PaneResizeHandle({
     event.stopPropagation();
     const handle = event.currentTarget;
     const pointerId = event.pointerId;
-    const startX = event.clientX;
+    const startPosition = orientation === "vertical" ? event.clientX : event.clientY;
     const startValue = value;
     handle.setPointerCapture(pointerId);
 
     const onMove = (move: globalThis.PointerEvent) => {
       if (move.pointerId !== pointerId) return;
-      apply(startValue + direction * (move.clientX - startX), false);
+      const position = orientation === "vertical" ? move.clientX : move.clientY;
+      apply(startValue + direction * (position - startPosition), false);
     };
     const cleanup = () => {
       handle.removeEventListener("pointermove", onMove);
@@ -78,8 +81,18 @@ export function PaneResizeHandle({
     if (disabled) return;
     const step = event.shiftKey ? 48 : 12;
     let next: number | null = null;
-    if (event.key === "ArrowLeft") next = value - direction * step;
-    if (event.key === "ArrowRight") next = value + direction * step;
+    if (orientation === "vertical" && event.key === "ArrowLeft") {
+      next = value - direction * step;
+    }
+    if (orientation === "vertical" && event.key === "ArrowRight") {
+      next = value + direction * step;
+    }
+    if (orientation === "horizontal" && event.key === "ArrowUp") {
+      next = value - direction * step;
+    }
+    if (orientation === "horizontal" && event.key === "ArrowDown") {
+      next = value + direction * step;
+    }
     if (event.key === "Home") next = min;
     if (event.key === "End") next = max;
     if (next === null) return;
@@ -90,9 +103,10 @@ export function PaneResizeHandle({
   return (
     <div
       className="pane-resize-handle"
+      data-orientation={orientation}
       role="separator"
       aria-label={label}
-      aria-orientation="vertical"
+      aria-orientation={orientation}
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={value}

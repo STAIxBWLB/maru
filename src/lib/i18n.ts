@@ -18,8 +18,6 @@ export const LOCALES: Locale[] = ["ko", "en"];
 const STORAGE_KEY = "maru:locale:v1";
 
 const ko: Record<string, string> = {
-  "app.title": "Maru",
-  "app.subtitle.work": "AI workspace",
   "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
@@ -1680,6 +1678,7 @@ const ko: Record<string, string> = {
   "today.top3.moved": "{title}, {rank}번째로 이동",
   "today.top3.moveUp": "위로 이동",
   "today.top3.moveDown": "아래로 이동",
+  "today.top3.reorder": "드래그하여 순서 변경",
   "today.top3.editOutcome": "결과 편집",
   "today.top3.outcomePlaceholder": "오늘 만들 결과",
   "today.top3.pickTask": "태스크 선택",
@@ -1986,6 +1985,8 @@ const ko: Record<string, string> = {
   "cmdk.action.skillCompose": "스킬 적용",
   "sites.title": "사이트",
   "sites.sidebar.title": "등록된 사이트",
+  "sites.reorder": "드래그하여 사이트 순서 변경",
+  "sites.moved": "{title}, {rank}번째로 이동",
   "sites.search.placeholder": "사이트 검색",
   "sites.category.all": "전체 카테고리",
   "sites.category.uncategorized": "미분류",
@@ -3165,8 +3166,6 @@ const ko: Record<string, string> = {
 };
 
 const en: Record<string, string> = {
-  "app.title": "Maru",
-  "app.subtitle.work": "AI workspace",
   "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
@@ -4827,6 +4826,7 @@ const en: Record<string, string> = {
   "today.top3.moved": "{title}, moved to position {rank}",
   "today.top3.moveUp": "Move up",
   "today.top3.moveDown": "Move down",
+  "today.top3.reorder": "Drag to reorder",
   "today.top3.editOutcome": "Edit outcome",
   "today.top3.outcomePlaceholder": "Outcome for today",
   "today.top3.pickTask": "Choose a task",
@@ -5134,6 +5134,8 @@ const en: Record<string, string> = {
   "cmdk.action.skillCompose": "Apply skill",
   "sites.title": "Sites",
   "sites.sidebar.title": "Registered sites",
+  "sites.reorder": "Drag to reorder sites",
+  "sites.moved": "{title}, moved to position {rank}",
   "sites.search.placeholder": "Search sites",
   "sites.category.all": "All categories",
   "sites.category.uncategorized": "Uncategorized",
