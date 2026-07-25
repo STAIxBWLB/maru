@@ -8,6 +8,20 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.23 - 2026-07-25 - Sites Reliability and Files Reveal
+
+- **Embedded Sites loads again.** The browser layout now reserves separate
+  rows for tabs, the address toolbar, and the native webview surface. The
+  address bar stays at the top, and first navigation waits for a valid surface
+  size instead of silently skipping webview creation.
+- **Close Sites tabs from the keyboard.** Cmd+W and the native Close Active
+  menu command close the current browser tab, including when remote content
+  has focus.
+- **Jump from Documents to Files.** Document context menus now include
+  "Reveal in Files". Maru opens the containing folder, clears filters that
+  could hide the target, selects the file, scrolls it into view, and focuses
+  the row.
+
 ## v0.4.22 - 2026-07-25 - Tabbed Browser and URL Bookmarks
 
 - **Sites is a browser now.** The address is an editable bar: type any

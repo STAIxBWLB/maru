@@ -392,6 +392,9 @@ test("hover highlights the 1-hop neighborhood and dims the rest", async ({ page 
   await openFilters(page);
   await page.getByLabel("미해소 링크 표시").check();
   await expect.poll(async () => (await stats(page)).visibleNodes).toBe(3);
+  const filtersToggle = page.getByTestId("graph-toggle-filters");
+  await filtersToggle.click();
+  await expect(page.getByTestId("graph-filter-panel")).toBeHidden();
 
   const glossaryBefore = await screenState(page, "maru-glossary");
   const ghostBefore = await screenState(page, "maru-project");
@@ -409,7 +412,7 @@ test("hover highlights the 1-hop neighborhood and dims the rest", async ({ page 
   expect(ghostNeighbor.color).toBe(ghostBefore.color);
 
   // Leaving the canvas clears the highlight.
-  await page.getByTestId("graph-toggle-filters").hover();
+  await filtersToggle.hover();
   await expect.poll(() => hoveredId(page)).toBe(null);
   const glossaryRestored = await screenState(page, "maru-glossary");
   expect(glossaryRestored.color).toBe(glossaryBefore.color);
