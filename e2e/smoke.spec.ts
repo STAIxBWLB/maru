@@ -806,6 +806,34 @@ test("keeps macOS window controls outside custom drag regions", async ({ page })
   expect(dragRegion.guardWidth).toBeGreaterThanOrEqual(70);
 });
 
+test("drives the Files folder tree and reveals only the target's chain", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+
+  const files = page.locator(".files-workbench");
+  const tree = files.getByRole("tree");
+  await expect(files).toBeVisible();
+
+  // Root children are always listed; bulk actions drive everything below them.
+  // (The sample workspace tree is flat, so nested expansion is unit-tested in
+  // filesWorkbench.test.ts rather than here.)
+  await expect(tree.getByRole("button", { name: "attachments", exact: true })).toBeVisible();
+  await files.getByRole("button", { name: "모두 펴기" }).click();
+  await expect(tree.getByRole("button", { name: "attachments", exact: true })).toBeVisible();
+  await files.getByRole("button", { name: "모두 접기" }).click();
+  await expect(tree.getByRole("button", { name: "attachments", exact: true })).toBeVisible();
+
+  // Expand/collapse current are only meaningful inside a folder.
+  await expect(files.getByRole("button", { name: "현재 폴더 펴기" })).toBeDisabled();
+  await tree.getByRole("button", { name: "attachments", exact: true }).click();
+  await expect(files.getByRole("button", { name: "현재 폴더 펴기" })).toBeEnabled();
+  await expect(files.locator(".files-breadcrumbs")).toContainText("attachments");
+
+  // Selecting a file keeps the folder chain the tree is showing.
+  await files.locator(".files-list-row", { hasText: "rise-budget-review.pdf" }).click();
+  await expect(files.locator(".files-breadcrumbs")).toContainText("attachments");
+});
+
 test("switches between standalone Documents and Files workspaces", async ({ page }) => {
   await page.goto("/");
 

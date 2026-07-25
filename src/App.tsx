@@ -8264,7 +8264,7 @@ function MainApp() {
             filesListAttributes={maruSettings.ui.filesListAttributes}
             paneFilters={filesPaneFilters}
             queuedSourcePaths={queuedSourcePaths}
-            collapsedFolders={collapsedFileFolders}
+            expandedFolders={collapsedFileFolders}
             treeOpen={layoutSettings.filesTreeOpen}
             treeWidth={layoutSettings.filesTreeWidth}
             previewOpen={layoutSettings.filesPreviewOpen}
@@ -8300,7 +8300,7 @@ function MainApp() {
             onSortKeyChange={setFilesSortKey}
             onFilesListAttributesChange={setFilesListAttributes}
             onPaneFiltersChange={setFilesPaneFilters}
-            onCollapsedFoldersChange={setCollapsedFileFolders}
+            onExpandedFoldersChange={setCollapsedFileFolders}
             onSelectionChange={setWorkspaceFileSelection}
             onOpenDocument={(entry) => {
               const docEntry =

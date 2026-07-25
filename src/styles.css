@@ -20692,17 +20692,23 @@ button.git-badge:hover {
   border-left: 1px solid var(--line-soft);
 }
 
+/* The preview has no fixed px ceiling; it is capped at a share of the window so
+   the limit follows the viewport. The collection track keeps a 360px floor in
+   every configuration, otherwise a wide preview can squeeze the list to zero
+   and clip its own resizer out of reach. */
 .files-workbench.tree-open:not(.preview-open) {
-  grid-template-columns: var(--files-tree-width) 5px minmax(0, 1fr);
+  grid-template-columns: var(--files-tree-width) 5px minmax(360px, 1fr);
 }
 
 .files-workbench.preview-open:not(.tree-open) {
-  grid-template-columns: minmax(0, 1fr) 5px var(--files-preview-width);
+  grid-template-columns:
+    minmax(360px, 1fr) 5px min(var(--files-preview-width), 62vw);
 }
 
 .files-workbench.tree-open.preview-open {
   grid-template-columns:
-    var(--files-tree-width) 5px minmax(360px, 1fr) 5px var(--files-preview-width);
+    var(--files-tree-width) 5px minmax(360px, 1fr) 5px
+    min(var(--files-preview-width), 62vw);
 }
 
 .files-tree-pane,
