@@ -8,6 +8,33 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.24 - 2026-07-26 - Apple-Inspired Interface
+
+- **A single design foundation.** Typography, spacing, color, materials, and
+  motion now come from one shared token set instead of per-mode values, and
+  Catalog, Studio, Today, Tasks, Sites, Inbox, and Skills share the same mode
+  chrome and dialog surfaces. The 44px top bar, 48px activity rail, navigation
+  model, terminal behavior, and data contracts are unchanged.
+- **Light and dark behave properly.** System appearance changes propagate, and
+  a dark-mode user no longer gets a flash of the light palette on every cold
+  start. Reduced-motion, reduced-transparency, and increased-contrast settings
+  are honored across the app, including the graph chrome.
+- **Reordering follows the pointer.** Today's Top 3 and the Sites sidebar
+  replace browser drag-and-drop with pointer-captured dragging: the row lifts
+  only once the gesture passes a threshold, so a plain click no longer flashes
+  it, and Escape abandons a drag in flight. Keyboard reordering and live rank
+  announcements are unchanged.
+- **The tool panel is readable and reachable when docked right.** Its header
+  stacks into rows instead of clipping controls off the panel edge, keeps the
+  surface tabs beside the theme and window buttons, and sheds launcher labels
+  and the working directory as the dock narrows. Collapsed to a rail, the
+  surface tabs and window buttons run down it instead of hiding.
+- **Korean text wraps at word boundaries.** Labels like the terminal and graph
+  tabs no longer break mid-word, and Korean prose throughout the app breaks
+  between words rather than between characters.
+- **The workspace switcher leads the top bar.** The Maru mark and wordmark are
+  gone; the window opens straight onto the workspace you are in.
+
 ## v0.4.23 - 2026-07-25 - Sites Reliability and Files Reveal
 
 - **Embedded Sites loads again.** The browser layout now reserves separate
