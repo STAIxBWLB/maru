@@ -7,6 +7,11 @@ import { useEffect, useState } from "react";
 import type { CatalogDrilldownResponse, CatalogEntry } from "../../lib/catalog";
 import { catalogDrilldown } from "../../lib/catalog";
 import { useTranslation } from "../../lib/i18n";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 interface DrilldownDialogProps {
   workspaceRoot: string;
@@ -25,13 +30,13 @@ export function DrilldownDialog({
   const [data, setData] = useState<CatalogDrilldownResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastEntry, setLastEntry] = useState<CatalogEntry | null>(entry);
 
   useEffect(() => {
-    if (!entry) {
-      setData(null);
-      return;
-    }
+    if (!entry) return;
     let cancelled = false;
+    setLastEntry(entry);
+    setData(null);
     setLoading(true);
     setError(null);
     catalogDrilldown(workspaceRoot, entry.path)
@@ -49,34 +54,44 @@ export function DrilldownDialog({
     };
   }, [workspaceRoot, entry]);
 
-  if (!entry) return null;
+  const activeEntry = entry ?? lastEntry;
+  if (!activeEntry) return null;
 
   return (
-    <div className="catalog-drilldown-overlay" role="dialog" aria-modal="true">
-      <div className="catalog-drilldown">
+    <DialogSurface
+      open={entry !== null}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      className="catalog-drilldown"
+      overlayClassName="catalog-drilldown-overlay"
+    >
         <header className="catalog-drilldown__header">
           <div>
-            <h3>{entry.title || entry.path}</h3>
-            <div className="catalog-drilldown__path">{entry.path}</div>
+            <DialogSurfaceTitle as="h3">
+              {activeEntry.title || activeEntry.path}
+            </DialogSurfaceTitle>
+            <div className="catalog-drilldown__path">{activeEntry.path}</div>
           </div>
           <div className="catalog-drilldown__actions">
             {onReveal ? (
               <button
                 type="button"
                 className="catalog-drilldown__action"
-                onClick={() => onReveal(entry.path)}
+                onClick={() => onReveal(activeEntry.path)}
               >
                 {t("catalog.drilldown.reveal")}
               </button>
             ) : null}
-            <button
-              type="button"
-              className="catalog-drilldown__action"
-              onClick={onClose}
-              aria-label={t("catalog.drilldown.close")}
-            >
-              {t("catalog.drilldown.close")}
-            </button>
+            <DialogSurfaceClose>
+              <button
+                type="button"
+                className="catalog-drilldown__action"
+                aria-label={t("catalog.drilldown.close")}
+              >
+                {t("catalog.drilldown.close")}
+              </button>
+            </DialogSurfaceClose>
           </div>
         </header>
 
@@ -135,7 +150,6 @@ export function DrilldownDialog({
             <p className="catalog-drilldown__empty">{t("catalog.drilldown.empty")}</p>
           ) : null}
         </div>
-      </div>
-    </div>
+    </DialogSurface>
   );
 }

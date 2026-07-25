@@ -338,7 +338,12 @@ import {
   todayAutoOpenKey,
 } from "./lib/todayRouting";
 import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
-import { applyThemePreference, applyThemeVars, buildThemeVars } from "./lib/theme";
+import {
+  applyThemePreference,
+  applyThemeVars,
+  buildThemeVars,
+  subscribeToSystemTheme,
+} from "./lib/theme";
 import {
   openSettingsWindow,
   restoreMainWindowLayout,
@@ -755,12 +760,14 @@ function SettingsWindowRoot({
     normalizeMaruSettings(DEFAULT_MARU_SETTINGS),
   );
   const [error, setError] = useState<string | null>(null);
-  const themeVars = useMemo(() => buildThemeVars(settings), [settings]);
-
   useEffect(() => {
-    applyThemePreference(settings.ui.themeMode);
-    applyThemeVars(themeVars);
-  }, [settings.ui.themeMode, themeVars]);
+    const apply = () => {
+      applyThemePreference(settings.ui.themeMode);
+      applyThemeVars(buildThemeVars(settings));
+    };
+    apply();
+    return subscribeToSystemTheme(settings.ui.themeMode, apply);
+  }, [settings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -826,7 +833,7 @@ function SettingsWindowRoot({
 
   return (
     <LocaleContext.Provider value={localeValue}>
-      <div className="settings-window-shell" style={themeVars}>
+      <div className="settings-window-shell">
         <SystemPane
           workPath={workPath}
           settings={settings}
@@ -1788,8 +1795,12 @@ function MainApp() {
   }, [settingsWorkPath]);
 
   useEffect(() => {
-    applyThemePreference(maruSettings.ui.themeMode);
-    applyThemeVars(buildThemeVars(maruSettings));
+    const apply = () => {
+      applyThemePreference(maruSettings.ui.themeMode);
+      applyThemeVars(buildThemeVars(maruSettings));
+    };
+    apply();
+    return subscribeToSystemTheme(maruSettings.ui.themeMode, apply);
   }, [maruSettings]);
 
   useEffect(() => {

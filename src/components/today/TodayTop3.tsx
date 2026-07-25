@@ -24,6 +24,7 @@ import type {
 } from "../../lib/today";
 import { TOP_LANE_SIZE } from "../../lib/todayPlan";
 import { useToday } from "./todayContext";
+import { usePointerReorder } from "../ui/usePointerReorder";
 import { emptyPlanShell, resolveRefTitle, taskKeyOf } from "./todayPrepareUtils";
 
 interface TodayTop3Props {
@@ -38,6 +39,12 @@ interface TodayTop3Props {
   onOpenTaskSheet?: (taskId: string) => void;
 }
 
+function planItemKey(item: DailyPlanItem): string {
+  return `${item.itemRef.kind}:${
+    item.itemRef.kind === "task" ? item.itemRef.taskId : item.itemRef.captureId
+  }`;
+}
+
 export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenTaskSheet }: TodayTop3Props) {
   const { t } = useTranslation();
   const { snapshot, mutate } = useToday();
@@ -49,13 +56,15 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
   const [addOutcome, setAddOutcome] = useState("");
   const [addTaskId, setAddTaskId] = useState("");
   const [showMaxWarning, setShowMaxWarning] = useState(false);
-  const dragIndexRef = useRef<number | null>(null);
+  const [optimisticTop, setOptimisticTop] = useState<DailyPlanItem[] | null>(null);
+  const orderMutationRef = useRef(0);
 
-  const top = useMemo(() => {
+  const snapshotTop = useMemo(() => {
     const items = [...(snapshot?.plan?.top ?? [])];
     items.sort((a, b) => a.order - b.order);
     return items;
   }, [snapshot]);
+  const top = optimisticTop ?? snapshotTop;
 
   const displayTitle = (item: DailyPlanItem) =>
     item.outcome || resolveRefTitle(item.itemRef, tasks, captures);
@@ -85,18 +94,40 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
     await mutate(mutation);
   };
 
+  const persistOrder = (
+    ordered: DailyPlanItem[],
+    moved: DailyPlanItem,
+    to: number,
+  ) => {
+    if (!snapshot) return;
+    const reindexed = ordered.map((item, index) => ({ ...item, order: index }));
+    setOptimisticTop(reindexed);
+    markManualOrder(reindexed.map((item) => item.itemRef));
+    setAnnouncement(t("today.top3.moved", { title: displayTitle(moved), rank: to + 1 }));
+    const plan = { ...(snapshot.plan ?? emptyPlanShell(snapshot)), top: reindexed };
+    const mutationId = ++orderMutationRef.current;
+    void applyMutation({ type: "setPlan", plan }).finally(() => {
+      if (orderMutationRef.current === mutationId) setOptimisticTop(null);
+    });
+  };
+
   const move = (from: number, to: number) => {
     if (!snapshot) return;
     if (to < 0 || to >= top.length || from === to) return;
     const next = [...top];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    const reindexed = next.map((item, index) => ({ ...item, order: index }));
-    markManualOrder(reindexed.map((item) => item.itemRef));
-    setAnnouncement(t("today.top3.moved", { title: displayTitle(moved), rank: to + 1 }));
-    const plan = { ...(snapshot.plan ?? emptyPlanShell(snapshot)), top: reindexed };
-    void applyMutation({ type: "setPlan", plan });
+    persistOrder(next, moved, to);
   };
+
+  const pointerReorder = usePointerReorder({
+    items: top,
+    getId: planItemKey,
+    onCommit: ({ items, draggedId, toIndex }) => {
+      const moved = items.find((item) => planItemKey(item) === draggedId);
+      if (moved) persistOrder(items, moved, toIndex);
+    },
+  });
 
   const handleRowKeyDown = (event: React.KeyboardEvent, index: number) => {
     if (!event.altKey) return;
@@ -175,28 +206,35 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
           <p className="today-panel-empty">{t("today.top3.empty")}</p>
         ) : (
           <ol className="today-top3-list">
-            {top.map((item, index) => (
-              <li
-                key={`${item.itemRef.kind}:${item.itemRef.kind === "task" ? item.itemRef.taskId : item.itemRef.captureId}`}
-                className="today-top3-row"
-                tabIndex={0}
-                draggable
-                onDragStart={() => {
-                  dragIndexRef.current = index;
-                }}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  if (dragIndexRef.current !== null) move(dragIndexRef.current, index);
-                  dragIndexRef.current = null;
-                }}
-                onKeyDown={(event) => handleRowKeyDown(event, index)}
-              >
-                <GripVertical
-                  size={14}
-                  strokeWidth={1.9}
+            {top.map((item, index) => {
+              const id = planItemKey(item);
+              const reorderState = pointerReorder.rowState(id);
+              return (
+                <li
+                  key={id}
+                  data-reorder-id={id}
+                  className={[
+                    "today-top3-row",
+                    reorderState.dragging ? "is-dragging" : "",
+                    reorderState.indicator ?? "",
+                  ].filter(Boolean).join(" ")}
+                  style={reorderState.style}
+                  tabIndex={0}
+                  onKeyDown={(event) => handleRowKeyDown(event, index)}
+                >
+                <button
+                  type="button"
                   className="today-top3-grip"
-                  aria-hidden="true"
-                />
+                  aria-label={t("today.top3.reorder")}
+                  title={t("today.top3.reorder")}
+                  onPointerDown={(event) => pointerReorder.begin(event, id)}
+                >
+                  <GripVertical
+                    size={14}
+                    strokeWidth={1.9}
+                    aria-hidden="true"
+                  />
+                </button>
                 <span className="today-top3-rank">{index + 1}</span>
                 {editingIndex === index ? (
                   <input
@@ -256,8 +294,9 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
                     </button>
                   )}
                 </span>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ol>
         )}
         {showMaxWarning && top.length >= TOP_LANE_SIZE ? (

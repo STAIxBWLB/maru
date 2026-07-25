@@ -17,6 +17,13 @@ import type {
 import { catalogQuery, catalogScan } from "../../lib/catalog";
 import { hubQueueDrain, hubStatus } from "../../lib/hubClient";
 import { useTranslation } from "../../lib/i18n";
+import {
+  CompactSelect,
+  EmptyState,
+  ModeHeader,
+  SegmentedControl,
+  StatusBanner,
+} from "../ui/ModeChrome";
 import { DrilldownDialog } from "./DrilldownDialog";
 
 interface CatalogPaneProps {
@@ -132,43 +139,56 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
   );
 
   if (!workspaceRoot) {
-    return <div className="catalog-pane catalog-pane--empty">{t("catalog.noWorkspace")}</div>;
+    return (
+      <div className="catalog-pane catalog-pane--empty">
+        <EmptyState title={t("catalog.noWorkspace")} />
+      </div>
+    );
   }
 
   return (
     <div className="catalog-pane">
-      <header className="catalog-pane__topbar">
-        <h2>{t("catalog.title")}</h2>
-        <div className="catalog-pane__filters">
-          <select
+      <ModeHeader
+        className="catalog-pane__topbar"
+        title={t("catalog.title")}
+        actions={(
+          <div className="catalog-pane__filters">
+            <CompactSelect
             value={selectedBu}
             onChange={(e) => setSelectedBu(e.target.value)}
             aria-label={t("catalog.bu.selectAria")}
-          >
-            <option value="all">{t("catalog.bu.all")}</option>
-            {(report?.bus_seen ?? []).map((bu) => (
-              <option key={bu} value={bu}>
-                {bu}
-              </option>
-            ))}
-          </select>
-          <div className="catalog-pane__category-chips">
-            {ALL_CATEGORIES.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                className={selectedCategory === c.value ? "active" : ""}
-                onClick={() => setSelectedCategory(c.value)}
-              >
-                {t(c.labelKey)}
-              </button>
-            ))}
+            >
+              <option value="all">{t("catalog.bu.all")}</option>
+              {(report?.bus_seen ?? []).map((bu) => (
+                <option key={bu} value={bu}>
+                  {bu}
+                </option>
+              ))}
+            </CompactSelect>
+            <SegmentedControl
+              className="catalog-pane__category-chips"
+              value={selectedCategory}
+              label={t("catalog.title")}
+              options={ALL_CATEGORIES.map((category) => ({
+                value: category.value,
+                label: t(category.labelKey),
+              }))}
+              onChange={setSelectedCategory}
+            />
           </div>
-        </div>
-      </header>
+        )}
+      />
 
-      {loading && <div className="catalog-pane__status">{t("catalog.loading")}</div>}
-      {error && <div className="catalog-pane__error">{t("catalog.error", { message: error })}</div>}
+      {loading && (
+        <StatusBanner className="catalog-pane__status">
+          {t("catalog.loading")}
+        </StatusBanner>
+      )}
+      {error && (
+        <StatusBanner className="catalog-pane__error" tone="danger">
+          {t("catalog.error", { message: error })}
+        </StatusBanner>
+      )}
 
       <div className="catalog-pane__columns">
         <CatalogColumn

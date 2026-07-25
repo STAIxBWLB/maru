@@ -146,6 +146,7 @@ import { SpecialCharsPicker } from "./modals/SpecialCharsPicker";
 import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
 import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
+import { resolveThemeMode } from "../../lib/theme";
 
 export interface DiagramActiveDocument {
   /** Workspace-relative path (what `readDocument`/`saveDocument` take). */
@@ -325,7 +326,14 @@ function DiagramShell({
   } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
-    return (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    const root = document.documentElement;
+    return resolveThemeMode(
+      root.dataset.themePreference === "system"
+        ? "system"
+        : root.dataset.theme === "dark"
+          ? "dark"
+          : "light",
+    );
   });
   const focusMode = useDiagram((s) => s.ephemeral.ui.focusMode);
   const [panels, setPanels] = useState<PersistedPanelState>(() => readPanelState());
@@ -360,7 +368,15 @@ function DiagramShell({
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     const apply = () => {
-      setTheme(root.dataset.theme === "dark" ? "dark" : "light");
+      setTheme(
+        resolveThemeMode(
+          root.dataset.themePreference === "system"
+            ? "system"
+            : root.dataset.theme === "dark"
+              ? "dark"
+              : "light",
+        ),
+      );
     };
     apply();
     const observer = new MutationObserver(apply);

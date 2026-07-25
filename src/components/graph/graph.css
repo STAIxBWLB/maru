@@ -44,7 +44,7 @@
   background: var(--panel-2, var(--bg));
   color: var(--muted);
   min-width: 180px;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color var(--motion-state) ease, box-shadow var(--motion-state) ease;
 }
 
 .graph-search-field:focus-within {
@@ -81,7 +81,7 @@
   padding: 3px 8px;
   border-radius: 5px;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease;
+  transition: background var(--motion-state) ease, color var(--motion-state) ease;
 }
 
 .graph-view-toggle button.active,
@@ -118,7 +118,7 @@
   background: var(--panel-2, var(--bg));
   color: var(--ink-2, var(--ink));
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition: background var(--motion-state) ease, border-color var(--motion-state) ease, color var(--motion-state) ease;
 }
 
 /* Scope toggle renders text, not an icon: size to content, never wrap. */
@@ -437,7 +437,7 @@
   background: var(--panel-2, var(--bg));
   color: var(--ink-2, var(--ink));
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition: background var(--motion-state) ease, border-color var(--motion-state) ease, color var(--motion-state) ease;
 }
 
 .graph-chip:hover,
@@ -958,7 +958,7 @@
   color: var(--muted);
   cursor: pointer;
   border-radius: var(--radius-sm, 6px);
-  transition: color 120ms ease, background 120ms ease;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
 }
 
 .graph-insight-action:hover {
@@ -978,7 +978,7 @@
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 
 .graph-insight-row:hover {
@@ -1085,7 +1085,7 @@
   background: var(--panel-2, var(--bg));
   color: var(--ink-2, var(--ink));
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition: border-color var(--motion-fast) ease, color var(--motion-fast) ease;
 }
 
 .graph-action.active {
@@ -1131,7 +1131,7 @@
   background: transparent;
   cursor: pointer;
   text-align: left;
-  transition: background 120ms ease;
+  transition: background var(--motion-fast) ease;
 }
 
 .graph-neighbor:hover {
@@ -1220,7 +1220,7 @@
   text-align: left;
   font-size: 11px;
   color: var(--ink);
-  transition: border-color 120ms ease;
+  transition: border-color var(--motion-fast) ease;
 }
 
 .decision-chip:hover {
@@ -1274,7 +1274,7 @@
   background: transparent;
   cursor: pointer;
   color: var(--muted);
-  transition: color 120ms ease, border-color 120ms ease;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 
 .neighborhood-graph-button:hover {
@@ -1698,54 +1698,54 @@
    app variables, and inheriting them from a light app under a dark graph
    rendered unreadable text (and vice versa). Values mirror styles.css. */
 .graph-view[data-graph-theme="dark"] {
-  --graph-canvas: #1e1e1e;
-  --graph-surface: rgba(35, 36, 34, 0.94);
-  --graph-ink: #f2f0e8;
-  --graph-muted: #8f918c;
-  --graph-line: rgba(242, 240, 232, 0.09);
-  --graph-edge: #292a29;
-  --graph-label: rgba(242, 240, 232, 0.3);
-  --graph-label-strong: #f2f0e8;
-  --bg: #181a18;
-  --panel: #252723;
-  --panel-2: #2a2c28;
-  --line: #3a3d36;
-  --line-strong: #50534b;
-  --ink: #f2f0e8;
-  --ink-2: #dedbd0;
-  --muted: #a19c8f;
-  --faint: #777368;
-  --accent: #7faf86;
-  --accent-soft: #2a3b2d;
-  --accent-tint: #2f4434;
+  --graph-canvas: #1c1c1e;
+  --graph-surface: rgba(44, 44, 46, 0.94);
+  --graph-ink: #f5f5f7;
+  --graph-muted: #aeaeb2;
+  --graph-line: rgba(245, 245, 247, 0.1);
+  --graph-edge: #343436;
+  --graph-label: rgba(245, 245, 247, 0.34);
+  --graph-label-strong: #f5f5f7;
+  --bg: #1c1c1e;
+  --panel: #2c2c2e;
+  --panel-2: #242426;
+  --line: #48484a;
+  --line-strong: #636366;
+  --ink: #f5f5f7;
+  --ink-2: #e5e5ea;
+  --muted: #aeaeb2;
+  --faint: #98989d;
+  --accent: #0a84ff;
+  --accent-soft: #173a5e;
+  --accent-tint: #162d46;
   --warn: #d6b070;
-  --on-accent: #101510;
+  --on-accent: #ffffff;
   color-scheme: dark;
 }
 
 .graph-view[data-graph-theme="light"] {
-  --graph-canvas: #f4f3ee;
-  --graph-surface: rgba(255, 255, 252, 0.95);
-  --graph-ink: #1f1d18;
-  --graph-muted: #69645b;
-  --graph-line: rgba(31, 29, 24, 0.1);
-  --graph-edge: #d8d6cf;
-  --graph-label: rgba(31, 29, 24, 0.38);
-  --graph-label-strong: #1f1d18;
-  --bg: #f4f3ee;
+  --graph-canvas: #f5f5f7;
+  --graph-surface: rgba(255, 255, 255, 0.95);
+  --graph-ink: #1d1d1f;
+  --graph-muted: #636366;
+  --graph-line: rgba(29, 29, 31, 0.1);
+  --graph-edge: #d1d1d6;
+  --graph-label: rgba(29, 29, 31, 0.4);
+  --graph-label-strong: #1d1d1f;
+  --bg: #f5f5f7;
   --panel: #ffffff;
-  --panel-2: #f9f8f4;
-  --line: #dedbd1;
-  --line-strong: #bfb8aa;
-  --ink: #1f1d18;
-  --ink-2: #3d3a32;
-  --muted: #69645b;
-  --faint: #969085;
-  --accent: #2f5a3c;
-  --accent-soft: #d8e6d2;
-  --accent-tint: #eaf1e3;
+  --panel-2: #f9f9fb;
+  --line: #d1d1d6;
+  --line-strong: #aeaeb2;
+  --ink: #1d1d1f;
+  --ink-2: #3a3a3c;
+  --muted: #636366;
+  --faint: #6e6e73;
+  --accent: #0071e3;
+  --accent-soft: #d9ecff;
+  --accent-tint: #edf6ff;
   --warn: #7a5520;
-  --on-accent: #fbfcf8;
+  --on-accent: #ffffff;
   color-scheme: light;
 }
 
@@ -2143,7 +2143,7 @@
   gap: 0;
   padding: 2px;
   opacity: 0.56;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-state) ease;
 }
 
 .graph-view .graph-canvas-wrap:hover .graph-zoom-floating,

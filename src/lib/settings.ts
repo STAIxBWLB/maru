@@ -470,7 +470,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     fileTreeStateInitialized: false,
     fileQueueDefaultOperation: "copy",
     themeMode: "system",
-    accentColor: "#2f5a3c",
+    accentColor: "#0071e3",
     layout: {
       documentsPaneOpen: true,
       documentsPaneWidth: 340,

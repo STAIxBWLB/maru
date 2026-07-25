@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { useTranslation } from "../../lib/i18n";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 interface InboxProcessComposerProps {
   open: boolean;
@@ -41,8 +46,6 @@ export function InboxProcessComposer({
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
-  if (!open) return null;
-
   const run = () => {
     if (busy) return;
     onRun(context);
@@ -63,35 +66,32 @@ export function InboxProcessComposer({
   const channelPreview = channels.filter(Boolean).join(" ");
 
   return (
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onCancel();
       }}
+      className="inbox-process-dialog"
+      ariaLabel={t("inbox.process.composer.title")}
     >
-      <section
-        className="inbox-process-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("inbox.process.composer.title")}
-      >
         <header>
           <div>
-            <h2>{t("inbox.process.composer.title")}</h2>
+            <DialogSurfaceTitle>{t("inbox.process.composer.title")}</DialogSurfaceTitle>
             <p>
               {t("inbox.process.composer.itemCount", { count: targetCount })}
               {channelPreview ? ` · inbox-process ${channelPreview}` : ""}
             </p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onCancel}
-            title={t("inbox.process.composer.cancel")}
-            aria-label={t("inbox.process.composer.cancel")}
-          >
-            <X size={16} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              title={t("inbox.process.composer.cancel")}
+              aria-label={t("inbox.process.composer.cancel")}
+            >
+              <X size={16} />
+            </button>
+          </DialogSurfaceClose>
         </header>
         <label className="field">
           <span>{t("inbox.process.composer.label")}</span>
@@ -121,7 +121,6 @@ export function InboxProcessComposer({
             </Button>
           </div>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

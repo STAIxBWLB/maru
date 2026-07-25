@@ -10,6 +10,11 @@ import {
   type SiteEntry,
 } from "../../lib/sites";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 const DEFAULT_SCAN_DIR = "~/workspace/work/sites";
 
@@ -58,8 +63,6 @@ export function ImportSitesDialog({
     setScanned(false);
     setError(null);
   }, [open]);
-
-  if (!open) return null;
 
   const scan = async () => {
     setScanning(true);
@@ -113,27 +116,28 @@ export function ImportSitesDialog({
   };
 
   return (
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
+      className="sites-import-dialog task-new-dialog"
     >
-      <section className="sites-import-dialog task-new-dialog" role="dialog" aria-modal="true">
         <header>
           <div>
-            <h2>{t("sites.import.title")}</h2>
+            <DialogSurfaceTitle>{t("sites.import.title")}</DialogSurfaceTitle>
             <p>{t("sites.import.description")}</p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            title={t("app.close")}
-            aria-label={t("app.close")}
-          >
-            <X size={16} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              title={t("app.close")}
+              aria-label={t("app.close")}
+            >
+              <X size={16} />
+            </button>
+          </DialogSurfaceClose>
         </header>
         {error ? <div className="inbox-error">{error}</div> : null}
         <div className="settings-form">
@@ -210,7 +214,6 @@ export function ImportSitesDialog({
             {t("sites.import.addSelected", { count: String(selectedRows.length) })}
           </Button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

@@ -76,7 +76,7 @@ export function MigrationBanner({ services, busy, onRefresh, onUnload }: Migrati
                 autoFocus
                 onClick={() => setConfirming(false)}
               >
-                {t("common.cancel")}
+                {t("dialog.cancel")}
               </button>
               <button
                 type="button"

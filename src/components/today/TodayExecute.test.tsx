@@ -314,14 +314,14 @@ describe("TodayExecute", () => {
     await act(async () => {
       row.click();
     });
-    const dialog = container.querySelector('[role="dialog"]');
+    const dialog = document.body.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     const titleInput = dialog!.querySelector<HTMLInputElement>(".task-schedule-editor input")!;
     expect(titleInput.value).toBe("알파 작업");
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("opens the task sheet from a plan row via keyboard (Enter)", async () => {
@@ -330,7 +330,7 @@ describe("TodayExecute", () => {
     await act(async () => {
       row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it("does not open the sheet when an inner row button handles the key", async () => {
@@ -341,7 +341,7 @@ describe("TodayExecute", () => {
     await act(async () => {
       pin.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   // --- Selective calendar sync ------------------------------------------------

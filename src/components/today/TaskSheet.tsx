@@ -4,7 +4,8 @@
 // click / Escape and restores focus to the previously focused element.
 
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useEffect, useState } from "react";
 import { readTaskMetadata, updateTaskDetails } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
@@ -27,9 +28,12 @@ export function TaskSheet({ entry, open, onClose, onSaved }: TaskSheetProps) {
   const [metadata, setMetadata] = useState<TaskMetadata | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [lastEntry, setLastEntry] = useState<TaskEntry | null>(entry);
   const entryRelPath = entry?.relPath ?? null;
+
+  useEffect(() => {
+    if (entry) setLastEntry(entry);
+  }, [entry]);
 
   useEffect(() => {
     if (!open || !entryRelPath || !workPath) return;
@@ -52,22 +56,8 @@ export function TaskSheet({ entry, open, onClose, onSaved }: TaskSheetProps) {
     };
   }, [open, entryRelPath, workPath]);
 
-  useEffect(() => {
-    if (!open) return;
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      previousFocusRef.current?.focus();
-    };
-  }, [open, onClose]);
-
-  if (!open || !entry) return null;
+  const renderEntry = entry ?? lastEntry;
+  if (!renderEntry) return null;
 
   const saveDetails = async (target: TaskEntry, fields: TaskDetailsPatch) => {
     if (!workPath) return;
@@ -76,42 +66,44 @@ export function TaskSheet({ entry, open, onClose, onSaved }: TaskSheetProps) {
   };
 
   return (
-    <>
-      <div className="dialog-overlay task-sheet-backdrop" onClick={onClose} />
-      <aside
-        className="task-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("today.sheet.title")}
-      >
-        <header className="task-sheet-header">
-          <h2 className="task-sheet-title">{entry.title}</h2>
-          <button
-            ref={closeRef}
-            type="button"
-            className="today-icon-button today-icon-button-sm"
-            aria-label={t("today.sheet.close")}
-            title={t("today.sheet.close")}
-            onClick={onClose}
-          >
-            <X size={15} strokeWidth={1.9} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="task-sheet-body">
-          {loadFailed ? (
-            <p className="today-panel-empty">{t("today.sheet.loadError")}</p>
-          ) : (
-            <TaskFormFields
-              entry={entry}
-              metadata={metadata}
-              loading={loading}
-              onSaveDetails={saveDetails}
-              onDirtyChange={() => {}}
-              lifecycleStatusLocked
-            />
-          )}
-        </div>
-      </aside>
-    </>
+    <Dialog.Root
+      open={open && Boolean(entry)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay task-sheet-backdrop" />
+        <Dialog.Content className="task-sheet" aria-describedby={undefined}>
+          <header className="task-sheet-header">
+            <Dialog.Title className="task-sheet-title">{renderEntry.title}</Dialog.Title>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="today-icon-button today-icon-button-sm"
+                aria-label={t("today.sheet.close")}
+                title={t("today.sheet.close")}
+              >
+                <X size={15} strokeWidth={1.9} aria-hidden="true" />
+              </button>
+            </Dialog.Close>
+          </header>
+          <div className="task-sheet-body">
+            {loadFailed ? (
+              <p className="today-panel-empty">{t("today.sheet.loadError")}</p>
+            ) : (
+              <TaskFormFields
+                entry={renderEntry}
+                metadata={metadata}
+                loading={loading}
+                onSaveDetails={saveDetails}
+                onDirtyChange={() => {}}
+                lifecycleStatusLocked
+              />
+            )}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

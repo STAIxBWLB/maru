@@ -147,6 +147,10 @@ async function openSelectionDetails(page: Page) {
 }
 
 async function openSelectedNode(page: Page, id: string) {
+  // A filter change can publish viewport coordinates one frame before
+  // Sigma's GPU picking buffer catches up. Warm the real hover path first so
+  // this navigation click stays deterministic under the full E2E load.
+  await hoverNode(page, id);
   await clickNode(page, id);
   const shelf = page.getByTestId("graph-selection-shelf");
   await expect(shelf).toBeVisible();

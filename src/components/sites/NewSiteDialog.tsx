@@ -3,6 +3,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { newSiteId, normalizeSiteUrl, type SiteEntry } from "../../lib/sites";
 import { Button } from "../ui/Button";
+import {
+  DialogSurface,
+  DialogSurfaceClose,
+  DialogSurfaceTitle,
+} from "../ui/DialogSurface";
 
 interface NewSiteDialogProps {
   open: boolean;
@@ -34,8 +39,6 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
     setNotes(initial?.notes ?? "");
     setError(null);
   }, [open, initial]);
-
-  if (!open) return null;
 
   const submit = () => {
     if (!label.trim()) {
@@ -69,31 +72,34 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
   };
 
   return (
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <DialogSurface
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
+      className="site-dialog task-new-dialog"
     >
-      <section className="site-dialog task-new-dialog" role="dialog" aria-modal="true">
         <header>
           <div>
-            <h2>{initial ? t("sites.dialog.edit.title") : t("sites.dialog.new.title")}</h2>
+            <DialogSurfaceTitle>
+              {initial ? t("sites.dialog.edit.title") : t("sites.dialog.new.title")}
+            </DialogSurfaceTitle>
             <p>
               {initial
                 ? t("sites.dialog.edit.description")
                 : t("sites.dialog.new.description")}
             </p>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            title={t("app.close")}
-            aria-label={t("app.close")}
-          >
-            <X size={16} />
-          </button>
+          <DialogSurfaceClose>
+            <button
+              type="button"
+              className="icon-button"
+              title={t("app.close")}
+              aria-label={t("app.close")}
+            >
+              <X size={16} />
+            </button>
+          </DialogSurfaceClose>
         </header>
         {error ? <div className="inbox-error">{error}</div> : null}
         <div className="settings-form">
@@ -142,7 +148,6 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
             {initial ? t("sites.dialog.save") : t("sites.dialog.create")}
           </Button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }
