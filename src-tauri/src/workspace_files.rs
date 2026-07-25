@@ -15,6 +15,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::win_process::NoWindow;
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
 const GENERATED_DIRS: &[&str] = &[
@@ -638,12 +639,7 @@ fn scan_workspace_files_at(
             binary: is_binary_file(path),
         });
     }
-    entries.sort_by(|a, b| {
-        a.rel_path
-            .to_lowercase()
-            .cmp(&b.rel_path.to_lowercase())
-            .then_with(|| a.rel_path.cmp(&b.rel_path))
-    });
+    entries.sort_by_cached_key(|entry| (entry.rel_path.to_lowercase(), entry.rel_path.clone()));
     Ok(entries)
 }
 
@@ -653,11 +649,15 @@ fn scan_workspace_entries_at(
 ) -> Result<WorkspaceEntriesSnapshot, String> {
     let ignore_patterns = load_maruignore(vault);
     let tracked = git_tracked_paths(vault);
-    let mut entries = Vec::new();
+    // Walk sequentially (walkdir is I/O bound and not thread-safe), then fan
+    // the per-entry work out across rayon. The dominant cost is is_binary_file,
+    // which opens and reads 8KB of every candidate — same shape as the
+    // parallel scan in vault.rs.
     // follow_links stays off: workspaces symlink into cloud-streamed trees
     // (Dropbox, Google Drive File Stream), and descending into them turns the
     // scan into an unbounded network fetch. Symlinks are still reported as
     // entries with their target kind; their contents are never traversed.
+    let mut candidates: Vec<PathBuf> = Vec::new();
     for entry in WalkDir::new(vault)
         .follow_links(false)
         .into_iter()
@@ -674,13 +674,17 @@ fn scan_workspace_entries_at(
         })
         .filter_map(Result::ok)
     {
-        let path = entry.path();
-        if path == vault {
+        if entry.path() == vault {
             continue;
         }
-        let Ok(link_metadata) = fs::symlink_metadata(path) else {
-            continue;
-        };
+        candidates.push(entry.into_path());
+    }
+
+    let mut entries: Vec<WorkspaceEntryNode> = candidates
+        .par_iter()
+        .filter_map(|path| {
+            let path = path.as_path();
+            let link_metadata = fs::symlink_metadata(path).ok()?;
         let is_symlink = link_metadata.file_type().is_symlink();
         let target_metadata = if is_symlink {
             fs::metadata(path).ok()
@@ -704,7 +708,7 @@ fn scan_workspace_entries_at(
         } else if link_metadata.is_file() {
             WorkspaceEntryKind::File
         } else {
-            continue;
+            return None;
         };
         let rel_path = path
             .strip_prefix(vault)
@@ -730,39 +734,36 @@ fn scan_workspace_entries_at(
         } else {
             extension.clone().unwrap_or_else(|| "file".to_string())
         };
-        entries.push(WorkspaceEntryNode {
-            kind,
-            target_kind,
-            path: path.to_string_lossy().to_string(),
-            rel_path: rel_path.clone(),
-            parent_rel_path,
-            name: path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or(&rel_path)
-                .to_string(),
-            extension,
-            file_kind,
-            size_bytes: if file_like {
-                effective_metadata.len()
-            } else {
-                0
-            },
-            updated_at: effective_metadata
-                .modified()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .map(|value| value.to_rfc3339()),
-            git_tracked: tracked.contains(&rel_path),
-            binary: file_like && is_binary_file(path),
-        });
-    }
-    entries.sort_by(|a, b| {
-        a.rel_path
-            .to_lowercase()
-            .cmp(&b.rel_path.to_lowercase())
-            .then_with(|| a.rel_path.cmp(&b.rel_path))
-    });
+            Some(WorkspaceEntryNode {
+                kind,
+                target_kind,
+                path: path.to_string_lossy().to_string(),
+                rel_path: rel_path.clone(),
+                parent_rel_path,
+                name: path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(&rel_path)
+                    .to_string(),
+                extension,
+                file_kind,
+                size_bytes: if file_like {
+                    effective_metadata.len()
+                } else {
+                    0
+                },
+                updated_at: effective_metadata
+                    .modified()
+                    .ok()
+                    .map(DateTime::<Utc>::from)
+                    .map(|value| value.to_rfc3339()),
+                git_tracked: tracked.contains(&rel_path),
+                binary: file_like && is_binary_file(path),
+            })
+        })
+        .collect();
+    // Cache the lowercase key instead of recomputing it inside the comparator.
+    entries.sort_by_cached_key(|entry| (entry.rel_path.to_lowercase(), entry.rel_path.clone()));
     let revision = format!("{}:{}", Utc::now().timestamp_millis(), entries.len());
     Ok(WorkspaceEntriesSnapshot { revision, entries })
 }
