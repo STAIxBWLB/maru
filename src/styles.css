@@ -11087,6 +11087,54 @@ button.git-badge:hover {
   row-gap: 6px;
 }
 
+/* The panel is resized independently of the viewport, so the shedding rules
+   below key off its width, not a media query. The container is the panel and
+   not the header because @container only ever styles descendants of the
+   container — a query cannot restyle the container element itself. */
+.terminal-panel.dock-right:not(.collapsed) {
+  container-type: inline-size;
+  container-name: toolpanel;
+}
+
+/* Labelled launchers need ~200px and wrap to two rows before that. The icons
+   carry the meaning; each button keeps its aria-label and title, so dropping
+   the visible text costs no accessible name. */
+@container toolpanel (max-width: 358px) {
+  .terminal-panel.dock-right .terminal-launchers button span {
+    display: none;
+  }
+
+  .terminal-panel.dock-right .terminal-launchers button {
+    padding: 0 7px;
+  }
+}
+
+/* Narrower still: the theme select sheds its text so it can share a row with
+   the window buttons instead of claiming one of its own. The palette icon
+   stays, and the select keeps its arrow and remains directly clickable.
+   Scoped through .terminal-panel because @container adds no specificity and
+   the base `.tool-panel-theme select` rule is declared later in this file. */
+@container toolpanel (max-width: 258px) {
+  /* Tightening the column gap and the select together is what lets the theme
+     control and all three window buttons share one row instead of spilling a
+     fifth. The select still opens a native dropdown with the full names. */
+  .terminal-panel.dock-right:not(.collapsed) .terminal-header {
+    column-gap: 6px;
+  }
+
+  .terminal-panel.dock-right .tool-panel-theme select {
+    max-width: 40px;
+    padding-right: 16px;
+  }
+
+  /* An absolute path truncated into a ~160px column reads as noise, and its
+     long max-content width is what forced .terminal-header-right onto a row
+     of its own. The context chip beside it already names the active item. */
+  .terminal-panel.dock-right .terminal-cwd {
+    display: none;
+  }
+}
+
 /* The tab strip takes a full row of its own; everything after it flows and
    wraps. Without the 100% basis it loses the fight for space and collapses. */
 .terminal-panel.dock-right:not(.collapsed) .tool-panel-tabs {
