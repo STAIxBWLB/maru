@@ -37,6 +37,7 @@ import {
   type SiteEntry,
 } from "../../lib/sites";
 import {
+  SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT,
   siteViewBack,
   siteViewClose,
   siteViewForward,
@@ -98,6 +99,7 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
   const copiedTimerRef = useRef<number | null>(null);
   const desiredVisibleRef = useRef(false);
   const activeTabRef = useRef<string | null>(activeTabId);
+  const pendingOpenRef = useRef(new Map<string, string>());
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
@@ -131,13 +133,20 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
     rafRef.current = window.requestAnimationFrame(() => {
       rafRef.current = null;
       const tabId = activeTabRef.current;
-      if (!tabId || !siteViewTabRuntime(tabId)) return;
+      if (!tabId) return;
       const el = surfaceRef.current;
       const bounds = el ? siteViewBoundsFromRect(el.getBoundingClientRect()) : null;
       // Collapsed placeholder (terminal maximized → display:none) or any
       // overlay/dialog → hide. Bounds-before-show prevents stale-rect flash.
       if (!desiredVisibleRef.current || !bounds) {
         void siteViewHide().catch(() => undefined);
+        return;
+      }
+      if (!siteViewTabRuntime(tabId)) {
+        if (!pendingOpenRef.current.has(tabId)) return;
+        const url = pendingOpenRef.current.get(tabId) ?? "";
+        pendingOpenRef.current.delete(tabId);
+        void siteViewOpen(tabId, url, bounds).catch(reportError);
         return;
       }
       void siteViewSetBounds(tabId, bounds)
@@ -231,17 +240,18 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
   const loadInTab = useCallback(
     (tabId: string, url: string) => {
       if (!tauri) return;
+      if (!url) {
+        pendingOpenRef.current.delete(tabId);
+        return;
+      }
       if (siteViewTabRuntime(tabId)) {
         void siteViewNavigate(tabId, url).then(scheduleSync).catch(reportError);
         return;
       }
-      // First open is always user-initiated from a visible pane, so the
-      // placeholder rect is valid here. Never opened from an effect — that is
-      // what makes StrictMode double-effects safe.
-      const el = surfaceRef.current;
-      const bounds = el ? siteViewBoundsFromRect(el.getBoundingClientRect()) : null;
-      if (!bounds) return;
-      void siteViewOpen(tabId, url, bounds).then(scheduleSync).catch(reportError);
+      // Defer first open until the measured surface has non-zero bounds.
+      // Mode switches and React commits can otherwise race the first click.
+      pendingOpenRef.current.set(tabId, url);
+      scheduleSync();
     },
     [reportError, scheduleSync, tauri],
   );
@@ -254,7 +264,7 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
           id,
           url,
           title: null,
-          loading: tauri,
+          loading: tauri && Boolean(url),
           siteId,
         });
         if (!result.opened) {
@@ -281,6 +291,7 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
 
   const closeTab = useCallback(
     (tabId: string) => {
+      pendingOpenRef.current.delete(tabId);
       setTabs((current) => {
         const result = closeBrowserTab(current, tabId, activeTabRef.current);
         setActiveTabId(result.activeId);
@@ -291,6 +302,16 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
     },
     [reportError],
   );
+
+  useEffect(() => {
+    const closeActiveTab = () => {
+      const tabId = activeTabRef.current;
+      if (tabId) closeTab(tabId);
+    };
+    window.addEventListener(SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT, closeActiveTab);
+    return () =>
+      window.removeEventListener(SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT, closeActiveTab);
+  }, [closeTab]);
 
   // ── user actions
   const activateSite = useCallback(

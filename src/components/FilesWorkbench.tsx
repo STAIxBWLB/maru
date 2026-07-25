@@ -794,18 +794,71 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     // target is not buried under unrelated open folders.
     onExpandedFoldersChange(filesFolderAncestors(parent));
     selectPaths([target.path]);
-    window.requestAnimationFrame(() => {
-      listRef.current
-        ?.querySelector<HTMLElement>(`[data-files-path="${CSS.escape(target.path)}"]`)
-        ?.focus();
-      onRevealHandled?.();
-    });
   }, [
     entries,
     onExpandedFoldersChange,
-    onRevealHandled,
     pendingRevealTargetPath,
     selectPaths,
+    workspacePath,
+  ]);
+
+  useEffect(() => {
+    if (!pendingRevealTargetPath || !workspacePath) return;
+    const target = entries.find(
+      (entry) =>
+        entry.path === pendingRevealTargetPath || entry.relPath === pendingRevealTargetPath,
+    );
+    if (!target) return;
+    const parent = isDirectoryNode(target) ? target.relPath : target.parentRelPath;
+    if (currentFolder !== parent) return;
+
+    if (isDirectoryNode(target)) {
+      const folder = listRef.current
+        ?.closest(".files-workbench")
+        ?.querySelector<HTMLElement>('.files-tree-row[aria-selected="true"] button');
+      folder?.focus();
+      onRevealHandled?.();
+      return;
+    }
+
+    const targetIndex = contents.findIndex((entry) => entry.path === target.path);
+    if (targetIndex < 0) return;
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = Math.max(
+      0,
+      targetIndex * rowHeight - Math.max(0, list.clientHeight - rowHeight) / 2,
+    );
+
+    let cancelled = false;
+    let frame = 0;
+    const focusTarget = (attempt: number) => {
+      frame = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        const row = list.querySelector<HTMLElement>(
+          `[data-files-path="${CSS.escape(target.path)}"]`,
+        );
+        if (!row && attempt < 3) {
+          focusTarget(attempt + 1);
+          return;
+        }
+        row?.scrollIntoView({ block: "nearest" });
+        row?.focus();
+        if (row) onRevealHandled?.();
+      });
+    };
+    focusTarget(0);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [
+    contents,
+    currentFolder,
+    entries,
+    onRevealHandled,
+    pendingRevealTargetPath,
+    rowHeight,
     workspacePath,
   ]);
 

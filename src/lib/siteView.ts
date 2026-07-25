@@ -24,6 +24,11 @@ const isTauri = () =>
 export const SITE_VIEW_NAVIGATED_EVENT = "sites://navigated";
 export const SITE_VIEW_PAGE_LOAD_EVENT = "sites://page-load";
 export const SITE_VIEW_TITLE_EVENT = "sites://title-changed";
+export const SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT = "maru:sites:close-active";
+
+export function requestSiteViewCloseActive(): void {
+  window.dispatchEvent(new Event(SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT));
+}
 
 export interface SiteViewNavigatedPayload {
   tabId: string;
