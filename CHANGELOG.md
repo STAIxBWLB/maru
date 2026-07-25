@@ -8,6 +8,25 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.20 - 2026-07-25 - Evidence Binder V2
+
+- **Evidence bindings are explicit, durable, and conflict-safe.** Binder data
+  now uses a versioned local schema with full-file SHA-256 identity,
+  revision-guarded mutations, atomic writes, deterministic migration from v1,
+  and rejection of unsupported future schemas. Linking, unlinking, target
+  edits, notes, local verification, and submission selection no longer rely on
+  replacing the complete state.
+- **Binder review becomes an intentional workflow.** Evidence can be bound to
+  free-form draft sections, KPIs, and submission checklist items, with live
+  suggestions from the current draft and HWP labels. Local verification and
+  submission inclusion are separate actions, the last reversible change can
+  be undone, and orphaned bindings remain visible and removable.
+- **Discovery and file operations preserve evidence integrity.** Candidate
+  discovery is scoped to the active business unit, sidecar metadata is typed
+  and independently validated, and Maru-owned moves or renames rekey
+  path-derived bindings with rollback on partial failure while stable
+  frontmatter document IDs remain unchanged.
+
 ## v0.4.19 — 2026-07-25 — Today & Messages Hardening
 
 - **Atomic, crash-safe Today setup finalization.** Finish setup and Quick
