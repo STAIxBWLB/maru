@@ -18,8 +18,6 @@ export const LOCALES: Locale[] = ["ko", "en"];
 const STORAGE_KEY = "maru:locale:v1";
 
 const ko: Record<string, string> = {
-  "app.title": "Maru",
-  "app.subtitle.work": "AI workspace",
   "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
@@ -3168,8 +3166,6 @@ const ko: Record<string, string> = {
 };
 
 const en: Record<string, string> = {
-  "app.title": "Maru",
-  "app.subtitle.work": "AI workspace",
   "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",

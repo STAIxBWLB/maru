@@ -1515,7 +1515,11 @@ a {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 12px;
+  /* The left inset clears the macOS traffic lights, which the overlay title
+     bar draws over the first ~76px. It used to ride on the brand mark; with
+     the brand gone the topbar itself owns it so the first control still
+     starts clear of them. */
+  padding: 0 12px 0 82px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   -webkit-app-region: drag;
@@ -1553,40 +1557,6 @@ a {
 
 .topbar-pill:hover .topbar-muted-label {
   color: var(--muted);
-}
-
-.brand-mark {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  overflow: hidden;
-  background: transparent;
-  margin-left: 70px;
-}
-
-.brand-mark-icon {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.brand-name {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: var(--ink);
-}
-
-.brand-name span {
-  color: var(--faint);
-  font-weight: 500;
-  margin-left: 8px;
-  font-size: 12px;
 }
 
 .workspace-switcher {
@@ -11126,6 +11096,11 @@ button.git-badge:hover {
   color: var(--terminal-muted);
   font-size: 12px;
   font-weight: 650;
+  /* Korean has no spaces inside a word, so the default CJK break rule splits
+     "터미널" into "터미/널" as soon as the header runs short on room. These
+     labels are fixed-width chrome and must never wrap or shrink. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .tool-panel-tab::after {
@@ -13117,7 +13092,6 @@ button.git-badge:hover {
     overflow: hidden;
   }
 
-  .brand-name span,
   .workspace-switcher .ws-status {
     display: none;
   }
@@ -21482,11 +21456,6 @@ button.git-badge:hover {
   background: var(--panel);
 }
 
-.brand-name {
-  font-size: var(--type-body-size);
-  letter-spacing: -0.005em;
-}
-
 .activity-rail {
   gap: var(--space-2);
   padding: 8px 6px;
@@ -21573,12 +21542,17 @@ button.git-badge:hover {
   min-width: 0;
 }
 
+/* `.terminal-header` deliberately stays out of this group. The tool panel is a
+   themed content surface — it carries its own theme switcher and its body is
+   painted from --terminal-*, not the app palette. Giving the header an app
+   background while its labels kept --terminal-muted put #9d9d9d on #f9f9fb
+   (~2.4:1), and left a white chip stranded on the black rail when docked right
+   and collapsed. Header and body must come from the same token family. */
 .mode-toolbar,
 .files-toolbar,
 .tasks-toolbar,
 .meetings-toolbar,
-.sites-toolbar,
-.terminal-header {
+.sites-toolbar {
   border-bottom-color: var(--line-soft);
   background: var(--panel-2);
 }

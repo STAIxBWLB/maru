@@ -19,6 +19,12 @@
   -moz-osx-font-smoothing: grayscale;
   -webkit-font-feature-settings: "ss01", "cv01";
   font-optical-sizing: auto;
+  /* Korean words carry no internal spaces, so the default CJK rule happily
+     breaks "터미널" into "터미/널". `keep-all` moves breaks to the spaces
+     between eojeol, which is how Korean is meant to wrap. Latin is
+     unaffected; the existing `word-break: break-all` rules on paths and
+     hashes are more specific and still win. */
+  word-break: keep-all;
 
   /* Stable shell geometry. */
   --shell-topbar-height: 44px;
