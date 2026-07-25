@@ -1,10 +1,23 @@
-import { FolderSearch, Globe, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Copy,
+  ExternalLink,
+  FolderSearch,
+  Globe,
+  Pencil,
+  Plus,
+  Search,
+  SquarePlus,
+  Trash2,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
+import { clampMenuPosition } from "../../lib/menu";
+import { useContextMenuKeyboard } from "../../lib/useContextMenuKeyboard";
 import {
   faviconUrlFor,
   filterSitesByQuery,
   groupSitesByCategory,
+  reorderSites,
   type SiteEntry,
 } from "../../lib/sites";
 
@@ -17,6 +30,10 @@ interface SitesSidebarProps {
   onQueryChange: (query: string) => void;
   onCategoryFilterChange: (category: string) => void;
   onSelect: (site: SiteEntry) => void;
+  onOpenInNewTab: (site: SiteEntry) => void;
+  onOpenExternal: (site: SiteEntry) => void;
+  onCopyUrl: (site: SiteEntry) => void;
+  onReorder: (sites: SiteEntry[]) => void;
   onAdd: () => void;
   onEdit: (site: SiteEntry) => void;
   onDelete: (site: SiteEntry) => void;
@@ -32,12 +49,48 @@ export function SitesSidebar({
   onQueryChange,
   onCategoryFilterChange,
   onSelect,
+  onOpenInNewTab,
+  onOpenExternal,
+  onCopyUrl,
+  onReorder,
   onAdd,
   onEdit,
   onDelete,
   onImport,
 }: SitesSidebarProps) {
   const { t } = useTranslation();
+  const [menu, setMenu] = useState<{ x: number; y: number; site: SiteEntry } | null>(
+    null,
+  );
+  const [dragId, setDragId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const handleMenuKeyDown = useContextMenuKeyboard(menuRef, !!menu, () => setMenu(null));
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  useEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const node = menuRef.current;
+    const next = clampMenuPosition(
+      { x: menu.x, y: menu.y },
+      { width: node.offsetWidth, height: node.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (next.x === menu.x && next.y === menu.y) return;
+    setMenu({ ...menu, ...next });
+  }, [menu]);
   const categories = useMemo(
     () =>
       Array.from(
@@ -124,15 +177,71 @@ export function SitesSidebar({
                   key={site.id}
                   site={site}
                   active={site.id === activeSiteId}
+                  dragging={dragId === site.id}
                   onSelect={onSelect}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setMenu({ x: event.clientX, y: event.clientY, site });
+                  }}
+                  onDragStart={() => setDragId(site.id)}
+                  onDragEnd={() => setDragId(null)}
+                  onDropOn={(target) => {
+                    if (!dragId || dragId === target.id) return;
+                    onReorder(reorderSites(sites, dragId, target.id));
+                    setDragId(null);
+                  }}
                 />
               ))}
             </div>
           ))
         )}
       </div>
+
+      {menu ? (
+        <div
+          ref={menuRef}
+          className="context-menu"
+          role="menu"
+          tabIndex={-1}
+          style={{ left: menu.x, top: menu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={handleMenuKeyDown}
+          onClick={() => setMenu(null)}
+        >
+          <button type="button" role="menuitem" onClick={() => onSelect(menu.site)}>
+            <Globe size={13} />
+            {t("sites.menu.open")}
+          </button>
+          <button type="button" role="menuitem" onClick={() => onOpenInNewTab(menu.site)}>
+            <SquarePlus size={13} />
+            {t("sites.menu.openInNewTab")}
+          </button>
+          <button type="button" role="menuitem" onClick={() => onOpenExternal(menu.site)}>
+            <ExternalLink size={13} />
+            {t("sites.menu.openExternal")}
+          </button>
+          <button type="button" role="menuitem" onClick={() => onCopyUrl(menu.site)}>
+            <Copy size={13} />
+            {t("sites.menu.copyUrl")}
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button type="button" role="menuitem" onClick={() => onEdit(menu.site)}>
+            <Pencil size={13} />
+            {t("sites.edit")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            onClick={() => onDelete(menu.site)}
+          >
+            <Trash2 size={13} />
+            {t("sites.delete")}
+          </button>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -141,25 +250,50 @@ export function SitesSidebar({
 function SiteRow({
   site,
   active,
+  dragging,
   onSelect,
   onEdit,
   onDelete,
+  onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDropOn,
 }: {
   site: SiteEntry;
   active: boolean;
+  dragging: boolean;
   onSelect: (site: SiteEntry) => void;
   onEdit: (site: SiteEntry) => void;
   onDelete: (site: SiteEntry) => void;
+  onContextMenu: (event: React.MouseEvent) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDropOn: (site: SiteEntry) => void;
 }) {
   const { t } = useTranslation();
   const [faviconFailed, setFaviconFailed] = useState(false);
   const favicon = faviconUrlFor(site);
   return (
     <div
-      className={active ? "sites-item active" : "sites-item"}
+      className={`sites-item${active ? " active" : ""}${dragging ? " dragging" : ""}`}
       role="button"
       tabIndex={0}
       title={site.url}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDropOn(site);
+      }}
+      onContextMenu={onContextMenu}
       onClick={() => onSelect(site)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

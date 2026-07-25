@@ -1,9 +1,12 @@
-// In-app browser pane: a single native child webview ("sites-embed")
-// embedded inside the "main" window. The embed loads arbitrary external
+// In-app browser pane: one native child webview per tab ("sites-embed-<id>")
+// embedded inside the "main" window. Each embed loads arbitrary external
 // http(s) sites and is intentionally NOT listed in any capability, so
 // remote content gets zero IPC surface. Control flows in through these
 // commands (invoked from the main webview); feedback flows back out via
-// app events emitted to the main webview only.
+// app events emitted to the main webview only, tagged with the tab id.
+//
+// Only the active tab is shown; the rest stay hidden so each keeps its own
+// page state (scroll position, forms, SPA state).
 //
 // Requires the tauri "unstable" cargo feature (Window::add_child,
 // Manager::get_window / get_webview are gated behind it in tauri 2.10).
@@ -24,8 +27,10 @@ use tauri::{
     WebviewUrl,
 };
 
-pub const SITES_EMBED_LABEL: &str = "sites-embed";
+pub const SITES_EMBED_PREFIX: &str = "sites-embed-";
 const MAIN_WINDOW_LABEL: &str = "main";
+/// Each tab is a real native webview, so the count is capped.
+const MAX_TABS: usize = 12;
 
 // Keep in sync with src/lib/siteView.ts (naming follows catalog://refresh).
 const EVENT_NAVIGATED: &str = "sites://navigated";
@@ -35,12 +40,14 @@ const EVENT_TITLE: &str = "sites://title-changed";
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NavigatedPayload {
+    tab_id: String,
     url: String,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadPayload {
+    tab_id: String,
     url: String,
     /// "started" | "finished"
     state: &'static str,
@@ -49,6 +56,7 @@ struct LoadPayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TitlePayload {
+    tab_id: String,
     title: String,
 }
 
@@ -76,9 +84,33 @@ fn embed_rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
     }
 }
 
-fn get_embed(app: &AppHandle) -> Result<Webview, String> {
-    app.get_webview(SITES_EMBED_LABEL)
-        .ok_or_else(|| "sites-embed webview is not open".to_string())
+/// Tab ids become webview labels, so they are restricted to a safe alphabet
+/// rather than trusted from the frontend.
+fn embed_label(tab_id: &str) -> Result<String, String> {
+    let trimmed = tab_id.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 {
+        return Err("Invalid browser tab id".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("Invalid browser tab id".to_string());
+    }
+    Ok(format!("{SITES_EMBED_PREFIX}{trimmed}"))
+}
+
+fn get_embed(app: &AppHandle, tab_id: &str) -> Result<Webview, String> {
+    let label = embed_label(tab_id)?;
+    app.get_webview(&label)
+        .ok_or_else(|| format!("Browser tab {tab_id} is not open"))
+}
+
+fn embed_labels(app: &AppHandle) -> Vec<String> {
+    app.webviews()
+        .into_keys()
+        .filter(|label| label.starts_with(SITES_EMBED_PREFIX))
+        .collect()
 }
 
 fn emit_to_main<S: Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
@@ -97,6 +129,7 @@ fn emit_to_main<S: Serialize + Clone>(app: &AppHandle, event: &str, payload: S) 
 #[tauri::command]
 pub async fn site_view_open(
     app: AppHandle,
+    tab_id: String,
     url: String,
     x: f64,
     y: f64,
@@ -104,6 +137,7 @@ pub async fn site_view_open(
     height: f64,
 ) -> Result<(), String> {
     let target = parse_http_url(&url)?;
+    let label = embed_label(&tab_id)?;
 
     // Serialize concurrent opens so two racing calls never both reach
     // add_child for the same label.
@@ -112,17 +146,21 @@ pub async fn site_view_open(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if let Some(existing) = app.get_webview(SITES_EMBED_LABEL) {
+    if let Some(existing) = app.get_webview(&label) {
         existing
             .set_bounds(embed_rect(x, y, width, height))
-            .map_err(|err| format!("Cannot set sites-embed bounds: {err}"))?;
+            .map_err(|err| format!("Cannot set browser tab bounds: {err}"))?;
         existing
             .navigate(target)
-            .map_err(|err| format!("Cannot navigate sites-embed: {err}"))?;
+            .map_err(|err| format!("Cannot navigate browser tab: {err}"))?;
         existing
             .show()
-            .map_err(|err| format!("Cannot show sites-embed: {err}"))?;
+            .map_err(|err| format!("Cannot show browser tab: {err}"))?;
         return Ok(());
+    }
+
+    if embed_labels(&app).len() >= MAX_TABS {
+        return Err(format!("Too many browser tabs open (max {MAX_TABS})"));
     }
 
     let window = app
@@ -133,8 +171,12 @@ pub async fn site_view_open(
     let app_load = app.clone();
     let app_title = app.clone();
     let app_popup = app.clone();
+    let nav_tab = tab_id.clone();
+    let load_tab = tab_id.clone();
+    let title_tab = tab_id.clone();
+    let popup_label = label.clone();
 
-    let builder = WebviewBuilder::new(SITES_EMBED_LABEL, WebviewUrl::External(target))
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
         // Do not steal keyboard focus from the main UI on open.
         .focused(false)
         .on_navigation(move |url| {
@@ -145,6 +187,7 @@ pub async fn site_view_open(
                     &app_nav,
                     EVENT_NAVIGATED,
                     NavigatedPayload {
+                        tab_id: nav_tab.clone(),
                         url: url.to_string(),
                     },
                 );
@@ -160,23 +203,32 @@ pub async fn site_view_open(
                 &app_load,
                 EVENT_LOAD,
                 LoadPayload {
+                    tab_id: load_tab.clone(),
                     url: payload.url().to_string(),
                     state,
                 },
             );
         })
         .on_document_title_changed(move |_webview, title| {
-            emit_to_main(&app_title, EVENT_TITLE, TitlePayload { title });
+            emit_to_main(
+                &app_title,
+                EVENT_TITLE,
+                TitlePayload {
+                    tab_id: title_tab.clone(),
+                    title,
+                },
+            );
         })
         .on_new_window(move |url, _features| {
-            // Keep target=_blank / window.open inside the pane: deny the
+            // Keep target=_blank / window.open inside this tab: deny the
             // popup, then steer the embed itself to the URL. Navigation is
             // deferred off the callback to avoid re-entrancy in the
             // platform webview delegate.
             if matches!(url.scheme(), "http" | "https") {
                 let app = app_popup.clone();
+                let label = popup_label.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Some(embed) = app.get_webview(SITES_EMBED_LABEL) {
+                    if let Some(embed) = app.get_webview(&label) {
                         let _ = embed.navigate(url);
                     }
                 });
@@ -190,75 +242,103 @@ pub async fn site_view_open(
             Position::Logical(LogicalPosition::new(x, y)),
             Size::Logical(LogicalSize::new(width.max(1.0), height.max(1.0))),
         )
-        .map_err(|err| format!("Cannot create sites-embed webview: {err}"))?;
+        .map_err(|err| format!("Cannot create browser tab webview: {err}"))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn site_view_navigate(app: AppHandle, url: String) -> Result<(), String> {
+pub async fn site_view_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), String> {
     let target = parse_http_url(&url)?;
-    get_embed(&app)?
+    get_embed(&app, &tab_id)?
         .navigate(target)
-        .map_err(|err| format!("Cannot navigate sites-embed: {err}"))
+        .map_err(|err| format!("Cannot navigate browser tab: {err}"))
 }
 
 #[tauri::command]
 pub async fn site_view_set_bounds(
     app: AppHandle,
+    tab_id: String,
     x: f64,
     y: f64,
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    get_embed(&app)?
+    get_embed(&app, &tab_id)?
         .set_bounds(embed_rect(x, y, width, height))
-        .map_err(|err| format!("Cannot set sites-embed bounds: {err}"))
+        .map_err(|err| format!("Cannot set browser tab bounds: {err}"))
 }
 
+/// Show one tab and hide every other embed, so switching tabs never leaves
+/// two webviews stacked on the same bounds.
 #[tauri::command]
-pub async fn site_view_show(app: AppHandle) -> Result<(), String> {
-    get_embed(&app)?
+pub async fn site_view_show(app: AppHandle, tab_id: String) -> Result<(), String> {
+    let label = embed_label(&tab_id)?;
+    for other in embed_labels(&app) {
+        if other == label {
+            continue;
+        }
+        if let Some(webview) = app.get_webview(&other) {
+            let _ = webview.hide();
+        }
+    }
+    get_embed(&app, &tab_id)?
         .show()
-        .map_err(|err| format!("Cannot show sites-embed: {err}"))
+        .map_err(|err| format!("Cannot show browser tab: {err}"))
 }
 
+/// Hide every embed. Used when the browser surface itself goes away.
 #[tauri::command]
 pub async fn site_view_hide(app: AppHandle) -> Result<(), String> {
-    get_embed(&app)?
-        .hide()
-        .map_err(|err| format!("Cannot hide sites-embed: {err}"))
+    for label in embed_labels(&app) {
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.hide();
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn site_view_close(app: AppHandle) -> Result<(), String> {
-    // Idempotent: closing an absent embed is a no-op.
-    match app.get_webview(SITES_EMBED_LABEL) {
+pub async fn site_view_close(app: AppHandle, tab_id: String) -> Result<(), String> {
+    // Idempotent: closing an absent tab is a no-op. A leaked child webview
+    // would float over the UI forever, so failures are surfaced.
+    let label = embed_label(&tab_id)?;
+    match app.get_webview(&label) {
         Some(webview) => webview
             .close()
-            .map_err(|err| format!("Cannot close sites-embed: {err}")),
+            .map_err(|err| format!("Cannot close browser tab: {err}")),
         None => Ok(()),
     }
 }
 
 #[tauri::command]
-pub async fn site_view_reload(app: AppHandle) -> Result<(), String> {
-    get_embed(&app)?
-        .reload()
-        .map_err(|err| format!("Cannot reload sites-embed: {err}"))
+pub async fn site_view_close_all(app: AppHandle) -> Result<(), String> {
+    for label in embed_labels(&app) {
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.close();
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn site_view_back(app: AppHandle) -> Result<(), String> {
+pub async fn site_view_reload(app: AppHandle, tab_id: String) -> Result<(), String> {
+    get_embed(&app, &tab_id)?
+        .reload()
+        .map_err(|err| format!("Cannot reload browser tab: {err}"))
+}
+
+#[tauri::command]
+pub async fn site_view_back(app: AppHandle, tab_id: String) -> Result<(), String> {
     // Webview<R> exposes no native history API; history.back() in the
     // page context is the supported equivalent.
-    get_embed(&app)?
+    get_embed(&app, &tab_id)?
         .eval("history.back()")
         .map_err(|err| format!("Cannot go back: {err}"))
 }
 
 #[tauri::command]
-pub async fn site_view_forward(app: AppHandle) -> Result<(), String> {
-    get_embed(&app)?
+pub async fn site_view_forward(app: AppHandle, tab_id: String) -> Result<(), String> {
+    get_embed(&app, &tab_id)?
         .eval("history.forward()")
         .map_err(|err| format!("Cannot go forward: {err}"))
 }

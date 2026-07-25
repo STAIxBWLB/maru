@@ -78,6 +78,7 @@ import {
   acceptInboxItem,
   acceptInboxItems,
   binaryViewerClassify,
+  binaryViewerOpenExternal,
   binaryViewerPrepareAsset,
   checkGwsAuth,
   checkMsoAuth,
@@ -8327,6 +8328,13 @@ function MainApp() {
             onToggleFavorite={toggleFavorite}
             isFavoriteMissing={isFavoriteMissing}
             isFavorite={isFavorite}
+            onOpenInBrowser={(targetPath) => {
+              if (!explorerWorkspacePath) return;
+              void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch(
+                (err: unknown) =>
+                  setError(err instanceof Error ? err.message : String(err)),
+              );
+            }}
             onApplySkillToTarget={applySkillToFileTarget}
             onAttachToTerminal={attachPathToTerminal}
             onError={setError}

@@ -16,6 +16,7 @@ import {
   FolderClosed,
   FolderOpen,
   FolderPlus,
+  Globe,
   ListFilter,
   MoreHorizontal,
   PanelLeftClose,
@@ -184,6 +185,7 @@ interface FilesWorkbenchProps {
   onToggleFavorite: (target: FavoriteTarget) => void;
   isFavoriteMissing: (favorite: FavoriteItem) => boolean;
   isFavorite: (kind: FavoriteItem["kind"], relPath: string) => boolean;
+  onOpenInBrowser?: (targetPath: string) => void;
   onApplySkillToTarget?: (targetPath: string, targetKind: "file" | "directory") => void;
   onAttachToTerminal?: (relPath: string, absPath: string) => void;
   onError: (message: string) => void;
@@ -239,6 +241,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     onToggleFavorite,
     isFavoriteMissing,
     isFavorite,
+    onOpenInBrowser,
     onApplySkillToTarget,
     onAttachToTerminal,
     onError,
@@ -1486,6 +1489,16 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             <Clipboard size={13} />
             {t("files.operations.copy")}
           </button>
+          {primaryEntry && onOpenInBrowser && /\.(html?|xhtml)$/i.test(primaryEntry.name) ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onOpenInBrowser(primaryEntry.path)}
+            >
+              <Globe size={13} />
+              {t("files.context.openInBrowser")}
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

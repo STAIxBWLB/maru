@@ -9,6 +9,7 @@ import {
   parseSiteCandidates,
   parseSitesDocument,
   removeSite,
+  reorderSites,
   serializeSitesDocument,
   shouldShowSiteView,
   siteViewBoundsFromRect,
@@ -177,5 +178,29 @@ describe("newSiteId", () => {
   it("produces unique non-empty ids", () => {
     const ids = new Set(Array.from({ length: 50 }, () => newSiteId()));
     expect(ids.size).toBe(50);
+  });
+});
+
+describe("reorderSites", () => {
+  const base = [
+    { ...site({ id: "a" }), order: 0, category: "Work" },
+    { ...site({ id: "b" }), order: 1, category: "Work" },
+    { ...site({ id: "c" }), order: 2, category: "Personal" },
+  ];
+
+  it("moves an entry into the target slot and renumbers order", () => {
+    const next = reorderSites(base, "c", "a");
+    expect(next.map((site) => site.id)).toEqual(["c", "a", "b"]);
+    expect(next.map((site) => site.order)).toEqual([0, 1, 2]);
+  });
+
+  it("adopts the target's category when dragging across groups", () => {
+    const next = reorderSites(base, "c", "a");
+    expect(next.find((site) => site.id === "c")?.category).toBe("Work");
+  });
+
+  it("is a no-op for unknown or identical ids", () => {
+    expect(reorderSites(base, "a", "a")).toBe(base);
+    expect(reorderSites(base, "missing", "a")).toBe(base);
   });
 });
