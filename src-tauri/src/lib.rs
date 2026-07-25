@@ -94,7 +94,7 @@ use document::{
     save_document, trash_document, update_frontmatter_field,
 };
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
-use evidence_binder::{evidence_binder_read, evidence_binder_save};
+use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
 use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use git::{
@@ -534,7 +534,7 @@ pub fn run() {
             maru_e2e_run,
             maru_e2e_read,
             evidence_binder_read,
-            evidence_binder_save,
+            evidence_binder_mutate,
             // M1 Operations Catalog (Phase 3)
             catalog_scan,
             catalog_query,

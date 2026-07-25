@@ -8758,6 +8758,7 @@ function MainApp() {
                 workspaceRoot={activeDocumentWorkspacePath}
                 docId={evidenceBinderDocId}
                 documentPath={document?.path ?? null}
+                documentMarkdown={draftContent || document?.content || ""}
                 onError={setError}
               />
             }

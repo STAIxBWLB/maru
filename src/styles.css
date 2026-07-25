@@ -8370,6 +8370,10 @@ button.git-badge:hover {
   justify-content: space-between;
   gap: 8px;
 }
+.evidence-binder__header-actions {
+  display: flex;
+  gap: 4px;
+}
 .evidence-binder__header h3 {
   margin: 0;
   font-size: 13px;
@@ -8415,7 +8419,7 @@ button.git-badge:hover {
   background: transparent;
   color: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 .evidence-card__main:disabled {
   cursor: progress;
@@ -8482,6 +8486,69 @@ button.git-badge:hover {
 }
 .evidence-card__linked {
   align-items: center;
+  color: var(--accent);
+}
+.evidence-card__editor {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 9px;
+}
+.evidence-card__editor label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.evidence-card__editor input,
+.evidence-card__editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  padding: 5px 7px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+}
+.evidence-card__editor textarea {
+  resize: vertical;
+}
+.evidence-card__editor-actions,
+.evidence-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.evidence-card__editor-actions {
+  margin-top: 0;
+}
+.evidence-card__editor-actions button,
+.evidence-card__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+  padding: 4px 7px;
+  color: var(--ink);
+  font-size: 10px;
+  cursor: pointer;
+}
+.evidence-card__editor-actions button:disabled,
+.evidence-card__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.evidence-card__actions button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: var(--accent-soft);
   color: var(--accent);
 }
 

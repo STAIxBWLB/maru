@@ -1,3 +1,4 @@
+use crate::evidence_binder::rekey_document_states;
 use crate::vault::{
     load_maruignore, matches_maruignore, normalize_existing_dir, resolve_inside_vault, ScanFilter,
     ScanOptions,
@@ -233,6 +234,16 @@ pub fn rename_workspace_entry(
         return Err(format!("An item named {new_name} already exists"));
     }
     journaled_rename(&vault, &source, &target)?;
+    if let Err(err) = rekey_document_states(&vault, &source, &target) {
+        if let Err(rollback_err) = journaled_rename(&vault, &target, &source) {
+            return Err(format!(
+                "Evidence Binder rekey failed after rename: {err}; rename rollback failed: {rollback_err}"
+            ));
+        }
+        return Err(format!(
+            "Evidence Binder rekey failed; rename rolled back: {err}"
+        ));
+    }
     Ok(success_outcome(Some(&source), Some(&target)))
 }
 
@@ -429,7 +440,23 @@ pub fn apply_file_queue(
         }
         match item.operation {
             FileQueueOperation::Copy => copy_source(&source_path, &target_path, item.source_kind)?,
-            FileQueueOperation::Move => move_source(&source_path, &target_path, item.source_kind)?,
+            FileQueueOperation::Move => {
+                move_source(&source_path, &target_path, item.source_kind)?;
+                if source_path.starts_with(&vault) {
+                    if let Err(err) = rekey_document_states(&vault, &source_path, &target_path) {
+                        if let Err(rollback_err) =
+                            move_source(&target_path, &source_path, item.source_kind)
+                        {
+                            return Err(format!(
+                                "Evidence Binder rekey failed after move: {err}; move rollback failed: {rollback_err}"
+                            ));
+                        }
+                        return Err(format!(
+                            "Evidence Binder rekey failed; move rolled back: {err}"
+                        ));
+                    }
+                }
+            }
         }
         outcomes.push(FileQueueApplyOutcome {
             id: item.id,
@@ -843,6 +870,33 @@ fn copy_entry(source: &Path, target: &Path) -> Result<(), String> {
 }
 
 fn move_entry(vault: &Path, source: &Path, target: &Path) -> Result<(), String> {
+    let moved = match journaled_rename(vault, source, target) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            copy_entry(source, target).map_err(|copy_error| {
+                format!("Cannot move item: {rename_error}; copy fallback failed: {copy_error}")
+            })?;
+            remove_entry(source).map_err(|remove_error| {
+                let _ = remove_entry(target);
+                format!("Cannot remove moved source: {remove_error}")
+            })
+        }
+    };
+    moved?;
+    if let Err(err) = rekey_document_states(vault, source, target) {
+        if let Err(rollback_err) = move_entry_without_binder(vault, target, source) {
+            return Err(format!(
+                "Evidence Binder rekey failed after move: {err}; move rollback failed: {rollback_err}"
+            ));
+        }
+        return Err(format!(
+            "Evidence Binder rekey failed; move rolled back: {err}"
+        ));
+    }
+    Ok(())
+}
+
+fn move_entry_without_binder(vault: &Path, source: &Path, target: &Path) -> Result<(), String> {
     match journaled_rename(vault, source, target) {
         Ok(()) => Ok(()),
         Err(rename_error) => {
@@ -1251,10 +1305,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(linked.kind, WorkspaceEntryKind::Symlink);
-        assert_eq!(
-            linked.target_kind,
-            Some(WorkspaceEntryTargetKind::Directory)
-        );
+        assert_eq!(linked.target_kind, Some(WorkspaceEntryTargetKind::Directory));
     }
 
     #[test]
@@ -1307,7 +1358,10 @@ mod tests {
             .iter()
             .find(|entry| entry.rel_path == "linked")
             .unwrap();
-        assert_eq!(linked.target_kind, Some(WorkspaceEntryTargetKind::Directory));
+        assert_eq!(
+            linked.target_kind,
+            Some(WorkspaceEntryTargetKind::Directory)
+        );
         assert!(!snapshot
             .entries
             .iter()

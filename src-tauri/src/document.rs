@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::atomic_file::write_atomic;
+use crate::evidence_binder::rekey_document_states;
 
 /// Frontend-supplied value for a single frontmatter field. Untagged so React
 /// can send a bare string / array / number / boolean and we figure it out.
@@ -425,6 +426,16 @@ pub fn move_document(
             .map_err(|err| format!("Cannot create target directory: {err}"))?;
     }
     move_file(&source_path, &target_path)?;
+    if let Err(err) = rekey_document_states(&vault, &source_path, &target_path) {
+        if let Err(rollback_err) = move_file(&target_path, &source_path) {
+            return Err(format!(
+                "Evidence Binder rekey failed after document move: {err}; move rollback failed: {rollback_err}"
+            ));
+        }
+        return Err(format!(
+            "Evidence Binder rekey failed; document move rolled back: {err}"
+        ));
+    }
 
     let payload = read_document(vault_path, target_path.to_string_lossy().to_string())?;
     if payload.rel_path != relative(&target_path, &vault) {
@@ -996,6 +1007,16 @@ mod tests {
         let source = tmp.path().join("notes").join("weekly.md");
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, "# Weekly\n\nbody\n").unwrap();
+        let binder_dir = tmp.path().join(".maru").join("binder");
+        fs::create_dir_all(&binder_dir).unwrap();
+        fs::write(
+            binder_dir.join("notes-weekly.json"),
+            format!(
+                r#"{{"schemaVersion":2,"docId":"notes-weekly","documentPath":{},"bindings":[],"updatedAt":"2026-07-25T00:00:00Z"}}"#,
+                serde_json::to_string(&source.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
 
         let payload = move_document(
             root,
@@ -1012,6 +1033,19 @@ mod tests {
             .join("archive")
             .join("weekly-renamed.md")
             .exists());
+        assert!(!binder_dir.join("notes-weekly.json").exists());
+        let binder: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(binder_dir.join("archive-weekly-renamed.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(binder["docId"], "archive-weekly-renamed");
+        assert_eq!(
+            binder["documentPath"],
+            tmp.path()
+                .join("archive/weekly-renamed.md")
+                .to_string_lossy()
+                .as_ref()
+        );
     }
 
     #[test]

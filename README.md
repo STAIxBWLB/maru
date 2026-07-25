@@ -1,7 +1,9 @@
 # Maru
 
 Local-first AI workspace desktop app for Korean knowledge/document operations.
-Tauri 2 + Rust + React 19 + TypeScript. Current version **0.4.0**.
+Tauri 2 + Rust + React 19 + TypeScript. The current version is defined by the
+synced app manifests (`package.json`, `src-tauri/tauri.conf.json`, and
+`src-tauri/Cargo.toml`).
 
 Maru is the author SSOT for a single user's `~/workspace/work/` — it edits
 markdown with byte-identical frontmatter, ingests an inbox, runs bundled Claude
@@ -9,7 +11,7 @@ Code skills, drives Korean document (HWPX/DOCX/PDF) operations, and visualizes
 the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 **Anchor**; the M0 rename (`kr.maru.desktop`, `~/.maru/`) landed in v0.3.0.
 
-## Status (2026-07-24)
+## Status (2026-07-25)
 
 | Phase | State | Outcome |
 |-------|-------|---------|
@@ -21,7 +23,7 @@ the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 | 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Separate Documents and Finder-style Files workspaces, file tree + direct-child list + inline preview, copy/move/rename/duplicate/system-Trash operations, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
 | 3 — Unified document ops (M1–M7) | ✅ W1–W6 + skills SSOT | Operations Catalog mode (`ops_catalog::scan`, fs watcher, Hub HTTP read + ETag/offline fallback, drilldown + Reveal), Hub Library client + template-aware new doc, Writing Guideline sidebar. Rust `skill_host` owns tiers (core/public/private/imported/managed), doctor validation, dirty/reconcile. maru-hub backs shared catalog (REST + Alembic + seeds). |
 | 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
-| 5 — Evidence Binder | ✅ W13 shipped | Right-pane Evidence Binder tab keyed by doc id, state under `<workspace>/.maru/binder/<doc-id>.json`, seeds from inbox-processed files + `<binary>.evidence.yaml` sidecars scoped to the active BU, `kordoc_lite` format detection + HWPX field previews. W14–W18 (section/KPI/checklist bindings + Deck Studio) planned. |
+| 5 — Evidence Binder | ✅ W14 implemented | Schema-v2 local binder state under `<workspace>/.maru/binder/<doc-id>.json`; revision-guarded atomic mutations; full binary sha256 identity; typed sidecar status; BU-scoped candidates; explicit section/KPI/checklist targets, local verification, submission selection, undo, and orphan handling. W15 Hub evidence-index integration and W16–W18 Deck Studio remain planned. |
 | D — Concept-map Diagram mode | ✅ shipped (Phase 0–7, hardened) + Report Pattern Studio (v8) | `diagram` mode: HWP-style 9-tab ribbon, 13 node kinds, 4-port edges, smart-guide snap, 11 templates, version history, viewport culling for 1000-node smoothness. Report Pattern Studio: v8 schema (report datasets + pattern views, one-time v7 backup at `.maru/diagrams/backups/`), typed table editing, pattern gallery + conversion preview, codec-registry import/export (lossless/structural/visual), and "Insert/Update in report" — managed `maru-diagram:v1` Markdown blocks with rendered assets at `attachments/diagrams/<docId>/`. Storage: `diagrams/*.cmd.json`, `.maru/diagram-patterns/`. New commands: `diagram_backup_document`, `diagram_pattern_save/list/delete`, `diagram_write_report_asset`. See [docs/diagram.md](docs/diagram.md). |
 | 8 — Knowledge graph | ✅ 8a/8b/8c + V6 shipped | `graph` mode: stable Sigma WebGL + Graphology multi-directed model, Barnes-Hut ForceAtlas2 worker, visibility reducers, 10k+ node target, vault/workspace sources, canonical Local targets, local depth/direction controls, background insights, saved views, reviewed relationship writes, incremental cache/watch refresh. V6: canvas-first floating controls, one progressive-disclosure tools drawer, dark neutral Obsidian-style defaults, selectable accent/color modes, dense-graph visual LOD, zero-size container recovery, and a persistent Graph tab in the shared bottom/right Panel. Managed writes remain schema-gated, revision-checked, snapshotted, and atomic. See [docs/graph.md](docs/graph.md). |
 | M0 — Anchor → Maru rename | ✅ shipped (v0.3.0) | Full rename across app id, dirs, CLI, tap. One-time on-disk migration (`~/.anchor → ~/.maru`, `com.anchor.app → com.maru.app`) with back-compat symlink; `.maruignore` preferred with `.anchorignore` fallback read. |
@@ -147,7 +149,7 @@ For repo-local management shortcuts:
 make cli-install
 make cli-smoke
 make release-preflight
-make homebrew-update RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version") HOMEBREW_TAP_DIR=../homebrew-cask
 ```
 
 ## Architecture
@@ -266,7 +268,7 @@ verification of the previous one.
 Git has run ahead of the linear W-plan: Phase 8 (graph mode) shipped before the
 remaining Phase 5 evidence work. The nearest pending items:
 
-1. **W14–W15 Evidence bindings** — section/KPI/submission-checklist binding model on the W13 Binder (`evidence_links[].section_bindings`, `kpi_bindings`, checklist bindings), Verify / Mark-as-submitted controls, then Hub `evidence_index` sha256 reuse. Entry files: `src-tauri/src/evidence_binder.rs`, `src/components/evidence/*`, `src/lib/evidenceBinder.ts`.
+1. **W15 Evidence index** — use the W14 full-sha binding identity for Hub `evidence_index` lookup and reuse hints. Keep binaries local; send only sha256 and metadata through the approval-gated Hub path. Entry files: `src-tauri/src/evidence_binder.rs`, `src-tauri/src/hub_client/*`, `src/components/evidence/*`.
 2. **W16–W18 Deck Studio (M6)** — a `Decks` mode wrapping the gpt-images-deck wizard with the bundled 14-style catalog (`skills/docs/slide-decks/`).
 3. **Phase 6 (W19–W22) Approval + Finalize-to-Hub** — submission gates, gate-state polling, and the approval-gated `POST /api/v1/documents/{id}/finalize` write path (the only Maru client path allowed to carry body/binary payloads). Requires a matching `hub_client/safety.rs` pre-flight.
 4. **Phase 7 (W23–W26) Certification & KPI bundle** — Hub-backed certification vault, KPI composer, and PDF bundle assembly.
@@ -320,13 +322,13 @@ pnpm tauri:build
 pnpm clean:tauri-debug
 # Checks once every 24h and prunes src-tauri/target/debug when artifacts exceed 4GiB.
 
-# Rust unit + integration tests (587 declarations; 2 ignored benchmarks):
+# Rust unit + integration tests:
 cd src-tauri && cargo test
 # or: make test-rust  (cargo test --lib)
 
-# Frontend unit tests (vitest, 101 test files / 788 tests):
+# Frontend unit tests:
 pnpm test
-# End-to-end (Playwright, 9 specs):
+# End-to-end:
 pnpm test:e2e
 
 # Local Maru MCP sidecar smoke:
@@ -455,7 +457,7 @@ before tagging or publishing a release. After release assets exist, update the
 Homebrew tap with:
 
 ```bash
-make homebrew-update-commit RELEASE_TAG=v0.4.0 HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-update-commit RELEASE_TAG=v$(node -p "require('./package.json').version") HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
 make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
