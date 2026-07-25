@@ -96,6 +96,7 @@ interface DocumentListProps {
   onCollapsedTreeFoldersChange: (paths: string[]) => void;
   onSelect: (entry: VaultEntry) => void;
   onRevealInFinder: (targetPath: string) => void;
+  onRevealInFiles: (targetPath: string) => void;
   onRefresh: () => void;
   refreshing?: boolean;
   onClose?: () => void;
@@ -140,6 +141,7 @@ export const DocumentList = memo(function DocumentList({
   onCollapsedTreeFoldersChange,
   onSelect,
   onRevealInFinder,
+  onRevealInFiles,
   onRefresh,
   refreshing = false,
   onClose,
@@ -775,6 +777,17 @@ export const DocumentList = memo(function DocumentList({
                 }}
               >
                 {t("context.revealInFinder")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const target = contextMenu.targetPath;
+                  setContextMenu(null);
+                  onRevealInFiles(target);
+                }}
+              >
+                {t("context.revealInFiles")}
               </button>
               {selectedFileQueueCount > 0 && onApplyFileQueueToDestination ? (
                 <>

@@ -233,6 +233,7 @@ import {
   type SettingsWindowTerminalLaunchPayload,
 } from "./lib/settingsWindowEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
+import { requestSiteViewCloseActive } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
@@ -6677,6 +6678,34 @@ function MainApp() {
     [binaryTabs, revealTargetInFinder, tabs],
   );
 
+  const revealPathInFiles = useCallback(
+    (
+      workspacePath: string,
+      visibility: WorkspaceVisibility,
+      targetPath: string,
+    ) => {
+      setPersistedAppMode("files");
+      setExplorerVisibility(visibility);
+      setWorkspaceFileFilter("all");
+      setFileQueryByVisibility((current) => ({
+        ...current,
+        [visibility]: "",
+      }));
+      setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
+      setSelectedFilePathsByWorkspace((current) => ({
+        ...current,
+        [workspacePath]: [targetPath],
+      }));
+      setPendingExplorerReveal({ pane: "files", targetPath });
+      void refreshWorkspaceFiles(workspacePath);
+    },
+    [
+      refreshWorkspaceFiles,
+      setPersistedAppMode,
+      setWorkspaceFileFilter,
+    ],
+  );
+
   const revealTabInExplorer = useCallback(
     (tabId: string, group: EditorGroupId) => {
       const docTab = tabs.find((item) => item.id === tabId) ?? null;
@@ -6701,14 +6730,7 @@ function MainApp() {
           };
         });
       } else {
-        setPersistedAppMode("files");
-        setWorkspaceFileFilter("all");
-        setWorkspaceFileQuery("");
-        setSelectedFilePathsByWorkspace((current) => ({
-          ...current,
-          [workspacePath]: [targetPath],
-        }));
-        void refreshWorkspaceFiles(workspacePath);
+        revealPathInFiles(workspacePath, visibility, targetPath);
       }
       selectTab(tabId, group);
       setPendingExplorerReveal({ pane: binaryTab ? "files" : "documents", targetPath });
@@ -6716,13 +6738,11 @@ function MainApp() {
     [
       binaryTabs,
       documentsPaneOpen,
-      refreshWorkspaceFiles,
+      revealPathInFiles,
       selectTab,
       setDocumentBrowserMode,
       setExplorerQuery,
       setExplorerDocumentFilter,
-      setWorkspaceFileFilter,
-      setWorkspaceFileQuery,
       setPersistedAppMode,
       tabs,
       updateLayoutSettings,
@@ -6740,6 +6760,10 @@ function MainApp() {
     const terminalPanel = terminalPanelRef.current;
     if (terminalPanel?.hasFocus()) {
       terminalPanel.closeFocusedSurface();
+      return;
+    }
+    if (visibleAppMode === "sites") {
+      requestSiteViewCloseActive();
       return;
     }
     if (visibleAppMode !== "pkm") return;
@@ -8569,6 +8593,14 @@ function MainApp() {
                 onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
                 onSelect={selectEntry}
                 onRevealInFinder={revealTargetInFinder}
+                onRevealInFiles={(targetPath) => {
+                  if (!explorerWorkspacePath) return;
+                  revealPathInFiles(
+                    explorerWorkspacePath,
+                    explorerVisibility,
+                    targetPath,
+                  );
+                }}
                 onRefresh={() => void refreshCurrent()}
                 refreshing={explorerWorkspaceState.refreshing}
                 onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}

@@ -118,6 +118,44 @@ test("boots the sample workspace and opens multiple editor tabs", async ({ page 
   await expect(page.locator(".evidence-card")).toContainText("receipt.pdf");
 });
 
+test("keeps the Sites address bar at the top and closes the active tab with Cmd+W", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "사이트", exact: true }).click();
+
+  const tabstrip = page.locator(".sites-tabstrip");
+  const toolbar = page.locator(".sites-toolbar");
+  const surface = page.locator(".sites-surface");
+  await expect(toolbar).toBeVisible();
+  await expect(surface).toBeVisible();
+
+  const [tabstripBox, toolbarBox, surfaceBox] = await Promise.all([
+    tabstrip.boundingBox(),
+    toolbar.boundingBox(),
+    surface.boundingBox(),
+  ]);
+  if (!tabstripBox || !toolbarBox || !surfaceBox) {
+    throw new Error("Sites browser layout boxes are unavailable");
+  }
+  expect(toolbarBox.y).toBeGreaterThanOrEqual(tabstripBox.y + tabstripBox.height - 1);
+  expect(surfaceBox.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height - 1);
+  expect(surfaceBox.height).toBeGreaterThan(100);
+
+  await page.getByRole("button", { name: "새 탭", exact: true }).click();
+  const address = page.getByRole("textbox", { name: "주소" });
+  await address.fill("https://halla.ai");
+  await address.press("Enter");
+  await expect(surface.getByRole("link", { name: "https://halla.ai" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /halla\.ai/ })).toHaveCount(1);
+
+  const closeShortcut = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta+w" : "Control+w",
+  );
+  await page.keyboard.press(closeShortcut);
+  await expect(page.getByRole("tab", { name: /halla\.ai/ })).toHaveCount(0);
+});
+
 test("binds, targets, verifies, selects, undoes, and unbinds evidence explicitly", async ({
   page,
 }) => {
@@ -648,7 +686,7 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
   await expect(dialog).toBeVisible();
 });
 
-test("supports tree bulk controls and Finder context menu", async ({ page }) => {
+test("supports tree bulk controls and Finder/Files context menu", async ({ page }) => {
   await page.goto("/");
 
   const documentList = page.locator(".document-list");
@@ -669,8 +707,16 @@ test("supports tree bulk controls and Finder context menu", async ({ page }) => 
   });
   await expect(page.getByRole("menuitem", { name: "파일 열기" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Finder에서 보기" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Files에서 보기" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "경로 복사", exact: true })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "상대 경로 복사" })).toBeVisible();
+
+  await page.getByRole("menuitem", { name: "Files에서 보기" }).click();
+  await expect(page.locator(".files-workbench")).toBeVisible();
+  const revealedFile = page.locator(".files-list-row", { hasText: "maru-glossary.md" });
+  await expect(revealedFile).toBeVisible();
+  await expect(revealedFile).toHaveAttribute("aria-selected", "true");
+  await expect(revealedFile).toBeFocused();
 });
 
 test("shows supported document tab menu items and performs file operations", async ({
