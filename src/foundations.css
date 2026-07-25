@@ -137,3 +137,47 @@
   --foundation-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.72);
   --foundation-shadow-lg: 0 28px 80px -32px rgba(0, 0, 0, 0.88);
 }
+
+/* First-paint fallback. `data-theme` is only set once React mounts and the
+   settings file resolves, and the CSP forbids an inline bootstrap script, so
+   without this an OS-dark user gets a full light frame before the flip.
+   `:not([data-theme="light"])` keeps an explicit light choice winning; the
+   values match `:root[data-theme="dark"]` above and must be kept in step. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --foundation-bg: #1c1c1e;
+    --foundation-bg-tint: #222224;
+    --foundation-panel: #2c2c2e;
+    --foundation-panel-2: #242426;
+    --foundation-panel-3: #3a3a3c;
+    --foundation-panel-raised: #323234;
+    --foundation-line: #48484a;
+    --foundation-line-strong: #636366;
+    --foundation-line-soft: #38383a;
+    --foundation-ink: #f5f5f7;
+    --foundation-ink-2: #e5e5ea;
+    --foundation-muted: #aeaeb2;
+    --foundation-faint: #98989d;
+    --foundation-accent: #0a84ff;
+    --foundation-accent-soft: #173a5e;
+    --foundation-accent-tint: #162d46;
+    --foundation-active: #173a5e;
+    --foundation-focus-ring: #0a84ff;
+    --foundation-overlay: rgba(0, 0, 0, 0.52);
+    --foundation-on-accent: #ffffff;
+    --foundation-button-hover: #409cff;
+    --foundation-rail-bg: #161618;
+    --foundation-rail-fg: #98989d;
+    --foundation-rail-fg-strong: #ffffff;
+    --foundation-rail-hover: rgba(255, 255, 255, 0.09);
+    --foundation-rail-active: rgba(255, 255, 255, 0.15);
+    --foundation-rail-indicator: #0a84ff;
+    --foundation-material-popover: rgba(44, 44, 46, 0.9);
+    --foundation-material-sheet: rgba(44, 44, 46, 0.94);
+    --foundation-material-modal: rgba(44, 44, 46, 0.96);
+    --foundation-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42);
+    --foundation-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.72);
+    --foundation-shadow-lg: 0 28px 80px -32px rgba(0, 0, 0, 0.88);
+  }
+}

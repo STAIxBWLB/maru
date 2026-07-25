@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -59,6 +60,11 @@ export function usePointerReorder<T>({
   const [offsetY, setOffsetY] = useState(0);
   const [indicator, setIndicator] = useState<Indicator | null>(null);
 
+  // The pointer listeners live on the handle node and die with it, but the
+  // Escape listener is on window — unmounting mid-drag would strand it.
+  const teardownRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => teardownRef.current?.(), []);
+
   const begin = (
     event: ReactPointerEvent<HTMLElement>,
     draggedId: string,
@@ -82,14 +88,15 @@ export function usePointerReorder<T>({
       targetId: draggedId,
       targetEdge: "before",
     };
-    setDraggingId(draggedId);
     setOffsetY(0);
 
     const cleanup = () => {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKeyDown, true);
       if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      teardownRef.current = null;
       sessionRef.current = null;
       setDraggingId(null);
       setIndicator(null);
@@ -102,7 +109,12 @@ export function usePointerReorder<T>({
       const dx = move.clientX - session.startX;
       const dy = move.clientY - session.startY;
       if (!session.active && Math.hypot(dx, dy) < hysteresis) return;
-      session.active = true;
+      if (!session.active) {
+        // Lift the row only once the gesture clears the threshold. Committing
+        // on pointer-down makes every plain click flash the dragging state.
+        session.active = true;
+        setDraggingId(session.draggedId);
+      }
       setOffsetY(dy);
 
       // The lifted row follows the pointer and is therefore the top hit.
@@ -163,9 +175,20 @@ export function usePointerReorder<T>({
       cleanup();
     };
 
+    // Escape abandons the drag without committing — the standard escape hatch
+    // for a reorder the user changed their mind about mid-gesture.
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      cleanup();
+    };
+
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onEnd);
     handle.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKeyDown, true);
+    teardownRef.current = cleanup;
   };
 
   const rowState = (id: string) => ({

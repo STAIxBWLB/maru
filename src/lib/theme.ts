@@ -99,7 +99,10 @@ function contrastText(value: string): "#ffffff" | "#1d1d1f" {
       : ((normalized + 0.055) / 1.055) ** 2.4;
   });
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance > 0.48 ? "#1d1d1f" : "#ffffff";
+  // Crossover where white and #1d1d1f give equal WCAG contrast against the
+  // accent: (1.05)/(L+0.05) == (L+0.05)/(0.0123+0.05) => L ~= 0.206. The old
+  // 0.48 handed white text to every mid-tone accent at roughly 2:1.
+  return luminance > 0.206 ? "#1d1d1f" : "#ffffff";
 }
 
 function parseHex(value: string): [number, number, number] | null {

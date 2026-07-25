@@ -2246,3 +2246,22 @@
 .tier-compact.graph-view .graph-selection-shelf small {
   display: none;
 }
+
+/* Graph chrome floats over a dense canvas and relies on blur for legibility.
+   Once reduced transparency strips the blur, the ~94% surfaces still show the
+   graph through them, so each theme gets the opaque form of its own value.
+   The graph theme is independent of the app theme, so this cannot resolve to
+   `--panel` — a light app under a dark graph would paint white panels. */
+@media (prefers-reduced-transparency: reduce) {
+  .graph-view {
+    --graph-surface: var(--panel);
+  }
+
+  .graph-view[data-graph-theme="dark"] {
+    --graph-surface: #2c2c2e;
+  }
+
+  .graph-view[data-graph-theme="light"] {
+    --graph-surface: #ffffff;
+  }
+}

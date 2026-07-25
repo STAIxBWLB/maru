@@ -22079,14 +22079,12 @@ select:focus-visible,
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .dialog-overlay,
-  .cmdk-overlay,
-  .dialog-content,
-  .cmdk-shell,
-  .dialog-surface,
-  .task-sheet,
-  .workspace-menu,
-  .context-menu {
+  /* Blur is killed universally rather than per-surface: an enumerated list
+     silently misses every translucent surface added later, and already missed
+     the graph chrome and three panel footers. */
+  *,
+  *::before,
+  *::after {
     backdrop-filter: none !important;
   }
 
