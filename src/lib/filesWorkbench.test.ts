@@ -3,7 +3,9 @@ import type { WorkspaceEntryNode } from "./types";
 import {
   buildFilesDirectoryTree,
   collapseNestedPaths,
+  collectFilesTreeFolderPaths,
   filesBreadcrumbs,
+  filesFolderAncestors,
   listFilesDirectoryContents,
   parentFolderRelPath,
 } from "./filesWorkbench";
@@ -90,6 +92,26 @@ describe("Files workbench navigation", () => {
     ]);
     expect(parentFolderRelPath("assets/icons")).toBe("assets");
     expect(parentFolderRelPath("assets")).toBe("");
+  });
+
+  it("collects every tree folder for expand-all and excludes the root", () => {
+    const tree = buildFilesDirectoryTree(entries, "Workspace");
+
+    expect(collectFilesTreeFolderPaths(tree)).toEqual([
+      "assets",
+      "assets/empty",
+      "docs",
+    ]);
+  });
+
+  it("returns a folder's own chain including itself", () => {
+    expect(filesFolderAncestors("assets/icons/brand")).toEqual([
+      "assets",
+      "assets/icons",
+      "assets/icons/brand",
+    ]);
+    expect(filesFolderAncestors("assets")).toEqual(["assets"]);
+    expect(filesFolderAncestors("")).toEqual([]);
   });
 
   it("collapses nested selections before filesystem mutations", () => {

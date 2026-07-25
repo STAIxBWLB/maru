@@ -36,7 +36,9 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.filesTreeOpen).toBe(false);
     expect(settings.ui.layout.filesTreeWidth).toBe(220);
     expect(settings.ui.layout.filesPreviewOpen).toBe(false);
-    expect(settings.ui.layout.filesPreviewWidth).toBe(720);
+    // No longer clamped to 720: the preview cap is a viewport ratio in CSS and
+    // the stored bound is only a sanity limit.
+    expect(settings.ui.layout.filesPreviewWidth).toBe(900);
   });
 
   it("accepts the 'both' document label mode and falls back for unknown values", () => {

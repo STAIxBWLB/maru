@@ -182,6 +182,8 @@ export interface MaruSettings {
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
     favorites: FavoriteItem[];
+    // Both "collapsed*" keys have always stored the *expanded* folder set, so
+    // an empty array means fully collapsed and new folders stay closed.
     collapsedTreeFolders: string[];
     collapsedFileFolders: string[];
     documentTreeStateInitialized: boolean;
@@ -2027,11 +2029,13 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       typeof layout.filesPreviewOpen === "boolean"
         ? layout.filesPreviewOpen
         : DEFAULT_MARU_SETTINGS.ui.layout.filesPreviewOpen,
+    // The upper bound is only a sanity limit on persisted junk. The real cap
+    // is a viewport ratio applied in CSS, so the preview follows the window.
     filesPreviewWidth: normalizePaneWidth(
       layout.filesPreviewWidth,
       DEFAULT_MARU_SETTINGS.ui.layout.filesPreviewWidth,
       320,
-      720,
+      4000,
     ),
     todaySidebarWidth: clampTodayLayoutWidth(
       "todaySidebarWidth",

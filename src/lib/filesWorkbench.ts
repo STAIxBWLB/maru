@@ -139,6 +139,25 @@ export function parentFolderRelPath(currentFolder: string): string {
   return normalizeRelPath(currentFolder).split("/").filter(Boolean).slice(0, -1).join("/");
 }
 
+/** Every folder relPath in the tree, root excluded (the root is always open). */
+export function collectFilesTreeFolderPaths(tree: FilesDirectoryTreeNode): string[] {
+  const paths: string[] = [];
+  const walk = (node: FilesDirectoryTreeNode) => {
+    if (node.relPath) paths.push(node.relPath);
+    for (const child of node.children) walk(child);
+  };
+  walk(tree);
+  return paths;
+}
+
+/** The folder itself plus each of its ancestors, root first. Unlike
+ *  `collectWorkspaceFileAncestorFolders`, which takes a *file* path and drops
+ *  the last segment, this takes a folder path and keeps it. */
+export function filesFolderAncestors(relPath: string): string[] {
+  const parts = normalizeRelPath(relPath).split("/").filter(Boolean);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
 export function normalizeRelPath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }

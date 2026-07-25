@@ -4,6 +4,8 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Clipboard,
   Copy,
   ExternalLink,
@@ -11,6 +13,7 @@ import {
   FilePlus2,
   FileText,
   Folder,
+  FolderClosed,
   FolderOpen,
   FolderPlus,
   ListFilter,
@@ -49,7 +52,9 @@ import {
 import {
   buildFilesDirectoryTree,
   collapseNestedPaths,
+  collectFilesTreeFolderPaths,
   filesBreadcrumbs,
+  filesFolderAncestors,
   isDirectoryNode,
   isFileNode,
   listFilesDirectoryContents,
@@ -89,6 +94,22 @@ import { HtmlPreviewFrame } from "./HtmlVisualEditor";
 const LOCATION_KEY = "maru:files-location:v1";
 const CLIPBOARD_KEY = "maru:files-clipboard:v1";
 
+// Shared by the drag clamp, the ARIA range, and settings normalization so the
+// three cannot drift. The preview has no fixed upper bound: it is capped by
+// FILES_PREVIEW_VIEWPORT_RATIO in CSS so the limit follows the window.
+export const FILES_TREE_MIN_WIDTH = 220;
+export const FILES_TREE_MAX_WIDTH = 420;
+export const FILES_PREVIEW_MIN_WIDTH = 320;
+export const FILES_PREVIEW_VIEWPORT_RATIO = 0.62;
+
+function filesPreviewMaxWidth(): number {
+  if (typeof window === "undefined") return FILES_PREVIEW_MIN_WIDTH;
+  return Math.max(
+    FILES_PREVIEW_MIN_WIDTH,
+    Math.round(window.innerWidth * FILES_PREVIEW_VIEWPORT_RATIO),
+  );
+}
+
 interface FilesClipboardState {
   workspacePath: string;
   operation: FileStoreOperation;
@@ -110,7 +131,9 @@ interface FilesWorkbenchProps {
   filesListAttributes: FilesListAttribute[];
   paneFilters: WorkspaceFilesPaneFilters;
   queuedSourcePaths: string[];
-  collapsedFolders: string[];
+  /** Expanded folder relPaths. The persisted settings key is named
+   *  `collapsedFileFolders` but has always stored the expanded set. */
+  expandedFolders: string[];
   treeOpen: boolean;
   treeWidth: number;
   previewOpen: boolean;
@@ -130,7 +153,7 @@ interface FilesWorkbenchProps {
   onSortKeyChange: (key: FilesSortKey) => void;
   onFilesListAttributesChange: (attributes: FilesListAttribute[]) => void;
   onPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
-  onCollapsedFoldersChange: (paths: string[]) => void;
+  onExpandedFoldersChange: (paths: string[]) => void;
   onSelectionChange: (paths: string[]) => void;
   onOpenDocument: (entry: WorkspaceFileEntry) => void;
   onQueuePaths: (paths: string[]) => void;
@@ -173,7 +196,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     filesListAttributes,
     paneFilters,
     queuedSourcePaths,
-    collapsedFolders,
+    expandedFolders,
     treeOpen,
     treeWidth,
     previewOpen,
@@ -193,7 +216,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     onSortKeyChange,
     onFilesListAttributesChange,
     onPaneFiltersChange,
-    onCollapsedFoldersChange,
+    onExpandedFoldersChange,
     onSelectionChange,
     onOpenDocument,
     onQueuePaths,
@@ -338,6 +361,22 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     () => buildFilesDirectoryTree(entries, rootLabel),
     [entries, rootLabel],
   );
+  const allFolderPaths = useMemo(() => collectFilesTreeFolderPaths(tree), [tree]);
+  const expandedSet = useMemo(() => new Set(expandedFolders), [expandedFolders]);
+  /** Expanded set with `folder` and everything under it removed. */
+  const collapseFolderSubtree = useCallback(
+    (folder: string) =>
+      expandedFolders.filter(
+        (path) => path !== folder && !path.startsWith(`${folder}/`),
+      ),
+    [expandedFolders],
+  );
+  /** Expanded set with `folder` and its ancestors added. */
+  const expandFolderChain = useCallback(
+    (folder: string) =>
+      Array.from(new Set([...expandedFolders, ...filesFolderAncestors(folder)])),
+    [expandedFolders],
+  );
   const breadcrumbs = useMemo(
     () => filesBreadcrumbs(currentFolder, rootLabel),
     [currentFolder, rootLabel],
@@ -373,10 +412,12 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
         setForwardStack([]);
       }
       setCurrentFolder(next);
+      // Keep the tree showing where you are, without closing anything else.
+      if (next) onExpandedFoldersChange(expandFolderChain(next));
       setRenamingPath(null);
       selectPaths([]);
     },
-    [currentFolder, selectPaths],
+    [currentFolder, expandFolderChain, onExpandedFoldersChange, selectPaths],
   );
 
   const navigateBack = () => {
@@ -666,6 +707,9 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     if (!target) return;
     const parent = isDirectoryNode(target) ? target.relPath : target.parentRelPath;
     setCurrentFolder(parent);
+    // Exclusive: revealing a file shows its own chain and nothing else, so the
+    // target is not buried under unrelated open folders.
+    onExpandedFoldersChange(filesFolderAncestors(parent));
     selectPaths([target.path]);
     window.requestAnimationFrame(() => {
       listRef.current
@@ -675,6 +719,7 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
     });
   }, [
     entries,
+    onExpandedFoldersChange,
     onRevealHandled,
     pendingRevealTargetPath,
     selectPaths,
@@ -696,8 +741,11 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
       const delta = move.clientX - startX;
       const width =
         side === "tree"
-          ? Math.min(420, Math.max(220, startWidth + delta))
-          : Math.min(720, Math.max(320, startWidth - delta));
+          ? Math.min(
+              FILES_TREE_MAX_WIDTH,
+              Math.max(FILES_TREE_MIN_WIDTH, startWidth + delta),
+            )
+          : Math.max(FILES_PREVIEW_MIN_WIDTH, startWidth - delta);
       onLayoutChange(
         side === "tree" ? { filesTreeWidth: width } : { filesPreviewWidth: width },
       );
@@ -782,18 +830,68 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
               <PanelLeftClose size={14} />
             </button>
           </div>
+          <div
+            className="tree-bulk-actions files-tree-actions"
+            role="group"
+            aria-label={t("files.tree.actions")}
+          >
+            <button
+              type="button"
+              className="files-list-action-button"
+              onClick={() => onExpandedFoldersChange([])}
+              disabled={allFolderPaths.length === 0}
+              title={t("list.tree.collapseAll")}
+              aria-label={t("list.tree.collapseAll")}
+            >
+              <ChevronsDownUp size={13} />
+              <span>{t("list.tree.collapseAll")}</span>
+            </button>
+            <button
+              type="button"
+              className="files-list-action-button"
+              onClick={() => onExpandedFoldersChange(allFolderPaths)}
+              disabled={allFolderPaths.length === 0}
+              title={t("list.tree.expandAll")}
+              aria-label={t("list.tree.expandAll")}
+            >
+              <ChevronsUpDown size={13} />
+              <span>{t("list.tree.expandAll")}</span>
+            </button>
+            <button
+              type="button"
+              className="files-list-action-button"
+              onClick={() => onExpandedFoldersChange(collapseFolderSubtree(currentFolder))}
+              disabled={!currentFolder}
+              title={t("files.tree.collapseCurrent")}
+              aria-label={t("files.tree.collapseCurrent")}
+            >
+              <FolderClosed size={13} />
+              <span>{t("files.tree.collapseCurrent")}</span>
+            </button>
+            <button
+              type="button"
+              className="files-list-action-button"
+              onClick={() => onExpandedFoldersChange(expandFolderChain(currentFolder))}
+              disabled={!currentFolder}
+              title={t("files.tree.expandCurrent")}
+              aria-label={t("files.tree.expandCurrent")}
+            >
+              <FolderOpen size={13} />
+              <span>{t("files.tree.expandCurrent")}</span>
+            </button>
+          </div>
           <div className="files-tree-scroll" role="tree" aria-label={t("files.tree.title")}>
             <DirectoryTreeRow
               node={tree}
               depth={0}
               currentFolder={currentFolder}
-              collapsed={new Set(collapsedFolders)}
+              expanded={expandedSet}
               onNavigate={navigateTo}
               onToggle={(relPath) =>
-                onCollapsedFoldersChange(
-                  collapsedFolders.includes(relPath)
-                    ? collapsedFolders.filter((path) => path !== relPath)
-                    : [...collapsedFolders, relPath],
+                onExpandedFoldersChange(
+                  expandedSet.has(relPath)
+                    ? collapseFolderSubtree(relPath)
+                    : [...expandedFolders, relPath],
                 )
               }
               onDrop={(relPath, event) => {
@@ -830,8 +928,8 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
           className="files-pane-resizer files-tree-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-valuemin={220}
-          aria-valuemax={420}
+          aria-valuemin={FILES_TREE_MIN_WIDTH}
+          aria-valuemax={FILES_TREE_MAX_WIDTH}
           aria-valuenow={treeWidth}
           tabIndex={0}
           onPointerDown={(event) => startResize("tree", event)}
@@ -1210,8 +1308,8 @@ export function FilesWorkbench(props: FilesWorkbenchProps) {
           className="files-pane-resizer files-preview-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-valuemin={320}
-          aria-valuemax={720}
+          aria-valuemin={FILES_PREVIEW_MIN_WIDTH}
+          aria-valuemax={filesPreviewMaxWidth()}
           aria-valuenow={previewWidth}
           tabIndex={0}
           onPointerDown={(event) => startResize("preview", event)}
@@ -1351,7 +1449,7 @@ function DirectoryTreeRow({
   node,
   depth,
   currentFolder,
-  collapsed,
+  expanded,
   onNavigate,
   onToggle,
   onDrop,
@@ -1359,12 +1457,13 @@ function DirectoryTreeRow({
   node: FilesDirectoryTreeNode;
   depth: number;
   currentFolder: string;
-  collapsed: Set<string>;
+  expanded: Set<string>;
   onNavigate: (relPath: string) => void;
   onToggle: (relPath: string) => void;
   onDrop: (relPath: string, event: React.DragEvent<HTMLDivElement>) => void;
 }) {
-  const isCollapsed = node.relPath ? collapsed.has(node.relPath) : false;
+  // The root row has no relPath and is always open.
+  const isCollapsed = node.relPath ? !expanded.has(node.relPath) : false;
   const hasChildren = node.children.length > 0;
   return (
     <div role="none">
@@ -1411,7 +1510,7 @@ function DirectoryTreeRow({
               node={child}
               depth={depth + 1}
               currentFolder={currentFolder}
-              collapsed={collapsed}
+              expanded={expanded}
               onNavigate={onNavigate}
               onToggle={onToggle}
               onDrop={onDrop}
