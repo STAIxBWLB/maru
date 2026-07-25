@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Maru desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status maru** — Updated through Graph V4 performance/authoring hardening + M0 Anchor → Maru rename (v0.3.3), 2026-07-11. Phases 0–5, Diagram mode, and Graph mode 8a/8b/8c are shipped. Phase 6/7 (W19–W26) remain planned. See README's Status table for the canonical state column and CHANGELOG.md for the release history; this file is the deeper "what's next + how to continue" reference.
+> **Status maru** — Updated through W14 Evidence Binder V2 on 2026-07-25. Phases 0–5 through W14, Diagram mode, and Graph mode 8a/8b/8c are implemented. W15–W26 remain planned. See README's Status table for the canonical state column and CHANGELOG.md for release history; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_meta/rules/{frontmatter-schema,document-lifecycle,hub-contract,evidence-policy}.md` (formerly `_sys/rules`, with `bu-lifecycle`→`document-lifecycle` and `hub-sync`→`hub-contract`). The work-repo-internal 26-week plan file it was mirrored from has since been consolidated; this file is the live Maru-side reference.
 
@@ -16,7 +16,7 @@ Each module is owned by Maru desktop. Hub backs them where shared catalog data i
 | M2 | Document Studio | 7-step authoring wizard (source → template → guideline → sections → HWP fields → export → package) replacing ad-hoc dialog | `Studio` mode | ✅ W12 shipped |
 | M3 | Template / Form Filling | Unified template catalog (workspace + `_meta/templates` + project `_templates` + hwpx skill + Hub) with `.hwpx` placeholder fill + binary `.hwp → .hwpx` conversion | Studio Step 2 + 5 | 🚧 HWPX slot/fill shipped · `.hwp` conversion manual fallback |
 | M4 | Export Pipeline | Markdown SSOT → docx / hwpx / pdf with sha256 manifest + converter dispatch + format-specific validators | `export_*` Tauri commands + palette | ✅ W8-W10 shipped · lightweight validators shipped · richer validators planned |
-| M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane Evidence tab | 🚧 W13 shipped · W14-W15 planned |
+| M5 | Evidence Binder | Bind evidence (originals + extracted text + summary + verification) to doc sections / KPIs / submission checklist | Right pane Evidence tab | ✅ W14 implemented · W15 planned |
 | M6 | Deck Studio | gpt-images-deck wizard with 14-style catalog, image-mode × production-mode matrix, job artifacts | New `Decks` mode (W17+) | 📋 planned |
 | M7 | Hub Connector | Read shared context (templates / guidelines / glossary / evidence index / KPI status / **finalized documents**) + create submission gates + **finalize approved documents to Hub** (markdown body + rendered artifacts + evidence binaries) | Background + `Hub` commands | ✅ read shipped (W4) · Hub sync API shipped · ⏳ Maru sync caller · ⏳ finalize write (P6 W21) |
 
@@ -51,7 +51,7 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W | Module | Deliverable |
 |---|--------|-------------|
 | W13 | ✅ M5 | Right-pane Evidence Binder tab + `<workspace>/.maru/binder/<doc-id>.json` state. Auto-pulls inbox-processed attachments + `<binary>.evidence.yaml` sidecars under the active doc's BU, then uses `kordoc_lite` for local format detection and HWPX/form preview metadata. |
-| W14 | M5 | Section / KPI / submission-checklist bindings — frontmatter `evidence_links[].section_bindings` (`"§ 2.1"`-style slugs), `kpi_bindings`, `submission_checklist_bindings`. Per-evidence Verify / Mark-as-submitted controls; reuse `kordoc_lite` HWPX fields as candidate binding labels. |
+| W14 | ✅ M5 | Local Binder schema v2 with section / KPI / submission-checklist free-entry targets and live heading/task/HWP label suggestions. Full binary sha256 identity is computed on bind; mutations are revision-guarded and atomic. Structural validation, typed sidecar status, local verification, and submission selection remain distinct. No document frontmatter or Hub writes. |
 | W15 | M5 | Hub `evidence_index` integration — sha256 lookup ("이미 검증됨" hint), `evidence_index.suggest_reuse` palette command, and metadata-only kordoc_lite detection fields. Maru still owns the binary; only sha256 + metadata flow to Hub. |
 | W16 | M6 | Deck Studio mode + Plan step (Claude proposal → `slide_plan.json`) + 14-style catalog browser reading `dev/maru/skills/docs/slide-decks/*.md`. |
 | W17 | M6 | Generate step matrix — `imageMode` radio (codex-native / provider / html-css) × `productionMode` checkboxes (image-folder / html-deck / pptx-from-images / pdf-export). Job artifact directory `projects/.../05-decks/<slug>/`. |
@@ -75,14 +75,15 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 | W25 | M5 | KPI Composer pulls Hub `kpi_snapshots` + generates a 개조식 narrative md with evidence references. |
 | W26 | M5 + Hub | `certification.bundle.create` proposal → Maru downloads + presents the PDF bundle (cover + per-requirement section + KPI charts + evidence pages). The bundle is assembled by Hub directly from `finalized_documents` + `finalized_document_artifact` + `evidence_blobs` — **no Maru binary push is needed at bundle time** (everything was pushed at Phase 6 W21 finalize). Phase 3-7 verification gate. |
 
-## 3. Test matrix (target growth)
+## 3. Verification matrix
 
-| Surface | W9 baseline | Phase 4 target | Phase 5 target | Phase 7 target | Actual (2026-07-08) |
-|---------|-------------|----------------|----------------|----------------|---------------------|
-| Rust unit (`cargo test --lib`) | 343 | 360+ (Studio, slot scan, lint helpers) | 380+ (binder + decks) | 410+ (cert bundle) | **587 declarations** (2 ignored benchmarks) |
-| Vitest (`pnpm test`) | 199 / 34 files | 220+ (Studio steps, ExportPanel) | 240+ (binder, decks) | 260+ | **638 tests / 87 files** |
-| Hub pytest | 15 | 25 (sync endpoint + workflow seeds) | 40 | 60 | (Hub repo) |
-| E2E playwright | smoke only | + Studio flow | + binder + decks | + full bundle | **7 specs** (binary-viewer, comms, diagram, graph, maru-e2e-flow, smoke, startup) |
+| Surface | Required gate |
+|---------|---------------|
+| Rust | `cargo test --lib`; Binder changes also run the focused `evidence_binder` tests |
+| Frontend | `pnpm test`, `pnpm typecheck`, and `pnpm lint:i18n` |
+| Browser | `pnpm test:e2e`; Binder coverage exercises bind, targets, undo, local verification, submission selection, and unbind |
+| Package | `pnpm build` plus the bundle-budget check included by that command |
+| Milestone | `make verify`, the real-workspace catalog smoke, and the relevant live integration procedure |
 
 ## 4. Conventions to keep
 
@@ -95,18 +96,18 @@ Legend — ✅ shipped · 🚧 in progress · 📋 planned · ⏳ awaiting upstr
 
 ## 5. Continuing work — concrete next steps
 
-> **Note (2026-07-08):** git ran ahead of the linear W-plan — the Phase 8 graph
+> **Note (2026-07-25):** git ran ahead of the linear W-plan. Phase 8 graph
 > mode (8a/8b/8c) and the M0 rename shipped before the remaining Phase 5
-> evidence work below. W14 is still the next backbone item.
+> work. W14 is now implemented; W15 is the next backbone item.
 
-### Immediate (W14 entry)
+### Immediate (W15 entry)
 
 ```
-# branch: fresh feat/evidence-binder-w13 off main
-src-tauri/src/evidence_binder.rs         # extend binder binding model
-src/components/evidence/*                # section/KPI/checklist controls
-src/lib/evidenceBinder.ts                # binding shape + UI model
-src/App.tsx                              # preserve right utility rail tab wiring
+# branch: fresh feat/evidence-index-w15 off main
+src-tauri/src/evidence_binder.rs         # expose full-sha lookup inputs
+src-tauri/src/hub_client/*               # metadata-only evidence_index lookup
+src/components/evidence/*                # verified/reuse hints
+src/lib/evidenceBinder.ts                # Hub hint UI model
 ```
 
 W10 follow-up hardening, if needed before Studio:
@@ -123,15 +124,18 @@ W10 follow-up hardening, if needed before Studio:
 
 ### W13 shipped notes
 
-- `evidence_binder_read/evidence_binder_save` persist document-scoped state at `<workspace>/.maru/binder/<doc-id>.json`.
+- `evidence_binder_read` and revision-guarded `evidence_binder_mutate` persist document-scoped state at `<workspace>/.maru/binder/<doc-id>.json`.
 - Evidence candidates are seeded from processed inbox raw files and `<binary>.evidence.yaml` sidecars, with sidecar scanning scoped to the active document's BU root when available.
 - Candidate metadata includes `kordoc_lite` format detection, lightweight structure checks, and HWPX field preview labels.
 
-### W14 (Evidence binding model)
+### W14 implemented notes
 
-- Add section / KPI / submission-checklist binding controls on top of the W13 candidate list.
-- Persist binding metadata in the binder state first; only promote to frontmatter after the W14 shape is final.
-- Keep binaries local; Hub receives only sha256 + metadata in the W15 evidence-index integration.
+- Schema-v1 states migrate in memory and persist as v2 on the first mutation; old auto-derived verification is intentionally reset.
+- Full binary sha256 is computed lazily on bind and becomes the stable binding identity. Candidate discovery does not hash all files.
+- Section / KPI / submission-checklist targets stay in local Binder state. Suggestions come from the live draft's headings/tasks and HWP field labels.
+- Structural checks, sidecar canonical status, local verification, and submission selection are separate states with guarded transitions.
+- Maru-owned rename/move operations rekey path-derived document identities while preserving frontmatter-derived stable IDs.
+- Binaries, document frontmatter, and Hub remain untouched. W15 may send only sha256 plus metadata.
 
 ## 6. Cross-cutting hand-off notes
 

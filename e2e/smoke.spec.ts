@@ -118,6 +118,43 @@ test("boots the sample workspace and opens multiple editor tabs", async ({ page 
   await expect(page.locator(".evidence-card")).toContainText("receipt.pdf");
 });
 
+test("binds, targets, verifies, selects, undoes, and unbinds evidence explicitly", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "증빙" }).click();
+  const card = page.locator(".evidence-card", { hasText: "receipt.pdf" });
+  await expect(card).toBeVisible();
+
+  await card.getByRole("button", { name: "연결", exact: true }).click();
+  await expect(card.getByLabel("문서 섹션")).toBeVisible();
+  await card.getByLabel("문서 섹션").fill("개요, 성과");
+  await card.getByLabel("KPI").fill("KPI 1");
+  await card.getByLabel("제출 체크리스트").fill("서명 확인");
+  await card.getByRole("button", { name: "대상 저장" }).click();
+  await expect(card.getByLabel("문서 섹션")).toHaveValue("개요, 성과");
+
+  await page.getByRole("button", { name: "마지막 변경 실행 취소" }).click();
+  await expect(card.getByLabel("문서 섹션")).toHaveValue("");
+
+  const verify = card.getByRole("button", { name: "로컬 검증" });
+  await verify.click();
+  await expect(card.getByRole("button", { name: "검증 취소" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  const include = card.getByRole("button", { name: "제출에 포함" });
+  await include.click();
+  await expect(card.getByRole("button", { name: "제출에서 제외" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await card.getByRole("button", { name: "연결 해제" }).click();
+  await expect(card.getByRole("button", { name: "연결", exact: true })).toBeVisible();
+});
+
 test("switches explorer between private and optional public workspace tabs", async ({
   page,
 }) => {
