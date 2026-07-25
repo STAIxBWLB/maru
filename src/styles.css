@@ -11074,6 +11074,42 @@ button.git-badge:hover {
   background: var(--terminal-bg-raised);
 }
 
+/* Docked right the panel's long axis is vertical, so a single header row has
+   to fit tabs + launchers + theme select + three icon buttons into ~200px.
+   It cannot: the row overflowed the panel by 41px (icons clipped past the
+   edge) and flex squeezed .tool-panel-tabs to 0 width, hiding the tab strip
+   outright. Stack into rows instead and let the header grow downward. */
+.terminal-panel.dock-right:not(.collapsed) .terminal-header {
+  height: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 8px;
+  row-gap: 6px;
+}
+
+/* The tab strip takes a full row of its own; everything after it flows and
+   wraps. Without the 100% basis it loses the fight for space and collapses. */
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-tabs {
+  flex: 1 0 100%;
+}
+
+/* A flex:1 spacer and a margin-left:auto push both fight wrapping. */
+.terminal-panel.dock-right:not(.collapsed) .tool-panel-spacer {
+  display: none;
+}
+
+/* Everything after the tab strip flows naturally and wraps only when it must,
+   so a wide right dock still packs the launchers, theme, and buttons onto one
+   row instead of paying a full row each. */
+.terminal-panel.dock-right:not(.collapsed) .terminal-header-right {
+  min-width: 0;
+  margin-left: 0;
+}
+
+.terminal-panel.dock-right:not(.collapsed) .terminal-launchers {
+  flex-wrap: wrap;
+}
+
 .terminal-panel.dock-right.collapsed .terminal-header {
   justify-content: center;
   padding: 0 6px;
