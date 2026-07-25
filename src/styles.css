@@ -11158,9 +11158,27 @@ button.git-badge:hover {
   flex-wrap: wrap;
 }
 
+/* Collapsed to a 40px rail the header is no longer a strip across the top —
+   it is the whole visible panel. Stack it so the surface tabs and the window
+   buttons run down the rail instead of hiding everything but one icon. */
 .terminal-panel.dock-right.collapsed .terminal-header {
-  justify-content: center;
-  padding: 0 6px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: auto;
+  padding: 6px 0;
+  gap: 6px;
+  /* The workspace below is [hidden] while collapsed, so a bottom rule would
+     read as a stray line across an empty rail. */
+  border-bottom: 0;
+}
+
+.terminal-panel.dock-right.collapsed .tool-panel-tabs {
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
 }
 
 .tool-panel-tabs {
@@ -11221,14 +11239,15 @@ button.git-badge:hover {
   padding: 0;
 }
 
+/* Labels, launchers, the context chip and the theme select have no room in a
+   40px rail. The surface tabs and the window buttons stay — they are the
+   controls you need to get the panel back. */
 .terminal-panel.dock-right.collapsed .terminal-title span,
 .terminal-panel.dock-right.collapsed .tool-panel-tab span,
-.terminal-panel.dock-right.collapsed .tool-panel-tab:not(.active),
 .terminal-panel.dock-right.collapsed .terminal-launchers,
 .terminal-panel.dock-right.collapsed .terminal-header-right,
 .terminal-panel.dock-right.collapsed .tool-panel-spacer,
-.terminal-panel.dock-right.collapsed .tool-panel-theme,
-.terminal-panel.dock-right.collapsed .terminal-icon-button {
+.terminal-panel.dock-right.collapsed .tool-panel-theme {
   display: none;
 }
 
