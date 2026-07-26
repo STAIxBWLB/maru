@@ -1275,6 +1275,9 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
         <div
           className="files-list"
           ref={listRef}
+          // handleKeyDown implements Cmd/Ctrl+A as "select every row"; this
+          // keeps useScopedSelectAll from also text-selecting the pane.
+          data-select-all-owner
           role="grid"
           aria-label={t("files.contents")}
           aria-multiselectable="true"

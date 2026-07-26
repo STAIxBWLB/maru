@@ -43,17 +43,47 @@ function anchorElement(): HTMLElement | null {
   return node instanceof HTMLElement ? node : node.parentElement;
 }
 
+/** Window chrome. Selecting it is never useful, so it resolves to no scope. */
+const SHELL_CHROME_SELECTOR = ".topbar, .activity-rail";
+
+/** True when the node sits inside a surface that handles Cmd/Ctrl+A itself.
+ *  Mark such a surface with `data-select-all-owner`; its own handler runs on
+ *  the bubble phase and is responsible for calling `preventDefault`. */
+export function ownsSelectAll(el: EventTarget | null): boolean {
+  return el instanceof HTMLElement && el.closest("[data-select-all-owner]") !== null;
+}
+
 function closestPane(el: unknown): HTMLElement | null {
   return el instanceof HTMLElement ? el.closest<HTMLElement>(PANE_SELECTOR) : null;
 }
 
-/** First candidate that sits inside a known pane, else `null`. Callers block
- *  the keystroke either way — `null` means "select nothing", never "let the
- *  browser select the whole window". */
+/** The mode surface the node sits in: the `.app-shell` grid child that owns it.
+ *  This is the fallback for panes missing from `PANE_SELECTOR`. Without it every
+ *  unlisted surface — `.today-pane`, `.catalog-pane`, `.sites-pane`, and any
+ *  pane added later — would resolve to nothing and Cmd+A would do nothing at
+ *  all there, which is no better than selecting the whole window. */
+export function closestModeSurface(el: unknown): HTMLElement | null {
+  if (!(el instanceof HTMLElement)) return null;
+  const shell = el.closest<HTMLElement>(".app-shell");
+  if (!shell) return null;
+  let node: HTMLElement | null = el;
+  while (node && node.parentElement !== shell) node = node.parentElement;
+  if (!node || node.matches(SHELL_CHROME_SELECTOR)) return null;
+  return node;
+}
+
+/** The narrowest sensible scope for a candidate: a known pane if one encloses
+ *  it, otherwise the mode surface it belongs to. `null` means chrome or nothing
+ *  at all — callers block the keystroke either way, never letting the browser
+ *  select the whole window. */
 export function resolveSelectScope(candidates: unknown[]): HTMLElement | null {
   for (const candidate of candidates) {
     const pane = closestPane(candidate);
     if (pane) return pane;
+  }
+  for (const candidate of candidates) {
+    const surface = closestModeSurface(candidate);
+    if (surface) return surface;
   }
   return null;
 }
@@ -74,6 +104,10 @@ export function createSelectAllHandler(isMac: boolean) {
     if (event.isComposing) return;
     if (!selectAllComboPressed(event, isMac)) return;
     if (isEditableTarget(event.target)) return;
+    // A surface that implements its own select-all (the Files list selects
+    // rows) owns the keystroke outright: text-selecting it as well would leave
+    // a highlight over the rows it just selected.
+    if (ownsSelectAll(event.target)) return;
 
     event.preventDefault();
 

@@ -86,12 +86,40 @@ describe("resolveSelectScope", () => {
     expect(resolveSelectScope([document.getElementById("leaf")])).not.toBeNull();
   });
 
-  // The whole point of the guard: unknown surfaces must not resolve, so the
-  // caller blocks Cmd+A instead of letting the browser select the whole window.
-  it("returns null outside any known pane", () => {
-    mount(`<header class="topbar"><span id="leaf">Maru</span></header>`);
+  // Panes missing from PANE_SELECTOR must still resolve to their mode surface,
+  // otherwise Cmd+A does nothing at all on them.
+  it("falls back to the mode surface for unlisted panes", () => {
+    mount(`<div class="app-shell">
+      <header class="topbar">chrome</header>
+      <div class="today-pane"><div class="today-card"><p id="leaf">x</p></div></div>
+    </div>`);
+    expect(resolveSelectScope([document.getElementById("leaf")])?.className).toBe("today-pane");
+  });
+
+  it("prefers a listed pane over the enclosing mode surface", () => {
+    mount(`<div class="app-shell">
+      <div class="editor-pane"><article class="preview-surface"><p id="leaf">x</p></article></div>
+    </div>`);
+    expect(resolveSelectScope([document.getElementById("leaf")])?.className).toBe(
+      "preview-surface",
+    );
+  });
+
+  // The whole point of the guard: chrome must not resolve, so the caller blocks
+  // Cmd+A instead of letting the browser select the whole window.
+  it("returns null for shell chrome and for non-elements", () => {
+    mount(`<div class="app-shell">
+      <header class="topbar"><span id="leaf">Maru</span></header>
+      <nav class="activity-rail"><button id="rail">Files</button></nav>
+    </div>`);
     expect(resolveSelectScope([document.getElementById("leaf")])).toBeNull();
+    expect(resolveSelectScope([document.getElementById("rail")])).toBeNull();
     expect(resolveSelectScope([null, undefined, "not-an-element"])).toBeNull();
+  });
+
+  it("returns null outside the shell entirely", () => {
+    mount(`<div class="stray"><p id="leaf">x</p></div>`);
+    expect(resolveSelectScope([document.getElementById("leaf")])).toBeNull();
   });
 });
 
@@ -147,5 +175,28 @@ describe("createSelectAllHandler", () => {
     const leaf = document.getElementById("leaf")!;
     expect(pressCmdA(leaf, { key: "c" }).defaultPrevented).toBe(false);
     expect(pressCmdA(leaf, { isComposing: true }).defaultPrevented).toBe(false);
+  });
+
+  // The Files list maps Cmd+A onto "select every row" in its own bubble-phase
+  // handler, so this must not also drop a text selection over those rows.
+  it("yields to a surface that owns select-all", () => {
+    document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
+      <div class="files-list" data-select-all-owner><div class="files-list-row" id="leaf">a.md</div></div>
+    </main></div>`;
+    const event = pressCmdA(document.getElementById("leaf")!);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(window.getSelection()?.toString() ?? "").toBe("");
+  });
+
+  it("still scopes elsewhere in a pane that owns select-all somewhere", () => {
+    document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
+      <div class="files-list" data-select-all-owner><div>a.md</div></div>
+      <article class="preview-surface"><p id="leaf">preview body</p></article>
+    </main></div>`;
+    const event = pressCmdA(document.getElementById("leaf")!);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(window.getSelection()?.toString() ?? "").toContain("preview body");
   });
 });

@@ -21050,6 +21050,22 @@ button.git-badge:hover {
   background: var(--panel-2);
 }
 
+/* Four chip groups need ~180px each. The drawer opens inside the collection
+   pane, which narrows independently of the window, so this follows the pane. */
+@container filescollection (max-width: 900px) {
+  .files-filter-drawer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container filescollection (max-width: 520px) {
+  .files-filter-drawer {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: 45vh;
+    overflow: auto;
+  }
+}
+
 .files-filter-drawer fieldset {
   min-width: 0;
   margin: 0;
@@ -21311,6 +21327,14 @@ button.git-badge:hover {
 }
 
 .files-name-cell input,
+/* The new-folder editor is icon + input, not a name cell plus metadata spans,
+   so it opts out of --files-list-columns entirely. Under the narrow container
+   rules the single-track grid auto-placed the input onto a second row, where
+   the row's fixed height clipped it. */
+.files-list-row.files-inline-edit {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .files-inline-edit input {
   min-width: 100px;
   width: min(360px, 100%);
@@ -21600,9 +21624,6 @@ button.git-badge:hover {
     box-shadow: var(--shadow-lg);
   }
 
-  .files-filter-drawer {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 759px) {
@@ -21653,11 +21674,6 @@ button.git-badge:hover {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
-  .files-filter-drawer {
-    grid-template-columns: minmax(0, 1fr);
-    max-height: 45vh;
-    overflow: auto;
-  }
 }
 
 /* ========================================================================
