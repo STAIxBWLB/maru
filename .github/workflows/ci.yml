@@ -84,3 +84,23 @@ jobs:
       - name: Run verify (typecheck + i18n lint + vitest + cargo test --lib + build)
         if: steps.changes.outputs.app == 'true'
         run: make verify
+
+      # e2e used to run only in release-preflight, so a broken or flaky spec
+      # first surfaced on the release tag instead of on the PR that caused it.
+      - name: Install Playwright browsers
+        if: steps.changes.outputs.app == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e
+        if: steps.changes.outputs.app == 'true'
+        run: make test-e2e
+
+      - name: Upload e2e artifacts on failure
+        if: failure() && steps.changes.outputs.app == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

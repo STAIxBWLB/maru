@@ -188,6 +188,12 @@ async function clickNode(page: Page, id: string, options?: { button?: "left" | "
   }
 }
 
+async function waitForCameraSettled(page: Page) {
+  await page.waitForFunction(
+    () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.cameraAnimating(),
+  );
+}
+
 async function dblclickNode(page: Page, id: string, options?: { fit?: boolean }) {
   // Wait for the current camera transition and its render before resolving a
   // pixel coordinate. Only fit when the caller revealed a potentially
@@ -198,11 +204,7 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
     if (fit) bridge.fitView();
     return { frame, animated: fit || bridge.cameraAnimating() };
   }, options?.fit === true);
-  if (cameraStart.animated) {
-    await page.waitForFunction(
-      () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.cameraAnimating(),
-    );
-  }
+  if (cameraStart.animated) await waitForCameraSettled(page);
   // Sigma resolves hover through a GPU picking buffer that only updates on
   // render. Force exactly one fresh frame at the settled camera before
   // hovering: capture the frame count FIRST, then request the render, so the
@@ -351,8 +353,10 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   await page.getByTestId("graph-search").press("Enter");
   await openSelectionDetails(page);
   await expect(activeInspector(page)).toContainText("Maru 용어집");
-  // Centered: the camera animation settles with the node near the viewport
-  // center (page coordinates).
+  // Centered: settle the camera first, then poll. The wait alone is not a
+  // guarantee - it can run before the animation has started and report idle -
+  // so the poll still does the asserting.
+  await waitForCameraSettled(page);
   await expect
     .poll(async () => {
       const [point, rect] = await Promise.all([nodePoint(page, "maru-glossary"), containerRect(page)]);
@@ -634,11 +638,30 @@ test("GPU loss falls back to an interactive, exportable static graph", async ({ 
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
 
-  await page.evaluate(() =>
-    (window as unknown as { __maruGraph: Bridge }).__maruGraph.simulateContextLost(),
-  );
-  await expect(page.getByTestId("graph-gpu-recovery")).toBeVisible();
+  // Observe the transient overlay from inside the page: a MutationObserver
+  // cannot miss a state that exists for only one render, unlike a poll.
+  await page.evaluate(() => {
+    const w = window as unknown as { __maruSawRecovery?: boolean };
+    w.__maruSawRecovery = false;
+    const seen = () =>
+      document.querySelector('[data-testid="graph-gpu-recovery"]') !== null;
+    const observer = new MutationObserver(() => {
+      if (seen()) w.__maruSawRecovery = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.simulateContextLost();
+    if (seen()) w.__maruSawRecovery = true;
+  });
+  // The recovery overlay is a ~1s transient before the fallback swap, so
+  // asserting it with a polling matcher races the transition. Assert the end
+  // state, and prove the overlay actually rendered by catching it as it
+  // appears rather than by sampling afterwards.
   await expect(page.locator("svg.graph-static-fallback")).toBeVisible({ timeout: 5_000 });
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __maruSawRecovery?: boolean }).__maruSawRecovery,
+    ),
+  ).toBe(true);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("graph-more-menu").click();
