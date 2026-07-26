@@ -8,6 +8,30 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.26 - 2026-07-27 - Select-All Correctness
+
+- **Cmd+A no longer highlights the whole window.** v0.4.25 scoped it, but when
+  the keystroke was handed to a surface that then declined it, nothing blocked
+  the browser's own select-all and the entire window lit up again. The default
+  is now blocked before any hand-off, except in a real text field where the
+  native behavior is the right one.
+- **Cmd+A in Files selects every file.** It was bound to the file list, and
+  clicking a row never moved focus there, so most of the time it did nothing at
+  all. It now works from the list, the folder tree, the path bar, and the
+  toolbar; the search box still selects its own text and the preview its own
+  text. Clicking a row also focuses the list, so copy, cut, paste, duplicate,
+  and delete are reachable from the keyboard.
+- **Navigation is not content.** The document sidebar and the tab strips are no
+  longer selectable, so Cmd+A stops returning a wall of highlighted list rows.
+- **The panel header no longer shows a stray "Panel theme" label.** The label is
+  meant to be read only by screen readers, but the rule that hides it shipped in
+  the graph stylesheet, which loads lazily; until Graph mode had been opened
+  once, the text simply rendered.
+- **Diagram shortcuts stay in the diagram.** v0.4.25 fixed the destructive ones.
+  Paste and arrow-key nudge were still reachable from a dialog button or the top
+  bar, and both change the document. Every diagram shortcut now shares one
+  ownership rule.
+
 ## v0.4.25 - 2026-07-26 - Narrow Panes and Scoped Select-All
 
 - **Files chrome survives a narrow pane.** The path bar no longer draws its
