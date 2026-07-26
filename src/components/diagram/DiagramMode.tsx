@@ -147,6 +147,7 @@ import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
 import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
 import { resolveThemeMode } from "../../lib/theme";
+import { isChromeTarget } from "../../lib/useScopedSelectAll";
 
 export interface DiagramActiveDocument {
   /** Workspace-relative path (what `readDocument`/`saveDocument` take). */
@@ -1279,7 +1280,8 @@ function DiagramShell({
       // diagram, so it blocks the default and a defaultPrevented guard would
       // swallow the ordinary select-all-nodes case.
       const inDialog = Boolean(target?.closest('[role="dialog"],[role="alertdialog"]'));
-      if (!inField && !inDialog && matchesShortcut(event, { key: "a", mod: true })) {
+      const outsideDiagram = inDialog || isChromeTarget(target);
+      if (!inField && !outsideDiagram && matchesShortcut(event, { key: "a", mod: true })) {
         event.preventDefault();
         store.setState(selectAllNodes());
         return;
@@ -1403,7 +1405,10 @@ function DiagramShell({
           return;
         }
       }
-      if (!inField && (event.key === "Delete" || event.key === "Backspace")) {
+      // Destructive, so it holds to the same boundary as Mod+A: a keystroke
+      // aimed at the top bar, activity rail or an open menu must not reach the
+      // canvas.
+      if (!inField && !outsideDiagram && (event.key === "Delete" || event.key === "Backspace")) {
         if (hasSelection) {
           event.preventDefault();
           const state = store.getState();
