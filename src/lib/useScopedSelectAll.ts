@@ -6,6 +6,12 @@ import { useEffect } from "react";
  *  `data-select-scope` to opt in without editing this list. */
 const PANE_SELECTOR = [
   "[data-select-scope]",
+  // Radix mounts Dialog.Content outside .app-shell, so a dialog resolves via
+  // neither a pane class nor the mode-surface fallback. Without this, Cmd+A in
+  // a dialog falls through to whatever the selection anchor last touched -
+  // i.e. the pane hidden behind it.
+  '[role="dialog"]',
+  '[role="alertdialog"]',
   ".preview-surface",
   ".editor-pane",
   ".outline-pane",
@@ -72,18 +78,21 @@ export function closestModeSurface(el: unknown): HTMLElement | null {
   return node;
 }
 
-/** The narrowest sensible scope for a candidate: a known pane if one encloses
- *  it, otherwise the mode surface it belongs to. `null` means chrome or nothing
- *  at all — callers block the keystroke either way, never letting the browser
- *  select the whole window. */
+/** The narrowest sensible scope for the first candidate that resolves at all:
+ *  a known pane if one encloses it, otherwise the mode surface it belongs to.
+ *
+ *  Each candidate is resolved completely before moving to the next, because the
+ *  candidates are in falling order of trust - the event target, then the focused
+ *  element, then wherever the selection happens to be anchored. Trying every
+ *  candidate against panes first would let a stale anchor outrank the element
+ *  the user actually pressed the key on.
+ *
+ *  `null` means chrome or nothing at all - callers block the keystroke either
+ *  way, never letting the browser select the whole window. */
 export function resolveSelectScope(candidates: unknown[]): HTMLElement | null {
   for (const candidate of candidates) {
-    const pane = closestPane(candidate);
-    if (pane) return pane;
-  }
-  for (const candidate of candidates) {
-    const surface = closestModeSurface(candidate);
-    if (surface) return surface;
+    const scope = closestPane(candidate) ?? closestModeSurface(candidate);
+    if (scope) return scope;
   }
   return null;
 }

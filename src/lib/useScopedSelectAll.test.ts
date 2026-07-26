@@ -121,6 +121,21 @@ describe("resolveSelectScope", () => {
     mount(`<div class="stray"><p id="leaf">x</p></div>`);
     expect(resolveSelectScope([document.getElementById("leaf")])).toBeNull();
   });
+
+  // Candidates are in falling order of trust. Resolving all of them against
+  // panes before considering any mode surface would let the weakest signal -
+  // wherever the selection happens to be anchored - beat the event target.
+  it("resolves each candidate fully before falling to the next", () => {
+    mount(`<div class="app-shell">
+      <div class="today-pane"><p id="target">today</p></div>
+      <div class="editor-pane"><p id="anchor">editor</p></div>
+    </div>`);
+    const scope = resolveSelectScope([
+      document.getElementById("target"),
+      document.getElementById("anchor"),
+    ]);
+    expect(scope?.className).toBe("today-pane");
+  });
 });
 
 describe("createSelectAllHandler", () => {
@@ -187,6 +202,28 @@ describe("createSelectAllHandler", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(window.getSelection()?.toString() ?? "").toBe("");
+  });
+
+  // Radix mounts Dialog.Content outside .app-shell (42 dialogs do this), so
+  // neither the target nor the mode surface resolves. A leftover selection
+  // anchor in the pane behind must not win, or Cmd+A then copy lifts text the
+  // user cannot even see.
+  it("scopes to a portaled dialog, not the pane behind it", () => {
+    document.body.innerHTML = `<div class="app-shell"><div class="editor-pane">
+        <article class="preview-surface"><p id="behind">hidden background text</p></article>
+      </div></div>
+      <div role="dialog" class="dialog-content"><p id="leaf">dialog body</p></div>`;
+    // leave a stale selection in the pane behind the dialog
+    const stale = document.createRange();
+    stale.selectNodeContents(document.getElementById("behind")!);
+    window.getSelection()!.addRange(stale);
+
+    const event = pressCmdA(document.getElementById("leaf")!);
+
+    expect(event.defaultPrevented).toBe(true);
+    const selected = window.getSelection()?.toString() ?? "";
+    expect(selected).toContain("dialog body");
+    expect(selected).not.toContain("hidden background text");
   });
 
   it("still scopes elsewhere in a pane that owns select-all somewhere", () => {
