@@ -117,6 +117,15 @@ describe("resolveSelectScope", () => {
     expect(resolveSelectScope([null, undefined, "not-an-element"])).toBeNull();
   });
 
+  // The nav sidebar is a grid child of .app-shell, so the mode-surface fallback
+  // would otherwise resolve it and select the whole file list as text.
+  it("does not resolve the nav sidebar as a selectable surface", () => {
+    mount(`<div class="app-shell">
+      <div class="document-list"><div id="leaf">a.md</div></div>
+    </div>`);
+    expect(resolveSelectScope([document.getElementById("leaf")])).toBeNull();
+  });
+
   it("returns null outside the shell entirely", () => {
     mount(`<div class="stray"><p id="leaf">x</p></div>`);
     expect(resolveSelectScope([document.getElementById("leaf")])).toBeNull();
@@ -185,6 +194,28 @@ describe("createSelectAllHandler", () => {
     expect(pressCmdA(document.getElementById("leaf")!).defaultPrevented).toBe(false);
   });
 
+  // The invariant. Deferring to an owner used to return before preventDefault,
+  // so an owner that declines the key (the terminal panel bails whenever its
+  // surface is inactive or the target is a field) left the native
+  // whole-document select-all unopposed - the exact bug this hook exists to
+  // stop. Anything that is not a real text field must leave the default blocked.
+  it.each([
+    ["owner chrome", `<div class="terminal-panel" data-select-all-owner>
+       <button id="leaf">Terminal</button></div>`],
+    ["owner body", `<main class="files-workbench" data-select-all-owner>
+       <div id="leaf">row</div></main>`],
+    ["known pane", `<div class="inbox-pane"><p id="leaf">x</p></div>`],
+    ["shell chrome", `<header class="topbar"><button id="leaf">Maru</button></header>`],
+    ["open menu", `<div role="menu"><button id="leaf">Rename</button></div>`],
+    ["nav sidebar", `<div class="document-list"><div id="leaf">a.md</div></div>`],
+    ["tab strip", `<div class="document-tabs-row"><button id="leaf">doc</button></div>`],
+    ["tablist", `<div role="tablist"><button id="leaf">Terminal</button></div>`],
+    ["unattributable", `<div class="stray"><p id="leaf">x</p></div>`],
+  ])("never lets the native select-all through: %s", (_label, html) => {
+    document.body.innerHTML = `<div class="app-shell">${html}</div>`;
+    expect(pressCmdA(document.getElementById("leaf")!).defaultPrevented).toBe(true);
+  });
+
   it("ignores other keys and IME composition", () => {
     document.body.innerHTML = `<div class="inbox-pane"><p id="leaf">x</p></div>`;
     const leaf = document.getElementById("leaf")!;
@@ -195,12 +226,12 @@ describe("createSelectAllHandler", () => {
   // The Files list maps Cmd+A onto "select every row" in its own bubble-phase
   // handler, so this must not also drop a text selection over those rows.
   it("yields to a surface that owns select-all", () => {
-    document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
-      <div class="files-list" data-select-all-owner><div class="files-list-row" id="leaf">a.md</div></div>
+    document.body.innerHTML = `<div class="app-shell"><main class="files-workbench" data-select-all-owner>
+      <div class="files-list"><div class="files-list-row" id="leaf">a.md</div></div>
     </main></div>`;
-    const event = pressCmdA(document.getElementById("leaf")!);
+    pressCmdA(document.getElementById("leaf")!);
 
-    expect(event.defaultPrevented).toBe(false);
+    // The workbench selects rows itself; no text range may be left over them.
     expect(window.getSelection()?.toString() ?? "").toBe("");
   });
 
@@ -262,9 +293,10 @@ describe("createSelectAllHandler", () => {
       <div class="maru-diagram" data-select-all-owner>
         <svg><rect id="leaf" width="10" height="10"/></svg>
       </div></div>`;
-    const event = pressCmdA(document.getElementById("leaf")!);
+    pressCmdA(document.getElementById("leaf")!);
 
-    expect(event.defaultPrevented).toBe(false);
+    // The owner's own handler does the selecting; this hook must not also drop
+    // a text range over it.
     expect(window.getSelection()?.toString() ?? "").toBe("");
   });
 

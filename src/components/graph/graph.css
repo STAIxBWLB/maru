@@ -519,18 +519,8 @@
   display: flex;
 }
 
-/* Screen-reader-only live region (selection announcements) */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
+/* .sr-only (used by the graph live regions) is defined in styles.css — it is
+   app-wide, and this file only loads once Graph mode has been opened. */
 
 .graph-source-select {
   height: 28px;

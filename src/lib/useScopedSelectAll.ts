@@ -15,7 +15,6 @@ const PANE_SELECTOR = [
   ".preview-surface",
   ".editor-pane",
   ".outline-pane",
-  ".document-list",
   ".inbox-pane",
   ".comms-pane",
   ".tasks-pane",
@@ -49,17 +48,22 @@ function anchorElement(): HTMLElement | null {
   return node instanceof HTMLElement ? node : node.parentElement;
 }
 
-/** Window chrome. Selecting it is never useful, so it resolves to no scope. */
-const SHELL_CHROME_SELECTOR = ".topbar, .activity-rail";
-
-/** Chrome that owns the keystroke outright while it is up. Selecting a menu's
- *  items is meaningless, and an open menu is often portaled to the body, so
- *  merely failing to resolve would let the search fall through to the selection
- *  anchor and pick the pane hidden behind it. Same for the top bar and activity
- *  rail: a focused chrome button must not select whatever was last highlighted. */
+/** Chrome: never selectable, and it answers for the keystroke outright.
+ *
+ *  Selecting a menu's items or a strip of tabs is meaningless, and an open menu
+ *  is often portaled to the body — so merely failing to resolve would let the
+ *  search fall through to the selection anchor and pick the pane hidden behind
+ *  it. One list, used both to reject an event target and to reject an
+ *  `.app-shell` grid child in `closestModeSurface`; two lists drift. */
 const CHROME_TARGET_SELECTOR = [
   ".topbar",
   ".activity-rail",
+  // Navigation, not content: selecting the document sidebar or a strip of tabs
+  // is never what Cmd+A is for, and both used to come back as a wall of
+  // highlighted list rows.
+  ".document-list",
+  ".document-tabs-row",
+  '[role="tablist"]',
   '[role="menu"]',
   '[role="menubar"]',
 ].join(",");
@@ -93,7 +97,7 @@ export function closestModeSurface(el: unknown): HTMLElement | null {
   if (!shell) return null;
   let node: Element | null = el;
   while (node && node.parentElement !== shell) node = node.parentElement;
-  if (!node || node.matches(SHELL_CHROME_SELECTOR)) return null;
+  if (!node || node.matches(CHROME_TARGET_SELECTOR)) return null;
   return node as HTMLElement;
 }
 
@@ -131,16 +135,24 @@ export function createSelectAllHandler(isMac: boolean) {
   return function handler(event: KeyboardEvent) {
     if (event.isComposing) return;
     if (!selectAllComboPressed(event, isMac)) return;
+    // A real text field scopes select-all to its own value, so it is the one
+    // case where the native default is correct.
     if (isEditableTarget(event.target)) return;
-    // A surface that implements its own select-all (the Files list selects
+
+    // Everything past here blocks the default first. Deferring to another
+    // handler before blocking assumes that handler will act, and when it
+    // declines - the terminal panel bails whenever its surface is inactive -
+    // the native whole-document select-all runs, which is the exact behaviour
+    // this hook exists to prevent.
+    event.preventDefault();
+
+    // A surface that implements its own select-all (the Files workbench selects
     // rows) owns the keystroke outright: text-selecting it as well would leave
     // a highlight over the rows it just selected.
     if (ownsSelectAll(event.target)) return;
 
-    event.preventDefault();
-
-    // Chrome answers for itself: block the key and select nothing rather than
-    // letting a weaker candidate resolve something behind it.
+    // Chrome answers for itself: select nothing rather than letting a weaker
+    // candidate resolve something behind it.
     if (isChromeTarget(event.target)) return;
 
     const scope = resolveSelectScope([

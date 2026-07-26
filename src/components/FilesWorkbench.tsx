@@ -91,6 +91,7 @@ import {
 import { useTranslation } from "../lib/i18n";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
+import { isEditableTarget } from "../lib/useScopedSelectAll";
 import { BinaryViewerPane } from "./BinaryViewerPane";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 import { HtmlPreviewFrame } from "./HtmlVisualEditor";
@@ -575,6 +576,10 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       rangeAnchorRef.current = entry.path;
     }
     selectPaths(next);
+    // A click leaves focus wherever it was, so the list's own shortcuts
+    // (copy/cut/paste/duplicate/delete) were unreachable until something else
+    // focused it.
+    listRef.current?.focus({ preventScroll: true });
   };
 
   const runMutation = useCallback(
@@ -718,13 +723,23 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     );
   };
 
+  // Select-all lives on the workbench root, not the list: clicking a row does
+  // not put focus in the list, so bound there it mostly never fired. The other
+  // shortcuts below stay on the list, where a focused row is the precondition.
+  const handleSelectAllKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+    if (event.key.toLowerCase() !== "a") return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    // The search and rename fields select their own text; the preview selects
+    // its rendered text via the app-level scoped handler.
+    if (isEditableTarget(target) || target.closest(".preview-surface")) return;
+    event.preventDefault();
+    selectPaths(contents.map((entry) => entry.path));
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const modifier = event.metaKey || event.ctrlKey;
-    if (modifier && event.key.toLowerCase() === "a") {
-      event.preventDefault();
-      selectPaths(contents.map((entry) => entry.path));
-      return;
-    }
     if (modifier && event.key.toLowerCase() === "c") {
       event.preventDefault();
       setInternalClipboard("copy");
@@ -927,6 +942,10 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       className={`files-workbench${treeOpen ? " tree-open" : ""}${
         previewOpen ? " preview-open" : ""
       }`}
+      // Cmd/Ctrl+A anywhere in Files means "select every file", so the whole
+      // workbench owns the keystroke and useScopedSelectAll stays out of it.
+      data-select-all-owner
+      onKeyDown={handleSelectAllKeyDown}
       style={workbenchStyle}
     >
       {treeOpen ? (
@@ -1275,9 +1294,6 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
         <div
           className="files-list"
           ref={listRef}
-          // handleKeyDown implements Cmd/Ctrl+A as "select every row"; this
-          // keeps useScopedSelectAll from also text-selecting the pane.
-          data-select-all-owner
           role="grid"
           aria-label={t("files.contents")}
           aria-multiselectable="true"

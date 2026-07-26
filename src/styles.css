@@ -250,6 +250,22 @@ button {
   color: var(--muted);
 }
 
+/* Visually hidden, still announced. Lives here rather than in graph.css because
+   the terminal panel's theme label uses it: graph.css is imported by the lazily
+   loaded GraphView, so until Graph mode had been opened once the rule did not
+   exist and that label rendered as ordinary text in the panel header. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 a {
   color: inherit;
 }
