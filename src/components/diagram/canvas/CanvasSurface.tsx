@@ -18,6 +18,7 @@ import {
   withSnapshot,
 } from "../../../lib/diagram/actions";
 import { defaultEdge } from "../../../lib/diagram/edgeRouting";
+import { isDiagramKeystroke } from "../../../lib/diagram/shortcuts";
 import {
   clamp,
   rectsIntersect,
@@ -683,6 +684,10 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      // Same boundary as the diagram's other shortcuts: this is a window
+      // listener, so without it Escape typed into the find bar or a dialog
+      // cancels an in-flight canvas gesture.
+      if (!isDiagramKeystroke(event.target)) return;
       if (event.key === "Escape") {
         gestureRef.current = null;
         setMarquee(null);

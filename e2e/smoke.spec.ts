@@ -880,6 +880,52 @@ test("drives the Files folder tree and reveals only the target's chain", async (
   await expect(files.locator(".files-breadcrumbs")).toContainText("attachments");
 });
 
+test("scopes Files select-all to rows, search text, or preview text", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+
+  const files = page.locator(".files-workbench");
+  const rows = files.locator(".files-list-row");
+  const meeting = rows.filter({ hasText: "maru-weekly-meeting.md" });
+  await expect(meeting).toBeVisible();
+  const rowCount = await rows.count();
+  const appShortcut = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta+A" : "Control+A",
+  );
+  // `Desktop Chrome` advertises a Windows UA even when Playwright runs on
+  // macOS. Maru follows the browser platform, while Chromium's native input
+  // editing follows the host OS, so exercise each boundary with its own combo.
+  const nativeShortcut = process.platform === "darwin" ? "Meta+A" : "Control+A";
+
+  await meeting.click();
+  await page.keyboard.press(appShortcut);
+  await expect(files.locator('.files-list-row[aria-selected="true"]')).toHaveCount(rowCount);
+
+  const search = files.getByPlaceholder("파일명, 경로 검색");
+  await search.fill("maru");
+  await expect(search).toBeFocused();
+  await search.press(nativeShortcut);
+  await expect
+    .poll(() =>
+      search.evaluate((input: HTMLInputElement) => ({
+        start: input.selectionStart,
+        end: input.selectionEnd,
+        length: input.value.length,
+      })),
+    )
+    .toEqual({ start: 0, end: 4, length: 4 });
+
+  await search.fill("");
+  await meeting.click();
+  const preview = files.locator(".preview-surface");
+  await expect(preview).toContainText("Maru 사업 주간 점검 회의");
+  await preview.click({ position: { x: 80, y: 80 } });
+  await page.keyboard.press(appShortcut);
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
+    .toContain("Maru 사업 주간 점검 회의");
+});
+
 test("switches between standalone Documents and Files workspaces", async ({ page }) => {
   await page.goto("/");
 

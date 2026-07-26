@@ -1050,7 +1050,12 @@ export function GraphCanvas({
           resumeLayout: () => startLayoutRef.current?.(false),
           fitView: () => fitToVisible(false),
           simulateContextLost: () => {
-            rendererCanvases.forEach((canvas) => canvas.dispatchEvent(new Event("webglcontextlost")));
+            // Resolve at call time: the canvases are replaced whenever the
+            // renderer epoch bumps, and a closed-over list would silently
+            // dispatch into detached elements.
+            Object.values(renderer.getCanvases()).forEach((canvas) =>
+              canvas.dispatchEvent(new Event("webglcontextlost")),
+            );
           },
           requestRender: () => renderer.scheduleRefresh(),
           graphStats: () => ({

@@ -347,11 +347,12 @@ cd src-tauri && cargo test --release bench_scan_real_workspace \
 # → MARU_BENCH_WORKSPACE=/some/path overrides the default ~/workspace/work
 ```
 
-CI runs `make verify` (typecheck + vitest + cargo test --lib + build) on every
-pull request and push to `main` via `.github/workflows/ci.yml`; pushes that
-touch only `skills/**` run `make skills-verify` instead of the full app
-toolchain. The heavier `release-preflight` (adds CLI + e2e + a debug Tauri
-build) runs on version tags.
+CI runs `make verify` (typecheck + vitest + cargo test --lib + build) and
+`make test-e2e` on every pull request and push to `main` via
+`.github/workflows/ci.yml`; pushes that touch only `skills/**` run
+`make skills-verify` instead of the full app toolchain. The heavier
+`release-preflight` repeats both and adds diff checks, CLI tests/smoke, and a
+debug Tauri build on version tags.
 
 ## Skills Bundle Channel (OTA)
 
