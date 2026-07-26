@@ -21188,6 +21188,35 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+/* Metadata columns shed from the right as the pane narrows, so the name keeps
+   its width instead of being squeezed by five content-sized columns.
+   --files-list-columns is set inline from the enabled attributes, so these need
+   !important to win; without a matching track count the hidden cells would
+   leave their column-gap behind as dead space on the right. */
+@container filescollection (max-width: 620px) {
+  .files-list-header,
+  .files-list-row {
+    --files-list-columns: minmax(0, 1fr) minmax(0, max-content) !important;
+  }
+
+  .files-list-header > span:nth-child(n + 3),
+  .files-list-row > span:nth-child(n + 3) {
+    display: none;
+  }
+}
+
+@container filescollection (max-width: 440px) {
+  .files-list-header,
+  .files-list-row {
+    --files-list-columns: minmax(0, 1fr) !important;
+  }
+
+  .files-list-header > span:not(:first-child),
+  .files-list-row > span:not(:first-child) {
+    display: none;
+  }
+}
+
 .files-list {
   flex: 1;
   min-height: 0;
@@ -21629,17 +21658,6 @@ button.git-badge:hover {
     max-height: 45vh;
     overflow: auto;
   }
-
-  .files-list-header,
-  .files-list-row {
-    --files-list-columns: minmax(200px, 1fr);
-  }
-
-  .files-list-header > span:not(:first-child),
-  .files-list-row > span:not(:first-child) {
-    display: none;
-  }
-
 }
 
 /* ========================================================================
