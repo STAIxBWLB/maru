@@ -1270,7 +1270,12 @@ function DiagramShell({
         setFindOpen(true);
         return;
       }
-      if (matchesShortcut(event, { key: "a", mod: true })) {
+      // Unlike its siblings this branch was missing !inField, so Mod+A in any
+      // text field selected every node instead of the field's text. This is a
+      // window listener and the diagram's dialogs are portaled outside the
+      // marked root, so it also has to yield when useScopedSelectAll (document
+      // capture, so it runs first) already claimed the keystroke for a dialog.
+      if (!inField && !event.defaultPrevented && matchesShortcut(event, { key: "a", mod: true })) {
         event.preventDefault();
         store.setState(selectAllNodes());
         return;

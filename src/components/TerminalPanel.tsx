@@ -1935,6 +1935,11 @@ export const TerminalPanel = memo(
             : `terminal-panel dock-${dock} collapsed`
         }
         data-terminal-theme={settings.terminal.theme}
+        // handleTerminalKeyDownCapture maps Cmd/Ctrl+A onto the terminal's own
+        // selectAll, but only while the terminal surface is active - and it
+        // runs after the document-level capture handler, which would otherwise
+        // text-select the whole panel first. Ownership tracks the same guard.
+        data-select-all-owner={activeSurface === "terminal" ? "" : undefined}
         style={panelStyle}
         onKeyDownCapture={handleTerminalKeyDownCapture}
       >
