@@ -1322,7 +1322,10 @@ function DiagramShell({
       // Table cell keyboard flow (F2/Tab/Enter/arrows/Delete/printable char)
       // — takes precedence over node-level nudge/delete/inline-edit while a
       // table has an active cell selection.
-      if (!inField && !cellEdit) {
+      // outsideDiagram for the same reason as the node Delete branch, and it
+      // matters more here: the selection survives a focus change, so without it
+      // Delete or any printable key aimed at chrome edits the cells silently.
+      if (!inField && !outsideDiagram && !cellEdit) {
         const tableAction = nextTableKeyAction(event, store.getState());
         if (tableAction) {
           event.preventDefault();
