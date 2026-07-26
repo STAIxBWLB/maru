@@ -8,6 +8,32 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.25 - 2026-07-26 - Narrow Panes and Scoped Select-All
+
+- **Files chrome survives a narrow pane.** The path bar no longer draws its
+  crumbs on top of each other; they truncate cleanly and shed ancestors as the
+  pane narrows, keeping the current folder readable. The preview header shows
+  the file name over its path instead of running both past the pane edge, the
+  FOLDERS actions settle into a tidy grid before falling back to icons, and the
+  search row, action strip, filter drawer, and list columns all narrow with the
+  pane. Previously every one of these responded to the window width, so a
+  narrow pane in a wide window got no adaptation at all.
+- **The command palette opens centered.** It was drawing half its own height
+  above the top of the window, putting the search field out of reach. Its ~40
+  commands are also grouped into Navigate, Create, Document, Layout, Agent,
+  Workspace, and Skills rather than one flat list.
+- **Cmd+A selects what you are looking at.** It used to highlight the entire
+  window: top bar, activity rail, every pane, and the terminal. It now scopes
+  to the surface you are in, leaves text fields to the browser, and defers to
+  surfaces that define their own select-all, such as the Files list and the
+  diagram canvas. In a dialog it selects the dialog, not the pane hidden
+  behind it.
+- **Diagram shortcuts stay in the diagram.** Undo, redo, find, duplicate,
+  select-all, delete, and table cell editing are bound to the whole window, so
+  they previously fired from anywhere. Ctrl+Z typed into the terminal rolled
+  back diagram history, and Delete or any printable key pressed with a top-bar
+  button focused edited the selected table cells. Save remains global.
+
 ## v0.4.24 - 2026-07-26 - Apple-Inspired Interface
 
 - **A single design foundation.** Typography, spacing, color, materials, and
