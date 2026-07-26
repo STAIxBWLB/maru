@@ -1201,6 +1201,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
         <div className="files-action-strip" role="toolbar" aria-label={t("files.operations.actions")}>
           <button
             type="button"
+            title={t("files.operations.rename")}
             onClick={beginRename}
             disabled={selectedEntries.length !== 1 || !canRenameMove || busy}
           >
@@ -1209,6 +1210,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           </button>
           <button
             type="button"
+            title={t("files.operations.duplicate")}
             onClick={duplicateSelection}
             disabled={selectedEntries.length === 0 || !canCreate || busy}
           >
@@ -1217,6 +1219,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           </button>
           <button
             type="button"
+            title={t("files.operations.cut")}
             onClick={() => setInternalClipboard("move")}
             disabled={selectedEntries.length === 0 || !canRenameMove}
           >
@@ -1225,6 +1228,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           </button>
           <button
             type="button"
+            title={t("files.operations.copy")}
             onClick={() => setInternalClipboard("copy")}
             disabled={selectedEntries.length === 0}
           >
@@ -1233,6 +1237,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           </button>
           <button
             type="button"
+            title={t("files.operations.paste")}
             onClick={pasteClipboard}
             disabled={
               !workspacePath ||
@@ -1247,6 +1252,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           </button>
           <button
             type="button"
+            title={t("files.queueSelected")}
             onClick={() => onQueuePaths(selectedPaths)}
             disabled={selectedPaths.length === 0}
           >
@@ -1257,6 +1263,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
           <button
             type="button"
             className="danger"
+            title={t("files.operations.trash")}
             onClick={trashSelection}
             disabled={selectedEntries.length === 0 || !canDelete || busy}
           >

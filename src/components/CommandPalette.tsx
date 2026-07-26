@@ -17,11 +17,26 @@ interface CommandPaletteProps {
   diagramEnabled?: boolean;
 }
 
+/** Section order in the palette. Actions without a group fall into `skills`,
+ *  which is where the dynamically supplied skill commands belong. */
+const ACTION_GROUPS = [
+  "navigate",
+  "create",
+  "document",
+  "layout",
+  "agent",
+  "workspace",
+  "skills",
+] as const;
+
+type ActionGroup = (typeof ACTION_GROUPS)[number];
+
 interface CommandAction {
   id: string;
   label: string;
   hint?: string;
   shortcut?: string;
+  group?: ActionGroup;
 }
 
 type PaletteItem =
@@ -48,46 +63,120 @@ export const CommandPalette = memo(function CommandPalette({
 
   const actions: CommandAction[] = useMemo(
     () => [
-      { id: "new-document", label: t("cmdk.action.newDocument"), shortcut: "⌘ N" },
+      { id: "open-catalog", label: t("cmdk.action.openCatalog"), group: "navigate" },
+      { id: "open-studio", label: t("cmdk.action.openStudio"), group: "navigate" },
+      ...(diagramEnabled
+        ? [
+            {
+              id: "open-diagram",
+              label: t("cmdk.action.openDiagram"),
+              group: "navigate" as const,
+            },
+          ]
+        : []),
+      { id: "open-graph", label: t("cmdk.action.openGraph"), group: "navigate" },
+      { id: "open-graph-right", label: t("cmdk.action.openGraphRight"), group: "navigate" },
+      { id: "open-scratchpad", label: t("cmdk.action.openScratchpad"), group: "navigate" },
+      { id: "open-inbox", label: t("cmdk.action.openInbox"), group: "navigate" },
+      {
+        id: "open-comms",
+        label: t("cmdk.action.openComms"),
+        shortcut: "⌘ ⇧ M",
+        group: "navigate",
+      },
+      { id: "open-meetings", label: t("cmdk.action.openMeetings"), group: "navigate" },
+      {
+        id: "open-tasks",
+        label: t("cmdk.action.openTasks"),
+        shortcut: "⌘ ⇧ T",
+        group: "navigate",
+      },
+      {
+        id: "open-sites",
+        label: t("cmdk.action.openSites"),
+        shortcut: "⌘ ⇧ B",
+        group: "navigate",
+      },
+      { id: "open-docs", label: t("cmdk.action.openDocs"), group: "navigate" },
+
+      {
+        id: "new-document",
+        label: t("cmdk.action.newDocument"),
+        shortcut: "⌘ N",
+        group: "create",
+      },
       {
         id: "new-document-from-template",
         label: t("cmdk.action.newDocumentFromTemplate"),
+        group: "create",
       },
-      { id: "open-catalog", label: t("cmdk.action.openCatalog") },
-      { id: "open-studio", label: t("cmdk.action.openStudio") },
-      ...(diagramEnabled ? [{ id: "open-diagram", label: t("cmdk.action.openDiagram") }] : []),
-      { id: "open-graph", label: t("cmdk.action.openGraph") },
-      { id: "open-graph-right", label: t("cmdk.action.openGraphRight") },
-      { id: "open-scratchpad", label: t("cmdk.action.openScratchpad") },
-      { id: "new-scratchpad-memo", label: t("cmdk.action.newScratchpadMemo") },
-      { id: "new-scratchpad-idea", label: t("cmdk.action.newScratchpadIdea") },
-      { id: "review-scratchpad-temp", label: t("cmdk.action.reviewScratchpadTemp") },
-      { id: "export-bundle", label: t("cmdk.action.exportBundle") },
-      { id: "export-validate", label: t("cmdk.action.exportValidate") },
-      { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S" },
-      { id: "snapshot", label: t("cmdk.action.snapshot"), shortcut: "⌘ ⇧ S" },
-      { id: "split-right", label: t("cmdk.action.splitRight"), shortcut: "⌘ D" },
-      { id: "attach-active-item", label: t("cmdk.action.attachActiveItem") },
-      { id: "toggle-agent-hooks", label: t("cmdk.action.toggleAgentHooks") },
-      { id: "write-context-hint", label: t("cmdk.action.writeContextHint") },
-      { id: "remove-context-hint", label: t("cmdk.action.removeContextHint") },
-      { id: "dock-terminal-right", label: t("cmdk.action.dockTerminalRight") },
-      { id: "dock-terminal-bottom", label: t("cmdk.action.dockTerminalBottom") },
-      { id: "close-all-tabs", label: t("cmdk.action.closeAllTabs") },
-      { id: "toggle-preview", label: t("cmdk.action.togglePreview"), shortcut: "⌘ P" },
-      { id: "toggle-outline", label: t("cmdk.action.toggleOutline"), shortcut: "⌘ \\" },
-      { id: "toggle-locale", label: t("cmdk.action.toggleLocale"), shortcut: "⌘ ⇧ L" },
-      { id: "refresh-workspace", label: t("cmdk.action.refresh"), shortcut: "⌘ R" },
-      { id: "open-inbox", label: t("cmdk.action.openInbox") },
-      { id: "open-comms", label: t("cmdk.action.openComms"), shortcut: "⌘ ⇧ M" },
-      { id: "open-meetings", label: t("cmdk.action.openMeetings") },
-      { id: "open-tasks", label: t("cmdk.action.openTasks"), shortcut: "⌘ ⇧ T" },
-      { id: "open-sites", label: t("cmdk.action.openSites"), shortcut: "⌘ ⇧ B" },
-      { id: "open-docs", label: t("cmdk.action.openDocs") },
-      { id: "open-settings", label: t("cmdk.action.openSettings"), shortcut: "⌘ ," },
-      { id: "check-updates", label: t("cmdk.action.checkUpdates") },
-      { id: "add-workspace", label: t("cmdk.action.addWorkspace") },
-      { id: "open-skill-compose", label: t("cmdk.action.skillCompose"), shortcut: "⌘ ⇧ K" },
+      { id: "new-scratchpad-memo", label: t("cmdk.action.newScratchpadMemo"), group: "create" },
+      { id: "new-scratchpad-idea", label: t("cmdk.action.newScratchpadIdea"), group: "create" },
+
+      { id: "save", label: t("cmdk.action.save"), shortcut: "⌘ S", group: "document" },
+      {
+        id: "snapshot",
+        label: t("cmdk.action.snapshot"),
+        shortcut: "⌘ ⇧ S",
+        group: "document",
+      },
+      { id: "export-bundle", label: t("cmdk.action.exportBundle"), group: "document" },
+      { id: "export-validate", label: t("cmdk.action.exportValidate"), group: "document" },
+
+      { id: "split-right", label: t("cmdk.action.splitRight"), shortcut: "⌘ D", group: "layout" },
+      {
+        id: "toggle-preview",
+        label: t("cmdk.action.togglePreview"),
+        shortcut: "⌘ P",
+        group: "layout",
+      },
+      {
+        id: "toggle-outline",
+        label: t("cmdk.action.toggleOutline"),
+        shortcut: "⌘ \\",
+        group: "layout",
+      },
+      { id: "dock-terminal-right", label: t("cmdk.action.dockTerminalRight"), group: "layout" },
+      { id: "dock-terminal-bottom", label: t("cmdk.action.dockTerminalBottom"), group: "layout" },
+      { id: "close-all-tabs", label: t("cmdk.action.closeAllTabs"), group: "layout" },
+
+      { id: "attach-active-item", label: t("cmdk.action.attachActiveItem"), group: "agent" },
+      { id: "toggle-agent-hooks", label: t("cmdk.action.toggleAgentHooks"), group: "agent" },
+      { id: "write-context-hint", label: t("cmdk.action.writeContextHint"), group: "agent" },
+      { id: "remove-context-hint", label: t("cmdk.action.removeContextHint"), group: "agent" },
+
+      {
+        id: "refresh-workspace",
+        label: t("cmdk.action.refresh"),
+        shortcut: "⌘ R",
+        group: "workspace",
+      },
+      {
+        id: "review-scratchpad-temp",
+        label: t("cmdk.action.reviewScratchpadTemp"),
+        group: "workspace",
+      },
+      { id: "add-workspace", label: t("cmdk.action.addWorkspace"), group: "workspace" },
+      {
+        id: "toggle-locale",
+        label: t("cmdk.action.toggleLocale"),
+        shortcut: "⌘ ⇧ L",
+        group: "workspace",
+      },
+      {
+        id: "open-settings",
+        label: t("cmdk.action.openSettings"),
+        shortcut: "⌘ ,",
+        group: "workspace",
+      },
+      { id: "check-updates", label: t("cmdk.action.checkUpdates"), group: "workspace" },
+
+      {
+        id: "open-skill-compose",
+        label: t("cmdk.action.skillCompose"),
+        shortcut: "⌘ ⇧ K",
+        group: "skills",
+      },
       ...skillActions,
     ],
     [diagramEnabled, skillActions, t],
@@ -108,29 +197,38 @@ export const CommandPalette = memo(function CommandPalette({
     [filteredDocs],
   );
 
-  const actionItems = useMemo(
-    () =>
-      (query.trim() ? filteredActions : actions).map((action) => ({
-      kind: "action" as const,
-      action,
-    })),
-    [actions, filteredActions, query],
+  const groupLabels: Record<ActionGroup, string> = useMemo(
+    () => ({
+      navigate: t("cmdk.group.navigate"),
+      create: t("cmdk.group.create"),
+      document: t("cmdk.group.document"),
+      layout: t("cmdk.group.layout"),
+      agent: t("cmdk.group.agent"),
+      workspace: t("cmdk.group.workspace"),
+      skills: t("cmdk.group.skills"),
+    }),
+    [t],
   );
 
   const groups = useMemo(() => {
-    const actionGroup = {
-      id: "actions",
-      label: t("cmdk.section.commands"),
-      items: actionItems as PaletteItem[],
-    };
+    const visibleActions = query.trim() ? filteredActions : actions;
+    const actionGroups = ACTION_GROUPS.map((group) => ({
+      id: group,
+      label: groupLabels[group],
+      items: visibleActions
+        .filter((action) => (action.group ?? "skills") === group)
+        .map((action) => ({ kind: "action" as const, action })) as PaletteItem[],
+    }));
     const docGroup = {
       id: "documents",
       label: t("cmdk.section.documents"),
       items: docItems as PaletteItem[],
     };
-    const ordered = query.trim() ? [docGroup, actionGroup] : [actionGroup, docGroup];
+    // Searching is a lookup, so matching documents lead; browsing is a menu, so
+    // the grouped commands lead.
+    const ordered = query.trim() ? [docGroup, ...actionGroups] : [...actionGroups, docGroup];
     return ordered.filter((group) => group.items.length > 0);
-  }, [actionItems, docItems, query, t]);
+  }, [actions, docItems, filteredActions, groupLabels, query, t]);
 
   const indexedGroups = useMemo(() => {
     let index = 0;

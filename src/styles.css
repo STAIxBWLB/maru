@@ -10529,15 +10529,22 @@ button.git-badge:hover {
   background: var(--overlay);
   backdrop-filter: blur(2px);
   z-index: 80;
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  /* Not `place-items: center`: when the shell is taller than the viewport that
+     centres the overflow on both edges, pushing the search field above the top
+     and out of reach. Auto margins collapse to 0 instead, and this scrolls. */
+  overflow: auto;
   padding: 24px;
   animation: overlay-in var(--motion-fast) ease forwards;
 }
 
 .cmdk-shell {
+  margin: auto;
   width: min(680px, calc(100vw - 48px));
-  max-height: min(720px, calc(100dvh - 48px));
+  /* Capped well short of the window so the palette reads as a centred dialog
+     and never runs under the macOS menu bar when it is revealed in fullscreen. */
+  max-height: min(560px, calc(100dvh - 120px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid var(--line-soft);
@@ -20874,6 +20881,10 @@ button.git-badge:hover {
 }
 
 .files-collection-pane {
+  /* The pane is resized by its two neighbours, so the search row and the action
+     strip below narrow on this width rather than the viewport's. */
+  container-type: inline-size;
+  container-name: filescollection;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -21003,6 +21014,23 @@ button.git-badge:hover {
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
+/* The search field plus both selects need ~460px on one line. Below that they
+   wrap onto two rows instead of overflowing - the filter and sort selects stay
+   reachable, which hiding them (the old viewport rule) gave up. */
+@container filescollection (max-width: 460px) {
+  .files-search-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .files-search-row label {
+    grid-column: 1 / -1;
+  }
+
+  .files-search-row select {
+    min-width: 0;
+  }
+}
+
 .files-search-row select {
   height: 32px;
   padding: 0 25px 0 8px;
@@ -21107,6 +21135,20 @@ button.git-badge:hover {
 .files-action-strip .danger:not(:disabled),
 .files-context-menu .danger:not(:disabled) {
   color: var(--danger);
+}
+
+/* The strip scrolls horizontally rather than clipping, but a hidden scroll in a
+   34px bar is undiscoverable - shed the labels so every action stays on screen.
+   Each button carries a title, so the icon keeps a tooltip. */
+@container filescollection (max-width: 600px) {
+  .files-action-strip button {
+    font-size: 0;
+  }
+
+  .files-action-strip button svg {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 .files-list-header,
@@ -21582,14 +21624,6 @@ button.git-badge:hover {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
-  .files-search-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .files-search-row select {
-    display: none;
-  }
-
   .files-filter-drawer {
     grid-template-columns: minmax(0, 1fr);
     max-height: 45vh;
@@ -21606,14 +21640,6 @@ button.git-badge:hover {
     display: none;
   }
 
-  .files-action-strip button {
-    font-size: 0;
-  }
-
-  .files-action-strip button svg {
-    width: 14px;
-    height: 14px;
-  }
 }
 
 /* ========================================================================
@@ -21935,7 +21961,19 @@ button.git-badge:hover {
   background: var(--foundation-material-modal);
   backdrop-filter: blur(18px) saturate(150%);
   box-shadow: var(--shadow-lg);
+}
+
+.dialog-content {
   animation: dialog-in var(--motion-enter) var(--ease-out) forwards;
+}
+
+/* Deliberately not dialog-in: its keyframes end at translate(-50%, -50%),
+   which is the centring transform for .dialog-content's position: fixed. The
+   palette is an ordinary flex item, so with animation-fill-mode: forwards that
+   offset permanently shifted it half its own size up and left - which is what
+   pushed the search field above the top of the window. */
+.cmdk-shell {
+  animation: cmdk-in var(--motion-enter) var(--ease-out) forwards;
 }
 
 .dialog-surface {
