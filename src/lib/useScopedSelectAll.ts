@@ -47,34 +47,57 @@ function closestPane(el: unknown): HTMLElement | null {
   return el instanceof HTMLElement ? el.closest<HTMLElement>(PANE_SELECTOR) : null;
 }
 
+/** First candidate that sits inside a known pane, else `null`. Callers block
+ *  the keystroke either way — `null` means "select nothing", never "let the
+ *  browser select the whole window". */
+export function resolveSelectScope(candidates: unknown[]): HTMLElement | null {
+  for (const candidate of candidates) {
+    const pane = closestPane(candidate);
+    if (pane) return pane;
+  }
+  return null;
+}
+
 /** Cmd/Ctrl+A selects only the active pane's text instead of the whole window.
  *  Native editables (the source textarea and the rich block editor) already
  *  scope to themselves, so they are left to the browser; everywhere else we
  *  select the contents of the nearest known pane. Capture phase so we win the
- *  default action; we only `preventDefault` once a pane scope is resolved, so
- *  dialogs and unrecognized surfaces keep their browser behavior. */
+ *  default action.
+ *
+ *  Outside a known pane we still `preventDefault` and select nothing: the
+ *  browser default would highlight the entire window - topbar, activity bar,
+ *  every pane and the terminal - which is never what Cmd+A should mean here.
+ *  Panes that implement their own select-all (the Files list selects rows) run
+ *  their handler on the bubble phase and are unaffected by the blocked default. */
+export function createSelectAllHandler(isMac: boolean) {
+  return function handler(event: KeyboardEvent) {
+    if (event.isComposing) return;
+    if (!selectAllComboPressed(event, isMac)) return;
+    if (isEditableTarget(event.target)) return;
+
+    event.preventDefault();
+
+    const scope = resolveSelectScope([
+      event.target,
+      document.activeElement,
+      anchorElement(),
+    ]);
+    if (!scope) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(scope);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+}
+
 export function useScopedSelectAll(): void {
   useEffect(() => {
-    const isMac = navigator.platform.toLowerCase().includes("mac");
-    function handler(event: KeyboardEvent) {
-      if (event.isComposing) return;
-      if (!selectAllComboPressed(event, isMac)) return;
-      if (isEditableTarget(event.target)) return;
-
-      const scope =
-        closestPane(event.target) ??
-        closestPane(document.activeElement) ??
-        closestPane(anchorElement());
-      if (!scope) return;
-
-      const selection = window.getSelection();
-      if (!selection) return;
-      event.preventDefault();
-      const range = document.createRange();
-      range.selectNodeContents(scope);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
+    const handler = createSelectAllHandler(
+      navigator.platform.toLowerCase().includes("mac"),
+    );
     document.addEventListener("keydown", handler, { capture: true });
     return () =>
       document.removeEventListener("keydown", handler, { capture: true });
