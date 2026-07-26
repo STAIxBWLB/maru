@@ -1527,6 +1527,9 @@ function DiagramShell({
     <div
       className={`maru-diagram${theme === "dark" ? " is-dark" : ""}${focusMode ? " is-focus-mode" : ""}`}
       data-testid="diagram-mode"
+      // Mod+A here means "select every node" (handled in the keydown above);
+      // this keeps useScopedSelectAll from also text-selecting the surface.
+      data-select-all-owner
       role="region"
       aria-label={t("mode.diagram")}
     >

@@ -21327,14 +21327,6 @@ button.git-badge:hover {
 }
 
 .files-name-cell input,
-/* The new-folder editor is icon + input, not a name cell plus metadata spans,
-   so it opts out of --files-list-columns entirely. Under the narrow container
-   rules the single-track grid auto-placed the input onto a second row, where
-   the row's fixed height clipped it. */
-.files-list-row.files-inline-edit {
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
 .files-inline-edit input {
   min-width: 100px;
   width: min(360px, 100%);
@@ -21344,6 +21336,14 @@ button.git-badge:hover {
   border-radius: var(--radius-sm);
   outline: 0;
   background: var(--panel);
+}
+
+/* The new-folder editor is icon + input, not a name cell plus metadata spans,
+   so it opts out of --files-list-columns entirely. Under the narrow container
+   rules the single-track grid auto-placed the input onto a second row, where
+   the row's fixed height clipped it. */
+.files-list-row.files-inline-edit {
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .files-badge {

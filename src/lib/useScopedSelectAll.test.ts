@@ -226,6 +226,33 @@ describe("createSelectAllHandler", () => {
     expect(selected).not.toContain("hidden background text");
   });
 
+  // DocumentList portals its context menu to the body. Selecting a menu's items
+  // is meaningless, and falling through to the stale anchor would select the
+  // pane behind it.
+  it("selects nothing from an open menu or from chrome", () => {
+    document.body.innerHTML = `<div class="app-shell">
+        <header class="topbar"><button id="chrome">Maru</button></header>
+        <div class="editor-pane"><article class="preview-surface">
+          <p id="anchored">anchored</p>
+          <p>hidden background text</p></article></div>
+      </div>
+      <div class="context-menu" role="menu"><button id="leaf" role="menuitem">Rename</button></div>`;
+
+    for (const id of ["leaf", "chrome"]) {
+      // A leftover anchor inside the pane behind: scoping to .preview-surface
+      // would grow this to swallow the rest of the pane.
+      const stale = document.createRange();
+      stale.selectNodeContents(document.getElementById("anchored")!);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(stale);
+
+      const event = pressCmdA(document.getElementById(id)!);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(window.getSelection()?.toString() ?? "").toBe("anchored");
+    }
+  });
+
   it("still scopes elsewhere in a pane that owns select-all somewhere", () => {
     document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
       <div class="files-list" data-select-all-owner><div>a.md</div></div>

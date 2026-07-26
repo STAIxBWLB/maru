@@ -52,6 +52,22 @@ function anchorElement(): HTMLElement | null {
 /** Window chrome. Selecting it is never useful, so it resolves to no scope. */
 const SHELL_CHROME_SELECTOR = ".topbar, .activity-rail";
 
+/** Chrome that owns the keystroke outright while it is up. Selecting a menu's
+ *  items is meaningless, and an open menu is often portaled to the body, so
+ *  merely failing to resolve would let the search fall through to the selection
+ *  anchor and pick the pane hidden behind it. Same for the top bar and activity
+ *  rail: a focused chrome button must not select whatever was last highlighted. */
+const CHROME_TARGET_SELECTOR = [
+  ".topbar",
+  ".activity-rail",
+  '[role="menu"]',
+  '[role="menubar"]',
+].join(",");
+
+export function isChromeTarget(el: EventTarget | null): boolean {
+  return el instanceof HTMLElement && el.closest(CHROME_TARGET_SELECTOR) !== null;
+}
+
 /** True when the node sits inside a surface that handles Cmd/Ctrl+A itself.
  *  Mark such a surface with `data-select-all-owner`; its own handler runs on
  *  the bubble phase and is responsible for calling `preventDefault`. */
@@ -119,6 +135,10 @@ export function createSelectAllHandler(isMac: boolean) {
     if (ownsSelectAll(event.target)) return;
 
     event.preventDefault();
+
+    // Chrome answers for itself: block the key and select nothing rather than
+    // letting a weaker candidate resolve something behind it.
+    if (isChromeTarget(event.target)) return;
 
     const scope = resolveSelectScope([
       event.target,
