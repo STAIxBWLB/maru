@@ -147,6 +147,7 @@ import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
 import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
 import { resolveThemeMode } from "../../lib/theme";
+import { isChromeTarget } from "../../lib/useScopedSelectAll";
 
 export interface DiagramActiveDocument {
   /** Workspace-relative path (what `readDocument`/`saveDocument` take). */
@@ -1240,27 +1241,35 @@ function DiagramShell({
       const target = event.target as HTMLElement | null;
       const inField = isInEditable(target);
 
+      // Every diagram-state shortcut below requires the keystroke to have
+      // originated in the diagram. This handler is on window, so without it a
+      // Ctrl+Z typed into the terminal, or a key pressed with a top-bar button
+      // focused, mutates diagram history.
+      const inDialog = Boolean(target?.closest('[role="dialog"],[role="alertdialog"]'));
+      const outsideDiagram = inField || inDialog || isChromeTarget(target);
+
+      // Save stays global on purpose: it is an app-level action.
       if (matchesShortcut(event, { key: "s", mod: true })) {
         event.preventDefault();
         handleSave();
         return;
       }
-      if (matchesShortcut(event, { key: "z", mod: true, shift: false })) {
+      if (!outsideDiagram && matchesShortcut(event, { key: "z", mod: true, shift: false })) {
         event.preventDefault();
         store.setState(undoAction());
         return;
       }
-      if (matchesShortcut(event, { key: "z", mod: true, shift: true })) {
+      if (!outsideDiagram && matchesShortcut(event, { key: "z", mod: true, shift: true })) {
         event.preventDefault();
         store.setState(redoAction());
         return;
       }
-      if (matchesShortcut(event, { key: "y", mod: true })) {
+      if (!outsideDiagram && matchesShortcut(event, { key: "y", mod: true })) {
         event.preventDefault();
         store.setState(redoAction());
         return;
       }
-      if (matchesShortcut(event, { key: "f", mod: true, shift: false })) {
+      if (!outsideDiagram && matchesShortcut(event, { key: "f", mod: true, shift: false })) {
         event.preventDefault();
         setFindOpen(true);
         return;
@@ -1270,12 +1279,16 @@ function DiagramShell({
         setFindOpen(true);
         return;
       }
-      if (matchesShortcut(event, { key: "a", mod: true })) {
+      // Boundary keyed off the target, not event.defaultPrevented: a click on
+      // bare canvas leaves the keydown target on BODY, which useScopedSelectAll
+      // cannot attribute to the diagram, so it blocks the default - and a
+      // defaultPrevented guard would then swallow the ordinary select-all case.
+      if (!outsideDiagram && matchesShortcut(event, { key: "a", mod: true })) {
         event.preventDefault();
         store.setState(selectAllNodes());
         return;
       }
-      if (matchesShortcut(event, { key: "d", mod: true })) {
+      if (!outsideDiagram && matchesShortcut(event, { key: "d", mod: true })) {
         event.preventDefault();
         store.setState(withSnapshot(duplicateSelection(), coalescer));
         return;
@@ -1311,7 +1324,10 @@ function DiagramShell({
       // Table cell keyboard flow (F2/Tab/Enter/arrows/Delete/printable char)
       // — takes precedence over node-level nudge/delete/inline-edit while a
       // table has an active cell selection.
-      if (!inField && !cellEdit) {
+      // outsideDiagram for the same reason as the node Delete branch, and it
+      // matters more here: the selection survives a focus change, so without it
+      // Delete or any printable key aimed at chrome edits the cells silently.
+      if (!outsideDiagram && !cellEdit) {
         const tableAction = nextTableKeyAction(event, store.getState());
         if (tableAction) {
           event.preventDefault();
@@ -1394,7 +1410,10 @@ function DiagramShell({
           return;
         }
       }
-      if (!inField && (event.key === "Delete" || event.key === "Backspace")) {
+      // Destructive, so it holds to the same boundary as Mod+A: a keystroke
+      // aimed at the top bar, activity rail or an open menu must not reach the
+      // canvas.
+      if (!outsideDiagram && (event.key === "Delete" || event.key === "Backspace")) {
         if (hasSelection) {
           event.preventDefault();
           const state = store.getState();
@@ -1527,6 +1546,9 @@ function DiagramShell({
     <div
       className={`maru-diagram${theme === "dark" ? " is-dark" : ""}${focusMode ? " is-focus-mode" : ""}`}
       data-testid="diagram-mode"
+      // Mod+A here means "select every node" (handled in the keydown above);
+      // this keeps useScopedSelectAll from also text-selecting the surface.
+      data-select-all-owner
       role="region"
       aria-label={t("mode.diagram")}
     >
