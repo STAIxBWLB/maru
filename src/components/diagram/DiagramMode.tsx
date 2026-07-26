@@ -48,7 +48,7 @@ import {
   pasteTextGridAt,
 } from "../../lib/diagram/tableEditing";
 import { nextTableKeyAction } from "../../lib/diagram/tableKeys";
-import { isInEditable, matchesShortcut } from "../../lib/diagram/shortcuts";
+import { isDiagramKeystroke, matchesShortcut } from "../../lib/diagram/shortcuts";
 import { fitView } from "../../lib/diagram/geometry";
 import {
   clipboardWriteHtml,
@@ -147,7 +147,6 @@ import { VersionHistoryDialog } from "./modals/VersionHistoryDialog";
 import { FindBar } from "./canvas/FindBar";
 import "./diagram.css";
 import { resolveThemeMode } from "../../lib/theme";
-import { isChromeTarget } from "../../lib/useScopedSelectAll";
 
 export interface DiagramActiveDocument {
   /** Workspace-relative path (what `readDocument`/`saveDocument` take). */
@@ -1239,14 +1238,6 @@ function DiagramShell({
       // Korean IME: never treat composition keystrokes as shortcuts.
       if (event.isComposing) return;
       const target = event.target as HTMLElement | null;
-      const inField = isInEditable(target);
-
-      // Every diagram-state shortcut below requires the keystroke to have
-      // originated in the diagram. This handler is on window, so without it a
-      // Ctrl+Z typed into the terminal, or a key pressed with a top-bar button
-      // focused, mutates diagram history.
-      const inDialog = Boolean(target?.closest('[role="dialog"],[role="alertdialog"]'));
-      const outsideDiagram = inField || inDialog || isChromeTarget(target);
 
       // Save stays global on purpose: it is an app-level action.
       if (matchesShortcut(event, { key: "s", mod: true })) {
@@ -1254,41 +1245,42 @@ function DiagramShell({
         handleSave();
         return;
       }
-      if (!outsideDiagram && matchesShortcut(event, { key: "z", mod: true, shift: false })) {
+      // Everything below acts on the diagram, so it requires a diagram
+      // keystroke. Stated once: a per-branch copy is how Mod+A ended up as the
+      // only branch that fired from a text field.
+      if (!isDiagramKeystroke(target)) return;
+
+      if (matchesShortcut(event, { key: "z", mod: true, shift: false })) {
         event.preventDefault();
         store.setState(undoAction());
         return;
       }
-      if (!outsideDiagram && matchesShortcut(event, { key: "z", mod: true, shift: true })) {
+      if (matchesShortcut(event, { key: "z", mod: true, shift: true })) {
         event.preventDefault();
         store.setState(redoAction());
         return;
       }
-      if (!outsideDiagram && matchesShortcut(event, { key: "y", mod: true })) {
+      if (matchesShortcut(event, { key: "y", mod: true })) {
         event.preventDefault();
         store.setState(redoAction());
         return;
       }
-      if (!outsideDiagram && matchesShortcut(event, { key: "f", mod: true, shift: false })) {
+      if (matchesShortcut(event, { key: "f", mod: true, shift: false })) {
         event.preventDefault();
         setFindOpen(true);
         return;
       }
-      if (!inField && event.key === "/" && !event.metaKey && !event.ctrlKey) {
+      if (event.key === "/" && !event.metaKey && !event.ctrlKey) {
         event.preventDefault();
         setFindOpen(true);
         return;
       }
-      // Boundary keyed off the target, not event.defaultPrevented: a click on
-      // bare canvas leaves the keydown target on BODY, which useScopedSelectAll
-      // cannot attribute to the diagram, so it blocks the default - and a
-      // defaultPrevented guard would then swallow the ordinary select-all case.
-      if (!outsideDiagram && matchesShortcut(event, { key: "a", mod: true })) {
+      if (matchesShortcut(event, { key: "a", mod: true })) {
         event.preventDefault();
         store.setState(selectAllNodes());
         return;
       }
-      if (!outsideDiagram && matchesShortcut(event, { key: "d", mod: true })) {
+      if (matchesShortcut(event, { key: "d", mod: true })) {
         event.preventDefault();
         store.setState(withSnapshot(duplicateSelection(), coalescer));
         return;
@@ -1296,7 +1288,7 @@ function DiagramShell({
       // Copy/paste: cell ranges win while a table has an active cell
       // selection (handled by the table block below); otherwise whole nodes.
       if (matchesShortcut(event, { key: "c", mod: true })) {
-        if (!inField && !store.getState().ephemeral.tableSelection) {
+        if (!store.getState().ephemeral.tableSelection) {
           if (store.getState().ephemeral.selection.nodes.size > 0) {
             event.preventDefault();
             store.setState(copyNodesToClipboard());
@@ -1305,29 +1297,24 @@ function DiagramShell({
         }
       }
       if (matchesShortcut(event, { key: "v", mod: true })) {
-        if (!inField) {
-          const clip = store.getState().ephemeral.clipboard;
-          if (!clip) {
-            // No internal clipboard entry — fall through to the OS clipboard
-            // (HTML table → TSV → Markdown table → plain text).
-            event.preventDefault();
-            void handleOsClipboardPaste();
-            return;
-          }
-          if (!store.getState().ephemeral.tableSelection && clip.kind === "nodes") {
-            event.preventDefault();
-            store.setState(withSnapshot(pasteClipboard(), gestureCoalescers.paste));
-            return;
-          }
+        const clip = store.getState().ephemeral.clipboard;
+        if (!clip) {
+          // No internal clipboard entry — fall through to the OS clipboard
+          // (HTML table → TSV → Markdown table → plain text).
+          event.preventDefault();
+          void handleOsClipboardPaste();
+          return;
+        }
+        if (!store.getState().ephemeral.tableSelection && clip.kind === "nodes") {
+          event.preventDefault();
+          store.setState(withSnapshot(pasteClipboard(), gestureCoalescers.paste));
+          return;
         }
       }
       // Table cell keyboard flow (F2/Tab/Enter/arrows/Delete/printable char)
       // — takes precedence over node-level nudge/delete/inline-edit while a
       // table has an active cell selection.
-      // outsideDiagram for the same reason as the node Delete branch, and it
-      // matters more here: the selection survives a focus change, so without it
-      // Delete or any printable key aimed at chrome edits the cells silently.
-      if (!outsideDiagram && !cellEdit) {
+      if (!cellEdit) {
         const tableAction = nextTableKeyAction(event, store.getState());
         if (tableAction) {
           event.preventDefault();
@@ -1359,7 +1346,7 @@ function DiagramShell({
           return;
         }
       }
-      if (!inField && event.key === "F2") {
+      if (event.key === "F2") {
         event.preventDefault();
         const selected = [...store.getState().ephemeral.selection.nodes];
         if (selected.length === 1 && selected[0]) {
@@ -1370,7 +1357,7 @@ function DiagramShell({
         }
         return;
       }
-      if (!inField && event.key === "Escape") {
+      if (event.key === "Escape") {
         if (store.getState().ephemeral.ui.focusMode) {
           event.preventDefault();
           store.setState(toggleFocusMode(false));
@@ -1387,7 +1374,7 @@ function DiagramShell({
           return;
         }
       }
-      if (!inField && !event.metaKey && !event.ctrlKey) {
+      if (!event.metaKey && !event.ctrlKey) {
         const step = event.shiftKey ? 10 : 1;
         if (event.key === "ArrowLeft") {
           event.preventDefault();
@@ -1413,7 +1400,7 @@ function DiagramShell({
       // Destructive, so it holds to the same boundary as Mod+A: a keystroke
       // aimed at the top bar, activity rail or an open menu must not reach the
       // canvas.
-      if (!outsideDiagram && (event.key === "Delete" || event.key === "Backspace")) {
+      if (event.key === "Delete" || event.key === "Backspace") {
         if (hasSelection) {
           event.preventDefault();
           const state = store.getState();
