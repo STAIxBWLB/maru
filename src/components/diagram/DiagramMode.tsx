@@ -1271,11 +1271,15 @@ function DiagramShell({
         return;
       }
       // Unlike its siblings this branch was missing !inField, so Mod+A in any
-      // text field selected every node instead of the field's text. This is a
-      // window listener and the diagram's dialogs are portaled outside the
-      // marked root, so it also has to yield when useScopedSelectAll (document
-      // capture, so it runs first) already claimed the keystroke for a dialog.
-      if (!inField && !event.defaultPrevented && matchesShortcut(event, { key: "a", mod: true })) {
+      // text field selected every node instead of the field's text. It also has
+      // to yield inside the diagram's own dialogs, which Radix portals outside
+      // the marked root. Keyed off the dialog directly rather than
+      // event.defaultPrevented: a click on the bare canvas leaves the keydown
+      // target on BODY, which useScopedSelectAll cannot attribute to the
+      // diagram, so it blocks the default and a defaultPrevented guard would
+      // swallow the ordinary select-all-nodes case.
+      const inDialog = Boolean(target?.closest('[role="dialog"],[role="alertdialog"]'));
+      if (!inField && !inDialog && matchesShortcut(event, { key: "a", mod: true })) {
         event.preventDefault();
         store.setState(selectAllNodes());
         return;

@@ -65,33 +65,36 @@ const CHROME_TARGET_SELECTOR = [
 ].join(",");
 
 export function isChromeTarget(el: EventTarget | null): boolean {
-  return el instanceof HTMLElement && el.closest(CHROME_TARGET_SELECTOR) !== null;
+  return el instanceof Element && el.closest(CHROME_TARGET_SELECTOR) !== null;
 }
 
 /** True when the node sits inside a surface that handles Cmd/Ctrl+A itself.
  *  Mark such a surface with `data-select-all-owner`; its own handler runs on
  *  the bubble phase and is responsible for calling `preventDefault`. */
 export function ownsSelectAll(el: EventTarget | null): boolean {
-  return el instanceof HTMLElement && el.closest("[data-select-all-owner]") !== null;
+  return el instanceof Element && el.closest("[data-select-all-owner]") !== null;
 }
 
 function closestPane(el: unknown): HTMLElement | null {
-  return el instanceof HTMLElement ? el.closest<HTMLElement>(PANE_SELECTOR) : null;
+  return el instanceof Element ? el.closest<HTMLElement>(PANE_SELECTOR) : null;
 }
 
 /** The mode surface the node sits in: the `.app-shell` grid child that owns it.
+ *  Takes `Element`, not `HTMLElement`: a click on the diagram canvas targets an
+ *  `SVGElement`, which is an `Element` and supports `closest()` but fails an
+ *  `instanceof HTMLElement` check.
  *  This is the fallback for panes missing from `PANE_SELECTOR`. Without it every
  *  unlisted surface — `.today-pane`, `.catalog-pane`, `.sites-pane`, and any
  *  pane added later — would resolve to nothing and Cmd+A would do nothing at
  *  all there, which is no better than selecting the whole window. */
 export function closestModeSurface(el: unknown): HTMLElement | null {
-  if (!(el instanceof HTMLElement)) return null;
+  if (!(el instanceof Element)) return null;
   const shell = el.closest<HTMLElement>(".app-shell");
   if (!shell) return null;
-  let node: HTMLElement | null = el;
+  let node: Element | null = el;
   while (node && node.parentElement !== shell) node = node.parentElement;
   if (!node || node.matches(SHELL_CHROME_SELECTOR)) return null;
-  return node;
+  return node as HTMLElement;
 }
 
 /** The narrowest sensible scope for the first candidate that resolves at all:

@@ -253,6 +253,21 @@ describe("createSelectAllHandler", () => {
     }
   });
 
+  // A click on the diagram canvas targets an SVGElement, which is an Element
+  // but not an HTMLElement. An instanceof HTMLElement check missed it, so the
+  // owner was not recognised and the surface got text-selected underneath the
+  // node selection.
+  it("recognises an owner from an SVG target", () => {
+    document.body.innerHTML = `<div class="app-shell">
+      <div class="maru-diagram" data-select-all-owner>
+        <svg><rect id="leaf" width="10" height="10"/></svg>
+      </div></div>`;
+    const event = pressCmdA(document.getElementById("leaf")!);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(window.getSelection()?.toString() ?? "").toBe("");
+  });
+
   it("still scopes elsewhere in a pane that owns select-all somewhere", () => {
     document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
       <div class="files-list" data-select-all-owner><div>a.md</div></div>
