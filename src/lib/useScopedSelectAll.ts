@@ -76,7 +76,13 @@ export function isChromeTarget(el: EventTarget | null): boolean {
  *  Mark such a surface with `data-select-all-owner`; its own handler runs on
  *  the bubble phase and is responsible for calling `preventDefault`. */
 export function ownsSelectAll(el: EventTarget | null): boolean {
-  return el instanceof Element && el.closest("[data-select-all-owner]") !== null;
+  return closestSelectAllOwner(el) !== null;
+}
+
+function closestSelectAllOwner(el: EventTarget | null): HTMLElement | null {
+  return el instanceof Element
+    ? el.closest<HTMLElement>("[data-select-all-owner]")
+    : null;
 }
 
 function closestPane(el: unknown): HTMLElement | null {
@@ -147,9 +153,18 @@ export function createSelectAllHandler(isMac: boolean) {
     event.preventDefault();
 
     // A surface that implements its own select-all (the Files workbench selects
-    // rows) owns the keystroke outright: text-selecting it as well would leave
-    // a highlight over the rows it just selected.
-    if (ownsSelectAll(event.target)) return;
+    // rows) owns the keystroke unless the target sits in a narrower selectable
+    // pane inside it. Files preview links are focusable, so their keydown target
+    // is inside both `.preview-surface` and the workbench owner; letting the
+    // outer owner win makes both handlers decline and Cmd+A do nothing.
+    const owner = closestSelectAllOwner(event.target);
+    const nestedScope = closestPane(event.target);
+    if (
+      owner &&
+      (!nestedScope || nestedScope === owner || !owner.contains(nestedScope))
+    ) {
+      return;
+    }
 
     // Chrome answers for itself: select nothing rather than letting a weaker
     // candidate resolve something behind it.

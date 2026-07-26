@@ -7,6 +7,12 @@ import { expect, test, type Page } from "@playwright/test";
 // freezeLayout() for determinism. Runs in web mode (isTauri=false →
 // mockEntries fixture: 2 markdown notes + 1 unresolved frontmatter wikilink).
 
+// The real WebGL renderer retains a residual flake after the camera-settle and
+// GPU-overlay fixes: 5 failures before and 4 after over 102 local runs, at one
+// worker as well as two. Retry only this spec on CI so unrelated E2E regressions
+// remain hard failures; Playwright still reports a retried Graph pass as flaky.
+test.describe.configure({ retries: process.env.CI ? 2 : 0 });
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     if (window.sessionStorage.getItem("maru:graph-e2e:storage-cleared") === "true") return;

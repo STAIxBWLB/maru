@@ -300,11 +300,15 @@ describe("createSelectAllHandler", () => {
     expect(window.getSelection()?.toString() ?? "").toBe("");
   });
 
-  it("still scopes elsewhere in a pane that owns select-all somewhere", () => {
-    document.body.innerHTML = `<div class="app-shell"><main class="files-workbench">
-      <div class="files-list" data-select-all-owner><div>a.md</div></div>
-      <article class="preview-surface"><p id="leaf">preview body</p></article>
-    </main></div>`;
+  it("lets a nested selectable pane override its outer owner", () => {
+    document.body.innerHTML = `<div class="app-shell">
+      <main class="files-workbench" data-select-all-owner>
+        <div class="files-list"><div>a.md</div></div>
+        <article class="preview-surface">
+          <p>preview body with a <a id="leaf" href="#">focusable link</a></p>
+        </article>
+      </main>
+    </div>`;
     const event = pressCmdA(document.getElementById("leaf")!);
 
     expect(event.defaultPrevented).toBe(true);
