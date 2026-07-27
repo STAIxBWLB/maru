@@ -7525,22 +7525,26 @@ function MainApp() {
     workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
   // The vault is usually a `vault/` submodule inside the workspace; only fall
   // back to the public-workspace-as-vault setup when there is no such folder.
-  const [nestedVaultPath, setNestedVaultPath] = useState<string | null>(null);
+  // The probe result is keyed by workspace so a switch A→B can never serve
+  // A's vault while B's probe is still in flight.
+  const [nestedVault, setNestedVault] = useState<{
+    workspace: string;
+    root: string | null;
+  } | null>(null);
   useEffect(() => {
-    if (!graphWorkspacePath) {
-      setNestedVaultPath(null);
-      return;
-    }
+    if (!graphWorkspacePath) return;
     let cancelled = false;
     void vaultGraphRoot(graphWorkspacePath)
       .then((root) => {
-        if (!cancelled) setNestedVaultPath(root);
+        if (!cancelled) setNestedVault({ workspace: graphWorkspacePath, root });
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [graphWorkspacePath]);
+  const nestedVaultPath =
+    nestedVault?.workspace === graphWorkspacePath ? nestedVault.root : null;
   const graphVaultPath =
     nestedVaultPath ??
     workspaceRegistry.activeByVisibility.public ??

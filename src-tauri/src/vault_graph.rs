@@ -61,8 +61,8 @@ pub fn vault_graph_read(
         Some("workspace") => "reports/workspace-graph.json",
         _ => "reports/vault-graph.json",
     };
-    // ponytail: the vault is the workspace root, or a `vault/` submodule inside
-    // it (work-repo layout). Root wins so an existing report is never shadowed.
+    // The vault is the workspace root, or a `vault/` submodule inside it
+    // (work-repo layout). Root wins so an existing report is never shadowed.
     for rel in [report.to_string(), format!("vault/{report}")] {
         let path = resolve_inside_vault(&vault_path, &rel)?;
         if !path.is_file() {
@@ -77,13 +77,21 @@ pub fn vault_graph_read(
     Ok(None)
 }
 
-/// `<workspace>/vault` when that is a directory — the submodule layout the graph
-/// reports are built for. `None` means the workspace is its own vault.
+/// `<workspace>/vault` when that looks like the managed vault — a `reports/`
+/// or `notes/` subdirectory must exist, so an unrelated `vault/` folder (an
+/// Obsidian vault, an export dir) cannot hijack the Vault graph source.
+/// `None` means the workspace is its own vault. A root-level
+/// `reports/vault-graph.json` also forces `None`: reads prefer the root, so
+/// the Vault source must stay there too or the overlay and the scanned
+/// entries would come from different trees.
 #[tauri::command]
 pub fn vault_graph_root(workspace: String) -> Option<String> {
-    let nested = Path::new(&workspace).join("vault");
-    nested
-        .is_dir()
+    let root = Path::new(&workspace);
+    if root.join("reports/vault-graph.json").is_file() {
+        return None;
+    }
+    let nested = root.join("vault");
+    (nested.join("reports").is_dir() || nested.join("notes").is_dir())
         .then(|| nested.to_string_lossy().into_owned())
 }
 
@@ -240,11 +248,38 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().to_string_lossy().to_string();
         assert_eq!(vault_graph_root(root.clone()), None);
+        // A bare `vault/` folder is not evidence — it must look like the
+        // managed vault (`reports/` or `notes/`) to qualify.
         fs::create_dir_all(tmp.path().join("vault")).unwrap();
+        assert_eq!(vault_graph_root(root.clone()), None);
+        fs::create_dir_all(tmp.path().join("vault/notes")).unwrap();
         assert_eq!(
             vault_graph_root(root),
             Some(tmp.path().join("vault").to_string_lossy().into_owned())
         );
+    }
+
+    #[test]
+    fn vault_graph_root_accepts_nested_reports_dir() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("vault/reports")).unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        assert_eq!(
+            vault_graph_root(root),
+            Some(tmp.path().join("vault").to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn vault_graph_root_defers_to_root_report() {
+        // Root-level report wins every read, so the Vault source must not be
+        // rerouted into the submodule even when one exists.
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("reports")).unwrap();
+        fs::write(tmp.path().join("reports/vault-graph.json"), r#"{"nodes": []}"#).unwrap();
+        fs::create_dir_all(tmp.path().join("vault/notes")).unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        assert_eq!(vault_graph_root(root), None);
     }
 
     #[test]
