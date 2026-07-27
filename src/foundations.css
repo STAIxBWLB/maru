@@ -45,6 +45,22 @@
   --type-label-leading: 1.35;
   --type-meta-size: 11px;
   --type-meta-leading: 1.4;
+  /* The scale used to stop at meta, but 127 declarations already lived below
+     it (badge counts, timestamps, path crumbs), so each picked its own value
+     between 8.5px and 10.5px. This is that rung, named. */
+  --type-micro-size: 10px;
+  --type-micro-leading: 1.4;
+
+  /* Rendered document content is a reading scale, deliberately larger and
+     looser than the chrome above. Kept separate so retuning the dense UI
+     never resizes the user's prose, and so a document's h3 can never end up
+     bigger than its h2 by being collapsed into the same rungs. */
+  --read-h1-size: clamp(26px, 3.4vw, 36px);
+  --read-h2-size: 20px;
+  --read-h3-size: 16px;
+  --read-body-size: 14px;
+  --read-body-leading: 1.78;
+  --read-code-size: 12px;
 
   /* Spacing and shape. */
   --space-1: 4px;
