@@ -8,6 +8,34 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.28 - 2026-07-28 - One Type Scale
+
+- **Text no longer jumps a size for no reason.** The app has always defined a
+  type scale, but nothing applied a base size, so anything without an explicit
+  rule fell back to the browser's 16px right next to labels set at 12px. That is
+  why the sort control in v0.4.27 opened an oversized system menu and why the
+  Telegram polling status towered over the buttons beside it. Both are fixed at
+  the source.
+- **Page titles are the same size in every mode.** Documents, Tasks, Meetings,
+  Studio, Catalog, and Today were each rendering their heading at a different
+  size, so the title resized as you moved between them. They now share one.
+- **Sorting is a toggle, not a dropdown.** Picking a sort order in Documents or
+  Scratchpad no longer opens a system menu that spills outside the pane. One
+  click, applied immediately, and the labels shrink to icons when the pane is
+  narrow.
+- **Dropdowns look like the rest of the app.** Every dropdown had been left in
+  its raw system appearance, each pane inventing its own height and border, and
+  two of them reserved space for an arrow they never drew. They now share one
+  style throughout.
+- **Documents keep their own reading size.** Note text is sized independently of
+  the surrounding interface, so tuning the dense chrome can never resize your
+  prose, and a heading inside a document can no longer come out smaller than the
+  one below it.
+- **The Operations Catalog lost its gray border.** The three columns were framed
+  in a band of divider colour left over from an earlier layout.
+- **Settings no longer shows an Import tab.** The `_sys/` importer is gone, along
+  with the empty-state hints that pointed at it.
+
 ## v0.4.27 - 2026-07-27 - Scratchpad Leaves the Documents List
 
 - **Scratchpad notes no longer clutter Documents.** Everything under
