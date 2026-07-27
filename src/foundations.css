@@ -34,7 +34,6 @@
 
   /* Type roles for dense desktop UI. */
   --type-display-size: 24px;
-  --type-display-leading: 1.15;
   --type-title-size: 17px;
   --type-title-leading: 1.25;
   --type-heading-size: 14px;
@@ -44,7 +43,6 @@
   --type-label-size: 12px;
   --type-label-leading: 1.35;
   --type-meta-size: 11px;
-  --type-meta-leading: 1.4;
   /* The scale used to stop at meta, but 127 declarations already lived below
      it (badge counts, timestamps, path crumbs), so each picked its own value
      between 8.5px and 10.5px. This is that rung, named. */
