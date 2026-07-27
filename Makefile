@@ -148,6 +148,10 @@ test: test-ts test-rust ## Run all unit tests (TS vitest + Rust cargo test)
 lint-i18n: ## i18n lint: ko/en key parity + hardcoded UI string scan
 	$(NODE) scripts/lint-i18n.mjs
 
+.PHONY: check-select-chrome
+check-select-chrome: ## Static guard: select rules must not wipe the base chevron via background shorthand
+	$(NODE) scripts/check-select-chrome.mjs
+
 .PHONY: test-ts
 test-ts: node_modules ## TypeScript / React unit tests (vitest)
 	$(PNPM) test
@@ -247,7 +251,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint-i18n test-ts test-rust build ## Full verification: typecheck + i18n lint + ts tests + rust tests + frontend build
+verify: typecheck lint-i18n check-select-chrome test-ts test-rust build ## Full verification: typecheck + i18n lint + select chrome guard + ts tests + rust tests + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean
