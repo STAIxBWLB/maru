@@ -528,7 +528,9 @@
   flex-shrink: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm, 6px);
-  background: var(--panel);
+  /* background-color, not the shorthand — the shorthand resets the base
+     select chevron image (styles.css `select` rule) away. */
+  background-color: var(--panel);
   color: var(--ink);
   padding: 0 24px 0 8px;
   font: inherit;
@@ -1598,10 +1600,12 @@
 .graph-display-field select {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm, 6px);
-  background: var(--panel);
+  /* background-color, not the shorthand — the shorthand resets the base
+     select chevron image away. Right padding makes room for that chevron. */
+  background-color: var(--panel);
   color: var(--ink);
   font-size: 11.5px;
-  padding: 2px 4px;
+  padding: 2px 24px 2px 4px;
 }
 
 .graph-display-field input[type="range"] {
@@ -2105,7 +2109,9 @@
 .graph-view .graph-facet-search,
 .graph-view .graph-saved-create input {
   border-color: var(--graph-line);
-  background: color-mix(in srgb, var(--graph-ink) 5%, transparent);
+  /* background-color, not the shorthand — the select in this group would lose
+     the base chevron image to the shorthand's background-image reset. */
+  background-color: color-mix(in srgb, var(--graph-ink) 5%, transparent);
   color: var(--graph-ink);
 }
 

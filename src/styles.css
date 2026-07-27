@@ -3974,7 +3974,9 @@ a {
   margin: 0 4px;
   border: 1px solid var(--line, rgba(127, 127, 127, 0.35));
   border-radius: 5px;
-  background: var(--panel-raised);
+  /* background-color, not the shorthand — the shorthand would reset the base
+     select chevron image away while its reserved padding stays. */
+  background-color: var(--panel-raised);
   color: var(--ink);
   font-size: 12px;
 }
@@ -11228,9 +11230,8 @@ button.git-badge:hover {
 
   .terminal-panel.dock-right .tool-panel-theme select {
     max-width: 40px;
-    padding-right: 16px;
-  padding-right: 26px;
-}
+    padding-right: 26px;
+  }
 
   /* An absolute path truncated into a ~160px column reads as noise, and its
      long max-content width is what forced .terminal-header-right onto a row
@@ -14649,13 +14650,6 @@ button.git-badge:hover {
 .inbox-source-select:focus {
   border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
   box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
-.inbox-source-select-chevron {
-  position: absolute;
-  right: 10px;
-  color: var(--muted);
-  pointer-events: none;
 }
 
 .inbox-source-count-badge {

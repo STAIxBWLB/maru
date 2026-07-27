@@ -1,6 +1,6 @@
 // Global site registry (~/.maru/sites.json) + work-sites directory scanner.
 //
-// Registry envelope (same convention as skills.json / imports.json):
+// Registry envelope (same convention as skills.json):
 //   { "version": 1, "sites": [ ...entries owned by the frontend... ] }
 //
 // `read_sites` is ensure-on-read: a missing or empty file is seeded with the

@@ -13,7 +13,6 @@
 //     skills.json          — skills catalog (read-only v1, written by import)
 //     workspace-state.json — workspace-scoped UI state and overrides
 //     settings.json        — legacy read-once migration source
-//     imports.json         — append-only receipts of `_sys/ → .maru/` imports
 //     secrets/             — workspace-local secret store (gitignored)
 //     versions/            — (legacy) snapshots
 //
@@ -151,10 +150,6 @@ fn workspace_state_json_path(work: &Path) -> PathBuf {
     maru_path(work).join("workspace-state.json")
 }
 
-fn imports_json_path(work: &Path) -> PathBuf {
-    maru_path(work).join("imports.json")
-}
-
 fn maruignore_path(work: &Path) -> PathBuf {
     work.join(".maruignore")
 }
@@ -257,12 +252,6 @@ pub fn ensure_maru_dir(work: &Path) -> Result<PathBuf, String> {
         write_json_pretty(
             &skills_json_path(work),
             &json!({ "version": SCHEMA_VERSION, "skills": [] }),
-        )?;
-    }
-    if !imports_json_path(work).exists() {
-        write_json_pretty(
-            &imports_json_path(work),
-            &json!({ "version": SCHEMA_VERSION, "items": [] }),
         )?;
     }
 
@@ -1286,7 +1275,6 @@ mod tests {
         assert!(tmp.path().join(".maru/projects.json").exists());
         assert!(tmp.path().join(".maru/skills.json").exists());
         assert!(!tmp.path().join(".maru/settings.json").exists());
-        assert!(tmp.path().join(".maru/imports.json").exists());
         assert!(tmp.path().join(".maruignore").exists());
     }
 
