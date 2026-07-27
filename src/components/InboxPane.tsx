@@ -1,7 +1,6 @@
 import {
   Brain,
   Check,
-  ChevronDown,
   FilePlus2,
   FolderOpen,
   HelpCircle,
@@ -632,11 +631,6 @@ export function InboxPane({
                   </option>
                 ))}
               </select>
-              <ChevronDown
-                size={14}
-                className="inbox-source-select-chevron"
-                aria-hidden="true"
-              />
             </span>
           </label>
           <span className="inbox-source-count-badge">
