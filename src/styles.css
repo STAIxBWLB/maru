@@ -227,6 +227,11 @@ body {
   color: var(--ink);
   overflow: hidden;
   font-feature-settings: "tnum" 0;
+  /* foundations.css declares the whole type scale but nothing ever applied a
+     base size, so any element without an explicit font-size fell back to the
+     UA's 16px next to siblings pinned at 12px. */
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
 }
 
 button,
@@ -235,6 +240,22 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+}
+
+/* Selects were left fully native: every pane re-derived its own chrome, and
+   two of them reserved room for a chevron they never drew. One base style so
+   they all share a shape. Scoped rules must use `background-color`, not the
+   `background` shorthand, or they reset this image away.
+   ponytail: one mid-gray chevron reads acceptably on both themes; make it a
+   themed token if the contrast ever matters. */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238a8479' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+  padding-right: 26px;
+  font-size: var(--type-label-size);
 }
 
 button {
@@ -1094,9 +1115,10 @@ a {
   font-size: 12px;
   padding: 0 8px;
   border-radius: 6px;
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--ink);
   border: 1px solid var(--line);
+  padding-right: 26px;
 }
 .catalog-pane__category-chips {
   display: flex;
@@ -2410,6 +2432,7 @@ a {
 
 .explorer-mode-toggle,
 .file-filter-toggle,
+.sort-mode-toggle,
 .list-mode-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2426,22 +2449,14 @@ a {
   margin-top: 6px;
 }
 
-.document-sort-row {
-  display: grid;
-  margin: 0 16px 6px;
-}
-
-.document-sort-row select {
-  width: 100%;
-  height: 26px;
-}
-
-.file-filter-toggle {
+.file-filter-toggle,
+.sort-mode-toggle {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
 .explorer-mode-toggle button,
 .file-filter-toggle button,
+.sort-mode-toggle button,
 .list-mode-toggle button {
   min-width: 0;
   height: 26px;
@@ -2462,12 +2477,14 @@ a {
 
 .explorer-mode-toggle button:hover,
 .file-filter-toggle button:hover,
+.sort-mode-toggle button:hover,
 .list-mode-toggle button:hover {
   color: var(--ink);
 }
 
 .explorer-mode-toggle button.active,
 .file-filter-toggle button.active,
+.sort-mode-toggle button.active,
 .list-mode-toggle button.active {
   background: var(--panel-raised);
   color: var(--ink);
@@ -2476,6 +2493,7 @@ a {
 
 .explorer-mode-toggle button:active,
 .file-filter-toggle button:active,
+.sort-mode-toggle button:active,
 .list-mode-toggle button:active {
   transform: scale(0.96);
 }
@@ -2523,6 +2541,20 @@ a {
 
   .tree-bulk-actions {
     grid-template-columns: repeat(3, minmax(32px, 1fr));
+  }
+}
+
+/* The sort labels are short enough to survive well below the 320px the other
+   toggles shed at, and the right pane sits under 320px permanently — sharing
+   that breakpoint would leave three near-identical arrow glyphs and no words. */
+@container (max-width: 240px) {
+  .sort-mode-toggle button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 }
 
@@ -5413,6 +5445,10 @@ button.git-badge:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  /* Matches .telegram-status above: the polling status is a bare span, so
+     without these it inherits the base size instead of the button size. */
+  color: var(--muted);
+  font-size: 12px;
   padding: 10px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -6693,6 +6729,12 @@ button.git-badge:hover {
   padding-inline: 6px;
 }
 
+/* The shared toggle carries the Documents pane's 16px gutter margin; the right
+   pane supplies its own padding and gap, so it is reset here. */
+.scratchpad-pane .sort-mode-toggle {
+  margin: 0;
+}
+
 .scratchpad-search {
   height: 30px;
   display: grid;
@@ -6794,17 +6836,6 @@ button.git-badge:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.scratchpad-search-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-}
-
-.scratchpad-search-row .scratchpad-search {
-  min-width: 0;
 }
 
 .scratchpad-list {
@@ -9891,10 +9922,11 @@ button.git-badge:hover {
   max-width: 180px;
   border: 1px solid var(--line-soft);
   border-radius: 6px;
-  background: var(--panel);
+  background-color: var(--panel);
   padding: 5px 6px;
   color: var(--ink);
   font-size: 12px;
+  padding-right: 26px;
 }
 
 .today-top3-warning {
@@ -11197,7 +11229,8 @@ button.git-badge:hover {
   .terminal-panel.dock-right .tool-panel-theme select {
     max-width: 40px;
     padding-right: 16px;
-  }
+  padding-right: 26px;
+}
 
   /* An absolute path truncated into a ~160px column reads as noise, and its
      long max-content width is what forced .terminal-header-right onto a row
@@ -11373,8 +11406,9 @@ button.git-badge:hover {
   border: 0;
   padding: 0 22px 0 2px;
   color: var(--terminal-ink);
-  background: transparent;
+  background-color: transparent;
   font-size: 11px;
+  padding-right: 26px;
 }
 
 .tool-panel-theme:focus-within {
@@ -12059,7 +12093,7 @@ button.git-badge:hover {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--ink);
   outline: 0;
   transition: border-color var(--motion-state) ease, box-shadow var(--motion-state) ease;
@@ -12073,16 +12107,22 @@ button.git-badge:hover {
   font-size: 12.5px;
 }
 
+.skills-system-detail select,
+.compose-dialog select {
+  padding-right: 26px;
+}
+
 .compose-empty-select {
   display: flex;
   align-items: center;
   min-height: 32px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--muted);
   padding: 0 10px;
   font-size: 12.5px;
+  padding-right: 26px;
 }
 
 .skills-system-detail input:focus,
@@ -13872,7 +13912,7 @@ button.git-badge:hover {
   min-width: 0;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   color: var(--ink);
   padding: 0 10px;
   font-size: 12.5px;
@@ -13882,6 +13922,10 @@ button.git-badge:hover {
     background var(--motion-state) ease,
     border-color var(--motion-state) ease,
     box-shadow var(--motion-state) ease;
+}
+
+.settings-form select {
+  padding-right: 26px;
 }
 
 .settings-form input:focus,
@@ -14317,60 +14361,6 @@ button.git-badge:hover {
   font-size: 11px;
 }
 
-.system-import-section {
-  margin-top: 16px;
-}
-.system-import-section h4 {
-  margin: 0 0 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.system-import-section ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 2px;
-}
-.system-import-item {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel-2);
-  padding: 6px 10px;
-}
-.system-import-item label {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  gap: 8px;
-  align-items: center;
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.system-import-label {
-  color: var(--ink);
-}
-.system-import-rel {
-  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chip-new {
-  background: var(--accent-tint);
-  color: var(--accent);
-}
-.chip-update {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-.chip-unchanged {
-  background: var(--panel);
-  color: var(--muted);
-}
 .chip-warn {
   background: var(--warn-soft);
   color: var(--warn);
@@ -14639,7 +14629,7 @@ button.git-badge:hover {
   appearance: none;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   color: var(--ink);
   padding: 0 34px 0 11px;
   outline: 0;
@@ -14653,7 +14643,7 @@ button.git-badge:hover {
 
 .inbox-source-select:hover {
   border-color: var(--line);
-  background: var(--panel);
+  background-color: var(--panel);
 }
 
 .inbox-source-select:focus {
@@ -14929,13 +14919,14 @@ button.git-badge:hover {
   height: 34px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   color: var(--ink);
   padding: 0 10px;
   outline: 0;
   transition:
     border-color var(--motion-state) ease,
     box-shadow var(--motion-state) ease;
+  padding-right: 26px;
 }
 
 .meetings-select:focus {
@@ -15318,7 +15309,7 @@ button.git-badge:hover {
   height: 34px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   color: var(--ink);
   padding: 0 10px;
   font-size: 12.25px;
@@ -15330,6 +15321,10 @@ button.git-badge:hover {
     box-shadow var(--motion-state) ease;
 }
 
+.meetings-metadata-panel select {
+  padding-right: 26px;
+}
+
 .meetings-metadata-panel input::placeholder {
   color: var(--faint);
 }
@@ -15337,7 +15332,7 @@ button.git-badge:hover {
 .meetings-metadata-panel input:focus,
 .meetings-metadata-panel select:focus {
   border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -15991,10 +15986,11 @@ button.git-badge:hover {
   height: 28px;
   border: 1px solid var(--line-soft);
   border-radius: 7px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   color: var(--muted);
   padding: 0 8px;
   font-size: 12px;
+  padding-right: 26px;
 }
 
 .meetings-before-after {
@@ -16698,8 +16694,9 @@ button.git-badge:hover {
   height: 34px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: var(--panel-raised);
+  background-color: var(--panel-raised);
   padding: 0 10px;
+  padding-right: 26px;
 }
 
 .tasks-result-count {
@@ -20050,10 +20047,11 @@ button.git-badge:hover {
 .share-outbox-options select {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--panel-2);
+  background-color: var(--panel-2);
   color: var(--ink);
   padding: 3px 6px;
   font-size: 12px;
+  padding-right: 26px;
 }
 .share-outbox-checkbox {
   cursor: pointer;
@@ -20631,8 +20629,9 @@ button.git-badge:hover {
   font-size: 12px;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
-  background: transparent;
+  background-color: transparent;
   color: inherit;
+  padding-right: 26px;
 }
 
 .inspector-description {
@@ -21079,7 +21078,7 @@ button.git-badge:hover {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   outline: 0;
-  background: var(--panel);
+  background-color: var(--panel);
   font-size: 11px;
 }
 
@@ -21921,7 +21920,7 @@ button.git-badge:hover {
   min-height: 30px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--ink);
   padding: 0 28px 0 9px;
   font-size: var(--type-label-size);
@@ -22195,12 +22194,17 @@ select:focus-visible,
 .catalog-pane__columns {
   gap: 1px;
   background: var(--line-soft);
+  /* The container background exists only to bleed through the 1px seams. The
+     base rule's padding would frame all three columns in that colour, so the
+     inset moves onto the columns themselves (as in Files and Tasks). */
+  padding: 0;
 }
 
 .catalog-column {
   border: 0;
   border-radius: 0;
   background: var(--panel);
+  padding: 12px 14px;
 }
 
 .studio-header.mode-header {

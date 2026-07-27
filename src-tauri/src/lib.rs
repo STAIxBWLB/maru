@@ -46,7 +46,6 @@ mod site_view;
 mod sites;
 mod skill_host;
 mod studio;
-mod sys_import;
 mod tasks;
 mod telegram_config;
 mod telegram_io;
@@ -126,7 +125,7 @@ use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_l
 use linter::gaejosik_lint;
 use maru_dir::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
-    list_maru_templates, list_workspace_projects, read_maru_imports, read_maru_mcp,
+    list_maru_templates, list_workspace_projects, read_maru_mcp,
     read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills, read_maru_template,
     read_maru_workspace, save_maru_mcp, save_maru_projects, save_maru_rule, save_maru_settings,
     save_maru_template, update_maru_workspace,
@@ -184,7 +183,6 @@ use skill_host::{
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
-use sys_import::{apply_sys_import, plan_sys_import};
 use tasks::{
     append_tasks_log, create_task_note, move_task_note, read_task_metadata, read_tasks_log,
     scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
@@ -482,15 +480,12 @@ pub fn run() {
             read_maru_skills,
             read_maru_settings,
             save_maru_settings,
-            read_maru_imports,
             secrets_scan,
             secrets_doctor,
             secrets_migrate,
             secrets_read_text,
             secrets_write_text,
             secrets_delete_text,
-            plan_sys_import,
-            apply_sys_import,
             skills_list_sources,
             skills_add_source,
             skills_remove_source,

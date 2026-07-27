@@ -61,6 +61,7 @@ import {
 } from "../lib/scratchpad";
 import { SCRATCHPAD_LIST_HEIGHT, type SortKey } from "../lib/settings";
 import { PaneResizeHandle } from "./ui/PaneResizeHandle";
+import { SortModeToggle } from "./ui/SortModeToggle";
 import type {
   IdeationStage,
   MemoFormat,
@@ -897,26 +898,17 @@ export function ScratchpadPane({
         </button>
       </div>
 
-      <div className="scratchpad-search-row">
-        <label className="scratchpad-search">
-          <Search size={13} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("rightPane.scratchpad.search")}
-            aria-label={t("rightPane.scratchpad.search")}
-          />
-        </label>
-        <select
-          aria-label={t("files.sort.label")}
-          value={sortKey}
-          onChange={(event) => onSortKeyChange(event.target.value as SortKey)}
-        >
-          <option value="name">{t("files.sort.name")}</option>
-          <option value="modifiedDesc">{t("files.sort.modifiedDesc")}</option>
-          <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
-        </select>
-      </div>
+      <label className="scratchpad-search">
+        <Search size={13} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("rightPane.scratchpad.search")}
+          aria-label={t("rightPane.scratchpad.search")}
+        />
+      </label>
+
+      <SortModeToggle value={sortKey} onChange={onSortKeyChange} t={t} />
 
       {localError ? (
         <div className="scratchpad-inline-state error" role="alert">

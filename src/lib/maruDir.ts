@@ -8,8 +8,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   MaruWorkspaceMeta,
   MaruWorkspaceMetaPatch,
-  ImportPlan,
-  ImportReceipt,
   ProjectPickerEntry,
   RegisterWorkspaceOutcome,
   RuleDocument,
@@ -573,37 +571,6 @@ async function emitMaruSettingsUpdated(
   } catch {
     // Settings persistence has already succeeded. Event fanout is best-effort.
   }
-}
-
-export async function readMaruImports(workPath: string): Promise<unknown> {
-  if (!isTauri()) return null;
-  return invoke<unknown>("read_maru_imports", { workPath });
-}
-
-// === _sys/ → .maru/ import ===
-
-export async function planSysImport(workPath: string): Promise<ImportPlan> {
-  if (!isTauri()) {
-    return {
-      workPath,
-      sysPresent: false,
-      rules: [],
-      templates: [],
-      mcp: null,
-      projects: null,
-      skills: null,
-    };
-  }
-  return invoke<ImportPlan>("plan_sys_import", { workPath });
-}
-
-export async function applySysImport(
-  workPath: string,
-  plan: ImportPlan,
-  selected: string[],
-): Promise<ImportReceipt> {
-  if (!isTauri()) return { applied: [], skipped: [] };
-  return invoke<ImportReceipt>("apply_sys_import", { workPath, plan, selected });
 }
 
 // === Helpers (frontend only) ===

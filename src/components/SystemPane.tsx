@@ -6,7 +6,6 @@
 
 import {
   AlertTriangle,
-  Check,
   Code2,
   Eye,
   FilePenLine,
@@ -33,7 +32,6 @@ import {
   saveInboxRuntimeConfig,
 } from "../lib/api";
 import {
-  applySysImport,
   deleteMaruRule,
   deleteMaruTemplate,
   listMaruRules,
@@ -42,7 +40,6 @@ import {
   deleteSecretText,
   doctorSecrets,
   migrateSecrets,
-  planSysImport,
   readSecretText,
   readMaruMcp,
   readMaruProjects,
@@ -100,8 +97,6 @@ import {
 } from "../lib/settingsWindowEvents";
 import { DIAGRAM_ENABLE_STORAGE_KEY } from "../lib/diagramFlag";
 import type {
-  ImportItem,
-  ImportPlan,
   InboxChannelConfig,
   InboxRuntimeConfig,
   ProjectPickerEntry,
@@ -172,8 +167,7 @@ type SystemTab =
   | "mcp"
   | "projects"
   | "skills"
-  | "jobs"
-  | "import";
+  | "jobs";
 
 function isSystemTab(value: string | null | undefined): value is SystemTab {
   return (
@@ -191,8 +185,7 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
     value === "mcp" ||
     value === "projects" ||
     value === "skills" ||
-    value === "jobs" ||
-    value === "import"
+    value === "jobs"
   );
 }
 
@@ -298,7 +291,6 @@ export function SystemPane({
             ["projects", "system.tab.projects"],
             ["skills", "system.tab.skills"],
             ["jobs", "system.tab.jobs"],
-            ["import", "system.tab.import"],
           ] as Array<[SystemTab, string]>
         ).map(([id, key]) => (
           <button
@@ -386,7 +378,6 @@ export function SystemPane({
         {tab === "projects" ? <ProjectsTab workPath={workPath} /> : null}
         {tab === "skills" ? <SkillsTab workPath={workPath} /> : null}
         {tab === "jobs" ? <JobsTab workPath={workPath} /> : null}
-        {tab === "import" ? <ImportTab workPath={workPath} /> : null}
       </section>
     </main>
   );
@@ -4910,190 +4901,5 @@ function SkillsTab({ workPath }: { workPath: string }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-// ============================== Import ==============================
-
-function ImportTab({ workPath }: { workPath: string }) {
-  const { t } = useTranslation();
-  const [plan, setPlan] = useState<ImportPlan | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [applying, setApplying] = useState(false);
-  const [appliedCount, setAppliedCount] = useState<number | null>(null);
-
-  const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      const next = await planSysImport(workPath);
-      setPlan(next);
-      setSelected(new Set());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [workPath]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const allItems: ImportItem[] = useMemo(() => {
-    if (!plan) return [];
-    const out: ImportItem[] = [];
-    out.push(...plan.rules);
-    out.push(...plan.templates);
-    if (plan.mcp) out.push(plan.mcp);
-    if (plan.projects) out.push(plan.projects);
-    if (plan.skills) out.push(plan.skills);
-    return out;
-  }, [plan]);
-
-  const toggle = useCallback((origin: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(origin)) next.delete(origin);
-      else next.add(origin);
-      return next;
-    });
-  }, []);
-
-  const selectAll = useCallback(() => {
-    setSelected(new Set(allItems.map((i) => i.originRel)));
-  }, [allItems]);
-
-  const selectChanged = useCallback(() => {
-    setSelected(
-      new Set(
-        allItems.filter((i) => i.status !== "unchanged").map((i) => i.originRel),
-      ),
-    );
-  }, [allItems]);
-
-  const apply = useCallback(async () => {
-    if (!plan) return;
-    setApplying(true);
-    setError(null);
-    try {
-      const receipt = await applySysImport(workPath, plan, Array.from(selected));
-      setAppliedCount(receipt.applied.length);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApplying(false);
-    }
-  }, [workPath, plan, selected, refresh]);
-
-  if (!plan) {
-    return <p className="muted">{t("inbox.loading")}</p>;
-  }
-  if (!plan.sysPresent) {
-    return <p className="muted">{t("system.import.empty")}</p>;
-  }
-
-  return (
-    <div className="system-detail" style={{ width: "100%" }}>
-      <p className="muted">{t("system.import.subtitle")}</p>
-      <div className="system-detail-actions">
-        <Button variant="ghost" size="sm" onClick={selectAll}>
-          {t("system.import.selectAll")}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={selectChanged}>
-          {t("system.import.selectChanges")}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => void refresh()} icon={<RefreshCcw size={13} />}>
-          {t("app.refresh")}
-        </Button>
-        <span style={{ flex: 1 }} />
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => void apply()}
-          disabled={applying || selected.size === 0}
-          icon={<Check size={14} />}
-        >
-          {applying ? t("system.import.applying") : t("system.import.apply")}
-        </Button>
-      </div>
-
-      {appliedCount !== null ? (
-        <div className="toast notice" title={t("system.import.applied", { count: appliedCount })}>
-          <Check size={13} />
-          <span>{t("system.import.applied", { count: appliedCount })}</span>
-        </div>
-      ) : null}
-      {error ? (
-        <div className="toast" title={error}>
-          <AlertTriangle size={13} />
-          <span>{error}</span>
-        </div>
-      ) : null}
-
-      <ImportSection title={t("system.import.section.rules")} items={plan.rules} selected={selected} onToggle={toggle} t={t} />
-      <ImportSection
-        title={t("system.import.section.templates")}
-        items={plan.templates}
-        selected={selected}
-        onToggle={toggle}
-        t={t}
-      />
-      <ImportSection
-        title={t("system.import.section.mcp")}
-        items={plan.mcp ? [plan.mcp] : []}
-        selected={selected}
-        onToggle={toggle}
-        t={t}
-      />
-      <ImportSection
-        title={t("system.import.section.projects")}
-        items={plan.projects ? [plan.projects] : []}
-        selected={selected}
-        onToggle={toggle}
-        t={t}
-      />
-      <ImportSection
-        title={t("system.import.section.skills")}
-        items={plan.skills ? [plan.skills] : []}
-        selected={selected}
-        onToggle={toggle}
-        t={t}
-      />
-    </div>
-  );
-}
-
-interface ImportSectionProps {
-  title: string;
-  items: ImportItem[];
-  selected: Set<string>;
-  onToggle: (origin: string) => void;
-  t: (key: string, vars?: Record<string, string | number>) => string;
-}
-
-function ImportSection({ title, items, selected, onToggle, t }: ImportSectionProps) {
-  if (items.length === 0) return null;
-  return (
-    <section className="system-import-section">
-      <h4>{title}</h4>
-      <ul>
-        {items.map((item) => (
-          <li key={item.originRel} className="system-import-item">
-            <label>
-              <input
-                type="checkbox"
-                checked={selected.has(item.originRel)}
-                onChange={() => onToggle(item.originRel)}
-              />
-              <span className="system-import-label">{item.label}</span>
-              <span className="muted system-import-rel">{item.originRel}</span>
-              <span className={`chip chip-${item.status}`}>
-                {t(`system.import.status.${item.status}`)}
-              </span>
-            </label>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
