@@ -8,6 +8,31 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.27 - 2026-07-27 - Scratchpad Leaves the Documents List
+
+- **Scratchpad notes no longer clutter Documents.** Everything under
+  `scratchpad/` (ideation, memos, and the agent runtime files that pile up in
+  `temp/`) was indexed like any other folder, so the document list filled with
+  scratch work. It is now excluded from the workspace scan and browsed in the
+  Scratchpad pane on the right, where it belongs. A public workspace that
+  happens to have a `scratchpad/` folder is unaffected. The tradeoff is
+  deliberate: wikilinks, backlinks, graph nodes, and command palette hits for
+  scratchpad notes go away, and `.html` files kept there are no longer listed
+  anywhere, since the Scratchpad pane reads Markdown and text only. The Files
+  workbench still shows the whole tree.
+- **Documents can be sorted by time.** A sort control sits above the list:
+  by name, newest first, or oldest first. The Today / This week / Earlier
+  headings now appear only under newest-first, where they mean something.
+  In tree view the sort reorders files inside each folder while the folders
+  themselves stay alphabetical.
+- **The Scratchpad file list and editor can be resized.** The split was pinned
+  at a fixed height. It now drags, remembers the size across restarts, moves
+  with the arrow keys, and snaps back on a double-click.
+- **Scratchpad can be sorted by time too.** The list groups by collection and
+  stage, which means each group restarts its own timeline and the file you
+  touched a minute ago can sit anywhere. Choosing a time sort drops the grouping
+  and puts the whole scratchpad in one list, most recent first.
+
 ## v0.4.26 - 2026-07-27 - Select-All Correctness
 
 - **Cmd+A no longer highlights the whole window.** v0.4.25 scoped it, but when
