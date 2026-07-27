@@ -3921,7 +3921,7 @@ a {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  font-size: var(--type-heading-size);
+  font-size: var(--read-body-size);
   line-height: 1.72;
 }
 
@@ -4123,7 +4123,7 @@ a {
   margin: 0 0 14px;
   color: var(--ink-2);
   font-size: var(--read-body-size);
-  line-height: 1.78;
+  line-height: var(--read-body-leading);
 }
 
 .preview-surface ul,
@@ -4132,7 +4132,7 @@ a {
   padding-left: 22px;
   color: var(--ink-2);
   font-size: var(--read-body-size);
-  line-height: 1.78;
+  line-height: var(--read-body-leading);
 }
 
 .preview-surface li {
@@ -6033,7 +6033,7 @@ button.git-badge:hover {
 .preview-surface table {
   border-collapse: collapse;
   margin: 14px 0;
-  font-size: var(--type-body-size);
+  font-size: var(--read-body-size);
   border: 1px solid var(--line);
 }
 
