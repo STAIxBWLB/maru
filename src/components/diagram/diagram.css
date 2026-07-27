@@ -230,8 +230,16 @@
   padding: 2px 4px;
   border: 1px solid var(--maru-border, #e5e7eb);
   border-radius: 4px;
-  background: var(--maru-surface, #ffffff);
+  /* background-color, not the shorthand — the select in this group would lose
+     the base chevron image (styles.css `select` rule) to the shorthand's
+     background-image reset. */
+  background-color: var(--maru-surface, #ffffff);
   color: inherit;
+}
+
+.maru-diagram-ribbon-field select {
+  /* Room for the base select chevron (drawn at right 9px, 12px wide). */
+  padding-right: 24px;
 }
 
 .maru-diagram-ribbon-field input[type="color"] {
@@ -438,8 +446,14 @@
   padding: 3px 6px;
   border: 1px solid var(--maru-border, #e5e7eb);
   border-radius: 4px;
-  background: var(--maru-surface, #ffffff);
+  /* background-color, not the shorthand — see .maru-diagram-ribbon-field. */
+  background-color: var(--maru-surface, #ffffff);
   color: inherit;
+}
+
+.maru-diagram-prop select {
+  /* Room for the base select chevron. */
+  padding-right: 24px;
 }
 
 .maru-diagram-prop-row {
@@ -952,10 +966,11 @@
 
 .maru-diagram-mapping-table select {
   font-size: 12px;
-  padding: 4px 6px;
+  padding: 4px 24px 4px 6px; /* right room for the base select chevron */
   border: 1px solid var(--maru-border, #e5e7eb);
   border-radius: 4px;
-  background: var(--maru-surface, #ffffff);
+  /* background-color, not the shorthand — see .maru-diagram-ribbon-field. */
+  background-color: var(--maru-surface, #ffffff);
   color: inherit;
 }
 
@@ -1079,7 +1094,9 @@
 .maru-diagram-ie-field select {
   flex: 1;
   font-size: 12px;
-  padding: 4px 6px;
+  /* Right room for the base select chevron — a plain 6px padding would leave
+     the chevron drawn on top of the option text. */
+  padding: 4px 24px 4px 6px;
 }
 
 .maru-diagram-ie-fidelity {

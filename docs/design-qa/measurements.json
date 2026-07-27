@@ -29,7 +29,7 @@
       "property": "height",
       "expected": 116,
       "tolerance": 4,
-      "measured": 116,
+      "measured": 116.5,
       "within": true
     },
     {

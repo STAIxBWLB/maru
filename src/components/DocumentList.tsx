@@ -61,6 +61,7 @@ import type {
   SortKey,
 } from "../lib/settings";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
+import { SortModeToggle } from "./ui/SortModeToggle";
 
 const GROUP_ROW_HEIGHT = 28;
 const ENTRY_ROW_HEIGHT = 156;
@@ -501,17 +502,7 @@ export const DocumentList = memo(function DocumentList({
         ) : null}
       </div>
 
-      <div className="document-sort-row">
-        <select
-          aria-label={t("files.sort.label")}
-          value={sortKey}
-          onChange={(event) => onSortKeyChange(event.target.value as SortKey)}
-        >
-          <option value="name">{t("files.sort.name")}</option>
-          <option value="modifiedDesc">{t("files.sort.modifiedDesc")}</option>
-          <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
-        </select>
-      </div>
+      <SortModeToggle value={sortKey} onChange={onSortKeyChange} t={t} />
 
       <div className="list-mode-toggle" role="group" aria-label={t("list.viewMode")}>
         <button

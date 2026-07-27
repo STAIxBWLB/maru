@@ -444,6 +444,22 @@ describe("ScratchpadPane safety flows", () => {
     expect(names).toEqual(["newer-idea.md", "older-memo.md"]);
   });
 
+  it("renders the sort toggle as buttons with the active option pressed", async () => {
+    await render("/work", { sortKey: "modifiedDesc" });
+
+    const toggle = container.querySelector('[role="group"].sort-mode-toggle');
+    expect(toggle).toBeTruthy();
+    // A segmented toggle, never a native select that would open an OS popup.
+    expect(container.querySelector(".sort-mode-toggle select")).toBeNull();
+
+    const buttons = Array.from(toggle!.querySelectorAll("button"));
+    expect(buttons).toHaveLength(3);
+    const pressed = buttons.filter((b) => b.getAttribute("aria-pressed") === "true");
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0].textContent).toContain("files.sort.modifiedDescShort");
+    expect(pressed[0].className).toContain("active");
+  });
+
   it("renders a resize separator driving the list height CSS variable", async () => {
     await render("/work", { listHeight: 300 });
 

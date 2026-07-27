@@ -13,7 +13,6 @@
 //     skills.json          — skills catalog (read-only v1, written by import)
 //     workspace-state.json — workspace-scoped UI state and overrides
 //     settings.json        — legacy read-once migration source
-//     imports.json         — append-only receipts of `_sys/ → .maru/` imports
 //     secrets/             — workspace-local secret store (gitignored)
 //     versions/            — (legacy) snapshots
 //
@@ -22,14 +21,13 @@
 // migration via `ensure_maru_dir`.
 
 use crate::atomic_file::write_atomic;
-use crate::frontmatter::{build_frontmatter, FrontmatterValue};
 use crate::vault::{lexical_normalize, parse_frontmatter, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MARU_DIR: &str = ".maru";
@@ -152,10 +150,6 @@ fn workspace_state_json_path(work: &Path) -> PathBuf {
     maru_path(work).join("workspace-state.json")
 }
 
-fn imports_json_path(work: &Path) -> PathBuf {
-    maru_path(work).join("imports.json")
-}
-
 fn maruignore_path(work: &Path) -> PathBuf {
     work.join(".maruignore")
 }
@@ -258,12 +252,6 @@ pub fn ensure_maru_dir(work: &Path) -> Result<PathBuf, String> {
         write_json_pretty(
             &skills_json_path(work),
             &json!({ "version": SCHEMA_VERSION, "skills": [] }),
-        )?;
-    }
-    if !imports_json_path(work).exists() {
-        write_json_pretty(
-            &imports_json_path(work),
-            &json!({ "version": SCHEMA_VERSION, "items": [] }),
         )?;
     }
 
@@ -1262,116 +1250,6 @@ pub fn save_maru_settings(
     save_maru_settings_internal_with_base(&work, &global_path, value, base_value)
 }
 
-#[tauri::command]
-pub fn read_maru_imports(work_path: String) -> Result<JsonValue, String> {
-    let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    read_json(&imports_json_path(&work))
-}
-
-/// Append entries to `.maru/imports.json`. Each entry is a free-form
-/// JSON object — the schema is owned by `sys_import.rs`.
-pub fn append_imports(work: &Path, items: Vec<JsonValue>) -> Result<(), String> {
-    let path = imports_json_path(work);
-    let mut value = read_json(&path).unwrap_or(JsonValue::Null);
-    if !value.is_object() {
-        value = json!({ "version": SCHEMA_VERSION, "items": [] });
-    }
-    let arr = value
-        .as_object_mut()
-        .and_then(|obj| obj.get_mut("items"))
-        .and_then(|v| v.as_array_mut())
-        .ok_or_else(|| "imports.json missing items array".to_string())?;
-    for item in items {
-        arr.push(item);
-    }
-    write_json_pretty(&path, &value)
-}
-
-// ---------------------------------------------------------------------------
-// Public helpers used by other modules
-// ---------------------------------------------------------------------------
-
-pub fn write_rule_with_origin(
-    work: &Path,
-    name: &str,
-    body: &str,
-    origin_rel: &str,
-    sha256: &str,
-) -> Result<PathBuf, String> {
-    ensure_maru_dir(work)?;
-    let path = rule_path(work, name)?;
-    // Strip any leading frontmatter on incoming body — origin file may
-    // itself be frontmatter-bearing. We attach our own metadata block.
-    let parts = parse_frontmatter(body);
-    let stripped_body = parts.body;
-    let now = Utc::now().to_rfc3339();
-    let mut fields: Vec<(&str, FrontmatterValue)> = vec![
-        ("origin", FrontmatterValue::String(origin_rel.to_string())),
-        (
-            "origin_sha256",
-            FrontmatterValue::String(sha256.to_string()),
-        ),
-        ("imported_at", FrontmatterValue::String(now)),
-        ("enabled", FrontmatterValue::Bool(true)),
-    ];
-    // If the original frontmatter already had `scope` or `title`,
-    // preserve them verbatim.
-    if let Some(scope) = parts.meta.get("scope").and_then(|v| v.as_str()) {
-        fields.push(("scope", FrontmatterValue::String(scope.to_string())));
-    }
-    let content = build_frontmatter(&fields, &stripped_body);
-    let mut file = fs::File::create(&path)
-        .map_err(|err| format!("Cannot write rule file {}: {err}", path.display()))?;
-    file.write_all(content.as_bytes())
-        .map_err(|err| format!("Cannot write rule {}: {err}", path.display()))?;
-    Ok(path)
-}
-
-pub fn write_template_with_origin(
-    work: &Path,
-    name: &str,
-    body: &str,
-    origin_rel: &str,
-    sha256: &str,
-) -> Result<PathBuf, String> {
-    ensure_maru_dir(work)?;
-    let path = template_path(work, name)?;
-    let parts = parse_frontmatter(body);
-    let stripped_body = parts.body;
-    let now = Utc::now().to_rfc3339();
-    let mut fields: Vec<(&str, FrontmatterValue)> = vec![
-        ("origin", FrontmatterValue::String(origin_rel.to_string())),
-        (
-            "origin_sha256",
-            FrontmatterValue::String(sha256.to_string()),
-        ),
-        ("imported_at", FrontmatterValue::String(now)),
-    ];
-    if let Some(t) = parts.meta.get("type").and_then(|v| v.as_str()) {
-        fields.push(("type", FrontmatterValue::String(t.to_string())));
-    }
-    let content = build_frontmatter(&fields, &stripped_body);
-    fs::write(&path, content).map_err(|err| format!("Cannot write template: {err}"))?;
-    Ok(path)
-}
-
-/// Used by sys_import to overwrite the projects/mcp/skills JSON.
-pub fn write_mcp(work: &Path, value: &JsonValue) -> Result<(), String> {
-    ensure_maru_dir(work)?;
-    write_json_pretty(&mcp_json_path(work), value)
-}
-
-pub fn write_projects(work: &Path, value: &JsonValue) -> Result<(), String> {
-    ensure_maru_dir(work)?;
-    write_json_pretty(&projects_json_path(work), value)
-}
-
-pub fn write_skills(work: &Path, value: &JsonValue) -> Result<(), String> {
-    ensure_maru_dir(work)?;
-    write_json_pretty(&skills_json_path(work), value)
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1397,7 +1275,6 @@ mod tests {
         assert!(tmp.path().join(".maru/projects.json").exists());
         assert!(tmp.path().join(".maru/skills.json").exists());
         assert!(!tmp.path().join(".maru/settings.json").exists());
-        assert!(tmp.path().join(".maru/imports.json").exists());
         assert!(tmp.path().join(".maruignore").exists());
     }
 
@@ -1867,42 +1744,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn imports_append_round_trips() {
-        let tmp = fresh_work();
-        ensure_maru_dir(tmp.path()).unwrap();
-        append_imports(
-            tmp.path(),
-            vec![json!({ "origin_rel": "_sys/rules/x.md", "sha256": "deadbeef", "category": "rule" })],
-        )
-        .unwrap();
-        let value = read_json(&imports_json_path(tmp.path())).unwrap();
-        let items = value.get("items").and_then(JsonValue::as_array).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(
-            items[0].get("origin_rel").and_then(JsonValue::as_str),
-            Some("_sys/rules/x.md")
-        );
-    }
-
-    #[test]
-    fn write_rule_with_origin_attaches_metadata() {
-        let tmp = fresh_work();
-        let written = write_rule_with_origin(
-            tmp.path(),
-            "ingest-chain",
-            "# Ingest Chain\n\nBody.\n",
-            "_sys/rules/ingest-chain.md",
-            "abc123",
-        )
-        .unwrap();
-        let content = fs::read_to_string(&written).unwrap();
-        assert!(content.starts_with("---\n"));
-        assert!(
-            content.contains("origin:") && content.contains("_sys/rules/ingest-chain.md"),
-            "got: {content}"
-        );
-        assert!(content.contains("origin_sha256:") && content.contains("abc123"));
-        assert!(content.contains("# Ingest Chain"));
-    }
 }

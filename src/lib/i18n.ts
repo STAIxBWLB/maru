@@ -2277,8 +2277,7 @@ const ko: Record<string, string> = {
   "system.jobs.logs.stdout": "표준 출력",
   "system.jobs.logs.stderr": "표준 오류",
   "system.jobs.logs.empty": "(비어 있음)",
-  "system.tab.import": "Import",
-  "system.rules.empty": "등록된 규칙이 없습니다. Import 탭에서 _sys/rules 를 가져오거나 새로 만들 수 있습니다.",
+  "system.rules.empty": "등록된 규칙이 없습니다. 새로 만들어 보세요.",
   "system.rules.new": "새 규칙",
   "system.rules.delete": "삭제",
   "system.rules.delete.confirm": "이 규칙을 .maru 에서 삭제할까요?",
@@ -2290,8 +2289,8 @@ const ko: Record<string, string> = {
   "system.mcp.empty": ".maru/mcp.json 이 비어 있습니다.",
   "system.mcp.invalidJson": "유효한 JSON 이 아닙니다.",
   "system.mcp.save": "저장",
-  "system.projects.empty": ".maru/projects.json 이 비어 있습니다. Import 탭에서 project-registry.yaml 을 가져오세요.",
-  "system.skills.empty": "스킬 카탈로그가 비어 있습니다. Import 탭에서 _sys/skills 를 가져오세요.",
+  "system.projects.empty": ".maru/projects.json 이 비어 있습니다.",
+  "system.skills.empty": "스킬 카탈로그가 비어 있습니다.",
   "system.skills.runtime": "런타임",
   "system.skills.source": "원본",
   "system.skills.category": "카테고리",
@@ -2526,27 +2525,10 @@ const ko: Record<string, string> = {
   "system.terminal.title": "터미널 런처 설정",
   "system.inboxChannels.title": "인박스 채널 설정",
   "system.connectors.title": "커넥터 설정",
-  "system.import.title": "_sys/ 로부터 가져오기",
-  "system.import.subtitle":
-    "사용자의 _sys/ 디렉터리를 maru 의 .maru/ 로 복사합니다. 같은 항목을 다시 가져오면 sha256 비교로 변경 여부를 알려줍니다.",
-  "system.import.empty": "이 work 폴더에 _sys/ 가 없습니다. 가져올 항목이 없습니다.",
-  "system.import.section.rules": "Rules",
-  "system.import.section.templates": "Templates",
-  "system.import.section.mcp": "MCP",
-  "system.import.section.projects": "Projects",
-  "system.import.section.skills": "Skills",
-  "system.import.status.new": "신규",
-  "system.import.status.update": "업데이트",
-  "system.import.status.unchanged": "변경 없음",
-  "system.import.selectAll": "전체 선택",
-  "system.import.selectChanges": "변경된 항목만",
-  "system.import.apply": "선택 항목 가져오기",
-  "system.import.applying": "가져오는 중...",
-  "system.import.applied": "가져옴: {count} 건",
 
   // === Sidebar Projects ===
   "sidebar.projects": "프로젝트",
-  "sidebar.projects.empty": "프로젝트가 없습니다. Import 탭에서 project-registry.yaml 을 가져오세요.",
+  "sidebar.projects.empty": "프로젝트가 없습니다.",
   "sidebar.projects.all": "전체",
 
   // === Integrated terminal ===
@@ -5433,9 +5415,7 @@ const en: Record<string, string> = {
   "system.jobs.logs.stdout": "stdout",
   "system.jobs.logs.stderr": "stderr",
   "system.jobs.logs.empty": "(empty)",
-  "system.tab.import": "Import",
-  "system.rules.empty":
-    "No rules yet. Import _sys/rules from the Import tab or create a new one.",
+  "system.rules.empty": "No rules yet. Create one to get started.",
   "system.rules.new": "New rule",
   "system.rules.delete": "Delete",
   "system.rules.delete.confirm": "Delete this rule from .maru?",
@@ -5448,9 +5428,8 @@ const en: Record<string, string> = {
   "system.mcp.invalidJson": "Invalid JSON.",
   "system.mcp.save": "Save",
   "system.projects.empty":
-    ".maru/projects.json is empty. Import project-registry.yaml from the Import tab.",
-  "system.skills.empty":
-    "Skills catalog is empty. Import _sys/skills from the Import tab.",
+    ".maru/projects.json is empty.",
+  "system.skills.empty": "Skills catalog is empty.",
   "system.skills.runtime": "Runtime",
   "system.skills.source": "Source",
   "system.skills.category": "Category",
@@ -5685,28 +5664,11 @@ const en: Record<string, string> = {
   "system.terminal.title": "Terminal launcher settings",
   "system.inboxChannels.title": "Inbox channel settings",
   "system.connectors.title": "Connector settings",
-  "system.import.title": "Import from _sys/",
-  "system.import.subtitle":
-    "Copy from your _sys/ tree into maru's .maru/. Re-importing compares sha256 to surface changes.",
-  "system.import.empty": "No _sys/ directory in this work folder. Nothing to import.",
-  "system.import.section.rules": "Rules",
-  "system.import.section.templates": "Templates",
-  "system.import.section.mcp": "MCP",
-  "system.import.section.projects": "Projects",
-  "system.import.section.skills": "Skills",
-  "system.import.status.new": "new",
-  "system.import.status.update": "update",
-  "system.import.status.unchanged": "unchanged",
-  "system.import.selectAll": "Select all",
-  "system.import.selectChanges": "Changed only",
-  "system.import.apply": "Import selected",
-  "system.import.applying": "Importing…",
-  "system.import.applied": "Imported {count} items",
 
   // === Sidebar Projects ===
   "sidebar.projects": "Projects",
   "sidebar.projects.empty":
-    "No projects. Import project-registry.yaml from the Import tab.",
+    "No projects.",
   "sidebar.projects.all": "All",
 
   // === Integrated terminal ===

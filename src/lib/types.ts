@@ -1124,28 +1124,3 @@ export interface TemplateEntry {
   updatedAt: string | null;
 }
 
-export interface ImportItem {
-  category: "rule" | "template" | "mcp" | "projects" | "skills";
-  originAbs: string;
-  originRel: string;
-  targetRel: string;
-  /** "new" | "update" | "unchanged" */
-  status: string;
-  originSha256: string;
-  label: string;
-}
-
-export interface ImportPlan {
-  workPath: string;
-  sysPresent: boolean;
-  rules: ImportItem[];
-  templates: ImportItem[];
-  mcp: ImportItem | null;
-  projects: ImportItem | null;
-  skills: ImportItem | null;
-}
-
-export interface ImportReceipt {
-  applied: ImportItem[];
-  skipped: ImportItem[];
-}
