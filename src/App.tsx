@@ -139,6 +139,7 @@ import {
   stopVaultWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
+  vaultGraphRoot,
   removeAgentContextHint,
   terminalHooksInstall,
   terminalHooksStatus,
@@ -7520,15 +7521,35 @@ function MainApp() {
     graph: " graph-mode",
     files: " files-mode",
   };
-  const graphVaultPath =
-    workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
   const graphWorkspacePath =
     workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
+  // The vault is usually a `vault/` submodule inside the workspace; only fall
+  // back to the public-workspace-as-vault setup when there is no such folder.
+  const [nestedVaultPath, setNestedVaultPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!graphWorkspacePath) {
+      setNestedVaultPath(null);
+      return;
+    }
+    let cancelled = false;
+    void vaultGraphRoot(graphWorkspacePath)
+      .then((root) => {
+        if (!cancelled) setNestedVaultPath(root);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [graphWorkspacePath]);
+  const graphVaultPath =
+    nestedVaultPath ??
+    workspaceRegistry.activeByVisibility.public ??
+    publicWorkspaces[0]?.path ??
+    null;
   const graphDataPath =
     maruSettings.graph.source === "vault"
       ? graphVaultPath ?? activeDocumentWorkspacePath
       : graphWorkspacePath ?? activeDocumentWorkspacePath;
-  const graphOverlayPath = graphVaultPath ?? graphDataPath;
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
@@ -7804,7 +7825,6 @@ function MainApp() {
       <LazyGraphView
         key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
         workspacePath={graphDataPath}
-        overlayPath={graphOverlayPath}
         entries={graphEntries}
         focusTarget={graphOpenTarget}
         onFocusTargetChange={setGraphOpenTarget}
@@ -7833,7 +7853,6 @@ function MainApp() {
     [
       maruSettings.graph,
       graphDataPath,
-      graphOverlayPath,
       graphEntries,
       graphOpenTarget,
       selectEntry,

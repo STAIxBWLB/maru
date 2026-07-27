@@ -61,15 +61,30 @@ pub fn vault_graph_read(
         Some("workspace") => "reports/workspace-graph.json",
         _ => "reports/vault-graph.json",
     };
-    let path = resolve_inside_vault(&vault_path, report)?;
-    if !path.is_file() {
-        return Ok(None);
+    // ponytail: the vault is the workspace root, or a `vault/` submodule inside
+    // it (work-repo layout). Root wins so an existing report is never shadowed.
+    for rel in [report.to_string(), format!("vault/{report}")] {
+        let path = resolve_inside_vault(&vault_path, &rel)?;
+        if !path.is_file() {
+            continue;
+        }
+        let raw =
+            std::fs::read_to_string(&path).map_err(|err| format!("Cannot read {rel}: {err}"))?;
+        let parsed: VaultGraphFile =
+            serde_json::from_str(&raw).map_err(|err| format!("Cannot parse {rel}: {err}"))?;
+        return Ok(Some(parsed));
     }
-    let raw =
-        std::fs::read_to_string(&path).map_err(|err| format!("Cannot read {report}: {err}"))?;
-    let parsed: VaultGraphFile =
-        serde_json::from_str(&raw).map_err(|err| format!("Cannot parse {report}: {err}"))?;
-    Ok(Some(parsed))
+    Ok(None)
+}
+
+/// `<workspace>/vault` when that is a directory — the submodule layout the graph
+/// reports are built for. `None` means the workspace is its own vault.
+#[tauri::command]
+pub fn vault_graph_root(workspace: String) -> Option<String> {
+    let nested = Path::new(&workspace).join("vault");
+    nested
+        .is_dir()
+        .then(|| nested.to_string_lossy().into_owned())
 }
 
 /// Persisted graph layout — node id → [x, y]. Disposable cache under
@@ -184,6 +199,52 @@ mod tests {
     fn absent_file_is_ok_none() {
         let (_tmp, root) = vault_with_reports();
         assert!(vault_graph_read(root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn reads_report_from_nested_vault_submodule() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("vault/reports")).unwrap();
+        fs::write(
+            tmp.path().join("vault/reports/workspace-graph.json"),
+            r#"{"nodes": [{"id": "a", "community": 7}], "edges": []}"#,
+        )
+        .unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let graph = vault_graph_read(root, Some("workspace".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(graph.nodes[0].community, Some(7));
+    }
+
+    #[test]
+    fn root_report_wins_over_nested_vault() {
+        let (tmp, root) = vault_with_reports();
+        fs::create_dir_all(tmp.path().join("vault/reports")).unwrap();
+        fs::write(
+            tmp.path().join("reports/vault-graph.json"),
+            r#"{"nodes": [{"id": "root", "community": 1}], "edges": []}"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("vault/reports/vault-graph.json"),
+            r#"{"nodes": [{"id": "nested", "community": 2}], "edges": []}"#,
+        )
+        .unwrap();
+        let graph = vault_graph_read(root, None).unwrap().unwrap();
+        assert_eq!(graph.nodes[0].id, "root");
+    }
+
+    #[test]
+    fn vault_graph_root_reports_nested_submodule_only() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        assert_eq!(vault_graph_root(root.clone()), None);
+        fs::create_dir_all(tmp.path().join("vault")).unwrap();
+        assert_eq!(
+            vault_graph_root(root),
+            Some(tmp.path().join("vault").to_string_lossy().into_owned())
+        );
     }
 
     #[test]

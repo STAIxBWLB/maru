@@ -80,7 +80,6 @@ import { GraphToolbar, GraphZoomCluster } from "./GraphToolbar";
 
 interface GraphViewProps {
   workspacePath: string | null;
-  overlayPath?: string | null;
   entries: VaultEntry[];
   focusTarget: GraphOpenTarget | null;
   onFocusTargetChange: (target: GraphOpenTarget | null) => void;
@@ -99,7 +98,6 @@ const MISSING_LOCAL_FOCUS_ID = "__maru_missing_local_focus__";
 
 export function GraphView({
   workspacePath,
-  overlayPath,
   entries,
   focusTarget,
   onFocusTargetChange,
@@ -406,9 +404,8 @@ export function GraphView({
   useEffect(() => {
     overlayRequestRef.current += 1;
     setEnrichment({ model: null, hint: null });
-    const root = overlayPath ?? workspacePath;
-    if (root) loadOverlay(root, liveModel);
-  }, [workspacePath, overlayPath, liveModel, loadOverlay]);
+    if (workspacePath) loadOverlay(workspacePath, liveModel);
+  }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
   const localFocusNode = useMemo(
@@ -1089,8 +1086,7 @@ export function GraphView({
         workbenchOpen={workbenchVisible}
         onToggleWorkbench={toggleWorkbenchPanel}
         onRefreshOverlay={() => {
-          const root = overlayPath ?? workspacePath;
-          if (root) loadOverlay(root, liveModel);
+          if (workspacePath) loadOverlay(workspacePath, liveModel);
         }}
         onExportPng={() => void handleExport("png")}
         onExportSvg={() => void handleExport("svg")}
