@@ -2314,6 +2314,9 @@ a {
   align-self: auto;
   width: auto;
   height: 9px;
+  /* In a flex column the handle would otherwise shrink to nothing when the
+     pane is short, leaving no grab target. */
+  flex: 0 0 9px;
   cursor: row-resize;
 }
 
@@ -2421,6 +2424,16 @@ a {
 
 .explorer-mode-toggle {
   margin-top: 6px;
+}
+
+.document-sort-row {
+  display: grid;
+  margin: 0 16px 6px;
+}
+
+.document-sort-row select {
+  width: 100%;
+  height: 26px;
 }
 
 .file-filter-toggle {
@@ -6783,8 +6796,21 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+.scratchpad-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.scratchpad-search-row .scratchpad-search {
+  min-width: 0;
+}
+
 .scratchpad-list {
-  flex: 0 1 218px;
+  /* Basis is the dragged height; keeping shrink at 1 (as before the split became
+     resizable) stops a tall list from pushing the editor out of a short pane. */
+  flex: 0 1 var(--scratchpad-list-height, 218px);
   min-height: 94px;
   overflow: auto;
   padding-right: 2px;

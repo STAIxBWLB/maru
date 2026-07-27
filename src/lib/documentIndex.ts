@@ -1,5 +1,5 @@
 import { frontmatterScalar } from "./document";
-import type { DocumentViewDefinition } from "./settings";
+import type { DocumentViewDefinition, SortKey } from "./settings";
 import type { VaultEntry } from "./types";
 
 export type BuiltInDocumentView = "inbox" | "drafts" | "archive" | "recentlyUpdated";
@@ -95,6 +95,27 @@ export function filterDocumentIndex(
   }
 
   return out;
+}
+
+/** Reorder a filtered document list. Mirrors the Files pane comparator
+ *  (`filesWorkbench.ts`): modified time first, then a stable name tiebreak. */
+export function sortDocumentEntries(entries: VaultEntry[], sortKey: SortKey): VaultEntry[] {
+  return [...entries].sort((a, b) => {
+    if (sortKey === "modifiedAsc" || sortKey === "modifiedDesc") {
+      const aTime = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+      const bTime = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+      const modified = sortKey === "modifiedAsc" ? aTime - bTime : bTime - aTime;
+      if (modified) return modified;
+    }
+    return compareDocumentName(a, b);
+  });
+}
+
+function compareDocumentName(a: VaultEntry, b: VaultEntry): number {
+  return (
+    a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }) ||
+    a.relPath.localeCompare(b.relPath, undefined, { sensitivity: "base", numeric: true })
+  );
 }
 
 export function countDocumentFilter(

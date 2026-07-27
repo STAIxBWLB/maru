@@ -113,3 +113,45 @@ describe("virtualizeDocumentTreeRows", () => {
     );
   });
 });
+
+describe("buildDocumentTreeRows sort key", () => {
+  function dated(relPath: string, updatedAt: string | null): VaultEntry {
+    return { ...entry(relPath), updatedAt };
+  }
+
+  it("orders leaf entries by modified time while folders stay alphabetical", () => {
+    const entries = [
+      dated("b/old.md", "2026-01-01T00:00:00Z"),
+      dated("b/new.md", "2026-06-01T00:00:00Z"),
+      dated("a/mid.md", "2026-03-01T00:00:00Z"),
+    ];
+
+    const desc = buildDocumentTreeRows(entries, ["a", "b"], false, "modifiedDesc");
+    expect(desc.map((row) => row.id)).toEqual([
+      "folder:a",
+      "entry:/vault/a/mid.md",
+      "folder:b",
+      "entry:/vault/b/new.md",
+      "entry:/vault/b/old.md",
+    ]);
+
+    const asc = buildDocumentTreeRows(entries, ["a", "b"], false, "modifiedAsc");
+    expect(asc.map((row) => row.id)).toEqual([
+      "folder:a",
+      "entry:/vault/a/mid.md",
+      "folder:b",
+      "entry:/vault/b/old.md",
+      "entry:/vault/b/new.md",
+    ]);
+  });
+
+  it("falls back to path order for entries without a timestamp", () => {
+    const rows = buildDocumentTreeRows(
+      [dated("z.md", null), dated("a.md", null)],
+      [],
+      false,
+      "modifiedDesc",
+    );
+    expect(rows.map((row) => row.id)).toEqual(["entry:/vault/a.md", "entry:/vault/z.md"]);
+  });
+});

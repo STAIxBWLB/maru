@@ -11,7 +11,9 @@ export type ExplorerPaneMode = "documents" | "files";
 export type WorkspaceFileFilter = "all" | "tracked" | "binary";
 export type FileQueueDefaultOperation = "copy" | "move";
 export type FilesBrowserMode = "list" | "tree";
-export type FilesSortKey = "name" | "modifiedDesc" | "modifiedAsc";
+/** Shared by the Files, Documents, and Scratchpad list panes. */
+export type SortKey = "name" | "modifiedDesc" | "modifiedAsc";
+export type FilesSortKey = SortKey;
 export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git" | "binary";
 export type FavoriteKind = "file" | "directory";
 export type TerminalLauncherId = "claude" | "codex" | "shell";
@@ -122,6 +124,10 @@ export const DEFAULT_FILES_LIST_ATTRIBUTES: FilesListAttribute[] = [
   "size",
 ];
 
+/** Drag limits for the Scratchpad list/editor split. The default matches the
+ *  flex basis `.scratchpad-list` used before the split became resizable. */
+export const SCRATCHPAD_LIST_HEIGHT = { defaultValue: 218, min: 120, max: 600 } as const;
+
 export interface WindowBoundsSettings {
   x: number;
   y: number;
@@ -140,6 +146,7 @@ export interface LayoutSettings {
   tasksSidebarWidth: number;
   calendarAgendaWidth: number;
   taskDetailsWidth: number;
+  scratchpadListHeight: number;
   outlineOpen: boolean;
   outlinePaneWidth: number;
   terminalOpen: boolean;
@@ -178,6 +185,8 @@ export interface MaruSettings {
     workspaceFileFilter: WorkspaceFileFilter;
     filesBrowserMode: FilesBrowserMode;
     filesSortKey: FilesSortKey;
+    documentSortKey: SortKey;
+    scratchpadSortKey: SortKey;
     filesListAttributes: FilesListAttribute[];
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
@@ -460,6 +469,10 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     workspaceFileFilter: "all",
     filesBrowserMode: "list",
     filesSortKey: "name",
+    // Matches the scan's own mtime-desc order, so the default view is unchanged.
+    documentSortKey: "modifiedDesc",
+    // Keeps the collection-grouped view as the Scratchpad default.
+    scratchpadSortKey: "name",
     filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
@@ -482,6 +495,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       tasksSidebarWidth: TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
       calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
       taskDetailsWidth: TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
+      scratchpadListHeight: SCRATCHPAD_LIST_HEIGHT.defaultValue,
       outlineOpen: true,
       outlinePaneWidth: 280,
       terminalOpen: false,
@@ -660,6 +674,8 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
       filesBrowserMode: "list",
       filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
+      documentSortKey: parseFilesSortKey(ui.documentSortKey) ?? "modifiedDesc",
+      scratchpadSortKey: parseFilesSortKey(ui.scratchpadSortKey) ?? "name",
       filesListAttributes: normalizeFilesListAttributes(ui.filesListAttributes),
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
         ui.binaryFileIncludePatterns,
@@ -2060,6 +2076,12 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       typeof layout.taskDetailsWidth === "number"
         ? layout.taskDetailsWidth
         : TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
+    ),
+    scratchpadListHeight: normalizePaneWidth(
+      layout.scratchpadListHeight,
+      SCRATCHPAD_LIST_HEIGHT.defaultValue,
+      SCRATCHPAD_LIST_HEIGHT.min,
+      SCRATCHPAD_LIST_HEIGHT.max,
     ),
     outlineOpen:
       typeof layout.outlineOpen === "boolean"

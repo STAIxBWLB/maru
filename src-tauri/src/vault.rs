@@ -13,6 +13,7 @@ use walkdir::WalkDir;
 use include_dir::{include_dir, Dir};
 
 use crate::atomic_file::write_atomic;
+use crate::scratchpad::{assert_scratchpad_workspace_access, resolve_scratchpad_root};
 use crate::skill_host::fs as host_fs;
 use crate::vault_list::registered_nested_roots;
 
@@ -256,6 +257,28 @@ impl ScanFilter {
     }
 }
 
+/// The Scratchpad root, but only for the workspace the Scratchpad pane can
+/// actually serve. Scratchpad notes are browsed in that pane, so they are kept
+/// out of the document index entirely. `None` fails open (keep listing) when
+/// resolution or the primary-private-workspace check fails, so a public
+/// workspace that happens to have a `scratchpad/` folder is untouched.
+fn excluded_scratchpad_root(vault: &Path) -> Option<PathBuf> {
+    assert_scratchpad_workspace_access(vault).ok()?;
+    resolve_scratchpad_root(vault).ok()
+}
+
+/// `excluded_scratchpad_root` expressed as a `relPath` prefix (with trailing
+/// slash) for filtering already-indexed entries.
+fn excluded_scratchpad_rel_prefix(vault: &Path) -> Option<String> {
+    let root = excluded_scratchpad_root(vault)?;
+    let rel = root.strip_prefix(vault).ok()?;
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if rel.is_empty() {
+        return None;
+    }
+    Some(format!("{rel}/"))
+}
+
 #[tauri::command]
 pub fn sample_workspace_path() -> Result<String, String> {
     let root = host_fs::maru_home()?.join("sample-workspace");
@@ -300,6 +323,7 @@ pub fn scan_vault(
     let ignore_patterns = load_maruignore(&vault);
     let version_names = collect_version_names(&vault);
     let nested_roots = registered_nested_roots(&vault);
+    let scratchpad_root = excluded_scratchpad_root(&vault);
     let cached = read_vault_cache_envelope(&vault).ok().flatten();
     let cached_entries: HashMap<String, VaultEntry> = cached
         .as_ref()
@@ -332,6 +356,9 @@ pub fn scan_vault(
                 return true;
             }
             if nested_roots.iter().any(|root| path == root) {
+                return false;
+            }
+            if scratchpad_root.as_deref() == Some(path) {
                 return false;
             }
             if scan_filter.is_excluded_path(path, &vault, GENERATED_DIRS) {
@@ -387,7 +414,17 @@ pub fn scan_vault(
 #[tauri::command]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
-    Ok(read_vault_cache_envelope(&vault)?.map(|cache| cache.entries))
+    // A cache written before scratchpad exclusion still holds those entries;
+    // drop them here so the first paint matches what the scan will return.
+    let scratchpad_prefix = excluded_scratchpad_rel_prefix(&vault);
+    Ok(read_vault_cache_envelope(&vault)?.map(|cache| match scratchpad_prefix {
+        Some(prefix) => cache
+            .entries
+            .into_iter()
+            .filter(|entry| !entry.rel_path.starts_with(&prefix))
+            .collect(),
+        None => cache.entries,
+    }))
 }
 
 fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
@@ -1001,6 +1038,42 @@ mod tests {
         assert!(titles.contains(&"Kept"));
         assert!(!titles.contains(&"Secret"));
         assert!(!titles.contains(&"Dep"));
+    }
+
+    #[test]
+    fn scan_vault_skips_scratchpad_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "scratchpad/ideation/seeds/idea.md", "# Idea\n");
+        write_file(root, "scratchpad/temp/runtime/log.md", "# Log\n");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(!titles.contains(&"Idea"), "scratchpad/ must be excluded");
+        assert!(!titles.contains(&"Log"), "scratchpad/ must be excluded");
+    }
+
+    #[test]
+    fn read_vault_cache_drops_stale_scratchpad_entries() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        // Simulate a cache written before scratchpad exclusion existed.
+        let mut stale = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        stale.push(VaultEntry {
+            rel_path: "scratchpad/memos/note.md".to_string(),
+            title: "Note".to_string(),
+            ..stale[0].clone()
+        });
+        write_vault_cache(root, &stale).unwrap();
+
+        let cached = read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .unwrap();
+        let titles: Vec<&str> = cached.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(!titles.contains(&"Note"));
     }
 
     #[test]

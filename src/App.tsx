@@ -315,6 +315,7 @@ import {
   type GraphOpenTarget,
   type FilesListAttribute,
   type FilesSortKey,
+  type SortKey,
   type RightPaneTab,
   type TerminalDock,
   type TerminalTheme,
@@ -2446,6 +2447,32 @@ function MainApp() {
         ui: {
           ...current.ui,
           filesSortKey,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setDocumentSortKey = useCallback(
+    (documentSortKey: SortKey) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          documentSortKey,
+        },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setScratchpadSortKey = useCallback(
+    (scratchpadSortKey: SortKey) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          scratchpadSortKey,
         },
       }));
     },
@@ -8589,10 +8616,12 @@ function MainApp() {
                 }}
                 onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
                 browserMode={maruSettings.ui.documentBrowserMode}
+                sortKey={maruSettings.ui.documentSortKey}
                 documentLabelMode={maruSettings.ui.documentLabelMode}
                 collapsedTreeFolders={collapsedTreeFolders}
                 onQueryChange={setExplorerQuery}
                 onBrowserModeChange={setDocumentBrowserMode}
+                onSortKeyChange={setDocumentSortKey}
                 onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
                 onSelect={selectEntry}
                 onRevealInFinder={revealTargetInFinder}
@@ -8709,6 +8738,12 @@ function MainApp() {
             readOnly={!activeWorkspaceCanModify}
             workspacePath={activeDocumentWorkspacePath}
             scratchpadWorkPath={primaryWorkspacePath}
+            scratchpadSortKey={maruSettings.ui.scratchpadSortKey}
+            scratchpadListHeight={layoutSettings.scratchpadListHeight}
+            onScratchpadSortKeyChange={setScratchpadSortKey}
+            onScratchpadListHeightChange={(scratchpadListHeight) =>
+              updateLayoutSettings({ scratchpadListHeight })
+            }
             activeLine={activeOutlineLine}
             onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
