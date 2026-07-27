@@ -55,6 +55,7 @@ import type {
   DocumentViewDefinition,
   ExplorerPaneMode,
   RightPaneTab,
+  SortKey,
 } from "../lib/settings";
 import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
 import type {
@@ -81,6 +82,10 @@ interface OutlinePaneProps {
   readOnly: boolean;
   workspacePath: string | null;
   scratchpadWorkPath: string | null;
+  scratchpadSortKey: SortKey;
+  scratchpadListHeight: number;
+  onScratchpadSortKeyChange: (key: SortKey) => void;
+  onScratchpadListHeightChange: (height: number) => void;
   /** Editor line currently scrolled to the top (source mode); highlights the
    *  matching outline heading. Null when tracking is inactive. */
   activeLine?: number | null;
@@ -210,6 +215,10 @@ export function OutlinePane({
   readOnly,
   workspacePath,
   scratchpadWorkPath,
+  scratchpadSortKey,
+  scratchpadListHeight,
+  onScratchpadSortKeyChange,
+  onScratchpadListHeightChange,
   activeLine = null,
   onJumpToLine,
   onClose,
@@ -509,8 +518,12 @@ export function OutlinePane({
             <ScratchpadPane
               key={scratchpadWorkPath ?? "scratchpad-unavailable"}
               workPath={scratchpadWorkPath}
+              sortKey={scratchpadSortKey}
+              listHeight={scratchpadListHeight}
               onError={onError}
               onRefreshWorkspace={onRefreshWorkspace}
+              onSortKeyChange={onScratchpadSortKeyChange}
+              onListHeightChange={onScratchpadListHeightChange}
               t={t}
             />
           ) : null}

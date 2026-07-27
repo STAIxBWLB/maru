@@ -5,6 +5,7 @@ import type {
   ScratchpadDocument,
   ScratchpadEntry,
 } from "./types";
+import type { SortKey } from "./settings";
 import { renderMarkdown } from "./markdown";
 
 export const SCRATCHPAD_COLLECTION_ORDER: readonly ScratchpadCollection[] = [
@@ -90,6 +91,30 @@ export function groupScratchpadEntries(entries: ScratchpadEntry[]): Array<{
         .filter((group) => group.entries.length > 0),
     };
   }).filter((section) => section.groups.length > 0);
+}
+
+/** Flat, collection-agnostic ordering. The grouped view answers "what stage is
+ *  this idea in"; this one answers "what did I touch last", which the grouping
+ *  hides because every collection restarts its own timeline. */
+export function sortScratchpadEntries(
+  entries: ScratchpadEntry[],
+  sortKey: SortKey,
+): ScratchpadEntry[] {
+  return [...entries].sort((left, right) => {
+    if (sortKey === "modifiedAsc" || sortKey === "modifiedDesc") {
+      const leftTime = left.updatedAt ? Date.parse(left.updatedAt) : 0;
+      const rightTime = right.updatedAt ? Date.parse(right.updatedAt) : 0;
+      const modified = sortKey === "modifiedAsc" ? leftTime - rightTime : rightTime - leftTime;
+      if (modified) return modified;
+    }
+    return (
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base", numeric: true }) ||
+      left.relativePath.localeCompare(right.relativePath, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      })
+    );
+  });
 }
 
 export function scratchpadCopyPath(relativePath: string, now = new Date()): string {

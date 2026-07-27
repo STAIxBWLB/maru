@@ -52,6 +52,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 import { ScratchpadPane } from "./ScratchpadPane";
+import type { SortKey } from "../lib/settings";
 import type { ScratchpadDocument, ScratchpadEntry } from "../lib/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -134,13 +135,20 @@ describe("ScratchpadPane safety flows", () => {
     vi.useRealTimers();
   });
 
-  async function render(workPath = "/work") {
+  async function render(
+    workPath = "/work",
+    overrides: { sortKey?: SortKey; listHeight?: number } = {},
+  ) {
     await act(async () => {
       root?.render(
         <ScratchpadPane
           workPath={workPath}
+          sortKey={overrides.sortKey ?? "name"}
+          listHeight={overrides.listHeight ?? 218}
           onError={vi.fn()}
           onRefreshWorkspace={vi.fn()}
+          onSortKeyChange={vi.fn()}
+          onListHeightChange={vi.fn()}
           t={t}
         />,
       );
@@ -302,8 +310,12 @@ describe("ScratchpadPane safety flows", () => {
       root?.render(
         <ScratchpadPane
           workPath="/work-b"
+          sortKey="name"
+          listHeight={218}
           onError={vi.fn()}
           onRefreshWorkspace={vi.fn()}
+          onSortKeyChange={vi.fn()}
+          onListHeightChange={vi.fn()}
           t={t}
         />,
       );
@@ -357,8 +369,12 @@ describe("ScratchpadPane safety flows", () => {
       root?.render(
         <ScratchpadPane
           workPath="/work-b"
+          sortKey="name"
+          listHeight={218}
           onError={vi.fn()}
           onRefreshWorkspace={vi.fn()}
+          onSortKeyChange={vi.fn()}
+          onListHeightChange={vi.fn()}
           t={t}
         />,
       );
@@ -371,13 +387,70 @@ describe("ScratchpadPane safety flows", () => {
       root?.render(
         <ScratchpadPane
           workPath="/work-a"
+          sortKey="name"
+          listHeight={218}
           onError={vi.fn()}
           onRefreshWorkspace={vi.fn()}
+          onSortKeyChange={vi.fn()}
+          onListHeightChange={vi.fn()}
           t={t}
         />,
       );
     });
     await settle();
     expect(container.textContent).toContain("rightPane.scratchpad.recoveryAvailable");
+  });
+
+  it("keeps collection grouping under the name sort", async () => {
+    mocks.list.mockResolvedValue([
+      memoEntry({ relativePath: "memo.md", name: "memo.md" }),
+      memoEntry({
+        collection: "ideation",
+        source: "manual",
+        ideationStage: "seed",
+        relativePath: "seeds/idea.md",
+        name: "idea.md",
+      }),
+    ]);
+    await render("/work", { sortKey: "name" });
+
+    expect(container.querySelectorAll(".scratchpad-collection")).toHaveLength(2);
+    expect(container.querySelector(".scratchpad-group-label")).toBeTruthy();
+  });
+
+  it("drops collection headers and flattens newest-first under a time sort", async () => {
+    mocks.list.mockResolvedValue([
+      memoEntry({
+        relativePath: "memo.md",
+        name: "older-memo.md",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+      memoEntry({
+        collection: "ideation",
+        source: "manual",
+        ideationStage: "seed",
+        relativePath: "seeds/idea.md",
+        name: "newer-idea.md",
+        updatedAt: "2026-06-01T00:00:00Z",
+      }),
+    ]);
+    await render("/work", { sortKey: "modifiedDesc" });
+
+    expect(container.querySelectorAll(".scratchpad-collection")).toHaveLength(0);
+    expect(container.querySelectorAll(".scratchpad-group-label")).toHaveLength(0);
+    const names = Array.from(
+      container.querySelectorAll(".scratchpad-list-item .scratchpad-list-title strong"),
+    ).map((node) => node.textContent);
+    expect(names).toEqual(["newer-idea.md", "older-memo.md"]);
+  });
+
+  it("renders a resize separator driving the list height CSS variable", async () => {
+    await render("/work", { listHeight: 300 });
+
+    const handle = container.querySelector('[role="separator"][aria-orientation="horizontal"]');
+    expect(handle).toBeTruthy();
+    expect(handle?.getAttribute("aria-valuenow")).toBe("300");
+    const pane = container.querySelector<HTMLElement>(".scratchpad-pane");
+    expect(pane?.style.getPropertyValue("--scratchpad-list-height")).toBe("300px");
   });
 });

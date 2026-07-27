@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
@@ -54,9 +55,12 @@ import {
   scratchpadCopyPath,
   scratchpadEntryKey,
   scratchpadPathForFormat,
+  sortScratchpadEntries,
   writeScratchpadDraft,
   type ScratchpadDraft,
 } from "../lib/scratchpad";
+import { SCRATCHPAD_LIST_HEIGHT, type SortKey } from "../lib/settings";
+import { PaneResizeHandle } from "./ui/PaneResizeHandle";
 import type {
   IdeationStage,
   MemoFormat,
@@ -72,8 +76,12 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface ScratchpadPaneProps {
   workPath: string | null;
+  sortKey: SortKey;
+  listHeight: number;
   onError: (message: string | null) => void;
   onRefreshWorkspace: () => void;
+  onSortKeyChange: (key: SortKey) => void;
+  onListHeightChange: (height: number) => void;
   t: Translate;
 }
 
@@ -130,8 +138,12 @@ function queueWatcherTransition(task: () => Promise<void>): Promise<void> {
 
 export function ScratchpadPane({
   workPath,
+  sortKey,
+  listHeight,
   onError,
   onRefreshWorkspace,
+  onSortKeyChange,
+  onListHeightChange,
   t,
 }: ScratchpadPaneProps) {
   const [entries, setEntries] = useState<ScratchpadEntry[]>([]);
@@ -151,6 +163,11 @@ export function ScratchpadPane({
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
   const [recoveryDraft, setRecoveryDraft] = useState<ScratchpadDraft | null>(null);
+  // Local during the drag, committed to settings on pointer release.
+  const [draggedListHeight, setDraggedListHeight] = useState(listHeight);
+  useEffect(() => {
+    setDraggedListHeight(listHeight);
+  }, [listHeight]);
 
   const editorRef = useRef<ScratchpadDocument | null>(null);
   const contentRef = useRef("");
@@ -776,15 +793,55 @@ export function ScratchpadPane({
     () => filterScratchpadEntries(entries, query),
     [entries, query],
   );
+  // "name" keeps the collection/stage grouping; a time sort flattens it so the
+  // most recently touched scratch file wins regardless of which collection it
+  // lives in.
+  const flatSort = sortKey !== "name";
   const groupedEntries = useMemo(
-    () => groupScratchpadEntries(filteredEntries),
-    [filteredEntries],
+    () => (flatSort ? [] : groupScratchpadEntries(filteredEntries)),
+    [flatSort, filteredEntries],
   );
+  const flatEntries = useMemo(
+    () => (flatSort ? sortScratchpadEntries(filteredEntries, sortKey) : []),
+    [flatSort, filteredEntries, sortKey],
+  );
+  const hasEntries = flatSort ? flatEntries.length > 0 : groupedEntries.length > 0;
   const previewHtml = useMemo(
     () => (editor?.format === "markdown" ? renderScratchpadMarkdown(content) : ""),
     [content, editor?.format],
   );
   const selectedKey = editor ? scratchpadEntryKey(editor) : "";
+  const renderEntryRow = (entry: ScratchpadEntry) => (
+    <button
+      key={scratchpadEntryKey(entry)}
+      type="button"
+      className={
+        scratchpadEntryKey(entry) === selectedKey
+          ? "scratchpad-list-item active"
+          : "scratchpad-list-item"
+      }
+      onClick={() => void openEntry(entry)}
+      title={`${entry.collection}/${entry.relativePath}`}
+    >
+      <span className="scratchpad-list-title">
+        <strong>{entry.name}</strong>
+        {entry.stale ? (
+          <em>
+            {entry.collection === "ideation"
+              ? t("rightPane.scratchpad.reviewDue")
+              : t("rightPane.scratchpad.cleanupEligible")}
+          </em>
+        ) : null}
+      </span>
+      <span className="scratchpad-list-preview">
+        {entry.preview || t("rightPane.memo.noPreview")}
+      </span>
+      <span className="scratchpad-list-meta">
+        <span>{entry.relativePath}</span>
+        <span>{formatUpdated(entry.updatedAt)}</span>
+      </span>
+    </button>
+  );
   const transitions = editor?.ideationStage
     ? IDEATION_STAGE_TRANSITIONS[editor.ideationStage]
     : [];
@@ -799,7 +856,11 @@ export function ScratchpadPane({
           : t("rightPane.memo.autoSaveIdle");
 
   return (
-    <section className="right-tool-pane scratchpad-pane" aria-label={t("rightPane.tab.memo")}>
+    <section
+      className="right-tool-pane scratchpad-pane"
+      aria-label={t("rightPane.tab.memo")}
+      style={{ "--scratchpad-list-height": `${draggedListHeight}px` } as CSSProperties}
+    >
       <div className="scratchpad-heading">
         <div>
           <span>{t("rightPane.scratchpad.kicker")}</span>
@@ -836,15 +897,26 @@ export function ScratchpadPane({
         </button>
       </div>
 
-      <label className="scratchpad-search">
-        <Search size={13} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("rightPane.scratchpad.search")}
-          aria-label={t("rightPane.scratchpad.search")}
-        />
-      </label>
+      <div className="scratchpad-search-row">
+        <label className="scratchpad-search">
+          <Search size={13} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("rightPane.scratchpad.search")}
+            aria-label={t("rightPane.scratchpad.search")}
+          />
+        </label>
+        <select
+          aria-label={t("files.sort.label")}
+          value={sortKey}
+          onChange={(event) => onSortKeyChange(event.target.value as SortKey)}
+        >
+          <option value="name">{t("files.sort.name")}</option>
+          <option value="modifiedDesc">{t("files.sort.modifiedDesc")}</option>
+          <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
+        </select>
+      </div>
 
       {localError ? (
         <div className="scratchpad-inline-state error" role="alert">
@@ -887,58 +959,45 @@ export function ScratchpadPane({
             <span />
           </div>
         ) : null}
-        {!loading && groupedEntries.length === 0 ? (
+        {!loading && !hasEntries ? (
           <div className="scratchpad-empty">
             <List size={18} />
             <strong>{query ? t("rightPane.scratchpad.noResults") : t("rightPane.scratchpad.empty")}</strong>
             <span>{t("rightPane.scratchpad.emptyHint")}</span>
           </div>
         ) : null}
-        {groupedEntries.map((section) => (
-          <section className="scratchpad-collection" key={section.collection}>
-            <header>
-              <strong>{collectionLabel(section.collection, t)}</strong>
-              <span>{section.groups.reduce((count, group) => count + group.entries.length, 0)}</span>
-            </header>
-            {section.groups.map((group) => (
-              <div className="scratchpad-group" key={group.id}>
-                <span className="scratchpad-group-label">{groupLabel(section.collection, group.id, t)}</span>
-                {group.entries.map((entry) => (
-                  <button
-                    key={scratchpadEntryKey(entry)}
-                    type="button"
-                    className={
-                      scratchpadEntryKey(entry) === selectedKey
-                        ? "scratchpad-list-item active"
-                        : "scratchpad-list-item"
-                    }
-                    onClick={() => void openEntry(entry)}
-                    title={`${entry.collection}/${entry.relativePath}`}
-                  >
-                    <span className="scratchpad-list-title">
-                      <strong>{entry.name}</strong>
-                      {entry.stale ? (
-                        <em>
-                          {entry.collection === "ideation"
-                            ? t("rightPane.scratchpad.reviewDue")
-                            : t("rightPane.scratchpad.cleanupEligible")}
-                        </em>
-                      ) : null}
+        {flatSort
+          ? flatEntries.map(renderEntryRow)
+          : groupedEntries.map((section) => (
+              <section className="scratchpad-collection" key={section.collection}>
+                <header>
+                  <strong>{collectionLabel(section.collection, t)}</strong>
+                  <span>
+                    {section.groups.reduce((count, group) => count + group.entries.length, 0)}
+                  </span>
+                </header>
+                {section.groups.map((group) => (
+                  <div className="scratchpad-group" key={group.id}>
+                    <span className="scratchpad-group-label">
+                      {groupLabel(section.collection, group.id, t)}
                     </span>
-                    <span className="scratchpad-list-preview">
-                      {entry.preview || t("rightPane.memo.noPreview")}
-                    </span>
-                    <span className="scratchpad-list-meta">
-                      <span>{entry.relativePath}</span>
-                      <span>{formatUpdated(entry.updatedAt)}</span>
-                    </span>
-                  </button>
+                    {group.entries.map(renderEntryRow)}
+                  </div>
                 ))}
-              </div>
+              </section>
             ))}
-          </section>
-        ))}
       </div>
+
+      <PaneResizeHandle
+        label={t("rightPane.scratchpad.resizeList")}
+        orientation="horizontal"
+        value={draggedListHeight}
+        min={SCRATCHPAD_LIST_HEIGHT.min}
+        max={SCRATCHPAD_LIST_HEIGHT.max}
+        defaultValue={SCRATCHPAD_LIST_HEIGHT.defaultValue}
+        onChange={setDraggedListHeight}
+        onCommit={onListHeightChange}
+      />
 
       {editor ? (
         <div className="scratchpad-editor-shell">

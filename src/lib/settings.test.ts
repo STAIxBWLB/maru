@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MARU_SETTINGS,
+  SCRATCHPAD_LIST_HEIGHT,
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
@@ -90,6 +91,8 @@ describe("normalizeMaruSettings", () => {
         workspaceFileFilter: "tracked",
         filesBrowserMode: "list",
         filesSortKey: "modifiedDesc",
+        documentSortKey: "name",
+        scratchpadSortKey: "bogus",
         filesListAttributes: ["size", "bad", "parent", "size", "git"],
         binaryFileIncludePatterns: ["*.pdf", "*.HWP*", "*.pdf"],
         documentViews: [
@@ -150,6 +153,7 @@ describe("normalizeMaruSettings", () => {
         layout: {
           documentsPaneWidth: 999,
           outlinePaneWidth: 100,
+          scratchpadListHeight: 9999,
           editorSplitOpen: true,
           editorSplitSurface: "graph",
           editorSplitRatio: 0.9,
@@ -186,6 +190,9 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.workspaceFileFilter).toBe("tracked");
     expect(settings.ui.filesBrowserMode).toBe("list");
     expect(settings.ui.filesSortKey).toBe("modifiedDesc");
+    expect(settings.ui.documentSortKey).toBe("name");
+    // Unparseable values fall back to the default rather than leaking through.
+    expect(settings.ui.scratchpadSortKey).toBe("name");
     expect(settings.ui.filesListAttributes).toEqual(["size", "parent", "git"]);
     expect(settings.ui.binaryFileIncludePatterns).toEqual(["*.pdf", "*.HWP*"]);
     expect(settings.ui.documentViews).toEqual([
@@ -224,6 +231,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.toolPanelSurface).toBe("graph");
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
+    expect(settings.ui.layout.scratchpadListHeight).toBe(SCRATCHPAD_LIST_HEIGHT.max);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
     expect(settings.ui.layout.terminalDock).toBe("right");
     expect(settings.ui.layout.terminalWidth).toBe(2048);

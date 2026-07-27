@@ -46,6 +46,7 @@ import {
   documentFilterKey,
   filterDocumentIndex,
   isAllDocumentFilter,
+  sortDocumentEntries,
   type DocumentFilter,
   type DocumentIndex,
 } from "../lib/documentIndex";
@@ -57,6 +58,7 @@ import type {
   DocumentLabelMode,
   DocumentViewDefinition,
   FavoriteItem,
+  SortKey,
 } from "../lib/settings";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
 
@@ -89,10 +91,12 @@ interface DocumentListProps {
   onWorkspaceVisibilityChange: (visibility: WorkspaceVisibility) => void;
   onAddPublicWorkspace: () => void;
   browserMode: DocumentBrowserMode;
+  sortKey: SortKey;
   documentLabelMode: DocumentLabelMode;
   collapsedTreeFolders: string[];
   onQueryChange: (query: string) => void;
   onBrowserModeChange: (mode: DocumentBrowserMode) => void;
+  onSortKeyChange: (key: SortKey) => void;
   onCollapsedTreeFoldersChange: (paths: string[]) => void;
   onSelect: (entry: VaultEntry) => void;
   onRevealInFinder: (targetPath: string) => void;
@@ -134,10 +138,12 @@ export const DocumentList = memo(function DocumentList({
   onWorkspaceVisibilityChange,
   onAddPublicWorkspace,
   browserMode,
+  sortKey,
   documentLabelMode,
   collapsedTreeFolders,
   onQueryChange,
   onBrowserModeChange,
+  onSortKeyChange,
   onCollapsedTreeFoldersChange,
   onSelect,
   onRevealInFinder,
@@ -207,16 +213,24 @@ export const DocumentList = memo(function DocumentList({
 
   const filtered = useMemo(
     () =>
-      filterDocumentIndex(documentIndex, deferredQuery, deferredDocumentFilter, {
-        customViews: documentViews,
-      }),
-    [documentIndex, deferredQuery, deferredDocumentFilter, documentViews],
+      sortDocumentEntries(
+        filterDocumentIndex(documentIndex, deferredQuery, deferredDocumentFilter, {
+          customViews: documentViews,
+        }),
+        sortKey,
+      ),
+    [documentIndex, deferredQuery, deferredDocumentFilter, documentViews, sortKey],
   );
 
-  // Group by mtime bucket: Today / This week / Earlier
+  // Group by mtime bucket: Today / This week / Earlier. Only meaningful under
+  // the newest-first sort — any other order would scatter rows across buckets.
   const grouped = useMemo(() => {
     if (browserMode !== "list") return [];
-    if (deferredQuery.trim() || !isAllDocumentFilter(deferredDocumentFilter)) {
+    if (
+      sortKey !== "modifiedDesc" ||
+      deferredQuery.trim() ||
+      !isAllDocumentFilter(deferredDocumentFilter)
+    ) {
       return [{ label: null, items: filtered }];
     }
     const now = Date.now();
@@ -234,7 +248,7 @@ export const DocumentList = memo(function DocumentList({
       else buckets[2].items.push(entry);
     }
     return buckets.filter((b) => b.items.length > 0);
-  }, [browserMode, filtered, deferredQuery, deferredDocumentFilter, t]);
+  }, [browserMode, filtered, deferredQuery, deferredDocumentFilter, sortKey, t]);
 
   const virtualRows = useMemo<VirtualRow[]>(() => {
     if (browserMode !== "list") return [];
@@ -282,9 +296,9 @@ export const DocumentList = memo(function DocumentList({
   const treeRows = useMemo(
     () =>
       browserMode === "tree"
-        ? buildDocumentTreeRows(filtered, collapsedTreeFolders, forceExpandTree)
+        ? buildDocumentTreeRows(filtered, collapsedTreeFolders, forceExpandTree, sortKey)
         : [],
-    [browserMode, filtered, collapsedTreeFolders, forceExpandTree],
+    [browserMode, filtered, collapsedTreeFolders, forceExpandTree, sortKey],
   );
   const virtualTreeLayout = useMemo(
     () =>
@@ -485,6 +499,18 @@ export const DocumentList = memo(function DocumentList({
             <PanelLeftClose size={14} />
           </button>
         ) : null}
+      </div>
+
+      <div className="document-sort-row">
+        <select
+          aria-label={t("files.sort.label")}
+          value={sortKey}
+          onChange={(event) => onSortKeyChange(event.target.value as SortKey)}
+        >
+          <option value="name">{t("files.sort.name")}</option>
+          <option value="modifiedDesc">{t("files.sort.modifiedDesc")}</option>
+          <option value="modifiedAsc">{t("files.sort.modifiedAsc")}</option>
+        </select>
       </div>
 
       <div className="list-mode-toggle" role="group" aria-label={t("list.viewMode")}>

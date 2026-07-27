@@ -7,6 +7,7 @@ import {
   filterDocumentIndex,
   getCommandPaletteDocs,
   getRecentEntries,
+  sortDocumentEntries,
 } from "./documentIndex";
 import type { VaultEntry } from "./types";
 
@@ -152,5 +153,35 @@ describe("document index", () => {
 
     expect(filterDocumentIndex(index, "", filter, { customViews })).toEqual([entries[0]]);
     expect(countDocumentFilter(index, filter, { customViews })).toBe(1);
+  });
+});
+
+describe("sortDocumentEntries", () => {
+  const older = entry("a-older.md", { updatedAt: "2026-01-01T00:00:00Z" });
+  const newer = entry("z-newer.md", { updatedAt: "2026-06-01T00:00:00Z" });
+
+  it("orders by modified time in both directions", () => {
+    expect(sortDocumentEntries([older, newer], "modifiedDesc")).toEqual([newer, older]);
+    expect(sortDocumentEntries([newer, older], "modifiedAsc")).toEqual([older, newer]);
+  });
+
+  it("orders by title when the sort key is name", () => {
+    expect(sortDocumentEntries([newer, older], "name")).toEqual([older, newer]);
+  });
+
+  it("treats a missing timestamp as the oldest and breaks ties by name", () => {
+    const undatedZ = entry("z-undated.md");
+    const undatedA = entry("a-undated.md");
+    expect(sortDocumentEntries([undatedZ, newer, undatedA], "modifiedDesc")).toEqual([
+      newer,
+      undatedA,
+      undatedZ,
+    ]);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [newer, older];
+    sortDocumentEntries(input, "modifiedAsc");
+    expect(input).toEqual([newer, older]);
   });
 });

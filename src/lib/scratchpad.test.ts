@@ -24,6 +24,7 @@ import {
   readScratchpadDraft,
   scratchpadCopyPath,
   scratchpadPathForFormat,
+  sortScratchpadEntries,
   writeScratchpadDraft,
 } from "./scratchpad";
 import type { ScratchpadEntry } from "./types";
@@ -111,5 +112,56 @@ describe("scratchpad helpers", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toMatch(/<svg|<image|<use/i);
     expect(html).not.toMatch(/(?:href|xlink:href)=/i);
+  });
+});
+
+describe("sortScratchpadEntries", () => {
+  const idea = entry({
+    collection: "ideation",
+    relativePath: "seeds/idea.md",
+    name: "idea.md",
+    updatedAt: "2026-01-01T00:00:00Z",
+  });
+  const memo = entry({
+    collection: "memos",
+    relativePath: "memo.md",
+    name: "memo.md",
+    updatedAt: "2026-06-01T00:00:00Z",
+  });
+  const tmp = entry({
+    collection: "temp",
+    relativePath: "codex/run.md",
+    name: "run.md",
+    updatedAt: "2026-03-01T00:00:00Z",
+  });
+
+  it("flattens across collections in newest-first order", () => {
+    expect(
+      sortScratchpadEntries([idea, memo, tmp], "modifiedDesc").map((item) => item.name),
+    ).toEqual(["memo.md", "run.md", "idea.md"]);
+  });
+
+  it("reverses for the oldest-first key", () => {
+    expect(
+      sortScratchpadEntries([memo, idea, tmp], "modifiedAsc").map((item) => item.name),
+    ).toEqual(["idea.md", "run.md", "memo.md"]);
+  });
+
+  it("treats a missing timestamp as the oldest and breaks ties by name", () => {
+    const undated = entry({ relativePath: "a-undated.md", name: "a-undated.md", updatedAt: null });
+    const undatedLater = entry({
+      relativePath: "z-undated.md",
+      name: "z-undated.md",
+      updatedAt: null,
+    });
+    expect(
+      sortScratchpadEntries([undatedLater, memo, undated], "modifiedDesc").map((i) => i.name),
+    ).toEqual(["memo.md", "a-undated.md", "z-undated.md"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [idea, memo];
+    sortScratchpadEntries(input, "modifiedDesc");
+    expect(input).toEqual([idea, memo]);
   });
 });

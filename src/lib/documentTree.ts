@@ -1,3 +1,4 @@
+import type { SortKey } from "./settings";
 import type { VaultEntry } from "./types";
 
 export type DocumentTreeRow =
@@ -39,6 +40,7 @@ export function buildDocumentTreeRows(
   entries: VaultEntry[],
   collapsedFolders: string[],
   forceExpand = false,
+  sortKey: SortKey = "name",
 ): DocumentTreeRow[] {
   // Existing settings key is named "collapsed", but the stored value is the
   // user's expanded folder set so new folders stay collapsed by default.
@@ -79,7 +81,7 @@ export function buildDocumentTreeRows(
     node.entries.push(entry);
   }
 
-  return flattenNode(root, expanded, forceExpand, -1);
+  return flattenNode(root, expanded, forceExpand, -1, sortKey);
 }
 
 export function nextCollapsedFolders(
@@ -160,10 +162,13 @@ function flattenNode(
   expanded: Set<string>,
   forceExpand: boolean,
   depth: number,
+  sortKey: SortKey,
 ): DocumentTreeRow[] {
   const rows: DocumentTreeRow[] = [];
+  // Folders stay alphabetical whatever the sort key — a folder has no mtime of
+  // its own, so reordering them by their children's would just look random.
   const folders = Array.from(node.folders.values()).sort(compareFolder);
-  const entries = [...node.entries].sort(compareEntry);
+  const entries = [...node.entries].sort((a, b) => compareEntry(a, b, sortKey));
 
   for (const folder of folders) {
     const isCollapsed = !forceExpand && !expanded.has(folder.path);
@@ -177,7 +182,7 @@ function flattenNode(
       collapsed: isCollapsed,
     });
     if (!isCollapsed) {
-      rows.push(...flattenNode(folder, expanded, forceExpand, depth + 1));
+      rows.push(...flattenNode(folder, expanded, forceExpand, depth + 1, sortKey));
     }
   }
 
@@ -197,7 +202,13 @@ function compareFolder(a: TreeNode, b: TreeNode): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 }
 
-function compareEntry(a: VaultEntry, b: VaultEntry): number {
+function compareEntry(a: VaultEntry, b: VaultEntry, sortKey: SortKey): number {
+  if (sortKey === "modifiedAsc" || sortKey === "modifiedDesc") {
+    const aTime = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+    const bTime = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+    const modified = sortKey === "modifiedAsc" ? aTime - bTime : bTime - aTime;
+    if (modified) return modified;
+  }
   return a.relPath.localeCompare(b.relPath, undefined, {
     sensitivity: "base",
     numeric: true,

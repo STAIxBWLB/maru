@@ -47,6 +47,8 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["ui", "workspaceFileFilter"],
     &["ui", "filesBrowserMode"],
     &["ui", "filesSortKey"],
+    &["ui", "documentSortKey"],
+    &["ui", "scratchpadSortKey"],
     &["ui", "filesListAttributes"],
     &["ui", "fileQueueDefaultOperation"],
     &["ui", "themeMode"],
@@ -346,6 +348,7 @@ fn default_settings_json() -> JsonValue {
         "filesTreeWidth": 260,
         "filesPreviewOpen": true,
         "filesPreviewWidth": 440,
+        "scratchpadListHeight": 218,
         "outlineOpen": true,
         "outlinePaneWidth": 280,
         "terminalOpen": false,
@@ -378,6 +381,8 @@ fn default_settings_json() -> JsonValue {
             "workspaceFileFilter": "all",
             "filesBrowserMode": "list",
             "filesSortKey": "name",
+            "documentSortKey": "modifiedDesc",
+            "scratchpadSortKey": "name",
             "filesListAttributes": ["parent", "kind", "modified", "size"],
             "binaryFileIncludePatterns": [
                 "*.tgz",
@@ -1451,6 +1456,27 @@ mod tests {
         ensure_maru_dir(tmp.path()).unwrap();
         let again = fs::read_to_string(tmp.path().join(".maruignore")).unwrap();
         assert_eq!(content, again, "second ensure_maruignore must be a no-op");
+    }
+
+    /// `split_settings_json` only persists paths named in the two lists, so a new
+    /// `ui.*` key that nobody claims is silently dropped on save. Assert every
+    /// default key is claimed exactly once rather than re-learning this per key.
+    #[test]
+    fn every_default_ui_key_is_claimed_by_exactly_one_path_list() {
+        let defaults = default_settings_json();
+        let ui = defaults.get("ui").and_then(JsonValue::as_object).unwrap();
+        for key in ui.keys() {
+            let claims = [GLOBAL_SETTINGS_PATHS, WORKSPACE_STATE_PATHS]
+                .iter()
+                .flat_map(|list| list.iter())
+                .filter(|path| path.len() == 2 && path[0] == "ui" && path[1] == key.as_str())
+                .count();
+            assert_eq!(
+                claims, 1,
+                "ui.{key} is claimed by {claims} path lists; it must be in exactly one \
+                 of GLOBAL_SETTINGS_PATHS / WORKSPACE_STATE_PATHS or it will not persist"
+            );
+        }
     }
 
     #[test]
