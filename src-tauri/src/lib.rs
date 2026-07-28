@@ -216,7 +216,9 @@ use today_store::{
     read_task_events, today_finalize_setup, today_mutate, today_open, today_rollover,
 };
 use vault::{read_vault_cache, sample_workspace_path, scan_vault};
-use vault_graph::{vault_graph_layout_read, vault_graph_layout_save, vault_graph_read};
+use vault_graph::{
+    vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
+};
 use vault_guard::vault_validate_note;
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
@@ -274,6 +276,7 @@ pub fn run() {
             start_scratchpad_watcher,
             stop_scratchpad_watcher,
             vault_graph_read,
+            vault_graph_root,
             vault_graph_layout_read,
             vault_graph_layout_save,
             graph_link_preview,

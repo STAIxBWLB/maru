@@ -526,9 +526,10 @@ export async function vaultValidateNote(
   return invoke<VaultSchemaReport>("vault_validate_note", { content, relPath });
 }
 
-/** Community-overlay JSON (`<workspace>/reports/vault-graph.json`, built by
- *  the weekly /vault-graph ritual). null = absent or unavailable — the graph
- *  mode degrades to the live layer. Corrupt file rejects with the reason. */
+/** Community-overlay JSON (`<vault>/reports/vault-graph.json`, built by the
+ *  weekly /vault-graph ritual; the vault is the workspace root or a `vault/`
+ *  submodule inside it). null = absent or unavailable — the graph mode degrades
+ *  to the live layer. Corrupt file rejects with the reason. */
 export async function vaultGraphRead(
   vaultPath: string,
   source: "vault" | "workspace" | "all" = "vault",
@@ -551,6 +552,13 @@ export async function vaultGraphRead(
     vaultPath,
     source,
   });
+}
+
+/** `<workspace>/vault` when the vault is a submodule inside the workspace, else
+ *  null (the workspace is its own vault). Drives the Vault graph source. */
+export async function vaultGraphRoot(workspace: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>("vault_graph_root", { workspace });
 }
 
 export interface GraphLayoutCache {

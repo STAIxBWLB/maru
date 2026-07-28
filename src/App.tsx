@@ -139,6 +139,7 @@ import {
   stopVaultWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
+  vaultGraphRoot,
   removeAgentContextHint,
   terminalHooksInstall,
   terminalHooksStatus,
@@ -7520,43 +7521,79 @@ function MainApp() {
     graph: " graph-mode",
     files: " files-mode",
   };
-  const graphVaultPath =
-    workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
   const graphWorkspacePath =
     workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
+  // The vault is usually a `vault/` submodule inside the workspace; only fall
+  // back to the public-workspace-as-vault setup when there is no such folder.
+  // The probe result is keyed by workspace so a switch A→B can never serve
+  // A's vault while B's probe is still in flight.
+  const [nestedVault, setNestedVault] = useState<{
+    workspace: string;
+    root: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!graphWorkspacePath) return;
+    let cancelled = false;
+    void vaultGraphRoot(graphWorkspacePath)
+      .then((root) => {
+        if (!cancelled) setNestedVault({ workspace: graphWorkspacePath, root });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [graphWorkspacePath]);
+  const nestedVaultPath =
+    nestedVault?.workspace === graphWorkspacePath ? nestedVault.root : null;
+  const graphVaultPath =
+    nestedVaultPath ??
+    workspaceRegistry.activeByVisibility.public ??
+    publicWorkspaces[0]?.path ??
+    null;
   const graphDataPath =
     maruSettings.graph.source === "vault"
       ? graphVaultPath ?? activeDocumentWorkspacePath
       : graphWorkspacePath ?? activeDocumentWorkspacePath;
-  const graphOverlayPath = graphVaultPath ?? graphDataPath;
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? []
     : activeDocumentEntries;
   const graphSurfaceVisible = visibleAppMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
+  // Read the current state through a ref: the first thing this effect does is
+  // patch workspaceStates, so depending on it would re-run the effect, cancel
+  // the scan it just started, and then bail on its own `loading: true` — the
+  // entries would never land for a path nothing else populates (e.g. the vault
+  // submodule, which only the graph scans).
+  const workspaceStatesRef = useRef(workspaceStates);
+  workspaceStatesRef.current = workspaceStates;
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath) return;
-    const current = workspaceStates[graphDataPath];
+    const current = workspaceStatesRef.current[graphDataPath];
     if (current?.startupIoReady || current?.loading || current?.refreshing) return;
+    // Land every result, cancelled or not: the writes are keyed by path, so a
+    // late one is still correct for that key. Skipping them was the bug — any
+    // re-run (settings load swaps the `scanOptions` array identity, or the
+    // surface flips visible) cancelled the in-flight scan, and the guard above
+    // then saw the `loading: true` this effect had just set and bailed
+    // forever. `cancelled` now only suppresses a toast nobody asked for.
+    const path = graphDataPath;
     let cancelled = false;
-    updateWorkspaceState(graphDataPath, { loading: true });
+    updateWorkspaceState(path, { loading: true });
     void (async () => {
       try {
-        const cached = await readVaultCache(graphDataPath);
-        if (!cancelled && cached) updateWorkspaceState(graphDataPath, { entries: cached, loading: false, refreshing: true });
-        const fresh = await scanVault(graphDataPath, scanOptions);
-        if (!cancelled) updateWorkspaceState(graphDataPath, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
+        const cached = await readVaultCache(path);
+        if (cached) updateWorkspaceState(path, { entries: cached, loading: false, refreshing: true });
+        const fresh = await scanVault(path, scanOptions);
+        updateWorkspaceState(path, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
       } catch (err) {
-        if (!cancelled) {
-          updateWorkspaceState(graphDataPath, { loading: false, refreshing: false });
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        updateWorkspaceState(path, { loading: false, refreshing: false });
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, workspaceStates]);
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState]);
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath || !vaultWatchPath) return;
     let disposed = false;
@@ -7804,7 +7841,6 @@ function MainApp() {
       <LazyGraphView
         key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
         workspacePath={graphDataPath}
-        overlayPath={graphOverlayPath}
         entries={graphEntries}
         focusTarget={graphOpenTarget}
         onFocusTargetChange={setGraphOpenTarget}
@@ -7833,7 +7869,6 @@ function MainApp() {
     [
       maruSettings.graph,
       graphDataPath,
-      graphOverlayPath,
       graphEntries,
       graphOpenTarget,
       selectEntry,
