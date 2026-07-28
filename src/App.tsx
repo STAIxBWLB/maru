@@ -7559,29 +7559,41 @@ function MainApp() {
     : activeDocumentEntries;
   const graphSurfaceVisible = visibleAppMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
+  // Read the current state through a ref: the first thing this effect does is
+  // patch workspaceStates, so depending on it would re-run the effect, cancel
+  // the scan it just started, and then bail on its own `loading: true` — the
+  // entries would never land for a path nothing else populates (e.g. the vault
+  // submodule, which only the graph scans).
+  const workspaceStatesRef = useRef(workspaceStates);
+  workspaceStatesRef.current = workspaceStates;
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath) return;
-    const current = workspaceStates[graphDataPath];
+    const current = workspaceStatesRef.current[graphDataPath];
     if (current?.startupIoReady || current?.loading || current?.refreshing) return;
+    // Land every result, cancelled or not: the writes are keyed by path, so a
+    // late one is still correct for that key. Skipping them was the bug — any
+    // re-run (settings load swaps the `scanOptions` array identity, or the
+    // surface flips visible) cancelled the in-flight scan, and the guard above
+    // then saw the `loading: true` this effect had just set and bailed
+    // forever. `cancelled` now only suppresses a toast nobody asked for.
+    const path = graphDataPath;
     let cancelled = false;
-    updateWorkspaceState(graphDataPath, { loading: true });
+    updateWorkspaceState(path, { loading: true });
     void (async () => {
       try {
-        const cached = await readVaultCache(graphDataPath);
-        if (!cancelled && cached) updateWorkspaceState(graphDataPath, { entries: cached, loading: false, refreshing: true });
-        const fresh = await scanVault(graphDataPath, scanOptions);
-        if (!cancelled) updateWorkspaceState(graphDataPath, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
+        const cached = await readVaultCache(path);
+        if (cached) updateWorkspaceState(path, { entries: cached, loading: false, refreshing: true });
+        const fresh = await scanVault(path, scanOptions);
+        updateWorkspaceState(path, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
       } catch (err) {
-        if (!cancelled) {
-          updateWorkspaceState(graphDataPath, { loading: false, refreshing: false });
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        updateWorkspaceState(path, { loading: false, refreshing: false });
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, workspaceStates]);
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState]);
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath || !vaultWatchPath) return;
     let disposed = false;
