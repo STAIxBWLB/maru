@@ -8,6 +8,22 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.29 - 2026-07-28 - The Graph Finds Its Vault
+
+- **Community colors work again.** Graph mode showed "No communities - run the
+  graph build skill" no matter how recently you had run it. The overlay was
+  being read from whichever workspace is marked public, which has nothing to do
+  with the workspace the graph is drawn from, and then looked for the report one
+  directory above where it actually lives. Maru now finds the report whether
+  your vault is the workspace root or a `vault/` folder inside it.
+- **The Knowledge graph source is no longer empty.** It pointed at the same
+  wrong workspace, so switching the source away from Workspace rendered nothing
+  at all. It now scans the real vault.
+- **A graph that came up blank stayed blank.** The workspace scan cancelled its
+  own result and then refused to retry, so the notes it had just finished
+  reading were thrown away. This only ever showed up for a folder nothing else
+  in the app scans, which the vault is.
+
 ## v0.4.28 - 2026-07-28 - One Type Scale
 
 - **Text no longer jumps a size for no reason.** The app has always defined a
