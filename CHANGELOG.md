@@ -30,6 +30,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   ladder and Markdown line-break rules; `md2docx --gaejosik` emits the matching
   indentation and bullet structure, and HWPX guidance reflects verified marker
   behavior and noun-ending rules.
+- **Styled HWPX documents use the released native presets.** The `hwpx styled`
+  command delegates new `gian` and `report` documents to hwp-cli v0.4.1 while
+  preserving the `gongmun` and `bogoseo` compatibility names, explicit
+  `HWP_CLI` pins, and the existing reference-template path.
 
 ## v0.4.31 - 2026-07-29 - A Lighter Glance
 
