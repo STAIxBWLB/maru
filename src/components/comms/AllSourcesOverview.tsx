@@ -10,6 +10,7 @@ interface AllSourcesOverviewProps {
   runningChannels: Set<string>;
   progressByChannel: Map<string, MissionProgress>;
   actionBusy: boolean;
+  msoProcessDisabled?: boolean;
   onProcessNow: (channel: string) => void;
   onSelect: (channel: string) => void;
 }
@@ -21,6 +22,7 @@ export function AllSourcesOverview({
   runningChannels,
   progressByChannel,
   actionBusy,
+  msoProcessDisabled = false,
   onProcessNow,
   onSelect,
 }: AllSourcesOverviewProps) {
@@ -35,6 +37,7 @@ export function AllSourcesOverview({
           progress={progressByChannel.get(channel) ?? null}
           processedCount={processedByChannel.get(channel) ?? 0}
           actionBusy={actionBusy}
+          processDisabled={channel === "mso" && msoProcessDisabled}
           compact
           onProcessNow={onProcessNow}
           onSelect={onSelect}

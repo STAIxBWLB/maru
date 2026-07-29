@@ -11,6 +11,7 @@ interface SourceControlsProps {
   refreshing?: boolean;
   onRefresh: () => void;
   onReauth?: () => void;
+  msoReauthDisabled?: boolean;
   onDeepProcess?: (channel: string) => void;
   onStartPolling?: () => void;
   onStopPolling?: () => void;
@@ -25,6 +26,7 @@ export function SourceControls({
   refreshing = false,
   onRefresh,
   onReauth,
+  msoReauthDisabled = false,
   onDeepProcess,
   onStartPolling,
   onStopPolling,
@@ -55,7 +57,12 @@ export function SourceControls({
         <span>{t("comms.source.refresh")}</span>
       </button>
       {onReauth ? (
-        <button type="button" className="secondary-button" onClick={onReauth}>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={channel === "mso" && msoReauthDisabled}
+          onClick={onReauth}
+        >
           <LogIn size={14} />
           <span>{isTelegram ? t("comms.telegram.login") : t("comms.auth.reauth")}</span>
         </button>

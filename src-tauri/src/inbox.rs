@@ -154,6 +154,13 @@ pub struct InboxProcessedItem {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InboxProcessedSnapshot {
+    pub items: Vec<InboxProcessedItem>,
+    pub counts: std::collections::HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InboxProcessedRawFile {
     pub path: String,
     pub rel_path: String,
@@ -296,6 +303,12 @@ struct ProcessedProcessingHints {
     project: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ProcessedChannelManifest {
+    #[serde(default)]
+    channel: Option<String>,
+}
+
 const INBOX_FILE_ACCEPT_KIND: &str = "inbox.file.accept";
 const INBOX_FILE_REJECT_KIND: &str = "inbox.file.reject";
 const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
@@ -335,6 +348,23 @@ pub fn scan_inbox_processed_items(
     let work = normalize_existing_dir(&work_path)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
     scan_processed_items_with_config(&work, &config, channel, statuses, query, limit)
+}
+
+#[tauri::command]
+pub async fn scan_inbox_processed_snapshot(
+    work_path: String,
+    channel: Option<String>,
+    statuses: Option<Vec<String>>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<InboxProcessedSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let work = normalize_existing_dir(&work_path)?;
+        let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
+        scan_processed_snapshot_with_config(&work, &config, channel, statuses, query, limit)
+    })
+    .await
+    .map_err(|err| format!("Inbox processed scan task failed: {err}"))?
 }
 
 #[tauri::command]
@@ -1040,16 +1070,118 @@ fn scan_processed_items_with_config(
     limit: Option<usize>,
 ) -> Result<Vec<InboxProcessedItem>, String> {
     let root = inbox_settings::resolve_runtime_root(work, config)?;
-    let channel = channel
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty());
     let statuses = normalize_processed_statuses(statuses)?;
-    let query = query
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty());
-    let limit = limit.unwrap_or(100).clamp(1, 500);
-    let mut items = Vec::new();
+    let (candidates, _) = collect_processed_candidates(&root, config, &statuses)?;
+    Ok(process_processed_candidates(
+        work, &root, config, candidates, &statuses, channel, query, limit,
+    ))
+}
 
+fn scan_processed_snapshot_with_config(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    channel: Option<String>,
+    statuses: Option<Vec<String>>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<InboxProcessedSnapshot, String> {
+    let root = inbox_settings::resolve_runtime_root(work, config)?;
+    let requested_statuses = normalize_processed_statuses(statuses)?;
+    let all_statuses = ["done", "failed", "duplicate"]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let (candidates, counts) = collect_processed_candidates(&root, config, &all_statuses)?;
+    let items = process_processed_candidates(
+        work,
+        &root,
+        config,
+        candidates,
+        &requested_statuses,
+        channel,
+        query,
+        limit,
+    );
+    Ok(InboxProcessedSnapshot { items, counts })
+}
+
+#[derive(Debug)]
+struct ParsedProcessedCandidate {
+    item_dir: PathBuf,
+    folder_status: String,
+    manifest_path: PathBuf,
+    manifest: ProcessedManifest,
+    id: String,
+    channel: String,
+    received_at: Option<String>,
+    updated_at: Option<String>,
+}
+
+#[derive(Debug)]
+struct ErrorProcessedCandidate {
+    item_dir: PathBuf,
+    folder_status: String,
+    id: String,
+    updated_at: Option<String>,
+    error: String,
+}
+
+#[derive(Debug)]
+enum ProcessedCandidate {
+    Parsed(ParsedProcessedCandidate),
+    Error(ErrorProcessedCandidate),
+}
+
+impl ProcessedCandidate {
+    fn folder_status(&self) -> &str {
+        match self {
+            Self::Parsed(candidate) => &candidate.folder_status,
+            Self::Error(candidate) => &candidate.folder_status,
+        }
+    }
+
+    fn channel(&self) -> &str {
+        match self {
+            Self::Parsed(candidate) => &candidate.channel,
+            Self::Error(_) => "unknown",
+        }
+    }
+
+    fn id(&self) -> &str {
+        match self {
+            Self::Parsed(candidate) => &candidate.id,
+            Self::Error(candidate) => &candidate.id,
+        }
+    }
+
+    fn received_at(&self) -> Option<&str> {
+        match self {
+            Self::Parsed(candidate) => candidate.received_at.as_deref(),
+            Self::Error(_) => None,
+        }
+    }
+
+    fn updated_at(&self) -> Option<&str> {
+        match self {
+            Self::Parsed(candidate) => candidate.updated_at.as_deref(),
+            Self::Error(candidate) => candidate.updated_at.as_deref(),
+        }
+    }
+}
+
+fn collect_processed_candidates(
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    statuses: &[String],
+) -> Result<
+    (
+        Vec<ProcessedCandidate>,
+        std::collections::HashMap<String, usize>,
+    ),
+    String,
+> {
+    let mut candidates = Vec::new();
+    let mut counts = std::collections::HashMap::new();
     for status in statuses {
         let status_dir = processed_status_dir(&root, config, &status)?;
         if !status_dir.exists() {
@@ -1072,34 +1204,276 @@ fn scan_processed_items_with_config(
                 continue;
             }
             let item_dir = inbox_settings::lexical_normalize_path(&entry.path());
-            let item = match build_processed_item(work, &root, config, &item_dir, &status) {
-                Ok(item) => item,
-                Err(err) => error_processed_item(work, config, &item_dir, &status, err),
+            let manifest_path = item_dir.join(&config.naming.manifest_file);
+            let (candidate, count_channel) = match read_processed_manifest_raw(&manifest_path) {
+                Ok(raw) => {
+                    let count_channel = processed_channel_from_raw(&raw);
+                    let candidate = match load_processed_candidate_from_raw(
+                        root,
+                        config,
+                        &item_dir,
+                        status,
+                        manifest_path,
+                        &raw,
+                    ) {
+                        Ok(candidate) => ProcessedCandidate::Parsed(candidate),
+                        Err(err) => ProcessedCandidate::Error(error_processed_candidate(
+                            &item_dir, status, err,
+                        )),
+                    };
+                    (candidate, count_channel)
+                }
+                Err(err) => (
+                    ProcessedCandidate::Error(error_processed_candidate(&item_dir, status, err)),
+                    "unknown".to_string(),
+                ),
             };
-            if channel
-                .as_deref()
-                .is_some_and(|expected| item.channel.to_lowercase() != expected)
-            {
-                continue;
+            *counts.entry(count_channel).or_insert(0) += 1;
+            candidates.push(candidate);
+        }
+    }
+    Ok((candidates, counts))
+}
+
+fn process_processed_candidates(
+    work: &Path,
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    candidates: Vec<ProcessedCandidate>,
+    statuses: &[String],
+    channel: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Vec<InboxProcessedItem> {
+    let channel = channel
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    let query = query
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    let limit = limit.unwrap_or(100).clamp(1, 500);
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|candidate| {
+            statuses
+                .iter()
+                .any(|status| status == candidate.folder_status())
+        })
+        .collect::<Vec<_>>();
+
+    sort_processed_candidates(&mut candidates);
+    if let Some(needle) = query.as_deref() {
+        let mut items = candidates
+            .into_iter()
+            .filter(|candidate| candidate_may_match_channel(candidate, channel.as_deref()))
+            .map(|candidate| hydrate_processed_candidate(work, root, config, candidate))
+            .filter(|item| processed_item_matches_channel(item, channel.as_deref()))
+            .filter(|item| processed_item_matches_query(item, needle))
+            .collect::<Vec<_>>();
+        sort_processed_items(&mut items);
+        items.truncate(limit);
+        return items;
+    }
+
+    // A parsed candidate with a received timestamp keeps its sort position
+    // after successful hydration. If hydration fails, the compatibility error
+    // item loses its timestamp and moves into the undated tail. Walk dated
+    // candidates until `limit` successful final items are known; only when
+    // that is insufficient do we hydrate the undated/error tail.
+    let (dated_candidates, tail_candidates): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|candidate| candidate.received_at().is_some());
+    let mut dated_items = Vec::new();
+    let mut deferred_items = Vec::new();
+    for candidate in dated_candidates {
+        if !candidate_may_match_channel(&candidate, channel.as_deref()) {
+            continue;
+        }
+        let item = hydrate_processed_candidate(work, root, config, candidate);
+        if !processed_item_matches_channel(&item, channel.as_deref()) {
+            continue;
+        }
+        if item.received_at.is_some() {
+            dated_items.push(item);
+            if dated_items.len() == limit {
+                sort_processed_items(&mut dated_items);
+                return dated_items;
             }
-            if query
-                .as_deref()
-                .map(|needle| processed_item_matches_query(&item, needle))
-                .unwrap_or(true)
-            {
-                items.push(item);
-            }
+        } else {
+            deferred_items.push(item);
         }
     }
 
+    let mut items = dated_items;
+    items.append(&mut deferred_items);
+    items.extend(
+        tail_candidates
+            .into_iter()
+            .filter(|candidate| candidate_may_match_channel(candidate, channel.as_deref()))
+            .map(|candidate| hydrate_processed_candidate(work, root, config, candidate))
+            .filter(|item| processed_item_matches_channel(item, channel.as_deref())),
+    );
+    sort_processed_items(&mut items);
+    items.truncate(limit);
+    items
+}
+
+fn candidate_may_match_channel(candidate: &ProcessedCandidate, channel: Option<&str>) -> bool {
+    match channel {
+        None => true,
+        Some("unknown") => true,
+        Some(expected) => candidate.channel().to_lowercase() == expected,
+    }
+}
+
+fn processed_item_matches_channel(item: &InboxProcessedItem, channel: Option<&str>) -> bool {
+    channel.map_or(true, |expected| item.channel.to_lowercase() == expected)
+}
+
+fn sort_processed_items(items: &mut [InboxProcessedItem]) {
     items.sort_by(|a, b| {
         b.received_at
             .cmp(&a.received_at)
             .then_with(|| b.updated_at.cmp(&a.updated_at))
             .then_with(|| a.id.cmp(&b.id))
     });
-    items.truncate(limit);
-    Ok(items)
+}
+
+fn sort_processed_candidates(candidates: &mut [ProcessedCandidate]) {
+    candidates.sort_by(|a, b| {
+        b.received_at()
+            .cmp(&a.received_at())
+            .then_with(|| b.updated_at().cmp(&a.updated_at()))
+            .then_with(|| a.id().cmp(b.id()))
+    });
+}
+
+fn load_processed_candidate(
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    item_dir: &Path,
+    folder_status: &str,
+) -> Result<ParsedProcessedCandidate, String> {
+    let manifest_path = item_dir.join(&config.naming.manifest_file);
+    let raw = read_processed_manifest_raw(&manifest_path)?;
+    load_processed_candidate_from_raw(root, config, item_dir, folder_status, manifest_path, &raw)
+}
+
+fn load_processed_candidate_from_raw(
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    item_dir: &Path,
+    folder_status: &str,
+    manifest_path: PathBuf,
+    raw: &str,
+) -> Result<ParsedProcessedCandidate, String> {
+    if !item_dir.starts_with(root) {
+        return Err("processed_item_outside_inbox".to_string());
+    }
+    let manifest: ProcessedManifest =
+        serde_yaml::from_str(raw).map_err(|err| format!("Cannot parse inbox manifest: {err}"))?;
+    let fallback_id = item_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let id = manifest
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_id.as_str())
+        .to_string();
+    let channel = manifest
+        .channel
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let summary_path = item_dir.join(&config.naming.summary_file);
+    let route_path = item_dir.join(&config.naming.route_file);
+    let extracted_path = item_dir.join(&config.naming.extracted_file);
+    let updated_at = latest_modified_time(&[
+        manifest_path.as_path(),
+        summary_path.as_path(),
+        route_path.as_path(),
+        extracted_path.as_path(),
+    ]);
+    let received_at = manifest.received_at.clone();
+    Ok(ParsedProcessedCandidate {
+        item_dir: item_dir.to_path_buf(),
+        folder_status: folder_status.to_string(),
+        manifest_path,
+        manifest,
+        id,
+        channel,
+        received_at,
+        updated_at,
+    })
+}
+
+fn read_processed_manifest_raw(manifest_path: &Path) -> Result<String, String> {
+    #[cfg(test)]
+    PROCESSED_MANIFEST_READ_COUNT.with(|count| count.set(count.get() + 1));
+    fs::read_to_string(manifest_path).map_err(|err| format!("Cannot read inbox manifest: {err}"))
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static PROCESSED_MANIFEST_READ_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    static PROCESSED_HYDRATION_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    static PROCESSED_ERROR_HYDRATION_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+fn hydrate_processed_candidate(
+    work: &Path,
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    candidate: ProcessedCandidate,
+) -> InboxProcessedItem {
+    match candidate {
+        ProcessedCandidate::Error(candidate) => error_processed_item(
+            work,
+            config,
+            &candidate.item_dir,
+            &candidate.folder_status,
+            candidate.error,
+        ),
+        ProcessedCandidate::Parsed(candidate) => {
+            let item_dir = candidate.item_dir.clone();
+            let folder_status = candidate.folder_status.clone();
+            match build_processed_item_from_candidate(root, config, candidate) {
+                Ok(item) => item,
+                Err(err) => error_processed_item(work, config, &item_dir, &folder_status, err),
+            }
+        }
+    }
+}
+
+fn error_processed_candidate(
+    item_dir: &Path,
+    status: &str,
+    error: String,
+) -> ErrorProcessedCandidate {
+    ErrorProcessedCandidate {
+        item_dir: item_dir.to_path_buf(),
+        folder_status: status.to_string(),
+        id: item_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        updated_at: fs::metadata(item_dir)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .map(DateTime::<Utc>::from)
+            .map(|dt| dt.to_rfc3339()),
+        error,
+    }
 }
 
 struct DigestEntry {
@@ -1254,7 +1628,7 @@ fn count_processed_by_channel_with_config(
     config: &InboxRuntimeConfig,
 ) -> Result<std::collections::HashMap<String, usize>, String> {
     let root = inbox_settings::resolve_runtime_root(work, config)?;
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut counts = std::collections::HashMap::new();
     for status in ["done", "failed", "duplicate"] {
         let status_dir = processed_status_dir(&root, config, status)?;
         if !status_dir.is_dir() {
@@ -1264,23 +1638,28 @@ fn count_processed_by_channel_with_config(
             .map_err(|err| format!("Cannot scan inbox processed items: {err}"))?;
         for entry in read_dir {
             let entry = entry.map_err(|err| format!("Cannot scan inbox processed item: {err}"))?;
-            if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
                 continue;
             }
             let manifest_path = entry.path().join(&config.naming.manifest_file);
-            let channel = read_processed_channel(&manifest_path);
-            *counts.entry(channel).or_insert(0) += 1;
+            *counts
+                .entry(read_processed_channel(&manifest_path))
+                .or_insert(0) += 1;
         }
     }
     Ok(counts)
 }
 
-/// Channel for a processed item, matching `build_processed_item`'s resolution
-/// (manifest `channel`, trimmed, falling back to `"unknown"`).
 fn read_processed_channel(manifest_path: &Path) -> String {
     fs::read_to_string(manifest_path)
         .ok()
-        .and_then(|raw| serde_yaml::from_str::<ProcessedManifest>(&raw).ok())
+        .map(|raw| processed_channel_from_raw(&raw))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn processed_channel_from_raw(raw: &str) -> String {
+    serde_yaml::from_str::<ProcessedChannelManifest>(raw)
+        .ok()
         .and_then(|manifest| manifest.channel)
         .map(|channel| channel.trim().to_string())
         .filter(|channel| !channel.is_empty())
@@ -1593,14 +1972,30 @@ fn build_processed_item(
     item_dir: &Path,
     folder_status: &str,
 ) -> Result<InboxProcessedItem, String> {
+    let candidate = load_processed_candidate(root, config, item_dir, folder_status)?;
+    build_processed_item_from_candidate(root, config, candidate)
+}
+
+fn build_processed_item_from_candidate(
+    root: &Path,
+    config: &InboxRuntimeConfig,
+    candidate: ParsedProcessedCandidate,
+) -> Result<InboxProcessedItem, String> {
+    #[cfg(test)]
+    PROCESSED_HYDRATION_COUNT.with(|count| count.set(count.get() + 1));
+    let ParsedProcessedCandidate {
+        item_dir,
+        folder_status,
+        manifest_path,
+        manifest,
+        id,
+        channel,
+        received_at,
+        updated_at,
+    } = candidate;
     if !item_dir.starts_with(root) {
         return Err("processed_item_outside_inbox".to_string());
     }
-    let manifest_path = item_dir.join(&config.naming.manifest_file);
-    let manifest_raw = fs::read_to_string(&manifest_path)
-        .map_err(|err| format!("Cannot read inbox manifest: {err}"))?;
-    let manifest: ProcessedManifest = serde_yaml::from_str(&manifest_raw)
-        .map_err(|err| format!("Cannot parse inbox manifest: {err}"))?;
     let summary_path = item_dir.join(&config.naming.summary_file);
     let route_path = item_dir.join(&config.naming.route_file);
     let extracted_path = item_dir.join(&config.naming.extracted_file);
@@ -1614,25 +2009,6 @@ fn build_processed_item(
         .as_deref()
         .map(split_markdown_frontmatter)
         .unwrap_or((None, ""));
-    let fallback_id = item_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let id = manifest
-        .id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback_id.as_str())
-        .to_string();
-    let channel = manifest
-        .channel
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown")
-        .to_string();
     let title = yaml_string(summary_meta.as_ref(), "title").unwrap_or_else(|| id.clone());
     let description = yaml_string(summary_meta.as_ref(), "description");
     let project = yaml_string(summary_meta.as_ref(), "project")
@@ -1652,7 +2028,7 @@ fn build_processed_item(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(folder_status)
+        .unwrap_or(folder_status.as_str())
         .to_string();
     let manifest_raw_file_count = manifest
         .files
@@ -1666,14 +2042,8 @@ fn build_processed_item(
     let raw_file_count = if manifest_raw_file_count > 0 {
         manifest_raw_file_count
     } else {
-        count_raw_files(item_dir, &config.naming.raw_dir)?
+        count_raw_files(&item_dir, &config.naming.raw_dir)?
     };
-    let updated_at = latest_modified_time(&[
-        manifest_path.as_path(),
-        summary_path.as_path(),
-        route_path.as_path(),
-        extracted_path.as_path(),
-    ]);
 
     Ok(InboxProcessedItem {
         id,
@@ -1681,7 +2051,7 @@ fn build_processed_item(
         channel,
         provider,
         kind,
-        received_at: manifest.received_at,
+        received_at,
         item_dir: item_dir.to_string_lossy().to_string(),
         manifest_path: manifest_path.to_string_lossy().to_string(),
         summary_path: path_string_if_exists(&summary_path),
@@ -1706,6 +2076,8 @@ fn error_processed_item(
     status: &str,
     error: String,
 ) -> InboxProcessedItem {
+    #[cfg(test)]
+    PROCESSED_ERROR_HYDRATION_COUNT.with(|count| count.set(count.get() + 1));
     let id = item_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -2805,6 +3177,232 @@ inbox:
     }
 
     #[test]
+    fn processed_snapshot_counts_all_items_once_before_filtering_and_limit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "a", "gws", "P", "summary a");
+        write_processed_item(root, "done", "b", "mso", "P", "summary b");
+        write_processed_item(root, "failed", "c", "gws", "P", "summary c");
+        let malformed = root.join("inbox/items/duplicate/bad");
+        fs::create_dir_all(&malformed).unwrap();
+        fs::write(malformed.join("manifest.yaml"), "id: [invalid\n").unwrap();
+        let blank_channel = root.join("inbox/items/duplicate/blank");
+        fs::create_dir_all(&blank_channel).unwrap();
+        fs::write(
+            blank_channel.join("manifest.yaml"),
+            "id: blank\nstatus: duplicate\nchannel: \"   \"\n",
+        )
+        .unwrap();
+
+        PROCESSED_MANIFEST_READ_COUNT.with(|count| count.set(0));
+        PROCESSED_HYDRATION_COUNT.with(|count| count.set(0));
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            Some("gws".to_string()),
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].channel, "gws");
+        assert_eq!(snapshot.counts.get("gws"), Some(&2));
+        assert_eq!(snapshot.counts.get("mso"), Some(&1));
+        assert_eq!(snapshot.counts.get("unknown"), Some(&2));
+        assert_eq!(snapshot.counts.values().sum::<usize>(), 5);
+        PROCESSED_MANIFEST_READ_COUNT.with(|count| assert_eq!(count.get(), 5));
+        PROCESSED_HYDRATION_COUNT.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn processed_snapshot_counts_channel_when_full_manifest_shape_is_invalid() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        let invalid = root.join("inbox/items/done/typed-error");
+        fs::create_dir_all(&invalid).unwrap();
+        fs::write(
+            invalid.join("manifest.yaml"),
+            "id: typed-error\nstatus: done\nchannel: gws\nfiles: 1\n",
+        )
+        .unwrap();
+
+        PROCESSED_MANIFEST_READ_COUNT.with(|count| count.set(0));
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            None,
+            Some(vec!["done".to_string()]),
+            None,
+            Some(10),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.counts.get("gws"), Some(&1));
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].id, "typed-error");
+        assert_eq!(snapshot.items[0].channel, "unknown");
+        assert!(snapshot.items[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("Cannot parse")));
+        PROCESSED_MANIFEST_READ_COUNT.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn processed_snapshot_applies_status_channel_and_limit_before_hydration() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "a", "gws", "P", "summary a");
+        write_processed_item(root, "done", "b", "gws", "P", "summary b");
+        write_processed_item(root, "done", "c", "mso", "P", "summary c");
+        write_processed_item(root, "failed", "d", "gws", "P", "summary d");
+
+        PROCESSED_HYDRATION_COUNT.with(|count| count.set(0));
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            Some("gws".to_string()),
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        PROCESSED_HYDRATION_COUNT.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn processed_snapshot_query_hydrates_filtered_candidates_and_matches_route() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "a", "gws", "P", "summary a");
+        write_processed_item(root, "done", "b", "gws", "P", "summary b");
+        write_processed_item(root, "done", "c", "mso", "P", "summary c");
+        fs::write(
+            root.join("inbox/items/done/b/route.md"),
+            "---\nclassification: urgent-route\nroute_status: routed\n---\n\nroute\n",
+        )
+        .unwrap();
+
+        PROCESSED_HYDRATION_COUNT.with(|count| count.set(0));
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            Some("gws".to_string()),
+            Some(vec!["done".to_string()]),
+            Some("urgent-route".to_string()),
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].id, "b");
+        PROCESSED_HYDRATION_COUNT.with(|count| assert_eq!(count.get(), 2));
+    }
+
+    #[test]
+    fn processed_snapshot_reapplies_channel_after_summary_hydration_failure() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "newer-bad", "gws", "P", "summary");
+        write_processed_item(root, "done", "older-good", "gws", "P", "summary");
+        set_processed_received_at(root, "done", "newer-bad", "2026-05-12T00:00:00Z");
+        set_processed_received_at(root, "done", "older-good", "2026-05-11T00:00:00Z");
+        fs::write(
+            root.join("inbox/items/done/newer-bad/summary.md"),
+            [0xff, 0xfe],
+        )
+        .unwrap();
+
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            Some("gws".to_string()),
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].id, "older-good");
+        assert!(snapshot.items[0].error.is_none());
+    }
+
+    #[test]
+    fn processed_snapshot_route_hydration_failure_does_not_displace_dated_item() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "newer-bad", "gws", "P", "summary");
+        write_processed_item(root, "done", "older-good", "gws", "P", "summary");
+        set_processed_received_at(root, "done", "newer-bad", "2026-05-12T00:00:00Z");
+        set_processed_received_at(root, "done", "older-good", "2026-05-11T00:00:00Z");
+        fs::write(
+            root.join("inbox/items/done/newer-bad/route.md"),
+            [0xff, 0xfe],
+        )
+        .unwrap();
+
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            None,
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].id, "older-good");
+        assert!(snapshot.items[0].error.is_none());
+    }
+
+    #[test]
+    fn processed_snapshot_defers_malformed_manifest_error_beyond_dated_limit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_processed_config(root, "summary.md", "route.md", "extracted.md");
+        write_processed_item(root, "done", "dated", "gws", "P", "summary");
+        let malformed = root.join("inbox/items/done/malformed");
+        fs::create_dir_all(malformed.join("raw")).unwrap();
+        fs::write(malformed.join("raw/large.bin"), vec![0_u8; 1024]).unwrap();
+        fs::write(malformed.join("manifest.yaml"), "id: [invalid\n").unwrap();
+
+        PROCESSED_ERROR_HYDRATION_COUNT.with(|count| count.set(0));
+        let config = inbox_settings::load_runtime_config_or_legacy(root).unwrap();
+        let snapshot = scan_processed_snapshot_with_config(
+            root,
+            &config,
+            None,
+            Some(vec!["done".to_string()]),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].id, "dated");
+        assert_eq!(snapshot.counts.get("unknown"), Some(&1));
+        PROCESSED_ERROR_HYDRATION_COUNT.with(|count| assert_eq!(count.get(), 0));
+    }
+
+    #[test]
     fn digest_generated_after_compares_instants_across_offsets() {
         // 00:30Z is later than 09:00+09:00 (== 00:00Z) despite smaller wall-clock text.
         assert!(digest_generated_after(
@@ -3173,6 +3771,20 @@ inbox:
             project,
             summary_body,
         );
+    }
+
+    fn set_processed_received_at(root: &Path, status: &str, id: &str, received_at: &str) {
+        let manifest_path = root
+            .join("inbox/items")
+            .join(status)
+            .join(id)
+            .join("manifest.yaml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        fs::write(
+            manifest_path,
+            manifest.replace("2026-05-10T00:00:00Z", received_at),
+        )
+        .unwrap();
     }
 
     fn write_processed_item_custom(

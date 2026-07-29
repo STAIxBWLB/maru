@@ -109,7 +109,6 @@ import {
   prepareApproval,
   openInFileManager,
   revealInFileManager,
-  countInboxProcessedByChannel,
   readInboxProcessedItem,
   readInboxSourceRuns,
   readInboxRuntimeConfig,
@@ -125,6 +124,7 @@ import {
   scanInboxDrop,
   scanInboxEntries,
   scanInboxProcessedItems,
+  scanInboxProcessedSnapshot,
   scanWorkspaceEntries,
   scanVault,
   setActiveWorkspaceRoot,
@@ -170,7 +170,6 @@ import {
 } from "./lib/studio";
 import {
   readMaruSettings,
-  readWorkspaceConfig,
   listWorkspaceProjects,
   registerWorkspaceRoots,
   saveMaruSettings,
@@ -286,7 +285,6 @@ import type {
   WorkspaceFileEntry,
   WorkspaceEntryNode,
   WorkspaceMutationOutcome,
-  WorkspaceConfig,
   WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
@@ -304,7 +302,9 @@ import {
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
   normalizeMaruSettings,
+  readWorkspaceM365AuthConfig,
   resolveClassifierRuntime,
+  validateWorkspaceM365ProviderConfig,
   type MaruSettings,
   type MaruAppMode,
   type DocumentBrowserMode,
@@ -325,6 +325,7 @@ import {
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
+import { useWorkspaceConfigLoad } from "./lib/useWorkspaceConfigLoad";
 import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
 import {
@@ -887,7 +888,6 @@ function MainApp() {
     },
     hiddenDefaults: [],
   });
-  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
   const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
   const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
   const [explorerVisibility, setExplorerVisibility] =
@@ -1533,30 +1533,76 @@ function MainApp() {
     settingsWorkPath != null &&
     (settingsWorkspace?.visibility !== "public" || workspaceCan(settingsWorkspace, "modify"));
   const workspaceConfigPath = settingsWorkPath ?? inboxWorkspacePath;
+  const {
+    state: workspaceConfigLoad,
+    reload: reloadWorkspaceConfig,
+  } = useWorkspaceConfigLoad(workspaceConfigPath, {
+    validator: validateWorkspaceM365ProviderConfig,
+  });
+  const useDedicatedInboxConfig =
+    Boolean(inboxWorkspacePath) && inboxWorkspacePath !== workspaceConfigPath;
+  const {
+    state: dedicatedInboxWorkspaceConfigLoad,
+    reload: reloadDedicatedInboxWorkspaceConfig,
+  } = useWorkspaceConfigLoad(inboxWorkspacePath, {
+    enabled: useDedicatedInboxConfig,
+    validator: validateWorkspaceM365ProviderConfig,
+  });
+  const inboxWorkspaceConfigLoad = useDedicatedInboxConfig
+    ? dedicatedInboxWorkspaceConfigLoad
+    : workspaceConfigLoad;
+  const workspaceConfig =
+    workspaceConfigLoad.status === "ready" ? workspaceConfigLoad.config : null;
+  const inboxWorkspaceConfig =
+    inboxWorkspaceConfigLoad.status === "ready"
+      ? inboxWorkspaceConfigLoad.config
+      : null;
+  const inboxWorkspaceConfigReady =
+    inboxWorkspaceConfigLoad.workPath === inboxWorkspacePath &&
+    inboxWorkspaceConfigLoad.status === "ready";
+  const retryInboxWorkspaceConfig = useCallback(
+    () =>
+      useDedicatedInboxConfig
+        ? reloadDedicatedInboxWorkspaceConfig()
+        : reloadWorkspaceConfig(),
+    [
+      reloadDedicatedInboxWorkspaceConfig,
+      reloadWorkspaceConfig,
+      useDedicatedInboxConfig,
+    ],
+  );
+  const reportedInboxWorkspaceConfigErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    const configError =
+      inboxWorkspaceConfigLoad.workPath === inboxWorkspacePath &&
+      inboxWorkspaceConfigLoad.status === "error"
+        ? inboxWorkspaceConfigLoad.error
+        : null;
+    if (configError) {
+      reportedInboxWorkspaceConfigErrorRef.current = configError;
+      setError(configError);
+      return;
+    }
+    const previous = reportedInboxWorkspaceConfigErrorRef.current;
+    if (previous) {
+      reportedInboxWorkspaceConfigErrorRef.current = null;
+      setError((current) => (current === previous ? null : current));
+    }
+  }, [
+    inboxWorkspaceConfigLoad.error,
+    inboxWorkspaceConfigLoad.status,
+    inboxWorkspaceConfigLoad.workPath,
+    inboxWorkspacePath,
+  ]);
   const settingsWorkspaceStartupReady =
     !settingsWorkPath || Boolean(workspaceStates[settingsWorkPath]?.startupIoReady);
-  useEffect(() => {
-    let cancelled = false;
-    if (!workspaceConfigPath) {
-      setWorkspaceConfig(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void readWorkspaceConfig(workspaceConfigPath)
-      .then((config) => {
-        if (!cancelled) setWorkspaceConfig(config);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaceConfig(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceConfigPath]);
   const effectiveCommsSettings = useMemo(
-    () => applyWorkspaceCommsOverrides(maruSettings.comms, workspaceConfig),
-    [maruSettings.comms, workspaceConfig],
+    () => applyWorkspaceCommsOverrides(maruSettings.comms, inboxWorkspaceConfig),
+    [inboxWorkspaceConfig, maruSettings.comms],
+  );
+  const workspaceM365AuthConfig = useMemo(
+    () => readWorkspaceM365AuthConfig(inboxWorkspaceConfig),
+    [inboxWorkspaceConfig],
   );
   const effectiveMeetingsSettings = useMemo(
     () => applyWorkspaceMeetingsOverrides(maruSettings.meetings, workspaceConfig),
@@ -2793,7 +2839,11 @@ function MainApp() {
   }, [inboxRuntimeConfig, inboxWorkspacePath, updateGmailScanStatus]);
 
   const refreshOutlook = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (!inboxWorkspacePath || !effectiveCommsSettings.outlook.enabled) {
+    if (
+      !inboxWorkspacePath ||
+      !inboxWorkspaceConfigReady ||
+      !effectiveCommsSettings.outlook.enabled
+    ) {
       outlookRequestSeqRef.current += 1;
       outlookLoadingRef.current = false;
       outlookRefreshCacheRef.current = { fetchedAt: null, key: "" };
@@ -2847,7 +2897,12 @@ function MainApp() {
         setOutlookLoading(false);
       }
     }
-  }, [effectiveCommsSettings.outlook, inboxWorkspacePath, locale]);
+  }, [
+    effectiveCommsSettings.outlook,
+    inboxWorkspaceConfigReady,
+    inboxWorkspacePath,
+    locale,
+  ]);
 
   const refreshTelegram = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!inboxWorkspacePath || !effectiveCommsSettings.telegram.enabled) {
@@ -2929,6 +2984,7 @@ function MainApp() {
     processedItemsRef.current = [];
     processedItemsKeyRef.current = "";
     setProcessedItems([]);
+    setProcessedCounts({});
     setProcessedDetail(null);
     setProcessedError(null);
     setCommsRefreshing(false);
@@ -2962,6 +3018,7 @@ function MainApp() {
       processedItemsRef.current = [];
       processedItemsKeyRef.current = "";
       setProcessedItems([]);
+      setProcessedCounts({});
       setProcessedDetail(null);
       setProcessedLoading(false);
       setProcessedRefreshing(false);
@@ -2994,17 +3051,26 @@ function MainApp() {
     setProcessedRefreshing(hasLastGood);
     setProcessedError(null);
     try {
-      const items = await scanInboxProcessedItems({
+      const request = {
         workPath: inboxWorkspacePath,
         channel,
         statuses,
         query: processedDeferredQuery || null,
         limit: 120,
-      });
+      };
+      const snapshot =
+        appMode === "comms"
+          ? await scanInboxProcessedSnapshot(request)
+          : {
+              items: await scanInboxProcessedItems(request),
+              counts: null,
+            };
       if (requestId !== processedRequestSeqRef.current) return;
+      const { items } = snapshot;
       processedItemsRef.current = items;
       processedItemsKeyRef.current = requestKey;
       setProcessedItems(items);
+      if (snapshot.counts) setProcessedCounts(snapshot.counts);
       setProcessedDetail((current) =>
         current && items.some((item) => item.itemDir === current.item.itemDir)
           ? current
@@ -3031,16 +3097,11 @@ function MainApp() {
   const refreshSourceRuns = useCallback(async () => {
     if (!inboxWorkspacePath) {
       setSourceRuns([]);
-      setProcessedCounts({});
       return;
     }
     try {
-      const [runs, counts] = await Promise.all([
-        readInboxSourceRuns(inboxWorkspacePath),
-        countInboxProcessedByChannel(inboxWorkspacePath),
-      ]);
+      const runs = await readInboxSourceRuns(inboxWorkspacePath);
       setSourceRuns(runs);
-      setProcessedCounts(counts);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -3056,11 +3117,19 @@ function MainApp() {
     if (inboxRuntimeConfig.gmail?.enabled !== false) {
       checks.push(checkGwsAuth(inboxWorkspacePath));
     }
-    if (effectiveCommsSettings.outlook.enabled) {
+    if (inboxWorkspaceConfigReady && effectiveCommsSettings.outlook.enabled) {
       checks.push(
         checkMsoAuth(
           inboxWorkspacePath,
           effectiveCommsSettings.outlook.m365Path,
+        ).catch(
+          (err): ProviderAuthStatus => ({
+            provider: "mso",
+            state: "error",
+            detail: err instanceof Error ? err.message : String(err),
+            cliPath: effectiveCommsSettings.outlook.m365Path,
+            account: null,
+          }),
         ),
       );
     }
@@ -3087,6 +3156,7 @@ function MainApp() {
     effectiveCommsSettings.outlook,
     effectiveCommsSettings.telegram,
     inboxRuntimeConfig.gmail?.enabled,
+    inboxWorkspaceConfigReady,
     inboxWorkspacePath,
   ]);
 
@@ -3128,10 +3198,15 @@ function MainApp() {
     }
   }, []);
 
-  const refreshCommsDashboard = useCallback(async () => {
+  const refreshCommsDashboard = useCallback(async (
+    options: { retryWorkspaceConfig?: boolean } = {},
+  ) => {
     const requestId = ++commsDashboardRequestSeqRef.current;
     setCommsRefreshing(true);
     try {
+      if (options.retryWorkspaceConfig) {
+        await retryInboxWorkspaceConfig();
+      }
       const polling = telegramPollingStatus()
         .then((status) => {
           if (requestId === commsDashboardRequestSeqRef.current) {
@@ -3156,7 +3231,6 @@ function MainApp() {
       await Promise.allSettled([
         refreshCommsReadiness(),
         refreshSourceRuns(),
-        refreshProcessedItems(),
         refreshProcessingMissions(),
         polling,
         migration,
@@ -3169,9 +3243,9 @@ function MainApp() {
   }, [
     isMac,
     refreshCommsReadiness,
-    refreshProcessedItems,
     refreshProcessingMissions,
     refreshSourceRuns,
+    retryInboxWorkspaceConfig,
   ]);
 
   // Latest-callback ref so the comms-mode effect below re-runs only on mode or
@@ -3282,6 +3356,10 @@ function MainApp() {
   const decideOutlookItem = useCallback(
     async (id: string, decision: InboxDecision) => {
       if (decision === "pending") return;
+      if (!inboxWorkspacePath || !inboxWorkspaceConfigReady) {
+        setOutlookError(t("comms.outlook.workspaceNotReady"));
+        return;
+      }
       const approvalId = await approvalGate.confirmApproval({
         kind: decision === "accepted" ? "outlook.accept" : "outlook.reject",
         summary:
@@ -3311,7 +3389,13 @@ function MainApp() {
         setOutlookError(err instanceof Error ? err.message : String(err));
       }
     },
-    [effectiveCommsSettings.outlook.m365Path, approvalGate, inboxWorkspacePath, t],
+    [
+      effectiveCommsSettings.outlook.m365Path,
+      approvalGate,
+      inboxWorkspaceConfigReady,
+      inboxWorkspacePath,
+      t,
+    ],
   );
 
   const decideTelegramItem = useCallback(
@@ -3635,6 +3719,7 @@ function MainApp() {
   const processCommsChannelNow = useCallback(
     async (channel: string) => {
       if (!inboxWorkspacePath) return;
+      if (channel === "mso" && !inboxWorkspaceConfigReady) return;
       if (channel === "kakao") {
         await processInboxKeys([], channel, false);
         return;
@@ -3719,6 +3804,7 @@ function MainApp() {
       effectiveCommsSettings.outlook,
       effectiveCommsSettings.telegram,
       inboxRuntimeConfig.gmail,
+      inboxWorkspaceConfigReady,
       inboxWorkspacePath,
       processInboxKeys,
       refreshInbox,
@@ -3911,7 +3997,13 @@ function MainApp() {
   }, [inboxWorkspacePath, refreshInbox, refreshProcessedItems]);
 
   useEffect(() => {
-    if (appMode !== "comms") return;
+    if (
+      appMode !== "comms" ||
+      inboxWorkspaceConfigLoad.status === "idle" ||
+      inboxWorkspaceConfigLoad.status === "pending"
+    ) {
+      return;
+    }
     let disposed = false;
     let unlistenTelegram: (() => void) | null = null;
     void refreshCommsDashboardRef.current();
@@ -3939,7 +4031,7 @@ function MainApp() {
       disposed = true;
       unlistenTelegram?.();
     };
-  }, [appMode, inboxWorkspacePath]);
+  }, [appMode, inboxWorkspaceConfigLoad.status, inboxWorkspacePath]);
 
   useEffect(() => {
     // In comms this is also the filter/search refetch path: the callback
@@ -5985,7 +6077,11 @@ function MainApp() {
   }, [inboxRuntimeConfig.gmail?.gws_path, inboxWorkspacePath, updateLayoutSettings]);
 
   const startMsoLogin = useCallback(() => {
-    const command = m365LoginCommand(effectiveCommsSettings.outlook.m365Path);
+    if (!inboxWorkspaceConfigReady) return;
+    const command = m365LoginCommand(
+      effectiveCommsSettings.outlook.m365Path,
+      workspaceM365AuthConfig,
+    );
     setTerminalLaunchRequest({
       kind: "shell",
       nonce: Date.now(),
@@ -5995,7 +6091,13 @@ function MainApp() {
       extraArgs: command.args,
     });
     updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
-  }, [effectiveCommsSettings.outlook.m365Path, inboxWorkspacePath, updateLayoutSettings]);
+  }, [
+    effectiveCommsSettings.outlook.m365Path,
+    inboxWorkspaceConfigReady,
+    inboxWorkspacePath,
+    updateLayoutSettings,
+    workspaceM365AuthConfig,
+  ]);
 
   const refreshMigrationServices = useCallback(() => {
     if (!isMac) {
@@ -6052,7 +6154,8 @@ function MainApp() {
       void refreshProcessedItems();
       void refreshProcessingMissions();
     } else if (appMode === "comms") {
-      void refreshCommsDashboard();
+      void refreshCommsDashboard({ retryWorkspaceConfig: true });
+      void refreshProcessedItems();
     } else if (appMode === "meetings") {
       void refreshProcessingMissions();
     } else if (appMode === "tasks") {
@@ -8588,6 +8691,8 @@ function MainApp() {
             }}
             onGwsReauth={startGwsAuth}
             onMsoReauth={startMsoLogin}
+            msoReauthDisabled={!inboxWorkspaceConfigReady}
+            msoProcessDisabled={!inboxWorkspaceConfigReady}
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}
             onTelegramLogin={startTelegramLogin}

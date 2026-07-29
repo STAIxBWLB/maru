@@ -764,6 +764,38 @@ export function serializeMaruSettings(settings: MaruSettings): unknown {
   return normalizeMaruSettings(settings);
 }
 
+export interface WorkspaceM365AuthConfig {
+  appId: string | null;
+  tenantId: string | null;
+}
+
+export function readWorkspaceM365AuthConfig(
+  workspaceConfig: { io?: unknown } | null,
+): WorkspaceM365AuthConfig {
+  const io = isRecord(workspaceConfig?.io) ? workspaceConfig.io : null;
+  const providers = isRecord(io?.providers) ? io.providers : null;
+  const outlook = canonicalM365ProviderConfig(providers);
+  return {
+    appId: readProviderString(outlook, ["app_id", "appId"]),
+    tenantId: readProviderString(outlook, ["tenant_id", "tenantId"]),
+  };
+}
+
+export function validateWorkspaceM365ProviderConfig(
+  workspaceConfig: { io?: unknown } | null,
+): string | null {
+  const io = isRecord(workspaceConfig?.io) ? workspaceConfig.io : null;
+  const providers = isRecord(io?.providers) ? io.providers : null;
+  if (!providers) return null;
+  const providerName = hasOwn(providers, "mso")
+    ? "mso"
+    : hasOwn(providers, "outlook")
+      ? "outlook"
+      : null;
+  if (!providerName || isRecord(providers[providerName])) return null;
+  return `Invalid workspace.config.yaml: io.providers.${providerName} must be a mapping`;
+}
+
 export function applyWorkspaceCommsOverrides(
   settings: CommsSettings,
   workspaceConfig: { io?: unknown } | null,
@@ -771,7 +803,7 @@ export function applyWorkspaceCommsOverrides(
   const io = isRecord(workspaceConfig?.io) ? workspaceConfig.io : null;
   const providers = isRecord(io?.providers) ? io.providers : null;
   if (!providers) return settings;
-  const outlook = providerConfig(providers, "outlook", "mso");
+  const outlook = canonicalM365ProviderConfig(providers);
   const telegram = providerConfig(providers, "telegram");
   return {
     outlook: {
@@ -1680,6 +1712,35 @@ function providerConfig(
   for (const name of names) {
     const value = providers[name];
     if (isRecord(value)) return value;
+  }
+  return null;
+}
+
+function canonicalM365ProviderConfig(
+  providers: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!providers) return null;
+  if (hasOwn(providers, "mso")) {
+    return isRecord(providers.mso) ? providers.mso : null;
+  }
+  if (hasOwn(providers, "outlook")) {
+    return isRecord(providers.outlook) ? providers.outlook : null;
+  }
+  return null;
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function readProviderString(
+  provider: Record<string, unknown> | null,
+  keys: string[],
+): string | null {
+  if (!provider) return null;
+  for (const key of keys) {
+    const value = provider[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
 }

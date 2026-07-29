@@ -11,6 +11,7 @@ use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::cli_path::{augmented_path, is_executable};
+use crate::command_output::{run_command_with_timeout, BoundedOutput, CommandTermination};
 use crate::inbox_drop::{
     auth_status, stage_message_json, stage_message_outcome, ProviderAuthStatus, StageOutcome,
 };
@@ -25,6 +26,10 @@ const TELEGRAM_STAGE_KIND: &str = "telegram.stage";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 60;
 const MIN_POLL_INTERVAL_SECONDS: u64 = 30;
+#[cfg(not(test))]
+const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
 pub struct TelegramIoState {
@@ -178,7 +183,15 @@ pub fn stage_telegram_items(
 }
 
 #[tauri::command]
-pub fn check_telegram_auth(options: TelegramFetchOptions) -> Result<ProviderAuthStatus, String> {
+pub async fn check_telegram_auth(
+    options: TelegramFetchOptions,
+) -> Result<ProviderAuthStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || check_telegram_auth_now(options))
+        .await
+        .map_err(|err| format!("telegram_probe_task_failed: {err}"))?
+}
+
+fn check_telegram_auth_now(options: TelegramFetchOptions) -> Result<ProviderAuthStatus, String> {
     let config = match resolve_telegram_command_config(&options) {
         Ok(config) => config,
         Err(err) => {
@@ -202,16 +215,36 @@ pub fn check_telegram_auth(options: TelegramFetchOptions) -> Result<ProviderAuth
     if let Some(monitor_config_path) = &config.monitor_config_path {
         cmd.arg("--config-file").arg(monitor_config_path);
     }
-    let output = cmd
-        .current_dir(
-            config
-                .script_path
-                .parent()
-                .unwrap_or_else(|| Path::new(".")),
-        )
-        .no_window()
-        .output()
+    cmd.current_dir(
+        config
+            .script_path
+            .parent()
+            .unwrap_or_else(|| Path::new(".")),
+    );
+    let output = run_command_with_timeout(&mut cmd, PROVIDER_READINESS_TIMEOUT, |_, _| false)
         .map_err(|err| format!("telegram_spawn_failed: {err}"))?;
+    let detail = output.diagnostic_tail(4096).unwrap_or_default();
+    if output.termination == CommandTermination::TimedOut {
+        if classify_telegram_auth_state(&detail) == "auth_required" {
+            return Ok(auth_status(
+                "telegram",
+                "auth_required",
+                Some("Telegram authentication is required.".to_string()),
+                Some(config.python_path),
+                None,
+            ));
+        }
+        return Ok(auth_status(
+            "telegram",
+            "error",
+            Some(provider_timeout_detail(
+                "telegram_timeout: readiness probe exceeded 10 seconds",
+                &output,
+            )),
+            Some(config.python_path),
+            None,
+        ));
+    }
     if output.status.success() {
         return Ok(auth_status(
             "telegram",
@@ -221,19 +254,32 @@ pub fn check_telegram_auth(options: TelegramFetchOptions) -> Result<ProviderAuth
             None,
         ));
     }
-    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
-        .into_iter()
-        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let state = classify_telegram_auth_state(&detail);
     Ok(auth_status(
         "telegram",
-        classify_telegram_auth_state(&detail),
-        Some(detail),
+        state,
+        Some(if state == "auth_required" {
+            "Telegram authentication is required.".to_string()
+        } else {
+            provider_failure_detail(&output, "Telegram command failed without a safe diagnostic")
+        }),
         Some(config.python_path),
         None,
     ))
+}
+
+fn provider_timeout_detail(prefix: &str, output: &BoundedOutput) -> String {
+    match output.safe_diagnostic_tail(1024) {
+        Some(detail) if !detail.is_empty() => format!("{prefix}. Diagnostic tail:\n{detail}"),
+        _ => prefix.to_string(),
+    }
+}
+
+fn provider_failure_detail(output: &BoundedOutput, fallback: &str) -> String {
+    output
+        .safe_diagnostic_tail(4096)
+        .filter(|detail| !detail.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 #[tauri::command]
@@ -785,5 +831,23 @@ mod tests {
             classify_telegram_setup_state("env_missing: python not found"),
             "env_missing"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_timeout_failure_detail_suppresses_camel_case_api_hash() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf '{\"apiHash\":\"TELEGRAM-SECRET\",\"error\":\"network unavailable\"}' >&2; exit 1",
+        ]);
+        let output =
+            run_command_with_timeout(&mut command, Duration::from_secs(1), |_, _| false).unwrap();
+
+        let detail =
+            provider_failure_detail(&output, "Telegram command failed without a safe diagnostic");
+
+        assert_eq!(detail, "Telegram command failed without a safe diagnostic");
+        assert!(!detail.contains("TELEGRAM-SECRET"));
     }
 }

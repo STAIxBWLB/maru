@@ -57,6 +57,8 @@ interface CommsPaneProps {
   onRevealPath: (path: string) => void;
   onGwsReauth: () => void;
   onMsoReauth: () => void;
+  msoReauthDisabled?: boolean;
+  msoProcessDisabled?: boolean;
   onStartTelegramPolling: () => void;
   onStopTelegramPolling: () => void;
   onTelegramLogin: () => void;
@@ -97,6 +99,8 @@ export function CommsPane({
   onRevealPath,
   onGwsReauth,
   onMsoReauth,
+  msoReauthDisabled = false,
+  msoProcessDisabled = false,
   onStartTelegramPolling,
   onStopTelegramPolling,
   onTelegramLogin,
@@ -214,6 +218,7 @@ export function CommsPane({
             runningChannels={runningChannels}
             progressByChannel={progressByChannel}
             actionBusy={actionBusy}
+            msoProcessDisabled={msoProcessDisabled}
             onProcessNow={onProcessNow}
             onSelect={onSourceFilter}
           />
@@ -226,6 +231,7 @@ export function CommsPane({
               progress={progressByChannel.get(sourceFilter) ?? null}
               processedCount={processedByChannel.get(sourceFilter) ?? 0}
               actionBusy={actionBusy}
+              processDisabled={sourceFilter === "mso" && msoProcessDisabled}
               onProcessNow={onProcessNow}
             />
             <SourceControls
@@ -244,6 +250,7 @@ export function CommsPane({
                       ? onTelegramLogin
                       : undefined
               }
+              msoReauthDisabled={msoReauthDisabled}
               onDeepProcess={sourceFilter === "telegram" ? onDeepProcess : undefined}
               onStartPolling={onStartTelegramPolling}
               onStopPolling={onStopTelegramPolling}

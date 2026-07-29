@@ -8,6 +8,7 @@ mod binary_viewer;
 mod calendar_search;
 mod cli;
 mod cli_path;
+mod command_output;
 mod diagram;
 mod document;
 mod e2e_flow;
@@ -109,8 +110,8 @@ use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, 
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
     read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
-    scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items, stage_inbox_drop_files,
-    trash_inbox_items,
+    scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items, scan_inbox_processed_snapshot,
+    stage_inbox_drop_files, trash_inbox_items,
 };
 use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_settings::{
@@ -309,6 +310,7 @@ pub fn run() {
             scan_inbox_drop,
             scan_inbox_entries,
             scan_inbox_processed_items,
+            scan_inbox_processed_snapshot,
             read_inbox_processed_item,
             read_inbox_source_runs,
             count_inbox_processed_by_channel,

@@ -437,6 +437,11 @@ export interface InboxProcessedItem {
   error: string | null;
 }
 
+export interface InboxProcessedSnapshot {
+  items: InboxProcessedItem[];
+  counts: Record<string, number>;
+}
+
 export interface InboxProcessedRawFile {
   path: string;
   relPath: string;
@@ -1123,4 +1128,3 @@ export interface TemplateEntry {
   origin: string | null;
   updatedAt: string | null;
 }
-
