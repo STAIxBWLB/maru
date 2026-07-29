@@ -22,7 +22,7 @@ description: >
 HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부터 대한민국 정부 공문서의 법정 저장 형식이다. 내부 구조는 zip + OWPML(Open Word-Processor Markup Language, KS X 6101). 이 스킬은 raw ZIP/XML 처리(lxml, 슬롯·구조 편집)와 hwp-cli(Rust) 네이티브 위임(생성·변환·렌더·검증)을 사용하여 다섯 가지 작업 경로를 지원한다:
 
 1. **양식 따라가기 (`styled --reference`)** — 주어진 공식 양식 파일의 폰트·여백·스타일을 그대로 사용하여 본문만 채움. 사업 공고 HWP 양식이 있을 때 최우선 경로.
-2. **신규 생성 (`styled` / `create`)** — 양식이 없을 때 `hwp new` + **공문서 기본 스타일 후처리 자동 적용**(표 칼럼 폭 내용 비례·헤더행 #F2F2F2 음영+굵게+가운데·짧은 칼럼 가운데·제목 가운데 15pt — corpus 근거 `references/style-patterns.md`). `--plain`으로 생략. (`--preset`은 no-op 하위호환.)
+2. **신규 생성 (`styled` / `create`)** — 양식이 없을 때 `hwp new` + **공문서 기본 스타일 후처리 자동 적용**(표 칼럼 폭 내용 비례·헤더행 #F2F2F2 음영+굵게+가운데·짧은 칼럼 가운데·제목 가운데 15pt — corpus 근거 `references/style-patterns.md`). `styled --preset`은 기안문/보고서의 폰트·여백·번호·쪽번호를 hwp-cli에 적용하고, `--plain`은 후처리만 생략.
 3. **템플릿 채우기 (`fill`)** — 내장 `templates/*.hwpx`의 `{{anchor}}` 치환. 기안문/사업계획서 뼈대 사용.
 4. **편집** (`edit`, `edit-section`, `unpack`+`repack`) — 기존 문서 수정.
 5. **레퍼런스 양식 복원·편집 (`analyze` → `fill`/`edit-section` → `validate` → `guard`)** — 첨부된 임의 공문 양식의 서식·구조를 보존하며 본문만 안전하게 교체하는 권장 경로. 아래 "robust 편집 엔진" 참조.
@@ -44,7 +44,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | 읽기 (markdown) | `./hwpx read <file.hwpx>` (text/md는 hwp-cli `cat` 우선·lxml 폴백) |
 | 메타 요약 | `./hwpx summary <file.hwpx>` |
 | 구조화 JSON | `./hwpx read <file.hwpx> --format json` |
-| **보기 좋은 생성 (양식 없음)** | `./hwpx styled --markdown <md> -o <out>` (공문서 스타일 자동, `--plain` 생략) |
+| **보기 좋은 생성 (양식 없음)** | `./hwpx styled --preset gongmun|bogoseo --markdown <md> -o <out>` (`gian|report`도 허용, `--plain`은 후처리만 생략) |
 | **양식 따라가기** | `./hwpx styled --reference <양식.hwpx> --markdown <md> -o <out>` |
 | **기존 파일 표/제목 다듬기** | `./hwpx beautify <file.hwpx> [-o out] [--header-fill "#D9E2F3"]` |
 | 템플릿 채우기 (run-aware) | `./hwpx fill <template> --kv key=value -o out.hwpx` |
@@ -133,16 +133,19 @@ hwpx 열의 불릿 사다리는 **목표 계약**이다. 현재 릴리스 동작
 
 ### 1-B. 양식이 없는 경우 (`styled`)
 
-양식 파일이 없으면 `styled --markdown`으로 생성한다. 경로는 하나다: hwp-cli `new` 기본 스타일 생성 후 공문서 style_pass 후처리(표 칼럼 폭 비례, 헤더행 음영, 제목 가운데). 공통 적용: A4 세로, 여백 30·15·20·15mm, 가운데정렬 제목·소제목, 좌측정렬 본문, 굵은 소제목.
+양식 파일이 없으면 `styled --markdown`으로 생성한다. hwp-cli `new --preset`으로 문서 기본 스타일을 만든 뒤 공문서 style_pass 후처리(표 칼럼 폭 비례, 헤더행 음영, 제목 가운데)를 적용한다.
 
 ```bash
-./hwpx styled --markdown 기안문.md \
+./hwpx styled --preset gongmun --markdown 기안문.md \
   --header "예시대학교 AI학과" \
   --footer "- # / ## -" \
   -o out.hwpx
 ```
 
-> `--preset gongmun|bogoseo`는 하위호환 no-op이다(hwp-cli가 `new --preset`을 제거해 출력에 영향 없음). 기관별 폰트·크기·여백이 필요하면 생성 후 `beautify` 조정, 또는 기관 양식 파일을 기준으로 slot 치환(§1-A)한다.
+- `gongmun`과 `gian`은 hwp-cli의 `gian` 프리셋(기안문·공문), `bogoseo`와 `report`는 `report` 프리셋(보고서·사업계획서)에 매핑됨.
+- `--plain`은 style_pass 후처리만 생략하며 preset은 그대로 적용됨.
+- `--reference` 경로는 참조 양식을 보존하므로 preset을 적용하지 않음.
+- preset 생성에는 `hwp new --preset` 지원 바이너리(hwp-cli v0.4.1 이상)가 필요함. 자동 탐색은 지원 바이너리 중 최고 버전을 선택하며, `HWP_CLI` 명시 지정본이 미지원이면 다른 설치본으로 조용히 우회하지 않고 갱신 방법을 안내함.
 
 ### 입력 markdown 규칙
 
@@ -491,7 +494,7 @@ hwp edit 결재.hwpx -o 날인.hwpx --seal "(인)=>seal.png@18mm"     # 크기 �
 
 - `create` / `write-java` — markdown(또는 title/body/JSON 블록)을 받아 `hwp new --from`으로 HWPX 생성. `write-java`는 레거시 별칭(앵커 export 폴백 계약 유지, 더 이상 Java 미사용).
 - **문서 메타데이터**: `hwp new`는 `--set-meta "키=값"`(키: `title`/`author`/`subject`/`keywords`, 반복 가능)으로 제목·작성자 등을 지정한다. 기존 문서는 `hwp edit --set-meta`로 갱신(§4).
-- `styled --markdown <md> -o <out>` — `hwp new` 생성 후 공문서 스타일 후처리. `--preset gongmun|bogoseo`는 하위호환용 no-op(hwp-cli가 `--preset`을 제거 — 출력에 영향 없음).
+- `styled --markdown <md> -o <out>` — `hwp new --preset` 생성 후 공문서 스타일 후처리. `gongmun|gian`은 `gian`, `bogoseo|report`는 `report`로 전달. `--plain`은 후처리만 생략.
 - `styled --reference <양식> ...` — 참조 템플릿의 `{{슬롯}}`을 lxml 엔진(`hwpx_xml.edit_text`)으로 채움(충실도 보존).
 - **공문서 스타일 후처리(`style_pass.py`)** — 템플릿 없는 생성 전 경로에 자동. 표: 칼럼 폭 내용 비례(2col 라벨:값 1:3~1:4, 좁은 칼럼 최소 12mm, 균등 내용은 균등 유지, 총폭 보존), 헤더행 음영 #F2F2F2+굵게+가운데, 짧은 칼럼(표시폭≤8) 본문 셀 가운데; 제목 H1 가운데 15pt 굵게. `--plain` 생략, 기존 파일은 `beautify` (`--header-fill`, `--no-title-center`). 멱등·이미 스타일된 표 불가침(균등 폭 아님/borderFill 혼합 시 스킵). 패턴 근거: `references/style-patterns.md` (workspace 실문서 137건 분석).
 

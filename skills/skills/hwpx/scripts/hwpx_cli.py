@@ -16,7 +16,7 @@ Subcommands:
         (전체 표 폭 유지하며 열 추가 — 기존 열 균등 축소, 병합 표는 거부)
   fill-table <file> --data tables.json [-o out]   (행 자동 증식 + 셀 채우기)
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file] [--plain]
-  styled -o <out.hwpx> [--preset gongmun|bogoseo (no-op, 하위호환)] [--reference form.hwpx]
+  styled -o <out.hwpx> [--preset gongmun|bogoseo|gian|report] [--reference form.hwpx]
          [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F] [--plain]
   beautify <in.hwpx> [-o out.hwpx] [--header-fill "#F2F2F2"] [--no-title-center]
   validate <file.hwpx>
@@ -62,6 +62,12 @@ IMAGE_SUFFIXES = (".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".wm
 # 이 스킬이 전제하는 hwp-cli 최소 버전. 0.3.0 미만은 hwpx 쓰기에서 수식(<hp:equation>)을
 # 경고 없이 통째로 버린다(GE-14). 편집·변환만 해도 유실되므로 경고 대상.
 HWP_CLI_MIN = (0, 3, 0)
+STYLED_PRESET_ALIASES = {
+    "gongmun": "gian",
+    "gian": "gian",
+    "bogoseo": "report",
+    "report": "report",
+}
 
 
 # helpers
@@ -356,6 +362,67 @@ def _find_hwp_cli() -> str | None:
     return chosen[1]
 
 
+@functools.lru_cache(maxsize=None)
+def _supports_new_preset(binary: str) -> bool:
+    """해당 hwp-cli가 `hwp new --preset`을 실제로 제공하는지 확인한다.
+
+    버전 번호만으로 판단하지 않는다. 같은 개발 버전의 서로 다른 빌드가 PATH와
+    워크스페이스에 함께 있을 수 있기 때문이다.
+    """
+    try:
+        proc = subprocess.run(
+            [binary, "new", "--help"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = (
+        proc.stdout.decode("utf-8", "ignore")
+        + "\n"
+        + proc.stderr.decode("utf-8", "ignore")
+    )
+    return proc.returncode == 0 and "--preset" in help_text
+
+
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_new_preset() -> str | None:
+    """`new --preset`을 제공하는 hwp-cli 중 가장 높은 버전을 선택한다.
+
+    `$HWP_CLI`가 명시되면 다른 설치본으로 우회하지 않는다. 자동 탐색일 때만
+    preset 미지원 사본을 제외하고 PATH/cargo/dev 후보 중 가장 높은 버전을 쓴다.
+    """
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_new_preset(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if (
+            version
+            and _supports_new_preset(candidate)
+            and (chosen is None or version > chosen[0])
+        ):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
+
+
 def _hwp_cat(path: Path, fmt: str = "markdown") -> str:
     """hwp-cli `cat` 텍스트 추출 (stdout만, 경고는 stderr). fmt: plain|markdown|json|html."""
     tool = _find_hwp_cli()
@@ -381,9 +448,18 @@ def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
         return None
 
 
-def _hwp_cli_or_die() -> str:
-    tool = _find_hwp_cli()
+def _hwp_cli_or_die(*, require_new_preset: bool = False) -> str:
+    tool = _find_hwp_cli_with_new_preset() if require_new_preset else _find_hwp_cli()
     if not tool:
+        if require_new_preset:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp new --preset`을 지원하지 않음. "
+                "hwp-cli v0.4.1 이상으로 `brew update && brew upgrade hwp`하거나 "
+                "preset 지원 바이너리를 HWP_CLI로 지정할 것",
+            )
         _die(1, "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI 지정")
     return tool
 
@@ -399,16 +475,18 @@ def _hwp_env() -> dict:
     return env
 
 
-def _run_hwp(argv: list) -> subprocess.CompletedProcess:
+def _run_hwp(
+    argv: list, *, require_new_preset: bool = False
+) -> subprocess.CompletedProcess:
     """확장된 hwp-cli에 위임 실행 (capture)."""
-    tool = _hwp_cli_or_die()
+    tool = _hwp_cli_or_die(require_new_preset=require_new_preset)
     return subprocess.run([tool, *argv], capture_output=True, text=True, env=_hwp_env())
 
 
 def _new_from_markdown(
     md_text: str,
     out: Path,
-    preset: str = "plain",
+    preset: str | None = None,
     *,
     plain: bool = False,
     base_dir: Path | None = None,
@@ -416,8 +494,8 @@ def _new_from_markdown(
     """markdown을 임시 파일로 써서 hwp-cli `new`에 위임 (문서 생성 통합 경로).
 
     생성 후 공문서 기본 스타일 후처리(style_pass — 표 칼럼 폭/헤더 음영/제목 가운데)를
-    적용한다. `plain=True`면 생략. preset은 하위호환용으로 받되 무시한다 — hwp-cli가
-    `new --preset`을 제거해 기본 스타일로만 생성한다.
+    적용한다. `plain=True`면 후처리만 생략한다. preset이 지정되면 하위호환 별칭을
+    hwp-cli의 canonical 이름으로 바꿔 `hwp new --preset`에 전달한다.
 
     `base_dir`: 상대경로 이미지(`![alt](img.png)`)의 해석 기준. hwp-cli `new`는 md 파일
     위치 기준으로 이미지를 찾으므로, 원본 md가 있으면 그 디렉터리에 임시 파일을 둬야
@@ -425,7 +503,9 @@ def _new_from_markdown(
     """
     import tempfile
 
-    _ = preset  # ponytail: hwp-cli --preset 제거됨 → 무시(기본 스타일). 인자 시그니처만 유지.
+    canonical_preset = STYLED_PRESET_ALIASES.get(preset) if preset else None
+    if preset and canonical_preset is None:
+        _die(1, f"알 수 없는 preset: {preset}")
     tf = tempfile.NamedTemporaryFile(
         "w",
         suffix=".md",
@@ -436,7 +516,10 @@ def _new_from_markdown(
     try:
         tf.write(md_text)
         tf.close()
-        proc = _run_hwp(["new", "--from", tf.name, "-o", str(out)])
+        cmd = ["new", "--from", tf.name, "-o", str(out)]
+        if canonical_preset:
+            cmd.extend(["--preset", canonical_preset])
+        proc = _run_hwp(cmd, require_new_preset=canonical_preset is not None)
     finally:
         os.unlink(tf.name)
     if proc.returncode != 0:
@@ -757,7 +840,7 @@ def cmd_create(args) -> int:
     out = Path(args.out_file)
     base = Path(args.markdown).parent if args.markdown else None
     rc = _new_from_markdown(
-        _create_markdown_from_args(args), out, "plain", plain=args.plain, base_dir=base
+        _create_markdown_from_args(args), out, plain=args.plain, base_dir=base
     )
     if rc == 0:
         print(f"[hwpx] created -> {out}", file=sys.stderr)
@@ -774,7 +857,7 @@ def cmd_write_java(args) -> int:
     else:
         md = _tagged_lines_to_markdown(sys.stdin.read())
     base = Path(args.markdown).parent if args.markdown else None
-    rc = _new_from_markdown(md, out, "plain", plain=args.plain, base_dir=base)
+    rc = _new_from_markdown(md, out, plain=args.plain, base_dir=base)
     if rc == 0:
         print(f"[hwpx] created -> {out} (engine=hwp-cli)", file=sys.stderr)
     return rc
@@ -782,7 +865,7 @@ def cmd_write_java(args) -> int:
 
 def cmd_styled(args) -> int:
     """비참조 생성은 hwp-cli `new` + 공문서 스타일 후처리(--plain 시 생략);
-    --reference(슬롯 채우기)·블록 JSON은 lxml 코어 유지. --preset은 하위호환용 무시."""
+    --reference(슬롯 채우기)는 lxml 코어 유지. --preset은 비참조 생성에만 적용."""
     if not args.reference and (args.markdown or args.stdin_markdown):
         md_text = (
             Path(args.markdown).read_text(encoding="utf-8")
@@ -791,7 +874,9 @@ def cmd_styled(args) -> int:
         )
         out = Path(args.output)  # styled는 -o 필수
         base = Path(args.markdown).parent if args.markdown else None
-        rc = _new_from_markdown(md_text, out, "plain", plain=args.plain, base_dir=base)
+        rc = _new_from_markdown(
+            md_text, out, args.preset, plain=args.plain, base_dir=base
+        )
         if rc == 0:
             print(f"[hwpx] styled(hwp-cli) -> {out}", file=sys.stderr)
         return rc
@@ -836,7 +921,12 @@ def _styled_legacy(args) -> int:
     else:
         _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
     md = "\n\n".join(_json_payload_to_markdown(payload))
-    _new_from_markdown(md, Path(args.output), plain=getattr(args, "plain", False))
+    _new_from_markdown(
+        md,
+        Path(args.output),
+        args.preset,
+        plain=getattr(args, "plain", False),
+    )
     print(f"[hwpx] styled(hwp-cli) -> {args.output}", file=sys.stderr)
     return 0
 
@@ -1347,9 +1437,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output", required=True, help="출력 파일 경로")
     s.add_argument(
         "--preset",
-        choices=list(["gongmun", "bogoseo"]),
+        choices=list(STYLED_PRESET_ALIASES),
         default="gongmun",
-        help="하위호환 no-op (hwp-cli --preset 제거됨 — 출력 영향 없음)",
+        help="문서 프리셋: gongmun|gian=기안문, bogoseo|report=보고서",
     )
     s.add_argument("--reference", help="양식 파일 (slot이 있으면 raw ZIP/XML 치환)")
     s.add_argument("--markdown", help="markdown 파일")

@@ -17,6 +17,7 @@ Run: ~/.maru/env/.venv/bin/python3 -m pytest scripts/tests
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -122,6 +123,154 @@ def test_styled_reference_produces_valid_hwpx(tmp_path):
     assert _run("validate", str(out)).returncode == 0
 
 
+# --- styled preset delegation ----------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("public_name", "canonical_name"),
+    [
+        ("gongmun", "gian"),
+        ("gian", "gian"),
+        ("bogoseo", "report"),
+        ("report", "report"),
+    ],
+)
+def test_styled_preset_aliases_delegate_to_hwp_new(
+    tmp_path, monkeypatch, public_name, canonical_name
+):
+    calls = []
+
+    def fake_run(argv, *, require_new_preset=False):
+        calls.append((argv, require_new_preset))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(hwpx_cli, "_run_hwp", fake_run)
+    assert (
+        hwpx_cli._new_from_markdown(
+            "# 제목", tmp_path / "out.hwpx", public_name, plain=True
+        )
+        == 0
+    )
+    argv, require_new_preset = calls.pop()
+    assert argv[0:2] == ["new", "--from"]
+    assert argv[-2:] == ["--preset", canonical_name]
+    assert require_new_preset is True
+
+
+@pytest.mark.parametrize(
+    "source_kind",
+    ["markdown", "stdin_markdown", "json", "stdin_json"],
+)
+def test_styled_all_non_reference_sources_forward_preset(
+    tmp_path, monkeypatch, source_kind
+):
+    calls = []
+
+    def fake_run(argv, *, require_new_preset=False):
+        calls.append((argv, require_new_preset))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(hwpx_cli, "_run_hwp", fake_run)
+    md_path = tmp_path / "input.md"
+    md_path.write_text("# 제목\n\n본문\n", encoding="utf-8")
+    json_path = tmp_path / "input.json"
+    json_path.write_text('{"title":"제목","paragraphs":["본문"]}', encoding="utf-8")
+    stdin_payload = (
+        '{"title":"제목","paragraphs":["본문"]}'
+        if source_kind == "stdin_json"
+        else "# 제목\n\n본문\n"
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_payload))
+    args = argparse.Namespace(
+        output=str(tmp_path / f"{source_kind}.hwpx"),
+        preset="bogoseo",
+        reference=None,
+        markdown=str(md_path) if source_kind == "markdown" else None,
+        json=str(json_path) if source_kind == "json" else None,
+        stdin_markdown=source_kind == "stdin_markdown",
+        stdin_json=source_kind == "stdin_json",
+        header=None,
+        footer=None,
+        plain=True,
+    )
+
+    assert hwpx_cli.cmd_styled(args) == 0
+    argv, require_new_preset = calls.pop()
+    assert argv[0:2] == ["new", "--from"]
+    assert argv[-2:] == ["--preset", "report"]
+    assert require_new_preset is True
+
+
+def test_styled_reference_does_not_delegate_preset(tmp_path, monkeypatch):
+    md = tmp_path / "body.md"
+    md.write_text("# 제목\n\n본문 한 줄\n", encoding="utf-8")
+
+    def reject_new(*_args, **_kwargs):
+        raise AssertionError("reference path must not call hwp new")
+
+    monkeypatch.setattr(hwpx_cli, "_new_from_markdown", reject_new)
+    args = argparse.Namespace(
+        output=str(tmp_path / "reference.hwpx"),
+        preset="report",
+        reference=str(TEMPLATE),
+        markdown=str(md),
+        json=None,
+        stdin_markdown=False,
+        stdin_json=False,
+        header=None,
+        footer=None,
+        plain=False,
+    )
+    assert hwpx_cli.cmd_styled(args) == 0
+
+
+def test_create_and_write_java_keep_raw_hwp_new(tmp_path, monkeypatch):
+    presets = []
+
+    def fake_new(_md, _out, preset=None, **_kwargs):
+        presets.append(preset)
+        return 0
+
+    monkeypatch.setattr(hwpx_cli, "_new_from_markdown", fake_new)
+    create_args = argparse.Namespace(
+        out_file=str(tmp_path / "create.hwpx"),
+        markdown=None,
+        title="제목",
+        body="본문",
+        json=None,
+        plain=True,
+    )
+    write_args = argparse.Namespace(
+        out_file=str(tmp_path / "write.hwpx"),
+        markdown=None,
+        input=None,
+        plain=True,
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("P: 본문"))
+
+    assert hwpx_cli.cmd_create(create_args) == 0
+    assert hwpx_cli.cmd_write_java(write_args) == 0
+    assert presets == [None, None]
+
+
+def test_plain_skips_only_style_pass_not_preset(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(argv, *, require_new_preset=False):
+        calls.append((argv, require_new_preset))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(hwpx_cli, "_run_hwp", fake_run)
+    assert (
+        hwpx_cli._new_from_markdown(
+            "# 제목", tmp_path / "plain.hwpx", "gongmun", plain=True
+        )
+        == 0
+    )
+    argv, require_new_preset = calls.pop()
+    assert argv[-2:] == ["--preset", "gian"]
+    assert require_new_preset is True
+
+
 # --- hwp-cli passthrough: info / fields / bookmarks / render / convert ------------
 
 @requires_cli
@@ -219,3 +368,83 @@ def test_stale_version_warns_even_when_explicitly_pinned(tmp_path, monkeypatch, 
         assert "0.2.0" in capsys.readouterr().err  # 그러나 경고는 낸다
     finally:
         hwpx_cli._find_hwp_cli.cache_clear()
+
+
+def _stub_hwp(path: Path, version: str, *, supports_preset: bool) -> Path:
+    preset_help = 'echo "  --preset <PRESET>"' if supports_preset else 'echo "new help"'
+    path.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then\n'
+        f'  echo "hwp {version}"\n'
+        'elif [ "$1" = "new" ] && [ "$2" = "--help" ]; then\n'
+        f"  {preset_help}\n"
+        "else\n"
+        "  exit 2\n"
+        "fi\n"
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _clear_preset_resolver_caches() -> None:
+    hwpx_cli._find_hwp_cli.cache_clear()
+    hwpx_cli._find_hwp_cli_with_new_preset.cache_clear()
+    hwpx_cli._supports_new_preset.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("path_version", "path_supports_preset", "cargo_version"),
+    [
+        ("9.9.9", False, "0.4.0"),
+        ("0.4.0", False, "0.4.0"),
+        ("0.4.0", True, "9.9.9"),
+    ],
+)
+def test_preset_resolver_selects_highest_capable_build(
+    tmp_path,
+    monkeypatch,
+    path_version,
+    path_supports_preset,
+    cargo_version,
+):
+    path_hwp = _stub_hwp(
+        tmp_path / "path_hwp",
+        path_version,
+        supports_preset=path_supports_preset,
+    )
+    cargo_hwp = _stub_hwp(
+        tmp_path / "cargo_hwp", cargo_version, supports_preset=True
+    )
+    cargo_bin = tmp_path / ".cargo" / "bin"
+    cargo_bin.mkdir(parents=True)
+    (cargo_bin / "hwp").symlink_to(cargo_hwp)
+    monkeypatch.delenv("HWP_CLI", raising=False)
+    monkeypatch.setattr(hwpx_cli.shutil, "which", lambda _name: str(path_hwp))
+    monkeypatch.setattr(hwpx_cli.Path, "home", staticmethod(lambda: tmp_path))
+
+    _clear_preset_resolver_caches()
+    try:
+        assert hwpx_cli._find_hwp_cli_with_new_preset() == str(cargo_bin / "hwp")
+    finally:
+        _clear_preset_resolver_caches()
+
+
+def test_explicit_preset_incapable_binary_fails_actionably(
+    tmp_path, monkeypatch, capsys
+):
+    unsupported = _stub_hwp(
+        tmp_path / "hwp", "0.4.0", supports_preset=False
+    )
+    monkeypatch.setenv("HWP_CLI", str(unsupported))
+
+    _clear_preset_resolver_caches()
+    try:
+        with pytest.raises(SystemExit) as exc:
+            hwpx_cli._hwp_cli_or_die(require_new_preset=True)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "new --preset" in err
+        assert "v0.4.1" in err
+        assert "HWP_CLI" in err
+    finally:
+        _clear_preset_resolver_caches()
