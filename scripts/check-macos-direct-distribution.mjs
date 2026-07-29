@@ -130,11 +130,11 @@ if (packageJson && tauriConfig) {
 for (const needle of [
   "Prepare macOS signing",
   "Developer ID Application",
-  "Build and upload notarized Tauri bundles",
+  "Build and upload Tauri bundles",
   "APPLE_SIGNING_IDENTITY",
-  "APPLE_API_ISSUER_ID",
-  "APPLE_API_KEY_ID",
-  "APPLE_API_KEY",
+  "APPLE_ID",
+  "APPLE_PASSWORD",
+  "APPLE_TEAM_ID",
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow contains ${needle}`);
@@ -208,9 +208,9 @@ function checkGitHubSecrets() {
     "APPLE_CERTIFICATE",
     "APPLE_CERTIFICATE_PASSWORD",
     "KEYCHAIN_PASSWORD",
-    "APPLE_API_ISSUER_ID",
-    "APPLE_API_KEY_ID",
-    "APPLE_API_KEY",
+    "APPLE_ID",
+    "APPLE_PASSWORD",
+    "APPLE_TEAM_ID",
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
   ];

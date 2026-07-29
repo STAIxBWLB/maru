@@ -414,9 +414,9 @@ configure these GitHub Secrets and publish a new release:
 - `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
 - `APPLE_CERTIFICATE_PASSWORD`
 - `KEYCHAIN_PASSWORD`
-- `APPLE_API_ISSUER_ID`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_KEY` — base64 encoded App Store Connect API `.p8`
+- `APPLE_ID`
+- `APPLE_PASSWORD` — app-specific password
+- `APPLE_TEAM_ID`
 
 The release workflow imports `APPLE_CERTIFICATE` only inside the macOS signing
 prep step, and it sends Apple notarization env vars only to the Developer ID
@@ -443,9 +443,9 @@ Minimum Apple Developer setup for direct distribution:
 
    gh secret set APPLE_CERTIFICATE_PASSWORD --repo STAIxBWLB/maru
    gh secret set KEYCHAIN_PASSWORD --repo STAIxBWLB/maru
-   gh secret set APPLE_API_ISSUER_ID --repo STAIxBWLB/maru
-   gh secret set APPLE_API_KEY_ID --repo STAIxBWLB/maru
-   gh secret set APPLE_API_KEY --repo STAIxBWLB/maru
+   gh secret set APPLE_ID --repo STAIxBWLB/maru
+   gh secret set APPLE_PASSWORD --repo STAIxBWLB/maru
+   gh secret set APPLE_TEAM_ID --repo STAIxBWLB/maru
    ```
 
 4. Confirm release readiness without printing secret values:

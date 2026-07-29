@@ -8,6 +8,25 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.30 - 2026-07-29 - Agents at a Glance
+
+- **Claude Code, Codex, Kimi, and Kiro now share one settings home.** Each
+  runtime has its own account status, version and provider details, login
+  action, editable launch command, and usage view. One agent failing to report
+  no longer blocks the others.
+- **Quota windows stay visible while you work.** The new footer shows usage and
+  reset timing for every installed runtime that exposes quota data, refreshes
+  on a short interval and when Maru regains focus, and opens the relevant agent
+  settings when clicked.
+- **Kimi and Kiro are first-class terminal and headless runtimes.** Maru now
+  understands their launch commands, permission modes, account probes, and
+  runtime status. Kimi sessions also retain the native session id needed to
+  resume after a terminal tab is restored.
+- **Agent credentials stay behind the backend boundary.** Account and usage
+  probes return only normalized display data; tokens are neither logged nor
+  returned to the frontend. Unsupported usage providers degrade independently
+  instead of breaking the status bar.
+
 ## v0.4.29 - 2026-07-28 - The Graph Finds Its Vault
 
 - **Community colors work again.** Graph mode showed "No communities - run the
