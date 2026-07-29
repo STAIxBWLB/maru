@@ -144,6 +144,44 @@ describe("AgentUsageBar", () => {
     expect(mocks.openSettingsWindow).toHaveBeenCalledWith("/work/vault", "agents");
   });
 
+  it("debounces focus reloads to at most one per 30s", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.agentsUsageStatus.mockResolvedValue([usageEntry()]);
+      await render();
+      const calls = () => mocks.agentsUsageStatus.mock.calls.length;
+      expect(calls()).toBe(1);
+
+      // Focus right after the initial load: debounced.
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(calls()).toBe(1);
+
+      // Focus once the last load is older than 30s: reloads.
+      await act(async () => {
+        vi.advanceTimersByTime(31_000);
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(calls()).toBe(2);
+
+      // Focus again within 30s of that reload: debounced.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(calls()).toBe(2);
+
+      // The 60s interval still polls independently of focus.
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(calls()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("passes force only on manual refresh", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([usageEntry()]);
     await render();

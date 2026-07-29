@@ -21,6 +21,10 @@ use crate::win_process::NoWindow;
 
 const USAGE_CACHE_TTL: Duration = Duration::from_secs(60);
 
+/// How many bytes from the end of a codex rollout file to scan for
+/// `token_count` events (they are always the most recent events).
+const ROLLOUT_TAIL_BYTES: u64 = 256 * 1024;
+
 const AGENTS: [CliProviderKind; 4] = [
     CliProviderKind::Claude,
     CliProviderKind::Codex,
@@ -61,7 +65,9 @@ pub struct AgentUsageStatus {
     pub message: Option<String>,
 }
 
-#[tauri::command]
+// `async` commands run on Tauri's blocking thread pool instead of the main
+// thread; the bodies stay synchronous (CLI spawns, reqwest::blocking).
+#[tauri::command(async)]
 pub fn agents_account_status(
     command_overrides: Option<HashMap<String, String>>,
 ) -> Vec<AgentAccountStatus> {
@@ -71,7 +77,7 @@ pub fn agents_account_status(
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn agents_usage_status(
     command_overrides: Option<HashMap<String, String>>,
     force: Option<bool>,
@@ -385,7 +391,9 @@ fn codex_usage_windows() -> Result<Vec<UsageWindow>, UsageProbeError> {
     let rollout = newest_rollout_file(&sessions_root).ok_or_else(|| {
         UsageProbeError::Other("No codex rollout session files found".to_string())
     })?;
-    let text = std::fs::read_to_string(&rollout)
+    // Rollouts can be multi-MB; token_count events sit at the end, so read
+    // only the tail instead of the whole file.
+    let text = read_file_tail(&rollout, ROLLOUT_TAIL_BYTES)
         .map_err(|err| UsageProbeError::Other(format!("rollout read failed: {err}")))?;
     parse_codex_rollout_usage(&text)
         .ok_or_else(|| UsageProbeError::Other("No token_count data in codex rollout".to_string()))
@@ -684,28 +692,29 @@ fn home_file(segments: &[&str]) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// Newest `rollout-*.jsonl` anywhere under the codex sessions tree, by mtime.
+/// Newest `rollout-*.jsonl` in the codex sessions tree. Sessions live under
+/// `YYYY/MM/DD` directories, where lexicographic-descending names are also
+/// newest, so descend only the newest year → month → day instead of walking
+/// the whole tree (which can hold hundreds of rollouts).
 fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
-    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_symlink() {
-                continue;
-            }
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                stack.push(path);
-            } else if file_type.is_file()
+    fn newest_child_dir(dir: &Path) -> Option<PathBuf> {
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+            .map(|entry| entry.file_name())
+            .max()
+            .map(|name| dir.join(name))
+    }
+    let year = newest_child_dir(root)?;
+    let month = newest_child_dir(&year)?;
+    let day = newest_child_dir(&month)?;
+    std::fs::read_dir(&day)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
                 && path
                     .file_name()
                     .map(|name| {
@@ -713,19 +722,24 @@ fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
                         name.starts_with("rollout-") && name.ends_with(".jsonl")
                     })
                     .unwrap_or(false)
-            {
-                let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                if best
-                    .as_ref()
-                    .map(|(_, best_mtime)| mtime > *best_mtime)
-                    .unwrap_or(true)
-                {
-                    best = Some((path, mtime));
-                }
-            }
-        }
-    }
-    best.map(|(path, _)| path)
+        })
+        .max_by_key(|path| {
+            path.metadata()
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+}
+
+/// Read the last `max_bytes` of a file as (lossy) UTF-8. The first line of a
+/// tail chunk may be partial; JSONL scanners tolerate the truncated record.
+fn read_file_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(max_bytes)))?;
+    let mut buf = Vec::new();
+    file.take(max_bytes).read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 // --- small helpers -----------------------------------------------------------
@@ -741,10 +755,36 @@ fn override_for<'a>(
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(not(test))]
+const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+// Short timeout in tests so the sleeping-fake-CLI test stays fast.
+#[cfg(test)]
+const CLI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+
 fn run_cli(program: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut cmd = Command::new(program);
-    cmd.args(args).env("PATH", augmented_path()).no_window();
-    crate::agent_host::provider::retry_etxtbsy(|| cmd.output()).ok()
+    cmd.args(args)
+        .env("PATH", augmented_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .no_window();
+    let mut child = crate::agent_host::provider::retry_etxtbsy(|| cmd.spawn()).ok()?;
+    let deadline = Instant::now() + CLI_PROBE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            _ => {
+                // Timed out (or try_wait failed): kill and reap the child.
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 fn unix_now() -> i64 {
@@ -922,6 +962,62 @@ mod tests {
         let found = newest_rollout_file(dir.path()).unwrap();
         assert_eq!(found, newer);
         assert!(newest_rollout_file(&dir.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn newest_rollout_file_uses_newest_date_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_day = dir.path().join("2025/12/31");
+        let new_day = dir.path().join("2026/01/02");
+        std::fs::create_dir_all(&old_day).unwrap();
+        std::fs::create_dir_all(&new_day).unwrap();
+        std::fs::write(old_day.join("rollout-old.jsonl"), "{}\n").unwrap();
+        let newest = new_day.join("rollout-new.jsonl");
+        std::fs::write(&newest, "{}\n").unwrap();
+
+        assert_eq!(newest_rollout_file(dir.path()), Some(newest));
+        // A year dir without month/day dirs yields nothing.
+        let empty = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(empty.path().join("2026")).unwrap();
+        assert!(newest_rollout_file(empty.path()).is_none());
+    }
+
+    #[test]
+    fn read_file_tail_reads_only_the_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-x.jsonl");
+        let head = "a".repeat(4 * 1024);
+        let tail_line = r#"{"type":"event_msg","payload":{"type":"token_count"}}"#;
+        std::fs::write(&path, format!("{head}\n{tail_line}\n")).unwrap();
+
+        let text = read_file_tail(&path, 256).unwrap();
+        assert!(text.len() <= 256 + 1);
+        assert!(!text.starts_with(head.as_str()));
+        assert!(text.contains("token_count"));
+
+        // Small files are read whole.
+        let small = dir.path().join("small.jsonl");
+        std::fs::write(&small, "{}\n").unwrap();
+        assert_eq!(read_file_tail(&small, 256).unwrap(), "{}\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_cli_collects_output_for_fast_commands() {
+        let output = run_cli(Path::new("/bin/sh"), &["-c", "echo ok"]).unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("ok"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_cli_times_out_on_sleeping_process() {
+        // CLI_PROBE_TIMEOUT is 500ms under cfg(test); the sleeper must be
+        // killed and reaped well before its own 30s sleep ends.
+        let start = Instant::now();
+        let output = run_cli(Path::new("/bin/sh"), &["-c", "sleep 30"]);
+        assert!(output.is_none());
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

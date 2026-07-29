@@ -1025,7 +1025,16 @@ fn build_terminal_command_spec(
         ("shell", None) => (default_shell_program(), Vec::new()),
         (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
     };
-    args.extend(extras);
+    if kind == "kiro" && custom.is_none() {
+        // kiro-cli parses some flags (e.g. `--v3`) only at the top level,
+        // before the `chat` subcommand; everything else stays after it.
+        let (top_level, rest): (Vec<String>, Vec<String>) =
+            extras.into_iter().partition(|arg| is_kiro_top_level_flag(arg));
+        args.splice(..0, top_level);
+        args.extend(rest);
+    } else {
+        args.extend(extras);
+    }
     let mut extra_env = extra_env.unwrap_or_default();
     crate::agent_runtime_env::reserve_hash_env(&mut extra_env, &cwd)?;
     extra_env
@@ -1045,6 +1054,12 @@ fn default_term_program(kind: &str) -> &'static str {
     } else {
         "Maru"
     }
+}
+
+/// kiro-cli flags that are parsed at the top level and must precede the
+/// `chat` subcommand.
+fn is_kiro_top_level_flag(arg: &str) -> bool {
+    arg == "--v3"
 }
 
 fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -1265,6 +1280,37 @@ mod tests {
         .unwrap();
         assert_eq!(spec.program, "/usr/local/bin/codex-1.5");
         assert_eq!(spec.args, vec!["--profile", "dev"]);
+    }
+
+    #[test]
+    fn kiro_extra_args_hoist_top_level_flags_before_chat() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let spec = build_terminal_command_spec(
+            "kiro",
+            Some(&cwd_str),
+            None,
+            Some(vec![
+                "--v3".to_string(),
+                "--agent".to_string(),
+                "x".to_string(),
+            ]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(spec.program, "kiro-cli");
+        assert_eq!(spec.args, vec!["--v3", "chat", "--agent", "x"]);
+
+        // A command override keeps extras verbatim after the program.
+        let spec = build_terminal_command_spec(
+            "kiro",
+            Some(&cwd_str),
+            Some("/opt/bin/kiro-cli"),
+            Some(vec!["--v3".to_string(), "--agent".to_string()]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(spec.args, vec!["--v3", "--agent"]);
     }
 
     #[test]

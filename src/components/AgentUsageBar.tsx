@@ -12,10 +12,14 @@ import { formatUsageWindowSegment } from "../lib/usageFormat";
 import { openSettingsWindow } from "../lib/windowLayout";
 
 const POLL_INTERVAL_MS = 60_000;
+// Focus/visibility events fire on every alt-tab; only reload when the last
+// load finished longer ago than this, so refocusing is not a backend hit.
+const FOCUS_RELOAD_MIN_AGE_MS = 30_000;
 
 /**
  * Main-window footer with one quota chip per agent. Polls usage every 60s and
- * on window focus; clicking a chip opens the settings window Agents tab.
+ * on window focus (debounced to one reload per 30s); clicking a chip opens
+ * the settings window Agents tab.
  */
 export function AgentUsageBar({
   workPath,
@@ -30,6 +34,9 @@ export function AgentUsageBar({
   // Ticks once per poll so "reset in" text stays roughly current.
   const [now, setNow] = useState(() => Date.now());
   const mountedRef = useRef(true);
+  // When the last load finished; initialized to mount time so an immediate
+  // focus event does not double-load alongside the initial load.
+  const lastLoadedAtRef = useRef(Date.now());
 
   const load = useCallback(
     async (force = false) => {
@@ -42,6 +49,7 @@ export function AgentUsageBar({
       } catch {
         // Keep stale chips; per-agent failures are modeled in the payload.
       } finally {
+        lastLoadedAtRef.current = Date.now();
         if (mountedRef.current) setRefreshing(false);
       }
     },
@@ -52,9 +60,12 @@ export function AgentUsageBar({
     mountedRef.current = true;
     void load();
     const timer = window.setInterval(() => void load(), POLL_INTERVAL_MS);
-    const onFocus = () => void load();
+    const reloadIfStale = () => {
+      if (Date.now() - lastLoadedAtRef.current > FOCUS_RELOAD_MIN_AGE_MS) void load();
+    };
+    const onFocus = () => reloadIfStale();
     const onVisibility = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") reloadIfStale();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
