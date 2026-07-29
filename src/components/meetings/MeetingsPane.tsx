@@ -2906,6 +2906,8 @@ function meetingMissionRuntime(mission: MissionRecord): string {
   const runtime = meetingMissionRuntimeValue(mission);
   if (runtime === "codex") return "Codex";
   if (runtime === "claude") return "Claude";
+  if (runtime === "kimi") return "Kimi";
+  if (runtime === "kiro") return "Kiro";
   return runtime ?? "Runtime";
 }
 
@@ -2949,7 +2951,9 @@ function meetingMissionMetadata(mission: MissionRecord): Record<string, unknown>
 }
 
 function normalizeSkillDispatchRuntime(value: string | null): SkillDispatchRuntime | null {
-  return value === "claude" || value === "codex" ? value : null;
+  return value === "claude" || value === "codex" || value === "kimi" || value === "kiro"
+    ? value
+    : null;
 }
 
 function formatMissionTime(value: string): string {

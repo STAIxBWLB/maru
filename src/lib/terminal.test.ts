@@ -390,7 +390,7 @@ describe("terminal session status", () => {
   it("applies precise agent status and captures the resume id", () => {
     let state = terminalTabsReducer(EMPTY_TERMINAL_STATE, {
       type: "create",
-      tab: createTerminalTab("tab-1", "claude", "Claude"),
+      tab: createTerminalTab("tab-1", "kimi", "Kimi"),
     });
     state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
     state = terminalTabsReducer(state, {
@@ -509,6 +509,8 @@ describe("active-item context bridge", () => {
     expect(buildAgentContextArgs("shell", CTX, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
     expect(buildAgentContextArgs("codex", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("kimi", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("kiro", CTX, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", { ...CTX, workspaceRoot: null }, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", CTX, false)).toEqual([]);
   });
@@ -544,7 +546,7 @@ describe("terminal persistence", () => {
     });
     state = terminalTabsReducer(state, {
       type: "create",
-      tab: createTerminalTab("tab-1", "claude", "Claude", { taskId: "task-1", cwd: "/work" }),
+      tab: createTerminalTab("tab-1", "kimi", "Kimi", { taskId: "task-1", cwd: "/work" }),
     });
     state = terminalTabsReducer(state, { type: "attach", tabId: "tab-1", sessionId: "s1" });
     state = terminalTabsReducer(state, {
@@ -563,7 +565,7 @@ describe("terminal persistence", () => {
       { id: "task-1", name: "Build", cwd: "/work", contextLabel: null, createdAt: 0 },
     ]);
     expect(persisted.sessions).toEqual([
-      { taskId: "task-1", kind: "claude", title: "Claude", cwd: "/work", agentSessionId: "resume-xyz" },
+      { taskId: "task-1", kind: "kimi", title: "Kimi", cwd: "/work", agentSessionId: "resume-xyz" },
     ]);
   });
 
@@ -578,6 +580,10 @@ describe("terminal persistence", () => {
     expect(tab.sessionId).toBeNull();
     expect(tab.agentSessionId).toBe("resume-xyz");
     expect(isRelaunchableTab(tab)).toBe(true);
+    expect(buildAgentResumeArgs(tab.kind, tab.agentSessionId)).toEqual([
+      "--session",
+      "resume-xyz",
+    ]);
   });
 
   it("rejects malformed or empty persisted blobs", () => {
@@ -605,6 +611,8 @@ describe("terminal persistence", () => {
   it("builds native agent resume args", () => {
     expect(buildAgentResumeArgs("claude", "abc")).toEqual(["--resume", "abc"]);
     expect(buildAgentResumeArgs("codex", "abc")).toEqual(["resume", "abc"]);
+    expect(buildAgentResumeArgs("kimi", "abc")).toEqual(["--session", "abc"]);
+    expect(buildAgentResumeArgs("kiro", "abc")).toEqual([]);
     expect(buildAgentResumeArgs("shell", "abc")).toEqual([]);
     expect(buildAgentResumeArgs("claude", null)).toEqual([]);
   });

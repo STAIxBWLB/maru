@@ -20,7 +20,7 @@ the vault as a knowledge graph. Releases before v0.3.0 shipped under the name
 | 1A — Killer feature MVP | ✅ shipped | Doc-selection reliability, frontmatter inline edit (InspectorPane), wikilink autocomplete (Korean IME-aware) + click-to-navigate, typed neighborhood pane, in-memory nav history (⌘[ / ⌘]). |
 | 1B — Rich editor / git | ✅ feature-complete | Git status badge + commit-from-app (file list + per-file diff + syntax color). Rayon-parallel workspace scan + cache-backed warm startup. Multi-tab editor (⌘1..⌘8 / ⌘W, dirty stash). BlockNote rich + source + preview modes persist independently per split pane; ⌘W closes the focused editor or terminal tab. Browser smoke e2e. **Deferred**: monorepo extraction. |
 | 2 — Inbox + AI | ✅ write loop live | Polling scan + notify watcher + Korean date parser + Claude CLI bridge + classifier + Gmail via `gws`, plus `InboxPane` (classify/accept/reject/process, approval gate, Maru labels, `a`/`r`/`p`, bulk actions, mission log tails). |
-| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Separate Documents and Finder-style Files workspaces, file tree + direct-child list + inline preview, copy/move/rename/duplicate/system-Trash operations, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
+| 2.5 — Tree + Cursor shell + Terminal | ✅ shipped | Separate Documents and Finder-style Files workspaces, file tree + direct-child list + inline preview, copy/move/rename/duplicate/system-Trash operations, Cursor-style activity rail, split panes (⌘D), and one resizable bottom/right Panel that switches between persistent Terminal and Graph tabs. Rust-native `alacritty_terminal` PTY tabs (Claude/Codex/Kimi/Kiro/Shell), independent Terminal/Graph themes, layered `~/.maru/settings.json` + `<workspace>/.maru/workspace-state.json`, signed auto-update, native menu bar. |
 | 3 — Unified document ops (M1–M7) | ✅ W1–W6 + skills SSOT | Operations Catalog mode (`ops_catalog::scan`, fs watcher, Hub HTTP read + ETag/offline fallback, drilldown + Reveal), Hub Library client + template-aware new doc, Writing Guideline sidebar. Rust `skill_host` owns tiers (core/public/private/imported/managed), doctor validation, dirty/reconcile. maru-hub backs shared catalog (REST + Alembic + seeds). |
 | 4 — Document Studio + Templates | ✅ W7–W12 | 7-step `Studio` mode (source → template → guideline → sections → HWP fields → export → package). `create_document` frontmatter prefill, M4 export pipeline (`export/` plan/validate/dispatch, docx/hwpx/pdf + sha256 manifest), HWPX field map (`hwpx slots` + `template_fill`), 개조식 inline lint (`linter/gaejosik`). |
 | 5 — Evidence Binder | ✅ W14 implemented | Schema-v2 local binder state under `<workspace>/.maru/binder/<doc-id>.json`; revision-guarded atomic mutations; full binary sha256 identity; typed sidecar status; BU-scoped candidates; explicit section/KPI/checklist targets, local verification, submission selection, undo, and orphan handling. W15 Hub evidence-index integration and W16–W18 Deck Studio remain planned. |
@@ -222,6 +222,31 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 - Frontend input is queued before spawn, microtask-batched, and sent in strict
   order. Normal key/text/paste delivery reads mirrored terminal modes without
   contending with the output parser's screen-model lock.
+
+### AI agent runtimes
+
+Maru treats Claude Code, Codex, Kimi, and Kiro as first-class AI runtimes
+(`ai.defaultRuntime`, terminal launchers, and per-agent command overrides).
+
+- The Settings window **Agents** tab (`system.tab.agents`) shows per-agent
+  sub-tabs with authentication status (Connected / Not connected / Not
+  installed), account details (version, provider, login method, organization,
+  email), a "Run login" action that launches the provider's login command in
+  the integrated terminal, launch-command overrides (binary path + extra
+  args), and quota/usage windows where the provider exposes them.
+- The main window footer renders an agent usage bar with one chip per agent
+  (usage percent + reset countdown); it polls on an interval and on window
+  focus, stays hidden when no agent reports usage, and clicking a chip opens
+  the Agents settings tab.
+- Backend commands: `agents_account_status` (per-agent install/auth probe,
+  honoring command overrides) and `agents_usage_status` (cached quota/usage
+  windows, `force` for a user-initiated refresh).
+- The opt-in command-palette hook action installs reversible Maru lifecycle
+  entries in the selected Claude settings scope and a marker-managed block in
+  `$KIMI_CODE_HOME/config.toml` (default `~/.kimi-code/config.toml`). Kimi's
+  `SessionStart` stdin supplies the native session id used to resume a restored
+  terminal tab; uninstall removes only Maru entries and preserves the user's
+  other hooks and TOML content.
 
 ## Phase 3 verification gates (passed)
 

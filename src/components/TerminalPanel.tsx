@@ -232,6 +232,20 @@ export function refreshFocusedTerminal(
   return true;
 }
 
+export function resolveTerminalCommand(
+  kind: TerminalKind,
+  requestCommand: string | null | undefined,
+  launcherCommand: string | null | undefined,
+  commandOverrides: MaruSettings["ai"]["commandOverrides"],
+): string | null {
+  return (
+    requestCommand ??
+    launcherCommand ??
+    (kind === "shell" ? null : commandOverrides[kind]) ??
+    null
+  );
+}
+
 function pathBaseName(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.replace(/[/\\]+$/, "");
@@ -705,7 +719,12 @@ export const TerminalPanel = memo(
             kind,
             resolvedCwd,
             {
-              command: request?.command ?? launcher.command ?? null,
+              command: resolveTerminalCommand(
+                kind,
+                request?.command,
+                launcher.command,
+                settings.ai.commandOverrides,
+              ),
               extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
               extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
               cols: 120,

@@ -45,6 +45,7 @@ import { EditorPane, type EditorViewMode, type HtmlViewMode } from "./components
 import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
 import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
+import { AgentUsageBar } from "./components/AgentUsageBar";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
@@ -1167,20 +1168,43 @@ function MainApp() {
   );
   const terminalRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
     () => ({
-      claude: maruSettings.terminal.launchers.claude.command ?? null,
-      codex: maruSettings.terminal.launchers.codex.command ?? null,
+      claude:
+        maruSettings.terminal.launchers.claude.command ??
+        maruSettings.ai.commandOverrides.claude,
+      codex:
+        maruSettings.terminal.launchers.codex.command ??
+        maruSettings.ai.commandOverrides.codex,
+      kimi:
+        maruSettings.terminal.launchers.kimi.command ??
+        maruSettings.ai.commandOverrides.kimi,
+      kiro:
+        maruSettings.terminal.launchers.kiro.command ??
+        maruSettings.ai.commandOverrides.kiro,
     }),
     [
       maruSettings.terminal.launchers.claude.command,
       maruSettings.terminal.launchers.codex.command,
+      maruSettings.terminal.launchers.kimi.command,
+      maruSettings.terminal.launchers.kiro.command,
+      maruSettings.ai.commandOverrides.claude,
+      maruSettings.ai.commandOverrides.codex,
+      maruSettings.ai.commandOverrides.kimi,
+      maruSettings.ai.commandOverrides.kiro,
     ],
   );
   const aiRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
     () => ({
       claude: maruSettings.ai.commandOverrides.claude,
       codex: maruSettings.ai.commandOverrides.codex,
+      kimi: maruSettings.ai.commandOverrides.kimi,
+      kiro: maruSettings.ai.commandOverrides.kiro,
     }),
-    [maruSettings.ai.commandOverrides.claude, maruSettings.ai.commandOverrides.codex],
+    [
+      maruSettings.ai.commandOverrides.claude,
+      maruSettings.ai.commandOverrides.codex,
+      maruSettings.ai.commandOverrides.kimi,
+      maruSettings.ai.commandOverrides.kiro,
+    ],
   );
 
   const privateWorkspaces = useMemo(
@@ -2100,13 +2124,15 @@ function MainApp() {
     const scope: "project" | "global" = workPath ? "project" : "global";
     try {
       const status = await terminalHooksStatus(workPath, scope);
-      const next = status.claudeInstalled
+      const allInstalled = status.claudeInstalled && status.kimiInstalled;
+      const next = allInstalled
         ? await terminalHooksUninstall(workPath, scope)
         : await terminalHooksInstall(workPath, scope);
+      const paths = [next.claudePath, next.kimiPath].join(", ");
       setError(
-        next.claudeInstalled
-          ? t("terminal.hooks.enabled", { path: next.claudePath })
-          : t("terminal.hooks.disabled", { path: next.claudePath }),
+        next.claudeInstalled && next.kimiInstalled
+          ? t("terminal.hooks.enabled", { paths })
+          : t("terminal.hooks.disabled", { paths }),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -9039,6 +9065,11 @@ function MainApp() {
             </div>
           ) : null}
         </div>
+
+        <AgentUsageBar
+          workPath={settingsWorkPath}
+          commandOverrides={terminalRuntimeCommands}
+        />
 
         {pendingDestructiveAction ? (
           <div className="dialog-backdrop">

@@ -16,7 +16,7 @@ export type SortKey = "name" | "modifiedDesc" | "modifiedAsc";
 export type FilesSortKey = SortKey;
 export type FilesListAttribute = "parent" | "kind" | "modified" | "size" | "git" | "binary";
 export type FavoriteKind = "file" | "directory";
-export type TerminalLauncherId = "claude" | "codex" | "shell";
+export type TerminalLauncherId = "claude" | "codex" | "kimi" | "kiro" | "shell";
 export type TerminalDock = "bottom" | "right";
 export type ToolPanelSurface = "terminal" | "graph";
 export type TerminalTheme = "dark" | "light" | "solarized";
@@ -53,7 +53,7 @@ export type RightPaneTab =
   | "shareOutbox";
 export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
-export type AiRuntime = "claude" | "codex";
+export type AiRuntime = "claude" | "codex" | "kimi" | "kiro";
 export type AiClassifierRuntime = AiRuntime | "inherit";
 export type AiPermissionMode = "plan" | "acceptEdits" | "default" | "bypassPermissions";
 
@@ -321,7 +321,7 @@ export interface AiSettings {
   /** Permission mode passed to the agent CLI (Claude `--permission-mode`). */
   permissionMode: AiPermissionMode;
   /** Optional absolute paths overriding PATH-based CLI resolution. */
-  commandOverrides: { claude: string | null; codex: string | null };
+  commandOverrides: { claude: string | null; codex: string | null; kimi: string | null; kiro: string | null };
   /** Round-trip-safe carrier for unmodeled/legacy keys (providers, defaults, …). */
   extra: Record<string, unknown>;
 }
@@ -529,6 +529,14 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
         enabled: true,
         label: "Codex",
       },
+      kimi: {
+        enabled: true,
+        label: "Kimi",
+      },
+      kiro: {
+        enabled: true,
+        label: "Kiro",
+      },
       shell: {
         enabled: true,
         label: "Shell",
@@ -543,7 +551,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     defaultRuntime: "claude",
     classifierRuntime: "inherit",
     permissionMode: "plan",
-    commandOverrides: { claude: null, codex: null },
+    commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
     extra: {},
   },
   comms: {
@@ -715,6 +723,14 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
         codex: normalizeLauncher(
           launchers.codex ?? legacyRuntimes.codex,
           DEFAULT_MARU_SETTINGS.terminal.launchers.codex,
+        ),
+        kimi: normalizeLauncher(
+          launchers.kimi,
+          DEFAULT_MARU_SETTINGS.terminal.launchers.kimi,
+        ),
+        kiro: normalizeLauncher(
+          launchers.kiro,
+          DEFAULT_MARU_SETTINGS.terminal.launchers.kiro,
         ),
         shell: normalizeLauncher(
           launchers.shell,
@@ -1023,6 +1039,8 @@ function cloneDefaultSettings(): MaruSettings {
       launchers: {
         claude: { ...DEFAULT_MARU_SETTINGS.terminal.launchers.claude },
         codex: { ...DEFAULT_MARU_SETTINGS.terminal.launchers.codex },
+        kimi: { ...DEFAULT_MARU_SETTINGS.terminal.launchers.kimi },
+        kiro: { ...DEFAULT_MARU_SETTINGS.terminal.launchers.kiro },
         shell: { ...DEFAULT_MARU_SETTINGS.terminal.launchers.shell },
       },
       shortcuts: { ...DEFAULT_MARU_SETTINGS.terminal.shortcuts },
@@ -1837,7 +1855,7 @@ function parseTerminalDock(value: unknown): TerminalDock | null {
 
 function parseAutoLaunch(value: unknown): TerminalLauncherId | null {
   if (value === null) return null;
-  return value === "claude" || value === "codex" || value === "shell"
+  return value === "claude" || value === "codex" || value === "kimi" || value === "kiro" || value === "shell"
     ? value
     : DEFAULT_MARU_SETTINGS.terminal.autoLaunch;
 }
@@ -2203,7 +2221,9 @@ const AI_KNOWN_KEYS = new Set([
 ]);
 
 function parseAiRuntime(value: unknown): AiRuntime | null {
-  return value === "claude" || value === "codex" ? value : null;
+  return value === "claude" || value === "codex" || value === "kimi" || value === "kiro"
+    ? value
+    : null;
 }
 
 /**
@@ -2237,6 +2257,8 @@ function normalizeAi(value: unknown): AiSettings {
     commandOverrides: {
       claude: normalizeOptionalString(overrides.claude),
       codex: normalizeOptionalString(overrides.codex),
+      kimi: normalizeOptionalString(overrides.kimi),
+      kiro: normalizeOptionalString(overrides.kiro),
     },
     extra,
   };

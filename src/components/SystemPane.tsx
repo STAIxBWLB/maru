@@ -91,8 +91,7 @@ import {
 } from "../lib/skillEditorEvents";
 import {
   SETTINGS_WINDOW_OPEN_TAB_EVENT,
-  SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT,
-  type SettingsWindowTerminalLaunchPayload,
+  emitSettingsTerminalLaunch,
   type SettingsWindowOpenTabPayload,
 } from "../lib/settingsWindowEvents";
 import { DIAGRAM_ENABLE_STORAGE_KEY } from "../lib/diagramFlag";
@@ -147,6 +146,7 @@ import {
 } from "../lib/telegramMonitor";
 import { openSkillEditorWindow } from "../lib/windowLayout";
 import { CommsSettingsTab } from "./comms/CommsSettingsTab";
+import { AgentsSettingsTab } from "./agents/AgentsSettingsTab";
 import { JobsTab } from "./jobs/JobsTab";
 import { MeetingsSettingsTab } from "./meetings/MeetingsSettingsTab";
 import { TasksSettingsTab } from "./tasks/TasksSettingsTab";
@@ -155,6 +155,7 @@ import { Button } from "./ui/Button";
 type SystemTab =
   | "preferences"
   | "ai"
+  | "agents"
   | "terminal"
   | "comms"
   | "meetings"
@@ -173,6 +174,7 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
   return (
     value === "preferences" ||
     value === "ai" ||
+    value === "agents" ||
     value === "terminal" ||
     value === "comms" ||
     value === "meetings" ||
@@ -189,32 +191,8 @@ function isSystemTab(value: string | null | undefined): value is SystemTab {
   );
 }
 
-/** Emit a terminal launch request for the main window. The only listener (and
- *  the terminal itself) lives in the main window, so bring it forward first —
- *  emitting with no listener would silently drop the re-auth launch. Returns
- *  false when the main window is gone and the launch cannot be delivered. */
-async function emitSettingsTerminalLaunch(
-  payload: SettingsWindowTerminalLaunchPayload,
-): Promise<boolean> {
-  try {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const mainWindow = await WebviewWindow.getByLabel("main");
-    if (!mainWindow) return false;
-    try {
-      await mainWindow.show();
-      await mainWindow.unminimize();
-      await mainWindow.setFocus();
-    } catch {
-      // Focusing is best-effort; the emit below still reaches the listener.
-    }
-    const { emit } = await import("@tauri-apps/api/event");
-    await emit(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, payload);
-    return true;
-  } catch {
-    // Browser dev shell: no Tauri event bus.
-    return true;
-  }
-}
+/** Emit a terminal launch request for the main window. Re-exported from
+ *  ../lib/settingsWindowEvents so sibling tabs share one implementation. */
 
 interface SystemPaneProps {
   workPath: string | null;
@@ -278,6 +256,7 @@ export function SystemPane({
           [
             ["preferences", "system.tab.preferences"],
             ["ai", "system.tab.ai"],
+            ["agents", "system.tab.agents"],
             ["terminal", "system.tab.terminal"],
             ["comms", "system.tab.comms"],
             ["meetings", "system.tab.meetings"],
@@ -311,6 +290,13 @@ export function SystemPane({
         ) : null}
         {tab === "ai" ? (
           <AiSettingsTab settings={settings} onSettingsChange={onSettingsChange} />
+        ) : null}
+        {tab === "agents" ? (
+          <AgentsSettingsTab
+            workPath={workPath}
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+          />
         ) : null}
         {tab === "terminal" ? (
           <SettingsJsonTab
@@ -1640,6 +1626,8 @@ function AiSettingsTab({
           >
             <option value="claude">{t("system.ai.runtime.claude")}</option>
             <option value="codex">{t("system.ai.runtime.codex")}</option>
+            <option value="kimi">{t("system.ai.runtime.kimi")}</option>
+            <option value="kiro">{t("system.ai.runtime.kiro")}</option>
           </select>
         </label>
         <label className="field">
@@ -1653,6 +1641,8 @@ function AiSettingsTab({
             <option value="inherit">{t("system.ai.classifierRuntime.inherit")}</option>
             <option value="claude">{t("system.ai.runtime.claude")}</option>
             <option value="codex">{t("system.ai.runtime.codex")}</option>
+            <option value="kimi">{t("system.ai.runtime.kimi")}</option>
+            <option value="kiro">{t("system.ai.runtime.kiro")}</option>
           </select>
         </label>
         <label className="field">
@@ -2026,6 +2016,8 @@ function PreferencesTab({
             <option value="shell">{t("terminal.launcher.shell")}</option>
             <option value="claude">{t("terminal.launcher.claude")}</option>
             <option value="codex">{t("terminal.launcher.codex")}</option>
+            <option value="kimi">{t("terminal.launcher.kimi")}</option>
+            <option value="kiro">{t("terminal.launcher.kiro")}</option>
             <option value="none">{t("system.preferences.terminalAutoLaunch.none")}</option>
           </select>
         </label>

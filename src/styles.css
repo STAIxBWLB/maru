@@ -21444,6 +21444,132 @@ button.git-badge:hover {
   white-space: nowrap;
 }
 
+/* Agent usage footer (main window). Sits in an implicit grid row below the
+ * terminal row so the many grid-template-areas variants stay untouched. */
+.agent-usage-bar {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  min-height: 25px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  color: var(--faint);
+  border-top: 1px solid var(--line-soft);
+  background: var(--panel);
+  font-size: var(--type-meta-size);
+}
+
+.app-shell.terminal-dock-right .agent-usage-bar {
+  grid-row: 3;
+}
+
+.agent-usage-chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.agent-usage-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agent-usage-chip:hover {
+  color: var(--ink);
+  border-color: var(--faint);
+}
+
+.agent-usage-chip.dimmed {
+  opacity: 0.6;
+}
+
+.agent-usage-chip-name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.agent-usage-refresh {
+  flex: none;
+}
+
+/* Agents settings tab */
+.agents-subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.agents-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.agents-section:last-child {
+  border-bottom: none;
+}
+
+.agents-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agents-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  color: var(--faint);
+  font-size: var(--type-meta-size);
+}
+
+.agents-badge.connected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.agents-account-table {
+  border-collapse: collapse;
+  font-size: var(--type-meta-size);
+}
+
+.agents-account-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--faint);
+  padding: 2px 16px 2px 0;
+  white-space: nowrap;
+}
+
+.agents-account-table td {
+  color: var(--ink);
+  padding: 2px 0;
+}
+
+.agents-actions {
+  display: flex;
+  gap: 8px;
+}
+
+
 .files-preview-pane {
   display: flex;
   flex-direction: column;
