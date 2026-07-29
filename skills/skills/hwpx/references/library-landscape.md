@@ -22,7 +22,7 @@
 ```
 HWPX 파일을 다뤄야 한다
 ├─ 텍스트 추출/slot 치환/구조 검증 → raw ZIP/XML 경로 (본 스킬 기본)
-├─ 신규 HWPX 생성 → hwp-cli `hwp new` (`create` / `styled --preset` / `write-java`)
+├─ 신규 HWPX 생성 → hwp-cli `hwp new` (`create` / `write-java`는 기본, `styled --preset`은 gian/report)
 ├─ Windows에서, 한컴오피스 있음 → pyhwpx (COM, 직접 렌더 가능)
 ├─ PDF로 변환만 필요 → LibreOffice + H2Orestart (`./hwpx to-pdf`)
 └─ LLM 파이프라인의 텍스트 추출 → airun-hwp 또는 `./hwpx to-md`
