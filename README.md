@@ -241,6 +241,12 @@ Maru treats Claude Code, Codex, Kimi, and Kiro as first-class AI runtimes
 - Backend commands: `agents_account_status` (per-agent install/auth probe,
   honoring command overrides) and `agents_usage_status` (cached quota/usage
   windows, `force` for a user-initiated refresh).
+- The opt-in command-palette hook action installs reversible Maru lifecycle
+  entries in the selected Claude settings scope and a marker-managed block in
+  `$KIMI_CODE_HOME/config.toml` (default `~/.kimi-code/config.toml`). Kimi's
+  `SessionStart` stdin supplies the native session id used to resume a restored
+  terminal tab; uninstall removes only Maru entries and preserves the user's
+  other hooks and TOML content.
 
 ## Phase 3 verification gates (passed)
 

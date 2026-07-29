@@ -2124,13 +2124,15 @@ function MainApp() {
     const scope: "project" | "global" = workPath ? "project" : "global";
     try {
       const status = await terminalHooksStatus(workPath, scope);
-      const next = status.claudeInstalled
+      const allInstalled = status.claudeInstalled && status.kimiInstalled;
+      const next = allInstalled
         ? await terminalHooksUninstall(workPath, scope)
         : await terminalHooksInstall(workPath, scope);
+      const paths = [next.claudePath, next.kimiPath].join(", ");
       setError(
-        next.claudeInstalled
-          ? t("terminal.hooks.enabled", { path: next.claudePath })
-          : t("terminal.hooks.disabled", { path: next.claudePath }),
+        next.claudeInstalled && next.kimiInstalled
+          ? t("terminal.hooks.enabled", { paths })
+          : t("terminal.hooks.disabled", { paths }),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

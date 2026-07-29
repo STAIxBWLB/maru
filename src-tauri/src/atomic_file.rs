@@ -9,6 +9,20 @@ use std::os::unix::fs::PermissionsExt;
 /// the destination. `tempfile::persist` uses replace semantics on Windows,
 /// where `std::fs::rename` cannot overwrite an existing file.
 pub(crate) fn write_atomic(path: &Path, content: &[u8]) -> Result<(), String> {
+    write_atomic_with_create_mode(path, content, 0o666)
+}
+
+/// Atomically replace a potentially sensitive file. Existing permissions are
+/// preserved; a newly created file is owner-readable/writable on Unix.
+pub(crate) fn write_atomic_private(path: &Path, content: &[u8]) -> Result<(), String> {
+    write_atomic_with_create_mode(path, content, 0o600)
+}
+
+fn write_atomic_with_create_mode(
+    path: &Path,
+    content: &[u8],
+    create_mode: u32,
+) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("Cannot determine parent directory for {}", path.display()))?;
@@ -22,7 +36,9 @@ pub(crate) fn write_atomic(path: &Path, content: &[u8]) -> Result<(), String> {
     let mut builder = tempfile::Builder::new();
     builder.prefix(&prefix);
     #[cfg(unix)]
-    builder.permissions(fs::Permissions::from_mode(0o666));
+    builder.permissions(fs::Permissions::from_mode(create_mode));
+    #[cfg(not(unix))]
+    let _ = create_mode;
     let mut temp = builder
         .tempfile_in(parent)
         .map_err(|err| format!("Cannot create temporary file: {err}"))?;
@@ -121,5 +137,17 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o640);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_create_uses_owner_only_permissions() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+
+        write_atomic_private(&path, b"hooks = []").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

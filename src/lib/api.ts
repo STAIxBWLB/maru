@@ -2042,6 +2042,8 @@ export interface TerminalHooksStatus {
   scope: string;
   claudePath: string;
   claudeInstalled: boolean;
+  kimiPath: string;
+  kimiInstalled: boolean;
   codexHint: string;
 }
 

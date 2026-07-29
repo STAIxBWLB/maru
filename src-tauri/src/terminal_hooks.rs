@@ -1,5 +1,5 @@
 // Agent status hooks (Phase D): a file-based event channel that lets external
-// CLI agents (Claude Code, Codex) report lifecycle transitions back to Maru
+// CLI agents (Claude Code, Codex, Kimi) report lifecycle transitions back to Maru
 // so the terminal sidebar can show precise running / needs-input / done status
 // and capture a native session id for resume.
 //
@@ -23,6 +23,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::atomic_file::write_atomic_private;
+
 /// Canonical claude hook events → status token. The installer translates each
 /// agent's native lifecycle event into one of our tokens, so the frontend
 /// mapping stays version-robust.
@@ -32,8 +34,23 @@ const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
     ("Stop", "done"),
 ];
 
+/// Kimi lifecycle events use the same canonical status tokens. SessionStart is
+/// essential because its stdin carries Kimi's native session id for resume.
+const KIMI_HOOK_EVENTS: &[(&str, &str)] = &[
+    ("SessionStart", "running"),
+    ("UserPromptSubmit", "running"),
+    ("PermissionRequest", "needs-input"),
+    ("PermissionResult", "running"),
+    ("Stop", "done"),
+    ("StopFailure", "done"),
+    ("Interrupt", "done"),
+    ("SessionEnd", "done"),
+];
+
 /// Substring marking an Maru-managed hook command (for idempotency + removal).
 const HOOK_MARKER: &str = "terminal-hook";
+const KIMI_HOOK_START: &str = "# maru:kimi-terminal-hooks v1 start";
+const KIMI_HOOK_END: &str = "# maru:kimi-terminal-hooks v1 end";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -116,7 +133,11 @@ fn read_agent_session_id_from_stdin() -> Option<String> {
     if std::io::stdin().read_to_string(&mut buf).is_err() || buf.trim().is_empty() {
         return None;
     }
-    let value: Value = serde_json::from_str(&buf).ok()?;
+    agent_session_id_from_hook_json(&buf)
+}
+
+fn agent_session_id_from_hook_json(raw: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(raw).ok()?;
     for key in ["session_id", "sessionId", "conversation_id", "id"] {
         if let Some(found) = value.get(key).and_then(Value::as_str) {
             if !found.is_empty() {
@@ -263,7 +284,7 @@ fn emit_new_events(app: &AppHandle, offsets: &Arc<Mutex<HashMap<PathBuf, u64>>>,
 }
 
 // ---------------------------------------------------------------------------
-// Installer: Claude Code settings.json hooks (project or global scope)
+// Installer: Claude settings.json + Kimi config.toml hooks
 // ---------------------------------------------------------------------------
 
 /// Resolve an absolute path to the bundled `maru-cli`, falling back to the
@@ -354,6 +375,38 @@ fn remove_claude_hooks(root: &mut Value) -> bool {
     changed
 }
 
+fn claude_hooks_installed(root: &Value) -> bool {
+    let Some(hooks) = root.get("hooks").and_then(Value::as_object) else {
+        return false;
+    };
+    CLAUDE_HOOK_EVENTS.iter().all(|(event, token)| {
+        hooks
+            .get(*event)
+            .and_then(Value::as_array)
+            .map(|groups| {
+                groups.iter().any(|group| {
+                    group
+                        .get("hooks")
+                        .and_then(Value::as_array)
+                        .map(|entries| {
+                            entries.iter().any(|entry| {
+                                entry
+                                    .get("command")
+                                    .and_then(Value::as_str)
+                                    .map(|command| {
+                                        is_maru_hook_command(command)
+                                            && command.contains(&format!("--event {token}"))
+                                    })
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 fn claude_settings_path(work_path: Option<&str>, scope: &str) -> Result<PathBuf, String> {
     if scope == "project" {
         let work =
@@ -367,12 +420,59 @@ fn claude_settings_path(work_path: Option<&str>, scope: &str) -> Result<PathBuf,
     }
 }
 
-fn read_json_object(path: &Path) -> Value {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}))
+fn kimi_config_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+    let configured_home = std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    Ok(kimi_config_path_for(&home, configured_home))
+}
+
+fn kimi_config_path_for(home: &Path, configured_home: Option<PathBuf>) -> PathBuf {
+    configured_home
+        .unwrap_or_else(|| home.join(".kimi-code"))
+        .join("config.toml")
+}
+
+fn read_text_or_empty(path: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(format!("Cannot read {}: {err}", path.display())),
+    }
+}
+
+fn read_json_object(path: &Path) -> Result<Value, String> {
+    let raw = read_text_or_empty(path)?;
+    if raw.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str::<Value>(&raw)
+        .map_err(|err| format!("Cannot parse {}: {err}", path.display()))
+        .and_then(|value| {
+            if value.is_object() {
+                Ok(value)
+            } else {
+                Err(format!("Expected a JSON object in {}", path.display()))
+            }
+        })
+}
+
+fn write_kimi_config(path: &Path, content: &str) -> Result<(), String> {
+    let target = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            std::fs::canonicalize(path).map_err(|err| {
+                format!(
+                    "Cannot resolve Kimi config symlink {}: {err}",
+                    path.display()
+                )
+            })?
+        }
+        Ok(_) => path.to_path_buf(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(err) => return Err(format!("Cannot inspect {}: {err}", path.display())),
+    };
+    write_atomic_private(&target, content.as_bytes())
 }
 
 fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
@@ -385,12 +485,80 @@ fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
     std::fs::write(path, text).map_err(|err| format!("Cannot write {}: {err}", path.display()))
 }
 
+fn shell_quote_token(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn kimi_command(cli: &str, token: &str) -> String {
+    format!(
+        "{} terminal-hook --event {token} --agent kimi",
+        shell_quote_token(cli)
+    )
+}
+
+fn kimi_hook_block(cli: &str) -> String {
+    let mut block = format!("{KIMI_HOOK_START}\n");
+    for (event, token) in KIMI_HOOK_EVENTS {
+        let command = serde_json::to_string(&kimi_command(cli, token))
+            .expect("serializing a command string cannot fail");
+        block.push_str(&format!(
+            "[[hooks]]\nevent = \"{event}\"\ncommand = {command}\ntimeout = 5\n\n"
+        ));
+    }
+    block.push_str(KIMI_HOOK_END);
+    block.push('\n');
+    block
+}
+
+fn marked_block_range(
+    content: &str,
+    start_marker: &str,
+    end_marker: &str,
+) -> Option<(usize, usize)> {
+    let start = content.find(start_marker)?;
+    let end_offset = content[start..].find(end_marker)?;
+    Some((start, start + end_offset + end_marker.len()))
+}
+
+fn kimi_hooks_installed(content: &str) -> bool {
+    let Some((start, end)) = marked_block_range(content, KIMI_HOOK_START, KIMI_HOOK_END) else {
+        return false;
+    };
+    let block = &content[start..end];
+    KIMI_HOOK_EVENTS.iter().all(|(event, token)| {
+        block.contains(&format!("event = \"{event}\""))
+            && block.contains(&format!("--event {token} --agent kimi"))
+    })
+}
+
+fn upsert_kimi_hooks(content: &str, cli: &str) -> String {
+    upsert_marked_block(
+        content,
+        KIMI_HOOK_START,
+        KIMI_HOOK_END,
+        &kimi_hook_block(cli),
+    )
+}
+
+fn remove_kimi_hooks(content: &str) -> String {
+    remove_marked_block(content, KIMI_HOOK_START, KIMI_HOOK_END)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalHooksStatus {
     pub scope: String,
     pub claude_path: String,
     pub claude_installed: bool,
+    pub kimi_path: String,
+    pub kimi_installed: bool,
     pub codex_hint: String,
 }
 
@@ -406,22 +574,17 @@ pub fn terminal_hooks_status(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
-    let path = claude_settings_path(work_path.as_deref(), &scope)?;
-    let root = read_json_object(&path);
-    let installed = root
-        .get("hooks")
-        .and_then(Value::as_object)
-        .map(|hooks| {
-            hooks
-                .values()
-                .filter_map(Value::as_array)
-                .any(|array| array.iter().any(group_has_maru_command))
-        })
-        .unwrap_or(false);
+    let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
+    let claude_root = read_json_object(&claude_path)?;
+    let claude_installed = claude_hooks_installed(&claude_root);
+    let kimi_path = kimi_config_path()?;
+    let kimi_content = read_text_or_empty(&kimi_path)?;
     Ok(TerminalHooksStatus {
         scope,
-        claude_path: path.to_string_lossy().to_string(),
-        claude_installed: installed,
+        claude_path: claude_path.to_string_lossy().to_string(),
+        claude_installed,
+        kimi_path: kimi_path.to_string_lossy().to_string(),
+        kimi_installed: kimi_hooks_installed(&kimi_content),
         codex_hint: codex_hint(),
     })
 }
@@ -431,11 +594,18 @@ pub fn terminal_hooks_install(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
-    let path = claude_settings_path(work_path.as_deref(), &scope)?;
-    let mut root = read_json_object(&path);
+    let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
+    let kimi_path = kimi_config_path()?;
+    let mut claude_root = read_json_object(&claude_path)?;
+    let kimi_content = read_text_or_empty(&kimi_path)?;
     let cli = resolve_maru_cli();
-    if merge_claude_hooks(&mut root, &cli) {
-        write_json_pretty(&path, &root)?;
+    let claude_changed = merge_claude_hooks(&mut claude_root, &cli);
+    let next_kimi = upsert_kimi_hooks(&kimi_content, &cli);
+    if next_kimi != kimi_content {
+        write_kimi_config(&kimi_path, &next_kimi)?;
+    }
+    if claude_changed {
+        write_json_pretty(&claude_path, &claude_root)?;
     }
     terminal_hooks_status(work_path, scope)
 }
@@ -445,12 +615,16 @@ pub fn terminal_hooks_uninstall(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
-    let path = claude_settings_path(work_path.as_deref(), &scope)?;
-    if path.exists() {
-        let mut root = read_json_object(&path);
-        if remove_claude_hooks(&mut root) {
-            write_json_pretty(&path, &root)?;
-        }
+    let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
+    let kimi_path = kimi_config_path()?;
+    let mut claude_root = read_json_object(&claude_path)?;
+    let kimi_content = read_text_or_empty(&kimi_path)?;
+    let next_kimi = remove_kimi_hooks(&kimi_content);
+    if next_kimi != kimi_content {
+        write_kimi_config(&kimi_path, &next_kimi)?;
+    }
+    if remove_claude_hooks(&mut claude_root) {
+        write_json_pretty(&claude_path, &claude_root)?;
     }
     terminal_hooks_status(work_path, scope)
 }
@@ -485,9 +659,8 @@ there is no active item of that kind. When the user says \"this note\" or \
 }
 
 /// Insert or replace the marked hint block, leaving all other content intact.
-fn upsert_marked_block(content: &str, block: &str) -> String {
-    if let (Some(start), Some(end)) = (content.find(HINT_START), content.find(HINT_END)) {
-        let end = end + HINT_END.len();
+fn upsert_marked_block(content: &str, start_marker: &str, end_marker: &str, block: &str) -> String {
+    if let Some((start, end)) = marked_block_range(content, start_marker, end_marker) {
         let mut out = String::new();
         out.push_str(&content[..start]);
         out.push_str(block.trim_end());
@@ -507,11 +680,10 @@ fn upsert_marked_block(content: &str, block: &str) -> String {
 }
 
 /// Remove the marked hint block (and the blank lines that bracket it).
-fn remove_marked_block(content: &str) -> String {
-    let (Some(start), Some(end)) = (content.find(HINT_START), content.find(HINT_END)) else {
+fn remove_marked_block(content: &str, start_marker: &str, end_marker: &str) -> String {
+    let Some((start, end)) = marked_block_range(content, start_marker, end_marker) else {
         return content.to_string();
     };
-    let end = end + HINT_END.len();
     let head = content[..start].trim_end_matches('\n');
     let tail = content[end..].trim_start_matches('\n');
     let mut out = String::from(head);
@@ -549,7 +721,7 @@ pub fn write_agent_context_hint(
             continue;
         };
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
-        let next = upsert_marked_block(&existing, &block);
+        let next = upsert_marked_block(&existing, HINT_START, HINT_END, &block);
         std::fs::write(&path, next)
             .map_err(|err| format!("Cannot write {}: {err}", path.display()))?;
         written.push(path.to_string_lossy().to_string());
@@ -572,7 +744,7 @@ pub fn remove_agent_context_hint(
             continue;
         }
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
-        let next = remove_marked_block(&existing);
+        let next = remove_marked_block(&existing, HINT_START, HINT_END);
         if next != existing {
             std::fs::write(&path, next)
                 .map_err(|err| format!("Cannot write {}: {err}", path.display()))?;
@@ -624,9 +796,61 @@ mod tests {
     }
 
     #[test]
+    fn parses_kimi_session_id_from_hook_stdin() {
+        assert_eq!(
+            agent_session_id_from_hook_json(
+                r#"{"hook_event_name":"SessionStart","session_id":"kimi-session-42"}"#,
+            )
+            .as_deref(),
+            Some("kimi-session-42")
+        );
+        assert!(agent_session_id_from_hook_json(r#"{"session_id":""}"#).is_none());
+        assert!(agent_session_id_from_hook_json("not json").is_none());
+    }
+
+    #[test]
+    fn kimi_config_path_honors_kimi_code_home() {
+        assert_eq!(
+            kimi_config_path_for(Path::new("/home/user"), None),
+            PathBuf::from("/home/user/.kimi-code/config.toml")
+        );
+        assert_eq!(
+            kimi_config_path_for(
+                Path::new("/home/user"),
+                Some(PathBuf::from("/tmp/custom-kimi")),
+            ),
+            PathBuf::from("/tmp/custom-kimi/config.toml")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_config_write_preserves_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("managed-config.toml");
+        let link = tmp.path().join("config.toml");
+        std::fs::write(&target, "theme = \"dark\"\n").unwrap();
+        symlink(&target, &link).unwrap();
+
+        write_kimi_config(&link, "theme = \"light\"\n").unwrap();
+
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "theme = \"light\"\n"
+        );
+    }
+
+    #[test]
     fn merge_claude_hooks_is_idempotent() {
         let mut root = json!({});
         assert!(merge_claude_hooks(&mut root, "/bin/maru-cli"));
+        assert!(claude_hooks_installed(&root));
         // Second merge changes nothing.
         assert!(!merge_claude_hooks(&mut root, "/bin/maru-cli"));
         let stop = root
@@ -658,6 +882,20 @@ mod tests {
     }
 
     #[test]
+    fn partial_claude_hooks_are_not_reported_as_installed() {
+        let mut root = json!({});
+        merge_claude_hooks(&mut root, "/bin/maru-cli");
+        root.get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .unwrap()
+            .remove("Notification");
+
+        assert!(!claude_hooks_installed(&root));
+        assert!(merge_claude_hooks(&mut root, "/bin/maru-cli"));
+        assert!(claude_hooks_installed(&root));
+    }
+
+    #[test]
     fn remove_claude_hooks_only_drops_maru_entries() {
         let mut root = json!({
             "hooks": {
@@ -682,17 +920,68 @@ mod tests {
     }
 
     #[test]
+    fn kimi_hooks_are_idempotent_and_preserve_user_config() {
+        let original = concat!(
+            "default_model = \"kimi-for-coding\"\n",
+            "# Keep this user comment and provider block byte-identical.\n",
+            "[providers.kimi-for-coding]\n",
+            "api_key = \"secret-placeholder\"\n\n",
+            "[[hooks]]\n",
+            "event = \"PostToolUse\"\n",
+            "command = \"echo mine\"\n",
+        );
+        let once = upsert_kimi_hooks(original, "/Applications/Maru App/maru-cli");
+        let twice = upsert_kimi_hooks(&once, "/Applications/Maru App/maru-cli");
+
+        assert_eq!(once, twice);
+        assert!(once.starts_with(original));
+        assert_eq!(once.matches(KIMI_HOOK_START).count(), 1);
+        assert!(once.contains("event = \"SessionStart\""));
+        assert!(once.contains("event = \"PermissionRequest\""));
+        assert!(once.contains("--event running --agent kimi"));
+        assert!(once.contains("--event needs-input --agent kimi"));
+        assert!(once.contains("--event done --agent kimi"));
+        assert!(once.contains("'/Applications/Maru App/maru-cli'"));
+        assert!(kimi_hooks_installed(&once));
+        assert_eq!(remove_kimi_hooks(&once), original);
+    }
+
+    #[test]
+    fn partial_kimi_marker_block_is_not_reported_as_installed() {
+        let partial = format!(
+            "{KIMI_HOOK_START}\n[[hooks]]\nevent = \"Stop\"\ncommand = \"maru-cli terminal-hook --event done --agent kimi\"\n{KIMI_HOOK_END}\n"
+        );
+        assert!(!kimi_hooks_installed(&partial));
+        assert!(kimi_hooks_installed(&upsert_kimi_hooks(
+            &partial,
+            "/bin/maru-cli"
+        )));
+    }
+
+    #[test]
+    fn kimi_hook_reinstall_updates_only_the_managed_block() {
+        let original = "theme = \"dark\"\n";
+        let first = upsert_kimi_hooks(original, "/old/maru-cli");
+        let updated = upsert_kimi_hooks(&first, "/new/maru-cli");
+
+        assert!(!updated.contains("/old/maru-cli"));
+        assert!(updated.contains("/new/maru-cli"));
+        assert!(updated.starts_with(original));
+        assert_eq!(remove_kimi_hooks(&updated), original);
+    }
+
+    #[test]
     fn upsert_hint_is_idempotent_and_preserves_content() {
         let block = agent_context_hint_block();
         let original = "# My Project\n\nSome rules.\n";
-        let once = upsert_marked_block(original, &block);
+        let once = upsert_marked_block(original, HINT_START, HINT_END, &block);
         assert!(once.starts_with("# My Project"));
         assert!(once.contains(HINT_START));
         assert!(once.contains("MARU_ACTIVE_DOC"));
         assert!(once.contains("MARU_SCRATCHPAD"));
         assert!(once.contains("$MARU_TEMP/<provider>/<task>/"));
         // Re-applying replaces in place (no duplicate markers).
-        let twice = upsert_marked_block(&once, &block);
+        let twice = upsert_marked_block(&once, HINT_START, HINT_END, &block);
         assert_eq!(once.matches(HINT_START).count(), 1);
         assert_eq!(twice.matches(HINT_START).count(), 1);
     }
@@ -701,11 +990,14 @@ mod tests {
     fn remove_hint_restores_surrounding_content() {
         let block = agent_context_hint_block();
         let original = "# My Project\n\nSome rules.\n";
-        let with = upsert_marked_block(original, &block);
-        let removed = remove_marked_block(&with);
+        let with = upsert_marked_block(original, HINT_START, HINT_END, &block);
+        let removed = remove_marked_block(&with, HINT_START, HINT_END);
         assert!(!removed.contains(HINT_START));
         assert_eq!(removed, original);
         // Removing when absent is a no-op.
-        assert_eq!(remove_marked_block(original), original);
+        assert_eq!(
+            remove_marked_block(original, HINT_START, HINT_END),
+            original
+        );
     }
 }
