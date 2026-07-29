@@ -3,6 +3,7 @@ import type { NativeTerminalViewHandle } from "./NativeTerminalView";
 import {
   cancelTerminalLayoutRefresh,
   refreshFocusedTerminal,
+  resolveTerminalCommand,
   shouldFocusTerminalInput,
   terminalActivationFocusAction,
   terminalFrameDisposition,
@@ -78,6 +79,39 @@ describe("TerminalPanel focus refresh helpers", () => {
 
     expect(handle.refreshLayout).toHaveBeenCalledWith({ focus: false });
     expect(handle.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resolveTerminalCommand", () => {
+  const commandOverrides = {
+    claude: "/opt/claude",
+    codex: null,
+    kimi: "/opt/kimi",
+    kiro: "/opt/kiro-cli",
+  };
+
+  it("falls back to the agent command override for terminal launchers", () => {
+    expect(resolveTerminalCommand("kimi", undefined, null, commandOverrides)).toBe(
+      "/opt/kimi",
+    );
+  });
+
+  it("keeps request and launcher commands ahead of the agent fallback", () => {
+    expect(
+      resolveTerminalCommand(
+        "kiro",
+        "/tmp/request-kiro",
+        "/tmp/launcher-kiro",
+        commandOverrides,
+      ),
+    ).toBe("/tmp/request-kiro");
+    expect(resolveTerminalCommand("kiro", null, "/tmp/launcher-kiro", commandOverrides)).toBe(
+      "/tmp/launcher-kiro",
+    );
+  });
+
+  it("never applies an agent override to shell sessions", () => {
+    expect(resolveTerminalCommand("shell", null, null, commandOverrides)).toBeNull();
   });
 });
 

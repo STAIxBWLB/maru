@@ -1168,20 +1168,43 @@ function MainApp() {
   );
   const terminalRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
     () => ({
-      claude: maruSettings.terminal.launchers.claude.command ?? null,
-      codex: maruSettings.terminal.launchers.codex.command ?? null,
+      claude:
+        maruSettings.terminal.launchers.claude.command ??
+        maruSettings.ai.commandOverrides.claude,
+      codex:
+        maruSettings.terminal.launchers.codex.command ??
+        maruSettings.ai.commandOverrides.codex,
+      kimi:
+        maruSettings.terminal.launchers.kimi.command ??
+        maruSettings.ai.commandOverrides.kimi,
+      kiro:
+        maruSettings.terminal.launchers.kiro.command ??
+        maruSettings.ai.commandOverrides.kiro,
     }),
     [
       maruSettings.terminal.launchers.claude.command,
       maruSettings.terminal.launchers.codex.command,
+      maruSettings.terminal.launchers.kimi.command,
+      maruSettings.terminal.launchers.kiro.command,
+      maruSettings.ai.commandOverrides.claude,
+      maruSettings.ai.commandOverrides.codex,
+      maruSettings.ai.commandOverrides.kimi,
+      maruSettings.ai.commandOverrides.kiro,
     ],
   );
   const aiRuntimeCommands = useMemo<Partial<Record<SkillDispatchRuntime, string | null>>>(
     () => ({
       claude: maruSettings.ai.commandOverrides.claude,
       codex: maruSettings.ai.commandOverrides.codex,
+      kimi: maruSettings.ai.commandOverrides.kimi,
+      kiro: maruSettings.ai.commandOverrides.kiro,
     }),
-    [maruSettings.ai.commandOverrides.claude, maruSettings.ai.commandOverrides.codex],
+    [
+      maruSettings.ai.commandOverrides.claude,
+      maruSettings.ai.commandOverrides.codex,
+      maruSettings.ai.commandOverrides.kimi,
+      maruSettings.ai.commandOverrides.kiro,
+    ],
   );
 
   const privateWorkspaces = useMemo(
@@ -9041,7 +9064,10 @@ function MainApp() {
           ) : null}
         </div>
 
-        <AgentUsageBar workPath={settingsWorkPath} />
+        <AgentUsageBar
+          workPath={settingsWorkPath}
+          commandOverrides={terminalRuntimeCommands}
+        />
 
         {pendingDestructiveAction ? (
           <div className="dialog-backdrop">

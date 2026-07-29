@@ -39,6 +39,12 @@ import {
 
 type ComposeMode = "terminal" | "background" | "structured";
 const EMPTY_RUNTIME_COMMANDS: Partial<Record<SkillDispatchRuntime, string | null>> = {};
+export const COMPOSE_SKILL_RUNTIMES = [
+  "claude",
+  "codex",
+  "kimi",
+  "kiro",
+] as const satisfies readonly SkillDispatchRuntime[];
 
 const MEETING_NOTES_SKILL = "meeting-notes";
 // Skills that accept a pasted/dropped transcript-like source in the dialog.
@@ -132,7 +138,7 @@ export function ComposeDialog({
     let cancelled = false;
     setRuntimeStatusLoading(true);
     Promise.all(
-      (["claude", "codex"] as SkillDispatchRuntime[]).map(async (candidate) => {
+      COMPOSE_SKILL_RUNTIMES.map(async (candidate) => {
         const status = await skillsRuntimeStatus({
           runtime: candidate,
           commandOverride: runtimeStatusCommands[candidate] ?? null,
@@ -148,9 +154,10 @@ export function ComposeDialog({
         setRuntimeStatuses(next);
         setRuntime((current) => {
           if (next[current]?.available) return current;
-          if (next.claude?.available) return "claude";
-          if (next.codex?.available) return "codex";
-          return current;
+          return (
+            COMPOSE_SKILL_RUNTIMES.find((candidate) => next[candidate]?.available) ??
+            current
+          );
         });
       })
       .catch((err) => {
@@ -408,24 +415,21 @@ export function ComposeDialog({
                   role="group"
                   aria-label={t("skills.compose.runTarget")}
                 >
-                  <button
-                    type="button"
-                    className={runtime === "claude" ? "active" : ""}
-                    onClick={() => setRuntime("claude")}
-                    disabled={runtimeStatuses.claude?.available === false}
-                  >
-                    <SquareTerminal size={13} />
-                    <span>Claude</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={runtime === "codex" ? "active" : ""}
-                    onClick={() => setRuntime("codex")}
-                    disabled={runtimeStatuses.codex?.available === false}
-                  >
-                    <Code2 size={13} />
-                    <span>Codex</span>
-                  </button>
+                  {COMPOSE_SKILL_RUNTIMES.map((candidate) => {
+                    const RuntimeIcon = candidate === "codex" ? Code2 : SquareTerminal;
+                    return (
+                      <button
+                        key={candidate}
+                        type="button"
+                        className={runtime === candidate ? "active" : ""}
+                        onClick={() => setRuntime(candidate)}
+                        disabled={runtimeStatuses[candidate]?.available === false}
+                      >
+                        <RuntimeIcon size={13} />
+                        <span>{runtimeLabel(candidate)}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div
                   className="compose-runtime-status"
@@ -618,8 +622,11 @@ function runtimeStatusState(
 
 function readLastSkillRuntime(): SkillDispatchRuntime | null {
   if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem("maru:last-skill-runtime");
-  return value === "claude" || value === "codex" ? value : null;
+  return parseStoredSkillRuntime(window.localStorage.getItem("maru:last-skill-runtime"));
+}
+
+export function parseStoredSkillRuntime(value: string | null): SkillDispatchRuntime | null {
+  return COMPOSE_SKILL_RUNTIMES.find((runtime) => runtime === value) ?? null;
 }
 
 function writeLastSkillRuntime(runtime: SkillDispatchRuntime) {

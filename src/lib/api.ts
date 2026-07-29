@@ -1442,6 +1442,7 @@ export async function startClaudeCliInvocation(
 export type AgentProvider = "claude" | "codex" | "kimi" | "kiro";
 
 export const AGENT_PROVIDERS: readonly AgentProvider[] = ["claude", "codex", "kimi", "kiro"];
+export type AgentCommandOverrides = Partial<Record<AgentProvider, string | null>>;
 
 export type AgentAuthStatus =
   | "authenticated"
@@ -1486,17 +1487,38 @@ export interface AgentUsageStatus {
 /** Per-agent account/authentication status. `commandOverrides` maps agent id
  *  to an absolute binary path that bypasses PATH-based resolution. */
 export async function agentsAccountStatus(
-  commandOverrides?: Record<string, string>,
+  commandOverrides?: AgentCommandOverrides,
 ): Promise<AgentAccountStatus[]> {
   if (!isTauri()) return mockAgentsAccountStatus();
-  return invoke<AgentAccountStatus[]>("agents_account_status", { commandOverrides });
+  return invoke<AgentAccountStatus[]>("agents_account_status", {
+    commandOverrides: populatedAgentCommandOverrides(commandOverrides),
+  });
 }
 
 /** Per-agent quota/usage windows. Cached backend-side; pass `force` only for
  *  a user-initiated refresh. */
-export async function agentsUsageStatus(force?: boolean): Promise<AgentUsageStatus[]> {
+export async function agentsUsageStatus(
+  commandOverrides?: AgentCommandOverrides,
+  force?: boolean,
+): Promise<AgentUsageStatus[]> {
   if (!isTauri()) return mockAgentsUsageStatus();
-  return invoke<AgentUsageStatus[]>("agents_usage_status", { force });
+  return invoke<AgentUsageStatus[]>("agents_usage_status", {
+    commandOverrides: populatedAgentCommandOverrides(commandOverrides),
+    force,
+  });
+}
+
+function populatedAgentCommandOverrides(
+  commandOverrides?: AgentCommandOverrides,
+): Record<string, string> | undefined {
+  if (!commandOverrides) return undefined;
+  const populated = Object.fromEntries(
+    AGENT_PROVIDERS.flatMap((id) => {
+      const value = commandOverrides[id]?.trim();
+      return value ? [[id, value]] : [];
+    }),
+  );
+  return Object.keys(populated).length > 0 ? populated : undefined;
 }
 
 function mockAgentsAccountStatus(): AgentAccountStatus[] {

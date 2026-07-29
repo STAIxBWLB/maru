@@ -414,7 +414,7 @@ export function TasksPane({
 
   const resolveRuntime = useCallback(async (): Promise<SkillDispatchRuntime | null> => {
     const preferred: SkillDispatchRuntime = defaultRuntime ?? "claude";
-    const order: SkillDispatchRuntime[] = preferred === "codex" ? ["codex", "claude"] : ["claude", "codex"];
+    const order = taskRuntimeFallbackOrder(preferred);
     for (const runtime of order) {
       try {
         const status = await skillsRuntimeStatus({ runtime, commandOverride: runtimeCommands[runtime] ?? null });
@@ -877,6 +877,17 @@ export function canSwitchTaskDetails(
   confirmDiscard: () => boolean,
 ): boolean {
   return !dirty || confirmDiscard();
+}
+
+export function taskRuntimeFallbackOrder(
+  preferred: SkillDispatchRuntime,
+): SkillDispatchRuntime[] {
+  return [
+    preferred,
+    ...(["claude", "codex", "kimi", "kiro"] as SkillDispatchRuntime[]).filter(
+      (runtime) => runtime !== preferred,
+    ),
+  ];
 }
 
 function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {

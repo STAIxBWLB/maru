@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCcw } from "lucide-react";
 
-import { agentsUsageStatus, AGENT_PROVIDERS, type AgentUsageStatus } from "../lib/api";
+import {
+  agentsUsageStatus,
+  AGENT_PROVIDERS,
+  type AgentCommandOverrides,
+  type AgentUsageStatus,
+} from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import { formatUsageWindowSegment } from "../lib/usageFormat";
 import { openSettingsWindow } from "../lib/windowLayout";
@@ -12,7 +17,13 @@ const POLL_INTERVAL_MS = 60_000;
  * Main-window footer with one quota chip per agent. Polls usage every 60s and
  * on window focus; clicking a chip opens the settings window Agents tab.
  */
-export function AgentUsageBar({ workPath }: { workPath: string | null }) {
+export function AgentUsageBar({
+  workPath,
+  commandOverrides,
+}: {
+  workPath: string | null;
+  commandOverrides?: AgentCommandOverrides;
+}) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AgentUsageStatus[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -20,19 +31,22 @@ export function AgentUsageBar({ workPath }: { workPath: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   const mountedRef = useRef(true);
 
-  const load = useCallback(async (force = false) => {
-    setRefreshing(true);
-    try {
-      const next = await agentsUsageStatus(force);
-      if (!mountedRef.current) return;
-      setUsage(next);
-      setNow(Date.now());
-    } catch {
-      // Keep stale chips; per-agent failures are modeled in the payload.
-    } finally {
-      if (mountedRef.current) setRefreshing(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (force = false) => {
+      setRefreshing(true);
+      try {
+        const next = await agentsUsageStatus(commandOverrides, force);
+        if (!mountedRef.current) return;
+        setUsage(next);
+        setNow(Date.now());
+      } catch {
+        // Keep stale chips; per-agent failures are modeled in the payload.
+      } finally {
+        if (mountedRef.current) setRefreshing(false);
+      }
+    },
+    [commandOverrides],
+  );
 
   useEffect(() => {
     mountedRef.current = true;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canSwitchTaskDetails } from "./TasksPane";
+import { canSwitchTaskDetails, taskRuntimeFallbackOrder } from "./TasksPane";
 
 describe("TasksPane detail selection guard", () => {
   it("switches immediately when the detail drawer is clean", () => {
@@ -17,5 +17,22 @@ describe("TasksPane detail selection guard", () => {
     expect(canSwitchTaskDetails(true, accept)).toBe(true);
     expect(reject).toHaveBeenCalledTimes(1);
     expect(accept).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TasksPane runtime selection", () => {
+  it("tries the configured Kimi or Kiro runtime before fallbacks", () => {
+    expect(taskRuntimeFallbackOrder("kimi")).toEqual([
+      "kimi",
+      "claude",
+      "codex",
+      "kiro",
+    ]);
+    expect(taskRuntimeFallbackOrder("kiro")).toEqual([
+      "kiro",
+      "claude",
+      "codex",
+      "kimi",
+    ]);
   });
 });

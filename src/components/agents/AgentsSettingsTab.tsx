@@ -47,11 +47,13 @@ export function AgentsSettingsTab({
   const commandOverrides = useMemo(() => {
     const overrides: Record<string, string> = {};
     for (const id of AGENT_PROVIDERS) {
-      const value = settings.ai.commandOverrides[id];
+      const value =
+        settings.ai.commandOverrides[id] ??
+        settings.terminal.launchers[id]?.command;
       if (value) overrides[id] = value;
     }
     return overrides;
-  }, [settings.ai.commandOverrides]);
+  }, [settings.ai.commandOverrides, settings.terminal.launchers]);
 
   const load = useCallback(
     async (forceUsage = false) => {
@@ -59,7 +61,7 @@ export function AgentsSettingsTab({
       try {
         const [nextAccounts, nextUsage] = await Promise.all([
           agentsAccountStatus(commandOverrides),
-          agentsUsageStatus(forceUsage),
+          agentsUsageStatus(commandOverrides, forceUsage),
         ]);
         setAccounts(nextAccounts);
         setUsage(nextUsage);
@@ -83,7 +85,10 @@ export function AgentsSettingsTab({
   const runLogin = async () => {
     const [command, ...args] = loginCommand.split(" ");
     const delivered = await emitSettingsTerminalLaunch({
-      command: settings.ai.commandOverrides[agent] ?? command,
+      command:
+        settings.ai.commandOverrides[agent] ??
+        settings.terminal.launchers[agent]?.command ??
+        command,
       args,
       cwd: workPath,
     });
@@ -215,7 +220,8 @@ function LaunchCommandFields({
 }) {
   const { t } = useTranslation();
   const launcher: TerminalLauncherSettings | undefined = settings.terminal.launchers[agent];
-  const overrideFromSettings = settings.ai.commandOverrides[agent] ?? "";
+  const overrideFromSettings =
+    settings.ai.commandOverrides[agent] ?? launcher?.command ?? "";
   const argsFromSettings = (launcher?.args ?? []).join(" ");
   const [overrideDraft, setOverrideDraft] = useState(overrideFromSettings);
   const [argsDraft, setArgsDraft] = useState(argsFromSettings);
@@ -236,6 +242,18 @@ function LaunchCommandFields({
           commandOverrides: {
             ...settings.ai.commandOverrides,
             [agent]: trimmed ? trimmed : null,
+          },
+        },
+        terminal: {
+          ...settings.terminal,
+          launchers: {
+            ...settings.terminal.launchers,
+            [agent]: {
+              enabled: launcher?.enabled ?? true,
+              label: launcher?.label ?? agent,
+              command: trimmed ? trimmed : null,
+              args: launcher?.args ?? [],
+            },
           },
         },
       }),

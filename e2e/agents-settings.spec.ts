@@ -92,11 +92,20 @@ test("launch command override persists across reload via the settings fallback",
         if (!raw) return null;
         const settings = JSON.parse(raw) as {
           ai?: { commandOverrides?: Record<string, string | null> };
+          terminal?: {
+            launchers?: Record<string, { command?: string | null }>;
+          };
         };
-        return settings.ai?.commandOverrides?.claude ?? null;
+        return {
+          ai: settings.ai?.commandOverrides?.claude ?? null,
+          terminal: settings.terminal?.launchers?.claude?.command ?? null,
+        };
       }),
     )
-    .toBe("/opt/claude/bin/claude");
+    .toEqual({
+      ai: "/opt/claude/bin/claude",
+      terminal: "/opt/claude/bin/claude",
+    });
 
   await page.reload();
   await expect(page.getByRole("tab", { name: "에이전트" })).toHaveAttribute(

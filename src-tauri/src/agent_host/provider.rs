@@ -125,11 +125,16 @@ fn apply_kimi_permission_args(cmd: &mut Command, permission_mode: &str) {
 
 fn apply_kiro_permission_args(cmd: &mut Command, permission_mode: &str) {
     match normalize_permission_mode(permission_mode) {
-        "acceptEdits" | "bypassPermissions" => {
-            cmd.arg("-a");
+        "plan" => {
+            cmd.arg("--trust-tools=read,grep");
         }
-        // plan/default: kiro-cli has no read-only headless flag; run untrusted.
-        "plan" | "default" => {}
+        "acceptEdits" => {
+            cmd.arg("--trust-tools=read,grep,write");
+        }
+        "bypassPermissions" => {
+            cmd.arg("--trust-all-tools");
+        }
+        "default" => {}
         _ => unreachable!("normalize_permission_mode only returns known modes"),
     }
 }
@@ -781,7 +786,15 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(args, ["chat", "--no-interactive", "do work"]);
+        assert_eq!(
+            args,
+            [
+                "chat",
+                "--no-interactive",
+                "--trust-tools=read,grep",
+                "do work",
+            ]
+        );
     }
 
     #[cfg(unix)]
@@ -803,10 +816,16 @@ mod tests {
                 .map(|a| a.to_string_lossy().into_owned())
                 .collect::<Vec<String>>()
         };
-        assert!(args_for("acceptEdits").contains(&"-a".to_string()));
-        assert!(args_for("bypassPermissions").contains(&"-a".to_string()));
-        assert!(!args_for("plan").contains(&"-a".to_string()));
-        assert!(!args_for("default").contains(&"-a".to_string()));
+        assert!(args_for("plan").contains(&"--trust-tools=read,grep".to_string()));
+        assert!(args_for("acceptEdits").contains(&"--trust-tools=read,grep,write".to_string()));
+        assert!(args_for("bypassPermissions").contains(&"--trust-all-tools".to_string()));
+        assert!(!args_for("default")
+            .iter()
+            .any(|arg| arg.starts_with("--trust-")));
+        assert!(!["plan", "acceptEdits", "default", "bypassPermissions"]
+            .into_iter()
+            .flat_map(args_for)
+            .any(|arg| arg == "-a"));
     }
 
     #[cfg(unix)]

@@ -258,12 +258,12 @@ fn usage_status(
     overrides: Option<&HashMap<String, String>>,
     force: bool,
 ) -> AgentUsageStatus {
-    let id = provider.id().to_string();
+    let cache_key = usage_cache_key(provider, overrides);
     if !force {
         if let Some(cached) = usage_cache()
             .lock()
             .ok()
-            .and_then(|cache| cache.get(&id).cloned())
+            .and_then(|cache| cache.get(&cache_key).cloned())
         {
             if cached.0.elapsed() < USAGE_CACHE_TTL {
                 return cached.1;
@@ -272,9 +272,20 @@ fn usage_status(
     }
     let status = probe_usage(provider, overrides);
     if let Ok(mut cache) = usage_cache().lock() {
-        cache.insert(id, (Instant::now(), status.clone()));
+        cache.insert(cache_key, (Instant::now(), status.clone()));
     }
     status
+}
+
+fn usage_cache_key(
+    provider: CliProviderKind,
+    overrides: Option<&HashMap<String, String>>,
+) -> String {
+    format!(
+        "{}\0{}",
+        provider.id(),
+        override_for(overrides, provider).unwrap_or_default()
+    )
 }
 
 fn probe_usage(
@@ -683,12 +694,18 @@ fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
             let Ok(meta) = entry.metadata() else {
                 continue;
             };
-            if meta.is_dir() {
+            if file_type.is_dir() {
                 stack.push(path);
-            } else if meta.is_file()
+            } else if file_type.is_file()
                 && path
                     .file_name()
                     .map(|name| {
@@ -905,5 +922,37 @@ mod tests {
         let found = newest_rollout_file(dir.path()).unwrap();
         assert_eq!(found, newer);
         assert!(newest_rollout_file(&dir.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn usage_cache_key_changes_with_command_override() {
+        let mut first = HashMap::new();
+        first.insert("codex".to_string(), "/opt/codex-a".to_string());
+        let mut second = HashMap::new();
+        second.insert("codex".to_string(), "/opt/codex-b".to_string());
+
+        assert_ne!(
+            usage_cache_key(CliProviderKind::Codex, Some(&first)),
+            usage_cache_key(CliProviderKind::Codex, Some(&second))
+        );
+        assert_eq!(
+            usage_cache_key(CliProviderKind::Claude, Some(&first)),
+            usage_cache_key(CliProviderKind::Claude, Some(&second))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newest_rollout_file_does_not_follow_symlink_cycles() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026/07/29");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = day.join("rollout-safe.jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        symlink(dir.path(), day.join("cycle")).unwrap();
+
+        assert_eq!(newest_rollout_file(dir.path()), Some(rollout));
     }
 }

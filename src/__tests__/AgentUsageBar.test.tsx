@@ -65,12 +65,15 @@ describe("AgentUsageBar", () => {
     vi.clearAllMocks();
   });
 
-  async function render(workPath: string | null = "/work") {
+  async function render(
+    workPath: string | null = "/work",
+    commandOverrides = { claude: "/opt/bin/claude" },
+  ) {
     root = createRoot(container);
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <AgentUsageBar workPath={workPath} />
+          <AgentUsageBar workPath={workPath} commandOverrides={commandOverrides} />
         </LocaleContext.Provider>,
       );
     });
@@ -144,12 +147,18 @@ describe("AgentUsageBar", () => {
   it("passes force only on manual refresh", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([usageEntry()]);
     await render();
-    expect(mocks.agentsUsageStatus).toHaveBeenCalledWith(false);
+    expect(mocks.agentsUsageStatus).toHaveBeenCalledWith(
+      { claude: "/opt/bin/claude" },
+      false,
+    );
 
     const refresh = container.querySelector<HTMLButtonElement>(".agent-usage-refresh");
     await act(async () => {
       refresh?.click();
     });
-    expect(mocks.agentsUsageStatus).toHaveBeenLastCalledWith(true);
+    expect(mocks.agentsUsageStatus).toHaveBeenLastCalledWith(
+      { claude: "/opt/bin/claude" },
+      true,
+    );
   });
 });
