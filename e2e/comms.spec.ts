@@ -35,6 +35,11 @@ test("filters processed results on the backend and refreshes without clearing th
 }) => {
   await page.addInitScript(() => {
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+    let releaseInitialSnapshot: (() => void) | null = null;
+    let initialSnapshotResolved = false;
+    const initialSnapshotGate = new Promise<void>((resolve) => {
+      releaseInitialSnapshot = resolve;
+    });
     const items = [
       {
         id: "gws-budget",
@@ -82,31 +87,38 @@ test("filters processed results on the backend and refreshes without clearing th
       },
     ];
     const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
-      scan_inbox_processed_items: (args) => {
-        calls.push({ command: "scan_inbox_processed_items", args });
+      scan_inbox_processed_snapshot: async (args) => {
+        calls.push({ command: "scan_inbox_processed_snapshot", args });
         const channel = typeof args.channel === "string" ? args.channel : null;
         const query = typeof args.query === "string" ? args.query.toLowerCase() : "";
-        return items.filter(
-          (item) =>
-            (!channel || item.channel === channel) &&
-            (!query ||
-              item.title.toLowerCase().includes(query) ||
-              item.summaryPreview.toLowerCase().includes(query)),
-        );
+        if (!channel) {
+          await initialSnapshotGate;
+          initialSnapshotResolved = true;
+        }
+        return {
+          items: items.filter(
+            (item) =>
+              (!channel || item.channel === channel) &&
+              (!query ||
+                item.title.toLowerCase().includes(query) ||
+                item.summaryPreview.toLowerCase().includes(query)),
+          ),
+          counts: channel
+            ? { gws: 1, mso: 1, telegram: 0, kakao: 0 }
+            : { gws: 99, mso: 99, telegram: 0, kakao: 0 },
+        };
       },
       read_inbox_source_runs: (args) => {
         calls.push({ command: "read_inbox_source_runs", args });
         return [];
-      },
-      count_inbox_processed_by_channel: (args) => {
-        calls.push({ command: "count_inbox_processed_by_channel", args });
-        return { gws: 1, mso: 1, telegram: 0, kakao: 0 };
       },
     };
     (
       window as unknown as {
         __MARU_E2E_INVOKE__: typeof handlers;
         __MARU_COMMS_CALLS__: typeof calls;
+        __MARU_RELEASE_INITIAL_SNAPSHOT__: () => void;
+        __MARU_INITIAL_SNAPSHOT_RESOLVED__: () => boolean;
       }
     ).__MARU_E2E_INVOKE__ = handlers;
     (
@@ -114,6 +126,16 @@ test("filters processed results on the backend and refreshes without clearing th
         __MARU_COMMS_CALLS__: typeof calls;
       }
     ).__MARU_COMMS_CALLS__ = calls;
+    (
+      window as unknown as {
+        __MARU_RELEASE_INITIAL_SNAPSHOT__: () => void;
+      }
+    ).__MARU_RELEASE_INITIAL_SNAPSHOT__ = () => releaseInitialSnapshot?.();
+    (
+      window as unknown as {
+        __MARU_INITIAL_SNAPSHOT_RESOLVED__: () => boolean;
+      }
+    ).__MARU_INITIAL_SNAPSHOT_RESOLVED__ = () => initialSnapshotResolved;
   });
   await page.goto("/");
   await page
@@ -122,9 +144,40 @@ test("filters processed results on the backend and refreshes without clearing th
     .click();
 
   const pane = page.locator(".comms-pane");
-  await pane.locator(".comms-source-selector").getByRole("button", { name: /Gmail/ }).click();
+  const gmailFilter = pane
+    .locator(".comms-source-selector")
+    .getByRole("button", { name: /Gmail/ });
+  await gmailFilter.click();
   await expect(pane.locator(".processed-row", { hasText: "Budget approval" })).toBeVisible();
   await expect(pane.locator(".processed-row", { hasText: "Contract review" })).toHaveCount(0);
+  await expect(gmailFilter.locator(".count")).toHaveText("1");
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        __MARU_RELEASE_INITIAL_SNAPSHOT__?: () => void;
+      }
+    ).__MARU_RELEASE_INITIAL_SNAPSHOT__?.();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __MARU_INITIAL_SNAPSHOT_RESOLVED__?: () => boolean;
+            }
+          ).__MARU_INITIAL_SNAPSHOT_RESOLVED__?.() ?? false,
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(pane.locator(".processed-row", { hasText: "Contract review" })).toHaveCount(0);
+  await expect(gmailFilter.locator(".count")).toHaveText("1");
   await expect
     .poll(() =>
       page.evaluate(
@@ -138,7 +191,7 @@ test("filters processed results on the backend and refreshes without clearing th
             }
           ).__MARU_COMMS_CALLS__?.some(
             (call) =>
-              call.command === "scan_inbox_processed_items" &&
+              call.command === "scan_inbox_processed_snapshot" &&
               call.args.channel === "gws",
           ) ?? false,
       ),
@@ -159,7 +212,7 @@ test("filters processed results on the backend and refreshes without clearing th
             }
           ).__MARU_COMMS_CALLS__?.some(
             (call) =>
-              call.command === "scan_inbox_processed_items" &&
+              call.command === "scan_inbox_processed_snapshot" &&
               call.args.channel === "gws" &&
               call.args.query === "Budget",
           ) ?? false,
@@ -169,4 +222,25 @@ test("filters processed results on the backend and refreshes without clearing th
 
   await pane.getByRole("button", { name: "처리된 항목 새로고침" }).click();
   await expect(pane.locator(".processed-row", { hasText: "Budget approval" })).toBeVisible();
+  const calls = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __MARU_COMMS_CALLS__?: Array<{
+            command: string;
+            args: Record<string, unknown>;
+          }>;
+        }
+      ).__MARU_COMMS_CALLS__ ?? [],
+  );
+  expect(calls.map((call) => call.command)).not.toContain(
+    "count_inbox_processed_by_channel",
+  );
+  expect(
+    calls.filter(
+      (call) =>
+        call.command === "scan_inbox_processed_snapshot" &&
+        call.args.channel === null,
+    ),
+  ).toHaveLength(1);
 });

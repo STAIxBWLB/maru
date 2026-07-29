@@ -12,6 +12,7 @@ interface SourceHeaderCardProps {
   progress?: MissionProgress | null;
   processedCount: number;
   actionBusy: boolean;
+  processDisabled?: boolean;
   compact?: boolean;
   onProcessNow: (channel: string) => void;
   onSelect?: (channel: string) => void;
@@ -24,6 +25,7 @@ export function SourceHeaderCard({
   progress = null,
   processedCount,
   actionBusy,
+  processDisabled = false,
   compact = false,
   onProcessNow,
   onSelect,
@@ -104,7 +106,7 @@ export function SourceHeaderCard({
         <button
           type="button"
           className="button button-primary button-sm"
-          disabled={actionBusy || running}
+          disabled={actionBusy || running || processDisabled}
           onClick={() => onProcessNow(channel)}
         >
           {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}

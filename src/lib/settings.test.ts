@@ -5,10 +5,15 @@ import {
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
+  hasLoadedWorkspaceConfigForPath,
   normalizeMaruSettings,
   parseBinaryFileIncludePatternsText,
+  readWorkspaceM365AuthConfig,
+  readWorkspaceM365AuthConfigForPath,
   resolveClassifierRuntime,
+  selectLoadedWorkspaceConfigForPath,
   serializeMaruSettings,
+  validateWorkspaceM365ProviderConfig,
 } from "./settings";
 
 describe("normalizeMaruSettings", () => {
@@ -844,6 +849,296 @@ describe("normalizeMaruSettings", () => {
     expect(effective.telegram.sessionFile).toBe("/tmp/telegram.session");
     expect(effective.telegram.monitorConfigPath).toBe("/tmp/telegram-monitor.yaml");
     expect(effective.telegram.legacyAutoDrop).toBe(true);
+  });
+
+  it("reads workspace M365 auth IDs from snake case and camel case provider config", () => {
+    expect(
+      readWorkspaceM365AuthConfig({
+        io: {
+          providers: {
+            mso: {
+              app_id: "  app-snake  ",
+              tenant_id: " tenant-snake ",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      appId: "app-snake",
+      tenantId: "tenant-snake",
+    });
+    expect(
+      readWorkspaceM365AuthConfig({
+        io: {
+          providers: {
+            outlook: {
+              appId: "app-camel",
+              tenantId: "tenant-camel",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      appId: "app-camel",
+      tenantId: "tenant-camel",
+    });
+  });
+
+  it("uses nonblank M365 fields only from the canonical mso record when present", () => {
+    expect(
+      readWorkspaceM365AuthConfig({
+        io: {
+          providers: {
+            mso: {
+              app_id: " ",
+              appId: "app-from-mso-camel",
+              tenant_id: "\t",
+              tenantId: "",
+            },
+            outlook: {
+              app_id: "app-from-outlook",
+              tenant_id: "tenant-from-outlook",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      appId: "app-from-mso-camel",
+      tenantId: null,
+    });
+    expect(
+      readWorkspaceM365AuthConfig({
+        io: {
+          providers: {
+            mso: {
+              app_id: "app-from-mso",
+              tenant_id: "tenant-from-mso",
+            },
+            outlook: {
+              app_id: "app-from-outlook",
+              tenant_id: "tenant-from-outlook",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      appId: "app-from-mso",
+      tenantId: "tenant-from-mso",
+    });
+    expect(readWorkspaceM365AuthConfig({ io: { providers: { mso: {} } } })).toEqual({
+      appId: null,
+      tenantId: null,
+    });
+    expect(readWorkspaceM365AuthConfig(null)).toEqual({
+      appId: null,
+      tenantId: null,
+    });
+  });
+
+  it("falls back to the outlook alias only when the mso record is absent", () => {
+    const base = normalizeMaruSettings({
+      comms: {
+        outlook: { m365Path: "/global/m365" },
+      },
+    }).comms;
+    const dualAliasConfig = {
+      io: {
+        providers: {
+          mso: {
+            command: "/mso/m365",
+            app_id: " ",
+            tenant_id: "mso-tenant",
+          },
+          outlook: {
+            command: "/outlook/m365",
+            app_id: "outlook-app",
+            tenant_id: "outlook-tenant",
+          },
+        },
+      },
+    };
+
+    expect(applyWorkspaceCommsOverrides(base, dualAliasConfig).outlook.m365Path).toBe(
+      "/mso/m365",
+    );
+    expect(readWorkspaceM365AuthConfig(dualAliasConfig)).toEqual({
+      appId: null,
+      tenantId: "mso-tenant",
+    });
+
+    const outlookOnlyConfig = {
+      io: {
+        providers: {
+          outlook: {
+            command: "/outlook/m365",
+            app_id: "outlook-app",
+            tenant_id: "outlook-tenant",
+          },
+        },
+      },
+    };
+    expect(applyWorkspaceCommsOverrides(base, outlookOnlyConfig).outlook.m365Path).toBe(
+      "/outlook/m365",
+    );
+    expect(readWorkspaceM365AuthConfig(outlookOnlyConfig)).toEqual({
+      appId: "outlook-app",
+      tenantId: "outlook-tenant",
+    });
+  });
+
+  it("blocks invalid present canonical aliases instead of falling back", () => {
+    const base = normalizeMaruSettings({
+      comms: {
+        outlook: { m365Path: "/global/m365" },
+      },
+    }).comms;
+    for (const invalidMso of [null, "m365"]) {
+      const config = {
+        io: {
+          providers: {
+            mso: invalidMso,
+            outlook: {
+              command: "/outlook/m365",
+              app_id: "outlook-app",
+              tenant_id: "outlook-tenant",
+            },
+          },
+        },
+      };
+      expect(validateWorkspaceM365ProviderConfig(config)).toBe(
+        "Invalid workspace.config.yaml: io.providers.mso must be a mapping",
+      );
+      expect(applyWorkspaceCommsOverrides(base, config).outlook.m365Path).toBe(
+        "/global/m365",
+      );
+      expect(readWorkspaceM365AuthConfig(config)).toEqual({
+        appId: null,
+        tenantId: null,
+      });
+    }
+
+    expect(
+      validateWorkspaceM365ProviderConfig({
+        io: {
+          providers: {
+            outlook: {
+              command: "/outlook/m365",
+            },
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("selects M365 auth config only for the requested workspace path", () => {
+    const first = {
+      workPath: "/workspace/first",
+      config: {
+        io: {
+          providers: {
+            mso: {
+              app_id: "first-app",
+              tenant_id: "first-tenant",
+            },
+          },
+        },
+      },
+    };
+    const second = {
+      workPath: "/workspace/second",
+      config: {
+        io: {
+          providers: {
+            mso: {
+              app_id: "second-app",
+              tenant_id: "second-tenant",
+            },
+          },
+        },
+      },
+    };
+
+    expect(readWorkspaceM365AuthConfigForPath("/workspace/second", first, second)).toEqual({
+      appId: "second-app",
+      tenantId: "second-tenant",
+    });
+    expect(readWorkspaceM365AuthConfigForPath("/workspace/missing", first, second)).toEqual({
+      appId: null,
+      tenantId: null,
+    });
+    expect(readWorkspaceM365AuthConfigForPath(null, first, second)).toEqual({
+      appId: null,
+      tenantId: null,
+    });
+    expect(hasLoadedWorkspaceConfigForPath("/workspace/second", first, second)).toBe(true);
+    expect(hasLoadedWorkspaceConfigForPath("/workspace/pending", first, second)).toBe(
+      false,
+    );
+    expect(hasLoadedWorkspaceConfigForPath(null, first, second)).toBe(false);
+    expect(
+      hasLoadedWorkspaceConfigForPath("/workspace/no-ids", {
+        workPath: "/workspace/no-ids",
+        config: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("selects M365 binary settings and auth IDs from the same inbox workspace", () => {
+    const base = normalizeMaruSettings({
+      comms: {
+        outlook: {
+          m365Path: "/global/m365",
+        },
+      },
+    }).comms;
+    const settingsWorkspace = {
+      workPath: "/workspace/settings",
+      config: {
+        io: {
+          providers: {
+            mso: {
+              command: "/settings/m365",
+              app_id: "settings-app",
+              tenant_id: "settings-tenant",
+            },
+          },
+        },
+      },
+    };
+    const inboxWorkspace = {
+      workPath: "/workspace/inbox",
+      config: {
+        io: {
+          providers: {
+            mso: {
+              command: "/inbox/m365",
+              app_id: "inbox-app",
+              tenant_id: "inbox-tenant",
+            },
+          },
+        },
+      },
+    };
+    const selected = selectLoadedWorkspaceConfigForPath(
+      "/workspace/inbox",
+      settingsWorkspace,
+      inboxWorkspace,
+    );
+
+    expect(applyWorkspaceCommsOverrides(base, selected).outlook.m365Path).toBe(
+      "/inbox/m365",
+    );
+    expect(readWorkspaceM365AuthConfig(selected)).toEqual({
+      appId: "inbox-app",
+      tenantId: "inbox-tenant",
+    });
+    expect(
+      selectLoadedWorkspaceConfigForPath(
+        "/workspace/not-loaded",
+        settingsWorkspace,
+        inboxWorkspace,
+      ),
+    ).toBeNull();
   });
 
   it("applies workspace meeting note overrides without rewriting base meetings defaults", () => {

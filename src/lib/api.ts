@@ -62,6 +62,7 @@ import type {
   InboxEntry,
   InboxProcessedItem,
   InboxProcessedItemDetail,
+  InboxProcessedSnapshot,
   InboxProcessedStatus,
   InboxSourceRun,
   InboxDropStageRequest,
@@ -706,6 +707,25 @@ export async function scanInboxProcessedItems({
     query,
     limit,
   });
+}
+
+export async function scanInboxProcessedSnapshot({
+  workPath,
+  channel,
+  statuses,
+  query,
+  limit,
+}: InboxProcessedQuery): Promise<InboxProcessedSnapshot> {
+  const args = { workPath, channel, statuses, query, limit };
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<InboxProcessedSnapshot>(
+      "scan_inbox_processed_snapshot",
+      args,
+    );
+    if (override) return override;
+    return { items: [], counts: {} };
+  }
+  return invoke<InboxProcessedSnapshot>("scan_inbox_processed_snapshot", args);
 }
 
 export async function readInboxProcessedItem(

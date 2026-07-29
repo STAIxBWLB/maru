@@ -34,6 +34,7 @@ interface CommsSettingsTabProps {
   onMonitorConfigChange?: (config: TelegramMonitorConfigView) => void;
   onGwsReauth?: () => void;
   onMsoReauth?: () => void;
+  msoReauthDisabled?: boolean;
   onStartPolling?: () => void;
   onStopPolling?: () => void;
   onTelegramLogin?: () => void;
@@ -62,6 +63,7 @@ export function CommsSettingsTab({
   onMonitorConfigChange,
   onGwsReauth,
   onMsoReauth,
+  msoReauthDisabled = false,
   onStartPolling,
   onStopPolling,
   onTelegramLogin,
@@ -210,7 +212,12 @@ export function CommsSettingsTab({
           </div>
           <AuthStatusBadge status={authStatuses.mso} />
           {onMsoReauth ? (
-            <button type="button" className="secondary-button" onClick={onMsoReauth}>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={msoReauthDisabled}
+              onClick={onMsoReauth}
+            >
               <LogIn size={14} />
               <span>{t("comms.outlook.reauth")}</span>
             </button>

@@ -47,21 +47,65 @@ describe("provider reauth commands", () => {
       "exec '/opt/homebrew/bin/gws' auth",
     );
     expect(m365LoginCommand("~/bin/m365").args[1]).toBe(
-      'exec "$HOME/bin/m365" login',
+      'exec "$HOME/bin/m365" login --authType deviceCode',
     );
   });
 
   it("escapes shell-active characters inside $HOME-expanded double quotes", () => {
     // A path that tries to break out of the double quotes must stay inert.
     expect(m365LoginCommand('~/x";echo pwned;"').args[1]).toBe(
-      'exec "$HOME/x\\";echo pwned;\\"" login',
+      'exec "$HOME/x\\";echo pwned;\\"" login --authType deviceCode',
     );
     expect(m365LoginCommand("~/x$(whoami)`id`").args[1]).toBe(
-      'exec "$HOME/x\\$(whoami)\\`id\\`" login',
+      'exec "$HOME/x\\$(whoami)\\`id\\`" login --authType deviceCode',
     );
     expect(gwsAuthCommand("$HOME/bin/g$ws").args[1]).toBe(
       'exec "$HOME/bin/g\\$ws" auth',
     );
+  });
+
+  it("quotes workspace M365 app and tenant IDs", () => {
+    expect(
+      m365LoginCommand("/opt/homebrew/bin/m365", {
+        appId: " app-id ",
+        tenantId: "tenant-id",
+      }).args[1],
+    ).toBe(
+      "exec '/opt/homebrew/bin/m365' login --appId='app-id' --tenant='tenant-id' --authType deviceCode",
+    );
+    expect(
+      m365LoginCommand("m365", {
+        appId: "app'; echo pwned; '",
+        tenantId: "tenant$(whoami)`id`",
+      }).args[1],
+    ).toBe(
+      "exec 'm365' login --appId='app'\\''; echo pwned; '\\''' --tenant='tenant$(whoami)`id`' --authType deviceCode",
+    );
+  });
+
+  it("keeps M365 IDs as literal option values without path expansion or option injection", () => {
+    expect(
+      m365LoginCommand("m365", {
+        appId: "--debug",
+        tenantId: "--help",
+      }).args[1],
+    ).toBe(
+      "exec 'm365' login --appId='--debug' --tenant='--help' --authType deviceCode",
+    );
+    expect(
+      m365LoginCommand("m365", {
+        appId: "$HOME/app$(whoami)`id`",
+        tenantId: "~/tenant'quoted",
+      }).args[1],
+    ).toBe(
+      "exec 'm365' login --appId='$HOME/app$(whoami)`id`' --tenant='~/tenant'\\''quoted' --authType deviceCode",
+    );
+  });
+
+  it("ignores blank M365 auth IDs", () => {
+    expect(
+      m365LoginCommand(null, { appId: " ", tenantId: "\t" }).args[1],
+    ).toBe("exec 'm365' login --authType deviceCode");
   });
 });
 

@@ -69,6 +69,7 @@ import type {
   ThemeMode,
   WorkspaceFileFilter,
 } from "../lib/settings";
+import { useWorkspaceConfigLoad } from "../lib/useWorkspaceConfigLoad";
 import {
   ALL_FILES_LIST_ATTRIBUTES,
   applyWorkspaceCommsOverrides,
@@ -78,6 +79,8 @@ import {
   normalizeMaruSettings,
   normalizeDotFolderIncludes,
   parseBinaryFileIncludePatternsText,
+  readWorkspaceM365AuthConfig,
+  validateWorkspaceM365ProviderConfig,
 } from "../lib/settings";
 import {
   DEFAULT_TERMINAL_SHORTCUTS,
@@ -1074,7 +1077,17 @@ function CommsSettingsSystemTab({
 }) {
   const { t } = useTranslation();
   const [telegramEnvHealthy, setTelegramEnvHealthy] = useState<boolean | null>(null);
-  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
+  const {
+    state: workspaceConfigLoad,
+    reload: reloadWorkspaceConfig,
+  } = useWorkspaceConfigLoad(workPath, {
+    validator: validateWorkspaceM365ProviderConfig,
+  });
+  const workspaceConfigReady =
+    workspaceConfigLoad.workPath === workPath &&
+    workspaceConfigLoad.status === "ready";
+  const workspaceConfig =
+    workspaceConfigReady ? workspaceConfigLoad.config : null;
   const [monitorConfig, setMonitorConfig] = useState<TelegramMonitorConfigView | null>(null);
   const [pristineMonitorConfig, setPristineMonitorConfig] =
     useState<TelegramMonitorConfigView | null>(null);
@@ -1090,6 +1103,10 @@ function CommsSettingsSystemTab({
   const effectiveDraftComms = useMemo(
     () => applyWorkspaceCommsOverrides(draftComms, workspaceConfig),
     [draftComms, workspaceConfig],
+  );
+  const workspaceM365AuthConfig = useMemo(
+    () => readWorkspaceM365AuthConfig(workspaceConfig),
+    [workspaceConfig],
   );
   const [config, setConfig] = useState<InboxRuntimeConfig>(() =>
     cloneInboxConfig(DEFAULT_INBOX_RUNTIME_CONFIG),
@@ -1139,23 +1156,18 @@ function CommsSettingsSystemTab({
   }, [workPath]);
 
   useEffect(() => {
-    let cancelled = false;
-    void readWorkspaceConfig(workPath)
-      .then((next) => {
-        if (!cancelled) setWorkspaceConfig(next);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaceConfig(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setError(null);
+    setAuthStatuses((current) => ({ ...current, mso: null }));
   }, [workPath]);
 
   const dirtyRef = useRef(dirty);
+  const forceLoadAfterConfigRef = useRef(false);
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+  useEffect(() => {
+    forceLoadAfterConfigRef.current = false;
+  }, [workPath]);
 
   const load = useCallback(
     async (options?: { force?: boolean; isCancelled?: () => boolean }) => {
@@ -1179,13 +1191,15 @@ function CommsSettingsSystemTab({
             cliPath: null,
             account: null,
           })),
-          checkMsoAuth(workPath, effectiveComms.outlook.m365Path).catch((err) => ({
-            provider: "mso",
-            state: "error",
-            detail: err instanceof Error ? err.message : String(err),
-            cliPath: null,
-            account: null,
-          })),
+          workspaceConfigReady
+            ? checkMsoAuth(workPath, effectiveComms.outlook.m365Path).catch((err) => ({
+                provider: "mso",
+                state: "error",
+                detail: err instanceof Error ? err.message : String(err),
+                cliPath: null,
+                account: null,
+              }))
+            : Promise.resolve(null),
           checkTelegramAuth({
             workPath,
             max: 1,
@@ -1223,16 +1237,29 @@ function CommsSettingsSystemTab({
       setError(err instanceof Error ? err.message : String(err));
     }
     },
-    [effectiveComms, workPath],
+    [effectiveComms, workPath, workspaceConfigReady],
   );
 
   useEffect(() => {
+    if (
+      workspaceConfigLoad.status !== "ready" &&
+      workspaceConfigLoad.status !== "error"
+    ) {
+      return;
+    }
     let cancelled = false;
-    void load({ isCancelled: () => cancelled });
+    const force = forceLoadAfterConfigRef.current;
+    forceLoadAfterConfigRef.current = false;
+    void load({ force, isCancelled: () => cancelled });
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [load, workspaceConfigLoad.status]);
+
+  const refresh = useCallback(async () => {
+    forceLoadAfterConfigRef.current = true;
+    await reloadWorkspaceConfig();
+  }, [reloadWorkspaceConfig]);
 
   const save = async () => {
     setSaving(true);
@@ -1281,6 +1308,10 @@ function CommsSettingsSystemTab({
     },
     [t, workPath],
   );
+  const visibleError =
+    workspaceConfigLoad.status === "error"
+      ? workspaceConfigLoad.error
+      : error;
 
   return (
     <div className="system-detail" style={{ width: "100%" }}>
@@ -1293,7 +1324,7 @@ function CommsSettingsSystemTab({
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => void load({ force: true })}
+          onClick={() => void refresh()}
           icon={<RefreshCcw size={14} />}
         >
           Refresh
@@ -1308,7 +1339,7 @@ function CommsSettingsSystemTab({
           {t("system.rules.save")}
         </Button>
       </div>
-      {error ? <div className="inbox-error">{error}</div> : null}
+      {visibleError ? <div className="inbox-error">{visibleError}</div> : null}
       {status ? <div className="save-state saved">{status}</div> : null}
       <CommsSettingsTab
         settings={draftComms}
@@ -1337,8 +1368,15 @@ function CommsSettingsSystemTab({
         onGwsReauth={() => {
           void launchTerminalCommand(gwsAuthCommand(gmail.gws_path ?? effectiveGwsPath));
         }}
+        msoReauthDisabled={!workspaceConfigReady}
         onMsoReauth={() => {
-          void launchTerminalCommand(m365LoginCommand(effectiveDraftComms.outlook.m365Path));
+          if (!workspaceConfigReady) return;
+          void launchTerminalCommand(
+            m365LoginCommand(
+              effectiveDraftComms.outlook.m365Path,
+              workspaceM365AuthConfig,
+            ),
+          );
         }}
         onTelegramLogin={() => {
           void launchTerminalCommand(telegramLoginCommand(effectiveDraftComms.telegram));

@@ -188,6 +188,91 @@ export async function readWorkspaceConfig(workPath: string): Promise<WorkspaceCo
   return invoke<WorkspaceConfig>("read_workspace_config", { workPath });
 }
 
+const MISSING_WORKSPACE_CONFIG_ERROR_PREFIX = "workspace.config.yaml not found at ";
+const WORKSPACE_CONFIG_TAURI_REQUIRED_ERROR =
+  "workspace.config.yaml requires the Tauri shell";
+
+export function isMissingWorkspaceConfigError(error: unknown): boolean {
+  return workspaceConfigErrorText(error).startsWith(
+    MISSING_WORKSPACE_CONFIG_ERROR_PREFIX,
+  );
+}
+
+export function isWorkspaceConfigShellUnavailableError(error: unknown): boolean {
+  return workspaceConfigErrorText(error) === WORKSPACE_CONFIG_TAURI_REQUIRED_ERROR;
+}
+
+export interface WorkspaceConfigLoadState {
+  workPath: string | null;
+  status: "idle" | "pending" | "ready" | "error";
+  config: WorkspaceConfig | null;
+  error: string | null;
+}
+
+export type WorkspaceConfigReader = (workPath: string) => Promise<WorkspaceConfig>;
+export type WorkspaceConfigValidator = (config: WorkspaceConfig) => string | null;
+
+export async function resolveWorkspaceConfigLoad(
+  workPath: string,
+  reader: WorkspaceConfigReader = readWorkspaceConfig,
+  validator?: WorkspaceConfigValidator,
+): Promise<WorkspaceConfigLoadState> {
+  try {
+    const config = await reader(workPath);
+    const validationError = validator?.(config) ?? null;
+    if (validationError) {
+      return {
+        workPath,
+        status: "error",
+        config: null,
+        error: workspaceConfigLoadErrorMessage(validationError),
+      };
+    }
+    return {
+      workPath,
+      status: "ready",
+      config,
+      error: null,
+    };
+  } catch (error) {
+    if (
+      isMissingWorkspaceConfigError(error) ||
+      isWorkspaceConfigShellUnavailableError(error)
+    ) {
+      return {
+        workPath,
+        status: "ready",
+        config: null,
+        error: null,
+      };
+    }
+    return {
+      workPath,
+      status: "error",
+      config: null,
+      error: workspaceConfigLoadErrorMessage(error),
+    };
+  }
+}
+
+function workspaceConfigLoadErrorMessage(error: unknown): string {
+  const message = workspaceConfigErrorText(error) || "Cannot read workspace.config.yaml";
+  return message.trim().slice(0, 2_000) || "Cannot read workspace.config.yaml";
+}
+
+function workspaceConfigErrorText(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : typeof error === "object" &&
+          error !== null &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "";
+}
+
 export async function registerWorkspaceRoots(
   workPath: string,
 ): Promise<RegisterWorkspaceOutcome> {

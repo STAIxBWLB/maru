@@ -15,6 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use crate::win_process::NoWindow;
 
@@ -24,6 +25,7 @@ use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::command_output::{run_command_with_timeout, BoundedOutput, CommandTermination};
 use crate::inbox_drop::{auth_status, stage_message_outcome, ProviderAuthStatus, StageOutcome};
 use crate::inbox_settings::{self, InboxGmailConfig};
 use crate::vault::resolve_inside_vault;
@@ -96,6 +98,10 @@ const GMAIL_STAGE_KIND: &str = "gmail.stage";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 const ACCEPTED_LABEL: &str = "maru-accepted";
 const REJECTED_LABEL: &str = "maru-rejected";
+#[cfg(not(test))]
+const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_millis(300);
 
 /// Resolve the `gws` binary. Priority: explicit override → PATH →
 /// augmented PATH probe. Returns the absolute path so spawning is not
@@ -194,7 +200,13 @@ pub fn stage_gmail_items(
 }
 
 #[tauri::command]
-pub fn check_gws_auth(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
+pub async fn check_gws_auth(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || check_gws_auth_now(vault_path))
+        .await
+        .map_err(|err| format!("gws_probe_task_failed: {err}"))?
+}
+
+fn check_gws_auth_now(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
     let override_path = vault_path
         .as_deref()
         .and_then(configured_gws_path_for_vault);
@@ -207,35 +219,70 @@ pub fn check_gws_auth(vault_path: Option<String>) -> Result<ProviderAuthStatus, 
             None,
         ));
     };
-    let output = gws_command(&gws_bin)
-        .args([
-            "gmail",
-            "users",
-            "labels",
-            "list",
-            "--params",
-            r#"{"userId":"me"}"#,
-            "--format",
-            "json",
-        ])
-        .output()
+    let mut cmd = gws_command(&gws_bin);
+    cmd.args([
+        "gmail",
+        "users",
+        "labels",
+        "list",
+        "--params",
+        r#"{"userId":"me"}"#,
+        "--format",
+        "json",
+    ]);
+    let output = run_command_with_timeout(&mut cmd, PROVIDER_READINESS_TIMEOUT, |_, _| false)
         .map_err(|err| format!("gws_spawn_failed: {err}"))?;
+    let detail = output.diagnostic_tail(4096).unwrap_or_default();
+    if output.termination == CommandTermination::TimedOut {
+        if classify_gws_auth_state(&detail) == "auth_required" {
+            return Ok(auth_status(
+                "gws",
+                "auth_required",
+                Some("Google Workspace authentication is required.".to_string()),
+                Some(gws_bin),
+                None,
+            ));
+        }
+        return Ok(auth_status(
+            "gws",
+            "error",
+            Some(provider_timeout_detail(
+                "gws_timeout: readiness probe exceeded 10 seconds",
+                &output,
+            )),
+            Some(gws_bin),
+            None,
+        ));
+    }
     if output.status.success() {
         return Ok(auth_status("gws", "ok", None, Some(gws_bin), None));
     }
-    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
-        .into_iter()
-        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let state = classify_gws_auth_state(&detail);
     Ok(auth_status(
         "gws",
-        classify_gws_auth_state(&detail),
-        Some(detail),
+        state,
+        Some(if state == "auth_required" {
+            "Google Workspace authentication is required.".to_string()
+        } else {
+            provider_failure_detail(&output, "gws command failed without a safe diagnostic")
+        }),
         Some(gws_bin),
         None,
     ))
+}
+
+fn provider_timeout_detail(prefix: &str, output: &BoundedOutput) -> String {
+    match output.safe_diagnostic_tail(1024) {
+        Some(detail) if !detail.is_empty() => format!("{prefix}. Diagnostic tail:\n{detail}"),
+        _ => prefix.to_string(),
+    }
+}
+
+fn provider_failure_detail(output: &BoundedOutput, fallback: &str) -> String {
+    output
+        .safe_diagnostic_tail(4096)
+        .filter(|detail| !detail.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 #[tauri::command]
@@ -700,7 +747,8 @@ mod tests {
 
     #[test]
     fn parses_label_list_payload() {
-        let raw = r#"{"labels":[{"id":"Label_1","name":"maru-accepted"},{"id":"INBOX","name":"INBOX"}]}"#;
+        let raw =
+            r#"{"labels":[{"id":"Label_1","name":"maru-accepted"},{"id":"INBOX","name":"INBOX"}]}"#;
         let labels = parse_label_list(raw.to_string()).unwrap();
         assert_eq!(
             labels[0],
@@ -752,5 +800,45 @@ mod tests {
             "auth_required"
         );
         assert_eq!(classify_gws_auth_state("network down"), "error");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_timeout_failure_detail_suppresses_sensitive_output() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'password=GWS-SECRET network unavailable' >&2; exit 1",
+        ]);
+        let output =
+            run_command_with_timeout(&mut command, Duration::from_secs(1), |_, _| false).unwrap();
+
+        let detail =
+            provider_failure_detail(&output, "gws command failed without a safe diagnostic");
+
+        assert_eq!(detail, "gws command failed without a safe diagnostic");
+        assert!(!detail.contains("GWS-SECRET"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_timeout_failure_detail_suppresses_truncated_secret_continuation() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'clientSecret=' >&2; i=0; while [ \"$i\" -lt 70000 ]; do printf S >&2; i=$((i + 1)); done; exit 1",
+        ]);
+        let output =
+            run_command_with_timeout(&mut command, Duration::from_secs(2), |_, _| false).unwrap();
+
+        assert!(output.stderr_truncated);
+        assert!(!String::from_utf8_lossy(&output.stderr)
+            .to_lowercase()
+            .contains("clientsecret"));
+        let detail =
+            provider_failure_detail(&output, "gws command failed without a safe diagnostic");
+
+        assert_eq!(detail, "gws command failed without a safe diagnostic");
+        assert!(!detail.contains(&"S".repeat(128)));
     }
 }

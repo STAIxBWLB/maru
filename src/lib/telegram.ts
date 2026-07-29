@@ -7,6 +7,11 @@ export interface TelegramMessageState {
   decision: InboxDecision;
 }
 
+export interface M365LoginOptions {
+  appId?: string | null;
+  tenantId?: string | null;
+}
+
 export function buildTelegramMessageStates(
   messages: TelegramMessage[],
   decisionsById: Map<string, InboxDecision>,
@@ -64,14 +69,24 @@ export function gwsAuthCommand(gwsPath?: string | null): {
   };
 }
 
-export function m365LoginCommand(m365Path?: string | null): {
+export function m365LoginCommand(
+  m365Path?: string | null,
+  options?: M365LoginOptions,
+): {
   command: string | null;
   args: string[];
 } {
   const m365 = m365Path?.trim() || "m365";
+  const appId = options?.appId?.trim();
+  const tenantId = options?.tenantId?.trim();
+  const appIdArg = appId ? ` --appId=${quoteShellLiteral(appId)}` : "";
+  const tenantArg = tenantId ? ` --tenant=${quoteShellLiteral(tenantId)}` : "";
   return {
     command: null,
-    args: ["-lc", `exec ${quoteShell(m365)} login`],
+    args: [
+      "-lc",
+      `exec ${quoteShell(m365)} login${appIdArg}${tenantArg} --authType deviceCode`,
+    ],
   };
 }
 
@@ -96,5 +111,9 @@ function quoteShell(value: string): string {
   // everything after the prefix is user-controlled and must be escaped.
   if (value.startsWith("~/")) return `"$HOME/${escapeDoubleQuoted(value.slice(2))}"`;
   if (value.startsWith("$HOME/")) return `"$HOME/${escapeDoubleQuoted(value.slice(6))}"`;
+  return quoteShellLiteral(value);
+}
+
+function quoteShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
