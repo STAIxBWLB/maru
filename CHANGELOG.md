@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.31 - 2026-07-29 - A Lighter Glance
+
+- **Agent status no longer freezes the app.** Account and usage probes run off
+  the main thread with an 8 second timeout per CLI, so a slow or hung agent
+  binary can't stall the interface on every focus or poll.
+- **Codex usage reads stay cheap.** Maru now scans only the newest session day
+  and the tail of the newest rollout instead of walking the entire
+  `~/.codex/sessions` tree, and the usage bar debounces focus-triggered
+  refreshes.
+- **Kimi is found where it is actually installed.** `~/.kimi-code/bin` joins
+  the CLI search path, so the Kimi runtime works without an absolute-path
+  override.
+- **`kiro-cli --v3` works as a launcher extra arg.** Top-level kiro-cli flags
+  are placed before the `chat` subcommand instead of after it.
+
 ## v0.4.30 - 2026-07-29 - Agents at a Glance
 
 - **Claude Code, Codex, Kimi, and Kiro now share one settings home.** Each
