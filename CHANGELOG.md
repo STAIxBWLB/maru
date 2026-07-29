@@ -8,6 +8,29 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.32 - 2026-07-30 - Messages Keep Moving
+
+- **Messages stays responsive when provider sessions expire.** Gmail, Outlook,
+  and Telegram readiness checks and operations now run away from the UI thread
+  with bounded deadlines, capped and redacted output, and descendant-process
+  cleanup, so a hung CLI or M365 device-code prompt cannot freeze the app.
+- **M365 reauthentication uses the right workspace identity.** Maru validates
+  the active app and tenant before mailbox access, presents a direct
+  reauthentication path when the session expires, and keeps mailbox actions
+  disabled until the workspace configuration is ready.
+- **Outlook does less work without losing messages.** Inbox reads use bounded
+  Graph pages and follow pagination within the remaining deadline, while bulk
+  decisions receive independent time budgets and retain category and approval
+  safety checks.
+- **Opening Messages avoids repeated history scans.** Processed-item history and
+  channel counts share one lazily hydrated snapshot with stale-request guards,
+  reducing startup disk and mailbox work.
+- **Korean official-document formatting follows one converter contract.** The
+  `gaejosik`, `md2docx`, and HWPX guidance now share the `□ -> ○ -> - -> ·`
+  ladder and Markdown line-break rules; `md2docx --gaejosik` emits the matching
+  indentation and bullet structure, and HWPX guidance reflects verified marker
+  behavior and noun-ending rules.
+
 ## v0.4.31 - 2026-07-29 - A Lighter Glance
 
 - **Agent status no longer freezes the app.** Account and usage probes run off
