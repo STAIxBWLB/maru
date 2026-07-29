@@ -481,7 +481,10 @@ fn cleanup_after_attach_failure(
     };
     io::Error::new(
         job_error.kind(),
-        format!("failed to attach child process to Windows Job Object: {context}"),
+        format!(
+            "failed to attach child process to Windows Job Object: {context} \
+             (a host job object without nesting/breakaway can cause AssignProcessToJobObject to fail)"
+        ),
     )
 }
 

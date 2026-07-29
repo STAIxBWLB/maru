@@ -769,27 +769,6 @@ export interface WorkspaceM365AuthConfig {
   tenantId: string | null;
 }
 
-export interface LoadedWorkspaceConfig {
-  workPath: string;
-  config: { io?: unknown } | null;
-}
-
-export function selectLoadedWorkspaceConfigForPath(
-  workPath: string | null,
-  ...loadedConfigs: Array<LoadedWorkspaceConfig | null>
-): { io?: unknown } | null {
-  if (!workPath) return null;
-  return loadedConfigs.find((candidate) => candidate?.workPath === workPath)?.config ?? null;
-}
-
-export function hasLoadedWorkspaceConfigForPath(
-  workPath: string | null,
-  ...loadedConfigs: Array<LoadedWorkspaceConfig | null>
-): boolean {
-  if (!workPath) return false;
-  return loadedConfigs.some((candidate) => candidate?.workPath === workPath);
-}
-
 export function readWorkspaceM365AuthConfig(
   workspaceConfig: { io?: unknown } | null,
 ): WorkspaceM365AuthConfig {
@@ -803,9 +782,9 @@ export function readWorkspaceM365AuthConfig(
 }
 
 export function validateWorkspaceM365ProviderConfig(
-  workspaceConfig: { io?: unknown },
+  workspaceConfig: { io?: unknown } | null,
 ): string | null {
-  const io = isRecord(workspaceConfig.io) ? workspaceConfig.io : null;
+  const io = isRecord(workspaceConfig?.io) ? workspaceConfig.io : null;
   const providers = isRecord(io?.providers) ? io.providers : null;
   if (!providers) return null;
   const providerName = hasOwn(providers, "mso")
@@ -815,15 +794,6 @@ export function validateWorkspaceM365ProviderConfig(
       : null;
   if (!providerName || isRecord(providers[providerName])) return null;
   return `Invalid workspace.config.yaml: io.providers.${providerName} must be a mapping`;
-}
-
-export function readWorkspaceM365AuthConfigForPath(
-  workPath: string | null,
-  ...loadedConfigs: Array<LoadedWorkspaceConfig | null>
-): WorkspaceM365AuthConfig {
-  return readWorkspaceM365AuthConfig(
-    selectLoadedWorkspaceConfigForPath(workPath, ...loadedConfigs),
-  );
 }
 
 export function applyWorkspaceCommsOverrides(

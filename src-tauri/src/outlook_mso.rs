@@ -42,6 +42,7 @@ const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_millis(300);
 const OUTLOOK_IO_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(test)]
 const OUTLOOK_IO_TIMEOUT: Duration = Duration::from_secs(10);
+const OUTLOOK_MAX_PAGES: usize = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -176,27 +177,38 @@ fn fetch_outlook_unread_now(
         remaining_before(deadline, "Outlook message read")?,
     )?;
     let limit = max.unwrap_or(50).clamp(1, 200);
-    let url = outlook_unread_url(limit);
-    let mut cmd = Command::new(&m365_bin);
-    cmd.env("PATH", augmented_path())
-        .args(["request", "--url", &url, "--output", "json"]);
-    let output = run_m365_json_command(
-        &mut cmd,
-        remaining_before(deadline, "Outlook message read")?,
-    )?;
-    if output.termination == CommandTermination::TimedOut {
-        return Err(timeout_detail(
-            "m365_timeout: Outlook message read exceeded 15 seconds",
-            &output,
-        ));
+    let mut url = outlook_unread_url(limit);
+    let mut messages = Vec::new();
+    for _ in 0..OUTLOOK_MAX_PAGES {
+        let mut cmd = Command::new(&m365_bin);
+        cmd.env("PATH", augmented_path())
+            .args(["request", "--url", &url, "--output", "json"]);
+        let output = run_m365_json_command(
+            &mut cmd,
+            remaining_before(deadline, "Outlook message read")?,
+        )?;
+        if output.termination == CommandTermination::TimedOut {
+            return Err(timeout_detail(
+                "m365_timeout: Outlook message read exceeded 15 seconds",
+                &output,
+            ));
+        }
+        if !output.status.success() {
+            return Err(classify_m365_output_error(&output));
+        }
+        reject_truncated_json_stdout(&output, "Outlook message response")?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let (mut page, next_link) =
+            parse_outlook_page(&stdout).map_err(|err| format!("m365_parse_failed: {err}"))?;
+        messages.append(&mut page);
+        let Some(next_link) = next_link else {
+            break;
+        };
+        if messages.len() >= limit as usize {
+            break;
+        }
+        url = next_link;
     }
-    if !output.status.success() {
-        return Err(classify_m365_output_error(&output));
-    }
-    reject_truncated_json_stdout(&output, "Outlook message response")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut messages =
-        parse_outlook_messages(&stdout).map_err(|err| format!("m365_parse_failed: {err}"))?;
     messages.retain(|message| !message.is_read);
     messages.sort_by(|a, b| b.date.cmp(&a.date));
     messages.truncate(limit as usize);
@@ -495,6 +507,7 @@ pub async fn decide_outlook_items(
         )?;
         let mut outcomes = Vec::new();
         for item in items {
+            let deadline = Instant::now() + OUTLOOK_IO_TIMEOUT;
             match decide_outlook_item_with_session(
                 &m365_bin,
                 &item.message_id,
@@ -798,22 +811,32 @@ fn is_m365_auth_required_output(stdout: &[u8], stderr: &[u8]) -> bool {
     })
 }
 
-fn parse_outlook_messages(raw: &str) -> Result<Vec<OutlookMessage>, String> {
+fn parse_outlook_page(raw: &str) -> Result<(Vec<OutlookMessage>, Option<String>), String> {
     let json = extract_json_fragment(raw).ok_or_else(|| "no_json_payload".to_string())?;
     let value: serde_json::Value = serde_json::from_str(json).map_err(|err| err.to_string())?;
-    let raw_messages: Vec<RawOutlookMessage> = match value {
+    let (raw_messages, next_link): (Vec<RawOutlookMessage>, Option<String>) = match value {
         serde_json::Value::Array(_) => {
-            serde_json::from_value(value).map_err(|err| err.to_string())?
+            (serde_json::from_value(value).map_err(|err| err.to_string())?, None)
         }
         serde_json::Value::Object(mut object) => {
+            let next_link = object.remove("@odata.nextLink").and_then(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|link| !link.is_empty())
+                    .map(ToString::to_string)
+            });
             let messages = object
                 .remove("value")
                 .ok_or_else(|| "missing_value_array".to_string())?;
-            serde_json::from_value(messages).map_err(|err| err.to_string())?
+            (
+                serde_json::from_value(messages).map_err(|err| err.to_string())?,
+                next_link,
+            )
         }
         _ => return Err("expected_message_array_or_graph_envelope".to_string()),
     };
-    Ok(raw_messages
+    let messages = raw_messages
         .into_iter()
         .map(|message| {
             let from = message
@@ -843,7 +866,8 @@ fn parse_outlook_messages(raw: &str) -> Result<Vec<OutlookMessage>, String> {
                 is_read: message.is_read.unwrap_or(false),
             }
         })
-        .collect())
+        .collect();
+    Ok((messages, next_link))
 }
 
 fn classify_m365_error(stderr: &[u8], stdout: &[u8]) -> String {
@@ -922,7 +946,7 @@ fn resolve_mso_context(
     supplied_m365_path: Option<&str>,
 ) -> Result<ResolvedMsoContext, String> {
     let config = load_workspace_mso_config(work_path)?;
-    let selected_path = config.command.as_deref().or(supplied_m365_path);
+    let selected_path = supplied_m365_path.or(config.command.as_deref());
     let m365_bin = resolve_m365_path(selected_path);
     Ok(ResolvedMsoContext { config, m365_bin })
 }
@@ -1172,10 +1196,11 @@ mod tests {
   }
 ]
 "#;
-        let parsed = parse_outlook_messages(raw).unwrap();
+        let (parsed, next_link) = parse_outlook_page(raw).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].from, "Jane <jane@example.com>");
         assert_eq!(parsed[0].categories, vec!["Blue"]);
+        assert_eq!(next_link, None);
     }
 
     #[test]
@@ -1191,14 +1216,18 @@ mod tests {
       "from": { "emailAddress": { "address": "graph@example.com" } }
     }
   ],
-  "@odata.nextLink": "https://graph.microsoft.com/ignored"
+  "@odata.nextLink": "https://graph.microsoft.com/page2"
 }"#;
 
-        let parsed = parse_outlook_messages(raw).unwrap();
+        let (parsed, next_link) = parse_outlook_page(raw).unwrap();
 
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].id, "graph-a");
         assert_eq!(parsed[0].from, "graph@example.com");
+        assert_eq!(
+            next_link.as_deref(),
+            Some("https://graph.microsoft.com/page2")
+        );
     }
 
     #[test]
@@ -1370,6 +1399,53 @@ io:
             format!("auth_required: {M365_AUTH_REQUIRED_DETAIL}")
         );
         assert!(!tmp.path().join("graph-reached").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn supplied_m365_path_overrides_workspace_config_command() {
+        let (_configured_tmp, configured) = executable_script("#!/bin/sh\nexit 0\n");
+        let (_supplied_tmp, supplied) = executable_script("#!/bin/sh\nexit 0\n");
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(
+            work.path().join("workspace.config.yaml"),
+            format!(
+                "io:\n  providers:\n    mso:\n      command: \"{}\"\n",
+                configured.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let work_path = work.path().to_string_lossy().into_owned();
+        let supplied_path = supplied.to_string_lossy().into_owned();
+
+        let context = resolve_mso_context(Some(&work_path), Some(&supplied_path)).unwrap();
+        assert_eq!(context.m365_bin.as_deref(), Some(supplied.as_path()));
+
+        let context = resolve_mso_context(Some(&work_path), None).unwrap();
+        assert_eq!(context.m365_bin.as_deref(), Some(configured.as_path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fetch_follows_graph_next_link_for_additional_pages() {
+        let (_tmp, script) = executable_script(
+            "#!/bin/sh\n\
+             if [ \"$1\" = status ]; then printf '%s' '{\"connectedAs\":\"user@example.com\"}'; exit 0; fi\n\
+             case \"$3\" in\n\
+             *page2*) printf '%s' '{\"value\":[{\"id\":\"b\",\"subject\":\"Second page\",\"receivedDateTime\":\"2026-07-28T08:00:00Z\",\"isRead\":false}]}' ;;\n\
+             *) printf '%s' '{\"value\":[{\"id\":\"a\",\"subject\":\"First page\",\"receivedDateTime\":\"2026-07-29T08:00:00Z\",\"isRead\":false}],\"@odata.nextLink\":\"https://graph.microsoft.com/page2\"}' ;;\n\
+             esac\n",
+        );
+        let work = tempfile::tempdir().unwrap();
+        let work_path = work.path().to_string_lossy().into_owned();
+        let script_path = script.to_string_lossy().into_owned();
+
+        let messages =
+            fetch_outlook_unread_now(Some(work_path), Some(50), Some(script_path)).unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].id, "a");
+        assert_eq!(messages[1].id, "b");
     }
 
     #[test]

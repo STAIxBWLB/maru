@@ -32,12 +32,14 @@ export function useWorkspaceConfigLoad(
   } = {},
 ): {
   state: WorkspaceConfigLoadState;
+  reloading: boolean;
   reload: () => Promise<WorkspaceConfigLoadState>;
 } {
   const enabled = options.enabled ?? true;
   const reader = options.reader ?? readWorkspaceConfig;
   const validator = options.validator;
   const [state, setState] = useState<WorkspaceConfigLoadState>(IDLE_STATE);
+  const [reloading, setReloading] = useState(false);
   const pendingRef = useRef<{
     workPath: string;
     promise: Promise<WorkspaceConfigLoadState>;
@@ -47,18 +49,27 @@ export function useWorkspaceConfigLoad(
     if (!enabled || !workPath) {
       pendingRef.current = null;
       setState(IDLE_STATE);
+      setReloading(false);
       return IDLE_STATE;
     }
     const pending = pendingRef.current;
     if (pending?.workPath === workPath) return pending.promise;
 
-    setState(pendingState(workPath));
+    // Keep an already loaded config visible while it refreshes; only the
+    // first load (or a path change) flips to pending.
+    setState((current) =>
+      current.workPath === workPath && current.status === "ready"
+        ? current
+        : pendingState(workPath),
+    );
+    setReloading(true);
     const promise = resolveWorkspaceConfigLoad(workPath, reader, validator);
     pendingRef.current = { workPath, promise };
     const result = await promise;
     if (pendingRef.current?.promise === promise) {
       pendingRef.current = null;
       setState(result);
+      setReloading(false);
     }
     return result;
   }, [enabled, reader, validator, workPath]);
@@ -73,5 +84,5 @@ export function useWorkspaceConfigLoad(
         ? state
         : pendingState(workPath)
       : IDLE_STATE;
-  return { state: exactState, reload };
+  return { state: exactState, reloading, reload };
 }

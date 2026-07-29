@@ -5,13 +5,10 @@ import {
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
-  hasLoadedWorkspaceConfigForPath,
   normalizeMaruSettings,
   parseBinaryFileIncludePatternsText,
   readWorkspaceM365AuthConfig,
-  readWorkspaceM365AuthConfigForPath,
   resolveClassifierRuntime,
-  selectLoadedWorkspaceConfigForPath,
   serializeMaruSettings,
   validateWorkspaceM365ProviderConfig,
 } from "./settings";
@@ -1028,117 +1025,8 @@ describe("normalizeMaruSettings", () => {
         },
       }),
     ).toBeNull();
-  });
 
-  it("selects M365 auth config only for the requested workspace path", () => {
-    const first = {
-      workPath: "/workspace/first",
-      config: {
-        io: {
-          providers: {
-            mso: {
-              app_id: "first-app",
-              tenant_id: "first-tenant",
-            },
-          },
-        },
-      },
-    };
-    const second = {
-      workPath: "/workspace/second",
-      config: {
-        io: {
-          providers: {
-            mso: {
-              app_id: "second-app",
-              tenant_id: "second-tenant",
-            },
-          },
-        },
-      },
-    };
-
-    expect(readWorkspaceM365AuthConfigForPath("/workspace/second", first, second)).toEqual({
-      appId: "second-app",
-      tenantId: "second-tenant",
-    });
-    expect(readWorkspaceM365AuthConfigForPath("/workspace/missing", first, second)).toEqual({
-      appId: null,
-      tenantId: null,
-    });
-    expect(readWorkspaceM365AuthConfigForPath(null, first, second)).toEqual({
-      appId: null,
-      tenantId: null,
-    });
-    expect(hasLoadedWorkspaceConfigForPath("/workspace/second", first, second)).toBe(true);
-    expect(hasLoadedWorkspaceConfigForPath("/workspace/pending", first, second)).toBe(
-      false,
-    );
-    expect(hasLoadedWorkspaceConfigForPath(null, first, second)).toBe(false);
-    expect(
-      hasLoadedWorkspaceConfigForPath("/workspace/no-ids", {
-        workPath: "/workspace/no-ids",
-        config: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("selects M365 binary settings and auth IDs from the same inbox workspace", () => {
-    const base = normalizeMaruSettings({
-      comms: {
-        outlook: {
-          m365Path: "/global/m365",
-        },
-      },
-    }).comms;
-    const settingsWorkspace = {
-      workPath: "/workspace/settings",
-      config: {
-        io: {
-          providers: {
-            mso: {
-              command: "/settings/m365",
-              app_id: "settings-app",
-              tenant_id: "settings-tenant",
-            },
-          },
-        },
-      },
-    };
-    const inboxWorkspace = {
-      workPath: "/workspace/inbox",
-      config: {
-        io: {
-          providers: {
-            mso: {
-              command: "/inbox/m365",
-              app_id: "inbox-app",
-              tenant_id: "inbox-tenant",
-            },
-          },
-        },
-      },
-    };
-    const selected = selectLoadedWorkspaceConfigForPath(
-      "/workspace/inbox",
-      settingsWorkspace,
-      inboxWorkspace,
-    );
-
-    expect(applyWorkspaceCommsOverrides(base, selected).outlook.m365Path).toBe(
-      "/inbox/m365",
-    );
-    expect(readWorkspaceM365AuthConfig(selected)).toEqual({
-      appId: "inbox-app",
-      tenantId: "inbox-tenant",
-    });
-    expect(
-      selectLoadedWorkspaceConfigForPath(
-        "/workspace/not-loaded",
-        settingsWorkspace,
-        inboxWorkspace,
-      ),
-    ).toBeNull();
+    expect(validateWorkspaceM365ProviderConfig(null)).toBeNull();
   });
 
   it("applies workspace meeting note overrides without rewriting base meetings defaults", () => {

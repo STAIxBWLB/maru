@@ -63,6 +63,60 @@ describe("useWorkspaceConfigLoad", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps a loaded config ready and flags reloading while it refreshes", async () => {
+    const loaded: WorkspaceConfig = { version: 1, paths: {} };
+    let resolveSecond: ((config: WorkspaceConfig) => void) | null = null;
+    const reader = vi
+      .fn<(workPath: string) => Promise<WorkspaceConfig>>()
+      .mockResolvedValueOnce(loaded)
+      .mockImplementationOnce(
+        () =>
+          new Promise<WorkspaceConfig>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    function Harness() {
+      const { state, reloading, reload } = useWorkspaceConfigLoad("/workspace/steady", {
+        reader,
+      });
+      return (
+        <>
+          <output data-status={state.status}>{reloading ? "reloading" : "settled"}</output>
+          <button type="button" onClick={() => void reload()}>
+            Refresh
+          </button>
+        </>
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await act(async () => {});
+    expect(container.querySelector("output")?.dataset.status).toBe("ready");
+
+    await act(async () => {
+      container
+        .querySelector("button")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.querySelector("output")?.dataset.status).toBe("ready");
+    expect(container.querySelector("output")?.textContent).toBe("reloading");
+
+    await act(async () => {
+      resolveSecond?.(loaded);
+    });
+    expect(container.querySelector("output")?.dataset.status).toBe("ready");
+    expect(container.querySelector("output")?.textContent).toBe("settled");
+    expect(reader).toHaveBeenCalledTimes(2);
+
+    await act(async () => root.unmount());
+  });
+
   it("treats a missing config as a successful null config", async () => {
     const reader = vi
       .fn<(workPath: string) => Promise<WorkspaceConfig>>()

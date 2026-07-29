@@ -3206,7 +3206,6 @@ function MainApp() {
     try {
       if (options.retryWorkspaceConfig) {
         await retryInboxWorkspaceConfig();
-        return;
       }
       const polling = telegramPollingStatus()
         .then((status) => {
@@ -3356,7 +3355,11 @@ function MainApp() {
 
   const decideOutlookItem = useCallback(
     async (id: string, decision: InboxDecision) => {
-      if (!inboxWorkspaceConfigReady || decision === "pending") return;
+      if (decision === "pending") return;
+      if (!inboxWorkspacePath || !inboxWorkspaceConfigReady) {
+        setOutlookError(t("comms.outlook.workspaceNotReady"));
+        return;
+      }
       const approvalId = await approvalGate.confirmApproval({
         kind: decision === "accepted" ? "outlook.accept" : "outlook.reject",
         summary:

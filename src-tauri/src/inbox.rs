@@ -1327,7 +1327,7 @@ fn candidate_may_match_channel(candidate: &ProcessedCandidate, channel: Option<&
 }
 
 fn processed_item_matches_channel(item: &InboxProcessedItem, channel: Option<&str>) -> bool {
-    channel.is_none_or(|expected| item.channel.to_lowercase() == expected)
+    channel.map_or(true, |expected| item.channel.to_lowercase() == expected)
 }
 
 fn sort_processed_items(items: &mut [InboxProcessedItem]) {
