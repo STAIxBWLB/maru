@@ -723,10 +723,14 @@ fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
                     })
                     .unwrap_or(false)
         })
+        // Rollout filenames embed a timestamp, so the name is a deterministic
+        // tie-breaker when mtimes compare equal (coarse fs granularity).
         .max_by_key(|path| {
-            path.metadata()
+            let mtime = path
+                .metadata()
                 .and_then(|meta| meta.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (mtime, path.file_name().map(|name| name.to_owned()))
         })
 }
 
