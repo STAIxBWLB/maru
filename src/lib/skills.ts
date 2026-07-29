@@ -41,7 +41,7 @@ const MOCK_BUILTIN_SKILLS = [
 export type SkillSourceKind = "linked" | "cloned" | "imported" | "managed" | "adopted" | "builtin";
 export type SkillInstallTarget = "claude" | "codex";
 export type SkillInstallMode = "symlink" | "copy";
-export type SkillDispatchRuntime = "claude" | "codex";
+export type SkillDispatchRuntime = "claude" | "codex" | "kimi" | "kiro";
 export type SkillTier = "core" | "public" | "private" | "imported" | "managed";
 
 export interface SkillSource {

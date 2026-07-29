@@ -36,6 +36,8 @@ pub trait ProviderAdapter {
 pub enum CliProviderKind {
     Claude,
     Codex,
+    Kimi,
+    Kiro,
 }
 
 impl CliProviderKind {
@@ -43,6 +45,8 @@ impl CliProviderKind {
         match value.trim().to_lowercase().as_str() {
             "claude" | "claude-code" => Ok(Self::Claude),
             "codex" | "codex-cli" => Ok(Self::Codex),
+            "kimi" | "kimi-code" => Ok(Self::Kimi),
+            "kiro" | "kiro-cli" => Ok(Self::Kiro),
             other => Err(format!("unsupported_provider: {other}")),
         }
     }
@@ -51,6 +55,17 @@ impl CliProviderKind {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Kimi => "kimi",
+            Self::Kiro => "kiro",
+        }
+    }
+
+    /// Binary name used when no command override is configured. Differs from
+    /// [`CliProviderKind::id`] for Kiro (`kiro` id, `kiro-cli` binary).
+    pub fn default_binary_name(self) -> &'static str {
+        match self {
+            Self::Kiro => "kiro-cli",
+            _ => self.id(),
         }
     }
 
@@ -65,7 +80,7 @@ impl CliProviderKind {
     }
 }
 
-/// User-facing AI permission modes shared by Claude and Codex command builders.
+/// User-facing AI permission modes shared by the CLI command builders.
 /// Unknown/empty input falls back to the safe `plan` default.
 pub fn normalize_permission_mode(value: &str) -> &'static str {
     match value.trim() {
@@ -88,6 +103,33 @@ fn apply_codex_permission_args(cmd: &mut Command, permission_mode: &str) {
         "bypassPermissions" => {
             cmd.arg("--dangerously-bypass-approvals-and-sandbox");
         }
+        _ => unreachable!("normalize_permission_mode only returns known modes"),
+    }
+}
+
+fn apply_kimi_permission_args(cmd: &mut Command, permission_mode: &str) {
+    match normalize_permission_mode(permission_mode) {
+        "plan" => {
+            cmd.arg("--plan");
+        }
+        "acceptEdits" => {
+            cmd.arg("-y");
+        }
+        "bypassPermissions" => {
+            cmd.arg("--auto");
+        }
+        "default" => {}
+        _ => unreachable!("normalize_permission_mode only returns known modes"),
+    }
+}
+
+fn apply_kiro_permission_args(cmd: &mut Command, permission_mode: &str) {
+    match normalize_permission_mode(permission_mode) {
+        "acceptEdits" | "bypassPermissions" => {
+            cmd.arg("-a");
+        }
+        // plan/default: kiro-cli has no read-only headless flag; run untrusted.
+        "plan" | "default" => {}
         _ => unreachable!("normalize_permission_mode only returns known modes"),
     }
 }
@@ -136,6 +178,33 @@ pub fn build_cli_command(
             cmd.arg("-");
             (cmd, Some(request.prompt.clone()))
         }
+        CliProviderKind::Kimi => {
+            let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
+                "cli_missing: kimi CLI not found in PATH or common install locations".to_string()
+            })?;
+            let mut cmd = Command::new(bin);
+            apply_provider_env(&mut cmd);
+            apply_kimi_permission_args(&mut cmd, permission_mode);
+            cmd.arg("-p").arg(&request.prompt);
+            for dir in add_dirs {
+                cmd.arg("--add-dir").arg(dir);
+            }
+            cmd.stdin(Stdio::null());
+            (cmd, None)
+        }
+        CliProviderKind::Kiro => {
+            let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
+                "cli_missing: kiro-cli not found in PATH or common install locations".to_string()
+            })?;
+            let mut cmd = Command::new(bin);
+            apply_provider_env(&mut cmd);
+            cmd.arg("chat").arg("--no-interactive");
+            apply_kiro_permission_args(&mut cmd, permission_mode);
+            // kiro-cli has no --cd/--add-dir: the working dir comes from the
+            // process cwd, set by the spawn site (`current_dir`).
+            cmd.arg(&request.prompt).stdin(Stdio::null());
+            (cmd, None)
+        }
     };
     crate::agent_runtime_env::apply_to_command(&mut cmd, Path::new(&request.cwd))?;
     Ok((cmd, stdin_payload))
@@ -147,10 +216,11 @@ pub fn resolve_provider_binary(
 ) -> Option<PathBuf> {
     command_override
         .and_then(resolve_program)
-        .or_else(|| resolve_program(provider.id()))
+        .or_else(|| resolve_program(provider.default_binary_name()))
 }
 
-/// Real `ProviderAdapter` that drives a CLI provider (Claude/Codex) synchronously:
+/// Real `ProviderAdapter` that drives a CLI provider (Claude/Codex/Kimi/Kiro)
+/// synchronously:
 /// `complete` spawns the command via [`build_cli_command`], pipes the prompt to
 /// stdin when required, blocks on `wait_with_output` (which drains both pipes —
 /// no deadlock; the five-role loop calls roles sequentially), and returns stdout
@@ -417,6 +487,18 @@ mod tests {
             CliProviderKind::parse("codex-cli").unwrap(),
             CliProviderKind::Codex
         );
+        assert_eq!(
+            CliProviderKind::parse("kimi-code").unwrap(),
+            CliProviderKind::Kimi
+        );
+        assert_eq!(
+            CliProviderKind::parse("kiro-cli").unwrap(),
+            CliProviderKind::Kiro
+        );
+        assert_eq!(CliProviderKind::Kimi.id(), "kimi");
+        assert_eq!(CliProviderKind::Kiro.id(), "kiro");
+        assert_eq!(CliProviderKind::Kimi.default_binary_name(), "kimi");
+        assert_eq!(CliProviderKind::Kiro.default_binary_name(), "kiro-cli");
         assert!(CliProviderKind::parse("openai").is_err());
     }
 
@@ -627,6 +709,146 @@ mod tests {
                     .into_owned()
             )
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_builds_kimi_headless_argv() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-kimi"), "#!/bin/sh\nexit 0\n");
+        let add_dir = dir.path().join("extra");
+        let (cmd, stdin) = build_cli_command(
+            CliProviderKind::Kimi,
+            &completion_request("do work", dir.path().to_str().unwrap()),
+            &[add_dir.to_string_lossy().into_owned()],
+            Some(cli.to_str().unwrap()),
+            "default",
+        )
+        .unwrap();
+        assert!(stdin.is_none(), "kimi takes the prompt as argv, not stdin");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[0], "-p");
+        assert_eq!(args[1], "do work");
+        assert_eq!(args[2..], ["--add-dir", add_dir.to_string_lossy().as_ref()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_applies_permission_mode_for_kimi() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-kimi"), "#!/bin/sh\nexit 0\n");
+        let request = completion_request("hi", dir.path().to_str().unwrap());
+        let args_for = |mode: &str| {
+            let (cmd, _stdin) = build_cli_command(
+                CliProviderKind::Kimi,
+                &request,
+                &[],
+                Some(cli.to_str().unwrap()),
+                mode,
+            )
+            .unwrap();
+            cmd.get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<String>>()
+        };
+        assert!(args_for("plan").contains(&"--plan".to_string()));
+        assert!(args_for("acceptEdits").contains(&"-y".to_string()));
+        assert!(args_for("bypassPermissions").contains(&"--auto".to_string()));
+        let default_args = args_for("default");
+        assert!(!default_args
+            .iter()
+            .any(|a| a == "--plan" || a == "-y" || a == "--auto"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_builds_kiro_headless_argv() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-kiro"), "#!/bin/sh\nexit 0\n");
+        let (cmd, stdin) = build_cli_command(
+            CliProviderKind::Kiro,
+            &completion_request("do work", dir.path().to_str().unwrap()),
+            &[],
+            Some(cli.to_str().unwrap()),
+            "plan",
+        )
+        .unwrap();
+        assert!(stdin.is_none(), "kiro takes the prompt as a positional arg");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["chat", "--no-interactive", "do work"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_cli_command_applies_permission_mode_for_kiro() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(dir.path().join("fake-kiro"), "#!/bin/sh\nexit 0\n");
+        let request = completion_request("hi", dir.path().to_str().unwrap());
+        let args_for = |mode: &str| {
+            let (cmd, _stdin) = build_cli_command(
+                CliProviderKind::Kiro,
+                &request,
+                &[],
+                Some(cli.to_str().unwrap()),
+                mode,
+            )
+            .unwrap();
+            cmd.get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<String>>()
+        };
+        assert!(args_for("acceptEdits").contains(&"-a".to_string()));
+        assert!(args_for("bypassPermissions").contains(&"-a".to_string()));
+        assert!(!args_for("plan").contains(&"-a".to_string()));
+        assert!(!args_for("default").contains(&"-a".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_kimi_returns_stdout_as_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(
+            dir.path().join("fake-kimi"),
+            "#!/bin/sh\necho '{\"ok\":true}'\n",
+        );
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Kimi,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        );
+        let response = adapter
+            .complete(completion_request("do work", dir.path().to_str().unwrap()))
+            .unwrap();
+        assert_eq!(response.content.trim(), "{\"ok\":true}");
+        assert_eq!(response.provider, "kimi");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_kiro_returns_stdout_as_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(
+            dir.path().join("fake-kiro"),
+            "#!/bin/sh\necho '{\"ok\":true}'\n",
+        );
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Kiro,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        );
+        let response = adapter
+            .complete(completion_request("do work", dir.path().to_str().unwrap()))
+            .unwrap();
+        assert_eq!(response.content.trim(), "{\"ok\":true}");
+        assert_eq!(response.provider, "kiro");
     }
 
     #[test]

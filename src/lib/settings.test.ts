@@ -250,7 +250,7 @@ describe("normalizeMaruSettings", () => {
       defaultRuntime: "claude",
       classifierRuntime: "inherit",
       permissionMode: "plan",
-      commandOverrides: { claude: null, codex: null },
+      commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
       extra: {},
     });
   });
@@ -1113,7 +1113,12 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ai.defaultRuntime).toBe("codex");
     expect(settings.ai.classifierRuntime).toBe("claude");
     expect(settings.ai.permissionMode).toBe("acceptEdits");
-    expect(settings.ai.commandOverrides).toEqual({ claude: "/bin/claude", codex: null });
+    expect(settings.ai.commandOverrides).toEqual({
+      claude: "/bin/claude",
+      codex: null,
+      kimi: null,
+      kiro: null,
+    });
     // unmodeled keys are preserved round-trip-safe under extra
     expect(settings.ai.extra.providers).toEqual({ custom: 1 });
     expect(resolveClassifierRuntime(settings.ai)).toBe("claude");
@@ -1142,6 +1147,53 @@ describe("normalizeMaruSettings", () => {
     const round = normalizeMaruSettings(serializeMaruSettings(custom));
     expect(round.ai).toEqual(custom.ai);
     expect(round.ai.extra.legacyFlag).toBe(true);
+  });
+
+  it("supports kimi/kiro runtimes, launchers, and command overrides", () => {
+    const settings = normalizeMaruSettings({
+      terminal: {
+        autoLaunch: "kimi",
+        launchers: {
+          kimi: { enabled: false, label: "Kimi Local", args: ["--verbose"] },
+          kiro: { enabled: true, label: "Kiro" },
+        },
+      },
+      ai: {
+        defaultRuntime: "kiro",
+        classifierRuntime: "kimi",
+        commandOverrides: { kimi: " /opt/kimi/bin/kimi ", kiro: "/usr/bin/kiro-cli" },
+      },
+    });
+    expect(settings.terminal.autoLaunch).toBe("kimi");
+    expect(settings.terminal.launchers.kimi).toEqual({
+      enabled: false,
+      label: "Kimi Local",
+      command: null,
+      args: ["--verbose"],
+    });
+    expect(settings.terminal.launchers.kiro.enabled).toBe(true);
+    expect(settings.ai.defaultRuntime).toBe("kiro");
+    expect(settings.ai.classifierRuntime).toBe("kimi");
+    expect(resolveClassifierRuntime(settings.ai)).toBe("kimi");
+    expect(settings.ai.commandOverrides).toEqual({
+      claude: null,
+      codex: null,
+      kimi: "/opt/kimi/bin/kimi",
+      kiro: "/usr/bin/kiro-cli",
+    });
+
+    const round = normalizeMaruSettings(serializeMaruSettings(settings));
+    expect(round.terminal.launchers.kimi).toEqual(settings.terminal.launchers.kimi);
+    expect(round.terminal.launchers.kiro).toEqual(settings.terminal.launchers.kiro);
+    expect(round.ai).toEqual(settings.ai);
+  });
+
+  it("provides kimi/kiro launcher defaults", () => {
+    const settings = normalizeMaruSettings({});
+    expect(settings.terminal.launchers.kimi.enabled).toBe(true);
+    expect(settings.terminal.launchers.kimi.label).toBe("Kimi");
+    expect(settings.terminal.launchers.kiro.enabled).toBe(true);
+    expect(settings.terminal.launchers.kiro.label).toBe("Kiro");
   });
 
   it("normalizes terminal reliability settings", () => {

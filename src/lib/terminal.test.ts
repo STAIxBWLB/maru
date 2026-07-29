@@ -509,6 +509,8 @@ describe("active-item context bridge", () => {
     expect(buildAgentContextArgs("shell", CTX, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
     expect(buildAgentContextArgs("codex", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("kimi", CTX, true)).toEqual(["--add-dir", "/work/vault"]);
+    expect(buildAgentContextArgs("kiro", CTX, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", { ...CTX, workspaceRoot: null }, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", CTX, false)).toEqual([]);
   });
@@ -605,6 +607,8 @@ describe("terminal persistence", () => {
   it("builds native agent resume args", () => {
     expect(buildAgentResumeArgs("claude", "abc")).toEqual(["--resume", "abc"]);
     expect(buildAgentResumeArgs("codex", "abc")).toEqual(["resume", "abc"]);
+    expect(buildAgentResumeArgs("kimi", "abc")).toEqual(["--session", "abc"]);
+    expect(buildAgentResumeArgs("kiro", "abc")).toEqual([]);
     expect(buildAgentResumeArgs("shell", "abc")).toEqual([]);
     expect(buildAgentResumeArgs("claude", null)).toEqual([]);
   });

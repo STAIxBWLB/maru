@@ -278,11 +278,12 @@ fn encode_line_break(
     kitty_keyboard_active: bool,
     bracketed_paste_active: bool,
 ) -> Option<String> {
-    // In Claude/Codex TUIs, bracketed-paste newline is the most stable way to
-    // express "insert a line break" because it does not depend on the app's
-    // enhanced-keyboard detection path. Shell sessions still use CSI-u once the
-    // foreground program explicitly enables the kitty keyboard protocol.
-    let ai_kind = kind == "claude" || kind == "codex";
+    // In Claude/Codex/Kimi/Kiro TUIs, bracketed-paste newline is the most
+    // stable way to express "insert a line break" because it does not depend
+    // on the app's enhanced-keyboard detection path. Shell sessions still use
+    // CSI-u once the foreground program explicitly enables the kitty keyboard
+    // protocol.
+    let ai_kind = matches!(kind, "claude" | "codex" | "kimi" | "kiro");
     if ai_kind && bracketed_paste_active {
         return Some("\x1b[200~\n\x1b[201~".to_string());
     }

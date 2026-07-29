@@ -157,7 +157,8 @@ export function extractSkillRunRetryRequest(events: AgentRunEvent[]): SkillRunRe
     const dispatch = record(payload?.dispatch);
     if (!dispatch) continue;
     const runtime = stringValue(dispatch.runtime);
-    if (runtime !== "claude" && runtime !== "codex") continue;
+    if (runtime !== "claude" && runtime !== "codex" && runtime !== "kimi" && runtime !== "kiro")
+      continue;
     const skillId = stringValue(dispatch.skillId);
     const prompt = stringValue(dispatch.prompt);
     if (!skillId || !prompt) continue;
@@ -203,7 +204,9 @@ function missionMetadata(mission: MissionRecord): Record<string, unknown> | null
 
 function runtimeField(metadata: Record<string, unknown> | null): SkillDispatchRuntime | null {
   const value = stringField(metadata, "runtime");
-  return value === "claude" || value === "codex" ? value : null;
+  return value === "claude" || value === "codex" || value === "kimi" || value === "kiro"
+    ? value
+    : null;
 }
 
 function stringField(metadata: Record<string, unknown> | null, key: string): string | null {

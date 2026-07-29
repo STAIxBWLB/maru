@@ -1018,6 +1018,10 @@ fn build_terminal_command_spec(
         (_, Some(program)) => (program.to_string(), Vec::<String>::new()),
         ("claude", None) => ("claude".to_string(), Vec::new()),
         ("codex", None) => ("codex".to_string(), vec!["--cd".to_string(), cwd_str]),
+        ("kimi", None) => ("kimi".to_string(), Vec::new()),
+        // kiro-cli has no --cd flag; the PTY cwd below already runs `chat`
+        // in the right directory.
+        ("kiro", None) => ("kiro-cli".to_string(), vec!["chat".to_string()]),
         ("shell", None) => (default_shell_program(), Vec::new()),
         (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
     };
@@ -1036,7 +1040,7 @@ fn build_terminal_command_spec(
 }
 
 fn default_term_program(kind: &str) -> &'static str {
-    if kind == "claude" || kind == "codex" {
+    if matches!(kind, "claude" | "codex" | "kimi" | "kiro") {
         "ghostty"
     } else {
         "Maru"
@@ -1138,6 +1142,16 @@ mod tests {
         assert_eq!(codex.program, "codex");
         assert_eq!(codex.args, vec!["--cd", cwd_str.as_str()]);
         assert_eq!(codex.extra_env["TERM_PROGRAM"], "ghostty");
+
+        let kimi = build_terminal_command_spec("kimi", Some(&cwd_str), None, None, None).unwrap();
+        assert_eq!(kimi.program, "kimi");
+        assert!(kimi.args.is_empty());
+        assert_eq!(kimi.extra_env["TERM_PROGRAM"], "ghostty");
+
+        let kiro = build_terminal_command_spec("kiro", Some(&cwd_str), None, None, None).unwrap();
+        assert_eq!(kiro.program, "kiro-cli");
+        assert_eq!(kiro.args, vec!["chat"]);
+        assert_eq!(kiro.extra_env["TERM_PROGRAM"], "ghostty");
 
         let shell = build_terminal_command_spec("shell", Some(&cwd_str), None, None, None).unwrap();
         assert!(!shell.program.is_empty());

@@ -836,11 +836,15 @@ function taskMissionRuntime(mission: MissionRecord): string {
   const runtime = taskMissionRuntimeValue(mission);
   if (runtime === "codex") return "Codex";
   if (runtime === "claude") return "Claude";
+  if (runtime === "kimi") return "Kimi";
+  if (runtime === "kiro") return "Kiro";
   return runtime ?? "Runtime";
 }
 
 function normalizeRuntime(value: string | null): SkillDispatchRuntime | null {
-  return value === "claude" || value === "codex" ? value : null;
+  return value === "claude" || value === "codex" || value === "kimi" || value === "kiro"
+    ? value
+    : null;
 }
 
 function formatTime(value: string): string {

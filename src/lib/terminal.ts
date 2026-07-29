@@ -91,6 +91,8 @@ export const TERMINAL_LAUNCHERS: Array<{
 }> = [
   { id: "claude", titleKey: "terminal.launcher.claude" },
   { id: "codex", titleKey: "terminal.launcher.codex" },
+  { id: "kimi", titleKey: "terminal.launcher.kimi" },
+  { id: "kiro", titleKey: "terminal.launcher.kiro" },
   { id: "shell", titleKey: "terminal.launcher.shell" },
 ];
 
@@ -437,6 +439,10 @@ export function terminalCommandPreview(kind: TerminalKind, cwd: string): string 
       return "claude";
     case "codex":
       return `codex --cd ${quoteShellToken(displayCwd)}`;
+    case "kimi":
+      return "kimi";
+    case "kiro":
+      return "kiro-cli chat";
     case "shell":
       return "shell";
   }
@@ -484,7 +490,7 @@ export interface PersistedTerminalState {
   sessions: PersistedTerminalSession[];
 }
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["claude", "codex", "shell"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["claude", "codex", "kimi", "kiro", "shell"]);
 
 /** Extract the durable task + session metadata (no live PTY/handle state). */
 export function serializeTerminalState(state: TerminalTabsState): PersistedTerminalState {
@@ -594,8 +600,10 @@ export function buildAgentResumeArgs(
 ): string[] {
   if (!agentSessionId) return [];
   // claude: `claude --resume <id>`. codex: `codex resume <id>` (subcommand).
+  // kimi: `kimi --session <id>`. kiro: no resume support.
   if (kind === "claude") return ["--resume", agentSessionId];
   if (kind === "codex") return ["resume", agentSessionId];
+  if (kind === "kimi") return ["--session", agentSessionId];
   return [];
 }
 
@@ -731,14 +739,14 @@ export function mergeMaruTerminalEnv(
   return { ...(requestedEnv ?? {}), ...contextEnv };
 }
 
-/** `--add-dir <workspace>` for claude/codex so the agent can read the tree. */
+/** `--add-dir <workspace>` for claude/codex/kimi so the agent can read the tree. */
 export function buildAgentContextArgs(
   kind: TerminalKind,
   ctx: ActiveTerminalContext,
   enabled: boolean,
 ): string[] {
   if (!enabled) return [];
-  if (kind !== "claude" && kind !== "codex") return [];
+  if (kind !== "claude" && kind !== "codex" && kind !== "kimi") return [];
   if (!ctx.workspaceRoot) return [];
   return ["--add-dir", ctx.workspaceRoot];
 }

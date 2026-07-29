@@ -45,6 +45,7 @@ import { EditorPane, type EditorViewMode, type HtmlViewMode } from "./components
 import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
 import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
+import { AgentUsageBar } from "./components/AgentUsageBar";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
@@ -9039,6 +9040,8 @@ function MainApp() {
             </div>
           ) : null}
         </div>
+
+        <AgentUsageBar workPath={settingsWorkPath} />
 
         {pendingDestructiveAction ? (
           <div className="dialog-backdrop">

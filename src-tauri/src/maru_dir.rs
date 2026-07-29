@@ -429,6 +429,14 @@ fn default_settings_json() -> JsonValue {
                     "enabled": true,
                     "label": "Codex"
                 },
+                "kimi": {
+                    "enabled": true,
+                    "label": "Kimi"
+                },
+                "kiro": {
+                    "enabled": true,
+                    "label": "Kiro"
+                },
                 "shell": {
                     "enabled": true,
                     "label": "Shell"

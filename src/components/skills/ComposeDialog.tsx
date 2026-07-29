@@ -602,7 +602,10 @@ export function ComposeDialog({
 }
 
 function runtimeLabel(runtime: SkillDispatchRuntime): string {
-  return runtime === "codex" ? "Codex" : "Claude";
+  if (runtime === "codex") return "Codex";
+  if (runtime === "kimi") return "Kimi";
+  if (runtime === "kiro") return "Kiro";
+  return "Claude";
 }
 
 function runtimeStatusState(

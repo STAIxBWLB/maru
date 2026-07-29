@@ -355,7 +355,7 @@ fn add_dirs(composition: &DispatchComposition) -> Vec<String> {
 fn normalize_runtime(runtime: &str) -> Result<String, String> {
     let value = runtime.trim().to_lowercase();
     match value.as_str() {
-        "claude" | "codex" => Ok(value),
+        "claude" | "codex" | "kimi" | "kiro" => Ok(value),
         _ => Err(format!("unsupported_dispatch_runtime: {value}")),
     }
 }
@@ -565,6 +565,33 @@ fn runtime_status(
     let auth = match provider {
         CliProviderKind::Claude => run_status_command(&binary, &["auth", "status"]),
         CliProviderKind::Codex => run_status_command(&binary, &["login", "status"]),
+        CliProviderKind::Kimi => {
+            // kimi has no auth-status subcommand; the local OAuth credentials
+            // file is the source of truth (never surfaced beyond a bool).
+            let ok = crate::agent_host::status::kimi_credentials_valid();
+            StatusCommandResult {
+                success: ok,
+                stdout: if ok {
+                    "authenticated".to_string()
+                } else {
+                    String::new()
+                },
+                stderr: if ok {
+                    String::new()
+                } else {
+                    "not logged in".to_string()
+                },
+            }
+        }
+        CliProviderKind::Kiro => {
+            // `kiro-cli whoami` prints account lines only when logged in; an
+            // exit-0 without an `Email:` line is still unauthenticated.
+            let mut result = run_status_command(&binary, &["whoami"]);
+            if !result.output_text().contains("Email:") {
+                result.success = false;
+            }
+            result
+        }
     };
     let version_text = version.ok_text();
     let auth_text = auth.output_text();

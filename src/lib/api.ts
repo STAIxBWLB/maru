@@ -1439,7 +1439,156 @@ export async function startClaudeCliInvocation(
   return invoke<string>("start_claude_cli_invocation", { prompt, cwd, extraArgs, extraEnv });
 }
 
-export type AgentProvider = "claude" | "codex";
+export type AgentProvider = "claude" | "codex" | "kimi" | "kiro";
+
+export const AGENT_PROVIDERS: readonly AgentProvider[] = ["claude", "codex", "kimi", "kiro"];
+
+export type AgentAuthStatus =
+  | "authenticated"
+  | "unauthenticated"
+  | "unknown"
+  | "cli_missing";
+
+export interface AgentAccountStatus {
+  id: AgentProvider;
+  installed: boolean;
+  binaryPath: string | null;
+  version: string | null;
+  authStatus: AgentAuthStatus;
+  loginMethod: string | null;
+  provider: string | null;
+  organization: string | null;
+  email: string | null;
+  message: string | null;
+}
+
+export type AgentUsageState =
+  | "ok"
+  | "unsupported"
+  | "unavailable"
+  | "cli_missing"
+  | "unauthenticated";
+
+export interface AgentUsageWindow {
+  label: string;
+  usedPercent: number;
+  resetsAt: string | null;
+}
+
+export interface AgentUsageStatus {
+  id: string;
+  state: AgentUsageState;
+  windows: AgentUsageWindow[];
+  updatedAt: string;
+  message: string | null;
+}
+
+/** Per-agent account/authentication status. `commandOverrides` maps agent id
+ *  to an absolute binary path that bypasses PATH-based resolution. */
+export async function agentsAccountStatus(
+  commandOverrides?: Record<string, string>,
+): Promise<AgentAccountStatus[]> {
+  if (!isTauri()) return mockAgentsAccountStatus();
+  return invoke<AgentAccountStatus[]>("agents_account_status", { commandOverrides });
+}
+
+/** Per-agent quota/usage windows. Cached backend-side; pass `force` only for
+ *  a user-initiated refresh. */
+export async function agentsUsageStatus(force?: boolean): Promise<AgentUsageStatus[]> {
+  if (!isTauri()) return mockAgentsUsageStatus();
+  return invoke<AgentUsageStatus[]>("agents_usage_status", { force });
+}
+
+function mockAgentsAccountStatus(): AgentAccountStatus[] {
+  return [
+    {
+      id: "claude",
+      installed: true,
+      binaryPath: "/usr/local/bin/claude",
+      version: "2.1.220",
+      authStatus: "authenticated",
+      loginMethod: "OAuth",
+      provider: "Anthropic",
+      organization: "jeju.ai",
+      email: "hello@jeju.ai",
+      message: null,
+    },
+    {
+      id: "codex",
+      installed: true,
+      binaryPath: "/usr/local/bin/codex",
+      version: "0.145.0",
+      authStatus: "authenticated",
+      loginMethod: "ChatGPT",
+      provider: "OpenAI",
+      organization: null,
+      email: "yj.lee@chu.ac.kr",
+      message: null,
+    },
+    {
+      id: "kimi",
+      installed: true,
+      binaryPath: "/usr/local/bin/kimi",
+      version: "0.29.2",
+      authStatus: "authenticated",
+      loginMethod: "OAuth",
+      provider: "Moonshot AI",
+      organization: null,
+      email: "hello@jeju.ai",
+      message: null,
+    },
+    {
+      id: "kiro",
+      installed: true,
+      binaryPath: "/usr/local/bin/kiro-cli",
+      version: "2.15.1",
+      authStatus: "unauthenticated",
+      loginMethod: null,
+      provider: null,
+      organization: null,
+      email: null,
+      message: "Not logged in.",
+    },
+  ];
+}
+
+function mockAgentsUsageStatus(): AgentUsageStatus[] {
+  const now = Date.now();
+  const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+  return [
+    {
+      id: "claude",
+      state: "ok",
+      windows: [
+        { label: "Session", usedPercent: 19, resetsAt: iso(48 * 60_000) },
+        { label: "Weekly", usedPercent: 89, resetsAt: iso((2 * 24 + 20) * 3_600_000) },
+      ],
+      updatedAt: new Date(now).toISOString(),
+      message: null,
+    },
+    {
+      id: "codex",
+      state: "ok",
+      windows: [{ label: "Session", usedPercent: 5, resetsAt: iso(3 * 3_600_000) }],
+      updatedAt: new Date(now).toISOString(),
+      message: null,
+    },
+    {
+      id: "kimi",
+      state: "unsupported",
+      windows: [],
+      updatedAt: new Date(now).toISOString(),
+      message: "No usage source for this agent.",
+    },
+    {
+      id: "kiro",
+      state: "unsupported",
+      windows: [],
+      updatedAt: new Date(now).toISOString(),
+      message: "No usage source for this agent.",
+    },
+  ];
+}
 
 /** Provider-agnostic one-shot CLI invocation (claude/codex). Returns the
  *  invocation id; caller subscribes to `ai://output` / `ai://done` / `ai://error`
