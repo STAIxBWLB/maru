@@ -24,6 +24,13 @@ import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
 import { denseMockEntries } from "./graph/fixtures";
 import { invokeE2EOverride } from "./e2eInvoke";
 import type {
+  KakaoEnqueueResult,
+  KakaoRelayEnvelope,
+  KakaoRelayStatus,
+  KakaoSendResult,
+  KakaoStageResult,
+} from "./kakaoRelay";
+import type {
   CreatedDocument,
   DeletedDocument,
   DocumentPayload,
@@ -2411,6 +2418,61 @@ export async function telegramPollingStatus(): Promise<TelegramPollingStatus> {
   return invoke<TelegramPollingStatus>("telegram_polling_status");
 }
 
+export async function readKakaoRelayStatus(workPath: string): Promise<KakaoRelayStatus> {
+  if (!isTauri()) return mockKakaoRelayStatus();
+  return invoke<KakaoRelayStatus>("read_kakao_relay_status", { workPath });
+}
+
+export async function readKakaoRelayMessages(
+  workPath: string,
+  roomSlug: string,
+  limit: number,
+): Promise<KakaoRelayEnvelope[]> {
+  if (!isTauri()) return mockKakaoRelayMessages(roomSlug, limit);
+  return invoke<KakaoRelayEnvelope[]>("read_kakao_relay_messages", {
+    workPath,
+    roomSlug,
+    limit,
+  });
+}
+
+export async function stageKakaoRelayNew(workPath: string): Promise<KakaoStageResult> {
+  if (!isTauri()) {
+    return { stagedMessages: 0, stagedMedia: 0, skipped: 0, errors: [], perRoom: {} };
+  }
+  return invoke<KakaoStageResult>("stage_kakao_relay_new", { workPath });
+}
+
+export async function enqueueKakaoSend(
+  workPath: string,
+  chat: string,
+  text: string,
+  attachmentPath?: string | null,
+): Promise<KakaoEnqueueResult> {
+  if (!isTauri()) {
+    return {
+      id: "00000000-0000-4000-8000-000000000001",
+      path: `${workPath}/kakao-relay/outbox/00000000-0000-4000-8000-000000000001.json`,
+    };
+  }
+  return invoke<KakaoEnqueueResult>("enqueue_kakao_send", {
+    workPath,
+    chat,
+    text,
+    attachmentPath: attachmentPath ?? null,
+  });
+}
+
+export async function readKakaoSendResults(
+  workPath: string,
+  ids: string[],
+): Promise<KakaoSendResult[]> {
+  if (!isTauri()) {
+    return ids.map((id) => ({ id, status: "queued", ok: null, error: null }));
+  }
+  return invoke<KakaoSendResult[]>("read_kakao_send_results", { workPath, ids });
+}
+
 export interface LegacyLaunchdService {
   label: string;
   plistPath: string;
@@ -2760,6 +2822,73 @@ function mockOutlookUnread(): OutlookMessage[] {
       isRead: false,
     },
   ];
+}
+
+const MOCK_KAKAO_ROOM_NAME = "코이카우즈백사업단";
+const MOCK_KAKAO_ROOM_SLUG = "koica-uzbek";
+
+function mockKakaoRelayStatus(): KakaoRelayStatus {
+  return {
+    configured: true,
+    root: "/mock/Dropbox/maru-kakao-relay",
+    state: "running",
+    heartbeat: new Date(Date.now() - 45 * 1000).toISOString(),
+    heartbeatAgeSeconds: 45,
+    stale: false,
+    lastError: null,
+    rooms: [
+      {
+        name: MOCK_KAKAO_ROOM_NAME,
+        slug: MOCK_KAKAO_ROOM_SLUG,
+        managed: true,
+        sendAllowed: true,
+        priority: 1,
+        messageDays: 7,
+      },
+    ],
+  };
+}
+
+function mockKakaoRelayMessages(roomSlug: string, limit: number): KakaoRelayEnvelope[] {
+  if (roomSlug !== MOCK_KAKAO_ROOM_SLUG) return [];
+  const base = Date.now();
+  const envelopes: KakaoRelayEnvelope[] = [
+    {
+      schema: "kakao-msg/v1",
+      provider: "kakao",
+      kind: "message",
+      message: {
+        id: "kakao-1",
+        chat: MOCK_KAKAO_ROOM_NAME,
+        room_slug: MOCK_KAKAO_ROOM_SLUG,
+        sender: "김철수",
+        is_me: false,
+        text: "이번 주 일정 공유드립니다.",
+        sent_at: new Date(base - 10 * 60 * 1000).toISOString(),
+        captured_at: new Date(base - 9 * 60 * 1000).toISOString(),
+        engine: "mock",
+        attachments: [],
+      },
+    },
+    {
+      schema: "kakao-msg/v1",
+      provider: "kakao",
+      kind: "message",
+      message: {
+        id: "kakao-2",
+        chat: MOCK_KAKAO_ROOM_NAME,
+        room_slug: MOCK_KAKAO_ROOM_SLUG,
+        sender: "나",
+        is_me: true,
+        text: "확인했습니다. 회의록은 내일까지 정리할게요.",
+        sent_at: new Date(base - 5 * 60 * 1000).toISOString(),
+        captured_at: new Date(base - 4 * 60 * 1000).toISOString(),
+        engine: "mock",
+        attachments: [],
+      },
+    },
+  ];
+  return envelopes.slice(0, Math.max(0, limit));
 }
 
 function mockTelegramRecent(): TelegramMessage[] {

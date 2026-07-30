@@ -14,10 +14,19 @@ export function AuthStatusBadge({ status }: AuthStatusBadgeProps) {
       ? t("comms.auth.status.authenticated")
       : state === "auth_required"
         ? t("comms.auth.status.expired")
-        : state === "cli_missing" || state === "env_missing"
-          ? t("comms.auth.status.unauthenticated")
-          : t("comms.auth.status.unknown");
-  const Icon = state === "ok" ? CheckCircle2 : state === "unknown" ? HelpCircle : AlertCircle;
+        : state === "paused"
+          ? t("comms.auth.status.paused")
+          : state === "stale"
+            ? t("comms.auth.status.stale")
+            : state === "cli_missing" || state === "env_missing"
+              ? t("comms.auth.status.unauthenticated")
+              : t("comms.auth.status.unknown");
+  const Icon =
+    state === "ok"
+      ? CheckCircle2
+      : state === "unknown" || state === "paused"
+        ? HelpCircle
+        : AlertCircle;
   return (
     <span className={`auth-status-badge ${state}`}>
       <Icon size={13} />

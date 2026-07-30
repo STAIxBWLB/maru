@@ -28,6 +28,7 @@ mod inbox_drop;
 mod inbox_settings;
 mod inbox_watcher;
 mod jobs;
+mod kakao_relay;
 mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
@@ -120,6 +121,10 @@ use inbox_settings::{
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
 use jobs::{
     jobs_install, jobs_list, jobs_read_log, jobs_run_now, jobs_start, jobs_stop, jobs_uninstall,
+};
+use kakao_relay::{
+    enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
+    read_kakao_send_results, stage_kakao_relay_new,
 };
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
@@ -435,6 +440,11 @@ pub fn run() {
             save_telegram_monitor_config,
             detect_legacy_telegram_launchd,
             unload_legacy_telegram_launchd,
+            read_kakao_relay_status,
+            read_kakao_relay_messages,
+            stage_kakao_relay_new,
+            enqueue_kakao_send,
+            read_kakao_send_results,
             jobs_list,
             jobs_install,
             jobs_uninstall,

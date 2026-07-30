@@ -639,7 +639,11 @@ fn non_empty_path(raw: &str) -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| host_fs::expand_tilde(trimmed))
 }
 
-fn workspace_provider_string(work_path: &Path, provider: &str, keys: &[&str]) -> Option<String> {
+pub(crate) fn workspace_provider_string(
+    work_path: &Path,
+    provider: &str,
+    keys: &[&str],
+) -> Option<String> {
     let content = fs::read_to_string(work_path.join("workspace.config.yaml")).ok()?;
     let yaml: YamlValue = serde_yaml::from_str(&content).ok()?;
     let provider = yaml.get("io")?.get("providers")?.get(provider)?;
@@ -657,7 +661,7 @@ fn workspace_provider_string(work_path: &Path, provider: &str, keys: &[&str]) ->
     None
 }
 
-fn workspace_provider_nested_string(
+pub(crate) fn workspace_provider_nested_string(
     work_path: &Path,
     provider: &str,
     key_paths: &[&[&str]],

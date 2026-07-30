@@ -36,7 +36,7 @@ export function SourceControls({
   const isTelegram = channel === "telegram";
   return (
     <div className="source-controls">
-      {channel !== "kakao" ? <AuthStatusBadge status={authStatus} /> : null}
+      <AuthStatusBadge status={authStatus} />
       {isTelegram && pollingStatus ? (
         <>
           <span className={pollingStatus.running ? "status-dot active" : "status-dot"} />
