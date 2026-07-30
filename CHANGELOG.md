@@ -8,6 +8,60 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.33 - 2026-07-30 - Nothing Lands Unconfirmed
+
+- **Drafts mode holds AI output until you confirm it.** A new activity-rail mode
+  collects task, idea, and implementation drafts with an importance and
+  confidence rating. Bodies live under `scratchpad/drafts/` with metadata in
+  `<work>/.maru/drafts/`, strictly outside vault data, so nothing in flight
+  reaches documents, the knowledge graph, or search. Accepting a draft promotes
+  it into a document or task through the approval gate and freezes a baseline
+  copy of exactly what Maru wrote; a discarded draft stays discarded.
+- **Recurring skill missions run themselves.** The Drafts Automation section
+  schedules skill runs (`<work>/.maru/schedules.json`, a 60-second ticker,
+  catch-up at launch) driving the new `extract-tasks` mode of the
+  `inbox-process` skill. Extracted candidates arrive as drafts with title dedupe
+  and an importance floor you set in the same section, so a scheduled run cannot
+  bury the list in low-value items.
+- **Scratchpad ideas become implementation drafts.** The new `ideation-drafts`
+  skill turns an ideation note into an implementation draft, and the
+  idea -> draft -> promoted lineage stays visible in the Drafts pane.
+- **Gap analysis shows what you had to fix.** Gap mode diffs each promoted
+  document against its frozen baseline, classifies every hunk (external
+  information, direct edit, cross-document reference, formatting) with the
+  evidence behind the call, and shows the result in a two-column viewer. Runs
+  append to `<work>/.maru/gap-log.jsonl` with a type distribution and trend, and
+  a digest of recent entries is attached to new extract-tasks schedule prompts,
+  so the next batch of drafts needs fewer edits.
+- **Documents show which vault notes they reference.** A per-document map of
+  wikilinks and title or alias mentions is computed on demand and cached under
+  `<work>/.maru/kg-cache/`. The editor highlights referenced titles in source
+  and preview modes, and the graph converges on the referenced neighborhood with
+  the rest dimmed, honoring reduced motion.
+- **KakaoTalk joins Messages as a real channel.** Maru reads the
+  maru-kakao-relay sync bus and shows relay liveness (ok, paused, stale,
+  unreachable), a read-only room viewer, and a confirmation-gated composer that
+  queues through `kakao-send/v1` and polls for the delivery result. Process-now
+  previews a dry run, waits for approval, and only then stages envelopes and
+  media into `inbox/drop/kakao` for the existing inbox-process pipeline;
+  approval is enforced in the backend, not only in the interface.
+- **Hardening from adversarial review of both features.** A Korean wikilink such
+  as `[[이영준]]` no longer panics the reference map, which previously killed the
+  feature on first use in any vault with Korean attendee links. Schedule
+  next-run times are walked over civil dates, so a daylight-saving fold can no
+  longer read as due and re-dispatch every minute, and persist failures surface
+  instead of being swallowed. Accepting a draft flushes the editor first, so a
+  last-second edit is what gets promoted and frozen, and promote-to-task
+  compares against the note it actually wrote. Revisiting the Drafts pane no
+  longer re-ingests completed runs or brings back discarded drafts. The
+  reference map moved off the IPC thread, editing an unrelated note no longer
+  invalidates every document's map, the graph convergence animation actually
+  moves on screen, and reference focus resolves against a nested `vault/`
+  layout. Promotion, draft reads, the draft index, and the gap log all gained
+  the guards the rest of the app already used.
+- **Font sizes cannot drift out of the type scale.** `make verify` gained
+  `check-type-tokens`, which fails on a raw px `font-size` in `src/styles.css`.
+
 ## v0.4.32 - 2026-07-30 - Messages Keep Moving
 
 - **Messages stays responsive when provider sessions expire.** Gmail, Outlook,
