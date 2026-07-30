@@ -22,11 +22,11 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{DiffTag, TextDiff};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Context lines kept on each side of a change group, unified-diff style.
 const CONTEXT_LINES: usize = 3;
@@ -148,6 +148,21 @@ fn baseline_path(work: &Path, draft_id: &str) -> PathBuf {
 
 fn gap_log_path(work: &Path) -> PathBuf {
     work.join(".maru").join("gap-log.jsonl")
+}
+
+// ponytail: third module-private copy of this per-path append lock (see
+// today_store.rs and agent_host/event_store.rs). Hoist the three into one
+// shared helper if a fourth JSONL appender shows up.
+fn append_lock_for(path: &Path) -> Result<Arc<Mutex<()>>, String> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "gap_log_lock_registry_poisoned".to_string())?;
+    Ok(locks
+        .entry(path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
 }
 
 /// Intermediate hunk with line indices retained for classification.
@@ -356,7 +371,9 @@ fn squash_whitespace(text: &str) -> String {
 ///    markdown link to a non-URL (workspace-relative) target.
 /// 3. `external-info`: an added line contains a URL, a date, a number, or a
 ///    quoted name that does not appear anywhere in the baseline. This is an
-///    approximation — "not in the baseline" stands in for "new information".
+///    approximation — "not in the baseline" stands in for "new information",
+///    and it gates every signal: rewording around an existing citation is a
+///    direct edit, not new external info.
 /// 4. `direct-edit`: everything else.
 fn classify_hunk(
     hunk: &RawHunk,
@@ -387,6 +404,14 @@ fn classify_hunk(
         (Some(old_end), Some(new_end)) => {
             (!hunk.removed_idx.is_empty() || !hunk.added_idx.is_empty())
                 && hunk.removed_idx.iter().all(|index| *index <= old_end)
+                && hunk.added_idx.iter().all(|index| *index <= new_end)
+        }
+        // Frontmatter the promote target injected over a baseline that had
+        // none (create_task_note does this): insert-only, and every added line
+        // sits inside the new leading block.
+        (None, Some(new_end)) => {
+            hunk.removed_idx.is_empty()
+                && !hunk.added_idx.is_empty()
                 && hunk.added_idx.iter().all(|index| *index <= new_end)
         }
         _ => false,
@@ -426,12 +451,18 @@ fn classify_hunk(
     // 3. external-info
     for line in &added {
         for found in url_regex().find_iter(line) {
-            evidence.push(found.as_str().to_string());
+            if !baseline.contains(found.as_str()) {
+                evidence.push(found.as_str().to_string());
+            }
         }
+        // Every date range is recorded so the number heuristic below stays
+        // deduped, but only dates absent from the baseline are new information.
         let date_ranges: Vec<(usize, usize)> = date_regex()
             .find_iter(line)
             .map(|found| {
-                evidence.push(found.as_str().to_string());
+                if !baseline.contains(found.as_str()) {
+                    evidence.push(found.as_str().to_string());
+                }
                 (found.start(), found.end())
             })
             .collect();
@@ -576,12 +607,19 @@ pub fn gap_append_log(work_path: String, draft_id: String) -> Result<GapLogEntry
     }
     let line = serde_json::to_string(&entry)
         .map_err(|err| format!("Cannot serialize gap log entry: {err}"))?;
+    // One buffer, one write_all, under the append lock: a concurrent window
+    // appending here must never interleave a record with its own newline.
+    let append_lock = append_lock_for(&log_path)?;
+    let _guard = append_lock
+        .lock()
+        .map_err(|_| "gap_log_append_lock_poisoned".to_string())?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
         .map_err(|err| format!("Cannot open gap log: {err}"))?;
-    writeln!(file, "{line}").map_err(|err| format!("Cannot append gap log: {err}"))?;
+    file.write_all(format!("{line}\n").as_bytes())
+        .map_err(|err| format!("Cannot append gap log: {err}"))?;
     Ok(entry)
 }
 
@@ -764,6 +802,32 @@ mod tests {
         let mixed = "---\ntitle: B\ntags: [x]\n---\nbody changed\n";
         let result = classified(old, mixed);
         assert!(result.iter().any(|(kind, _)| *kind != GapHunkType::Formatting));
+    }
+
+    #[test]
+    fn injected_frontmatter_over_a_plain_baseline_is_formatting() {
+        // What an older drafts_promote left behind: baseline = raw draft body,
+        // promoted note = the same body with generated frontmatter on top.
+        let old = "# Draft body\n\nDetails here.\n";
+        let new = "---\nstatus: active\ntitle: Ship 3 reports\n---\n# Draft body\n\nDetails here.\n";
+        let result = classified(old, new);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, GapHunkType::Formatting);
+        assert_eq!(result[0].1, vec!["frontmatter".to_string()]);
+    }
+
+    #[test]
+    fn url_or_date_already_in_the_baseline_is_not_external_info() {
+        let old = "see https://example.com/a on 2026-08-01\n";
+        let new = "please see https://example.com/a on 2026-08-01 for details\n";
+        let result = classified(old, new);
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].0,
+            GapHunkType::DirectEdit,
+            "rewording around an existing citation is a direct edit"
+        );
+        assert!(result[0].1.is_empty(), "unexpected evidence {:?}", result[0].1);
     }
 
     #[test]

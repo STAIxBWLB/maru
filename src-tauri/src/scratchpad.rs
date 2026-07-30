@@ -451,7 +451,7 @@ fn normalize_relative_path(raw: &str) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
-fn assert_no_symlink_components(root: &Path, relative: &Path) -> Result<(), String> {
+pub(crate) fn assert_no_symlink_components(root: &Path, relative: &Path) -> Result<(), String> {
     if root.exists() {
         let metadata = fs::symlink_metadata(root)
             .map_err(|err| format!("Cannot inspect Scratchpad root: {err}"))?;

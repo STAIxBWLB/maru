@@ -1073,7 +1073,14 @@ export function GraphCanvas({
           },
           nodeScreenState: (id) => {
             const data = renderer.getNodeDisplayData(id) as
-              | { size?: number; color?: string; borderColor?: string; favorite?: boolean }
+              | {
+                  size?: number;
+                  color?: string;
+                  borderColor?: string;
+                  favorite?: boolean;
+                  x?: number;
+                  y?: number;
+                }
               | undefined;
             const visibleIds = interactionRef.current.visibleNodeIds;
             return {
@@ -1084,6 +1091,10 @@ export function GraphCanvas({
               color: data?.color ?? null,
               borderColor: data?.borderColor ?? null,
               favorite: data?.favorite === true,
+              // Display-data coordinates: the only place a reducer-only move is
+              // observable (nodeViewportPoint reads the graphology attributes).
+              x: typeof data?.x === "number" ? data.x : null,
+              y: typeof data?.y === "number" ? data.y : null,
             };
           },
           hoveredId: () => interactionRef.current.hoverId,
@@ -1337,12 +1348,14 @@ export function GraphCanvas({
       renderer?.refresh();
       return;
     }
+    // Not ready yet (FA2 still running, GPU recovery): this effect re-runs on
+    // every rendererState change, and the nonce is only consumed once the
+    // animation COMPLETES, so the trigger is picked up when the graph settles.
     if (!renderer || !graph || rendererStateRef.current !== "ready") return;
     if (refFocusAnimatedNonceRef.current === refFocusNonce) {
       renderer.refresh();
       return;
     }
-    refFocusAnimatedNonceRef.current = refFocusNonce;
     let cx = 0;
     let cy = 0;
     let count = 0;
@@ -1367,10 +1380,59 @@ export function GraphCanvas({
       { duration: animDuration(320) },
     );
     renderer.refresh();
-    if (prefersReducedMotion()) return;
+    if (prefersReducedMotion()) {
+      refFocusAnimatedNonceRef.current = refFocusNonce;
+      return;
+    }
+    // The tick must NOT use a bare refresh(). A full refresh runs sigma's
+    // process(), which re-reads x/y from the graphology attributes
+    // (sigma.esm.js "Get initial coordinates") and so discards the reducer's
+    // animated coordinates — the animation rendered nothing at all while still
+    // paying for a full re-index every frame. A partial refresh with
+    // skipIndexation instead calls updateNode (reducer + normalization) and
+    // uploads straight to the program, leaving process() out of the loop, so
+    // the animated coordinates survive to the GPU.
+    //
+    // Incident edges have to ride along: edge geometry is baked from the node
+    // cache when an edge is uploaded, so refreshing the nodes alone leaves the
+    // edges pinned to the old positions and visibly tears the subgraph.
+    const animatedNodes: string[] = [];
+    refFocusIds.forEach((id) => {
+      if (graph.hasNode(id)) animatedNodes.push(id);
+    });
+    const incidentEdges = new Set<string>();
+    for (const id of animatedNodes) {
+      for (const edge of graph.edges(id)) incidentEdges.add(edge);
+    }
+    const partialGraph = { nodes: animatedNodes, edges: [...incidentEdges] };
     let raf = 0;
+    let recoveries = 0;
     const start = performance.now();
+    // A partial repaint needs the program slots process() assigns. The
+    // interaction-sync effect above also depends on referenceFocus, and its
+    // scheduleRefresh() clears those slots SYNCHRONOUSLY while deferring
+    // process() to the next frame — a partial repaint landing in that window
+    // throws "can't be repaint". A synchronous full refresh runs process() and
+    // restores them, so recover and keep animating; give up if it persists
+    // rather than silently burning frames.
+    const paint = (): boolean => {
+      try {
+        renderer.refresh({ partialGraph, skipIndexation: true });
+        return true;
+      } catch {
+        renderer.refresh();
+        recoveries += 1;
+        if (recoveries <= 3) return true;
+        refAnimRef.current = null;
+        renderer.refresh();
+        return false;
+      }
+    };
     const tick = (now: number) => {
+      // A topology-identical rebuild swaps the renderer without changing
+      // rendererState, so this effect is not re-run; bail rather than paint into
+      // a killed instance.
+      if (rendererRef.current !== renderer) return;
       const progress = Math.min(1, (now - start) / KG_REF_ANIM_DURATION_MS);
       refAnimRef.current = {
         ids: refFocusIds,
@@ -1378,16 +1440,24 @@ export function GraphCanvas({
         // Out-and-back: gather toward the centroid, then ease home.
         amp: Math.sin(Math.PI * progress),
       };
-      renderer.refresh();
+      if (!paint()) return;
       if (progress < 1) {
         raf = requestAnimationFrame(tick);
       } else {
         refAnimRef.current = null;
-        renderer.refresh();
+        paint();
+        // Consume the trigger only now: an animation cut short by a layout
+        // restart or a teardown is retried when the graph is ready again.
+        refFocusAnimatedNonceRef.current = refFocusNonce;
       }
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Interrupted mid-flight (new trigger, unmount, teardown): drop the offset
+      // so a later render cannot resurrect a half-converged frame.
+      refAnimRef.current = null;
+    };
   }, [refFocusIds, refFocusNonce, rendererState]);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------

@@ -5,6 +5,7 @@ import {
   byteOffsetToCharIndex,
   mapSpansToRenderedText,
   refMapToCharSpans,
+  resolveReferenceNodeIds,
   segmentsFromSpans,
   spanSearchTexts,
   uniqueRefNodePaths,
@@ -270,5 +271,51 @@ describe("mapSpansToRenderedText", () => {
     expect(mapped).toHaveLength(1);
     expect(mapped[0].nodePath).toBe("real.md");
     expect(rendered.slice(mapped[0].start, mapped[0].end)).toBe("실체");
+  });
+});
+
+describe("resolveReferenceNodeIds", () => {
+  const nodes = [
+    { id: "plan", relPath: "notes/plan.md" },
+    { id: "people", relPath: "notes/people.md" },
+    { id: "ghost", relPath: null },
+  ];
+
+  // The regression this exists for: refs come back rooted at the workspace while
+  // graph nodes are rooted at the graph's data path. On the primary layout (work
+  // repo + nested vault/ submodule) the two differ by one segment, and comparing
+  // the relative strings resolved nothing while the UI still claimed a highlight.
+  it("matches across a nested vault root", () => {
+    const ids = resolveReferenceNodeIds(
+      nodes,
+      ["vault/notes/plan.md"],
+      "/w",
+      "/w/vault",
+    );
+    expect([...ids]).toEqual(["plan"]);
+  });
+
+  it("matches when both roots are the same workspace", () => {
+    const ids = resolveReferenceNodeIds(nodes, ["notes/people.md"], "/w", "/w");
+    expect([...ids]).toEqual(["people"]);
+  });
+
+  it("does not match a same-suffix path under a different root", () => {
+    const ids = resolveReferenceNodeIds(nodes, ["notes/plan.md"], "/other", "/w/vault");
+    expect(ids.size).toBe(0);
+  });
+
+  it("ignores ghost nodes and tolerates trailing slashes and backslashes", () => {
+    const ids = resolveReferenceNodeIds(
+      [...nodes, { id: "win", relPath: "notes\\win.md" }],
+      ["vault/notes/win.md"],
+      "/w/",
+      "/w/vault/",
+    );
+    expect([...ids]).toEqual(["win"]);
+  });
+
+  it("resolves nothing when the graph has no root yet", () => {
+    expect(resolveReferenceNodeIds(nodes, ["vault/notes/plan.md"], "/w", null).size).toBe(0);
   });
 });

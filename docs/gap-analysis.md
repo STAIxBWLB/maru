@@ -44,7 +44,9 @@ Pure Rust string/regex signals, no AI call. Ordered — first match wins:
 
 1. **formatting** — every changed line is blank, added/removed lines are
    identical once whitespace is squashed, or every changed line sits inside
-   the leading frontmatter block of its document.
+   the leading frontmatter block of its document. The last case also covers an
+   insert-only hunk where the *baseline* has no frontmatter at all, which is how
+   an older task baseline (frozen before the read-back fix) reads.
 2. **cross-doc-reference** — an added line contains a `[[wikilink]]` or a
    markdown link to a non-URL (workspace-relative) target.
 3. **external-info** — an added line contains a URL, a date, a number, or a
@@ -59,7 +61,11 @@ numbers, ...) so the UI can show *why* a hunk got its type.
 
 Analysis itself is read-only. `gap_append_log` (explicit, frontend-triggered
 after an analysis is viewed) re-runs the analysis and appends one JSON line to
-`<work>/.maru/gap-log.jsonl`:
+`<work>/.maru/gap-log.jsonl`. The record is built into a single buffer and
+written under the per-path append lock the other JSONL writers use
+(`agent_host/event_store.rs`, `today_store.rs`): a two-call `writeln!` could tear
+a line between two windows, and since the reader skips unparseable lines that
+would silently swallow the torn record *and* the one concatenated onto it.
 
 ```json
 { "at": "...", "draftId": "...", "promotedTo": "...", "addedLines": 2,

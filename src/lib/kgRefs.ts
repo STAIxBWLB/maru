@@ -111,6 +111,33 @@ export function uniqueRefNodePaths(refs: KgNodeRef[]): string[] {
   return out;
 }
 
+function joinRoot(root: string, relative: string): string {
+  return `${root.replace(/[\\/]+$/, "")}/${relative.replace(/\\/g, "/").replace(/^\/+/, "")}`;
+}
+
+/** Resolve referenced node paths to graph node ids.
+ *
+ *  The two sides are rooted differently: `kg_document_refs` returns paths
+ *  relative to the document's workspace, while graph nodes carry `relPath`
+ *  relative to the graph's own data path — and those differ by a `vault/`
+ *  segment whenever the graph reads a nested vault submodule. Comparing the
+ *  relative strings directly resolved nothing on exactly that layout, so rebase
+ *  both to absolute before matching. */
+export function resolveReferenceNodeIds(
+  nodes: readonly { id: string; relPath: string | null }[],
+  nodePaths: readonly string[],
+  docRoot: string,
+  graphRoot: string | null,
+): Set<string> {
+  const ids = new Set<string>();
+  if (!graphRoot) return ids;
+  const referenced = new Set(nodePaths.map((relative) => joinRoot(docRoot, relative)));
+  for (const node of nodes) {
+    if (node.relPath && referenced.has(joinRoot(graphRoot, node.relPath))) ids.add(node.id);
+  }
+  return ids;
+}
+
 /** Plain segments for a highlighter: text outside spans + the spans. */
 export interface KgSegment {
   text: string;

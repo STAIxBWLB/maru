@@ -71,14 +71,19 @@ export function parseTaskCandidatesArtifact(raw: string): TaskCandidatesArtifact
 
 /** Normalized title key for duplicate detection: case-insensitive and
  *  punctuation-insensitive so "Review weekly report" matches
- *  "review weekly report!". */
+ *  "review weekly report!". Strips punctuation/symbols/separators rather than
+ *  keeping an allowlist of scripts — an allowlist collapsed every Hanja-,
+ *  Kana- or Cyrillic-only title to "", making unrelated titles collide. */
 export function normalizeDraftTitleKey(title: string): string {
-  return title
+  const key = title
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9가-힣]+/g, " ")
+    .replace(/[\p{P}\p{S}\p{Z}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
+  // A title made entirely of punctuation or emoji normalizes to "". Fall back to
+  // the raw title so two such titles stay distinct instead of deduping away.
+  return key || title.trim().toLowerCase();
 }
 
 export function importanceRank(importance: DraftImportance): number {
@@ -122,9 +127,56 @@ export function isCompletedSchedulerSkillMission(mission: MissionRecord): boolea
   return asRecord(mission.metadata)?.scheduler === true;
 }
 
+// The ingest guard has to live where the replay source lives. Mission records
+// are process-global (mission_state hydrates them from disk and keeps them for
+// the app's lifetime), while the panes that trigger ingestion unmount on every
+// mode switch — so a per-component ref replayed every completed run on each
+// remount, resurrecting drafts the user had discarded. Module scope dies with
+// the process, exactly like MissionState.
+const ingestedRuns = new Set<string>();
+let ingestQueue: Promise<unknown> = Promise.resolve();
+
+/** Run `task` at most once per `key`, and never concurrently with another
+ *  ingestion. Serialization is required, not just nice: each ingest reads the
+ *  draft list, decides, then writes, so two interleaved runs both miss the
+ *  titles the other is about to create and duplicate them. */
+export function onceSerialized<T>(key: string, task: () => Promise<T>): Promise<T | null> {
+  const chained = ingestQueue.then(async () => {
+    if (ingestedRuns.has(key)) return null;
+    ingestedRuns.add(key);
+    try {
+      return await task();
+    } catch (error) {
+      // Release the claim so a transient failure can be retried; already-created
+      // drafts are covered by the title dedupe on the next pass.
+      ingestedRuns.delete(key);
+      throw error;
+    }
+  });
+  ingestQueue = chained.catch(() => undefined);
+  return chained;
+}
+
+/** Test-only: drop the module-scope ingest guard between cases. */
+export function resetIngestGuardForTests(): void {
+  ingestedRuns.clear();
+  ingestQueue = Promise.resolve();
+}
+
 /** Read one completed run's events and import its task candidates as drafts.
- *  Returns null when the run produced no candidates artifact. */
+ *  Returns null when the run produced no candidates artifact, or when this run
+ *  was already ingested in this process. */
 export async function ingestTaskCandidateRun(
+  workPath: string,
+  runId: string,
+  minImportance: AiTaskIngestMinImportance,
+): Promise<TaskIngestResult | null> {
+  return onceSerialized(`${workPath}|${runId}`, () =>
+    ingestTaskCandidateRunUnguarded(workPath, runId, minImportance),
+  );
+}
+
+async function ingestTaskCandidateRunUnguarded(
   workPath: string,
   runId: string,
   minImportance: AiTaskIngestMinImportance,

@@ -16,14 +16,16 @@
 // runs ON DEMAND ONLY through the kg_document_refs command and is cached on
 // disk at <work>/.maru/kg-cache/<sha256(docRelPath)>.json. A cached entry is
 // valid iff the document content hash matches AND the vault stamp matches.
-// The vault stamp is the sha256 of the vault scan cache file
-// (.maru/cache/workspace-index-v3.json): scan_vault rewrites it with fresh
-// per-file fingerprints whenever the vault actually changed, and identical
-// content hashes equal, so no-change rescans do NOT invalidate this cache.
-// Known gap: a vault edit that no scan_vault call has picked up yet (watcher
-// debounce window) leaves the stamp unchanged and the stale entry is served —
-// the next trigger after any scan refreshes it. Document edits are always
-// caught immediately via the content hash.
+// The vault stamp hashes the note *identities* in the vault scan cache
+// (.maru/cache/workspace-index-v3.json) — rel_path + title + aliases, sorted —
+// so it changes only when a note is added, removed, renamed, retitled or
+// re-aliased. Identical identity sets stamp equal, so no-change rescans do NOT
+// invalidate this cache, and neither does editing the body of an unrelated
+// note (which cannot change what this document matches). Known gap: a vault
+// change that no scan_vault call has picked up yet (watcher debounce window)
+// leaves the stamp unchanged and the stale entry is served — the next trigger
+// after any scan refreshes it. Document edits are always caught immediately
+// via the content hash.
 //
 // Span offsets are UTF-8 BYTE offsets into the raw document content (what
 // read_document returns), not JS char offsets. `paragraph` is the 0-based
@@ -31,7 +33,9 @@
 // over the whole raw document (the frontmatter block counts as paragraph 0).
 
 use crate::atomic_file::write_atomic;
-use crate::vault::{normalize_existing_dir, resolve_inside_vault, scan_vault, VaultEntry};
+use crate::vault::{
+    normalize_existing_dir, read_vault_cache, resolve_inside_vault, scan_vault, VaultEntry,
+};
 use chrono::Utc;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -42,7 +46,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const VAULT_SCAN_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v3.json"];
 const KG_CACHE_REL: &[&str] = &[".maru", "kg-cache"];
 /// Per-note occurrence cap for entity matches (first N spans win).
 const MAX_ENTITY_SPANS_PER_NOTE: usize = 20;
@@ -86,7 +89,7 @@ pub struct DocumentRefMap {
     pub doc_path: String,
     /// sha256 hex of the raw document bytes at compute time.
     pub doc_hash: String,
-    /// sha256 hex of the vault scan cache file at compute time (see header).
+    /// sha256 hex of the vault note-identity set at compute time (see header).
     pub vault_stamp: String,
     pub refs: Vec<KgNodeRef>,
     pub computed_at: String,
@@ -106,8 +109,11 @@ fn wikilink_re() -> &'static Regex {
 /// trailing markdown extension, case-insensitive.
 fn strip_ext(path: &str) -> &str {
     for ext in [".md", ".mdx", ".markdown"] {
-        if path.len() > ext.len() && path[path.len() - ext.len()..].eq_ignore_ascii_case(ext) {
-            return &path[..path.len() - ext.len()];
+        let Some(cut) = path.len().checked_sub(ext.len()) else {
+            continue;
+        };
+        if cut > 0 && path.is_char_boundary(cut) && path[cut..].eq_ignore_ascii_case(ext) {
+            return &path[..cut];
         }
     }
     path
@@ -268,17 +274,34 @@ fn cache_file_path(work: &Path, doc_rel: &str) -> PathBuf {
         .join(name)
 }
 
-/// The vault freshness stamp: sha256 of the vault scan cache file. Missing
-/// file → "none", which never matches a computed stamp (compute runs
-/// scan_vault first, which writes the file), so it degrades to a miss.
+/// The vault freshness stamp: sha256 over the *identity* of every note the
+/// scan cache holds — rel_path, title and aliases, i.e. exactly what
+/// build_entry_index and entity matching key on. Note bodies, fingerprints and
+/// timestamps are excluded on purpose: editing an unrelated note cannot change
+/// which titles/aliases a document matches, so its cached map survives. Sorted
+/// before hashing, so repeated no-change rescans stamp EQUAL (header
+/// invariant). Missing/unparseable cache → "none", which never matches a
+/// computed stamp (compute runs scan_vault first, which writes the cache), so
+/// it degrades to a miss.
 fn vault_stamp(work: &Path) -> String {
-    let path = VAULT_SCAN_CACHE_REL
+    let Ok(Some(entries)) = read_vault_cache(work.to_string_lossy().to_string()) else {
+        return "none".to_string();
+    };
+    let mut ids: Vec<String> = entries
         .iter()
-        .fold(work.to_path_buf(), |acc, part| acc.join(part));
-    match fs::read(&path) {
-        Ok(bytes) => sha256_hex(&bytes),
-        Err(_) => "none".to_string(),
-    }
+        .map(|entry| {
+            let mut aliases = frontmatter_aliases(entry);
+            aliases.sort();
+            format!(
+                "{}\u{1}{}\u{1}{}",
+                normalize_rel(&entry.rel_path),
+                entry.title,
+                aliases.join("\u{2}")
+            )
+        })
+        .collect();
+    ids.sort();
+    sha256_hex(ids.join("\n").as_bytes())
 }
 
 struct RefBuilder {
@@ -457,7 +480,11 @@ fn compute_document_refs(
 /// On-demand, cache-aware reference mapping for one document. Recomputes only
 /// when the cache is missing, the document changed (content hash), or the
 /// vault scan cache changed (vault stamp).
-#[tauri::command]
+///
+/// `async` so a cache miss (full scan_vault + one regex pass per vault
+/// title/alias) runs on Tauri's blocking pool instead of hard-blocking the
+/// window; the body stays synchronous.
+#[tauri::command(async)]
 pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentRefMap, String> {
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &doc_path)?;
@@ -605,6 +632,41 @@ mod tests {
         // line between) as block 0, then 첫 문단=1, 둘째=2, 셋째=3.
         let paragraphs: Vec<usize> = alpha.spans.iter().map(|s| s.paragraph).collect();
         assert_eq!(paragraphs, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn strip_ext_only_cuts_at_char_boundaries() {
+        assert_eq!(strip_ext("인공지능"), "인공지능");
+        assert_eq!(strip_ext("회의.html"), "회의.html");
+        assert_eq!(strip_ext("note.md"), "note");
+        assert_eq!(strip_ext("NOTE.MD"), "NOTE");
+        assert_eq!(strip_ext("한글노트.md"), "한글노트");
+    }
+
+    #[test]
+    fn hangul_wikilink_target_resolves() {
+        let (temp, work) = workspace();
+        write_file(temp.path(), "ai.md", "# 인공지능\n");
+        write_file(temp.path(), "doc.md", "# Doc\n\n[[인공지능]]을 참조한다.\n");
+        let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
+        let ai = refs_for(&map, "ai.md", KgRefMatchKind::Wikilink).unwrap();
+        assert_eq!(ai.spans.len(), 1);
+    }
+
+    #[test]
+    fn korean_named_non_markdown_note_is_indexable() {
+        let (temp, work) = workspace();
+        write_file(temp.path(), "notes/회의.html", "<h1>회의록</h1>");
+        write_file(temp.path(), "doc.md", "# Doc\n\n위키링크가 없는 본문.\n");
+        let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
+        assert_eq!(map.doc_path, "doc.md");
+        assert!(
+            map.refs
+                .iter()
+                .all(|r| r.match_kind != KgRefMatchKind::Wikilink),
+            "the document has no wikilinks: {:?}",
+            map.refs
+        );
     }
 
     #[test]
@@ -780,6 +842,26 @@ mod tests {
         scan_vault(work.clone(), None).unwrap();
         let recomputed = kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
         assert_ne!(recomputed.computed_at, "sentinel", "vault change must recompute");
+    }
+
+    #[test]
+    fn unrelated_note_body_edit_keeps_the_cached_entry() {
+        let (temp, work) = workspace();
+        write_file(temp.path(), "Alpha.md", "# Alpha\n");
+        write_file(temp.path(), "other.md", "# Other\n\nfirst body\n");
+        write_file(temp.path(), "doc.md", "# Doc\n\nSee [[Alpha]].\n");
+        kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
+        sentinelize_cache(&work);
+
+        // Body-only edit of an unrelated note: the note-identity set is
+        // unchanged, so the stamp holds and the cached map survives the rescan.
+        write_file(temp.path(), "other.md", "# Other\n\na rewritten body\n");
+        scan_vault(work.clone(), None).unwrap();
+        let hit = kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
+        assert_eq!(
+            hit.computed_at, "sentinel",
+            "an unrelated body edit must not invalidate the ref map"
+        );
     }
 
     #[test]

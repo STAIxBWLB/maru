@@ -22885,7 +22885,7 @@ select:focus-visible,
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .drafts-kind-chip {
@@ -23155,7 +23155,7 @@ select:focus-visible,
 
 .drafts-schedule-info > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .drafts-schedule-actions {
@@ -23274,7 +23274,7 @@ select:focus-visible,
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-list-path {
@@ -23282,7 +23282,7 @@ select:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: var(--type-micro-size);
 }
 
 .gap-baseline-chip {
@@ -23345,7 +23345,7 @@ select:focus-visible,
 .gap-summary {
   flex: 1;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   white-space: nowrap;
 }
 
@@ -23367,7 +23367,7 @@ select:focus-visible,
 
 .gap-diff-table {
   font-family: var(--font-mono, monospace);
-  font-size: var(--type-meta-size, 11.5px);
+  font-size: var(--type-meta-size);
   line-height: 1.5;
   min-width: 100%;
 }
@@ -23430,7 +23430,7 @@ select:focus-visible,
 
 .gap-diff-range {
   color: var(--info);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-type-badge {
@@ -23438,7 +23438,7 @@ select:focus-visible,
   border-radius: 999px;
   border: 1px solid var(--line);
   font-family: var(--font-ui, inherit);
-  font-size: 10.5px;
+  font-size: var(--type-micro-size);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -23473,7 +23473,7 @@ select:focus-visible,
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--type-micro-size);
 }
 
 .gap-diff-collapsed {
@@ -23487,7 +23487,7 @@ select:focus-visible,
   border-bottom: 1px solid var(--line-soft);
   background: var(--panel);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   cursor: pointer;
   text-align: left;
 }
@@ -23524,7 +23524,7 @@ select:focus-visible,
 .gap-log-section h4 {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -23555,7 +23555,7 @@ select:focus-visible,
   min-width: 2.5ch;
   text-align: right;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-trend {
@@ -23565,7 +23565,7 @@ select:focus-visible,
   gap: 4px;
   margin: 0;
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-trend-point {
@@ -23593,7 +23593,7 @@ select:focus-visible,
 .gap-log-hint {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-log-day {
@@ -23605,7 +23605,7 @@ select:focus-visible,
 .gap-log-day-label {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   font-weight: 700;
 }
 
@@ -23627,7 +23627,7 @@ select:focus-visible,
 
 .gap-log-entry-time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   flex-shrink: 0;
 }
 
@@ -23644,7 +23644,7 @@ select:focus-visible,
   flex-shrink: 0;
   color: var(--muted);
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
 }
 
 .gap-log-entry-types {

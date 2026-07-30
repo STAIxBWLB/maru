@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { Check, FileDiff, Lightbulb, PenLine, RefreshCcw, Sparkles, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
   discardDraft,
@@ -104,6 +104,19 @@ export function DraftsPane({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [promoteTarget, setPromoteTarget] = useState<DraftEntry | null>(null);
 
+  // Held in a ref, not read from state, so the open/promote callbacks keep a
+  // stable identity while the user types — onOpenDraft feeds useIdeationDrafts'
+  // effects, and a per-keystroke identity change would re-run its mount scan.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = editing && detail !== null && editContent !== detail.content;
+  }, [detail, editContent, editing]);
+
+  const confirmDiscardEdits = useCallback(
+    () => !dirtyRef.current || window.confirm(t("drafts.discardEdits")),
+    [t],
+  );
+
   const refresh = useCallback(async () => {
     if (!workPath) {
       setDrafts([]);
@@ -168,7 +181,7 @@ export function DraftsPane({
 
   const openDraft = useCallback(
     async (draft: DraftEntry) => {
-      if (!workPath) return;
+      if (!workPath || !confirmDiscardEdits()) return;
       setSelectedId(draftItemId({ itemKind: "draft", draft }));
       setDetailLoading(true);
       setLocalError(null);
@@ -194,7 +207,7 @@ export function DraftsPane({
         setDetailLoading(false);
       }
     },
-    [onError, workPath],
+    [confirmDiscardEdits, onError, workPath],
   );
 
   const handleOpenDraft = useCallback((draft: DraftEntry) => void openDraft(draft), [openDraft]);
@@ -213,6 +226,7 @@ export function DraftsPane({
   const ideaDraftCounts = useMemo(() => countImplementationDraftsByIdea(drafts), [drafts]);
 
   const openIdea = (entry: ScratchpadEntry) => {
+    if (!confirmDiscardEdits()) return;
     setSelectedId(draftItemId({ itemKind: "idea", entry }));
     setDetail(null);
   };
@@ -222,8 +236,10 @@ export function DraftsPane({
     else openIdea(item.entry);
   };
 
-  const saveDetail = async () => {
-    if (!workPath || !detail) return;
+  /** Returns the saved document, or null when there was nothing to save or the
+   *  save failed — callers that publish the body must not proceed on null. */
+  const saveDetail = async (): Promise<DraftDocument | null> => {
+    if (!workPath || !detail) return null;
     setSaveState("saving");
     setLocalError(null);
     try {
@@ -232,12 +248,28 @@ export function DraftsPane({
       setSaveState("saved");
       setEditing(false);
       void refresh();
+      return saved;
     } catch (error) {
       const message = errorMessage(error);
       setSaveState("error");
       setLocalError(message);
       onError(message);
+      return null;
     }
+  };
+
+  // Promotion reads the body from disk, so an unsaved buffer would be published
+  // as the pre-edit text AND frozen as the gap baseline. Flush first, and abort
+  // if the flush fails (a revision conflict here means the body on disk is not
+  // what the user approved).
+  const promoteDetail = async () => {
+    if (!detail) return;
+    if (!dirtyRef.current) {
+      setPromoteTarget(detail);
+      return;
+    }
+    const saved = await saveDetail();
+    if (saved) setPromoteTarget(saved);
   };
 
   const discardSelected = async () => {
@@ -454,7 +486,7 @@ export function DraftsPane({
                         type="button"
                         size="sm"
                         icon={<Check size={13} />}
-                        onClick={() => setPromoteTarget(detail)}
+                        onClick={() => void promoteDetail()}
                       >
                         {t("drafts.actions.accept")}
                       </Button>

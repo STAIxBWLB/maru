@@ -30,6 +30,7 @@ import { applyGraphSearch, deriveGraphView } from "../../lib/graph/derive";
 import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
+import { resolveReferenceNodeIds } from "../../lib/kgRefs";
 import {
   graphLocalTargetForNode,
   graphNodeMatchesLocalTarget,
@@ -93,7 +94,14 @@ interface GraphViewProps {
   onGraphChanged?: () => void;
   /** KG reference-focus mode (kg_refs Phase 4): vault-relative node paths the
    *  active document references + a nonce re-arming the animation. */
-  referenceFocus?: { docPath: string; nodePaths: string[]; nonce: number } | null;
+  referenceFocus?: {
+    docPath: string;
+    /** Root the nodePaths are relative to — the document's workspace, which is
+     *  not necessarily the graph's data path. */
+    docRoot: string;
+    nodePaths: string[];
+    nonce: number;
+  } | null;
   onExitReferenceFocus?: () => void;
 }
 
@@ -414,17 +422,18 @@ export function GraphView({
   }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
-  // KG reference-focus: nodePaths (vault relPaths) → graph node ids. Only
-  // nodes present in the current model can be emphasized.
+  // KG reference-focus: referenced node paths → graph node ids. Only nodes
+  // present in the current model can be emphasized. The two path roots differ
+  // (see resolveReferenceNodeIds), so this must not compare relPaths directly.
   const refFocusIds = useMemo(() => {
     if (!referenceFocus) return null;
-    const paths = new Set(referenceFocus.nodePaths);
-    const ids = new Set<string>();
-    for (const node of model.nodes) {
-      if (node.relPath && paths.has(node.relPath)) ids.add(node.id);
-    }
-    return ids;
-  }, [referenceFocus, model.nodes]);
+    return resolveReferenceNodeIds(
+      model.nodes,
+      referenceFocus.nodePaths,
+      referenceFocus.docRoot,
+      workspacePath,
+    );
+  }, [referenceFocus, model.nodes, workspacePath]);
   const localFocusNode = useMemo(
     () =>
       localTarget
@@ -1160,8 +1169,18 @@ export function GraphView({
         </div>
       ) : null}
       {referenceFocus ? (
-        <div className="graph-ref-focus-bar" data-testid="graph-ref-focus-bar">
-          <span>{t("kgref.focusBar", { count: String(refFocusIds?.size ?? 0) })}</span>
+        <div
+          className="graph-ref-focus-bar"
+          data-testid="graph-ref-focus-bar"
+          data-ref-focus-empty={refFocusIds && refFocusIds.size > 0 ? undefined : "true"}
+        >
+          {/* Say so when nothing resolved, instead of claiming "0 nodes
+              highlighted" while the graph is visibly unchanged. */}
+          <span>
+            {refFocusIds && refFocusIds.size > 0
+              ? t("kgref.focusBar", { count: String(refFocusIds.size) })
+              : t("kgref.focusBarEmpty")}
+          </span>
           <button
             type="button"
             data-testid="graph-ref-focus-exit"

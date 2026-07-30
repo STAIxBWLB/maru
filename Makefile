@@ -152,6 +152,15 @@ lint-i18n: ## i18n lint: ko/en key parity + hardcoded UI string scan
 check-select-chrome: ## Static guard: select rules must not wipe the base chevron via background shorthand
 	$(NODE) scripts/check-select-chrome.mjs
 
+# The type scale is the single source of truth (PR #137). A raw px font-size in
+# styles.css silently opts that rule out of any future --type-* retune, so the
+# pane drifts away from the rest of the app. graph.css/diagram.css still carry
+# pre-existing raw values and are not gated yet.
+.PHONY: check-type-tokens
+check-type-tokens: ## Static guard: styles.css font sizes must use the --type-*/--read-* scale
+	@! grep -nE 'font-size: *[0-9.]+px' src/styles.css \
+		|| (echo "check-type-tokens: raw px font-size above — use a --type-*/--read-* token (src/foundations.css)"; exit 1)
+
 .PHONY: test-ts
 test-ts: node_modules ## TypeScript / React unit tests (vitest)
 	$(PNPM) test
@@ -251,7 +260,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint-i18n check-select-chrome test-ts test-rust build ## Full verification: typecheck + i18n lint + select chrome guard + ts tests + rust tests + frontend build
+verify: typecheck lint-i18n check-select-chrome check-type-tokens test-ts test-rust build ## Full verification: typecheck + i18n lint + select chrome guard + type token guard + ts tests + rust tests + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean

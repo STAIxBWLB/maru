@@ -7,7 +7,7 @@ import {
   safeParseRecord,
   stringValue,
 } from "./skillProposal";
-import { normalizeConfidence, runtimeSourceFromEvents } from "./taskIngestion";
+import { normalizeConfidence, onceSerialized, runtimeSourceFromEvents } from "./taskIngestion";
 import type { DraftEntry, MissionRecord } from "./types";
 
 // Ideation-draft ingestion: an `ideation-drafts ideate-to-draft` background
@@ -127,8 +127,20 @@ export function countImplementationDraftsByIdea(drafts: DraftEntry[]): Map<strin
 
 /** Read one completed run's events and import its implementation-draft
  *  artifact as a draft linked to the idea. Returns null when the run produced
- *  no artifact. */
+ *  no artifact, or when this run was already ingested in this process.
+ *  Shares the ingest guard with the task path so both are serialized against
+ *  each other — they read and write the same draft list. */
 export async function ingestImplementationDraftRun(
+  workPath: string,
+  runId: string,
+  ideaPath: string,
+): Promise<ImplementationDraftIngestResult | null> {
+  return onceSerialized(`${workPath}|${runId}`, () =>
+    ingestImplementationDraftRunUnguarded(workPath, runId, ideaPath),
+  );
+}
+
+async function ingestImplementationDraftRunUnguarded(
   workPath: string,
   runId: string,
   ideaPath: string,

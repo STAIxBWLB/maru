@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { ChevronDown, ChevronRight, Play, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
   addSchedule,
@@ -98,7 +98,6 @@ export function SchedulerSection({
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const [lastIngest, setLastIngest] = useState<TaskIngestResult | null>(null);
-  const ingestedRunIds = useRef<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     if (!workPath) {
@@ -120,11 +119,12 @@ export function SchedulerSection({
   // maru_task_candidates_v1 artifact in its run events; import it as task
   // drafts once per run. Runs that finished while the pane was unmounted are
   // caught by the mount scan below; live completions arrive via mission
-  // updates.
+  // updates. Once-per-run and mutual exclusion live in ingestTaskCandidateRun,
+  // not here — this section remounts on every mode switch while mission records
+  // are process-global, so a ref-based guard replayed every completed run.
   const ingestRun = useCallback(
     async (runId: string) => {
-      if (!workPath || ingestedRunIds.current.has(runId)) return;
-      ingestedRunIds.current.add(runId);
+      if (!workPath) return;
       setIngesting(true);
       try {
         const result = await ingestTaskCandidateRun(
@@ -434,7 +434,10 @@ function AddScheduleDialog({
   if (!open) return null;
 
   const submit = async () => {
-    if (!workPath || busy || !name.trim() || !skillId.trim()) return;
+    // Validate the pre-digest prompt: the Rust side rejects a blank prompt, and
+    // promptWithGapFeedback can turn "" into a digest-only prompt that passes
+    // that check while carrying no instruction for the agent to act on.
+    if (!workPath || busy || !name.trim() || !skillId.trim() || !prompt.trim()) return;
     setBusy(true);
     onError(null);
     try {
@@ -571,7 +574,7 @@ function AddScheduleDialog({
         <Button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !name.trim() || !skillId.trim()}
+          disabled={busy || !name.trim() || !skillId.trim() || !prompt.trim()}
         >
           {t("drafts.schedule.submit")}
         </Button>

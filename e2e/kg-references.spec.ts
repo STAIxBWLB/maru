@@ -173,3 +173,122 @@ test("highlight toggle decorates preview and mark click focuses the graph", asyn
   await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
   await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
 });
+
+// --- Feature A: the converge animation actually moves nodes ------------------
+// This exists because the animation shipped as a visual no-op: the tick called
+// renderer.refresh() with no arguments, which takes sigma's full-refresh path
+// and re-reads x/y from the graphology attributes, discarding the reducer's
+// animated coordinates. Nothing on screen moved while the loop paid for ~90 full
+// re-index passes. Asserting on nodeViewportPoint would NOT have caught it
+// either — that projects the graphology attributes, which the animation
+// deliberately never touches. Only the rendered display data can prove motion.
+
+interface KgBridge {
+  frames(): number;
+  layoutRunning(): boolean;
+  nodeScreenState(id: string): { x: number | null; y: number | null };
+}
+
+/** Two refs that resolve to REAL graph nodes. The centroid is computed from the
+ *  referenced set, so a single resolved node sits on its own centroid and cannot
+ *  move by construction — the default SEEDED_REFS (one ghost, one real) can never
+ *  show motion. The web-mode fixtures expose exactly two markdown documents
+ *  (src/lib/fixtures.ts mockDocuments; the html ones need ?mockHtml), so both of
+ *  them have to be referenced to get a centroid the nodes can travel toward. */
+const TWO_REAL_REFS = [
+  {
+    nodePath: "references/maru-glossary.md",
+    nodeTitle: "Maru 용어집",
+    matchKind: "entity",
+    spans: [spanFor("KPI", 2)],
+  },
+  {
+    nodePath: "maru-weekly-meeting.md",
+    nodeTitle: "Maru 사업 주간 점검 회의",
+    matchKind: "entity",
+    spans: [spanFor("예산", 2)],
+  },
+];
+
+/** Separation between the two referenced nodes in rendered space. Camera panning
+ *  moves both equally, so a distance is immune to the 320ms camera framing that
+ *  runs alongside the converge animation. */
+const separation = (page: Page) =>
+  page.evaluate(() => {
+    const bridge = (window as unknown as { __maruGraph: KgBridge }).__maruGraph;
+    const a = bridge.nodeScreenState("maru-glossary");
+    const b = bridge.nodeScreenState("maru-weekly-meeting");
+    if (a.x == null || a.y == null || b.x == null || b.y == null) return null;
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  });
+
+test("reference-focus converge animation moves the referenced nodes", async ({ page }) => {
+  await page.addInitScript((seededRefs) => {
+    window.localStorage.setItem("maru:e2e:graph-bridge", "1");
+    const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
+      kg_document_refs: (args) => ({
+        docPath: args.docPath,
+        docHash: "e2e-hash",
+        vaultStamp: "e2e-stamp",
+        refs: seededRefs,
+        computedAt: "2026-07-30T00:00:00Z",
+      }),
+      kg_refs_clear: () => 0,
+    };
+    (window as unknown as { __MARU_E2E_INVOKE__: typeof handlers }).__MARU_E2E_INVOKE__ =
+      handlers;
+  }, TWO_REAL_REFS);
+
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-visualize-refs").click();
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("2개");
+
+  await page.waitForFunction(
+    () => {
+      const bridge = (window as unknown as { __maruGraph?: KgBridge }).__maruGraph;
+      return bridge != null && bridge.frames() > 0;
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+
+  // Opening the reference-focus split rescans the workspace, which rebuilds the
+  // renderer and restarts FA2 — node positions drift until it settles. The
+  // animation deliberately waits for a ready renderer, so sampling only after
+  // layout stops isolates it from that drift: from here the ONLY thing that can
+  // move a node is the converge animation.
+  await page.waitForFunction(
+    () => {
+      const bridge = (window as unknown as { __maruGraph?: KgBridge }).__maruGraph;
+      return bridge != null && !bridge.layoutRunning();
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  // Sampled from the Node side, one evaluate per read: headless chromium throttles
+  // in-page timers hard (a 25ms setInterval fired twice in 1.9s; rAF ~8 times in
+  // 1.8s), so an in-page sampling loop misses the peak entirely.
+  const samples: number[] = [];
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const value = await separation(page);
+    if (value != null) samples.push(value);
+  }
+  expect(samples.length).toBeGreaterThan(50);
+
+  // The baseline is the TAIL of the window, not the maximum: layoutRunning() can
+  // read false in the gap before FA2 starts, when seed positions are still wild
+  // (an 18x outlier was observed), and the animation ends back on the layout
+  // positions anyway. A flat tail also proves the run actually finished.
+  const tail = samples.slice(Math.floor(samples.length * 0.8));
+  const rest = tail[tail.length - 1];
+  expect(Math.max(...tail) - Math.min(...tail)).toBeLessThan(rest * 0.02);
+
+  // Converge pulls each node 35% of the way to the shared centroid, so the
+  // separation bottoms out at 0.65x the layout separation. Before the fix nothing
+  // moved once layout had settled, so the minimum equals the resting value.
+  expect(Math.min(...samples)).toBeLessThan(rest * 0.8);
+});

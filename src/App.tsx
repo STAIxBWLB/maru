@@ -1098,6 +1098,9 @@ function MainApp() {
   // nothing is computed until the user clicks the per-document triggers.
   const [kgRefFocus, setKgRefFocus] = useState<{
     docPath: string;
+    /** nodePaths are relative to this root, which is the document's workspace —
+     *  the graph may be reading a nested vault/ instead. */
+    docRoot: string;
     nodePaths: string[];
     nonce: number;
   } | null>(null);
@@ -7101,6 +7104,7 @@ function MainApp() {
         .then((map) => {
           setKgRefFocus({
             docPath: map.docPath,
+            docRoot: tab.workspacePath,
             nodePaths: uniqueRefNodePaths(map.refs),
             nonce: Date.now(),
           });

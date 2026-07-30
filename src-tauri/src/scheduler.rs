@@ -9,12 +9,13 @@
 use crate::approval::{require_approval, ApprovalState};
 use crate::atomic_file::write_atomic;
 use crate::skill_host::skills_dispatch_background;
-use chrono::{DateTime, Datelike, Duration, Local, TimeZone};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration as StdDuration;
 use tauri::{AppHandle, Emitter};
@@ -24,6 +25,13 @@ const SCHEDULER_TICK_SECONDS: u64 = 60;
 const SCHEDULER_ADD_KIND: &str = "scheduler.add";
 
 static TICKER_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// (workspace, schedule id) -> civil date the ticker last dispatched it on.
+/// A schedule owns one hour:minute slot per day, so a date-keyed claim taken
+/// before dispatch caps the ticker at one run per day even when the
+/// persisted nextRunAt guard cannot be written (ENOSPC, read-only mount).
+/// ponytail: process-local only, entries are overwritten not evicted.
+static LAST_FIRED: Mutex<BTreeMap<(PathBuf, String), NaiveDate>> = Mutex::new(BTreeMap::new());
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -110,23 +118,35 @@ fn save_schedules(work: &Path, schedules: &[SchedulerSchedule]) -> Result<(), St
 
 /// Next fire time strictly after `now`, honoring optional weekday filters.
 /// Returns None for invalid hour/minute/weekday input.
-fn compute_next_run(
-    now: DateTime<Local>,
+///
+/// Candidates walk civil dates, not 24-hour instants, so a DST transition
+/// never skips a calendar day. An ambiguous local time (fall back) resolves
+/// to the earlier instant and a nonexistent one (spring forward) skips only
+/// that day — never the whole lookup, whose None means "no slot", which
+/// callers persist as a missing nextRunAt.
+///
+/// Generic over the timezone so DST can be tested against a fixed zone; the
+/// production call sites all pass `Local::now()`.
+fn compute_next_run<Tz: TimeZone>(
+    now: DateTime<Tz>,
     hour: u32,
     minute: u32,
     days_of_week: &[u32],
-) -> Option<DateTime<Local>> {
+) -> Option<DateTime<Tz>> {
     if hour > 23 || minute > 59 || days_of_week.iter().any(|day| *day > 6) {
         return None;
     }
+    let tz = now.timezone();
     let days: BTreeSet<u32> = days_of_week.iter().copied().collect();
-    for offset in 0..=7_i64 {
-        let date = (now + Duration::days(offset)).date_naive();
+    for offset in 0..=7_u64 {
+        let date = now.date_naive() + Days::new(offset);
         if !days.is_empty() && !days.contains(&date.weekday().num_days_from_sunday()) {
             continue;
         }
-        let candidate = date.and_hms_opt(hour, minute, 0)?;
-        let candidate = Local.from_local_datetime(&candidate).single()?;
+        let naive = date.and_hms_opt(hour, minute, 0)?;
+        let Some(candidate) = tz.from_local_datetime(&naive).earliest() else {
+            continue;
+        };
         if candidate > now {
             return Some(candidate);
         }
@@ -134,15 +154,17 @@ fn compute_next_run(
     None
 }
 
-/// A schedule is due when it is enabled and has no recorded next run (fresh
-/// or migrated) or its next run is now or in the past (catch-up included —
-/// both cases fire exactly once and then re-align).
+/// A schedule is due when it is enabled and either has never run and has no
+/// recorded next run (fresh or migrated from an older schema) or its next run
+/// is now or in the past (catch-up included — both cases fire exactly once
+/// and then re-align). A schedule that has run but holds no nextRunAt failed
+/// to re-align; treating that as due would re-fire it every tick.
 fn is_due(schedule: &SchedulerSchedule, now: DateTime<Local>) -> bool {
     if !schedule.enabled {
         return false;
     }
     let Some(next) = schedule.next_run_at.as_deref() else {
-        return true;
+        return schedule.last_run_at.is_none();
     };
     match DateTime::parse_from_rfc3339(next) {
         Ok(next) => next <= now,
@@ -303,6 +325,17 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
         if !is_due(schedule, now) {
             continue;
         }
+        // Claim today's slot before dispatching: if the mark_fired write below
+        // fails, this is the only thing standing between a broken .maru/ and
+        // one child process per tick.
+        let claim = (work.to_path_buf(), schedule.id.clone());
+        {
+            let mut claimed = LAST_FIRED.lock().unwrap_or_else(|err| err.into_inner());
+            if claimed.get(&claim) == Some(&now.date_naive()) {
+                continue;
+            }
+            claimed.insert(claim.clone(), now.date_naive());
+        }
         let work_path = work.to_string_lossy().to_string();
         match dispatch_schedule(app, work, schedule) {
             Ok(invocation_id) => {
@@ -327,8 +360,27 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
             }
         }
         // Record the attempt either way so a broken schedule does not retry
-        // every tick.
-        let _ = mark_fired(work, &schedule.id, now);
+        // every tick. A persisted nextRunAt is the real guard, so once it is
+        // written the day claim is released — that keeps a launch catch-up
+        // from swallowing the same day's regular slot.
+        match mark_fired(work, &schedule.id, now) {
+            Ok(_) => {
+                LAST_FIRED
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner())
+                    .remove(&claim);
+            }
+            Err(message) => {
+                let _ = app.emit(
+                    "scheduler://error",
+                    SchedulerErrorEvent {
+                        work_path,
+                        schedule_id: schedule.id.clone(),
+                        message: format!("scheduler_persist_failed: {message}"),
+                    },
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -433,7 +485,19 @@ pub fn scheduler_run_now(
     let schedules = load_schedules(&work)?;
     let index = find_schedule(&schedules, &id).ok_or_else(|| "scheduler_not_found".to_string())?;
     let invocation_id = dispatch_schedule(&app, &work, &schedules[index])?;
-    let _ = mark_fired(&work, &id, Local::now());
+    // Same contract as the ticker: a failed persist leaves nextRunAt in the past,
+    // so the next tick will fire this schedule again. The day claim bounds that to
+    // one extra run, but the user still has to be told persistence failed.
+    if let Err(message) = mark_fired(&work, &id, Local::now()) {
+        let _ = app.emit(
+            "scheduler://error",
+            SchedulerErrorEvent {
+                work_path: work_path.clone(),
+                schedule_id: id.clone(),
+                message: format!("scheduler_persist_failed: {message}"),
+            },
+        );
+    }
     let _ = app.emit(
         "scheduler://fired",
         SchedulerFiredEvent {
@@ -497,6 +561,49 @@ mod tests {
         assert_eq!(next, local(2026, 8, 3, 9, 30));
     }
 
+    // DST assertions need a fixed zone: CI runs in UTC, where `Local` has no
+    // transitions. compute_next_run is generic over the timezone for this.
+    fn ny(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<chrono_tz::Tz> {
+        chrono_tz::America::New_York
+            .from_local_datetime(
+                &chrono::NaiveDate::from_ymd_opt(y, mo, d)
+                    .unwrap()
+                    .and_hms_opt(h, mi, 0)
+                    .unwrap(),
+            )
+            .earliest()
+            .unwrap()
+    }
+
+    #[test]
+    fn next_run_resolves_ambiguous_local_time_to_earliest() {
+        // 2026-11-01 falls back 02:00 EDT -> 01:00 EST, so 01:30 happens twice.
+        let now = ny(2026, 11, 1, 0, 30);
+        let next = compute_next_run(now, 1, 30, &[]).expect("ambiguous slot must resolve");
+        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap());
+        // 01:30 EDT (05:30 UTC), the earlier of the two instants.
+        assert_eq!(next.naive_utc(), ny(2026, 11, 1, 1, 30).naive_utc());
+        assert_eq!(next.naive_utc().time(), chrono::NaiveTime::from_hms_opt(5, 30, 0).unwrap());
+    }
+
+    #[test]
+    fn next_run_skips_nonexistent_local_time() {
+        // 2026-03-08 springs forward 02:00 -> 03:00, so 02:30 does not exist.
+        let now = ny(2026, 3, 8, 0, 30);
+        let next = compute_next_run(now, 2, 30, &[]).expect("nonexistent slot must skip the day");
+        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 3, 9).unwrap());
+    }
+
+    #[test]
+    fn next_run_does_not_skip_a_weekday_across_spring_forward() {
+        // Saturday 23:30 EST: instant arithmetic (+24h) would land on Monday
+        // and push a Sunday-only schedule out a full week.
+        let now = ny(2026, 3, 7, 23, 30);
+        let next = compute_next_run(now, 9, 0, &[0]).expect("Sunday slot must be found");
+        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 3, 8).unwrap());
+        assert_eq!(next.date_naive().weekday().num_days_from_sunday(), 0);
+    }
+
     #[test]
     fn next_run_rejects_invalid_time() {
         let now = local(2026, 7, 30, 8, 0);
@@ -518,6 +625,21 @@ mod tests {
         assert!(!is_due(&disabled, now));
         let corrupt = sample_schedule(Some("not-a-date".to_string()), true);
         assert!(!is_due(&corrupt, now), "corrupt nextRunAt never fires");
+    }
+
+    #[test]
+    fn fired_without_next_run_never_refires() {
+        let now = Local::now();
+        let unaligned = SchedulerSchedule {
+            last_run_at: Some(now.to_rfc3339()),
+            ..sample_schedule(None, true)
+        };
+        assert!(
+            !is_due(&unaligned, now),
+            "a fired schedule that could not re-align must not fire every tick"
+        );
+        let never_ran = sample_schedule(None, true);
+        assert!(is_due(&never_ran, now), "fresh or migrated schedule fires once");
     }
 
     #[test]

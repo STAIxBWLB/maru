@@ -11,12 +11,12 @@
 use crate::atomic_file::{write_atomic, write_atomic_create};
 use crate::approval::{require_approval, ApprovalState};
 use crate::scratchpad::{
-    assert_scratchpad_workspace_access, move_to_system_trash, resolve_scratchpad_drafts_root,
-    ScratchpadSource,
+    assert_no_symlink_components, assert_scratchpad_workspace_access, move_to_system_trash,
+    resolve_scratchpad_drafts_root, ScratchpadSource,
 };
 use crate::tasks::{CreateTaskDraft, TaskBucket};
 use crate::vault::{is_document_extension, resolve_inside_vault, slugify};
-use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
+use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -111,7 +111,9 @@ fn index_path(work: &Path) -> PathBuf {
 }
 
 /// Load the draft index. A missing or corrupt index starts empty so a bad
-/// file can never wedge the drafts workflow.
+/// file can never wedge the drafts workflow. Entries are salvaged one by one:
+/// `save_index` rewrites the whole array, so a single unreadable record must
+/// lose only itself instead of every other draft's metadata.
 pub(crate) fn load_index(work: &Path) -> Result<Vec<DraftEntry>, String> {
     let path = index_path(work);
     if !path.is_file() {
@@ -119,7 +121,11 @@ pub(crate) fn load_index(work: &Path) -> Result<Vec<DraftEntry>, String> {
     }
     let raw = fs::read_to_string(&path)
         .map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
-    Ok(serde_json::from_str(&raw).unwrap_or_default())
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| serde_json::from_value(row).ok())
+        .collect())
 }
 
 fn save_index(work: &Path, entries: &[DraftEntry]) -> Result<(), String> {
@@ -166,6 +172,7 @@ fn normalize_body_path(raw: &str) -> Result<PathBuf, String> {
 fn body_file_path(work: &Path, entry: &DraftEntry) -> Result<PathBuf, String> {
     let root = resolve_scratchpad_drafts_root(work)?;
     let relative = normalize_body_path(&entry.body_path)?;
+    assert_no_symlink_components(&root, &relative)?;
     Ok(root.join(relative))
 }
 
@@ -357,6 +364,7 @@ fn resolve_document_target(work_path: &str, target_path: &str) -> Result<(PathBu
         return Err("drafts_promote_target_must_be_markdown".to_string());
     }
     let dest = resolve_inside_vault(work_path, &path_slashes(&relative))?;
+    assert_document_owner(work_path, &dest)?;
     if dest.exists() {
         return Err("drafts_promote_target_exists".to_string());
     }
@@ -383,7 +391,11 @@ fn promote_impl(
     }
     let body = read_body(&work, &entry)?;
 
-    let promoted_to = match target {
+    // The baseline must be the bytes that actually landed at the promote
+    // target, not the draft body: the Task path routes through
+    // `create_task_note`, which injects frontmatter, and freezing `body` there
+    // makes every task promote report a phantom insert on first analysis.
+    let (promoted_to, baseline_bytes) = match target {
         DraftPromoteTarget::Document => {
             assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
             let (dest, relative) = resolve_document_target(work_path, target_path)?;
@@ -392,7 +404,7 @@ fn promote_impl(
                     .map_err(|err| format!("Cannot create promote target directory: {err}"))?;
             }
             write_atomic_create(&dest, body.as_bytes())?;
-            relative
+            (relative, body.as_bytes().to_vec())
         }
         DraftPromoteTarget::Task => {
             let slug = if target_path.trim().is_empty() {
@@ -411,18 +423,25 @@ fn promote_impl(
                 },
                 None,
             )?;
-            row.rel_path
+            let created = work.join(&row.rel_path);
+            let bytes = fs::read(&created).map_err(|err| {
+                format!(
+                    "Cannot read promoted task note {}: {err}",
+                    created.display()
+                )
+            })?;
+            (row.rel_path, bytes)
         }
     };
 
-    // Frozen baseline for later gap analysis between the draft and the
-    // promoted artifact.
+    // Frozen baseline for later gap analysis between the promoted artifact and
+    // the human edits made to it afterwards.
     let baseline = work
         .join(".maru")
         .join("drafts")
         .join(&entry.id)
         .join("baseline.md");
-    write_atomic(&baseline, body.as_bytes())?;
+    write_atomic(&baseline, &baseline_bytes)?;
 
     entries[index].status = DraftStatus::Accepted;
     entries[index].promoted_to = Some(promoted_to);
@@ -664,6 +683,71 @@ mod tests {
             .join(&entry.id)
             .join("baseline.md");
         assert!(baseline.is_file());
+    }
+
+    #[test]
+    fn promote_task_freezes_the_created_note_not_the_draft_body() {
+        let (temp, work) = workspace();
+        // A digit in the title lands in the injected frontmatter, which is what
+        // used to trip the external-info heuristic on a zero-edit promote.
+        let entry = create_task_draft(&work, "Ship 3 reports");
+        let promoted = promote_impl(&work, &entry.id, DraftPromoteTarget::Task, "").unwrap();
+        let rel = promoted.promoted_to.clone().unwrap();
+        let baseline = temp
+            .path()
+            .join(".maru/drafts")
+            .join(&entry.id)
+            .join("baseline.md");
+        assert_eq!(
+            fs::read(&baseline).unwrap(),
+            fs::read(temp.path().join(&rel)).unwrap(),
+            "baseline must be the promoted artifact, byte for byte"
+        );
+
+        // With zero human edits the gap report must be empty.
+        let report = crate::gap::gap_analyze(work.clone(), entry.id.clone()).unwrap();
+        assert_eq!(report.summary.total_hunks, 0);
+        assert_eq!(report.summary.added_lines, 0);
+        assert!(report.hunks.is_empty());
+    }
+
+    #[test]
+    fn one_corrupt_index_entry_does_not_erase_the_others() {
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Keep me");
+        let index = temp.path().join(".maru/drafts/index.json");
+        let mut rows: Vec<serde_json::Value> =
+            serde_json::from_str(&fs::read_to_string(&index).unwrap()).unwrap();
+        rows.push(serde_json::json!({ "id": 42 }));
+        fs::write(&index, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
+
+        let added = create_task_draft(&work, "New draft");
+        let listed = load_index(Path::new(&work)).unwrap();
+        let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
+        assert!(
+            ids.contains(&entry.id.as_str()),
+            "pre-existing entry lost, got {ids:?}"
+        );
+        assert!(ids.contains(&added.id.as_str()));
+        assert_eq!(listed.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_draft_body_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Symlink bait");
+        let body = temp.path().join("scratchpad/drafts").join(&entry.body_path);
+        fs::remove_file(&body).unwrap();
+        fs::write(temp.path().join("outside.md"), "secret").unwrap();
+        symlink(temp.path().join("outside.md"), &body).unwrap();
+        let error = read_impl(&work, &entry.id).unwrap_err();
+        assert!(error.contains("symlink"), "unexpected error {error}");
+        // Promote must not copy an out-of-tree read into a confirmed document.
+        assert!(
+            promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/x.md").is_err()
+        );
     }
 
     #[test]

@@ -71,7 +71,15 @@ via `drafts_create` (`src/lib/taskIngestion.ts`).
   (`ai.taskIngestMinImportance`) are skipped; candidates whose normalized
   title matches a non-discarded draft are skipped as duplicates.
 - Ingestion runs once per run id, both on pane mount (scan of completed
-  scheduler missions) and live via `ai://mission_update`.
+  scheduler missions) and live via `ai://mission_update`. The once-per-run claim
+  and mutual exclusion live in `taskIngestion.ts` at module scope
+  (`onceSerialized`), not in component state: the pane unmounts on every mode
+  switch while mission records live for the whole process, so a per-mount guard
+  replayed every completed run on each visit and, because the title dedupe
+  ignores discarded drafts, resurrected drafts the user had discarded.
+  Serialization matters too, since each ingest reads the draft list, decides,
+  then writes: two un-awaited runs sharing a candidate title would both miss the
+  other's pending create.
 - The skill contract lives in `skills/skills/inbox-process/SKILL.md`. When the
   schedule prompt carries a `## 최근 수정 경향` section (auto-attached gap
   feedback, see [gap-analysis.md](gap-analysis.md)), the skill applies its
@@ -94,12 +102,20 @@ state:
 1. Rejects discarded and already-accepted drafts.
 2. Reads the body, then writes it to the chosen target:
    - **Document** — `write_atomic_create` at a vault-relative path resolved
-     through `resolve_inside_vault`; an existing target is never overwritten
+     through `resolve_inside_vault` and then `assert_document_owner`, the same
+     ownership guard every other document writer applies (without it a nested
+     registered workspace could receive the file and the parent's scan would
+     skip it); an existing target is never overwritten
      (`drafts_promote_target_exists`).
    - **Task** — `tasks::create_task_note` into the active bucket.
-3. Freezes the pre-promotion body to `.maru/drafts/<id>/baseline.md` — this is
-   the gap-analysis baseline.
+3. Freezes the promoted bytes to `.maru/drafts/<id>/baseline.md`. For the task
+   target this is read back from the created note rather than reused from the
+   draft body, because `create_task_note` injects `status`/`title` frontmatter:
+   freezing the raw body instead made every task promotion report its own
+   generated frontmatter as a human edit.
 4. Flips the entry to `accepted`, records `promotedTo`, bumps `updatedAt`.
 
 The frozen baseline is what makes [gap analysis](gap-analysis.md) possible:
-it captures exactly what the AI produced before any human edit.
+it captures exactly what the AI produced before any human edit. The pane flushes
+an unsaved editor buffer before opening the promote dialog, so the baseline and
+the published artifact are both the text the user actually approved.

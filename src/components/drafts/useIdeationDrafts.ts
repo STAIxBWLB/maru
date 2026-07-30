@@ -64,7 +64,6 @@ export function useIdeationDrafts({
   /** ideaPath -> runId for missions known to be in flight. */
   const [pendingRuns, setPendingRuns] = useState<Record<string, string>>({});
   const pendingRunsRef = useRef(pendingRuns);
-  const ingestedRunIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     pendingRunsRef.current = pendingRuns;
@@ -79,10 +78,13 @@ export function useIdeationDrafts({
     });
   }, []);
 
+  // Once-per-run and mutual exclusion live in ingestImplementationDraftRun, not
+  // here: this hook remounts on every mode switch while mission records are
+  // process-global, so a ref-based guard replayed every completed run and
+  // resurrected drafts the user had discarded.
   const ingestRun = useCallback(
     async (runId: string, ideaPath: string, autoOpen: boolean) => {
-      if (!workPath || ingestedRunIds.current.has(runId)) return;
-      ingestedRunIds.current.add(runId);
+      if (!workPath) return;
       try {
         const result = await ingestImplementationDraftRun(workPath, runId, ideaPath);
         if (!result?.created) return;
