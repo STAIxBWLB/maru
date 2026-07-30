@@ -15,6 +15,7 @@ import {
   Clock3,
   Code2,
   Command,
+  Diff,
   FileText,
   FolderOpen,
   Globe,
@@ -27,6 +28,7 @@ import {
   PanelRight,
   PanelRightClose,
   PanelRightOpen,
+  PenLine,
   RefreshCcw,
   Route,
   Settings2,
@@ -101,6 +103,7 @@ import {
   fetchTelegramRecent,
   getSampleWorkspacePath,
   gitStatus,
+  kgDocumentRefs,
   listAiMissions,
   listWorkspaceRoots,
   moveDocument,
@@ -182,6 +185,8 @@ import {
 import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
+import { isHtmlFileKind } from "./lib/htmlDocument";
+import { uniqueRefNodePaths } from "./lib/kgRefs";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
@@ -270,6 +275,7 @@ import type {
   FileStoreOperation,
   GitStatus,
   GmailMessage,
+  KgNodeRef,
   OutlookMessage,
   TelegramMessage,
   TelegramPollingStatus,
@@ -401,6 +407,8 @@ const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((mo
 const LazyDiagramMode = lazy(() => import("./components/diagram/DiagramMode").then((module) => ({ default: module.DiagramMode })));
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
+const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
+const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
@@ -1086,6 +1094,17 @@ function MainApp() {
         : appMode;
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
   const [graphOpenTarget, setGraphOpenTarget] = useState<GraphOpenTarget | null>(null);
+  // KG reference visualization (kg_refs Phase 4). Session-local, on-demand:
+  // nothing is computed until the user clicks the per-document triggers.
+  const [kgRefFocus, setKgRefFocus] = useState<{
+    docPath: string;
+    nodePaths: string[];
+    nonce: number;
+  } | null>(null);
+  const [kgHighlight, setKgHighlight] = useState<{
+    docPath: string;
+    refs: KgNodeRef[];
+  } | null>(null);
   const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
   const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
   const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
@@ -2354,6 +2373,23 @@ function MainApp() {
       }));
     },
     [updateSettings],
+  );
+
+  const openScratchpadSurface = useCallback(() => {
+    setPersistedAppMode("pkm");
+    setPersistedRightPaneTab("memo");
+    updateLayoutSettings({ outlineOpen: true });
+  }, [setPersistedAppMode, setPersistedRightPaneTab, updateLayoutSettings]);
+
+  // Draft handoff into gap mode: the pane consumes it once on mount, so a
+  // later rail-button revisit does not reselect the same draft.
+  const [gapDraftId, setGapDraftId] = useState<string | null>(null);
+  const openGapAnalysis = useCallback(
+    (draftId?: string) => {
+      setGapDraftId(draftId ?? null);
+      setPersistedAppMode("gap");
+    },
+    [setPersistedAppMode],
   );
 
   const restoredWindowKeyRef = useRef<string | null>(null);
@@ -3849,6 +3885,7 @@ function MainApp() {
       inboxWorkspacePath,
       processInboxKeys,
       refreshInbox,
+      t,
     ],
   );
 
@@ -7054,6 +7091,53 @@ function MainApp() {
     [setPersistedAppMode, updateLayoutSettings, updateSettings],
   );
 
+  // --- KG reference visualization (kg_refs Phase 4) -------------------------
+
+  // Feature A trigger: map the document's references, then open the doc↔graph
+  // split (graph in the tool panel) in reference-focus mode.
+  const visualizeDocRefs = useCallback(
+    (tab: EditorTab) => {
+      void kgDocumentRefs(tab.workspacePath, tab.document.relPath)
+        .then((map) => {
+          setKgRefFocus({
+            docPath: map.docPath,
+            nodePaths: uniqueRefNodePaths(map.refs),
+            nonce: Date.now(),
+          });
+          openGraphPanel();
+        })
+        .catch((err: unknown) =>
+          setError(err instanceof Error ? err.message : String(err)),
+        );
+    },
+    [openGraphPanel],
+  );
+
+  // Feature B toggle: per-document, session-local; the backend cache makes
+  // repeat toggles cheap.
+  const toggleKgHighlight = useCallback(
+    (tab: EditorTab) => {
+      if (kgHighlight?.docPath === tab.document.relPath) {
+        setKgHighlight(null);
+        return;
+      }
+      void kgDocumentRefs(tab.workspacePath, tab.document.relPath)
+        .then((map) => setKgHighlight({ docPath: map.docPath, refs: map.refs }))
+        .catch((err: unknown) =>
+          setError(err instanceof Error ? err.message : String(err)),
+        );
+    },
+    [kgHighlight],
+  );
+
+  // Leaving the document exits both modes (both are per-document).
+  const kgActiveDocPath = document?.relPath ?? null;
+  useEffect(() => {
+    if (kgHighlight && kgHighlight.docPath !== kgActiveDocPath) setKgHighlight(null);
+    if (kgRefFocus && kgRefFocus.docPath !== kgActiveDocPath) setKgRefFocus(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kgActiveDocPath]);
+
   const openGraphWorkspace = useCallback(() => {
     setPersistedAppMode("graph");
     if (layoutSettings.toolPanelSurface === "graph") {
@@ -7690,6 +7774,8 @@ function MainApp() {
     sites: " sites-mode",
     graph: " graph-mode",
     files: " files-mode",
+    drafts: " drafts-mode",
+    gap: " gap-mode",
   };
   const graphWorkspacePath =
     workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
@@ -8028,6 +8114,8 @@ function MainApp() {
         isFavorite={isFavorite}
         onToggleFavorite={toggleFavorite}
         onError={setError}
+        referenceFocus={kgRefFocus}
+        onExitReferenceFocus={() => setKgRefFocus(null)}
         onGraphChanged={() => {
           if (!graphDataPath) return;
           void scanVault(graphDataPath, scanOptions).then((fresh) =>
@@ -8041,6 +8129,7 @@ function MainApp() {
       graphDataPath,
       graphEntries,
       graphOpenTarget,
+      kgRefFocus,
       selectEntry,
       handleWikilinkClick,
       isFavorite,
@@ -8143,6 +8232,30 @@ function MainApp() {
         onSnapshot={() => void snapshotTab(tabId)}
         onSplitRight={splitEditorRight}
         onOpenGraphRight={openGraphPanel}
+        onVisualizeRefs={
+          docTab && !isHtmlFileKind(docTab.document.fileKind)
+            ? () => visualizeDocRefs(docTab)
+            : undefined
+        }
+        kgHighlightRefs={
+          docTab && kgHighlight?.docPath === docTab.document.relPath
+            ? kgHighlight.refs
+            : null
+        }
+        onToggleKgHighlight={
+          docTab && !isHtmlFileKind(docTab.document.fileKind)
+            ? () => toggleKgHighlight(docTab)
+            : undefined
+        }
+        onKgRefNodeClick={(nodePath) => {
+          // Same handoff as NeighborhoodPane "그래프에서 보기", but into the
+          // doc↔graph split (panel) so the document stays visible.
+          openGraphPanel({
+            source:
+              activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+            localTarget: { ownerWorkspacePath: null, relPath: nodePath },
+          });
+        }}
         onFocusPane={() => {
           if (tabId) activateEditorTab(tabId, group);
         }}
@@ -8357,6 +8470,24 @@ function MainApp() {
             aria-label={t("mode.tasks")}
           >
             <ListTodo size={20} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            className={visibleAppMode === "drafts" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("drafts")}
+            title={t("mode.drafts")}
+            aria-label={t("mode.drafts")}
+          >
+            <PenLine size={20} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            className={visibleAppMode === "gap" ? "activity-button active" : "activity-button"}
+            onClick={() => openGapAnalysis()}
+            title={t("mode.gap")}
+            aria-label={t("mode.gap")}
+          >
+            <Diff size={20} strokeWidth={1.9} />
           </button>
           <button
             type="button"
@@ -8633,6 +8764,30 @@ function MainApp() {
               const root = inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);
             }}
+          />
+        ) : visibleAppMode === "drafts" ? (
+          <LazyDraftsPane
+            workPath={inboxWorkspacePath}
+            skills={skills}
+            defaultRuntime={maruSettings.ai.defaultRuntime}
+            taskIngestMinImportance={maruSettings.ai.taskIngestMinImportance}
+            onTaskIngestMinImportanceChange={(value) =>
+              updateSettings((current) => ({
+                ...current,
+                ai: { ...current.ai, taskIngestMinImportance: value },
+              }))
+            }
+            onConfirmApproval={approvalGate.confirmApproval}
+            onError={setError}
+            onOpenScratchpad={openScratchpadSurface}
+            onOpenGapAnalysis={openGapAnalysis}
+          />
+        ) : visibleAppMode === "gap" ? (
+          <LazyGapPane
+            workPath={inboxWorkspacePath}
+            initialDraftId={gapDraftId}
+            onConsumeInitialDraftId={() => setGapDraftId(null)}
+            onError={setError}
           />
         ) : visibleAppMode === "inbox" ? (
           <LazyInboxPane

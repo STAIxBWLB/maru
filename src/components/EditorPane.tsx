@@ -6,6 +6,8 @@ import {
   Columns2,
   FileText,
   GitCommit,
+  Highlighter,
+  Network,
   PanelRightOpen,
   Save,
   Waypoints,
@@ -25,12 +27,22 @@ import {
 import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
 import { isHtmlFileKind } from "../lib/htmlDocument";
+import {
+  mapSpansToRenderedText,
+  refMapToCharSpans,
+  type KgCharSpan,
+} from "../lib/kgRefs";
 import type { HtmlEditorFlushHandle } from "./HtmlVisualEditor";
-import type { DocumentPayload, VaultEntry } from "../lib/types";
+import type { DocumentPayload, KgNodeRef, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
+import {
+  applyKgPreviewHighlights,
+  clearKgPreviewHighlights,
+  KgSourceBackdrop,
+} from "./KgRefHighlight";
 import { Button } from "./ui/Button";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
 
@@ -114,6 +126,14 @@ interface EditorPaneProps {
   /** Managed vault note (write_policy managed + notes/**\/*.md) — arms the
    *  schema validation strip (maru-vault-graph-spec §3 F1). */
   isManagedVaultNote?: boolean;
+  /** KG reference visualization (kg_refs Phase 4). Trigger for the on-demand
+   *  "Visualize references" synthesis in the graph split. */
+  onVisualizeRefs?: () => void;
+  /** Reference map refs while the per-document highlight toggle is on. */
+  kgHighlightRefs?: KgNodeRef[] | null;
+  onToggleKgHighlight?: () => void;
+  /** Preview-mark click → focus the KG node in the graph split. */
+  onKgRefNodeClick?: (nodePath: string) => void;
 }
 
 export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
@@ -167,6 +187,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     htmlFlushRef,
     vaultPath,
     isManagedVaultNote,
+    onVisualizeRefs,
+    kgHighlightRefs = null,
+    onToggleKgHighlight,
+    onKgRefNodeClick,
   },
   ref,
 ) {
@@ -255,8 +279,50 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     }
   }, [previewHtml, isHtml, viewMode, previewIndex, entries]);
 
+  // KG reference highlight (Feature B): byte-offset spans → JS indices over
+  // the current draft. Offsets come from the saved document; a dirty draft
+  // can shift them slightly — purely decorative, never written back.
+  const kgHighlightActive = Boolean(kgHighlightRefs && document && !isHtml);
+  const kgSpans = useMemo<KgCharSpan[] | null>(() => {
+    if (!kgHighlightActive || !document || !kgHighlightRefs) return null;
+    return refMapToCharSpans(draftContent, {
+      docPath: document.relPath,
+      docHash: "",
+      vaultStamp: "",
+      refs: kgHighlightRefs,
+      computedAt: "",
+    });
+  }, [kgHighlightActive, document, kgHighlightRefs, draftContent]);
+  const kgTitleFor = useCallback(
+    (span: { nodeTitle: string; matchKind: "wikilink" | "entity" }) =>
+      `${span.nodeTitle} · ${t(span.matchKind === "wikilink" ? "kgref.kind.wikilink" : "kgref.kind.entity")}`,
+    [t],
+  );
+
+  // Preview mode: wrap rendered text ranges in <mark> after each render.
+  // Cleanup unwraps, so toggling off or switching docs restores the DOM.
+  useEffect(() => {
+    const container = previewRef.current;
+    if (!container || isHtml || viewMode !== "preview" || !kgSpans || !previewHtml) return;
+    const mapped = mapSpansToRenderedText(
+      container.textContent ?? "",
+      kgSpans,
+      (span) => draftContent.slice(span.start, span.end),
+    );
+    applyKgPreviewHighlights(container, mapped, kgTitleFor);
+    return () => clearKgPreviewHighlights(container);
+  }, [kgSpans, previewHtml, isHtml, viewMode, draftContent, kgTitleFor]);
+
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
+      const mark = (event.target as HTMLElement).closest(
+        "mark.kg-ref-mark",
+      ) as HTMLElement | null;
+      if (mark?.dataset.kgNode && onKgRefNodeClick) {
+        event.preventDefault();
+        onKgRefNodeClick(mark.dataset.kgNode);
+        return;
+      }
       const node = (event.target as HTMLElement).closest(
         "[data-wikilink]",
       ) as HTMLElement | null;
@@ -265,7 +331,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       const target = node.getAttribute("data-wikilink");
       if (target) onWikilinkClick(target);
     },
-    [onWikilinkClick],
+    [onWikilinkClick, onKgRefNodeClick],
   );
 
   useEffect(() => {
@@ -546,6 +612,36 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
           >
             {saving ? t("editor.saving") : t("editor.save")}
           </Button>
+          {document && !isHtml && onVisualizeRefs ? (
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onVisualizeRefs}
+              title={t("kgref.visualize")}
+              aria-label={t("kgref.visualize")}
+              data-testid="kg-visualize-refs"
+            >
+              <Network size={14} />
+            </button>
+          ) : null}
+          {document && !isHtml && onToggleKgHighlight ? (
+            <button
+              type="button"
+              className={kgHighlightActive ? "icon-button active" : "icon-button"}
+              onClick={onToggleKgHighlight}
+              disabled={viewMode === "rich"}
+              aria-pressed={kgHighlightActive}
+              title={
+                viewMode === "rich"
+                  ? t("kgref.highlight.richUnsupported")
+                  : t("kgref.highlight")
+              }
+              aria-label={t("kgref.highlight")}
+              data-testid="kg-highlight-toggle"
+            >
+              <Highlighter size={14} />
+            </button>
+          ) : null}
           <button
             type="button"
             className={outlineOpen ? "icon-button active" : "icon-button"}
@@ -627,19 +723,29 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             </Suspense>
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="source">
-            <textarea
-              ref={taRef}
-              className="source-editor"
-              value={draftContent}
-              onChange={(event) => onChange(event.target.value)}
-              readOnly={readOnly}
-              onKeyDown={autocompleteHandlers.onKeyDown}
-              onKeyUp={autocompleteHandlers.onKeyUp}
-              onClick={autocompleteHandlers.onClick}
-              onCompositionStart={autocompleteHandlers.onCompositionStart}
-              onCompositionEnd={autocompleteHandlers.onCompositionEnd}
-              spellCheck={false}
-            />
+            <div className={kgSpans ? "source-editor-wrap kg-active" : "source-editor-wrap"}>
+              {kgSpans ? (
+                <KgSourceBackdrop
+                  content={draftContent}
+                  spans={kgSpans}
+                  textareaRef={taRef}
+                  titleFor={kgTitleFor}
+                />
+              ) : null}
+              <textarea
+                ref={taRef}
+                className="source-editor"
+                value={draftContent}
+                onChange={(event) => onChange(event.target.value)}
+                readOnly={readOnly}
+                onKeyDown={autocompleteHandlers.onKeyDown}
+                onKeyUp={autocompleteHandlers.onKeyUp}
+                onClick={autocompleteHandlers.onClick}
+                onCompositionStart={autocompleteHandlers.onCompositionStart}
+                onCompositionEnd={autocompleteHandlers.onCompositionEnd}
+                spellCheck={false}
+              />
+            </div>
             {autocompletePopup}
           </Tabs.Content>
           <Tabs.Content className="tab-panel" value="preview">

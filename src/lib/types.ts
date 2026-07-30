@@ -869,7 +869,7 @@ export interface MemoDocument extends MemoEntry {
   content: string;
 }
 
-export type ScratchpadCollection = "ideation" | "memos" | "temp";
+export type ScratchpadCollection = "ideation" | "memos" | "temp" | "drafts";
 export type ScratchpadSource =
   | "maru"
   | "claude"
@@ -938,6 +938,181 @@ export interface ScratchpadWatcherErrorEvent {
   workPath: string;
   message: string;
   generation: number;
+}
+
+// === Drafts (AI-generated task/idea drafts, unconfirmed) ===
+
+export type DraftKind = "task" | "idea" | "implementation";
+export type DraftStatus = "new" | "in-review" | "accepted" | "discarded";
+export type DraftImportance = "high" | "medium" | "low";
+export type DraftPromoteTarget = "document" | "task";
+
+export interface DraftEntry {
+  id: string;
+  kind: DraftKind;
+  title: string;
+  status: DraftStatus;
+  importance?: DraftImportance | null;
+  confidence?: number | null;
+  source: ScratchpadSource;
+  originRefs: string[];
+  bodyPath: string;
+  promotedTo?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DraftDocument extends DraftEntry {
+  content: string;
+}
+
+export interface DraftsChangedEvent {
+  workPath: string;
+  draftId?: string | null;
+}
+
+// === Gap analysis (promoted draft vs. frozen baseline) ===
+
+export type GapHunkType = "external-info" | "direct-edit" | "cross-doc-reference" | "formatting";
+
+export type GapHunkOp = "equal" | "insert" | "delete" | "replace";
+
+export interface GapDiffLine {
+  /** " " context, "-" removed from baseline, "+" added in promoted doc. */
+  kind: " " | "-" | "+";
+  text: string;
+}
+
+export interface GapHunk {
+  op: GapHunkOp;
+  /** 1-based first affected baseline line; for pure insertions the baseline line after which content was added. */
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: GapDiffLine[];
+  hunkType: GapHunkType;
+  evidence: string[];
+}
+
+export interface GapTypeCounts {
+  externalInfo: number;
+  directEdit: number;
+  crossDocReference: number;
+  formatting: number;
+}
+
+export interface GapSummary {
+  totalHunks: number;
+  addedLines: number;
+  removedLines: number;
+  byType: GapTypeCounts;
+}
+
+export interface GapReport {
+  draftId: string;
+  draftTitle: string;
+  promotedTo: string;
+  baselineHash?: string | null;
+  analyzedAt: string;
+  hunks: GapHunk[];
+  summary: GapSummary;
+}
+
+export interface GapLogEntry {
+  at: string;
+  draftId: string;
+  promotedTo: string;
+  addedLines: number;
+  removedLines: number;
+  byType: GapTypeCounts;
+  hunkCount: number;
+}
+
+export interface GapReportSummary {
+  draftId: string;
+  title: string;
+  promotedTo: string;
+  promotedAt: string;
+  hasBaseline: boolean;
+}
+
+// === Knowledge-graph reference mapping (kg_refs) ===
+
+export type KgRefMatchKind = "wikilink" | "entity";
+
+export interface KgRefSpan {
+  /** UTF-8 BYTE offset of the span start in the raw document content (what
+   *  readDocument returns) — not a JS string char index. */
+  start: number;
+  /** UTF-8 byte offset one past the span end. */
+  end: number;
+  /** 0-based blank-line-separated block index of the span start, counted over
+   *  the whole raw document (the frontmatter block counts as paragraph 0). */
+  paragraph: number;
+}
+
+export interface KgNodeRef {
+  /** Vault-relative path of the referenced note (matches GraphNode.relPath). */
+  nodePath: string;
+  nodeTitle: string;
+  matchKind: KgRefMatchKind;
+  spans: KgRefSpan[];
+}
+
+export interface DocumentRefMap {
+  /** Vault-relative document path (forward slashes). */
+  docPath: string;
+  /** sha256 hex of the raw document bytes at compute time. */
+  docHash: string;
+  /** sha256 hex of the vault scan cache file at compute time. */
+  vaultStamp: string;
+  refs: KgNodeRef[];
+  computedAt: string;
+}
+
+// === Scheduler (recurring skill missions) ===
+
+export interface SchedulerSchedule {
+  id: string;
+  name: string;
+  skillId: string;
+  runtime: string;
+  prompt: string;
+  hour: number;
+  minute: number;
+  /** 0 = Sunday .. 6 = Saturday; empty means daily. */
+  daysOfWeek: number[];
+  enabled: boolean;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+}
+
+export interface SchedulerScheduleInput {
+  name: string;
+  skillId: string;
+  runtime: string;
+  prompt: string;
+  hour: number;
+  minute: number;
+  daysOfWeek?: number[];
+  enabled?: boolean;
+}
+
+export interface SchedulerChangedEvent {
+  workPath: string;
+}
+
+export interface SchedulerFiredEvent {
+  workPath: string;
+  scheduleId: string;
+  invocationId: string;
+}
+
+export interface SchedulerErrorEvent {
+  workPath: string;
+  scheduleId: string;
+  message: string;
 }
 
 // === Workspace pairing + .maru/ system mode ===

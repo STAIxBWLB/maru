@@ -91,6 +91,10 @@ interface GraphViewProps {
   onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
   onGraphChanged?: () => void;
+  /** KG reference-focus mode (kg_refs Phase 4): vault-relative node paths the
+   *  active document references + a nonce re-arming the animation. */
+  referenceFocus?: { docPath: string; nodePaths: string[]; nonce: number } | null;
+  onExitReferenceFocus?: () => void;
 }
 
 const SAVE_DEBOUNCE_MS = 1500;
@@ -109,6 +113,8 @@ export function GraphView({
   onToggleFavorite,
   onError,
   onGraphChanged,
+  referenceFocus = null,
+  onExitReferenceFocus,
 }: GraphViewProps) {
   const { t } = useTranslation();
   const source = graphSettings.source;
@@ -408,6 +414,17 @@ export function GraphView({
   }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
+  // KG reference-focus: nodePaths (vault relPaths) → graph node ids. Only
+  // nodes present in the current model can be emphasized.
+  const refFocusIds = useMemo(() => {
+    if (!referenceFocus) return null;
+    const paths = new Set(referenceFocus.nodePaths);
+    const ids = new Set<string>();
+    for (const node of model.nodes) {
+      if (node.relPath && paths.has(node.relPath)) ids.add(node.id);
+    }
+    return ids;
+  }, [referenceFocus, model.nodes]);
   const localFocusNode = useMemo(
     () =>
       localTarget
@@ -865,6 +882,11 @@ export function GraphView({
           else setSearchOpen(false);
           return;
         }
+        if (referenceFocus) {
+          event.preventDefault();
+          onExitReferenceFocus?.();
+          return;
+        }
         if (pathSourceId || pathIds.length > 0) {
           event.preventDefault();
           setPathSourceId(null);
@@ -895,8 +917,10 @@ export function GraphView({
       clearFocus,
       localTarget,
       menu,
+      onExitReferenceFocus,
       pathIds.length,
       pathSourceId,
+      referenceFocus,
       search,
       searchOpen,
       selectById,
@@ -1135,6 +1159,18 @@ export function GraphView({
           <button type="button" onClick={() => setPathSourceId(null)}>{t("graph.focus.exit")}</button>
         </div>
       ) : null}
+      {referenceFocus ? (
+        <div className="graph-ref-focus-bar" data-testid="graph-ref-focus-bar">
+          <span>{t("kgref.focusBar", { count: String(refFocusIds?.size ?? 0) })}</span>
+          <button
+            type="button"
+            data-testid="graph-ref-focus-exit"
+            onClick={() => onExitReferenceFocus?.()}
+          >
+            {t("graph.focus.exit")}
+          </button>
+        </div>
+      ) : null}
 
       {effectiveMode !== "chains" && derived.emptyReason ? (
         <div className="graph-degraded-bar graph-empty-bar" data-testid="graph-empty-bar">
@@ -1194,6 +1230,11 @@ export function GraphView({
               onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
               favoriteIds={favoriteIds}
               exportControllerRef={exportControllerRef}
+              referenceFocus={
+                referenceFocus && refFocusIds && refFocusIds.size > 0
+                  ? { ids: refFocusIds, nonce: referenceFocus.nonce }
+                  : null
+              }
               overlay={
                 <>
                   {display.colorMode === "domain" ||

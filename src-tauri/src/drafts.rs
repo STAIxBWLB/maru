@@ -1,0 +1,721 @@
+// Drafts unify AI-generated task drafts and ideation into a first-class,
+// unconfirmed concept. Bodies live in the `drafts` scratchpad collection
+// (<workspace>/scratchpad/drafts/*.md); metadata lives in a JSON index at
+// <work>/.maru/drafts/index.json. Vault scanning already excludes the
+// scratchpad root, so drafts never leak into confirmed vault data.
+//
+// Isolation invariant: nothing in this module writes outside
+// <workspace>/scratchpad/drafts/, <work>/.maru/drafts/, and the explicit,
+// approval-gated promote target.
+
+use crate::atomic_file::{write_atomic, write_atomic_create};
+use crate::approval::{require_approval, ApprovalState};
+use crate::scratchpad::{
+    assert_scratchpad_workspace_access, move_to_system_trash, resolve_scratchpad_drafts_root,
+    ScratchpadSource,
+};
+use crate::tasks::{CreateTaskDraft, TaskBucket};
+use crate::vault::{is_document_extension, resolve_inside_vault, slugify};
+use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use tauri::{AppHandle, Emitter};
+use uuid::Uuid;
+
+const DRAFT_MAX_BYTES: u64 = 2 * 1024 * 1024;
+const DRAFTS_PROMOTE_KIND: &str = "drafts.promote";
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DraftKind {
+    Task,
+    Idea,
+    Implementation,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DraftStatus {
+    New,
+    InReview,
+    Accepted,
+    Discarded,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DraftImportance {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DraftPromoteTarget {
+    Document,
+    Task,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftEntry {
+    pub id: String,
+    pub kind: DraftKind,
+    pub title: String,
+    pub status: DraftStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub importance: Option<DraftImportance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    pub source: ScratchpadSource,
+    #[serde(default)]
+    pub origin_refs: Vec<String>,
+    pub body_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promoted_to: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftDocument {
+    #[serde(flatten)]
+    pub entry: DraftEntry,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftsChangedEvent {
+    pub work_path: String,
+    pub draft_id: Option<String>,
+}
+
+fn emit_drafts_changed(app: &AppHandle, work_path: &str, draft_id: Option<String>) {
+    let _ = app.emit(
+        "drafts://changed",
+        DraftsChangedEvent {
+            work_path: work_path.to_string(),
+            draft_id,
+        },
+    );
+}
+
+fn index_path(work: &Path) -> PathBuf {
+    work.join(".maru").join("drafts").join("index.json")
+}
+
+/// Load the draft index. A missing or corrupt index starts empty so a bad
+/// file can never wedge the drafts workflow.
+pub(crate) fn load_index(work: &Path) -> Result<Vec<DraftEntry>, String> {
+    let path = index_path(work);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
+    Ok(serde_json::from_str(&raw).unwrap_or_default())
+}
+
+fn save_index(work: &Path, entries: &[DraftEntry]) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(entries)
+        .map_err(|err| format!("Cannot serialize drafts index: {err}"))?;
+    write_atomic(&index_path(work), &bytes)
+}
+
+/// Draft ids are server-generated (`draft-<uuid>`). Validate before using one
+/// in a filesystem path (promote baselines live at .maru/drafts/<id>/).
+pub(crate) fn validate_draft_id(id: &str) -> Result<(), String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 128
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    {
+        return Err("drafts_invalid_id".to_string());
+    }
+    Ok(())
+}
+
+/// Body paths are server-generated file names inside the drafts collection
+/// root. Re-validate on every use so a hand-edited index cannot redirect a
+/// read or write outside the collection.
+fn normalize_body_path(raw: &str) -> Result<PathBuf, String> {
+    if raw.contains('\0') {
+        return Err("Draft body path contains a NUL byte".to_string());
+    }
+    let trimmed = raw.trim();
+    let path = Path::new(trimmed);
+    if trimmed.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("Draft body path must be a safe relative path".to_string());
+    }
+    Ok(path.to_path_buf())
+}
+
+fn body_file_path(work: &Path, entry: &DraftEntry) -> Result<PathBuf, String> {
+    let root = resolve_scratchpad_drafts_root(work)?;
+    let relative = normalize_body_path(&entry.body_path)?;
+    Ok(root.join(relative))
+}
+
+fn read_body(work: &Path, entry: &DraftEntry) -> Result<String, String> {
+    let path = body_file_path(work, entry)?;
+    fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read draft body {}: {err}", path.display()))
+}
+
+fn find_entry(entries: &[DraftEntry], id: &str) -> Option<usize> {
+    entries.iter().position(|entry| entry.id == id)
+}
+
+fn path_slashes(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_impl(
+    work_path: &str,
+    kind: DraftKind,
+    title: &str,
+    source: ScratchpadSource,
+    origin_refs: Vec<String>,
+    importance: Option<DraftImportance>,
+    confidence: Option<f32>,
+    body: &str,
+) -> Result<DraftEntry, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("Draft title must not be empty".to_string());
+    }
+    if let Some(confidence) = confidence {
+        if !(0.0..=1.0).contains(&confidence) {
+            return Err("Draft confidence must be between 0.0 and 1.0".to_string());
+        }
+    }
+    if body.len() as u64 > DRAFT_MAX_BYTES {
+        return Err(format!(
+            "drafts_too_large: content exceeds {DRAFT_MAX_BYTES} bytes"
+        ));
+    }
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    fs::create_dir_all(&root).map_err(|err| format!("Cannot create drafts directory: {err}"))?;
+
+    // The body file name is derived only from the slugified title plus a
+    // random suffix; caller-controlled strings never become path components.
+    let id = format!("draft-{}", Uuid::new_v4());
+    let slug = slugify(trimmed);
+    let suffix = Uuid::new_v4().simple().to_string();
+    let file_name = format!(
+        "{}-{}-{}.md",
+        Utc::now().format("%y%m%d"),
+        slug,
+        &suffix[..8]
+    );
+    let body_path = root.join(&file_name);
+    write_atomic_create(&body_path, body.as_bytes())?;
+
+    let now = Utc::now().to_rfc3339();
+    let entry = DraftEntry {
+        id,
+        kind,
+        title: trimmed.to_string(),
+        status: DraftStatus::New,
+        importance,
+        confidence,
+        source,
+        origin_refs,
+        body_path: file_name,
+        promoted_to: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let mut entries = load_index(&work)?;
+    entries.push(entry.clone());
+    save_index(&work, &entries)?;
+    Ok(entry)
+}
+
+fn read_impl(work_path: &str, id: &str) -> Result<DraftDocument, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    validate_draft_id(id)?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    let entry = entries[index].clone();
+    let content = read_body(&work, &entry)?;
+    Ok(DraftDocument { entry, content })
+}
+
+fn save_impl(
+    work_path: &str,
+    id: &str,
+    body: &str,
+    expected_updated_at: &str,
+) -> Result<DraftDocument, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
+    validate_draft_id(id)?;
+    if body.len() as u64 > DRAFT_MAX_BYTES {
+        return Err(format!(
+            "drafts_too_large: content exceeds {DRAFT_MAX_BYTES} bytes"
+        ));
+    }
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let mut entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    let entry = entries[index].clone();
+    if entry.updated_at != expected_updated_at {
+        return Err(format!(
+            "drafts_conflict: expected updatedAt {expected_updated_at}, found {}",
+            entry.updated_at
+        ));
+    }
+    let path = body_file_path(&work, &entry)?;
+    write_atomic(&path, body.as_bytes())?;
+    entries[index].updated_at = Utc::now().to_rfc3339();
+    save_index(&work, &entries)?;
+    Ok(DraftDocument {
+        entry: entries[index].clone(),
+        content: body.to_string(),
+    })
+}
+
+fn set_status_impl(work_path: &str, id: &str, status: DraftStatus) -> Result<DraftEntry, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
+    validate_draft_id(id)?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let mut entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    entries[index].status = status;
+    entries[index].updated_at = Utc::now().to_rfc3339();
+    save_index(&work, &entries)?;
+    Ok(entries[index].clone())
+}
+
+fn discard_impl(work_path: &str, id: &str) -> Result<DraftEntry, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    assert_maru_can_write(work_path, WorkspaceWriteAction::Delete)?;
+    validate_draft_id(id)?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let mut entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    let entry = entries[index].clone();
+    let path = body_file_path(&work, &entry)?;
+    if path.exists() {
+        move_to_system_trash(&path)?;
+    }
+    entries[index].status = DraftStatus::Discarded;
+    entries[index].updated_at = Utc::now().to_rfc3339();
+    save_index(&work, &entries)?;
+    Ok(entries[index].clone())
+}
+
+/// Resolve and validate the promote target for a vault document. The target
+/// must be a relative markdown path inside the workspace, outside the
+/// scratchpad and .maru managed areas, and must not already exist.
+fn resolve_document_target(work_path: &str, target_path: &str) -> Result<(PathBuf, String), String> {
+    let trimmed = target_path.trim();
+    if trimmed.is_empty() {
+        return Err("drafts_promote_target_required".to_string());
+    }
+    let raw = Path::new(trimmed);
+    if raw.is_absolute() {
+        return Err("drafts_promote_target_must_be_relative".to_string());
+    }
+    let relative = crate::vault::lexical_normalize(raw);
+    let first = relative.components().next().and_then(|component| match component {
+        Component::Normal(value) => value.to_str().map(str::to_string),
+        _ => None,
+    });
+    match first.as_deref() {
+        Some("scratchpad") | Some(".maru") => {
+            return Err("drafts_promote_target_managed: target must be a vault document".to_string())
+        }
+        None => return Err("drafts_promote_target_required".to_string()),
+        _ => {}
+    }
+    let extension = relative
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if !is_document_extension(extension) || matches!(extension.to_ascii_lowercase().as_str(), "html" | "htm") {
+        return Err("drafts_promote_target_must_be_markdown".to_string());
+    }
+    let dest = resolve_inside_vault(work_path, &path_slashes(&relative))?;
+    if dest.exists() {
+        return Err("drafts_promote_target_exists".to_string());
+    }
+    Ok((dest, path_slashes(&relative)))
+}
+
+fn promote_impl(
+    work_path: &str,
+    id: &str,
+    target: DraftPromoteTarget,
+    target_path: &str,
+) -> Result<DraftEntry, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    validate_draft_id(id)?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let mut entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    let entry = entries[index].clone();
+    if entry.status == DraftStatus::Discarded {
+        return Err("drafts_promote_discarded".to_string());
+    }
+    if entry.status == DraftStatus::Accepted {
+        return Err("drafts_promote_already_accepted".to_string());
+    }
+    let body = read_body(&work, &entry)?;
+
+    let promoted_to = match target {
+        DraftPromoteTarget::Document => {
+            assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
+            let (dest, relative) = resolve_document_target(work_path, target_path)?;
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|err| format!("Cannot create promote target directory: {err}"))?;
+            }
+            write_atomic_create(&dest, body.as_bytes())?;
+            relative
+        }
+        DraftPromoteTarget::Task => {
+            let slug = if target_path.trim().is_empty() {
+                entry.title.as_str()
+            } else {
+                target_path.trim()
+            };
+            let row = crate::tasks::create_task_note(
+                work_path.to_string(),
+                CreateTaskDraft {
+                    slug: slug.to_string(),
+                    title: entry.title.clone(),
+                    frontmatter: BTreeMap::new(),
+                    body: body.clone(),
+                    bucket: TaskBucket::Active,
+                },
+                None,
+            )?;
+            row.rel_path
+        }
+    };
+
+    // Frozen baseline for later gap analysis between the draft and the
+    // promoted artifact.
+    let baseline = work
+        .join(".maru")
+        .join("drafts")
+        .join(&entry.id)
+        .join("baseline.md");
+    write_atomic(&baseline, body.as_bytes())?;
+
+    entries[index].status = DraftStatus::Accepted;
+    entries[index].promoted_to = Some(promoted_to);
+    entries[index].updated_at = Utc::now().to_rfc3339();
+    save_index(&work, &entries)?;
+    Ok(entries[index].clone())
+}
+
+#[tauri::command]
+pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
+    assert_scratchpad_workspace_access(Path::new(&work_path))?;
+    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    load_index(&work)
+}
+
+#[tauri::command]
+pub fn drafts_read(work_path: String, id: String) -> Result<DraftDocument, String> {
+    read_impl(&work_path, &id)
+}
+
+#[tauri::command]
+pub fn drafts_save(
+    app: AppHandle,
+    work_path: String,
+    id: String,
+    body: String,
+    expected_updated_at: String,
+) -> Result<DraftDocument, String> {
+    let document = save_impl(&work_path, &id, &body, &expected_updated_at)?;
+    emit_drafts_changed(&app, &work_path, Some(id));
+    Ok(document)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn drafts_create(
+    app: AppHandle,
+    work_path: String,
+    kind: DraftKind,
+    title: String,
+    source: ScratchpadSource,
+    origin_refs: Option<Vec<String>>,
+    importance: Option<DraftImportance>,
+    confidence: Option<f32>,
+    body: String,
+) -> Result<DraftEntry, String> {
+    let entry = create_impl(
+        &work_path,
+        kind,
+        &title,
+        source,
+        origin_refs.unwrap_or_default(),
+        importance,
+        confidence,
+        &body,
+    )?;
+    emit_drafts_changed(&app, &work_path, Some(entry.id.clone()));
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn drafts_set_status(
+    app: AppHandle,
+    work_path: String,
+    id: String,
+    status: DraftStatus,
+) -> Result<DraftEntry, String> {
+    let entry = set_status_impl(&work_path, &id, status)?;
+    emit_drafts_changed(&app, &work_path, Some(id));
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn drafts_discard(
+    app: AppHandle,
+    work_path: String,
+    id: String,
+) -> Result<DraftEntry, String> {
+    let entry = discard_impl(&work_path, &id)?;
+    emit_drafts_changed(&app, &work_path, Some(id));
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn drafts_promote(
+    approvals: tauri::State<'_, ApprovalState>,
+    app: AppHandle,
+    work_path: String,
+    id: String,
+    target: DraftPromoteTarget,
+    target_path: Option<String>,
+    approval_id: Option<String>,
+) -> Result<DraftEntry, String> {
+    require_approval(&approvals, approval_id, DRAFTS_PROMOTE_KIND)?;
+    let entry = promote_impl(&work_path, &id, target, target_path.as_deref().unwrap_or(""))?;
+    emit_drafts_changed(&app, &work_path, Some(id));
+    Ok(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn workspace() -> (TempDir, String) {
+        let temp = TempDir::new().unwrap();
+        let work = temp.path().to_string_lossy().to_string();
+        (temp, work)
+    }
+
+    fn create_task_draft(work: &str, title: &str) -> DraftEntry {
+        create_impl(
+            work,
+            DraftKind::Task,
+            title,
+            ScratchpadSource::Kimi,
+            vec!["inbox/telegram/260730-note.md".to_string()],
+            Some(DraftImportance::High),
+            Some(0.8),
+            "# Draft body\n\nDetails here.\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn create_list_read_save_round_trip() {
+        let (_temp, work) = workspace();
+        let entry = create_task_draft(&work, "Weekly report automation");
+        assert_eq!(entry.status, DraftStatus::New);
+        assert!(entry.body_path.ends_with(".md"));
+
+        let listed = load_index(Path::new(&work)).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, entry.id);
+
+        let document = read_impl(&work, &entry.id).unwrap();
+        assert_eq!(document.content, "# Draft body\n\nDetails here.\n");
+        assert_eq!(document.entry.title, "Weekly report automation");
+
+        let saved = save_impl(&work, &entry.id, "updated body", &entry.updated_at).unwrap();
+        assert_eq!(saved.content, "updated body");
+        assert_ne!(saved.entry.updated_at, entry.updated_at);
+        let reread = read_impl(&work, &entry.id).unwrap();
+        assert_eq!(reread.content, "updated body");
+    }
+
+    #[test]
+    fn save_rejects_stale_expected_updated_at() {
+        let (_temp, work) = workspace();
+        let entry = create_task_draft(&work, "Conflict check");
+        let error = save_impl(&work, &entry.id, "x", "1999-01-01T00:00:00Z").unwrap_err();
+        assert!(error.starts_with("drafts_conflict:"));
+    }
+
+    #[test]
+    fn status_transitions_persist() {
+        let (_temp, work) = workspace();
+        let entry = create_task_draft(&work, "Status flow");
+        let reviewed = set_status_impl(&work, &entry.id, DraftStatus::InReview).unwrap();
+        assert_eq!(reviewed.status, DraftStatus::InReview);
+        let listed = load_index(Path::new(&work)).unwrap();
+        assert_eq!(listed[0].status, DraftStatus::InReview);
+    }
+
+    #[test]
+    fn discard_trashes_body_and_marks_entry() {
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Discard me");
+        let body = temp.path().join("scratchpad/drafts").join(&entry.body_path);
+        assert!(body.is_file());
+        let discarded = discard_impl(&work, &entry.id).unwrap();
+        assert_eq!(discarded.status, DraftStatus::Discarded);
+        assert!(!body.exists());
+        let listed = load_index(Path::new(&work)).unwrap();
+        assert_eq!(listed[0].status, DraftStatus::Discarded);
+    }
+
+    #[test]
+    fn promote_document_writes_target_and_baseline() {
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Promote to doc");
+        let promoted = promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/promoted.md").unwrap();
+        assert_eq!(promoted.status, DraftStatus::Accepted);
+        assert_eq!(promoted.promoted_to.as_deref(), Some("notes/promoted.md"));
+        let target = temp.path().join("notes/promoted.md");
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "# Draft body\n\nDetails here.\n"
+        );
+        let baseline = temp
+            .path()
+            .join(".maru/drafts")
+            .join(&entry.id)
+            .join("baseline.md");
+        assert_eq!(
+            fs::read_to_string(&baseline).unwrap(),
+            "# Draft body\n\nDetails here.\n"
+        );
+        // Re-promoting an accepted draft is rejected.
+        assert!(promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/other.md").is_err());
+        // Existing targets are never overwritten.
+        let other = create_task_draft(&work, "Second draft");
+        let error = promote_impl(&work, &other.id, DraftPromoteTarget::Document, "notes/promoted.md").unwrap_err();
+        assert_eq!(error, "drafts_promote_target_exists");
+    }
+
+    #[test]
+    fn promote_document_rejects_managed_and_traversal_targets() {
+        let (_temp, work) = workspace();
+        for bad in [
+            "scratchpad/drafts/x.md",
+            ".maru/x.md",
+            "../escape.md",
+            "/abs/path.md",
+            "notes/page.html",
+        ] {
+            let entry = create_task_draft(&work, "Guard check");
+            assert!(
+                promote_impl(&work, &entry.id, DraftPromoteTarget::Document, bad).is_err(),
+                "target {bad} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn promote_task_creates_task_note() {
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Promote to task");
+        let promoted = promote_impl(&work, &entry.id, DraftPromoteTarget::Task, "").unwrap();
+        assert_eq!(promoted.status, DraftStatus::Accepted);
+        let rel = promoted.promoted_to.clone().unwrap();
+        assert!(rel.starts_with("tasks/active/"), "unexpected rel path {rel}");
+        let target = temp.path().join(&rel);
+        let content = fs::read_to_string(&target).unwrap();
+        assert!(content.contains("# Draft body"));
+        let baseline = temp
+            .path()
+            .join(".maru/drafts")
+            .join(&entry.id)
+            .join("baseline.md");
+        assert!(baseline.is_file());
+    }
+
+    #[test]
+    fn create_never_writes_outside_drafts_collection() {
+        let (temp, work) = workspace();
+        let entry = create_impl(
+            &work,
+            DraftKind::Idea,
+            "../../../../etc/evil",
+            ScratchpadSource::Claude,
+            vec!["../../secret.md".to_string(), "C:\\abs\\path".to_string()],
+            None,
+            None,
+            "body",
+        )
+        .unwrap();
+        let body = temp.path().join("scratchpad/drafts").join(&entry.body_path);
+        assert!(body.is_file(), "body must live under scratchpad/drafts");
+        assert!(!Path::new(&entry.body_path).is_absolute());
+        assert!(!entry.body_path.contains(".."));
+        // Origin refs are stored as opaque data, never used as paths.
+        assert_eq!(entry.origin_refs.len(), 2);
+        // Nothing escaped into the workspace root or above it.
+        assert!(!temp.path().join("etc").exists());
+        assert_eq!(
+            load_index(Path::new(&work)).unwrap()[0].body_path,
+            entry.body_path
+        );
+    }
+
+    #[test]
+    fn corrupt_or_missing_index_starts_empty() {
+        let (temp, _work) = workspace();
+        assert!(load_index(temp.path()).unwrap().is_empty());
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(&index, "{not json").unwrap();
+        assert!(load_index(temp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn promote_requires_approval() {
+        let state = ApprovalState::default();
+        let error = require_approval(&state, None, DRAFTS_PROMOTE_KIND).unwrap_err();
+        assert!(error.starts_with("approval_required"));
+    }
+
+    #[test]
+    fn draft_id_validation_rejects_path_segments() {
+        assert!(validate_draft_id("draft-abc-123").is_ok());
+        assert!(validate_draft_id("../x").is_err());
+        assert!(validate_draft_id("a/b").is_err());
+        assert!(validate_draft_id("").is_err());
+    }
+}

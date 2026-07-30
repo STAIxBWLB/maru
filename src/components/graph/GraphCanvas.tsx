@@ -126,6 +126,9 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
+  /** KG reference-focus mode (kg_refs Phase 4): referenced node ids + a nonce
+   *  that re-arms the converge animation on every trigger. null = off. */
+  referenceFocus?: { ids: Set<string>; nonce: number } | null;
   overlay?: ReactNode;
 }
 
@@ -144,6 +147,7 @@ type InteractionState = {
   favoriteIds: Set<string>;
   visibleNodeIds: Set<string> | null;
   visibleEdgeKeys: Set<string> | null;
+  refFocusIds: Set<string> | null;
 };
 
 function highlightSets(highlight: GraphHighlight): {
@@ -175,6 +179,11 @@ function edgeArrowType(edge: GraphEdge, arrows: GraphDisplaySettings["arrows"]):
 
 const LABEL_DENSITY: Record<GraphDisplaySettings["labels"], number> = { low: 0.35, balanced: 0.55, high: 0.8 };
 const LABEL_THRESHOLD: Record<GraphDisplaySettings["labels"], number> = { low: 4, balanced: 3, high: 2 };
+
+/** Reference-focus synthesis: fraction of the way each referenced node
+ *  travels toward the subgraph centroid at the animation's peak. */
+const KG_REF_CONVERGE = 0.35;
+const KG_REF_ANIM_DURATION_MS = 1_500;
 
 function prefersReducedMotion(): boolean {
   return (
@@ -545,6 +554,7 @@ export function GraphCanvas({
   onNodeContextMenu,
   favoriteIds = new Set<string>(),
   exportControllerRef,
+  referenceFocus = null,
   overlay,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
@@ -595,6 +605,14 @@ export function GraphCanvas({
   const displayRef = useRef(display);
   displayRef.current = display;
   const highlightMasks = useMemo(() => highlightSets(highlight), [highlight]);
+  // Reference-focus converge animation (rAF-driven reducer inputs — never a
+  // layout re-run). amp 0 = rest state at the layout positions.
+  const refAnimRef = useRef<{
+    ids: Set<string>;
+    centroid: { x: number; y: number };
+    amp: number;
+  } | null>(null);
+  const refFocusAnimatedNonceRef = useRef(-1);
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -607,6 +625,7 @@ export function GraphCanvas({
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
+    refFocusIds: referenceFocus?.ids ?? null,
   });
   interactionRef.current = {
     ...interactionRef.current,
@@ -620,6 +639,7 @@ export function GraphCanvas({
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
+    refFocusIds: referenceFocus?.ids ?? null,
   };
   const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu });
   callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu };
@@ -749,6 +769,26 @@ export function GraphCanvas({
               patch.borderColor = graphTheme().warn;
               patch.forceLabel = true;
             }
+            // KG reference-focus: referenced nodes carry the accent, every
+            // other node dims (same pathway as hover/filter dimming).
+            const refIds = state.refFocusIds;
+            if (refIds) {
+              if (refIds.has(node)) {
+                patch.color = graphTheme().accent;
+                patch.borderColor = graphTheme().accent;
+                patch.size = data.size * (dense ? 0.95 : 1.25);
+                patch.forceLabel = true;
+              } else {
+                patch.color = graphTheme().dimNode;
+              }
+              // Converge animation: offset reducer output toward the centroid
+              // of the referenced subgraph — the graphology data never moves.
+              const anim = refAnimRef.current;
+              if (anim && anim.amp > 0 && anim.ids.has(node)) {
+                patch.x = data.x + (anim.centroid.x - data.x) * KG_REF_CONVERGE * anim.amp;
+                patch.y = data.y + (anim.centroid.y - data.y) * KG_REF_CONVERGE * anim.amp;
+              }
+            }
             // Sparse Global views and typical Local neighborhoods should be
             // readable without an extra zoom gesture. Sigma still resolves
             // label collisions, and larger graphs keep zoom-linked LOD.
@@ -773,6 +813,11 @@ export function GraphCanvas({
             let emphasized = false;
             if (hovered) {
               active = data.sourceId === hovered || data.targetId === hovered;
+              emphasized = active;
+            } else if (state.refFocusIds) {
+              // Reference-focus: only edges inside the referenced subgraph
+              // stay bright; everything else fades.
+              active = state.refFocusIds.has(data.sourceId) && state.refFocusIds.has(data.targetId);
               emphasized = active;
             } else if (overlayEdges) {
               active = overlayEdges.has(edgeKey(data.sourceId, data.targetId));
@@ -1274,7 +1319,76 @@ export function GraphCanvas({
   useEffect(() => {
     const renderer = rendererRef.current;
     if (renderer) renderer.scheduleRefresh();
-  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds, visibleEdgeKeys]);
+  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds, visibleEdgeKeys, referenceFocus]);
+
+  // --- KG reference-focus converge animation -------------------------------
+  // Runs once per trigger nonce, only after the renderer is ready, and only
+  // ever touches reducer inputs (refAnimRef) + refresh — FA2 is never
+  // restarted for this. prefers-reduced-motion skips straight to the rest
+  // state (dimmed/emphasized, no motion).
+  const refFocusIds = referenceFocus?.ids ?? null;
+  const refFocusNonce = referenceFocus?.nonce ?? -1;
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    refAnimRef.current = null;
+    if (!refFocusIds || refFocusIds.size === 0) {
+      refFocusAnimatedNonceRef.current = -1;
+      renderer?.refresh();
+      return;
+    }
+    if (!renderer || !graph || rendererStateRef.current !== "ready") return;
+    if (refFocusAnimatedNonceRef.current === refFocusNonce) {
+      renderer.refresh();
+      return;
+    }
+    refFocusAnimatedNonceRef.current = refFocusNonce;
+    let cx = 0;
+    let cy = 0;
+    let count = 0;
+    refFocusIds.forEach((id) => {
+      if (!graph.hasNode(id)) return;
+      const attrs = graph.getNodeAttributes(id);
+      if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
+      cx += attrs.x;
+      cy += attrs.y;
+      count += 1;
+    });
+    if (count === 0) {
+      renderer.refresh();
+      return;
+    }
+    const centroid = { x: cx / count, y: cy / count };
+    // Frame the referenced subgraph once so the synthesis reads on screen.
+    const viewport = renderer.graphToViewport({ x: centroid.x, y: centroid.y });
+    const target = renderer.viewportToFramedGraph(viewport);
+    void renderer.getCamera().animate(
+      { x: target.x, y: target.y },
+      { duration: animDuration(320) },
+    );
+    renderer.refresh();
+    if (prefersReducedMotion()) return;
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - start) / KG_REF_ANIM_DURATION_MS);
+      refAnimRef.current = {
+        ids: refFocusIds,
+        centroid,
+        // Out-and-back: gather toward the centroid, then ease home.
+        amp: Math.sin(Math.PI * progress),
+      };
+      renderer.refresh();
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        refAnimRef.current = null;
+        renderer.refresh();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [refFocusIds, refFocusNonce, rendererState]);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------
 

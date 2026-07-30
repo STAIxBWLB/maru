@@ -34,7 +34,7 @@ The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md)
 
 ## Modes
 
-The activity rail exposes twelve top-level modes (Settings opens as a separate
+The activity rail exposes fourteen top-level modes (Settings opens as a separate
 window, so it is not an app mode). Diagram and Graph default on; E2E Flow is
 flag-gated.
 
@@ -46,6 +46,8 @@ flag-gated.
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
 | `tasks` | 태스크 / Tasks | File-backed tasks with Google Tasks/Calendar links; edit details, month/week/day calendar. |
+| `drafts` | 초안 / Drafts | Unconfirmed AI-generated task/idea/implementation drafts (accept → promote, discard) plus the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
+| `gap` | 갭 분석 / Gap Analysis | Diffs promoted drafts against their frozen baselines, classifies the human edits, and feeds the tendencies back into draft prompts. See [docs/gap-analysis.md](docs/gap-analysis.md). |
 | `catalog` | 카탈로그 / Catalog | M1 Operations Catalog — deadlines, in-flight approvals, unlinked evidence, inbox pending. |
 | `studio` | 스튜디오 / Studio | M2 Document Studio 7-step authoring wizard. See [docs/studio.md](docs/studio.md). |
 | `diagram` | 다이어그램 / Diagram | Concept-map editor. See [docs/diagram.md](docs/diagram.md). |
@@ -121,6 +123,27 @@ only.
   recovery. Collisions never overwrite an existing item; copy/paste chooses a
   `-copy` suffix.
 
+## Drafts, gap analysis, and KG references
+
+Three surfaces close the loop between AI generation and the confirmed vault:
+
+- **Drafts + scheduler** — AI skill runs (scheduled via the Drafts Automation
+  section, or manual) emit task/idea/implementation draft artifacts that Maru
+  ingests into an unconfirmed store (`scratchpad/drafts/` bodies +
+  `.maru/drafts/index.json` metadata). Accepting a draft promotes it into the
+  vault through the approval gate. See [docs/drafts.md](docs/drafts.md).
+- **Gap analysis** — promotion freezes a baseline copy; the Gap mode diffs the
+  promoted document against it, classifies each human edit (external info /
+  direct edit / cross-doc reference / formatting), and appends the summary to
+  `.maru/gap-log.jsonl`. A digest of recent log entries is attached to new
+  extract-tasks schedule prompts so future drafts need fewer edits. See
+  [docs/gap-analysis.md](docs/gap-analysis.md).
+- **KG reference visualization** — `kg_document_refs` maps which vault notes a
+  document references (wikilinks + title/alias mentions), computed on demand
+  and cached under `.maru/kg-cache/`. The editor highlights referenced titles
+  inline; the graph can focus the referenced neighborhood. See
+  [docs/kg-references.md](docs/kg-references.md).
+
 ## Install
 
 Maru ships the desktop app and CLI as separate artifacts. On macOS, both are
@@ -160,9 +183,10 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 │   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
 │   Sigma WebGL + Graphology · CodeMirror · alacritty canvas    │
 │                                                               │
-│   Activity rail (12 modes):                                  │
+│   Activity rail (14 modes):                                  │
 │     Docs / Files / Inbox / Messages / Meetings / Tasks /     │
-│     Catalog / Studio / Diagram / Graph / Sites / E2E         │
+│     Drafts / Gap / Catalog / Studio / Diagram / Graph /      │
+│     Sites / E2E                                              │
 │   Files tree/list/preview + editor tabs + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC

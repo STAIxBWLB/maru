@@ -34,7 +34,9 @@ export type MaruAppMode =
   | "e2e"
   | "diagram"
   | "sites"
-  | "graph";
+  | "graph"
+  | "drafts"
+  | "gap";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export interface EditorPaneViewModes {
@@ -313,11 +315,16 @@ export interface ComposerSettings {
   lintDismissals: Record<string, string[]>;
 }
 
+/** Minimum importance for scheduled task-extraction candidates to become drafts. */
+export type AiTaskIngestMinImportance = "high" | "medium" | "low";
+
 export interface AiSettings {
   /** Agent runtime used by default for skill dispatch + structured runs. */
   defaultRuntime: AiRuntime;
   /** Runtime used for inbox classification; "inherit" resolves to defaultRuntime. */
   classifierRuntime: AiClassifierRuntime;
+  /** Candidates below this importance are skipped during draft ingestion. */
+  taskIngestMinImportance: AiTaskIngestMinImportance;
   /** Permission mode passed to the agent CLI (Claude `--permission-mode`). */
   permissionMode: AiPermissionMode;
   /** Optional absolute paths overriding PATH-based CLI resolution. */
@@ -550,6 +557,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
   ai: {
     defaultRuntime: "claude",
     classifierRuntime: "inherit",
+    taskIngestMinImportance: "medium",
     permissionMode: "plan",
     commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
     extra: {},
@@ -1819,7 +1827,8 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 function parseMaruAppMode(value: unknown): MaruAppMode | null {
   return value === "pkm" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "tasks" || value === "catalog" || value === "studio" || value === "e2e"
-    || value === "diagram" || value === "sites" || value === "graph"
+    || value === "diagram" || value === "sites" || value === "graph" || value === "drafts"
+    || value === "gap"
     ? value
     : null;
 }
@@ -2276,6 +2285,7 @@ const AI_PERMISSION_MODES: AiPermissionMode[] = [
 const AI_KNOWN_KEYS = new Set([
   "defaultRuntime",
   "classifierRuntime",
+  "taskIngestMinImportance",
   "permissionMode",
   "commandOverrides",
   "extra",
@@ -2312,6 +2322,12 @@ function normalizeAi(value: unknown): AiSettings {
       value.classifierRuntime === "inherit"
         ? "inherit"
         : parseAiRuntime(value.classifierRuntime) ?? fallback.classifierRuntime,
+    taskIngestMinImportance:
+      value.taskIngestMinImportance === "high" ||
+      value.taskIngestMinImportance === "medium" ||
+      value.taskIngestMinImportance === "low"
+        ? value.taskIngestMinImportance
+        : fallback.taskIngestMinImportance,
     permissionMode: AI_PERMISSION_MODES.includes(value.permissionMode as AiPermissionMode)
       ? (value.permissionMode as AiPermissionMode)
       : fallback.permissionMode,
