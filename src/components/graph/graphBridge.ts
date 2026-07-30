@@ -24,6 +24,12 @@ export interface MaruGraphBridge {
     color: string | null;
     borderColor: string | null;
     favorite: boolean;
+    /** RENDERED coordinates (sigma display data, normalized space). These differ
+     *  from nodeViewportPoint, which projects the graphology attributes: reducer
+     *  effects that move a node without touching the graph — the KG
+     *  reference-focus converge animation — are only observable here. */
+    x: number | null;
+    y: number | null;
   };
   hoveredId(): string | null;
   layoutRunning(): boolean;

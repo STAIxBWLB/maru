@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { invokeE2EOverride } from "./e2eInvoke";
 import type { MissionMetadata } from "./types";
 
 declare global {
@@ -19,6 +20,7 @@ const MOCK_BUILTIN_SKILLS = [
   "task-management",
   "gaejosik",
   "inbox-process",
+  "ideation-drafts",
 ].map((name): SkillRecord => ({
   id: `mock:${name}`,
   sourceId: "mock-builtin",
@@ -618,7 +620,14 @@ export async function agentReadRunEvents(
   cwd: string,
   runId: string,
 ): Promise<AgentRunEvent[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<AgentRunEvent[]>("agent_read_run_events", {
+      cwd,
+      runId,
+    });
+    if (override) return override;
+    return [];
+  }
   return invoke<AgentRunEvent[]>("agent_read_run_events", { cwd, runId });
 }
 

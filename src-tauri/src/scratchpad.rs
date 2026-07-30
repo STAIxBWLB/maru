@@ -23,6 +23,7 @@ pub enum ScratchpadCollection {
     Ideation,
     Memos,
     Temp,
+    Drafts,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -310,6 +311,10 @@ pub(crate) fn resolve_scratchpad_memos_root(work_path: &Path) -> Result<PathBuf,
     resolve_collection_root(work_path, ScratchpadCollection::Memos)
 }
 
+pub(crate) fn resolve_scratchpad_drafts_root(work_path: &Path) -> Result<PathBuf, String> {
+    resolve_collection_root(work_path, ScratchpadCollection::Drafts)
+}
+
 pub(crate) fn assert_scratchpad_workspace_access(work_path: &Path) -> Result<(), String> {
     #[cfg(test)]
     {
@@ -344,12 +349,13 @@ fn resolve_collection_root(
     let work = absolute_work_path(work_path)?;
     let config = load_config(&work)?;
     let root = resolve_scratchpad_root(&work)?;
-    let roots = collection_roots(&root, &config.scratchpad)?;
+    let roots = all_collection_roots(&root, &config.scratchpad)?;
     validate_collection_roots(&root, &roots)?;
     Ok(match collection {
         ScratchpadCollection::Ideation => roots[0].clone(),
         ScratchpadCollection::Memos => roots[1].clone(),
         ScratchpadCollection::Temp => roots[2].clone(),
+        ScratchpadCollection::Drafts => roots[3].clone(),
     })
 }
 
@@ -364,6 +370,16 @@ fn collection_roots(root: &Path, config: &ScratchpadConfigFile) -> Result<[PathB
     ])
 }
 
+/// The drafts collection lives at a fixed `<root>/drafts` subdir (not
+/// user-configurable) alongside the three configurable collections.
+fn all_collection_roots(
+    root: &Path,
+    config: &ScratchpadConfigFile,
+) -> Result<[PathBuf; 4], String> {
+    let [ideation, memos, temp] = collection_roots(root, config)?;
+    Ok([ideation, memos, temp, root.join("drafts")])
+}
+
 fn comparable_collection_path(path: &Path) -> String {
     let value = path_slashes(path);
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -376,7 +392,7 @@ fn comparable_collection_path(path: &Path) -> String {
     }
 }
 
-fn validate_collection_roots(root: &Path, roots: &[PathBuf; 3]) -> Result<(), String> {
+fn validate_collection_roots(root: &Path, roots: &[PathBuf]) -> Result<(), String> {
     for left in 0..roots.len() {
         for right in (left + 1)..roots.len() {
             let left_comparable = comparable_collection_path(&roots[left]);
@@ -407,14 +423,14 @@ pub(crate) fn validate_scratchpad_layout(work_path: &Path) -> Result<(), String>
     let work = absolute_work_path(work_path)?;
     let config = load_config(&work)?;
     let root = resolve_scratchpad_root(&work)?;
-    validate_collection_roots(&root, &collection_roots(&root, &config.scratchpad)?)
+    validate_collection_roots(&root, &all_collection_roots(&root, &config.scratchpad)?)
 }
 
 fn config_for(work_path: &Path) -> Result<(PathBuf, ScratchpadConfigFile), String> {
     let work = absolute_work_path(work_path)?;
     let config = load_config(&work)?;
     let root = resolve_scratchpad_root(&work)?;
-    validate_collection_roots(&root, &collection_roots(&root, &config.scratchpad)?)?;
+    validate_collection_roots(&root, &all_collection_roots(&root, &config.scratchpad)?)?;
     Ok((work, config.scratchpad))
 }
 
@@ -435,7 +451,7 @@ fn normalize_relative_path(raw: &str) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
-fn assert_no_symlink_components(root: &Path, relative: &Path) -> Result<(), String> {
+pub(crate) fn assert_no_symlink_components(root: &Path, relative: &Path) -> Result<(), String> {
     if root.exists() {
         let metadata = fs::symlink_metadata(root)
             .map_err(|err| format!("Cannot inspect Scratchpad root: {err}"))?;
@@ -553,7 +569,7 @@ fn path_slashes(path: &Path) -> String {
 fn source_for(collection: ScratchpadCollection, relative: &Path) -> ScratchpadSource {
     match collection {
         ScratchpadCollection::Memos => ScratchpadSource::Maru,
-        ScratchpadCollection::Ideation => ScratchpadSource::Manual,
+        ScratchpadCollection::Ideation | ScratchpadCollection::Drafts => ScratchpadSource::Manual,
         ScratchpadCollection::Temp => {
             let mut parts = relative
                 .components()
@@ -632,7 +648,7 @@ fn stale_for(
     let days = match collection {
         ScratchpadCollection::Temp => config.temp_stale_days,
         ScratchpadCollection::Ideation => config.ideation_review_days,
-        ScratchpadCollection::Memos => return false,
+        ScratchpadCollection::Memos | ScratchpadCollection::Drafts => return false,
     };
     modified
         .and_then(|value| SystemTime::now().duration_since(value).ok())
@@ -744,6 +760,7 @@ pub fn scratchpad_list(work_path: String) -> Result<Vec<ScratchpadEntry>, String
         ScratchpadCollection::Ideation,
         ScratchpadCollection::Memos,
         ScratchpadCollection::Temp,
+        ScratchpadCollection::Drafts,
     ] {
         let root = resolve_collection_root(&work, collection)?;
         if !root.exists() {
@@ -779,6 +796,7 @@ fn collection_rank(collection: ScratchpadCollection) -> u8 {
         ScratchpadCollection::Ideation => 0,
         ScratchpadCollection::Memos => 1,
         ScratchpadCollection::Temp => 2,
+        ScratchpadCollection::Drafts => 3,
     }
 }
 

@@ -88,6 +88,19 @@ import type {
   ScratchpadCollection,
   ScratchpadDocument,
   ScratchpadEntry,
+  DraftDocument,
+  DraftEntry,
+  DraftImportance,
+  DraftKind,
+  DraftPromoteTarget,
+  DraftStatus,
+  GapLogEntry,
+  GapReport,
+  GapReportSummary,
+  DocumentRefMap,
+  SchedulerSchedule,
+  SchedulerScheduleInput,
+  ScratchpadSource,
   IdeationStage,
   TempCleanupCandidate,
   TempCleanupResult,
@@ -1666,7 +1679,11 @@ export async function startAgentCliInvocation(
 }
 
 export async function listAiMissions(): Promise<MissionRecord[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<MissionRecord[]>("list_ai_missions", {});
+    if (override) return override;
+    return [];
+  }
   return invoke<MissionRecord[]>("list_ai_missions");
 }
 
@@ -2466,7 +2483,8 @@ export async function enqueueKakaoSend(
     workPath,
     chat,
     text,
-    attachmentPath: attachmentPath ?? null,
+    attachmentPath,
+    approvalId,
   });
 }
 
@@ -2648,7 +2666,11 @@ export async function saveMemoAs(
 }
 
 export async function listScratchpad(workPath: string): Promise<ScratchpadEntry[]> {
-  if (!isTauri()) return [];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<ScratchpadEntry[]>("scratchpad_list", { workPath });
+    if (override) return override;
+    return [];
+  }
   return invoke<ScratchpadEntry[]>("scratchpad_list", { workPath });
 }
 
@@ -2797,6 +2819,255 @@ export async function startScratchpadWatcher(workPath: string): Promise<number> 
 export async function stopScratchpadWatcher(): Promise<void> {
   if (!isTauri()) return;
   await invoke("stop_scratchpad_watcher");
+}
+
+// === Drafts ===
+
+export async function listDrafts(workPath: string): Promise<DraftEntry[]> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry[]>("drafts_list", { workPath });
+    if (override) return override;
+    return [];
+  }
+  return invoke<DraftEntry[]>("drafts_list", { workPath });
+}
+
+export async function readDraft(workPath: string, id: string): Promise<DraftDocument> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftDocument>("drafts_read", { workPath, id });
+    if (override) return override;
+    throw new Error("drafts_not_found");
+  }
+  return invoke<DraftDocument>("drafts_read", { workPath, id });
+}
+
+export async function saveDraft(
+  workPath: string,
+  id: string,
+  body: string,
+  expectedUpdatedAt: string,
+): Promise<DraftDocument> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftDocument>("drafts_save", {
+      workPath,
+      id,
+      body,
+      expectedUpdatedAt,
+    });
+    if (override) return override;
+    throw new Error("drafts_not_found");
+  }
+  return invoke<DraftDocument>("drafts_save", { workPath, id, body, expectedUpdatedAt });
+}
+
+export async function createDraft(params: {
+  workPath: string;
+  kind: DraftKind;
+  title: string;
+  source: ScratchpadSource;
+  originRefs?: string[];
+  importance?: DraftImportance | null;
+  confidence?: number | null;
+  body: string;
+}): Promise<DraftEntry> {
+  const args = {
+    workPath: params.workPath,
+    kind: params.kind,
+    title: params.title,
+    source: params.source,
+    originRefs: params.originRefs ?? null,
+    importance: params.importance ?? null,
+    confidence: params.confidence ?? null,
+    body: params.body,
+  };
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry>("drafts_create", args);
+    if (override) return override;
+    throw new Error("drafts_create_unavailable");
+  }
+  return invoke<DraftEntry>("drafts_create", args);
+}
+
+export async function setDraftStatus(
+  workPath: string,
+  id: string,
+  status: DraftStatus,
+): Promise<DraftEntry> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry>("drafts_set_status", {
+      workPath,
+      id,
+      status,
+    });
+    if (override) return override;
+    throw new Error("drafts_not_found");
+  }
+  return invoke<DraftEntry>("drafts_set_status", { workPath, id, status });
+}
+
+export async function discardDraft(workPath: string, id: string): Promise<DraftEntry> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry>("drafts_discard", { workPath, id });
+    if (override) return override;
+    throw new Error("drafts_not_found");
+  }
+  return invoke<DraftEntry>("drafts_discard", { workPath, id });
+}
+
+export async function promoteDraft(params: {
+  workPath: string;
+  id: string;
+  target: DraftPromoteTarget;
+  targetPath?: string | null;
+  approvalId: string;
+}): Promise<DraftEntry> {
+  const args = {
+    workPath: params.workPath,
+    id: params.id,
+    target: params.target,
+    targetPath: params.targetPath ?? null,
+    approvalId: params.approvalId,
+  };
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry>("drafts_promote", args);
+    if (override) return override;
+    throw new Error("drafts_not_found");
+  }
+  return invoke<DraftEntry>("drafts_promote", args);
+}
+
+// === Gap analysis ===
+
+export async function gapAnalyze(workPath: string, draftId: string): Promise<GapReport> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<GapReport>("gap_analyze", { workPath, draftId });
+    if (override) return override;
+    throw new Error("gap_analyze_unavailable");
+  }
+  return invoke<GapReport>("gap_analyze", { workPath, draftId });
+}
+
+/** Explicit log append — call only after an analysis has been viewed/confirmed. */
+export async function gapAppendLog(workPath: string, draftId: string): Promise<GapLogEntry> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<GapLogEntry>("gap_append_log", { workPath, draftId });
+    if (override) return override;
+    throw new Error("gap_append_log_unavailable");
+  }
+  return invoke<GapLogEntry>("gap_append_log", { workPath, draftId });
+}
+
+export async function gapLogList(workPath: string, limit?: number): Promise<GapLogEntry[]> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<GapLogEntry[]>("gap_log_list", {
+      workPath,
+      limit: limit ?? null,
+    });
+    if (override) return override;
+    return [];
+  }
+  return invoke<GapLogEntry[]>("gap_log_list", { workPath, limit: limit ?? null });
+}
+
+export async function gapReportsList(workPath: string): Promise<GapReportSummary[]> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<GapReportSummary[]>("gap_reports_list", { workPath });
+    if (override) return override;
+    return [];
+  }
+  return invoke<GapReportSummary[]>("gap_reports_list", { workPath });
+}
+
+// === Knowledge-graph reference mapping ===
+
+/** On-demand, cache-aware document→note reference mapping. Expensive on a
+ *  miss (one regex pass per vault title), cheap on a cache hit. */
+export async function kgDocumentRefs(workPath: string, docPath: string): Promise<DocumentRefMap> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DocumentRefMap>("kg_document_refs", {
+      workPath,
+      docPath,
+    });
+    if (override) return override;
+    throw new Error("kg_document_refs_unavailable");
+  }
+  return invoke<DocumentRefMap>("kg_document_refs", { workPath, docPath });
+}
+
+/** Drop kg-ref cache entries: one document when docPath is given, all when
+ *  omitted. Returns the number of entries removed. */
+export async function kgRefsClear(workPath: string, docPath?: string): Promise<number> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<number>("kg_refs_clear", {
+      workPath,
+      docPath: docPath ?? null,
+    });
+    if (override !== null) return override;
+    return 0;
+  }
+  return invoke<number>("kg_refs_clear", { workPath, docPath: docPath ?? null });
+}
+
+// === Scheduler ===
+
+export async function listSchedules(workPath: string): Promise<SchedulerSchedule[]> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<SchedulerSchedule[]>("scheduler_list", { workPath });
+    if (override) return override;
+    return [];
+  }
+  return invoke<SchedulerSchedule[]>("scheduler_list", { workPath });
+}
+
+export async function addSchedule(
+  workPath: string,
+  schedule: SchedulerScheduleInput,
+  approvalId: string,
+): Promise<SchedulerSchedule> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<SchedulerSchedule>("scheduler_add", {
+      workPath,
+      schedule,
+      approvalId,
+    });
+    if (override) return override;
+    throw new Error("scheduler_add_unavailable");
+  }
+  return invoke<SchedulerSchedule>("scheduler_add", { workPath, schedule, approvalId });
+}
+
+export async function removeSchedule(workPath: string, id: string): Promise<void> {
+  if (!isTauri()) {
+    await invokeE2EOverride<void>("scheduler_remove", { workPath, id });
+    return;
+  }
+  await invoke("scheduler_remove", { workPath, id });
+}
+
+export async function setScheduleEnabled(
+  workPath: string,
+  id: string,
+  enabled: boolean,
+): Promise<SchedulerSchedule> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<SchedulerSchedule>("scheduler_set_enabled", {
+      workPath,
+      id,
+      enabled,
+    });
+    if (override) return override;
+    throw new Error("scheduler_not_found");
+  }
+  return invoke<SchedulerSchedule>("scheduler_set_enabled", { workPath, id, enabled });
+}
+
+export async function runScheduleNow(workPath: string, id: string): Promise<string> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<string>("scheduler_run_now", { workPath, id });
+    if (override) return override;
+    throw new Error("scheduler_not_found");
+  }
+  return invoke<string>("scheduler_run_now", { workPath, id });
 }
 
 function mockGmailUnread(): GmailMessage[] {

@@ -218,7 +218,9 @@ export function ScratchpadPane({
       try {
         const nextEntries = await listScratchpad(workPath);
         if (refreshSerialRef.current !== refreshSerial) return;
-        setEntries(nextEntries);
+        // The "drafts" collection is owned by the Drafts pane; keep it out of
+        // the memo/ideation surface so entries do not appear in two places.
+        setEntries(nextEntries.filter((entry) => entry.collection !== "drafts"));
         const current = editorRef.current;
         if (!checkActive || !current || !current.revision) return;
         const fresh = nextEntries.find(

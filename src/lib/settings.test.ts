@@ -251,6 +251,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ai).toEqual({
       defaultRuntime: "claude",
       classifierRuntime: "inherit",
+      taskIngestMinImportance: "medium",
       permissionMode: "plan",
       commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
       extra: {},

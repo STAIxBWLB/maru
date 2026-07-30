@@ -11,12 +11,14 @@ mod cli_path;
 mod command_output;
 mod diagram;
 mod document;
+mod drafts;
 mod e2e_flow;
 mod evidence_binder;
 mod export;
 mod file_manager;
 mod filename_rules;
 mod frontmatter;
+mod gap;
 mod git;
 mod gmail_gws;
 mod graph_authoring;
@@ -29,6 +31,7 @@ mod inbox_settings;
 mod inbox_watcher;
 mod jobs;
 mod kakao_relay;
+mod kg_refs;
 mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
@@ -41,6 +44,7 @@ mod ops_catalog;
 mod outlook_mso;
 pub(crate) mod scratchpad;
 mod scratchpad_watcher;
+mod scheduler;
 mod secrets;
 mod share_outbox;
 mod shelf;
@@ -94,10 +98,16 @@ use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
     save_document, trash_document, update_frontmatter_field,
 };
+use drafts::{
+    drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_read, drafts_save,
+    drafts_set_status,
+};
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
 use file_manager::{open_in_file_manager, reveal_in_file_manager};
+use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
+use kg_refs::{kg_document_refs, kg_refs_clear};
 use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
@@ -156,6 +166,9 @@ use scratchpad::{
 };
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
+};
+use scheduler::{
+    scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
 use secrets::{
     secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
@@ -271,6 +284,9 @@ pub fn run() {
             // Start the agent-hook status watcher (best-effort; absent hooks
             // simply produce no events).
             let _ = start_terminal_hook_watcher(&app.handle().clone());
+            // Start the skill-mission scheduler ticker (60s cadence; first
+            // tick doubles as the launch catch-up pass).
+            scheduler::start_scheduler_ticker(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -391,6 +407,24 @@ pub fn run() {
             scratchpad_cleanup_plan,
             scratchpad_cleanup_apply,
             scratchpad_migrate_legacy_memos,
+            drafts_list,
+            drafts_read,
+            drafts_save,
+            drafts_create,
+            drafts_set_status,
+            drafts_discard,
+            drafts_promote,
+            gap_analyze,
+            gap_append_log,
+            gap_log_list,
+            gap_reports_list,
+            kg_document_refs,
+            kg_refs_clear,
+            scheduler_list,
+            scheduler_add,
+            scheduler_remove,
+            scheduler_set_enabled,
+            scheduler_run_now,
             start_claude_cli_invocation,
             start_agent_cli_invocation,
             list_ai_missions,

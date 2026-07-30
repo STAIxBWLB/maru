@@ -30,6 +30,7 @@ import { applyGraphSearch, deriveGraphView } from "../../lib/graph/derive";
 import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
+import { resolveReferenceNodeIds } from "../../lib/kgRefs";
 import {
   graphLocalTargetForNode,
   graphNodeMatchesLocalTarget,
@@ -91,6 +92,17 @@ interface GraphViewProps {
   onToggleFavorite: (target: FavoriteTarget) => void;
   onError: (message: string) => void;
   onGraphChanged?: () => void;
+  /** KG reference-focus mode (kg_refs Phase 4): vault-relative node paths the
+   *  active document references + a nonce re-arming the animation. */
+  referenceFocus?: {
+    docPath: string;
+    /** Root the nodePaths are relative to — the document's workspace, which is
+     *  not necessarily the graph's data path. */
+    docRoot: string;
+    nodePaths: string[];
+    nonce: number;
+  } | null;
+  onExitReferenceFocus?: () => void;
 }
 
 const SAVE_DEBOUNCE_MS = 1500;
@@ -109,6 +121,8 @@ export function GraphView({
   onToggleFavorite,
   onError,
   onGraphChanged,
+  referenceFocus = null,
+  onExitReferenceFocus,
 }: GraphViewProps) {
   const { t } = useTranslation();
   const source = graphSettings.source;
@@ -408,6 +422,18 @@ export function GraphView({
   }, [workspacePath, liveModel, loadOverlay]);
 
   const model = enrichment.model ?? liveModel;
+  // KG reference-focus: referenced node paths → graph node ids. Only nodes
+  // present in the current model can be emphasized. The two path roots differ
+  // (see resolveReferenceNodeIds), so this must not compare relPaths directly.
+  const refFocusIds = useMemo(() => {
+    if (!referenceFocus) return null;
+    return resolveReferenceNodeIds(
+      model.nodes,
+      referenceFocus.nodePaths,
+      referenceFocus.docRoot,
+      workspacePath,
+    );
+  }, [referenceFocus, model.nodes, workspacePath]);
   const localFocusNode = useMemo(
     () =>
       localTarget
@@ -865,6 +891,11 @@ export function GraphView({
           else setSearchOpen(false);
           return;
         }
+        if (referenceFocus) {
+          event.preventDefault();
+          onExitReferenceFocus?.();
+          return;
+        }
         if (pathSourceId || pathIds.length > 0) {
           event.preventDefault();
           setPathSourceId(null);
@@ -895,8 +926,10 @@ export function GraphView({
       clearFocus,
       localTarget,
       menu,
+      onExitReferenceFocus,
       pathIds.length,
       pathSourceId,
+      referenceFocus,
       search,
       searchOpen,
       selectById,
@@ -1135,6 +1168,28 @@ export function GraphView({
           <button type="button" onClick={() => setPathSourceId(null)}>{t("graph.focus.exit")}</button>
         </div>
       ) : null}
+      {referenceFocus ? (
+        <div
+          className="graph-ref-focus-bar"
+          data-testid="graph-ref-focus-bar"
+          data-ref-focus-empty={refFocusIds && refFocusIds.size > 0 ? undefined : "true"}
+        >
+          {/* Say so when nothing resolved, instead of claiming "0 nodes
+              highlighted" while the graph is visibly unchanged. */}
+          <span>
+            {refFocusIds && refFocusIds.size > 0
+              ? t("kgref.focusBar", { count: String(refFocusIds.size) })
+              : t("kgref.focusBarEmpty")}
+          </span>
+          <button
+            type="button"
+            data-testid="graph-ref-focus-exit"
+            onClick={() => onExitReferenceFocus?.()}
+          >
+            {t("graph.focus.exit")}
+          </button>
+        </div>
+      ) : null}
 
       {effectiveMode !== "chains" && derived.emptyReason ? (
         <div className="graph-degraded-bar graph-empty-bar" data-testid="graph-empty-bar">
@@ -1194,6 +1249,11 @@ export function GraphView({
               onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
               favoriteIds={favoriteIds}
               exportControllerRef={exportControllerRef}
+              referenceFocus={
+                referenceFocus && refFocusIds && refFocusIds.size > 0
+                  ? { ids: refFocusIds, nonce: referenceFocus.nonce }
+                  : null
+              }
               overlay={
                 <>
                   {display.colorMode === "domain" ||

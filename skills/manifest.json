@@ -62,6 +62,15 @@
       ]
     },
     {
+      "name": "ideation-drafts",
+      "path": "skills/ideation-drafts",
+      "tier": "core",
+      "tags": [
+        "ideation",
+        "drafts"
+      ]
+    },
+    {
       "name": "inbox-intake",
       "path": "skills/inbox-intake",
       "tier": "core",

@@ -126,6 +126,9 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, index: number, x: number, y: number) => void;
   favoriteIds?: Set<string>;
   exportControllerRef?: RefObject<GraphExportController | null>;
+  /** KG reference-focus mode (kg_refs Phase 4): referenced node ids + a nonce
+   *  that re-arms the converge animation on every trigger. null = off. */
+  referenceFocus?: { ids: Set<string>; nonce: number } | null;
   overlay?: ReactNode;
 }
 
@@ -144,6 +147,7 @@ type InteractionState = {
   favoriteIds: Set<string>;
   visibleNodeIds: Set<string> | null;
   visibleEdgeKeys: Set<string> | null;
+  refFocusIds: Set<string> | null;
 };
 
 function highlightSets(highlight: GraphHighlight): {
@@ -175,6 +179,11 @@ function edgeArrowType(edge: GraphEdge, arrows: GraphDisplaySettings["arrows"]):
 
 const LABEL_DENSITY: Record<GraphDisplaySettings["labels"], number> = { low: 0.35, balanced: 0.55, high: 0.8 };
 const LABEL_THRESHOLD: Record<GraphDisplaySettings["labels"], number> = { low: 4, balanced: 3, high: 2 };
+
+/** Reference-focus synthesis: fraction of the way each referenced node
+ *  travels toward the subgraph centroid at the animation's peak. */
+const KG_REF_CONVERGE = 0.35;
+const KG_REF_ANIM_DURATION_MS = 1_500;
 
 function prefersReducedMotion(): boolean {
   return (
@@ -545,6 +554,7 @@ export function GraphCanvas({
   onNodeContextMenu,
   favoriteIds = new Set<string>(),
   exportControllerRef,
+  referenceFocus = null,
   overlay,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
@@ -595,6 +605,14 @@ export function GraphCanvas({
   const displayRef = useRef(display);
   displayRef.current = display;
   const highlightMasks = useMemo(() => highlightSets(highlight), [highlight]);
+  // Reference-focus converge animation (rAF-driven reducer inputs — never a
+  // layout re-run). amp 0 = rest state at the layout positions.
+  const refAnimRef = useRef<{
+    ids: Set<string>;
+    centroid: { x: number; y: number };
+    amp: number;
+  } | null>(null);
+  const refFocusAnimatedNonceRef = useRef(-1);
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -607,6 +625,7 @@ export function GraphCanvas({
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
+    refFocusIds: referenceFocus?.ids ?? null,
   });
   interactionRef.current = {
     ...interactionRef.current,
@@ -620,6 +639,7 @@ export function GraphCanvas({
     favoriteIds,
     visibleNodeIds: visibleNodeIds ?? null,
     visibleEdgeKeys: visibleEdgeKeys ?? null,
+    refFocusIds: referenceFocus?.ids ?? null,
   };
   const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu });
   callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu };
@@ -749,6 +769,26 @@ export function GraphCanvas({
               patch.borderColor = graphTheme().warn;
               patch.forceLabel = true;
             }
+            // KG reference-focus: referenced nodes carry the accent, every
+            // other node dims (same pathway as hover/filter dimming).
+            const refIds = state.refFocusIds;
+            if (refIds) {
+              if (refIds.has(node)) {
+                patch.color = graphTheme().accent;
+                patch.borderColor = graphTheme().accent;
+                patch.size = data.size * (dense ? 0.95 : 1.25);
+                patch.forceLabel = true;
+              } else {
+                patch.color = graphTheme().dimNode;
+              }
+              // Converge animation: offset reducer output toward the centroid
+              // of the referenced subgraph — the graphology data never moves.
+              const anim = refAnimRef.current;
+              if (anim && anim.amp > 0 && anim.ids.has(node)) {
+                patch.x = data.x + (anim.centroid.x - data.x) * KG_REF_CONVERGE * anim.amp;
+                patch.y = data.y + (anim.centroid.y - data.y) * KG_REF_CONVERGE * anim.amp;
+              }
+            }
             // Sparse Global views and typical Local neighborhoods should be
             // readable without an extra zoom gesture. Sigma still resolves
             // label collisions, and larger graphs keep zoom-linked LOD.
@@ -773,6 +813,11 @@ export function GraphCanvas({
             let emphasized = false;
             if (hovered) {
               active = data.sourceId === hovered || data.targetId === hovered;
+              emphasized = active;
+            } else if (state.refFocusIds) {
+              // Reference-focus: only edges inside the referenced subgraph
+              // stay bright; everything else fades.
+              active = state.refFocusIds.has(data.sourceId) && state.refFocusIds.has(data.targetId);
               emphasized = active;
             } else if (overlayEdges) {
               active = overlayEdges.has(edgeKey(data.sourceId, data.targetId));
@@ -1028,7 +1073,14 @@ export function GraphCanvas({
           },
           nodeScreenState: (id) => {
             const data = renderer.getNodeDisplayData(id) as
-              | { size?: number; color?: string; borderColor?: string; favorite?: boolean }
+              | {
+                  size?: number;
+                  color?: string;
+                  borderColor?: string;
+                  favorite?: boolean;
+                  x?: number;
+                  y?: number;
+                }
               | undefined;
             const visibleIds = interactionRef.current.visibleNodeIds;
             return {
@@ -1039,6 +1091,10 @@ export function GraphCanvas({
               color: data?.color ?? null,
               borderColor: data?.borderColor ?? null,
               favorite: data?.favorite === true,
+              // Display-data coordinates: the only place a reducer-only move is
+              // observable (nodeViewportPoint reads the graphology attributes).
+              x: typeof data?.x === "number" ? data.x : null,
+              y: typeof data?.y === "number" ? data.y : null,
             };
           },
           hoveredId: () => interactionRef.current.hoverId,
@@ -1274,7 +1330,135 @@ export function GraphCanvas({
   useEffect(() => {
     const renderer = rendererRef.current;
     if (renderer) renderer.scheduleRefresh();
-  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds, visibleEdgeKeys]);
+  }, [selectedId, focusNodeId, searchHighlightId, pathSourceId, highlight, favoriteIds, visibleNodeIds, visibleEdgeKeys, referenceFocus]);
+
+  // --- KG reference-focus converge animation -------------------------------
+  // Runs once per trigger nonce, only after the renderer is ready, and only
+  // ever touches reducer inputs (refAnimRef) + refresh — FA2 is never
+  // restarted for this. prefers-reduced-motion skips straight to the rest
+  // state (dimmed/emphasized, no motion).
+  const refFocusIds = referenceFocus?.ids ?? null;
+  const refFocusNonce = referenceFocus?.nonce ?? -1;
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    refAnimRef.current = null;
+    if (!refFocusIds || refFocusIds.size === 0) {
+      refFocusAnimatedNonceRef.current = -1;
+      renderer?.refresh();
+      return;
+    }
+    // Not ready yet (FA2 still running, GPU recovery): this effect re-runs on
+    // every rendererState change, and the nonce is only consumed once the
+    // animation COMPLETES, so the trigger is picked up when the graph settles.
+    if (!renderer || !graph || rendererStateRef.current !== "ready") return;
+    if (refFocusAnimatedNonceRef.current === refFocusNonce) {
+      renderer.refresh();
+      return;
+    }
+    let cx = 0;
+    let cy = 0;
+    let count = 0;
+    refFocusIds.forEach((id) => {
+      if (!graph.hasNode(id)) return;
+      const attrs = graph.getNodeAttributes(id);
+      if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
+      cx += attrs.x;
+      cy += attrs.y;
+      count += 1;
+    });
+    if (count === 0) {
+      renderer.refresh();
+      return;
+    }
+    const centroid = { x: cx / count, y: cy / count };
+    // Frame the referenced subgraph once so the synthesis reads on screen.
+    const viewport = renderer.graphToViewport({ x: centroid.x, y: centroid.y });
+    const target = renderer.viewportToFramedGraph(viewport);
+    void renderer.getCamera().animate(
+      { x: target.x, y: target.y },
+      { duration: animDuration(320) },
+    );
+    renderer.refresh();
+    if (prefersReducedMotion()) {
+      refFocusAnimatedNonceRef.current = refFocusNonce;
+      return;
+    }
+    // The tick must NOT use a bare refresh(). A full refresh runs sigma's
+    // process(), which re-reads x/y from the graphology attributes
+    // (sigma.esm.js "Get initial coordinates") and so discards the reducer's
+    // animated coordinates — the animation rendered nothing at all while still
+    // paying for a full re-index every frame. A partial refresh with
+    // skipIndexation instead calls updateNode (reducer + normalization) and
+    // uploads straight to the program, leaving process() out of the loop, so
+    // the animated coordinates survive to the GPU.
+    //
+    // Incident edges have to ride along: edge geometry is baked from the node
+    // cache when an edge is uploaded, so refreshing the nodes alone leaves the
+    // edges pinned to the old positions and visibly tears the subgraph.
+    const animatedNodes: string[] = [];
+    refFocusIds.forEach((id) => {
+      if (graph.hasNode(id)) animatedNodes.push(id);
+    });
+    const incidentEdges = new Set<string>();
+    for (const id of animatedNodes) {
+      for (const edge of graph.edges(id)) incidentEdges.add(edge);
+    }
+    const partialGraph = { nodes: animatedNodes, edges: [...incidentEdges] };
+    let raf = 0;
+    let recoveries = 0;
+    const start = performance.now();
+    // A partial repaint needs the program slots process() assigns. The
+    // interaction-sync effect above also depends on referenceFocus, and its
+    // scheduleRefresh() clears those slots SYNCHRONOUSLY while deferring
+    // process() to the next frame — a partial repaint landing in that window
+    // throws "can't be repaint". A synchronous full refresh runs process() and
+    // restores them, so recover and keep animating; give up if it persists
+    // rather than silently burning frames.
+    const paint = (): boolean => {
+      try {
+        renderer.refresh({ partialGraph, skipIndexation: true });
+        return true;
+      } catch {
+        renderer.refresh();
+        recoveries += 1;
+        if (recoveries <= 3) return true;
+        refAnimRef.current = null;
+        renderer.refresh();
+        return false;
+      }
+    };
+    const tick = (now: number) => {
+      // A topology-identical rebuild swaps the renderer without changing
+      // rendererState, so this effect is not re-run; bail rather than paint into
+      // a killed instance.
+      if (rendererRef.current !== renderer) return;
+      const progress = Math.min(1, (now - start) / KG_REF_ANIM_DURATION_MS);
+      refAnimRef.current = {
+        ids: refFocusIds,
+        centroid,
+        // Out-and-back: gather toward the centroid, then ease home.
+        amp: Math.sin(Math.PI * progress),
+      };
+      if (!paint()) return;
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        refAnimRef.current = null;
+        paint();
+        // Consume the trigger only now: an animation cut short by a layout
+        // restart or a teardown is retried when the graph is ready again.
+        refFocusAnimatedNonceRef.current = refFocusNonce;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Interrupted mid-flight (new trigger, unmount, teardown): drop the offset
+      // so a later render cannot resurrect a half-converged frame.
+      refAnimRef.current = null;
+    };
+  }, [refFocusIds, refFocusNonce, rendererState]);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------
 
