@@ -1,8 +1,10 @@
 import { RefreshCcw, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { LegacyLaunchdService } from "../lib/api";
+import type { ApprovalInput } from "../approval/ApprovalDialog";
 import { useTranslation } from "../lib/i18n";
 import { enumerateSourceChannels, sourceRunByChannel } from "../lib/inboxSources";
+import type { KakaoRelayStatus } from "../lib/kakaoRelay";
 import { latestActivityLine, type MissionProgress } from "../lib/missionProgress";
 import type {
   InboxProcessedItem,
@@ -20,6 +22,7 @@ import {
   inboxProcessChannel,
 } from "./inbox/ProcessingMissionsPanel";
 import { AllSourcesOverview } from "./comms/AllSourcesOverview";
+import { KakaoRelayPanel } from "./comms/KakaoRelayPanel";
 import { MigrationBanner } from "./comms/MigrationBanner";
 import { SourceHeaderCard } from "./comms/SourceHeaderCard";
 import { SourceSelector } from "./comms/SourceSelector";
@@ -43,6 +46,9 @@ interface CommsPaneProps {
   actionBusy?: boolean;
   telegramPollingStatus: TelegramPollingStatus;
   authStatuses: Record<string, ProviderAuthStatus | null>;
+  kakaoRelayStatus: KakaoRelayStatus | null;
+  workPath: string | null;
+  onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   refreshing: boolean;
   migrationServices: LegacyLaunchdService[];
   migrationBusy: boolean;
@@ -85,6 +91,9 @@ export function CommsPane({
   actionBusy = false,
   telegramPollingStatus,
   authStatuses,
+  kakaoRelayStatus,
+  workPath,
+  onConfirmApproval,
   refreshing,
   migrationServices,
   migrationBusy,
@@ -256,6 +265,13 @@ export function CommsPane({
               onStopPolling={onStopTelegramPolling}
               onOpenSettings={onOpenCommsSettings}
             />
+            {sourceFilter === "kakao" ? (
+              <KakaoRelayPanel
+                status={kakaoRelayStatus}
+                workPath={workPath}
+                onConfirmApproval={onConfirmApproval}
+              />
+            ) : null}
             <ProcessingMissionsPanel
               missions={missionsForActive}
               logLines={processingLogLines}

@@ -112,6 +112,7 @@ import {
   readInboxProcessedItem,
   readInboxSourceRuns,
   readInboxRuntimeConfig,
+  readKakaoRelayStatus,
   readTelegramMonitorConfig,
   readVaultCache,
   unloadLegacyTelegramLaunchd,
@@ -130,6 +131,7 @@ import {
   setActiveWorkspaceRoot,
   stageGmailItems,
   stageInboxDropFiles,
+  stageKakaoRelayNew,
   stageOutlookItems,
   stageTelegramItems,
   startInboxWatcher,
@@ -154,6 +156,7 @@ import {
   type LegacyLaunchdService,
 } from "./lib/api";
 import { inboxRootPath, sourceFolderPath } from "./lib/inboxSources";
+import { kakaoRelayAuthStatus, type KakaoRelayStatus } from "./lib/kakaoRelay";
 import {
   exportDispatch,
   exportPlan,
@@ -1108,6 +1111,7 @@ function MainApp() {
   const [commsAuthStatuses, setCommsAuthStatuses] = useState<
     Record<string, ProviderAuthStatus | null>
   >({});
+  const [kakaoRelayStatus, setKakaoRelayStatus] = useState<KakaoRelayStatus | null>(null);
   const [commsRefreshing, setCommsRefreshing] = useState(false);
 
   // Gmail surface (gws CLI). List state is memory-only in Comms, while
@@ -3111,6 +3115,7 @@ function MainApp() {
     const requestId = ++commsReadinessRequestSeqRef.current;
     if (!inboxWorkspacePath) {
       setCommsAuthStatuses({});
+      setKakaoRelayStatus(null);
       return;
     }
     const checks: Array<Promise<ProviderAuthStatus>> = [];
@@ -3143,8 +3148,25 @@ function MainApp() {
         ),
       );
     }
+    const kakaoRelayCheck = readKakaoRelayStatus(inboxWorkspacePath).catch(() => null);
+    checks.push(
+      kakaoRelayCheck.then(
+        (relay): ProviderAuthStatus =>
+          relay
+            ? kakaoRelayAuthStatus(relay)
+            : {
+                provider: "kakao",
+                state: "cli_missing",
+                detail: null,
+                cliPath: null,
+                account: null,
+              },
+      ),
+    );
     const results = await Promise.allSettled(checks);
+    const kakaoRelay = await kakaoRelayCheck;
     if (requestId !== commsReadinessRequestSeqRef.current) return;
+    setKakaoRelayStatus(kakaoRelay);
     const statuses: Record<string, ProviderAuthStatus | null> = {};
     for (const result of results) {
       if (result.status === "fulfilled") {
@@ -3720,10 +3742,6 @@ function MainApp() {
     async (channel: string) => {
       if (!inboxWorkspacePath) return;
       if (channel === "mso" && !inboxWorkspaceConfigReady) return;
-      if (channel === "kakao") {
-        await processInboxKeys([], channel, false);
-        return;
-      }
       setInboxActionBusy(true);
       setError(null);
       try {
@@ -3787,6 +3805,29 @@ function MainApp() {
             const failed = outcomes.filter((outcome) => !outcome.ok);
             if (failed.length > 0) {
               throw new Error(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+            }
+          }
+        } else if (channel === "kakao") {
+          // Dry-run first (copies nothing, does not advance the relay
+          // cursor) so the approval preview reflects exactly what a real
+          // stage would write. A declined approval leaves nothing behind,
+          // and the next run shows the same preview.
+          const preview = await stageKakaoRelayNew(inboxWorkspacePath, true, null);
+          if (preview.stagedMessages + preview.stagedMedia > 0) {
+            const approvalId = await approvalGate.confirmApproval({
+              kind: "kakao.stage",
+              summary: t("comms.kakao.stage.summary"),
+              target: "inbox/drop/kakao",
+              payloadPreview: Object.entries(preview.perRoom)
+                .map(([room, count]) =>
+                  t("comms.kakao.stage.previewLine", { room, count: count.staged }),
+                )
+                .join("\n"),
+            });
+            if (!approvalId) return;
+            const staged = await stageKakaoRelayNew(inboxWorkspacePath, false, approvalId);
+            if (staged.errors.length > 0) {
+              throw new Error(staged.errors.join("\n"));
             }
           }
         }
@@ -8675,6 +8716,9 @@ function MainApp() {
             actionBusy={inboxActionBusy}
             telegramPollingStatus={telegramPolling}
             authStatuses={commsAuthStatuses}
+            kakaoRelayStatus={kakaoRelayStatus}
+            workPath={inboxWorkspacePath}
+            onConfirmApproval={approvalGate.confirmApproval}
             refreshing={commsRefreshing}
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}

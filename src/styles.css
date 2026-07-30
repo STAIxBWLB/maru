@@ -5540,6 +5540,138 @@ button.git-badge:hover {
   color: var(--muted);
 }
 
+.kakao-relay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.kakao-relay-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kakao-relay-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kakao-relay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.kakao-relay-field select,
+.kakao-relay-field input,
+.kakao-relay-field textarea {
+  font: inherit;
+  color: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.kakao-relay-field textarea {
+  resize: vertical;
+}
+
+.kakao-relay-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-label-size);
+}
+
+.kakao-relay-error {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--type-label-size);
+}
+
+.kakao-relay-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.kakao-relay-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.kakao-relay-message.me {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line-soft));
+}
+
+.kakao-relay-message-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.kakao-relay-message-sender {
+  font-weight: 600;
+  color: inherit;
+}
+
+.kakao-relay-message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kakao-relay-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kakao-relay-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kakao-relay-send-state {
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.kakao-relay-send-state.ok {
+  color: var(--accent);
+}
+
+.kakao-relay-send-state.error {
+  color: var(--warn);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

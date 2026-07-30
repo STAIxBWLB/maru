@@ -30,6 +30,38 @@ test("opens the Messages per-source processing dashboard", async ({ page }) => {
   await expect(pane.locator(".comms-results")).toBeVisible();
 });
 
+test("shows the kakao relay panel and auth badge against browser mocks", async ({ page }) => {
+  await page.goto("/");
+
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "메시지", exact: true }).click();
+
+  const pane = page.locator(".comms-pane");
+  await expect(pane).toBeVisible();
+
+  // Drill into the kakao source via the selector.
+  await pane
+    .locator(".comms-source-selector")
+    .getByRole("button", { name: /카카오톡/ })
+    .click();
+  await expect(pane.locator(".comms-source-detail")).toBeVisible();
+
+  // The auth badge now renders for kakao too (mock relay reports running).
+  await expect(pane.locator(".source-controls .auth-status-badge")).toBeVisible();
+
+  // The relay panel renders the mock room + captured messages, read-only viewer.
+  const panel = pane.locator(".kakao-relay-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator("select").first()).toBeVisible();
+  await expect(panel.locator(".kakao-relay-message")).toHaveCount(2);
+  await expect(panel.getByText("이번 주 일정 공유드립니다.")).toBeVisible();
+
+  // The composer is available because the mock room is send-allowed.
+  await expect(
+    panel.getByRole("button", { name: "보내기", exact: true }),
+  ).toBeVisible();
+});
+
 test("filters processed results on the backend and refreshes without clearing the list", async ({
   page,
 }) => {
