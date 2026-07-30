@@ -2436,18 +2436,25 @@ export async function readKakaoRelayMessages(
   });
 }
 
-export async function stageKakaoRelayNew(workPath: string): Promise<KakaoStageResult> {
-  if (!isTauri()) {
-    return { stagedMessages: 0, stagedMedia: 0, skipped: 0, errors: [], perRoom: {} };
-  }
-  return invoke<KakaoStageResult>("stage_kakao_relay_new", { workPath });
+export async function stageKakaoRelayNew(
+  workPath: string,
+  dryRun: boolean,
+  approvalId?: string | null,
+): Promise<KakaoStageResult> {
+  if (!isTauri()) return mockKakaoStageResult();
+  return invoke<KakaoStageResult>("stage_kakao_relay_new", {
+    workPath,
+    dryRun,
+    approvalId: approvalId ?? null,
+  });
 }
 
 export async function enqueueKakaoSend(
   workPath: string,
   chat: string,
   text: string,
-  attachmentPath?: string | null,
+  attachmentPath: string | null,
+  approvalId: string,
 ): Promise<KakaoEnqueueResult> {
   if (!isTauri()) {
     return {
@@ -2826,6 +2833,16 @@ function mockOutlookUnread(): OutlookMessage[] {
 
 const MOCK_KAKAO_ROOM_NAME = "코이카우즈백사업단";
 const MOCK_KAKAO_ROOM_SLUG = "koica-uzbek";
+
+function mockKakaoStageResult(): KakaoStageResult {
+  return {
+    stagedMessages: 2,
+    stagedMedia: 0,
+    skipped: 0,
+    errors: [],
+    perRoom: { [MOCK_KAKAO_ROOM_SLUG]: { staged: 2, skipped: 0 } },
+  };
+}
 
 function mockKakaoRelayStatus(): KakaoRelayStatus {
   return {

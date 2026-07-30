@@ -6,7 +6,23 @@ import {
   relayLiveness,
   type KakaoRelayEnvelope,
   type KakaoRelayStatus,
+  type KakaoStageResult,
 } from "./kakaoRelay";
+
+describe("KakaoStageResult perRoom", () => {
+  it("carries shaped staged/skipped counts per room (not bare numbers)", () => {
+    const result: KakaoStageResult = {
+      stagedMessages: 2,
+      stagedMedia: 0,
+      skipped: 1,
+      errors: [],
+      perRoom: { "koica-uzbek": { staged: 2, skipped: 1 } },
+    };
+    const total = Object.values(result.perRoom).reduce((sum, room) => sum + room.staged, 0);
+    expect(total).toBe(2);
+    expect(result.perRoom["koica-uzbek"].skipped).toBe(1);
+  });
+});
 
 function status(partial: Partial<KakaoRelayStatus>): KakaoRelayStatus {
   return {
@@ -32,7 +48,7 @@ describe("relayLiveness", () => {
     expect(relayLiveness(status({ state: "paused", stale: true }))).toBe("paused");
     expect(relayLiveness(status({ stale: true }))).toBe("stale");
     expect(relayLiveness(status({}))).toBe("ok");
-    expect(relayLiveness(status({ state: "starting" }))).toBe("unreachable");
+    expect(relayLiveness(status({ state: "starting" }))).toBe("unknown");
   });
 });
 
@@ -104,6 +120,7 @@ describe("kakaoRelayAuthStatus", () => {
     expect(kakaoRelayAuthStatus(status({ stale: true })).state).toBe("stale");
     expect(kakaoRelayAuthStatus(status({ state: "unreachable" })).state).toBe("cli_missing");
     expect(kakaoRelayAuthStatus(status({ configured: false })).state).toBe("cli_missing");
+    expect(kakaoRelayAuthStatus(status({ state: "starting" })).state).toBe("unknown");
 
     const errored = kakaoRelayAuthStatus(status({ lastError: "daemon down" }));
     expect(errored.detail).toBe("daemon down");

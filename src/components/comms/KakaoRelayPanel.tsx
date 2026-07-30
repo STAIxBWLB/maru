@@ -14,8 +14,12 @@ import {
 } from "../../lib/kakaoRelay";
 
 const MESSAGE_LIMIT = 50;
-const SEND_POLL_INTERVAL_MS = 5000;
-const SEND_POLL_ATTEMPTS = 12;
+// The relay cycle defaults to 300s plus Dropbox sync latency, so poll with
+// backoff for ~6 minutes before giving up: 5s x6, then 30s x10.
+const SEND_POLL_DELAYS_MS: number[] = [
+  ...Array.from({ length: 6 }, () => 5000),
+  ...Array.from({ length: 10 }, () => 30000),
+];
 
 interface KakaoRelayPanelProps {
   status: KakaoRelayStatus | null;
@@ -23,7 +27,7 @@ interface KakaoRelayPanelProps {
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
 }
 
-type SendState = "idle" | "sending" | "queued" | "sent" | "failed";
+type SendState = "idle" | "sending" | "queued" | "sent" | "failed" | "pending";
 
 export function KakaoRelayPanel({
   status,
@@ -44,11 +48,14 @@ export function KakaoRelayPanel({
   const [messages, setMessages] = useState<KakaoRelayEnvelope[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
-  const effectiveViewerRoom = viewerRoom || rooms[0]?.slug || "";
+  // Clamp the selection if the slug disappears from the relay's rooms.json.
+  const effectiveViewerRoom = rooms.some((room) => room.slug === viewerRoom)
+    ? viewerRoom
+    : rooms[0]?.slug || "";
 
   const loadMessages = useCallback(async () => {
+    setMessages([]);
     if (!workPath || !effectiveViewerRoom) {
-      setMessages([]);
       return;
     }
     setMessagesLoading(true);
@@ -86,8 +93,8 @@ export function KakaoRelayPanel({
   const pollSendResult = useCallback(
     async (id: string, seq: number) => {
       if (!workPath) return;
-      for (let attempt = 0; attempt < SEND_POLL_ATTEMPTS; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, SEND_POLL_INTERVAL_MS));
+      for (const delay of SEND_POLL_DELAYS_MS) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
         if (pollSeqRef.current !== seq) return;
         try {
           const results = await readKakaoSendResults(workPath, [id]);
@@ -105,6 +112,12 @@ export function KakaoRelayPanel({
           // A transient read failure should not abort the polling loop.
         }
       }
+      // The relay cycle did not consume the request within the poll window.
+      // It may still be sent later — surface a terminal state instead of
+      // spinning forever.
+      if (pollSeqRef.current === seq) {
+        setSendState("pending");
+      }
     },
     [workPath],
   );
@@ -120,10 +133,12 @@ export function KakaoRelayPanel({
     setSendState("sending");
     setSendError(null);
     try {
+      const attachmentPath = attachment.trim();
       const approvalId = await onConfirmApproval({
         kind: "kakao.relay_send",
         summary: t("comms.kakao.send.summary"),
         target: chatName,
+        payloadPreview: attachmentPath ? `${text}\n${attachmentPath}` : text,
       });
       if (!approvalId) {
         setSendState("idle");
@@ -133,7 +148,8 @@ export function KakaoRelayPanel({
         workPath,
         chatName,
         text,
-        attachment.trim() || null,
+        attachmentPath || null,
+        approvalId,
       );
       setSendState("queued");
       setDraft("");
@@ -278,6 +294,9 @@ export function KakaoRelayPanel({
               ) : null}
               {sendState === "sent" ? (
                 <span className="kakao-relay-send-state ok">{t("comms.kakao.send.sent")}</span>
+              ) : null}
+              {sendState === "pending" ? (
+                <span className="kakao-relay-send-state">{t("comms.kakao.send.pending")}</span>
               ) : null}
               {sendState === "failed" ? (
                 <span className="kakao-relay-send-state error">

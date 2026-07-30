@@ -27,22 +27,54 @@ from pathlib import Path
 SCHEMA = "kakao-send/v1"
 
 
+def _section_chain_value(text: str, chain: list[str], key: str) -> str | None:
+    """Indentation-aware scan for a nested YAML value (e.g. io.providers.kakao.relay_root).
+
+    Tracks the section path by indent depth; ignores comments and quoted
+    values are unwrapped. No regex backtracking, no cross-section leaks.
+    """
+
+    def indent_of(line: str) -> int:
+        return len(line) - len(line.lstrip(" "))
+
+    path: list[tuple[int, str]] = []  # (indent, section) stack
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", stripped)
+        if not m:
+            continue
+        name, value = m.group(1), m.group(2)
+        depth = indent_of(raw)
+        while path and path[-1][0] >= depth:
+            path.pop()
+        current = [section for _, section in path]
+        if not value:
+            # Section header — push and continue.
+            path.append((depth, name))
+            continue
+        # Leaf value. Strip inline comments outside quotes.
+        value = value.split(" #", 1)[0].strip().strip("\"'").strip()
+        if current == chain and name == key and value:
+            return value
+        # A leaf at this level still counts as a node on the stack path only
+        # when it is itself one of the chain parents handled above; leaves
+        # are never pushed.
+    return None
+
+
 def resolve_relay_root(work: Path, override: str | None) -> Path:
     if override:
         return Path(os.path.expanduser(override))
     config = work / "workspace.config.yaml"
     if not config.is_file():
         raise SystemExit(f"relay_root_not_configured: {config} not found")
-    # Tolerant line-based extraction of io.providers.kakao.relay_root.
-    # Good enough for the flat provider map; --relay-root overrides anyway.
     text = config.read_text(encoding="utf-8")
-    match = re.search(
-        r"(?ms)^\s*kakao:\s*\n(?:^\s{4,}\S.*\n)*?^\s*relay_root:\s*[\"']?([^\"'\n]+)[\"']?\s*$",
-        text,
-    )
-    if not match:
+    value = _section_chain_value(text, ["io", "providers", "kakao"], "relay_root")
+    if not value:
         raise SystemExit("relay_root_not_configured: io.providers.kakao.relay_root missing")
-    return Path(os.path.expanduser(match.group(1).strip()))
+    return Path(os.path.expanduser(value))
 
 
 def sanitize(name: str) -> str:
@@ -88,8 +120,9 @@ def main() -> int:
 
     pending = relay_root / "outbox" / "pending"
     pending.mkdir(parents=True, exist_ok=True)
-    # Atomic write: temp file in the same directory, then rename.
-    fd, tmp_name = tempfile.mkstemp(dir=pending, prefix=".tmp-", suffix=".json")
+    # Atomic write: temp file in the same directory, then rename. The tmp
+    # name must NOT end in .json — the relay's pending filter matches *.json.
+    fd, tmp_name = tempfile.mkstemp(dir=pending, prefix=".tmp-", suffix=".part")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)

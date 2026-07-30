@@ -1152,6 +1152,7 @@ const ko: Record<string, string> = {
   "comms.kakao.composer.send": "보내기",
   "comms.kakao.send.summary": "카카오톡 메시지를 릴레이 전송 큐에 등록합니다.",
   "comms.kakao.send.queued": "전송 큐에 등록됨. 릴레이 처리를 기다리는 중...",
+  "comms.kakao.send.pending": "아직 전송 대기 중입니다. 나중에 확인해 주세요.",
   "comms.kakao.send.sent": "전송됨",
   "comms.kakao.send.failed": "전송 실패: {error}",
   "comms.kakao.noSendRooms":
@@ -4349,6 +4350,7 @@ const en: Record<string, string> = {
   "comms.kakao.composer.send": "Send",
   "comms.kakao.send.summary": "Queue a KakaoTalk message for the relay to send.",
   "comms.kakao.send.queued": "Queued. Waiting for the relay to send...",
+  "comms.kakao.send.pending": "Still queued, check back later.",
   "comms.kakao.send.sent": "Sent",
   "comms.kakao.send.failed": "Send failed: {error}",
   "comms.kakao.noSendRooms":

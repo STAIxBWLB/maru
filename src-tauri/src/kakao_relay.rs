@@ -9,15 +9,19 @@
 //
 // All reads tolerate partial Dropbox sync: unparseable JSON files are
 // skipped, and media files younger than 10s are considered still in flight.
+// Envelopes are staged into `<drop>/messages/` and media into `<drop>/files/`
+// so the inbox `source_kinds` mapping (messages -> message, files ->
+// attachment) applies via the first path component.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use tauri::State;
 
 use crate::atomic_file::write_atomic;
 use crate::inbox_drop::sanitize_filename;
@@ -27,12 +31,21 @@ use crate::vault::resolve_inside_vault;
 
 const RELAY_PROVIDER: &str = "kakao";
 const DROP_CHANNEL: &str = "kakao";
+const KAKAO_STAGE_KIND: &str = "kakao.stage";
+const KAKAO_SEND_KIND: &str = "kakao.relay_send";
 const MEDIA_STABLE_AGE: Duration = Duration::from_secs(10);
 const DEFAULT_HEARTBEAT_INTERVAL_SECONDS: i64 = 300;
 const HEARTBEAT_STALE_MAX_SECONDS: i64 = 900;
 const DEFAULT_MESSAGE_LIMIT: u32 = 50;
 const MAX_MESSAGE_LIMIT: u32 = 500;
 const REQUESTED_BY: &str = "work-mac";
+/// Per-room ring of recently staged message keys, persisted in the cursor so
+/// late/backfilled files below the high-water mark are still staged exactly
+/// once.
+const ROOM_SEEN_RING: usize = 500;
+/// Ring of staged media identity triples (`size:mtime:name`); capped so the
+/// cursor file does not grow without bound.
+const MEDIA_SEEN_RING: usize = 5000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +116,11 @@ struct RelayCursor {
 struct RelayRoomCursor {
     #[serde(default)]
     last_file: Option<String>,
+    /// Bounded ring of recently staged keys. `None` means the cursor was
+    /// written before the ring existed; on first load it is seeded from the
+    /// high-water mark so history is not restaged.
+    #[serde(default)]
+    seen: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +181,38 @@ fn read_json_file(path: &Path) -> Option<JsonValue> {
     serde_json::from_str(&raw).ok()
 }
 
+fn is_valid_room_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug != "."
+        && slug != ".."
+        && !slug.contains('/')
+        && !slug.contains('\\')
+        && !slug.contains('\0')
+}
+
+fn validate_room_slug(slug: &str) -> Result<String, String> {
+    let trimmed = slug.trim();
+    if !is_valid_room_slug(trimmed) {
+        return Err(format!("invalid_room_slug: {slug}"));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// The relay writes priority as "high"|"medium"|"low"; older builds wrote a
+/// number. Accept both, mapping high=0 / medium=1 / low=2 and passing numbers
+/// through. Missing/unknown values land on medium.
+fn parse_priority(value: Option<&JsonValue>) -> i64 {
+    match value {
+        Some(JsonValue::String(level)) => match level.trim().to_ascii_lowercase().as_str() {
+            "high" => 0,
+            "low" => 2,
+            _ => 1,
+        },
+        Some(JsonValue::Number(number)) => number.as_i64().unwrap_or(1),
+        _ => 1,
+    }
+}
+
 fn read_rooms(root: &Path) -> Vec<RelayRoomEntry> {
     let Some(value) = read_json_file(&root.join("rooms").join("rooms.json")) else {
         return Vec::new();
@@ -173,8 +223,10 @@ fn read_rooms(root: &Path) -> Vec<RelayRoomEntry> {
     rooms
         .iter()
         .filter_map(|room| {
-            let slug = room.get("slug")?.as_str()?.trim().to_string();
-            if slug.is_empty() {
+            let slug = room.get("slug")?.as_str()?.trim();
+            // Poisoned slugs (path traversal) must never reach a path join,
+            // regardless of which caller consumes the room list.
+            if !is_valid_room_slug(slug) {
                 return None;
             }
             let name = room
@@ -182,11 +234,11 @@ fn read_rooms(root: &Path) -> Vec<RelayRoomEntry> {
                 .and_then(JsonValue::as_str)
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .unwrap_or(&slug)
+                .unwrap_or(slug)
                 .to_string();
             Some(RelayRoomEntry {
                 name,
-                slug,
+                slug: slug.to_string(),
                 managed: room
                     .get("managed")
                     .and_then(JsonValue::as_bool)
@@ -195,26 +247,10 @@ fn read_rooms(root: &Path) -> Vec<RelayRoomEntry> {
                     .get("send_allowed")
                     .and_then(JsonValue::as_bool)
                     .unwrap_or(false),
-                priority: room
-                    .get("priority")
-                    .and_then(JsonValue::as_i64)
-                    .unwrap_or(0),
+                priority: parse_priority(room.get("priority")),
             })
         })
         .collect()
-}
-
-fn validate_room_slug(slug: &str) -> Result<String, String> {
-    let trimmed = slug.trim();
-    if trimmed.is_empty()
-        || trimmed == "."
-        || trimmed == ".."
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-    {
-        return Err(format!("invalid_room_slug: {slug}"));
-    }
-    Ok(trimmed.to_string())
 }
 
 /// All message envelope files for a room as (`YYYY-MM-DD/<file>`, path),
@@ -304,12 +340,15 @@ fn read_status_inner(work: &Path) -> KakaoRelayStatus {
             value
                 .get("interval_seconds")
                 .or_else(|| value.get("cycle_seconds"))
+                .or_else(|| value.get("poll_interval_seconds"))
         })
         .and_then(JsonValue::as_i64)
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_SECONDS);
     let stale = match heartbeat_age_seconds {
-        Some(age) => age > 3 * expected_interval || age > HEARTBEAT_STALE_MAX_SECONDS,
+        Some(age) => {
+            age > expected_interval.saturating_mul(3) || age > HEARTBEAT_STALE_MAX_SECONDS
+        }
         None => true,
     };
     let state = relay
@@ -372,7 +411,22 @@ fn read_messages_inner(
     Ok(messages)
 }
 
-fn stage_inner(work: &Path, media_stable_age: Duration) -> Result<KakaoRelayStageOutcome, String> {
+/// Identity for staged media: same name with different content (size/mtime)
+/// must be staged again.
+fn media_seen_key(name: &str, size: u64, mtime_secs: i64) -> String {
+    format!("{size}:{mtime_secs}:{name}")
+}
+
+fn cap_seen_ring(seen: BTreeSet<String>) -> Vec<String> {
+    let mut keys: Vec<String> = seen.into_iter().collect();
+    if keys.len() > ROOM_SEEN_RING {
+        // Keys sort by date/time; keep the newest.
+        keys = keys.split_off(keys.len() - ROOM_SEEN_RING);
+    }
+    keys
+}
+
+fn stage_inner(work: &Path, media_stable_age: Duration, dry_run: bool) -> Result<KakaoRelayStageOutcome, String> {
     let root = resolve_relay_root(work)?;
     let mut outcome = KakaoRelayStageOutcome::default();
     let drop_dir = match resolve_kakao_drop_dir(work) {
@@ -386,88 +440,135 @@ fn stage_inner(work: &Path, media_stable_age: Duration) -> Result<KakaoRelayStag
     let mut cursor_dirty = false;
 
     if let Some(drop_dir) = drop_dir.as_ref() {
-        fs::create_dir_all(drop_dir)
-            .map_err(|err| format!("Cannot create {}: {err}", drop_dir.to_string_lossy()))?;
+        if !dry_run {
+            fs::create_dir_all(drop_dir)
+                .map_err(|err| format!("Cannot create {}: {err}", drop_dir.to_string_lossy()))?;
+        }
+        // Envelopes land in `<drop>/messages/` so the inbox source_kinds
+        // mapping (`messages` -> message) applies via the first component.
+        let messages_dir = drop_dir.join("messages");
         for room in read_rooms(&root).into_iter().filter(|room| room.managed) {
-            let last_seen = cursor
-                .rooms
-                .get(&room.slug)
-                .and_then(|entry| entry.last_file.clone());
-            let count = outcome.per_room.entry(room.slug.clone()).or_default();
+            let files = list_room_message_files(&root, &room.slug);
+            let (high_water, seen_seed) = match cursor.rooms.get(&room.slug) {
+                Some(entry) => (entry.last_file.clone(), entry.seen.clone()),
+                None => (None, None),
+            };
+            // A legacy (high-water-only) cursor is seeded with everything at
+            // or below the mark so existing history is not restaged; anything
+            // appearing later — even below the mark — is not in the ring and
+            // gets staged exactly once.
+            let mut seen: BTreeSet<String> = match seen_seed {
+                Some(list) => list.into_iter().collect(),
+                None => files
+                    .iter()
+                    .filter(|(key, _)| {
+                        high_water
+                            .as_deref()
+                            .is_some_and(|last| key.as_str() <= last)
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect(),
+            };
             let mut newest_staged: Option<String> = None;
-            for (key, path) in list_room_message_files(&root, &room.slug) {
-                if last_seen.as_deref().is_some_and(|last| key.as_str() <= last) {
-                    continue;
+            {
+                let count = outcome.per_room.entry(room.slug.clone()).or_default();
+                for (key, path) in &files {
+                    if seen.contains(key) {
+                        continue;
+                    }
+                    // Partial sync: leave unparseable envelopes (and everything
+                    // after them) for the next run instead of staging partials.
+                    let Ok(bytes) = fs::read(path) else {
+                        count.skipped += 1;
+                        outcome.skipped += 1;
+                        outcome
+                            .errors
+                            .push(format!("{}: cannot read {}", room.slug, key));
+                        break;
+                    };
+                    if serde_json::from_slice::<JsonValue>(&bytes).is_err() {
+                        count.skipped += 1;
+                        outcome.skipped += 1;
+                        outcome
+                            .errors
+                            .push(format!("{}: unparseable envelope {}", room.slug, key));
+                        break;
+                    }
+                    if !dry_run {
+                        let Some(file_name) = path.file_name() else {
+                            continue;
+                        };
+                        // Atomic copy: dot-prefixed temp in the same dir, then rename.
+                        if let Err(err) = write_atomic(&messages_dir.join(file_name), &bytes) {
+                            count.skipped += 1;
+                            outcome.skipped += 1;
+                            outcome
+                                .errors
+                                .push(format!("{}: cannot stage {}: {err}", room.slug, key));
+                            break;
+                        }
+                        seen.insert(key.clone());
+                        newest_staged = Some(key.clone());
+                    }
+                    count.staged += 1;
+                    outcome.staged_messages += 1;
                 }
-                // Partial sync: leave unparseable envelopes (and everything
-                // after them) for the next run instead of staging partials.
-                let Ok(bytes) = fs::read(&path) else {
-                    count.skipped += 1;
-                    outcome.skipped += 1;
-                    outcome
-                        .errors
-                        .push(format!("{}: cannot read {}", room.slug, key));
-                    break;
-                };
-                if serde_json::from_slice::<JsonValue>(&bytes).is_err() {
-                    count.skipped += 1;
-                    outcome.skipped += 1;
-                    outcome
-                        .errors
-                        .push(format!("{}: unparseable envelope {}", room.slug, key));
-                    break;
-                }
-                let Some(file_name) = path.file_name() else {
-                    continue;
-                };
-                let target = drop_dir.join(file_name);
-                if let Err(err) = fs::copy(&path, &target) {
-                    count.skipped += 1;
-                    outcome.skipped += 1;
-                    outcome.errors.push(format!(
-                        "{}: cannot stage {}: {err}",
-                        room.slug, key
-                    ));
-                    break;
-                }
-                count.staged += 1;
-                outcome.staged_messages += 1;
-                newest_staged = Some(key);
             }
-            if let Some(newest) = newest_staged {
-                cursor
-                    .rooms
-                    .entry(room.slug.clone())
-                    .or_default()
-                    .last_file = Some(newest);
-                cursor_dirty = true;
+            if !dry_run {
+                let entry = cursor.rooms.entry(room.slug.clone()).or_default();
+                if let Some(newest) = newest_staged {
+                    if entry
+                        .last_file
+                        .as_deref()
+                        .is_none_or(|last| newest.as_str() > last)
+                    {
+                        entry.last_file = Some(newest);
+                    }
+                    cursor_dirty = true;
+                }
+                entry.seen = Some(cap_seen_ring(seen));
             }
         }
 
         // Media: copy stable (fully synced) new files into `<drop>/files/`.
         let incoming = root.join("media").join("_incoming");
         if incoming.is_dir() {
-            let known: std::collections::BTreeSet<String> =
-                cursor.media.iter().cloned().collect();
-            let mut staged_names = Vec::new();
-            let mut entries: Vec<PathBuf> = fs::read_dir(&incoming)
-                .map(|read| {
-                    read.flatten()
-                        .map(|entry| entry.path())
-                        .filter(|path| path.is_file())
-                        .collect()
-                })
-                .unwrap_or_default();
-            entries.sort();
-            for path in entries {
-                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                    continue;
-                };
-                if name.starts_with('.') || known.contains(name) {
+            let known: BTreeSet<String> = cursor.media.iter().cloned().collect();
+            let mut entries: Vec<(String, PathBuf, fs::Metadata)> = Vec::new();
+            if let Ok(read) = fs::read_dir(&incoming) {
+                for entry in read.flatten() {
+                    let path = entry.path();
+                    // symlink_metadata: stage regular files only — never follow
+                    // symlinks out of the relay tree.
+                    let Ok(meta) = fs::symlink_metadata(&path) else {
+                        continue;
+                    };
+                    if !meta.file_type().is_file() {
+                        continue;
+                    }
+                    let Some(name) = entry.file_name().to_str().map(ToString::to_string) else {
+                        continue;
+                    };
+                    entries.push((name, path, meta));
+                }
+            }
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            for (name, path, meta) in entries {
+                if name.starts_with('.') {
                     continue;
                 }
-                let stable = fs::metadata(&path)
-                    .and_then(|meta| meta.modified())
+                let mtime_secs = meta
+                    .modified()
+                    .ok()
+                    .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
+                    .map(|age| age.as_secs() as i64)
+                    .unwrap_or(0);
+                let key = media_seen_key(&name, meta.len(), mtime_secs);
+                if known.contains(&key) {
+                    continue;
+                }
+                let stable = meta
+                    .modified()
                     .ok()
                     .and_then(|mtime| SystemTime::now().duration_since(mtime).ok())
                     .is_some_and(|age| age >= media_stable_age);
@@ -475,34 +576,34 @@ fn stage_inner(work: &Path, media_stable_age: Duration) -> Result<KakaoRelayStag
                     outcome.skipped += 1;
                     continue;
                 }
-                let files_dir = drop_dir.join("files");
-                if let Err(err) = fs::create_dir_all(&files_dir)
-                    .map_err(|err| err.to_string())
-                    .and_then(|_| {
-                        fs::copy(&path, files_dir.join(name)).map_err(|err| err.to_string())
-                    })
-                {
-                    outcome.skipped += 1;
-                    outcome
-                        .errors
-                        .push(format!("media: cannot stage {name}: {err}"));
-                    continue;
+                if !dry_run {
+                    let staged = fs::read(&path).map_err(|err| err.to_string()).and_then(
+                        |bytes| write_atomic(&drop_dir.join("files").join(&name), &bytes),
+                    );
+                    match staged {
+                        Ok(()) => {
+                            cursor.media.push(key);
+                            if cursor.media.len() > MEDIA_SEEN_RING {
+                                let overflow = cursor.media.len() - MEDIA_SEEN_RING;
+                                cursor.media.drain(0..overflow);
+                            }
+                            cursor_dirty = true;
+                        }
+                        Err(err) => {
+                            outcome.skipped += 1;
+                            outcome
+                                .errors
+                                .push(format!("media: cannot stage {name}: {err}"));
+                            continue;
+                        }
+                    }
                 }
                 outcome.staged_media += 1;
-                staged_names.push(name.to_string());
-            }
-            if !staged_names.is_empty() {
-                let mut merged = cursor.media.clone();
-                merged.extend(staged_names);
-                merged.sort();
-                merged.dedup();
-                cursor.media = merged;
-                cursor_dirty = true;
             }
         }
     }
 
-    if cursor_dirty {
+    if cursor_dirty && !dry_run {
         let payload = serde_json::to_vec_pretty(&cursor)
             .map_err(|err| format!("kakao_relay_cursor_serialize_failed: {err}"))?;
         write_atomic(&cursor_path(work), &payload)?;
@@ -542,13 +643,9 @@ fn enqueue_send_inner(
             .ok_or_else(|| format!("attachment_name_invalid: {source}"))?;
         let relative = format!("outbox/attachments/{id}-{name}");
         let target = root.join(&relative);
-        let parent = target
-            .parent()
-            .ok_or_else(|| "attachment_target_invalid".to_string())?;
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create {}: {err}", parent.to_string_lossy()))?;
-        fs::copy(&source_path, &target)
-            .map_err(|err| format!("Cannot copy attachment to {}: {err}", target.to_string_lossy()))?;
+        let bytes = fs::read(&source_path)
+            .map_err(|err| format!("Cannot read attachment {source}: {err}"))?;
+        write_atomic(&target, &bytes)?;
         attachment_field = JsonValue::String(relative);
     }
 
@@ -622,46 +719,88 @@ fn read_send_results_inner(work: &Path, ids: &[String]) -> Result<Vec<KakaoSendR
     Ok(results)
 }
 
-#[tauri::command]
-pub fn read_kakao_relay_status(work_path: String) -> Result<KakaoRelayStatus, String> {
-    let work = resolve_inside_vault(&work_path, ".")?;
-    Ok(read_status_inner(&work))
+/// Stage gate: dry runs copy nothing and never touch the cursor, so they are
+/// exempt; real runs consume a `kakao.stage` approval before any write.
+fn require_stage_approval(
+    approvals: &crate::approval::ApprovalState,
+    dry_run: bool,
+    approval_id: Option<String>,
+) -> Result<(), String> {
+    if dry_run {
+        return Ok(());
+    }
+    crate::approval::require_approval(approvals, approval_id, KAKAO_STAGE_KIND)
 }
 
 #[tauri::command]
-pub fn read_kakao_relay_messages(
+pub async fn read_kakao_relay_status(work_path: String) -> Result<KakaoRelayStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<KakaoRelayStatus, String> {
+        let work = resolve_inside_vault(&work_path, ".")?;
+        Ok(read_status_inner(&work))
+    })
+    .await
+    .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn read_kakao_relay_messages(
     work_path: String,
     room_slug: String,
     limit: Option<u32>,
 ) -> Result<Vec<JsonValue>, String> {
-    let work = resolve_inside_vault(&work_path, ".")?;
-    read_messages_inner(&work, &room_slug, limit)
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<JsonValue>, String> {
+        let work = resolve_inside_vault(&work_path, ".")?;
+        read_messages_inner(&work, &room_slug, limit)
+    })
+    .await
+    .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
 }
 
 #[tauri::command]
-pub fn stage_kakao_relay_new(work_path: String) -> Result<KakaoRelayStageOutcome, String> {
-    let work = resolve_inside_vault(&work_path, ".")?;
-    stage_inner(&work, MEDIA_STABLE_AGE)
+pub async fn stage_kakao_relay_new(
+    approvals: State<'_, crate::approval::ApprovalState>,
+    work_path: String,
+    dry_run: bool,
+    approval_id: Option<String>,
+) -> Result<KakaoRelayStageOutcome, String> {
+    require_stage_approval(&approvals, dry_run, approval_id)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<KakaoRelayStageOutcome, String> {
+        let work = resolve_inside_vault(&work_path, ".")?;
+        stage_inner(&work, MEDIA_STABLE_AGE, dry_run)
+    })
+    .await
+    .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
 }
 
 #[tauri::command]
-pub fn enqueue_kakao_send(
+pub async fn enqueue_kakao_send(
+    approvals: State<'_, crate::approval::ApprovalState>,
     work_path: String,
     chat: String,
     text: String,
     attachment_path: Option<String>,
+    approval_id: Option<String>,
 ) -> Result<KakaoSendEnqueueResult, String> {
-    let work = resolve_inside_vault(&work_path, ".")?;
-    enqueue_send_inner(&work, &chat, &text, attachment_path.as_deref())
+    crate::approval::require_approval(&approvals, approval_id, KAKAO_SEND_KIND)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<KakaoSendEnqueueResult, String> {
+        let work = resolve_inside_vault(&work_path, ".")?;
+        enqueue_send_inner(&work, &chat, &text, attachment_path.as_deref())
+    })
+    .await
+    .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
 }
 
 #[tauri::command]
-pub fn read_kakao_send_results(
+pub async fn read_kakao_send_results(
     work_path: String,
     ids: Vec<String>,
 ) -> Result<Vec<KakaoSendResult>, String> {
-    let work = resolve_inside_vault(&work_path, ".")?;
-    read_send_results_inner(&work, &ids)
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<KakaoSendResult>, String> {
+        let work = resolve_inside_vault(&work_path, ".")?;
+        read_send_results_inner(&work, &ids)
+    })
+    .await
+    .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
 }
 
 #[cfg(test)]
@@ -787,7 +926,7 @@ io:
         .unwrap();
         write_rooms(
             fixture.relay.path(),
-            r#"{"rooms":[{"name":"Team","slug":"team","managed":true,"send_allowed":false,"priority":1}]}"#,
+            r#"{"rooms":[{"name":"Team","slug":"team","managed":true,"send_allowed":false,"priority":"high"}]}"#,
         );
         fs::create_dir_all(fixture.relay.path().join("messages/team/2026-07-28")).unwrap();
         fs::create_dir_all(fixture.relay.path().join("messages/team/2026-07-29")).unwrap();
@@ -798,7 +937,48 @@ io:
         assert!(status.heartbeat_age_seconds.unwrap() >= 7200);
         assert_eq!(status.rooms.len(), 1);
         assert_eq!(status.rooms[0].slug, "team");
+        assert_eq!(status.rooms[0].priority, 0);
         assert_eq!(status.rooms[0].message_days, 2);
+    }
+
+    #[test]
+    fn status_uses_poll_interval_seconds_for_staleness() {
+        let fixture = fixture("drop/kakao");
+        let status_dir = fixture.relay.path().join("status");
+        fs::create_dir_all(&status_dir).unwrap();
+        // 60-second-old heartbeat: fresh with the 300s default, stale when the
+        // relay publishes a 10s poll interval (3*10 < 60).
+        let heartbeat = (Utc::now() - chrono::Duration::seconds(60)).to_rfc3339();
+        fs::write(
+            status_dir.join("relay.json"),
+            format!(r#"{{"state":"running","heartbeat":"{heartbeat}"}}"#),
+        )
+        .unwrap();
+        assert!(!read_status_inner(fixture.work.path()).stale);
+        fs::write(
+            status_dir.join("relay.json"),
+            format!(r#"{{"state":"running","heartbeat":"{heartbeat}","poll_interval_seconds":10}}"#),
+        )
+        .unwrap();
+        assert!(read_status_inner(fixture.work.path()).stale);
+    }
+
+    #[test]
+    fn priority_accepts_string_levels_and_numbers() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(
+            fixture.relay.path(),
+            r#"{"rooms":[
+                {"slug":"a","priority":"high"},
+                {"slug":"b","priority":"medium"},
+                {"slug":"c","priority":"low"},
+                {"slug":"d","priority":5},
+                {"slug":"e"}
+            ]}"#,
+        );
+        let status = read_status_inner(fixture.work.path());
+        let priorities: Vec<i64> = status.rooms.iter().map(|room| room.priority).collect();
+        assert_eq!(priorities, vec![0, 1, 2, 5, 1]);
     }
 
     #[test]
@@ -831,6 +1011,32 @@ io:
     }
 
     #[test]
+    fn poisoned_slug_never_reaches_a_path() {
+        let fixture = fixture("drop/kakao");
+        // "../evil" would resolve to <relay>/evil if it ever reached a join.
+        let evil_day = fixture.relay.path().join("evil/2026-07-29");
+        write_envelope(&evil_day, "090000-aaaa1111", "evil");
+        write_rooms(
+            fixture.relay.path(),
+            r#"{"rooms":[
+                {"name":"Evil","slug":"../evil","managed":true},
+                {"name":"Bad","slug":"a/b","managed":true},
+                {"name":"Team","slug":"team","managed":true}
+            ]}"#,
+        );
+
+        let status = read_status_inner(fixture.work.path());
+        let slugs: Vec<&str> = status.rooms.iter().map(|room| room.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["team"]);
+
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 0);
+        let drop = fixture.work.path().join("inbox/drop/kakao");
+        assert!(!drop.join("messages").exists()
+            || fs::read_dir(drop.join("messages")).unwrap().count() == 0);
+    }
+
+    #[test]
     fn staging_copies_envelopes_and_media_and_is_idempotent() {
         let fixture = fixture("drop/kakao");
         write_rooms(
@@ -849,17 +1055,17 @@ io:
         fs::create_dir_all(&incoming).unwrap();
         fs::write(incoming.join("photo.jpg"), b"jpeg-bytes").unwrap();
 
-        let outcome = stage_inner(fixture.work.path(), Duration::ZERO).unwrap();
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 2);
         assert_eq!(outcome.staged_media, 1);
         assert_eq!(outcome.per_room.get("team").unwrap().staged, 2);
         assert!(!outcome.per_room.contains_key("idle"));
 
         let drop = fixture.work.path().join("inbox/drop/kakao");
-        assert!(drop.join("090000-aaaa1111.json").exists());
-        assert!(drop.join("100000-bbbb2222.json").exists());
+        assert!(drop.join("messages/090000-aaaa1111.json").exists());
+        assert!(drop.join("messages/100000-bbbb2222.json").exists());
         assert_eq!(
-            fs::read(drop.join("090000-aaaa1111.json")).unwrap(),
+            fs::read(drop.join("messages/090000-aaaa1111.json")).unwrap(),
             fs::read(day.join("090000-aaaa1111.json")).unwrap()
         );
         assert_eq!(
@@ -868,15 +1074,165 @@ io:
         );
 
         let cursor = load_cursor(fixture.work.path());
+        let team = cursor.rooms.get("team").unwrap();
+        assert_eq!(
+            team.last_file.as_deref(),
+            Some("2026-07-29/100000-bbbb2222.json")
+        );
+        assert_eq!(
+            team.seen.as_ref().unwrap(),
+            &vec![
+                "2026-07-29/090000-aaaa1111.json".to_string(),
+                "2026-07-29/100000-bbbb2222.json".to_string(),
+            ]
+        );
+        assert_eq!(cursor.media.len(), 1);
+        assert!(cursor.media[0].ends_with(":photo.jpg"));
+
+        let second = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(second.staged_messages, 0);
+        assert_eq!(second.staged_media, 0);
+    }
+
+    #[test]
+    fn dry_run_counts_without_copying_or_advancing_cursor() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(
+            fixture.relay.path(),
+            r#"{"rooms":[{"name":"Team","slug":"team","managed":true}]}"#,
+        );
+        let day = fixture.relay.path().join("messages/team/2026-07-29");
+        write_envelope(&day, "090000-aaaa1111", "first");
+        write_envelope(&day, "100000-bbbb2222", "second");
+        let incoming = fixture.relay.path().join("media/_incoming");
+        fs::create_dir_all(&incoming).unwrap();
+        fs::write(incoming.join("photo.jpg"), b"jpeg-bytes").unwrap();
+
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, true).unwrap();
+        assert_eq!(outcome.staged_messages, 2);
+        assert_eq!(outcome.staged_media, 1);
+        assert_eq!(outcome.per_room.get("team").unwrap().staged, 2);
+        // Nothing copied, drop dir not even created, cursor untouched.
+        assert!(!fixture.work.path().join("inbox/drop/kakao").exists());
+        assert!(!cursor_path(fixture.work.path()).exists());
+
+        // A subsequent real run stages everything the dry run announced.
+        let real = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(real.staged_messages, 2);
+        assert_eq!(real.staged_media, 1);
+        assert!(cursor_path(fixture.work.path()).exists());
+    }
+
+    #[test]
+    fn staging_picks_up_late_backfill_below_high_water_once() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(
+            fixture.relay.path(),
+            r#"{"rooms":[{"name":"Team","slug":"team","managed":true}]}"#,
+        );
+        let day = fixture.relay.path().join("messages/team/2026-07-29");
+        write_envelope(&day, "100000-bbbb2222", "on-time");
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 1);
+
+        // A 09:00 message shows up only after the cursor passed 10:00.
+        write_envelope(&day, "090000-aaaa1111", "late");
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 1);
+        assert!(
+            fixture
+                .work
+                .path()
+                .join("inbox/drop/kakao/messages/090000-aaaa1111.json")
+                .exists()
+        );
+        // High-water mark stays at the newest key.
+        let cursor = load_cursor(fixture.work.path());
         assert_eq!(
             cursor.rooms.get("team").unwrap().last_file.as_deref(),
             Some("2026-07-29/100000-bbbb2222.json")
         );
-        assert_eq!(cursor.media, vec!["photo.jpg".to_string()]);
 
-        let second = stage_inner(fixture.work.path(), Duration::ZERO).unwrap();
-        assert_eq!(second.staged_messages, 0);
-        assert_eq!(second.staged_media, 0);
+        // But never twice.
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 0);
+    }
+
+    #[test]
+    fn staging_migrates_legacy_high_water_cursor_without_restaging_history() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(
+            fixture.relay.path(),
+            r#"{"rooms":[{"name":"Team","slug":"team","managed":true}]}"#,
+        );
+        let day = fixture.relay.path().join("messages/team/2026-07-29");
+        write_envelope(&day, "090000-aaaa1111", "old");
+        write_envelope(&day, "100000-bbbb2222", "marked");
+        write_envelope(&day, "110000-cccc3333", "new");
+        // Cursor written by the previous build: high-water only, no seen ring.
+        let cache = fixture.work.path().join(".maru/cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(
+            cache.join("kakao-relay-cursor.json"),
+            r#"{"rooms":{"team":{"last_file":"2026-07-29/100000-bbbb2222.json"}},"media":[]}"#,
+        )
+        .unwrap();
+
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 1);
+        let drop = fixture.work.path().join("inbox/drop/kakao/messages");
+        assert!(!drop.join("090000-aaaa1111.json").exists());
+        assert!(drop.join("110000-cccc3333.json").exists());
+
+        // Backfills below the mark are still picked up afterwards.
+        write_envelope(&day, "093000-zzzz9999", "backfill");
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_messages, 1);
+        assert!(drop.join("093000-zzzz9999.json").exists());
+    }
+
+    #[test]
+    fn staging_restages_same_name_media_when_content_changes() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(fixture.relay.path(), r#"{"rooms":[]}"#);
+        let incoming = fixture.relay.path().join("media/_incoming");
+        fs::create_dir_all(&incoming).unwrap();
+        fs::write(incoming.join("photo.jpg"), b"v1").unwrap();
+
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_media, 1);
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_media, 0);
+
+        // Same name, different content (size differs) -> staged again.
+        fs::write(incoming.join("photo.jpg"), b"v2-with-more-bytes").unwrap();
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+        assert_eq!(outcome.staged_media, 1);
+        assert_eq!(
+            fs::read(fixture.work.path().join("inbox/drop/kakao/files/photo.jpg")).unwrap(),
+            b"v2-with-more-bytes"
+        );
+    }
+
+    #[test]
+    fn staging_skips_symlinked_media() {
+        let fixture = fixture("drop/kakao");
+        write_rooms(fixture.relay.path(), r#"{"rooms":[]}"#);
+        let incoming = fixture.relay.path().join("media/_incoming");
+        fs::create_dir_all(&incoming).unwrap();
+        let secret = fixture.work.path().join("secret.txt");
+        fs::write(&secret, b"secret").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&secret, incoming.join("link.txt")).unwrap();
+            let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
+            assert_eq!(outcome.staged_media, 0);
+            assert!(!fixture
+                .work
+                .path()
+                .join("inbox/drop/kakao/files/link.txt")
+                .exists());
+        }
     }
 
     #[test]
@@ -891,7 +1247,7 @@ io:
         fs::write(day.join("100000-bbbb2222.json"), "{\"partial\":").unwrap();
         write_envelope(&day, "110000-cccc3333", "third");
 
-        let outcome = stage_inner(fixture.work.path(), Duration::ZERO).unwrap();
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 1);
         assert_eq!(outcome.skipped, 1);
         assert!(!outcome.errors.is_empty());
@@ -903,7 +1259,7 @@ io:
 
         // Sync completes the partial file; next run picks it up.
         write_envelope(&day, "100000-bbbb2222", "second");
-        let outcome = stage_inner(fixture.work.path(), Duration::ZERO).unwrap();
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 2);
         let cursor = load_cursor(fixture.work.path());
         assert_eq!(
@@ -922,10 +1278,21 @@ io:
         let day = fixture.relay.path().join("messages/team/2026-07-29");
         write_envelope(&day, "090000-aaaa1111", "first");
 
-        let outcome = stage_inner(fixture.work.path(), Duration::ZERO).unwrap();
+        let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 0);
         assert!(!outcome.errors.is_empty());
         assert!(!cursor_path(fixture.work.path()).exists());
+    }
+
+    #[test]
+    fn approval_required_for_stage_and_send_but_not_dry_run() {
+        let state = crate::approval::ApprovalState::default();
+        assert!(require_stage_approval(&state, true, None).is_ok());
+        let err = require_stage_approval(&state, false, None).unwrap_err();
+        assert!(err.contains("approval_required"));
+        assert!(err.contains(KAKAO_STAGE_KIND));
+        let err = crate::approval::require_approval(&state, None, KAKAO_SEND_KIND).unwrap_err();
+        assert!(err.contains(KAKAO_SEND_KIND));
     }
 
     #[test]

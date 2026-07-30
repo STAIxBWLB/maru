@@ -3808,24 +3808,27 @@ function MainApp() {
             }
           }
         } else if (channel === "kakao") {
-          // The relay daemon already staged envelopes into the kakao inbox
-          // drop server-side; approval here gates the *processing* of what
-          // was staged, mirroring the sibling channels' confirm-then-process
-          // flow.
-          const result = await stageKakaoRelayNew(inboxWorkspacePath);
-          if (result.stagedMessages + result.stagedMedia > 0) {
+          // Dry-run first (copies nothing, does not advance the relay
+          // cursor) so the approval preview reflects exactly what a real
+          // stage would write. A declined approval leaves nothing behind,
+          // and the next run shows the same preview.
+          const preview = await stageKakaoRelayNew(inboxWorkspacePath, true, null);
+          if (preview.stagedMessages + preview.stagedMedia > 0) {
             const approvalId = await approvalGate.confirmApproval({
               kind: "kakao.stage",
               summary: t("comms.kakao.stage.summary"),
               target: "inbox/drop/kakao",
-              payloadPreview: Object.entries(result.perRoom)
-                .map(([room, count]) => t("comms.kakao.stage.previewLine", { room, count }))
+              payloadPreview: Object.entries(preview.perRoom)
+                .map(([room, count]) =>
+                  t("comms.kakao.stage.previewLine", { room, count: count.staged }),
+                )
                 .join("\n"),
             });
             if (!approvalId) return;
-          }
-          if (result.errors.length > 0) {
-            throw new Error(result.errors.join("\n"));
+            const staged = await stageKakaoRelayNew(inboxWorkspacePath, false, approvalId);
+            if (staged.errors.length > 0) {
+              throw new Error(staged.errors.join("\n"));
+            }
           }
         }
         await refreshInbox();

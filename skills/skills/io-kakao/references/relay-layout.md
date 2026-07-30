@@ -103,11 +103,15 @@ Idempotency: a request id present in `outbox/done/` is never re-sent.
   every send; no match = failed, never guessed.
 - One send in flight; global pause blocks both polling and sending.
 - Malformed or unknown-room requests land in `outbox/done/` marked failed.
+- Attachment sync race: a synced folder may deliver a small pending request
+  before its large attachment. A missing or still-syncing attachment is
+  treated as not-ready and retried each cycle for a 15-minute grace period
+  (from `requested_at`) before the request is failed terminally.
 
 ## Intake path (work Mac)
 
 Envelopes are viewed read-only any time. On explicit "Process now", Maru
-copies new envelopes into `inbox/drop/kakao/` and stable media files into
-`inbox/drop/kakao/files/`; from there the normal `inbox-intake` →
-`inbox-process kakao` pipeline runs (classification and routing stay
-confirmation-gated).
+copies new envelopes into `inbox/drop/kakao/messages/` and stable media
+files into `inbox/drop/kakao/files/` (matching the channel `source_kinds`
+mapping); from there the normal `inbox-intake` → `inbox-process kakao`
+pipeline runs (classification and routing stay confirmation-gated).

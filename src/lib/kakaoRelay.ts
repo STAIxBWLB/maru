@@ -61,7 +61,13 @@ export interface KakaoStageResult {
   stagedMedia: number;
   skipped: number;
   errors: string[];
-  perRoom: Record<string, number>;
+  perRoom: Record<string, KakaoStageRoomOutcome>;
+}
+
+/** Per-room breakdown of a stage run, as serialized by the Rust side. */
+export interface KakaoStageRoomOutcome {
+  staged: number;
+  skipped: number;
 }
 
 export interface KakaoEnqueueResult {
@@ -76,7 +82,13 @@ export interface KakaoSendResult {
   error: string | null;
 }
 
-export type KakaoRelayLiveness = "ok" | "paused" | "stale" | "unreachable" | "unconfigured";
+export type KakaoRelayLiveness =
+  | "ok"
+  | "paused"
+  | "stale"
+  | "unreachable"
+  | "unconfigured"
+  | "unknown";
 
 /** Collapse the raw relay status into one liveness bucket for the UI. */
 export function relayLiveness(status: KakaoRelayStatus | null | undefined): KakaoRelayLiveness {
@@ -85,7 +97,7 @@ export function relayLiveness(status: KakaoRelayStatus | null | undefined): Kaka
   if (status.state === "paused") return "paused";
   if (status.stale) return "stale";
   if (status.state === "running") return "ok";
-  return "unreachable";
+  return "unknown";
 }
 
 export interface KakaoEnvelopePreview {
@@ -128,7 +140,9 @@ export function kakaoRelayAuthStatus(status: KakaoRelayStatus): ProviderAuthStat
         ? "paused"
         : liveness === "stale"
           ? "stale"
-          : "cli_missing";
+          : liveness === "unknown"
+            ? "unknown"
+            : "cli_missing";
   return {
     provider: "kakao",
     state,
