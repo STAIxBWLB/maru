@@ -11,6 +11,22 @@ import { expect, test, type Page } from "@playwright/test";
 // node count). Feature B: the "참조 하이라이트" toggle decorates the source
 // backdrop and the preview with .kg-ref-mark elements; toggle off clears.
 
+// Preview marks are applied by an effect that unwraps and re-wraps the ranges
+// whenever it re-runs (EditorPane.tsx, the applyKgPreviewHighlights effect), so
+// the click target in "mark click focuses the graph" can be replaced underneath
+// Playwright: the observed failure alternated "element is not stable" and
+// "element was detached from the DOM, retrying" until the 30s timeout.
+//
+// Seen once on a CI push (2 workers) and not reproduced in 5+ single-worker
+// local runs of this spec, the full 118-test local suite, or the PR run; the
+// rerun of that same commit passed. The final DOM is correct either way, so this
+// is a click-stability race in the test rather than a product defect. Retrying
+// only this spec follows the same reasoning as e2e/graph.spec.ts: unrelated E2E
+// regressions stay hard failures, and Playwright still reports a retried pass as
+// flaky so it does not go unnoticed. Remove this once the effect stops
+// re-wrapping on every re-run.
+test.describe.configure({ retries: process.env.CI ? 2 : 0 });
+
 // Mirrors `sampleContent` in src/lib/fixtures.ts (now = 2026-04-27T09:00:00+09:00).
 const MOCK_DOC_CONTENT = `---
 type: meeting
