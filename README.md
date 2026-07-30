@@ -502,9 +502,18 @@ Apple signing configuration instead of silently producing an unintended ad-hoc
 macOS release.
 
 Release asset versions come from the app metadata in `package.json`,
-`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; keep those in sync
-before tagging or publishing a release. After release assets exist, update the
-Homebrew tap with:
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the `maru` package entry
+in `src-tauri/Cargo.lock`; keep all four in sync before tagging or publishing a
+release. `make macos-distribution-check` asserts the first three agree but does
+not read the lock file, and nothing checks the tag against the manifests: if the
+tag names a version the manifests do not, the bundle jobs still succeed with the
+old asset names and `latest.json` advertises the old version, so no installed
+client is ever offered the update.
+
+The `homebrew-tap` job in `release-bundles.yml` pushes the tap update
+automatically once the bundle and CLI jobs finish. The `make homebrew-*` targets
+below are for verifying that result, or for recovering by hand if that job
+failed:
 
 ```bash
 make homebrew-update-commit RELEASE_TAG=v$(node -p "require('./package.json').version") HOMEBREW_TAP_DIR=../homebrew-cask
