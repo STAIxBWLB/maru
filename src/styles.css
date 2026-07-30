@@ -5679,7 +5679,7 @@ button.git-badge:hover {
   padding: 6px 8px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  background: var(--panel);
+  background-color: var(--panel);
 }
 
 .kakao-relay-field textarea {
