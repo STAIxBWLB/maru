@@ -256,6 +256,170 @@ fn create_impl(
     Ok(entry)
 }
 
+/// Frontmatter keys an adopted body may carry. Only these map onto `DraftEntry`;
+/// every other key stays in the file untouched, which is where richer provenance
+/// (run id, channel, message ids) lives for a human to read.
+///
+/// `runtime`, not `source`: `DraftEntry.source` is the AI runtime enum, and a
+/// drop that wants to record an inbox channel would otherwise collide with it.
+fn adopted_title(meta: &BTreeMap<String, serde_yaml::Value>, body: &str, file_stem: &str) -> String {
+    if let Some(title) = meta.get("title").and_then(|v| v.as_str()) {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    for line in body.lines() {
+        if let Some(heading) = line.trim().strip_prefix("# ") {
+            let trimmed = heading.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    file_stem.to_string()
+}
+
+fn adopted_kind(meta: &BTreeMap<String, serde_yaml::Value>) -> DraftKind {
+    match meta.get("kind").and_then(|v| v.as_str()).map(str::trim) {
+        Some("task") => DraftKind::Task,
+        Some("implementation") => DraftKind::Implementation,
+        // A hand-dropped note is more likely to become a document than a task,
+        // and `idea` is the kind whose promote dialog defaults that way.
+        _ => DraftKind::Idea,
+    }
+}
+
+fn adopted_status(meta: &BTreeMap<String, serde_yaml::Value>) -> DraftStatus {
+    match meta.get("status").and_then(|v| v.as_str()).map(str::trim) {
+        Some("in-review") => DraftStatus::InReview,
+        Some("accepted") => DraftStatus::Accepted,
+        Some("discarded") => DraftStatus::Discarded,
+        // "draft" is what a writer naturally reaches for; it means the same as
+        // the model's `new`.
+        _ => DraftStatus::New,
+    }
+}
+
+fn adopted_origin_refs(meta: &BTreeMap<String, serde_yaml::Value>) -> Vec<String> {
+    meta.get("origin_refs")
+        .or_else(|| meta.get("originRefs"))
+        .and_then(|v| v.as_sequence())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn adopt_entry_for(file_name: &str, content: &str, modified: String) -> DraftEntry {
+    let parts = crate::vault::parse_frontmatter(content);
+    let meta = &parts.meta;
+    let stem = file_name.strip_suffix(".md").unwrap_or(file_name);
+    let importance = match meta.get("importance").and_then(|v| v.as_str()).map(str::trim) {
+        Some("high") => Some(DraftImportance::High),
+        Some("medium") => Some(DraftImportance::Medium),
+        Some("low") => Some(DraftImportance::Low),
+        _ => None,
+    };
+    let confidence = meta
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .map(|value| value.clamp(0.0, 1.0) as f32);
+    let source = match meta.get("runtime").and_then(|v| v.as_str()).map(str::trim) {
+        Some("claude") => ScratchpadSource::Claude,
+        Some("codex") => ScratchpadSource::Codex,
+        Some("kimi") => ScratchpadSource::Kimi,
+        Some("kiro") => ScratchpadSource::Kiro,
+        Some("maru") => ScratchpadSource::Maru,
+        _ => ScratchpadSource::Manual,
+    };
+    DraftEntry {
+        id: format!("draft-{}", Uuid::new_v4()),
+        kind: adopted_kind(meta),
+        title: adopted_title(meta, &parts.body, stem),
+        status: adopted_status(meta),
+        importance,
+        confidence,
+        source,
+        origin_refs: adopted_origin_refs(meta),
+        body_path: file_name.to_string(),
+        // Only Maru fills promoted_to, at promote time. Trusting a dropped file
+        // to claim it was already promoted would let it point the gap baseline
+        // at an arbitrary path.
+        promoted_to: None,
+        created_at: modified.clone(),
+        updated_at: modified,
+    }
+}
+
+/// Adopt body files that exist on disk but no index entry points at.
+///
+/// The headless pipeline writes drafts into `scratchpad/drafts/` directly, and
+/// `drafts_list` reads only the index, so without this those files are invisible
+/// to the app. Everything degrades rather than fails: an unreadable or oversized
+/// file is skipped, missing frontmatter falls back to the body's own heading, and
+/// a malformed drop can never wedge the list.
+///
+/// Returns true when the index gained entries and needs saving.
+fn adopt_orphan_bodies(work: &Path, entries: &mut Vec<DraftEntry>) -> Result<bool, String> {
+    let Ok(root) = resolve_scratchpad_drafts_root(work) else {
+        return Ok(false);
+    };
+    if !root.is_dir() {
+        return Ok(false);
+    }
+    let known: std::collections::HashSet<String> =
+        entries.iter().map(|entry| entry.body_path.clone()).collect();
+    let mut orphans: Vec<String> = Vec::new();
+    let read_dir = match fs::read_dir(&root) {
+        Ok(read_dir) => read_dir,
+        Err(_) => return Ok(false),
+    };
+    for entry in read_dir.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.to_ascii_lowercase().ends_with(".md") || known.contains(&name) {
+            continue;
+        }
+        // Same guard the indexed read path applies: a symlink planted here must
+        // not be adopted and then copied into a confirmed document by promote.
+        if assert_no_symlink_components(&root, Path::new(&name)).is_err() {
+            continue;
+        }
+        if !entry.path().is_file() {
+            continue;
+        }
+        orphans.push(name);
+    }
+    // Deterministic adoption order, so two machines adopting the same directory
+    // produce the same index ordering.
+    orphans.sort();
+    let mut adopted = false;
+    for name in orphans {
+        let path = root.join(&name);
+        let too_large = fs::metadata(&path)
+            .map(|meta| meta.len() > DRAFT_MAX_BYTES)
+            .unwrap_or(true);
+        if too_large {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let modified = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .map(|time| chrono::DateTime::<Utc>::from(time).to_rfc3339())
+            .unwrap_or_else(|_| Utc::now().to_rfc3339());
+        entries.push(adopt_entry_for(&name, &content, modified));
+        adopted = true;
+    }
+    Ok(adopted)
+}
+
 fn read_impl(work_path: &str, id: &str) -> Result<DraftDocument, String> {
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     validate_draft_id(id)?;
@@ -454,7 +618,16 @@ fn promote_impl(
 pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = crate::vault::normalize_existing_dir(&work_path)?;
-    load_index(&work)
+    let mut entries = load_index(&work)?;
+    // Pick up anything the headless pipeline dropped since the last listing.
+    // Skipped on a read-only workspace: adoption persists to the index, and a
+    // listing must not fail just because it cannot write.
+    if assert_maru_can_write(&work_path, WorkspaceWriteAction::Create).is_ok()
+        && adopt_orphan_bodies(&work, &mut entries)?
+    {
+        save_index(&work, &entries)?;
+    }
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -550,6 +723,124 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let work = temp.path().to_string_lossy().to_string();
         (temp, work)
+    }
+
+    fn drafts_root(work: &str) -> PathBuf {
+        let root = resolve_scratchpad_drafts_root(Path::new(work)).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn drop_orphan(work: &str, name: &str, content: &str) -> PathBuf {
+        let path = drafts_root(work).join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn adopts_a_dropped_body_with_its_frontmatter() {
+        let (_temp, work) = workspace();
+        drop_orphan(
+            &work,
+            "260801-reply-koica-budget.md",
+            "---\ntitle: KOICA 예산 회신 초안\nkind: task\nstatus: draft\nimportance: high\nconfidence: 0.9\nruntime: claude\norigin_refs:\n  - inbox/items/pending/260801-gws-x/summary.md\n---\n# body\n",
+        );
+        let entries = drafts_list(work.clone()).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.title, "KOICA 예산 회신 초안");
+        assert_eq!(entry.kind, DraftKind::Task);
+        // "draft" is the word a writer reaches for; it maps onto the model's New.
+        assert_eq!(entry.status, DraftStatus::New);
+        assert_eq!(entry.importance, Some(DraftImportance::High));
+        assert_eq!(entry.source, ScratchpadSource::Claude);
+        assert_eq!(
+            entry.origin_refs,
+            vec!["inbox/items/pending/260801-gws-x/summary.md".to_string()]
+        );
+        assert_eq!(entry.body_path, "260801-reply-koica-budget.md");
+        // The body must be readable through the normal path once adopted.
+        let doc = read_impl(&work, &entry.id).unwrap();
+        assert!(doc.content.contains("# body"));
+    }
+
+    #[test]
+    fn adopts_a_body_with_no_frontmatter_using_its_heading() {
+        let (_temp, work) = workspace();
+        drop_orphan(&work, "loose-note.md", "# 손으로 쓴 초안\n\n본문\n");
+        let entries = drafts_list(work).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "손으로 쓴 초안");
+        assert_eq!(entries[0].kind, DraftKind::Idea);
+        assert_eq!(entries[0].status, DraftStatus::New);
+        assert_eq!(entries[0].source, ScratchpadSource::Manual);
+        assert!(entries[0].importance.is_none());
+    }
+
+    #[test]
+    fn falls_back_to_the_file_name_when_there_is_no_title_or_heading() {
+        let (_temp, work) = workspace();
+        drop_orphan(&work, "260801-plain.md", "just prose, no heading\n");
+        let entries = drafts_list(work).unwrap();
+        assert_eq!(entries[0].title, "260801-plain");
+    }
+
+    #[test]
+    fn adopting_twice_creates_one_entry() {
+        let (_temp, work) = workspace();
+        drop_orphan(&work, "once.md", "# once\n");
+        let first = drafts_list(work.clone()).unwrap();
+        let second = drafts_list(work.clone()).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        // Same identity across listings, so the pane's selection survives.
+        assert_eq!(first[0].id, second[0].id);
+    }
+
+    #[test]
+    fn adoption_leaves_indexed_drafts_alone() {
+        let (_temp, work) = workspace();
+        let created = create_task_draft(&work, "이미 있는 초안");
+        drop_orphan(&work, "dropped.md", "# 떨어진 초안\n");
+        let entries = drafts_list(work).unwrap();
+        assert_eq!(entries.len(), 2);
+        // The pre-existing entry keeps its id and is not re-adopted as a copy.
+        assert_eq!(
+            entries.iter().filter(|e| e.id == created.id).count(),
+            1
+        );
+        assert!(entries.iter().any(|e| e.title == "떨어진 초안"));
+    }
+
+    #[test]
+    fn a_dropped_file_cannot_claim_it_was_already_promoted() {
+        let (_temp, work) = workspace();
+        drop_orphan(
+            &work,
+            "sneaky.md",
+            "---\ntitle: sneaky\npromoted_to: ../../../etc/passwd\n---\nbody\n",
+        );
+        let entries = drafts_list(work).unwrap();
+        assert_eq!(entries[0].promoted_to, None);
+    }
+
+    #[test]
+    fn non_markdown_files_are_ignored() {
+        let (_temp, work) = workspace();
+        drop_orphan(&work, "notes.txt", "not a draft");
+        drop_orphan(&work, "image.png", "binary-ish");
+        assert!(drafts_list(work).unwrap().is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlinked_body_is_not_adopted() {
+        let (_temp, work) = workspace();
+        let outside = Path::new(&work).join("outside.md");
+        fs::write(&outside, "# outside\n").unwrap();
+        let link = drafts_root(&work).join("linked.md");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(drafts_list(work).unwrap().is_empty());
     }
 
     fn create_task_draft(work: &str, title: &str) -> DraftEntry {
