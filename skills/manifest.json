@@ -62,6 +62,15 @@
       ]
     },
     {
+      "name": "draft-writer",
+      "path": "skills/draft-writer",
+      "tier": "core",
+      "tags": [
+        "drafts",
+        "automation"
+      ]
+    },
+    {
       "name": "ideation-drafts",
       "path": "skills/ideation-drafts",
       "tier": "core",
