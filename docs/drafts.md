@@ -36,6 +36,35 @@ Frontend: `src/components/drafts/` (DraftsPane, SchedulerSection),
 Bodies are capped at 2 MiB. A missing or corrupt index loads as empty so a
 bad file can never wedge the workflow; all writes go through `atomic_file`.
 
+### Adopting dropped bodies
+
+`drafts_list` also adopts any `*.md` in the collection that no index entry
+points at, so a body written outside the app (the headless pipeline, or a
+person) becomes a real draft on the next listing rather than staying invisible.
+Adoption reads what it can from the file's own frontmatter and degrades instead
+of failing, because a malformed drop must never wedge the list:
+
+| Frontmatter | Maps to | Missing or unrecognized |
+|---|---|---|
+| `title` | `title` | first `# ` heading, else the file name |
+| `kind` (`task`/`implementation`) | `kind` | `idea`, whose promote dialog defaults to a document |
+| `status` (`in-review`/`accepted`/`discarded`) | `status` | `new` (`draft` also means `new`) |
+| `importance` (`high`/`medium`/`low`) | `importance` | unset |
+| `confidence` (0..1) | `confidence` | unset |
+| `runtime` (`claude`/`codex`/`kimi`/`kiro`/`maru`) | `source` | `manual` |
+| `origin_refs` (list of strings) | `originRefs` | empty |
+
+The key is `runtime`, not `source`: `DraftEntry.source` is the AI runtime, so a
+drop recording an inbox channel under `source` would collide with it. Every
+other frontmatter key is left in the file untouched; that is where richer
+provenance (run id, channel, message ids) lives for a person to read.
+
+`promoted_to` is never adopted from a file. Only Maru sets it, at promote time;
+trusting a dropped file to claim it was already promoted would let it point the
+gap baseline at an arbitrary path. Symlinked and oversized bodies are skipped,
+as are non-`.md` files, and adoption is skipped entirely on a workspace Maru
+may not write to.
+
 **Isolation invariant**: nothing in the drafts module writes outside
 `<workspace>/scratchpad/drafts/`, `<work>/.maru/drafts/`, and the explicit,
 approval-gated promote target. Vault scanning already excludes the scratchpad
