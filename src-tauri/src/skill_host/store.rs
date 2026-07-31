@@ -3660,17 +3660,33 @@ fn run_env_repair_blocking(
         .arg(&setup)
         .arg("--target")
         .arg(&root)
+        // The setup script runs pnpm, and `.output()` gives it no TTY. Whenever
+        // pnpm decides node_modules has to be purged it refuses to do that
+        // without a TTY and aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY,
+        // which failed every bundle update on an otherwise healthy machine. CI=true
+        // is the escape hatch pnpm's own error message names.
+        .env("CI", "true")
         .no_window()
         .output()
         .map_err(|err| format!("env_repair_spawn_failed: {err}"))?;
     if !output.status.success() {
+        // Report across BOTH streams: pnpm writes its fatal error to stdout, so
+        // reading stderr alone surfaced uv's last progress line ("Checked 137
+        // packages") as the cause and sent debugging in the wrong direction.
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let line = stderr
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("env repair failed")
-            .to_string();
+        let last_line = |text: &str| -> Option<String> {
+            text.lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string())
+        };
+        let line = match (last_line(&stdout), last_line(&stderr)) {
+            (Some(out), Some(err)) => format!("{out} | stderr: {err}"),
+            (Some(out), None) => out,
+            (None, Some(err)) => err,
+            (None, None) => "env repair failed".to_string(),
+        };
         return Err(format!("env_repair_failed: {line}"));
     }
     progress.success("Skills environment repaired");
