@@ -8,6 +8,32 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.36 - 2026-08-01 - The Loop Learns
+
+- **The feedback digest is fresh at every dispatch.** Scheduled inbox
+  extractions used to replay the edit-tendencies snapshot baked in when the
+  schedule was created — a schedule from weeks ago taught today's run
+  nothing. The scheduler now strips any stored snapshot and rebuilds the
+  digest from the current gap log at dispatch time, so drafters learn from
+  edits made the same morning. New schedules store a bare prompt; the dialog
+  keeps a read-only preview.
+- **App-driven runs no longer duplicate the pipeline's drafts.** The
+  ingestion dedupe compared exact titles, but extraction rewords a title
+  every run, so one run-now created seven drafts where six were reworded
+  copies of ones the headless pipeline had already written. Candidates are
+  now deduped the way the pipeline driver does it: shared source plus real
+  title overlap, with short titles exempt so a shared subject word cannot
+  suppress a distinct follow-up.
+- **Drafts can start from a person, not just a pipeline.** A New draft
+  dialog in the Drafts pane (kind, title, importance, body) creates a
+  manual draft and opens it — the typed path that voice intake will build
+  on later.
+- **The graph stops rebuilding itself during a scan.** A fresh empty array
+  every render re-keyed the graph model, tore down the canvas, and
+  restarted layout mid-flight — the root of a camera-centering flake in CI
+  and of visible graph churn. The empty fallback now keeps a stable
+  identity.
+
 ## v0.4.35 - 2026-08-01 - Skills Get Their Own Repo
 
 - **Skills ship from their own repository now.** The skill tree and its whole
