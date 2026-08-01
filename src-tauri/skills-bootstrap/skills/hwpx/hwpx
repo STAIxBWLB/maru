@@ -4,7 +4,7 @@
 # Usage:
 #   ./hwpx read <file.hwpx> [--format md|text|json]
 #   ./hwpx summary <file.hwpx>
-#   ./hwpx to-md <file.hwpx> [-o out.md]
+#   ./hwpx to-md <file.hwpx> [-o out.md] [--media-dir figs]
 #   ./hwpx unpack <file.hwpx> <out_dir> [-f]
 #   ./hwpx repack <dir> <out.hwpx>
 #   ./hwpx fill <template.hwpx> [--data file.json] [--kv k=v ...] [-o out.hwpx]
@@ -78,7 +78,7 @@ Usage: ./hwpx <command> [args...]
 Commands:
   read       HWPX → markdown/text/json
   summary    문서 메타 요약 (섹션/단락/이미지 개수)
-  to-md      markdown 변환
+  to-md      markdown 변환 (-o 시 이미지 추출 — 기본 <스템>.media/, --media-dir 지정 가능)
   unpack     HWPX → 디렉토리 (XML 직접 편집용)
   repack     디렉토리 → HWPX (mimetype-first STORED 자동)
   fill       템플릿의 {{anchor}} 치환 (run 경계 넘어도 매칭, linesegarray 자동 정리)
@@ -103,6 +103,11 @@ Commands:
   (수식은 render/to-pdf에서 자동 조판 — references/equation-syntax.md)
 
 Note: read/render/render-pdf/to-html/convert accept legacy binary .hwp (auto-delegates to hwp-cli).
+Native edit (hwp edit, .hwp/.hwpx 바이트보존): --create-field/--set-field, --create-bookmark,
+  --create-hyperlink, --insert-image, --set-format, --set-align, --insert-para[-before],
+  --delete-para, --delete-row, --set-meta, --verify. hwp new --set-meta. 상세: SKILL.md §4.
+Native table (v0.2.0, 병합 셀 표 지원): --add-col "표[:위치]", --delete-col "표:열",
+  --merge-cells "표:r1:c1:r2:c2", --split-cell "표:행:열". cat --with-segments(md 추출근거 좌표).
 
 Templates (templates/):
   공문서_기본.hwpx        대외시행 공문 기본형
@@ -120,10 +125,10 @@ Examples:
   echo '{"제목":"테스트","본문":"본문"}' | \\
     ./hwpx fill templates/공문서_기본.hwpx --stdin-json -o /tmp/out.hwpx
 
-  # 보기 좋은 문서 (hwp new + 공문서 스타일 후처리)
-  ./hwpx styled --markdown report.md \\
+  # 보기 좋은 문서 (hwp new --preset + 공문서 스타일 후처리)
+  ./hwpx styled --preset bogoseo --markdown report.md \\
     --header "예시대학교" --footer "- # / ## -" -o styled.hwpx
-  # (--preset gongmun|bogoseo 는 하위호환 no-op — 출력 동일)
+  # gongmun|gian=기안문, bogoseo|report=보고서. --plain은 후처리만 생략.
 
   # 주어진 양식 따라가기 (기관 지정 양식 파일 있을 때)
   ./hwpx styled --reference 양식.hwpx --markdown 본문.md -o final.hwpx

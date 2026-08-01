@@ -4,16 +4,19 @@
 Subcommands:
   read <file.hwpx> [--format md|text|json] [--section N] [--engine auto|hwp|lxml]
   summary <file.hwpx>
-  to-md <file.hwpx> [-o out.md] [--section N] [--engine auto|hwp|lxml]
+  to-md <file.hwpx> [-o out.md] [--media-dir figs] [--section N] [--engine auto|hwp|lxml]
+        (-o 시 hwp-cli convert 위임 — 이미지를 <출력스템>.media/ 또는 --media-dir로 추출)
   unpack <file.hwpx> <out_dir> [-f]
   repack <dir> <out.hwpx>
   fill <template.hwpx> [--data json_file] [--kv key=value ...] [-o out.hwpx] [--stdin-json]
   slots <template.hwpx> [--format text|json]
   edit <in.hwpx> <out.hwpx> --replace OLD NEW [--limit N]
   add-rows <file> --count N [--table T] [--set-cell "T:row:col=val" ...] [-o out]
+  add-col <file> [--table T] [--count N] [--set-cell "T:row:col=val" ...] [-o out]
+        (전체 표 폭 유지하며 열 추가 — 기존 열 균등 축소, 병합 표는 거부)
   fill-table <file> --data tables.json [-o out]   (행 자동 증식 + 셀 채우기)
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file] [--plain]
-  styled -o <out.hwpx> [--preset gongmun|bogoseo (no-op, 하위호환)] [--reference form.hwpx]
+  styled -o <out.hwpx> [--preset gongmun|bogoseo|gian|report] [--reference form.hwpx]
          [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F] [--plain]
   beautify <in.hwpx> [-o out.hwpx] [--header-fill "#F2F2F2"] [--no-title-center]
   validate <file.hwpx>
@@ -38,6 +41,7 @@ All commands: exit 0 success, 1 arg/IO error, 2 parse failure, 3 not found.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -54,6 +58,16 @@ HP_NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HP = f"{{{HP_NS}}}"
 XML_SUFFIXES = (".xml", ".hpf")
 IMAGE_SUFFIXES = (".bmp", ".gif", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".wmf", ".emf")
+
+# 이 스킬이 전제하는 hwp-cli 최소 버전. 0.3.0 미만은 hwpx 쓰기에서 수식(<hp:equation>)을
+# 경고 없이 통째로 버린다(GE-14). 편집·변환만 해도 유실되므로 경고 대상.
+HWP_CLI_MIN = (0, 3, 0)
+STYLED_PRESET_ALIASES = {
+    "gongmun": "gian",
+    "gian": "gian",
+    "bogoseo": "report",
+    "report": "report",
+}
 
 
 # helpers
@@ -288,33 +302,125 @@ def _json_payload_to_markdown(payload) -> list[str]:
 
 # subcommand implementations
 
-def _is_hwp_cli(binary: str) -> bool:
-    """True if `binary` is hwp-cli (has a `cat` subcommand). Excludes the legacy
-    hwp-toolkit wrapper, which shares the name `hwp` but has no `cat`."""
+def _hwp_version(binary: str) -> tuple[int, int, int] | None:
+    """`hwp --version`이 `hwp X.Y.Z`를 내면 버전 튜플, 아니면 None. 동명이인(구
+    hwp-toolkit 래퍼처럼 `hwp`라는 이름을 공유하지만 hwp-cli가 아닌 것)을
+    걸러내는 판별자를 겸한다."""
     try:
-        proc = subprocess.run([binary, "cat", "--help"], capture_output=True, timeout=5)
-        return proc.returncode == 0
+        proc = subprocess.run([binary, "--version"], capture_output=True, timeout=5)
     except OSError:
-        return False
+        return None
+    m = re.match(r"hwp (\d+)\.(\d+)\.(\d+)", proc.stdout.decode("utf-8", "ignore").strip())
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
 
 
+@functools.lru_cache(maxsize=1)
 def _find_hwp_cli() -> str | None:
-    """Locate the hwp-cli (Rust) `hwp` binary for legacy .hwp delegation. Order:
-    $HWP_CLI, ~/.cargo/bin/hwp, the workspace dev release build, then a *validated*
-    `hwp` on PATH. The name `hwp` collides with the old hwp-toolkit wrapper, so a
-    PATH candidate is probed for the `cat` subcommand before use."""
-    explicit = [
-        os.environ.get("HWP_CLI"),
+    """hwp-cli(Rust) `hwp` 바이너리 탐색. `$HWP_CLI`가 지정되면 그것을 쓰고(명시적
+    의도 우선), 없으면 알려진 설치 경로(PATH의 Homebrew 설치·`~/.cargo/bin`·
+    워크스페이스 dev 릴리스 빌드) 중 **버전이 가장 높은 것**을 고른다.
+
+    고정 순서가 아니라 버전 최대를 쓰는 이유: 세 곳에 동시에 설치되는 게 정상이라
+    (brew 설치 + cargo install + dev 빌드) 고정 순서는 오래된 사본을 집어 신기능이
+    조용히 안 보인다. 실제로 0.2.0이 hwpx 쓰기에서 수식을 통째로 버렸다.
+
+    어느 경로로 잡혔든 HWP_CLI_MIN 미만이면 stderr에 경고한다(무경고 데이터 유실
+    방지 — 명시 지정도 예외가 아니다)."""
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        v = _hwp_version(explicit)
+        if v is None:  # 버전을 못 읽어도 명시 지정은 존중하되 검증은 못 한다
+            return explicit
+        chosen = (v, explicit)
+    else:
+        seen: set[str] = set()
+        for c in (
+            shutil.which("hwp"),
+            str(Path.home() / ".cargo" / "bin" / "hwp"),
+            str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+        ):
+            if not c or not Path(c).is_file() or not os.access(c, os.X_OK):
+                continue
+            real = os.path.realpath(c)  # brew 심링크 등 같은 실체를 두 번 재지 않는다
+            if real in seen:
+                continue
+            seen.add(real)
+            v = _hwp_version(c)
+            if v and (chosen is None or v > chosen[0]):
+                chosen = (v, c)
+    if chosen is None:
+        return None
+    if chosen[0] < HWP_CLI_MIN:
+        print(
+            f"[hwpx] 경고: hwp-cli {'.'.join(map(str, chosen[0]))} 사용 중 "
+            f"({chosen[1]}). 이 스킬은 {'.'.join(map(str, HWP_CLI_MIN))} 이상을 "
+            "전제하며, 구버전은 hwpx 쓰기에서 수식을 경고 없이 버린다. "
+            "`brew upgrade hwp` 또는 `cargo install --path crates/hwp-cli --force`로 갱신할 것",
+            file=sys.stderr,
+        )
+    return chosen[1]
+
+
+@functools.lru_cache(maxsize=None)
+def _supports_new_preset(binary: str) -> bool:
+    """해당 hwp-cli가 `hwp new --preset`을 실제로 제공하는지 확인한다.
+
+    버전 번호만으로 판단하지 않는다. 같은 개발 버전의 서로 다른 빌드가 PATH와
+    워크스페이스에 함께 있을 수 있기 때문이다.
+    """
+    try:
+        proc = subprocess.run(
+            [binary, "new", "--help"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = (
+        proc.stdout.decode("utf-8", "ignore")
+        + "\n"
+        + proc.stderr.decode("utf-8", "ignore")
+    )
+    return proc.returncode == 0 and "--preset" in help_text
+
+
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_new_preset() -> str | None:
+    """`new --preset`을 제공하는 hwp-cli 중 가장 높은 버전을 선택한다.
+
+    `$HWP_CLI`가 명시되면 다른 설치본으로 우회하지 않는다. 자동 탐색일 때만
+    preset 미지원 사본을 제외하고 PATH/cargo/dev 후보 중 가장 높은 버전을 쓴다.
+    """
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_new_preset(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
         str(Path.home() / ".cargo" / "bin" / "hwp"),
-        str(Path.home() / "workspace" / "work" / "dev" / "hwp-cli" / "target" / "release" / "hwp"),
-    ]
-    for c in explicit:
-        if c and Path(c).is_file() and os.access(c, os.X_OK):
-            return c
-    path_hwp = shutil.which("hwp")
-    if path_hwp and _is_hwp_cli(path_hwp):
-        return path_hwp
-    return None
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if (
+            version
+            and _supports_new_preset(candidate)
+            and (chosen is None or version > chosen[0])
+        ):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
 
 
 def _hwp_cat(path: Path, fmt: str = "markdown") -> str:
@@ -342,9 +448,18 @@ def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
         return None
 
 
-def _hwp_cli_or_die() -> str:
-    tool = _find_hwp_cli()
+def _hwp_cli_or_die(*, require_new_preset: bool = False) -> str:
+    tool = _find_hwp_cli_with_new_preset() if require_new_preset else _find_hwp_cli()
     if not tool:
+        if require_new_preset:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp new --preset`을 지원하지 않음. "
+                "hwp-cli v0.4.1 이상으로 `brew update && brew upgrade hwp`하거나 "
+                "preset 지원 바이너리를 HWP_CLI로 지정할 것",
+            )
         _die(1, "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI 지정")
     return tool
 
@@ -360,29 +475,51 @@ def _hwp_env() -> dict:
     return env
 
 
-def _run_hwp(argv: list) -> subprocess.CompletedProcess:
+def _run_hwp(
+    argv: list, *, require_new_preset: bool = False
+) -> subprocess.CompletedProcess:
     """확장된 hwp-cli에 위임 실행 (capture)."""
-    tool = _hwp_cli_or_die()
+    tool = _hwp_cli_or_die(require_new_preset=require_new_preset)
     return subprocess.run([tool, *argv], capture_output=True, text=True, env=_hwp_env())
 
 
 def _new_from_markdown(
-    md_text: str, out: Path, preset: str = "plain", *, plain: bool = False
+    md_text: str,
+    out: Path,
+    preset: str | None = None,
+    *,
+    plain: bool = False,
+    base_dir: Path | None = None,
 ) -> int:
     """markdown을 임시 파일로 써서 hwp-cli `new`에 위임 (문서 생성 통합 경로).
 
     생성 후 공문서 기본 스타일 후처리(style_pass — 표 칼럼 폭/헤더 음영/제목 가운데)를
-    적용한다. `plain=True`면 생략. preset은 하위호환용으로 받되 무시한다 — hwp-cli가
-    `new --preset`을 제거해 기본 스타일로만 생성한다.
+    적용한다. `plain=True`면 후처리만 생략한다. preset이 지정되면 하위호환 별칭을
+    hwp-cli의 canonical 이름으로 바꿔 `hwp new --preset`에 전달한다.
+
+    `base_dir`: 상대경로 이미지(`![alt](img.png)`)의 해석 기준. hwp-cli `new`는 md 파일
+    위치 기준으로 이미지를 찾으므로, 원본 md가 있으면 그 디렉터리에 임시 파일을 둬야
+    상대 경로가 유지된다(미지정 시 시스템 임시 디렉터리 — 상대 이미지는 떨어진다).
     """
     import tempfile
 
-    _ = preset  # ponytail: hwp-cli --preset 제거됨 → 무시(기본 스타일). 인자 시그니처만 유지.
-    tf = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+    canonical_preset = STYLED_PRESET_ALIASES.get(preset) if preset else None
+    if preset and canonical_preset is None:
+        _die(1, f"알 수 없는 preset: {preset}")
+    tf = tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".md",
+        delete=False,
+        encoding="utf-8",
+        dir=str(base_dir) if base_dir else None,
+    )
     try:
         tf.write(md_text)
         tf.close()
-        proc = _run_hwp(["new", "--from", tf.name, "-o", str(out)])
+        cmd = ["new", "--from", tf.name, "-o", str(out)]
+        if canonical_preset:
+            cmd.extend(["--preset", canonical_preset])
+        proc = _run_hwp(cmd, require_new_preset=canonical_preset is not None)
     finally:
         os.unlink(tf.name)
     if proc.returncode != 0:
@@ -483,6 +620,20 @@ def cmd_summary(args) -> int:
 def cmd_to_md(args) -> int:
     path = _ensure_file(args.file)
     engine = getattr(args, "engine", "auto")
+    # 파일 출력은 hwp-cli `convert` 우선 — 이미지를 사이드카 디렉터리(기본 <스템>.media,
+    # --media-dir로 지정)에 추출하고 목록·각주·수식·병합셀까지 보존한다.
+    # stdout 출력은 이미지 추출이 없는 `cat` 경로 유지(hwp-cli 의미와 동일).
+    if args.output and args.section is None and engine != "lxml" and _find_hwp_cli():
+        out = Path(args.output)
+        cmd = ["convert", str(path), "--to", "md", "-o", str(out)]
+        if args.media_dir:
+            cmd += ["--media-dir", args.media_dir]
+        proc = _run_hwp(cmd)
+        if proc.returncode == 0:
+            media = args.media_dir or f"{out.stem}.media"
+            print(f"[hwpx] convert(→md) -> {out} (이미지: {media}/)", file=sys.stderr)
+            return 0
+        print(f"[hwpx] hwp convert 폴백 → cat: {proc.stderr.strip()}", file=sys.stderr)
     md = None
     # hwp-cli `cat` markdown 우선 (섹션 선택 없을 때), 실패 시 lxml 폴백
     if args.section is None and engine != "lxml":
@@ -633,6 +784,36 @@ def cmd_add_rows(args) -> int:
     return 0
 
 
+def cmd_add_col(args) -> int:
+    """표 열 추가 (전체 폭 유지) → hwp edit --add-col 위임. .hwp/.hwpx 모두.
+
+    새 열은 균등 몫(행총폭/(열수+1))을 갖고 기존 열은 비율로 축소된다(행별 정수 잔차는
+    마지막 기존 셀에 가산해 총폭 정확 보존). v0.2.0부터 열 추가는 병합 셀 표도 지원한다
+    (피병합 셀 생략·병합 cellSz 규칙 — 정품 실측). 새 열 인덱스는 기존 열 수이고, --set-cell 로
+    새 셀을 채울 수 있다(add-rows와 같은 2차 패스). 위치 삽입·열 삭제·셀 병합/분할은
+    hwp edit --add-col "표:위치"/--delete-col/--merge-cells/--split-cell 직접 호출(SKILL.md §4).
+    """
+    src = _ensure_file(args.in_file)
+    out = Path(args.output or _derive_output(args.in_file, suffix=f"-wide{Path(args.in_file).suffix}"))
+    cmd = ["edit", str(src), "-o", str(out)]
+    for _ in range(args.count):
+        cmd += ["--add-col", str(args.table)]
+    proc = _run_hwp(cmd)
+    if proc.returncode != 0:
+        _die(2, f"add-col 실패: {proc.stderr.strip()}")
+    # --set-cell 은 edit 안에서 --add-col 보다 먼저 적용돼(새 열이 아직 없음) 같은 호출로는
+    # 새 셀을 못 채운다 → 열 추가 후 2차 패스로 채운다.
+    if args.set_cell:
+        cmd2 = ["edit", str(out), "-o", str(out)]
+        for sc in args.set_cell:
+            cmd2 += ["--set-cell", sc]
+        proc2 = _run_hwp(cmd2)
+        if proc2.returncode != 0:
+            _die(2, f"add-col 셀 채우기 실패: {proc2.stderr.strip()}")
+    print(f"[hwpx] 표{args.table}에 {args.count}열 추가(전체 폭 유지) -> {out}", file=sys.stderr)
+    return 0
+
+
 def cmd_fill_table(args) -> int:
     """데이터 구동 표 채우기 (행 자동 증식) → hwp fill --data 위임.
 
@@ -657,8 +838,9 @@ def cmd_fill_table(args) -> int:
 
 def cmd_create(args) -> int:
     out = Path(args.out_file)
+    base = Path(args.markdown).parent if args.markdown else None
     rc = _new_from_markdown(
-        _create_markdown_from_args(args), out, "plain", plain=args.plain
+        _create_markdown_from_args(args), out, plain=args.plain, base_dir=base
     )
     if rc == 0:
         print(f"[hwpx] created -> {out}", file=sys.stderr)
@@ -674,7 +856,8 @@ def cmd_write_java(args) -> int:
         md = "\n\n".join(Path(args.input).read_text(encoding="utf-8").splitlines())
     else:
         md = _tagged_lines_to_markdown(sys.stdin.read())
-    rc = _new_from_markdown(md, out, "plain", plain=args.plain)
+    base = Path(args.markdown).parent if args.markdown else None
+    rc = _new_from_markdown(md, out, plain=args.plain, base_dir=base)
     if rc == 0:
         print(f"[hwpx] created -> {out} (engine=hwp-cli)", file=sys.stderr)
     return rc
@@ -682,7 +865,7 @@ def cmd_write_java(args) -> int:
 
 def cmd_styled(args) -> int:
     """비참조 생성은 hwp-cli `new` + 공문서 스타일 후처리(--plain 시 생략);
-    --reference(슬롯 채우기)·블록 JSON은 lxml 코어 유지. --preset은 하위호환용 무시."""
+    --reference(슬롯 채우기)는 lxml 코어 유지. --preset은 비참조 생성에만 적용."""
     if not args.reference and (args.markdown or args.stdin_markdown):
         md_text = (
             Path(args.markdown).read_text(encoding="utf-8")
@@ -690,7 +873,10 @@ def cmd_styled(args) -> int:
             else sys.stdin.read()
         )
         out = Path(args.output)  # styled는 -o 필수
-        rc = _new_from_markdown(md_text, out, "plain", plain=args.plain)
+        base = Path(args.markdown).parent if args.markdown else None
+        rc = _new_from_markdown(
+            md_text, out, args.preset, plain=args.plain, base_dir=base
+        )
         if rc == 0:
             print(f"[hwpx] styled(hwp-cli) -> {out}", file=sys.stderr)
         return rc
@@ -735,7 +921,12 @@ def _styled_legacy(args) -> int:
     else:
         _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
     md = "\n\n".join(_json_payload_to_markdown(payload))
-    _new_from_markdown(md, Path(args.output), plain=getattr(args, "plain", False))
+    _new_from_markdown(
+        md,
+        Path(args.output),
+        args.preset,
+        plain=getattr(args, "plain", False),
+    )
     print(f"[hwpx] styled(hwp-cli) -> {args.output}", file=sys.stderr)
     return 0
 
@@ -978,6 +1169,8 @@ def cmd_convert(args) -> int:
     src = _ensure_file(args.file)
     out = Path(args.output) if args.output else src.with_suffix(f".{args.to}")
     cmd = ["convert", str(src), "--to", args.to, "-o", str(out)]
+    if getattr(args, "media_dir", None):
+        cmd += ["--media-dir", args.media_dir]
     if args.strict:
         cmd.append("--strict")
     proc = _run_hwp(cmd)
@@ -1167,9 +1360,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("file")
     s.set_defaults(func=cmd_summary)
 
-    s = sub.add_parser("to-md", help="HWPX -> markdown (hwp-cli 우선)")
+    s = sub.add_parser("to-md", help="HWPX -> markdown (hwp-cli 우선; -o 시 이미지 추출)")
     s.add_argument("file")
     s.add_argument("-o", "--output")
+    s.add_argument("--media-dir", dest="media_dir", default=None,
+                   help="(-o 필요) 이미지 추출 디렉터리 — 기본 <출력스템>.media, 상대경로는 출력 파일 기준")
     s.add_argument("--section", type=int, default=None)
     s.add_argument("--engine", choices=["auto", "hwp", "lxml"], default="auto",
                    help="auto(기본): hwp-cli cat 우선·lxml 폴백 / hwp: 강제 / lxml: 순수 파이썬 (section 지정 시 lxml)")
@@ -1215,6 +1410,14 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_add_rows)
 
+    s = sub.add_parser("add-col", help="표 열 추가 (전체 폭 유지, 기존 열 균등 축소) + 선택 채움")
+    s.add_argument("in_file")
+    s.add_argument("--table", type=int, default=0, help="표 인덱스(0-기반, 기본 0)")
+    s.add_argument("--count", type=int, default=1, help="추가할 열 수 (기본 1)")
+    s.add_argument("--set-cell", action="append", help='새 열 채우기 "표:행:열=값" (반복 가능)')
+    s.add_argument("-o", "--output")
+    s.set_defaults(func=cmd_add_col)
+
     s = sub.add_parser("fill-table", help="데이터 구동 표 채우기 (행 자동 증식) — --data tables 지시")
     s.add_argument("in_file")
     s.add_argument("--data", required=True, help='JSON 파일 ({"tables":[{"table":0,"start_row":1,"rows":[[..]]}]})')
@@ -1234,9 +1437,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("-o", "--output", required=True, help="출력 파일 경로")
     s.add_argument(
         "--preset",
-        choices=list(["gongmun", "bogoseo"]),
+        choices=list(STYLED_PRESET_ALIASES),
         default="gongmun",
-        help="하위호환 no-op (hwp-cli --preset 제거됨 — 출력 영향 없음)",
+        help="문서 프리셋: gongmun|gian=기안문, bogoseo|report=보고서",
     )
     s.add_argument("--reference", help="양식 파일 (slot이 있으면 raw ZIP/XML 치환)")
     s.add_argument("--markdown", help="markdown 파일")
@@ -1344,6 +1547,8 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--to", required=True,
                    choices=["hwp", "hwpx", "md", "json", "html", "odt", "pdf"], help="출력 포맷")
     s.add_argument("-o", "--output", help="출력 (생략 시 <in>.<to>)")
+    s.add_argument("--media-dir", dest="media_dir", default=None,
+                   help="(md) 이미지 추출 디렉터리 — 기본 <출력스템>.media, 상대경로는 출력 파일 기준")
     s.add_argument("--strict", action="store_true", help="보존 불가(opaque) 데이터 발견 시 실패")
     s.set_defaults(func=cmd_convert)
 

@@ -576,6 +576,7 @@ type UpdateToast =
   | { kind: "downloading"; info: AppUpdateInfo; progress: AppUpdateProgress | null }
   | { kind: "ready"; info: AppUpdateInfo }
   | { kind: "skillsUpdated"; version: string }
+  | { kind: "skillsAvailable"; version: string }
   | { kind: "error"; message: string };
 
 function tabIdForEntry(entry: VaultEntry): string {
@@ -5838,40 +5839,66 @@ function MainApp() {
     return () => window.clearTimeout(timer);
   }, [checkForUpdates]);
 
-  // Skills bundle OTA: one background check after launch, silently applied
-  // only when clean and runtime-compatible (autoApplicable). Network errors
-  // stay silent; signature/integrity failures surface as a security warning.
+  // Skills bundle OTA: a background check after launch and then every 6 h.
+  // Clean, runtime-compatible updates apply silently; an update that needs a
+  // human (env change, dirty builtin, app too old) surfaces as a toast with
+  // a jump to the skills settings tab. Network errors stay silent;
+  // signature/integrity failures surface as a security warning.
+  const skillsAvailableNotifiedRef = useRef<string | null>(null);
+  const checkSkillsBundle = useCallback(async () => {
+    try {
+      const status = await skillsCheckBundleUpdate();
+      if (!status?.updateAvailable) {
+        skillsAvailableNotifiedRef.current = null;
+        return;
+      }
+      if (!status.autoApplicable) {
+        const version = status.available?.displayVersion ?? "";
+        if (version && skillsAvailableNotifiedRef.current !== version) {
+          skillsAvailableNotifiedRef.current = version;
+          setUpdateToast({ kind: "skillsAvailable", version });
+        }
+        return;
+      }
+      const outcome = await skillsApplyBundleUpdate({ repairEnv: false });
+      if (outcome) {
+        skillsAvailableNotifiedRef.current = null;
+        setUpdateToast({
+          kind: "skillsUpdated",
+          version: outcome.current.displayVersion,
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Verification failures of any kind are security-relevant; only
+      // plain network/channel unavailability stays silent.
+      if (/signature|sha256_mismatch|size_mismatch|metadata_|archive_|bundle_path/.test(message)) {
+        setUpdateToast({
+          kind: "error",
+          message: t("updates.skillsSecurityError", { message }),
+        });
+      } else {
+        console.info("[maru] skills bundle check failed:", message);
+      }
+    }
+  }, [t]);
+
   useEffect(() => {
     if (!updaterAvailable()) return;
     const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const status = await skillsCheckBundleUpdate();
-          if (!status?.updateAvailable || !status.autoApplicable) return;
-          const outcome = await skillsApplyBundleUpdate({ repairEnv: false });
-          if (outcome) {
-            setUpdateToast({
-              kind: "skillsUpdated",
-              version: outcome.current.displayVersion,
-            });
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          // Verification failures of any kind are security-relevant; only
-          // plain network/channel unavailability stays silent.
-          if (/signature|sha256_mismatch|size_mismatch|metadata_|archive_|bundle_path/.test(message)) {
-            setUpdateToast({
-              kind: "error",
-              message: t("updates.skillsSecurityError", { message }),
-            });
-          } else {
-            console.info("[maru] skills bundle check failed:", message);
-          }
-        }
-      })();
+      void checkSkillsBundle();
     }, 3000);
-    return () => window.clearTimeout(timer);
-  }, [t]);
+    const interval = window.setInterval(
+      () => {
+        void checkSkillsBundle();
+      },
+      6 * 60 * 60 * 1000,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [checkSkillsBundle]);
 
   useEffect(() => {
     let disposed = false;
@@ -9318,7 +9345,9 @@ function MainApp() {
                           ? t("updates.ready")
                           : updateToast.kind === "skillsUpdated"
                             ? t("updates.skillsUpdated", { version: updateToast.version })
-                            : t("updates.error", { message: updateToast.message })
+                            : updateToast.kind === "skillsAvailable"
+                              ? t("updates.skillsAvailable", { version: updateToast.version })
+                              : t("updates.error", { message: updateToast.message })
               }
             >
               {updateToast.kind === "checking" || updateToast.kind === "downloading" ? (
@@ -9344,7 +9373,9 @@ function MainApp() {
                           ? t("updates.ready")
                           : updateToast.kind === "skillsUpdated"
                             ? t("updates.skillsUpdated", { version: updateToast.version })
-                            : t("updates.error", { message: updateToast.message })}
+                            : updateToast.kind === "skillsAvailable"
+                              ? t("updates.skillsAvailable", { version: updateToast.version })
+                              : t("updates.error", { message: updateToast.message })}
               </span>
               {updateToast.kind === "available" ? (
                 <button
@@ -9353,6 +9384,20 @@ function MainApp() {
                   onClick={() => void installPendingUpdate()}
                 >
                   {t("updates.install")}
+                </button>
+              ) : null}
+              {updateToast.kind === "skillsAvailable" ? (
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => {
+                    setUpdateToast(null);
+                    void openSettingsWindow(settingsWorkPath, "skills").catch((err) => {
+                      console.info("[maru] open settings window failed:", err);
+                    });
+                  }}
+                >
+                  {t("updates.skillsOpen")}
                 </button>
               ) : null}
               {updateToast.kind === "ready" ? (

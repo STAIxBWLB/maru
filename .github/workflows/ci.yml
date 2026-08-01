@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  # dorny/paths-filter reads the PR file list via the API on pull_request runs.
-  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -28,18 +26,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # Classify the change so skill-only edits (OTA bundle content) skip the
-      # heavy app toolchain. Unknown diffs classify as app changes (safe).
-      - name: Classify changes
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            skills:
-              - 'skills/**'
-            app:
-              - '!(skills/**)'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -51,23 +37,16 @@ jobs:
           node-version: 22.22.3
           cache: pnpm
 
-      - name: Verify skills bundle content
-        if: steps.changes.outputs.skills == 'true'
-        run: make skills-verify
-
       - name: Setup Rust
-        if: steps.changes.outputs.app == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        if: steps.changes.outputs.app == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
           key: ci-ubuntu-22.04
 
       - name: Install Linux Tauri dependencies
-        if: steps.changes.outputs.app == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -78,25 +57,21 @@ jobs:
             librsvg2-dev
 
       - name: Install frontend dependencies
-        if: steps.changes.outputs.app == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Run verify (typecheck + i18n lint + vitest + cargo test --lib + build)
-        if: steps.changes.outputs.app == 'true'
         run: make verify
 
       # e2e used to run only in release-preflight, so a broken or flaky spec
       # first surfaced on the release tag instead of on the PR that caused it.
       - name: Install Playwright browsers
-        if: steps.changes.outputs.app == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run e2e
-        if: steps.changes.outputs.app == 'true'
         run: make test-e2e
 
       - name: Upload e2e artifacts on failure
-        if: failure() && steps.changes.outputs.app == 'true'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
