@@ -144,6 +144,11 @@ not run follow-up skills.
      (fall back to `inbox.naming.extracted_file`) under the pending dir.
    - Recent meeting notes: the newest notes under the configured meetings
      root (default `meetings/`), at most 10 files, newest first.
+   - Latest mail digest: the newest file under the configured
+     `inbox.hooks.digest_output` path (e.g. `inbox/_state/digests/`), when
+     present. It is context only — it covers messages that were not staged
+     as pending items, so candidates may cite it, but never treat it as a
+     substitute for reading a staged item's own summary.
 2. Extract only concrete, actionable follow-ups (an identifiable action an
    owner could start). Skip pure information, completed items, and noise.
    Merge duplicates across sources into one candidate and list every source
