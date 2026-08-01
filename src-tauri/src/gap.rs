@@ -781,8 +781,9 @@ pub(crate) fn build_gap_feedback_digest(entries: &[GapLogEntry], max_entries: us
         totals.formatting,
     ];
     let mut lines = vec![format!(
-        "최근 초안 {}건의 수정 분석: 추가 {}줄, 삭제 {}줄 \
-         (외부 정보 {}건, 직접 수정 {}건, 교차 참조 {}건, 서식 {}건)",
+        // One line, no literal continuation: the frontend TS builds this with
+        // a single space and the two digests must stay byte-identical.
+        "최근 초안 {}건의 수정 분석: 추가 {}줄, 삭제 {}줄 (외부 정보 {}건, 직접 수정 {}건, 교차 참조 {}건, 서식 {}건)",
         recent.len(),
         added_lines,
         removed_lines,

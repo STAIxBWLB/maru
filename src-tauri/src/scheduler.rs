@@ -275,20 +275,34 @@ fn mark_fired(work: &Path, id: &str, now: DateTime<Local>) -> Result<SchedulerSc
     Ok(schedules[index].clone())
 }
 
-/// Prompt actually dispatched for a schedule. For inbox-process schedules a
-/// stale baked-in gap-feedback section (legacy add-time snapshot) is stripped
-/// and the digest is rebuilt fresh from the current gap log; anything else
-/// passes through untouched. Best-effort: a gap-log read failure dispatches
-/// the bare stripped prompt, and an empty log yields no section at all.
+/// Prompt actually dispatched for a schedule. For the builtin inbox-process
+/// skill a stale baked-in gap-feedback section (legacy add-time snapshot) is
+/// stripped and the digest is rebuilt fresh from the current gap log;
+/// anything else passes through untouched. Best-effort: a gap-log read
+/// failure dispatches the bare stripped prompt, and an empty log yields no
+/// section at all. If stripping would leave nothing (a legacy prompt that was
+/// ONLY the baked-in section) and there is no fresh digest to add, the
+/// original stored prompt is dispatched instead — a stale digest beats a
+/// `skill_prompt_required` failure.
 fn build_dispatch_prompt(work: &Path, schedule: &SchedulerSchedule) -> String {
-    if !schedule.skill_id.contains("inbox-process") {
+    if !is_builtin_inbox_process(&schedule.skill_id) {
         return schedule.prompt.clone();
     }
     let stripped = crate::gap::strip_gap_feedback_section(&schedule.prompt);
     let entries = crate::gap::read_gap_log_entries(work).unwrap_or_default();
     let digest =
         crate::gap::build_gap_feedback_digest(&entries, crate::gap::GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
+    if stripped.trim().is_empty() && digest.is_empty() {
+        return schedule.prompt.clone();
+    }
     crate::gap::append_gap_feedback_digest(&stripped, &digest)
+}
+
+/// Canonical match for the builtin inbox skill only: an imported skill whose
+/// composite id merely contains "inbox-process" must not have its prompt
+/// rewritten at dispatch.
+fn is_builtin_inbox_process(skill_id: &str) -> bool {
+    skill_id == "inbox-process" || skill_id == "maru-builtin::inbox-process"
 }
 
 fn dispatch_schedule(
@@ -883,5 +897,27 @@ mod tests {
         let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
         let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&legacy));
         assert_eq!(prompt, "do stuff");
+    }
+
+    #[test]
+    fn dispatch_prompt_keeps_original_when_strip_would_leave_nothing() {
+        let temp = TempDir::new().unwrap(); // no gap log -> no fresh digest
+        // A legacy schedule whose stored prompt was ONLY the baked-in digest
+        // section: stripping must not produce an empty dispatch prompt.
+        let only_digest = format!("{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&only_digest));
+        assert_eq!(prompt, only_digest);
+    }
+
+    #[test]
+    fn dispatch_prompt_ignores_imported_skills_with_inbox_process_in_the_id() {
+        let temp = TempDir::new().unwrap();
+        let baked = format!("Run it\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        let schedule = SchedulerSchedule {
+            skill_id: "my-import::inbox-process".to_string(),
+            prompt: baked.clone(),
+            ..sample_schedule(None, true)
+        };
+        assert_eq!(build_dispatch_prompt(temp.path(), &schedule), baked);
     }
 }
