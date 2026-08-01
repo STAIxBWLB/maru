@@ -125,6 +125,18 @@ pub struct GapLogEntry {
     pub removed_lines: usize,
     pub by_type: GapTypeCounts,
     pub hunk_count: usize,
+    // Provenance, all optional so older log lines still deserialize. Raw churn
+    // cannot answer "are the drafts getting better": 20 edited lines means one
+    // thing in a 40-line note and another in a 400-line one, and nothing in the
+    // entry said which runtime produced the draft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_by: Option<String>,
 }
 
 /// Cheap per-draft row for the analyzable-docs list: no diff is run.
@@ -591,6 +603,11 @@ pub fn gap_analyze(work_path: String, draft_id: String) -> Result<GapReport, Str
 #[tauri::command]
 pub fn gap_append_log(work_path: String, draft_id: String) -> Result<GapLogEntry, String> {
     let report = analyze_impl(&work_path, &draft_id)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let draft = load_promoted_entry(&work, &draft_id)?;
+    let baseline_lines = fs::read_to_string(baseline_path(&work, &draft.id))
+        .ok()
+        .map(|text| text.lines().count());
     let entry = GapLogEntry {
         at: Utc::now().to_rfc3339(),
         draft_id: report.draft_id.clone(),
@@ -599,9 +616,30 @@ pub fn gap_append_log(work_path: String, draft_id: String) -> Result<GapLogEntry
         removed_lines: report.summary.removed_lines,
         by_type: report.summary.by_type.clone(),
         hunk_count: report.summary.total_hunks,
+        baseline_hash: report.baseline_hash.clone(),
+        baseline_lines,
+        draft_kind: serde_json::to_value(draft.kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string)),
+        generated_by: serde_json::to_value(draft.source)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string)),
     };
-    let work = normalize_existing_dir(&work_path)?;
     let log_path = gap_log_path(&work);
+    // Save to log can be clicked twice, and each click used to append a row,
+    // doubling that document's weight in every aggregate and in the feedback
+    // digest. Same draft, same baseline, same counts as the last logged state
+    // is not new information.
+    if let Some(previous) = last_entry_for(&log_path, &draft_id) {
+        if previous.baseline_hash == entry.baseline_hash
+            && previous.added_lines == entry.added_lines
+            && previous.removed_lines == entry.removed_lines
+            && previous.hunk_count == entry.hunk_count
+            && previous.by_type == entry.by_type
+        {
+            return Ok(previous);
+        }
+    }
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("Cannot create gap log dir: {err}"))?;
     }
@@ -621,6 +659,16 @@ pub fn gap_append_log(work_path: String, draft_id: String) -> Result<GapLogEntry
     file.write_all(format!("{line}\n").as_bytes())
         .map_err(|err| format!("Cannot append gap log: {err}"))?;
     Ok(entry)
+}
+
+/// Most recent logged entry for one draft, or None. Corrupt lines are skipped
+/// the same way `gap_log_list` skips them.
+fn last_entry_for(log_path: &Path, draft_id: &str) -> Option<GapLogEntry> {
+    let raw = fs::read_to_string(log_path).ok()?;
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<GapLogEntry>(line).ok())
+        .filter(|entry| entry.draft_id == draft_id)
+        .next_back()
 }
 
 #[tauri::command]
@@ -984,6 +1032,44 @@ mod tests {
         writeln!(file, "{{not json").unwrap();
         let listed = gap_log_list(work.clone(), None).unwrap();
         assert_eq!(listed.len(), 2);
+    }
+
+    #[test]
+    fn log_entry_carries_provenance_for_normalizing_churn() {
+        let (_temp, work) = workspace();
+        seed_promoted_draft(&work, "draft-prov", "notes/prov.md", "a\nb\n", Some("a\nb\nc\n"));
+        let entry = gap_append_log(work.clone(), "draft-prov".to_string()).unwrap();
+        // Two added lines mean one thing against a 2-line baseline and another
+        // against a 200-line one, so the size has to travel with the counts.
+        assert_eq!(entry.baseline_lines, Some(2));
+        assert_eq!(entry.draft_kind.as_deref(), Some("task"));
+        assert_eq!(entry.generated_by.as_deref(), Some("kimi"));
+        assert!(entry.baseline_hash.is_some());
+    }
+
+    #[test]
+    fn logging_the_same_unchanged_state_twice_appends_once() {
+        let (_temp, work) = workspace();
+        seed_promoted_draft(&work, "draft-dupe", "notes/dupe.md", "a\n", Some("a\nb\n"));
+
+        let first = gap_append_log(work.clone(), "draft-dupe".to_string()).unwrap();
+        let second = gap_append_log(work.clone(), "draft-dupe".to_string()).unwrap();
+        // The second click returns the first row rather than doubling this
+        // document's weight in every aggregate.
+        assert_eq!(second.at, first.at);
+        assert_eq!(gap_log_list(work.clone(), None).unwrap().len(), 1);
+
+        // A real edit is a different state and does get its own row.
+        fs::write(Path::new(&work).join("notes/dupe.md"), "a\nb\nc\n").unwrap();
+        let third = gap_append_log(work.clone(), "draft-dupe".to_string()).unwrap();
+        assert_ne!(third.at, first.at);
+        assert_eq!(third.added_lines, 2);
+        assert_eq!(gap_log_list(work.clone(), None).unwrap().len(), 2);
+
+        // Another draft is never confused with this one.
+        seed_promoted_draft(&work, "draft-other", "notes/other.md", "a\n", Some("a\nb\n"));
+        gap_append_log(work.clone(), "draft-other".to_string()).unwrap();
+        assert_eq!(gap_log_list(work.clone(), None).unwrap().len(), 3);
     }
 
     #[test]

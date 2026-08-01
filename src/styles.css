@@ -23534,6 +23534,76 @@ select:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gap-dist-row:hover {
+  background-color: var(--panel-2);
+}
+
+.gap-dist-row.is-active {
+  border-color: var(--accent);
+  background-color: var(--panel-2);
+}
+
+.gap-log-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gap-log-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--type-meta-size);
+  color: var(--muted);
+}
+
+.gap-log-filter input {
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
+.gap-log-filter-clear {
+  padding: 3px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background-color: var(--panel);
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+  cursor: pointer;
+}
+
+.gap-log-entry.is-clickable {
+  cursor: pointer;
+}
+
+.gap-log-entry.is-clickable:hover {
+  background-color: var(--panel-2);
+}
+
+.gap-log-entry.is-selected {
+  border-left: 2px solid var(--accent);
+}
+
+.gap-log-entry-baseline,
+.gap-log-entry-runtime {
+  color: var(--muted);
+  font-size: var(--type-meta-size);
 }
 
 .gap-dist-bar {

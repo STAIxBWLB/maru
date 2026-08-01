@@ -10,6 +10,7 @@ import {
   GAP_HUNK_TYPES,
   gapEntrySize,
   gapHunkRangeLabel,
+  gapLogDayKey,
   gapTrend,
   gapTypeCountKey,
   groupGapLogByDay,
@@ -143,6 +144,24 @@ describe("groupGapLogByDay", () => {
   it("falls back to the raw date prefix for unparseable timestamps", () => {
     const groups = groupGapLogByDay([logEntry({ at: "2026-07-30Tbroken" })]);
     expect(groups[0].day).toBe("2026-07-30");
+  });
+
+  it("buckets on the same key the date filter compares against", () => {
+    // The log panel filters by gapLogDayKey and renders groupGapLogByDay
+    // headings. If the two disagreed, a range would drop rows it should keep.
+    const entries = [
+      logEntry({ at: "2026-07-29T10:00:00" }),
+      logEntry({ at: "2026-07-28T23:30:00" }),
+      logEntry({ at: "2026-07-30Tbroken" }),
+    ];
+    for (const group of groupGapLogByDay(entries)) {
+      for (const entry of group.entries) {
+        expect(gapLogDayKey(entry.at)).toBe(group.day);
+      }
+    }
+    // Keys are ISO, so the panel's lexicographic range comparison is ordered.
+    expect(gapLogDayKey("2026-07-28T23:30:00") < gapLogDayKey("2026-07-29T10:00:00")).toBe(true);
+    expect(gapLogDayKey("2026-08-01T00:00:00") > gapLogDayKey("2026-07-31T23:59:00")).toBe(true);
   });
 });
 

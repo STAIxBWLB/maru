@@ -318,6 +318,7 @@ export function GapPane({
           loading={logLoading}
           reports={reports}
           selectedDraftId={selectedId}
+          onSelectDraft={selectReport}
         />
       </div>
     </section>
