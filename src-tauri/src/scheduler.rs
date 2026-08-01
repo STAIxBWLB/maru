@@ -275,6 +275,22 @@ fn mark_fired(work: &Path, id: &str, now: DateTime<Local>) -> Result<SchedulerSc
     Ok(schedules[index].clone())
 }
 
+/// Prompt actually dispatched for a schedule. For inbox-process schedules a
+/// stale baked-in gap-feedback section (legacy add-time snapshot) is stripped
+/// and the digest is rebuilt fresh from the current gap log; anything else
+/// passes through untouched. Best-effort: a gap-log read failure dispatches
+/// the bare stripped prompt, and an empty log yields no section at all.
+fn build_dispatch_prompt(work: &Path, schedule: &SchedulerSchedule) -> String {
+    if !schedule.skill_id.contains("inbox-process") {
+        return schedule.prompt.clone();
+    }
+    let stripped = crate::gap::strip_gap_feedback_section(&schedule.prompt);
+    let entries = crate::gap::read_gap_log_entries(work).unwrap_or_default();
+    let digest =
+        crate::gap::build_gap_feedback_digest(&entries, crate::gap::GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
+    crate::gap::append_gap_feedback_digest(&stripped, &digest)
+}
+
 fn dispatch_schedule(
     app: &AppHandle,
     work: &Path,
@@ -284,7 +300,7 @@ fn dispatch_schedule(
         app.clone(),
         schedule.skill_id.clone(),
         schedule.runtime.clone(),
-        schedule.prompt.clone(),
+        build_dispatch_prompt(work, schedule),
         Some(work.to_string_lossy().to_string()),
         None,
         Some(serde_json::json!({
@@ -754,5 +770,118 @@ mod tests {
         assert!(next > now, "next run must move past the fired slot");
         // After re-alignment the schedule is no longer due.
         assert!(!is_due(&fired, now));
+    }
+
+    // === Dispatch-time gap-feedback digest ===
+
+    use crate::gap::{GapLogEntry, GapTypeCounts, GAP_FEEDBACK_SECTION_HEADER};
+
+    fn inbox_schedule(prompt: &str) -> SchedulerSchedule {
+        SchedulerSchedule {
+            skill_id: "inbox-process".to_string(),
+            prompt: prompt.to_string(),
+            ..sample_schedule(None, true)
+        }
+    }
+
+    fn gap_entry(at: &str, added: usize, removed: usize, by_type: GapTypeCounts) -> GapLogEntry {
+        GapLogEntry {
+            at: at.to_string(),
+            draft_id: "draft-fb".to_string(),
+            promoted_to: "notes/fb.md".to_string(),
+            added_lines: added,
+            removed_lines: removed,
+            by_type,
+            hunk_count: 0,
+            baseline_hash: None,
+            baseline_lines: None,
+            draft_kind: None,
+            generated_by: None,
+        }
+    }
+
+    fn write_gap_log(work: &Path, entries: &[GapLogEntry]) {
+        fs::create_dir_all(work.join(".maru")).unwrap();
+        let mut body = String::new();
+        for entry in entries {
+            body.push_str(&serde_json::to_string(entry).unwrap());
+            body.push('\n');
+        }
+        fs::write(work.join(".maru").join("gap-log.jsonl"), body).unwrap();
+    }
+
+    #[test]
+    fn dispatch_prompt_leaves_non_inbox_process_prompts_untouched() {
+        let temp = TempDir::new().unwrap();
+        let baked = format!("Run it\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        let schedule = SchedulerSchedule {
+            prompt: baked.clone(),
+            ..sample_schedule(None, true) // skill_id "vault-sync"
+        };
+        assert_eq!(build_dispatch_prompt(temp.path(), &schedule), baked);
+    }
+
+    #[test]
+    fn dispatch_prompt_strips_stale_section_and_attaches_one_fresh_digest() {
+        let temp = TempDir::new().unwrap();
+        write_gap_log(
+            temp.path(),
+            &[gap_entry(
+                "2026-07-30T09:00:00",
+                3,
+                1,
+                GapTypeCounts {
+                    external_info: 2,
+                    direct_edit: 1,
+                    ..GapTypeCounts::default()
+                },
+            )],
+        );
+        let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&legacy));
+        assert!(!prompt.contains("stale digest"), "{prompt}");
+        assert_eq!(
+            prompt.matches(GAP_FEEDBACK_SECTION_HEADER).count(),
+            1,
+            "exactly one fresh section: {prompt}"
+        );
+        assert!(prompt.contains("최근 초안 1건"), "{prompt}");
+    }
+
+    #[test]
+    fn dispatch_prompt_appends_fresh_digest_to_a_clean_prompt() {
+        let temp = TempDir::new().unwrap();
+        write_gap_log(
+            temp.path(),
+            &[gap_entry(
+                "2026-07-30T09:00:00",
+                3,
+                1,
+                GapTypeCounts {
+                    external_info: 2,
+                    direct_edit: 1,
+                    ..GapTypeCounts::default()
+                },
+            )],
+        );
+        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule("do stuff"));
+        assert_eq!(
+            prompt,
+            format!(
+                "do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\n\
+                 최근 초안 1건의 수정 분석: 추가 3줄, 삭제 1줄 \
+                 (외부 정보 2건, 직접 수정 1건, 교차 참조 0건, 서식 0건)\n\
+                 가장 잦은 수정 유형은 외부 정보 추가: \
+                 초안에 출처·수치·날짜 등 근거 정보를 더 포함할 것"
+            ),
+        );
+    }
+
+    #[test]
+    fn dispatch_prompt_without_log_returns_stripped_bare_prompt() {
+        let temp = TempDir::new().unwrap(); // no gap log at all
+        let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&legacy));
+        assert_eq!(prompt, "do stuff");
     }
 }

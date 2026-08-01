@@ -15,7 +15,6 @@ import {
 import { formatRelativeDate } from "../../lib/document";
 import { formatScheduleTime } from "../../lib/drafts";
 import {
-  appendGapFeedbackDigest,
   buildGapFeedbackDigest,
   GAP_FEEDBACK_DEFAULT_MAX_ENTRIES,
 } from "../../lib/gapAnalysis";
@@ -57,28 +56,6 @@ const IMPORTANCE_LEVELS: AiTaskIngestMinImportance[] = ["low", "medium", "high"]
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Gap-feedback loop: for inbox-process (extract-tasks) schedules, append the
- * current gap-log digest to the stored prompt under a clearly delimited,
- * user-editable section. The digest is a snapshot taken at schedule-add time;
- * the prompt executes later, Rust-side, so this is the zero-risk injection
- * point. Best-effort — a gap-log read failure never blocks schedule creation.
- */
-async function promptWithGapFeedback(
-  workPath: string,
-  skillId: string,
-  prompt: string,
-): Promise<string> {
-  if (!skillId.includes("inbox-process")) return prompt;
-  try {
-    const entries = await gapLogList(workPath, GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
-    const digest = buildGapFeedbackDigest(entries, GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
-    return appendGapFeedbackDigest(prompt, digest);
-  } catch {
-    return prompt;
-  }
 }
 
 export function SchedulerSection({
@@ -418,6 +395,9 @@ function AddScheduleDialog({
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [gapDigest, setGapDigest] = useState<string | null>(null);
+
+  const showGapDigest = skillId.includes("inbox-process");
 
   useEffect(() => {
     if (!open) return;
@@ -431,12 +411,35 @@ function AddScheduleDialog({
     setEnabled(true);
   }, [open, skills, defaultRuntime]);
 
+  // Read-only preview of the gap-feedback digest. The stored prompt stays
+  // bare: the Rust scheduler strips any stale section and attaches the digest
+  // fresh at each dispatch (see build_dispatch_prompt in scheduler.rs). A
+  // gap-log read failure just hides the preview.
+  useEffect(() => {
+    if (!open || !workPath || !showGapDigest) {
+      setGapDigest(null);
+      return;
+    }
+    let cancelled = false;
+    gapLogList(workPath, GAP_FEEDBACK_DEFAULT_MAX_ENTRIES)
+      .then((entries) => {
+        if (!cancelled) {
+          setGapDigest(buildGapFeedbackDigest(entries, GAP_FEEDBACK_DEFAULT_MAX_ENTRIES));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGapDigest(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workPath, showGapDigest]);
+
   if (!open) return null;
 
   const submit = async () => {
-    // Validate the pre-digest prompt: the Rust side rejects a blank prompt, and
-    // promptWithGapFeedback can turn "" into a digest-only prompt that passes
-    // that check while carrying no instruction for the agent to act on.
+    // The Rust side rejects a blank prompt; the digest is attached at
+    // dispatch time, so the stored prompt carries the user's words only.
     if (!workPath || busy || !name.trim() || !skillId.trim() || !prompt.trim()) return;
     setBusy(true);
     onError(null);
@@ -453,7 +456,7 @@ function AddScheduleDialog({
           name: name.trim(),
           skillId: skillId.trim(),
           runtime,
-          prompt: await promptWithGapFeedback(workPath, skillId.trim(), prompt.trim()),
+          prompt: prompt.trim(),
           hour,
           minute,
           daysOfWeek,
@@ -520,6 +523,19 @@ function AddScheduleDialog({
             onChange={(event) => setPrompt(event.target.value)}
           />
         </Field>
+        {showGapDigest && (
+          <div className="drafts-schedule-gap-digest">
+            <div className="drafts-schedule-gap-digest-title">
+              {t("drafts.schedule.gapDigest.title")}
+            </div>
+            <p className="drafts-schedule-gap-digest-note">
+              {t("drafts.schedule.gapDigest.note")}
+            </p>
+            {gapDigest && (
+              <pre className="drafts-schedule-gap-digest-body">{gapDigest}</pre>
+            )}
+          </div>
+        )}
         <Field label={t("drafts.schedule.time")}>
           <div className="drafts-schedule-time">
             <TextInput

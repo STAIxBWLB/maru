@@ -200,8 +200,11 @@ export function buildGapFeedbackDigest(
 }
 
 /** Delimited prompt section header marking the auto-attached digest. The
- *  extract-tasks skill honors this section when present; users can see and
- *  edit it in the schedule dialog. */
+ *  extract-tasks skill honors this section when present. The Rust scheduler
+ *  attaches the digest at dispatch time via a port of this module in
+ *  `src-tauri/src/gap.rs` — the two implementations (header string, Korean
+ *  copy, entry cap) must stay in sync; this frontend copy still feeds the
+ *  read-only preview in the schedule dialog. */
 export const GAP_FEEDBACK_SECTION_HEADER = "## 최근 수정 경향 (자동 첨부)";
 
 /** Append the digest to a schedule prompt under the section header. A prompt

@@ -93,17 +93,21 @@ The log is not just a report: it closes the loop back into draft generation.
   ("최근 초안 N건의 수정 분석: 추가 X줄, 삭제 Y줄 (...)"), plus one actionable
   hint for the dominant edit type (e.g. external-info dominates → "초안에
   출처·수치·날짜 등 근거 정보를 더 포함할 것"). Empty input yields an empty
-  string.
-- Injection point: **schedule-add time**, frontend-side
-  (`promptWithGapFeedback` in `SchedulerSection.tsx`). When the user adds a
-  schedule for the `inbox-process` skill, the current digest is appended to
-  the stored prompt under a clearly delimited, user-editable section header
+  string. A Rust port (`build_gap_feedback_digest` in `src-tauri/src/gap.rs`)
+  produces the identical digest; the two must stay in sync.
+- Injection point: **dispatch time**, Rust-side (`build_dispatch_prompt` in
+  `src-tauri/src/scheduler.rs`). When an `inbox-process` schedule fires, the
+  scheduler strips any previously attached digest section — legacy schedules
+  may carry a stale add-time snapshot — and appends a digest built fresh from
+  the current gap log under the delimited section header
   (`## 최근 수정 경향 (자동 첨부)`). The digest is best-effort: a gap-log read
-  failure never blocks schedule creation, and non-inbox-process schedules are
-  untouched.
-- Trade-off: the digest is a snapshot, stale between runs. Chosen over a
-  Rust-side injection at dispatch time because it requires no change to
-  `skill_host` and keeps the section visible/editable in the schedule dialog.
+  failure dispatches the bare stripped prompt, and non-inbox-process
+  schedules are untouched.
+- Stored schedule prompts stay bare. The schedule dialog instead shows a
+  read-only preview of the current digest (built with the frontend
+  `buildGapFeedbackDigest`), labelled as attached fresh at each run.
+- Trade-off: the section is no longer visible or editable in the stored
+  prompt; in exchange the digest is never stale between runs.
 - The extract-tasks mode of `skills/skills/inbox-process/SKILL.md` is
   instructed to honor the `## 최근 수정 경향` section when present and apply
   its hints to every `draftBody`.
