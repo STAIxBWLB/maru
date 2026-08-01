@@ -6,6 +6,7 @@
 #   ./md2docx <file.md> -o <out.docx>
 #   ./md2docx <file.md> --theme mineral|koica|mono   (default: mineral)
 #   ./md2docx <file.md> --serif                       (Korean myeongjo body, formal)
+#   ./md2docx <file.md> --gaejosik                     (Korean official symbol ladder)
 #   ./md2docx <file.md> --header "Running header"      (override) | --no-header
 #
 # Resolves the Maru env Node runtime + sets NODE_PATH so the bundled `docx`
@@ -77,6 +78,7 @@ Options:
   -o <out.docx>           단일 입력일 때 출력 경로 지정 (기본: 입력 .md 옆에 .docx)
   --theme mineral|koica|mono   팔레트 (기본 mineral; koica=네이비, mono=모노크롬)
   --serif                 한글 명조 본문 (격식 문서)
+  --gaejosik              개조식 기호 사다리 (□/○ 내어쓰기, 불릿 -/·)
   --header "TEXT"         머리말 텍스트 override
   --no-header             머리말 제거
 

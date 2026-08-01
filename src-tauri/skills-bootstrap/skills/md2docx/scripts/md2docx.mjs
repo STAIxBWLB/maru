@@ -9,6 +9,7 @@
 //   md2docx <file.md> -o <out.docx>
 //   md2docx <file.md> --theme mineral|koica|mono   (default: mineral)
 //   md2docx <file.md> --serif                       (Korean myeongjo body, formal)
+//   md2docx <file.md> --gaejosik                     (Korean official symbol ladder □→○→-→·)
 //   md2docx <file.md> --header "Running header"      (override) | --no-header
 //
 // Supports: YAML frontmatter strip, H1–H6 (+italic subtitle), inline code/bold/italic/<br>,
@@ -49,6 +50,7 @@ const FONT_SANS = { ascii: "Calibri", hAnsi: "Calibri", eastAsia: "Malgun Gothic
 const FONT_SERIF = { ascii: "Cambria", hAnsi: "Cambria", eastAsia: "바탕" };
 const MONO = { ascii: "Consolas", hAnsi: "Consolas", eastAsia: "Malgun Gothic" };
 let FONT = FONT_SANS;
+let gaejosik = false; // Korean official body ladder: □/○ paragraphs + `-`/`·` bullets
 
 // ---------- inline parsing → (TextRun|ExternalHyperlink)[] ----------
 // pipeline: code spans (protected) → links → **bold** → _italic_/*italic*
@@ -449,8 +451,15 @@ function mdToBlocks(md) {
 
     // bullet list (with nesting + task lists)
     if (/^\s*[-*]\s+/.test(line)) {
+      // --gaejosik: ladder level = depth *within* the list group. A `-` list under a `○`
+      // paragraph starts at column 2 but is still level 1, so normalize by the group's base.
+      let base = 0;
+      if (gaejosik) {
+        base = Infinity;
+        for (let j = i; j < lines.length && /^\s*[-*]\s+/.test(lines[j]); j++) base = Math.min(base, leadIndent(lines[j]));
+      }
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        const level = leadIndent(lines[i]);
+        const level = leadIndent(lines[i]) - base;
         const txt = lines[i].replace(/^\s*[-*]\s+/, "");
         const task = /^\[([ xX])\]\s+(.*)$/.exec(txt);
         if (task) {
@@ -465,7 +474,10 @@ function mdToBlocks(md) {
           }));
         } else {
           blocks.push(new Paragraph({
-            bullet: { level },
+            // --gaejosik swaps docx-js' default ●○■ cycle for the Korean ladder (`-` then `·`)
+            ...(gaejosik
+              ? { numbering: { reference: "gaejosik", level, instance: 0 } }
+              : { bullet: { level } }),
             spacing: { before: 20, after: 20 },
             children: inlineRuns(txt),
           }));
@@ -502,7 +514,12 @@ function mdToBlocks(md) {
       para.push(lines[i]);
       i++;
     }
-    blocks.push(new Paragraph({ spacing: { before: 40, after: 40 }, children: inlineRuns(para.join(" ")) }));
+    const text = para.join(" ").trim();
+    const opts = { spacing: { before: 40, after: 40 }, children: runsWithBreaks(text) };
+    // 개조식 1·2단: glyph stays in the text, hanging indent aligns wrapped lines under it
+    if (gaejosik && text.startsWith("□ ")) opts.indent = { left: 360, hanging: 360 };
+    else if (gaejosik && text.startsWith("○ ")) opts.indent = { left: 720, hanging: 360 };
+    blocks.push(new Paragraph(opts));
   }
   return blocks;
 }
@@ -573,6 +590,15 @@ function makeDoc(blocks, { title, headerText }) {
           { level: 2, format: LevelFormat.LOWER_ROMAN, text: "%3.", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 1440, hanging: 260 } } } },
           { level: 3, format: LevelFormat.DECIMAL, text: "%4)", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 1920, hanging: 260 } } } },
         ],
+      }, {
+        // Korean official body ladder, rungs 3-4: first list level `-`, deeper levels `·`
+        reference: "gaejosik",
+        levels: [
+          { level: 0, format: LevelFormat.BULLET, text: "-", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 480, hanging: 260 } } } },
+          { level: 1, format: LevelFormat.BULLET, text: "·", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 960, hanging: 260 } } } },
+          { level: 2, format: LevelFormat.BULLET, text: "·", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 1440, hanging: 260 } } } },
+          { level: 3, format: LevelFormat.BULLET, text: "·", alignment: AlignmentType.START, style: { paragraph: { indent: { left: 1920, hanging: 260 } } } },
+        ],
       }],
     },
     sections: [sectionChildren],
@@ -588,12 +614,13 @@ for (let k = 0; k < argv.length; k++) {
   if (a === "-o") { outOverride = argv[++k]; continue; }
   if (a === "--theme") { themeName = (argv[++k] || "mineral").toLowerCase(); continue; }
   if (a === "--serif") { serif = true; continue; }
+  if (a === "--gaejosik") { gaejosik = true; continue; }
   if (a === "--no-header") { noHeader = true; continue; }
   if (a === "--header") { headerOverride = argv[++k]; continue; }
   files.push(a);
 }
 if (files.length === 0) {
-  console.error("usage: md2docx <file.md> [more.md ...] [-o out.docx] [--theme mineral|koica|mono] [--serif] [--header TEXT|--no-header]");
+  console.error("usage: md2docx <file.md> [more.md ...] [-o out.docx] [--theme mineral|koica|mono] [--serif] [--gaejosik] [--header TEXT|--no-header]");
   process.exit(1);
 }
 T = THEMES[themeName] || THEMES.mineral;
@@ -613,5 +640,5 @@ for (const f of files) {
     ? outOverride
     : join(dirname(f), basename(f).replace(/\.md$/i, "") + ".docx");
   writeFileSync(out, buf);
-  console.log(`✓ ${out}  (${(buf.length / 1024).toFixed(1)} KB, ${blocks.length} blocks, theme=${themeName}${serif ? ", serif" : ""})`);
+  console.log(`✓ ${out}  (${(buf.length / 1024).toFixed(1)} KB, ${blocks.length} blocks, theme=${themeName}${serif ? ", serif" : ""}${gaejosik ? ", gaejosik" : ""})`);
 }

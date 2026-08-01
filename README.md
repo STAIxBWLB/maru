@@ -398,23 +398,24 @@ cd src-tauri && cargo test --release bench_scan_real_workspace \
 
 CI runs `make verify` (typecheck + vitest + cargo test --lib + build) and
 `make test-e2e` on every pull request and push to `main` via
-`.github/workflows/ci.yml`; pushes that touch only `skills/**` run
-`make skills-verify` instead of the full app toolchain. The heavier
+`.github/workflows/ci.yml`. The heavier
 `release-preflight` repeats both and adds diff checks, CLI tests/smoke, and a
 debug Tauri build on version tags.
 
 ## Skills Bundle Channel (OTA)
 
-Skills deploy independently of app releases. Merging `skills/**` changes to
-`main` triggers `.github/workflows/release-skills.yml`: it verifies and
-packages the tree (`make skills-verify` / `make skills-package`), signs the
-zip and metadata with the Tauri updater key, and uploads immutable assets to
-the fixed `skills-channel` prerelease. The app checks that channel at launch
-and applies new bundles automatically when the local skills are clean and
-runtime-compatible; `maru skills update --check|--apply [--repair-env]` and
-the Skills UI cover manual flows. The binary embeds only a frozen
-`src-tauri/skills-bootstrap/` snapshot as the offline first-run fallback, so
-editing `skills/` requires no Rust rebuild.
+Skills deploy independently of app releases and live in their own repo,
+[`STAIxBWLB/skills`](https://github.com/STAIxBWLB/skills). Every push there
+that touches bundle content verifies, packages, signs (same minisign key as
+the app updater), and uploads immutable assets to that repo's
+`skills-channel` prerelease. The app checks that channel after launch and
+every 6 hours, applies new bundles automatically when the local skills are
+clean and runtime-compatible, and shows an update-available notification
+otherwise; `maru skills update --check|--apply [--repair-env]` and the
+Skills UI cover manual flows. The binary embeds only a frozen
+`src-tauri/skills-bootstrap/` snapshot as the offline first-run fallback;
+refresh it from the newest bundle with `make skills-bootstrap-refresh` when
+cutting an app release.
 
 ## Release Bundles
 

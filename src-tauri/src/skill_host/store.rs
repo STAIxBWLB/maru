@@ -3284,7 +3284,7 @@ pub struct SkillBundleApplyOutcome {
 }
 
 fn embedded_channel() -> (String, String) {
-    let repo_fallback = "STAIxBWLB/maru".to_string();
+    let repo_fallback = "STAIxBWLB/skills".to_string();
     let tag_fallback = "skills-channel".to_string();
     let Some(manifest) = BUILTIN_DIR.get_file("manifest.json") else {
         return (repo_fallback, tag_fallback);

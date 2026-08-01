@@ -28,7 +28,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
     # App releases only (v* tags). The skills-channel prerelease publishes
-    # through release-skills.yml and must not trigger app/CLI/Homebrew builds.
+    # from STAIxBWLB/skills and must not trigger app/CLI/Homebrew builds.
     if: ${{ startsWith(github.event.release.tag_name || inputs.tag, 'v') }}
 
     strategy:

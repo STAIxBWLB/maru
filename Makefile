@@ -198,13 +198,13 @@ skills-doctor-json: ## Run Maru skills doctor and print JSON
 skills-dirty: ## List dirty Maru skills as JSON
 	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin maru-cli -- skills dirty --json
 
-.PHONY: skills-verify
-skills-verify: ## Validate skills/ manifest, frontmatter, and tracked inventory
-	$(NODE) scripts/skills-bundle.mjs verify
+.PHONY: skills-bootstrap-verify
+skills-bootstrap-verify: ## Validate the embedded bootstrap snapshot against the OTA bundle schema
+	$(NODE) scripts/skills-bootstrap-refresh.mjs verify
 
-.PHONY: skills-package
-skills-package: ## Package skills bundle + metadata into dist-skills/ (REVISION=<n>)
-	$(NODE) scripts/skills-bundle.mjs package --revision $(or $(REVISION),0)
+.PHONY: skills-bootstrap-refresh
+skills-bootstrap-refresh: ## Replace src-tauri/skills-bootstrap with the newest OTA bundle
+	$(NODE) scripts/skills-bootstrap-refresh.mjs refresh
 
 .PHONY: diff-check
 diff-check: ## Check working tree diff for whitespace errors

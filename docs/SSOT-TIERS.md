@@ -22,7 +22,7 @@ and doctor output, but never increase the 43 managed skills or 86 installs.
 
 | Tier | Location | Identity | Change Path |
 |------|----------|----------|-------------|
-| T1 Core | `dev/maru/skills/skills/<name>/` | Maru-bundled skill, deployed via the `skills-channel` OTA bundle (no app release needed) | `dev/maru` PR → auto-published bundle |
+| T1 Core | `STAIxBWLB/skills` repo, `skills/<name>/` | Maru-bundled skill, deployed via the `skills-channel` OTA bundle (no app release needed) | `STAIxBWLB/skills` PR → auto-published bundle |
 | T2 Public | `~/.maru/skills/_sources/skills-public/skills/<name>/` | Public reusable skill | `STAIxBWLB/skills` PR |
 | T3 Private | `~/.maru/skills/_sources/skills-private/skills/<name>/` | Private or identity-bearing skill | `entelecheia/skills` push |
 | T4 Imported | `~/.maru/skills/_imported/skills/<name>/` | Explicitly imported external skill | `maru skills import` |
@@ -40,13 +40,14 @@ and doctor output, but never increase the 43 managed skills or 86 installs.
 ## T1 deployment
 
 T1 skills ship as signed immutable bundles on the fixed `skills-channel`
-prerelease of `STAIxBWLB/maru` (see `skills/README.md`). The app applies the
-newest bundle automatically at launch when `_builtin` is clean and the
-runtime env hash matches; otherwise the update waits for a manual apply
+prerelease of `STAIxBWLB/skills` (see that repo's README). The app applies
+the newest bundle automatically when `_builtin` is clean and the runtime env
+hash matches; otherwise it notifies and the update waits for a manual apply
 (`maru skills update --apply [--repair-env]` or the Skills UI). Local T1
 edits block bundle apply until promoted (Save As) or discarded. The embedded
 `src-tauri/skills-bootstrap/` snapshot only seeds offline first runs and can
-never downgrade an applied bundle.
+never downgrade an applied bundle; refresh it with
+`make skills-bootstrap-refresh` at release time.
 
 ## Reconcile Paths
 

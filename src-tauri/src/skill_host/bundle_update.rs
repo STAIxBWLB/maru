@@ -692,7 +692,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Digest over (rel path, content sha) pairs: sorted `rel\0sha\0`, matching
-/// scripts/skills-bundle.mjs. Paths must be '/'-normalized bundle-relative.
+/// scripts/skills-bundle.mjs in STAIxBWLB/skills. Paths must be
+/// '/'-normalized bundle-relative.
 pub fn hash_from_file_hashes(mut pairs: Vec<(String, String)>) -> String {
     pairs.sort_by(|a, b| a.0.cmp(&b.0));
     let mut hasher = Sha256::new();
