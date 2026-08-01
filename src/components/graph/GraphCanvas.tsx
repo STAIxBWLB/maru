@@ -128,7 +128,13 @@ interface GraphCanvasProps {
   exportControllerRef?: RefObject<GraphExportController | null>;
   /** KG reference-focus mode (kg_refs Phase 4): referenced node ids + a nonce
    *  that re-arms the converge animation on every trigger. null = off. */
-  referenceFocus?: { ids: Set<string>; nonce: number } | null;
+  referenceFocus?: {
+    ids: Set<string>;
+    /** Per-paragraph node sets, walked in document order. One step (or none)
+     *  animates everything at once, which is the old behaviour. */
+    steps?: Set<string>[];
+    nonce: number;
+  } | null;
   overlay?: ReactNode;
 }
 
@@ -184,6 +190,9 @@ const LABEL_THRESHOLD: Record<GraphDisplaySettings["labels"], number> = { low: 4
  *  travels toward the subgraph centroid at the animation's peak. */
 const KG_REF_CONVERGE = 0.35;
 const KG_REF_ANIM_DURATION_MS = 1_500;
+// How far a paused leg stays pulled toward its centroid, so a stopped walk
+// still shows which paragraph's nodes are on screen.
+const KG_REF_PAUSED_AMP = 0.4;
 
 function prefersReducedMotion(): boolean {
   return (
@@ -613,6 +622,15 @@ export function GraphCanvas({
     amp: number;
   } | null>(null);
   const refFocusAnimatedNonceRef = useRef(-1);
+  // Walk controls. The rAF loop reads the refs (React state would be a frame
+  // stale inside the loop); the state only drives the control bar's rendering.
+  const [refWalk, setRefWalk] = useState<{
+    step: number;
+    total: number;
+    paused: boolean;
+  } | null>(null);
+  const refWalkPausedRef = useRef(false);
+  const refWalkJumpRef = useRef<number | null>(null);
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -1338,6 +1356,7 @@ export function GraphCanvas({
   // restarted for this. prefers-reduced-motion skips straight to the rest
   // state (dimmed/emphasized, no motion).
   const refFocusIds = referenceFocus?.ids ?? null;
+  const refFocusSteps = referenceFocus?.steps ?? null;
   const refFocusNonce = referenceFocus?.nonce ?? -1;
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -1345,6 +1364,7 @@ export function GraphCanvas({
     refAnimRef.current = null;
     if (!refFocusIds || refFocusIds.size === 0) {
       refFocusAnimatedNonceRef.current = -1;
+      setRefWalk(null);
       renderer?.refresh();
       return;
     }
@@ -1356,22 +1376,25 @@ export function GraphCanvas({
       renderer.refresh();
       return;
     }
-    let cx = 0;
-    let cy = 0;
-    let count = 0;
-    refFocusIds.forEach((id) => {
-      if (!graph.hasNode(id)) return;
-      const attrs = graph.getNodeAttributes(id);
-      if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
-      cx += attrs.x;
-      cy += attrs.y;
-      count += 1;
-    });
-    if (count === 0) {
+    const centroidOf = (ids: Set<string>) => {
+      let cx = 0;
+      let cy = 0;
+      let count = 0;
+      ids.forEach((id) => {
+        if (!graph.hasNode(id)) return;
+        const attrs = graph.getNodeAttributes(id);
+        if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
+        cx += attrs.x;
+        cy += attrs.y;
+        count += 1;
+      });
+      return count === 0 ? null : { x: cx / count, y: cy / count };
+    };
+    const centroid = centroidOf(refFocusIds);
+    if (!centroid) {
       renderer.refresh();
       return;
     }
-    const centroid = { x: cx / count, y: cy / count };
     // Frame the referenced subgraph once so the synthesis reads on screen.
     const viewport = renderer.graphToViewport({ x: centroid.x, y: centroid.y });
     const target = renderer.viewportToFramedGraph(viewport);
@@ -1396,10 +1419,36 @@ export function GraphCanvas({
     // Incident edges have to ride along: edge geometry is baked from the node
     // cache when an edge is uploaded, so refreshing the nodes alone leaves the
     // edges pinned to the old positions and visibly tears the subgraph.
-    const animatedNodes: string[] = [];
-    refFocusIds.forEach((id) => {
-      if (graph.hasNode(id)) animatedNodes.push(id);
-    });
+    //
+    // The walk: one leg per paragraph that cites something, in document order,
+    // so the viewer sees which part of the document pulls in which nodes. With
+    // no usable step data it is a single leg over everything, which is the
+    // behaviour this replaced.
+    //
+    // Every leg converges on the centroid of the WHOLE referenced set, not its
+    // own. A paragraph citing a single node sits on its own centroid and could
+    // not move by construction, which is exactly the common case; sharing the
+    // document's centroid also reads as each paragraph feeding one document.
+    const legs = (refFocusSteps ?? [])
+      .map((ids) => {
+        const nodes: string[] = [];
+        ids.forEach((id) => {
+          if (graph.hasNode(id)) nodes.push(id);
+        });
+        return nodes.length > 0 ? { ids, nodes } : null;
+      })
+      .filter((leg): leg is { ids: Set<string>; nodes: string[] } => leg !== null);
+    if (legs.length === 0) {
+      const nodes: string[] = [];
+      refFocusIds.forEach((id) => {
+        if (graph.hasNode(id)) nodes.push(id);
+      });
+      legs.push({ ids: refFocusIds, nodes });
+    }
+    // Repaint the union for every leg. Scoping the partial graph to the active
+    // leg would leave the previous leg's nodes displaying their last animated
+    // offset, since nothing repaints them back to rest.
+    const animatedNodes = [...new Set(legs.flatMap((leg) => leg.nodes))];
     const incidentEdges = new Set<string>();
     for (const id of animatedNodes) {
       for (const edge of graph.edges(id)) incidentEdges.add(edge);
@@ -1407,7 +1456,10 @@ export function GraphCanvas({
     const partialGraph = { nodes: animatedNodes, edges: [...incidentEdges] };
     let raf = 0;
     let recoveries = 0;
-    const start = performance.now();
+    let legIndex = 0;
+    let start = performance.now();
+    setRefWalk({ step: 0, total: legs.length, paused: false });
+    refWalkPausedRef.current = false;
     // A partial repaint needs the program slots process() assigns. The
     // interaction-sync effect above also depends on referenceFocus, and its
     // scheduleRefresh() clears those slots SYNCHRONOUSLY while deferring
@@ -1433,9 +1485,30 @@ export function GraphCanvas({
       // rendererState, so this effect is not re-run; bail rather than paint into
       // a killed instance.
       if (rendererRef.current !== renderer) return;
+      // Stepping happens while paused, so the jump must be consumed before the
+      // pause branch or the prev/next buttons would do nothing.
+      const jump = refWalkJumpRef.current;
+      if (jump !== null) {
+        refWalkJumpRef.current = null;
+        legIndex = Math.max(0, Math.min(legs.length - 1, jump));
+        start = now;
+        setRefWalk({ step: legIndex, total: legs.length, paused: refWalkPausedRef.current });
+      }
+      // A paused leg holds part-way in, not at rest: at rest its nodes sit on
+      // their layout positions and nothing on screen says which paragraph is
+      // being shown.
+      if (refWalkPausedRef.current) {
+        start = now;
+        const held = legs[legIndex];
+        refAnimRef.current = { ids: held.ids, centroid, amp: KG_REF_PAUSED_AMP };
+        if (!paint()) return;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const leg = legs[legIndex];
       const progress = Math.min(1, (now - start) / KG_REF_ANIM_DURATION_MS);
       refAnimRef.current = {
-        ids: refFocusIds,
+        ids: leg.ids,
         centroid,
         // Out-and-back: gather toward the centroid, then ease home.
         amp: Math.sin(Math.PI * progress),
@@ -1443,13 +1516,24 @@ export function GraphCanvas({
       if (!paint()) return;
       if (progress < 1) {
         raf = requestAnimationFrame(tick);
-      } else {
-        refAnimRef.current = null;
-        paint();
-        // Consume the trigger only now: an animation cut short by a layout
-        // restart or a teardown is retried when the graph is ready again.
-        refFocusAnimatedNonceRef.current = refFocusNonce;
+        return;
       }
+      if (legIndex < legs.length - 1) {
+        legIndex += 1;
+        start = now;
+        setRefWalk({ step: legIndex, total: legs.length, paused: false });
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      refAnimRef.current = null;
+      paint();
+      // Consume the trigger only now: an animation cut short by a layout
+      // restart or a teardown is retried when the graph is ready again.
+      refFocusAnimatedNonceRef.current = refFocusNonce;
+      // Keep the bar so the walk can be replayed or stepped through by hand.
+      setRefWalk({ step: legs.length - 1, total: legs.length, paused: true });
+      refWalkPausedRef.current = true;
+      raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => {
@@ -1458,7 +1542,7 @@ export function GraphCanvas({
       // so a later render cannot resurrect a half-converged frame.
       refAnimRef.current = null;
     };
-  }, [refFocusIds, refFocusNonce, rendererState]);
+  }, [refFocusIds, refFocusSteps, refFocusNonce, rendererState]);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------
 
@@ -1682,6 +1766,63 @@ export function GraphCanvas({
           >
             {t("graph.overlay.retry")}
           </button>
+        </div>
+      ) : null}
+      {/* Only worth showing when there is more than one paragraph to walk. */}
+      {refWalk && refWalk.total > 1 ? (
+        <div className="graph-ref-walk" data-testid="graph-ref-walk">
+          <button
+            type="button"
+            data-testid="graph-ref-walk-prev"
+            aria-label={t("kgref.walk.prev")}
+            disabled={refWalk.step === 0}
+            onClick={() => {
+              refWalkPausedRef.current = true;
+              refWalkJumpRef.current = refWalk.step - 1;
+              setRefWalk({ ...refWalk, step: Math.max(0, refWalk.step - 1), paused: true });
+            }}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            data-testid="graph-ref-walk-play"
+            aria-label={refWalk.paused ? t("kgref.walk.play") : t("kgref.walk.pause")}
+            onClick={() => {
+              const paused = !refWalk.paused;
+              refWalkPausedRef.current = paused;
+              // Replaying from the end restarts at the first paragraph.
+              if (!paused && refWalk.step === refWalk.total - 1) {
+                refWalkJumpRef.current = 0;
+              }
+              setRefWalk({ ...refWalk, paused });
+            }}
+          >
+            {refWalk.paused ? "▶" : "❚❚"}
+          </button>
+          <button
+            type="button"
+            data-testid="graph-ref-walk-next"
+            aria-label={t("kgref.walk.next")}
+            disabled={refWalk.step >= refWalk.total - 1}
+            onClick={() => {
+              refWalkPausedRef.current = true;
+              refWalkJumpRef.current = refWalk.step + 1;
+              setRefWalk({
+                ...refWalk,
+                step: Math.min(refWalk.total - 1, refWalk.step + 1),
+                paused: true,
+              });
+            }}
+          >
+            ›
+          </button>
+          <span className="graph-ref-walk-label" data-testid="graph-ref-walk-label">
+            {t("kgref.walk.step", {
+              step: String(refWalk.step + 1),
+              total: String(refWalk.total),
+            })}
+          </span>
         </div>
       ) : null}
       {overlay}

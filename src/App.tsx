@@ -186,7 +186,8 @@ import { classifyInboxItem } from "./lib/aiInvoke";
 import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
 import { isHtmlFileKind } from "./lib/htmlDocument";
-import { uniqueRefNodePaths } from "./lib/kgRefs";
+import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
+import type { KgRefStep } from "./lib/kgRefs";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
@@ -1102,6 +1103,9 @@ function MainApp() {
      *  the graph may be reading a nested vault/ instead. */
     docRoot: string;
     nodePaths: string[];
+    /** Same references grouped by the paragraph that cites them, so the graph
+     *  can walk the document instead of lighting everything up at once. */
+    steps: KgRefStep[];
     nonce: number;
   } | null>(null);
   const [kgHighlight, setKgHighlight] = useState<{
@@ -7106,6 +7110,7 @@ function MainApp() {
             docPath: map.docPath,
             docRoot: tab.workspacePath,
             nodePaths: uniqueRefNodePaths(map.refs),
+            steps: refStepsByParagraph(map.refs),
             nonce: Date.now(),
           });
           openGraphPanel();

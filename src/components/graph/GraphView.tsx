@@ -31,6 +31,7 @@ import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions"
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
 import { resolveReferenceNodeIds } from "../../lib/kgRefs";
+import type { KgRefStep } from "../../lib/kgRefs";
 import {
   graphLocalTargetForNode,
   graphNodeMatchesLocalTarget,
@@ -100,6 +101,8 @@ interface GraphViewProps {
      *  not necessarily the graph's data path. */
     docRoot: string;
     nodePaths: string[];
+    /** Grouped by citing paragraph, in document order. */
+    steps: KgRefStep[];
     nonce: number;
   } | null;
   onExitReferenceFocus?: () => void;
@@ -433,6 +436,21 @@ export function GraphView({
       referenceFocus.docRoot,
       workspacePath,
     );
+  }, [referenceFocus, model.nodes, workspacePath]);
+  // Same resolution per step. A paragraph whose nodes are all outside the
+  // current model would animate nothing, so it is not a step here either.
+  const refFocusSteps = useMemo(() => {
+    if (!referenceFocus) return [];
+    return referenceFocus.steps
+      .map((step) =>
+        resolveReferenceNodeIds(
+          model.nodes,
+          step.nodePaths,
+          referenceFocus.docRoot,
+          workspacePath,
+        ),
+      )
+      .filter((ids) => ids.size > 0);
   }, [referenceFocus, model.nodes, workspacePath]);
   const localFocusNode = useMemo(
     () =>
@@ -1251,7 +1269,7 @@ export function GraphView({
               exportControllerRef={exportControllerRef}
               referenceFocus={
                 referenceFocus && refFocusIds && refFocusIds.size > 0
-                  ? { ids: refFocusIds, nonce: referenceFocus.nonce }
+                  ? { ids: refFocusIds, steps: refFocusSteps, nonce: referenceFocus.nonce }
                   : null
               }
               overlay={

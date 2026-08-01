@@ -308,3 +308,76 @@ test("reference-focus converge animation moves the referenced nodes", async ({ p
   // moved once layout had settled, so the minimum equals the resting value.
   expect(Math.min(...samples)).toBeLessThan(rest * 0.8);
 });
+
+/** Same two real nodes, but cited from DIFFERENT paragraphs, so the reference
+ *  walk has two legs. TWO_REAL_REFS above puts both in paragraph 2, which is a
+ *  single leg and deliberately shows no walk controls. */
+const REFS_IN_TWO_PARAGRAPHS = [
+  {
+    nodePath: "references/maru-glossary.md",
+    nodeTitle: "Maru 용어집",
+    matchKind: "entity",
+    spans: [spanFor("KPI", 1)],
+  },
+  {
+    nodePath: "maru-weekly-meeting.md",
+    nodeTitle: "Maru 사업 주간 점검 회의",
+    matchKind: "entity",
+    spans: [spanFor("예산", 2)],
+  },
+];
+
+async function seedRefs(page: Page, refs: unknown) {
+  await page.addInitScript((seededRefs) => {
+    window.localStorage.setItem("maru:e2e:graph-bridge", "1");
+    const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
+      kg_document_refs: (args) => ({
+        docPath: args.docPath,
+        docHash: "e2e-hash",
+        vaultStamp: "e2e-stamp",
+        refs: seededRefs,
+        computedAt: "2026-07-30T00:00:00Z",
+      }),
+      kg_refs_clear: () => 0,
+    };
+    (window as unknown as { __MARU_E2E_INVOKE__: typeof handlers }).__MARU_E2E_INVOKE__ =
+      handlers;
+  }, refs);
+}
+
+test("reference walk steps through the citing paragraphs", async ({ page }) => {
+  await seedRefs(page, REFS_IN_TWO_PARAGRAPHS);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-visualize-refs").click();
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("2개");
+
+  // Two citing paragraphs, so the walk is worth showing and starts at the first.
+  const label = page.getByTestId("graph-ref-walk-label");
+  await expect(label).toHaveText("문단 1/2", { timeout: 25_000 });
+  // It advances on its own: one leg per paragraph, in document order.
+  await expect(label).toHaveText("문단 2/2", { timeout: 20_000 });
+
+  // The walk parks at the end paused, so it can be stepped through by hand.
+  await expect(page.getByTestId("graph-ref-walk-next")).toBeDisabled();
+  await page.getByTestId("graph-ref-walk-prev").click();
+  await expect(label).toHaveText("문단 1/2");
+  await expect(page.getByTestId("graph-ref-walk-prev")).toBeDisabled();
+  await page.getByTestId("graph-ref-walk-next").click();
+  await expect(label).toHaveText("문단 2/2");
+
+  // Exiting reference focus takes the controls with it.
+  await page.getByTestId("graph-ref-focus-exit").click();
+  await expect(page.getByTestId("graph-ref-walk")).toHaveCount(0);
+});
+
+test("a document citing everything from one paragraph shows no walk controls", async ({ page }) => {
+  await seedRefs(page, TWO_REAL_REFS);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-visualize-refs").click();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("2개");
+  // One leg is the old single-burst animation; a "1/1" control bar would be noise.
+  await expect(page.getByTestId("graph-ref-walk")).toHaveCount(0);
+});
