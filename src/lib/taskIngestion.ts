@@ -90,6 +90,38 @@ export function importanceRank(importance: DraftImportance): number {
   return importance === "high" ? 3 : importance === "medium" ? 2 : 1;
 }
 
+/** Alphanumeric token set of a title (NFKC, lowercased), matching the
+ *  desk-pipeline driver's overlap dedupe: extract-tasks rewords a title every
+ *  run, so exact-match dedupe never fires for the same follow-up. */
+export function titleTokenSet(title: string): Set<string> {
+  const tokens = title
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+  return new Set(tokens);
+}
+
+const DUP_TITLE_TOKEN_OVERLAP = 0.3;
+
+/** Probable duplicate of an existing draft: shares at least one originRef AND
+ *  has >= 0.3 title-token overlap with the smaller set. Either condition alone
+ *  is wrong — one meeting note legitimately yields several distinct
+ *  follow-ups, and unrelated tasks share stock words. Bias toward
+ *  suppressing: a missed draft comes back next run, a duplicate is triage. */
+export function isProbableDuplicateDraft(candidate: TaskCandidate, existing: DraftEntry): boolean {
+  const sharedRef = candidate.originRefs.some((ref) => existing.originRefs.includes(ref));
+  if (!sharedRef) return false;
+  const candidateTokens = titleTokenSet(candidate.title);
+  const existingTokens = titleTokenSet(existing.title);
+  if (candidateTokens.size === 0 || existingTokens.size === 0) return false;
+  let overlap = 0;
+  for (const token of candidateTokens) {
+    if (existingTokens.has(token)) overlap += 1;
+  }
+  return overlap / Math.min(candidateTokens.size, existingTokens.size) >= DUP_TITLE_TOKEN_OVERLAP;
+}
+
 /** Apply the importance threshold and title dedupe. Existing discarded drafts
  *  do not block re-ingestion; duplicates inside the batch collapse too. */
 export function selectTaskCandidates(
@@ -98,11 +130,8 @@ export function selectTaskCandidates(
   minImportance: AiTaskIngestMinImportance,
 ): TaskCandidateSelection {
   const minRank = importanceRank(minImportance);
-  const taken = new Set(
-    existingDrafts
-      .filter((draft) => draft.status !== "discarded")
-      .map((draft) => normalizeDraftTitleKey(draft.title)),
-  );
+  const liveDrafts = existingDrafts.filter((draft) => draft.status !== "discarded");
+  const taken = new Set(liveDrafts.map((draft) => normalizeDraftTitleKey(draft.title)));
   const selection: TaskCandidateSelection = { create: [], skippedLow: [], skippedDup: [] };
   for (const candidate of candidates) {
     if (importanceRank(candidate.importance) < minRank) {
@@ -110,7 +139,7 @@ export function selectTaskCandidates(
       continue;
     }
     const key = normalizeDraftTitleKey(candidate.title);
-    if (taken.has(key)) {
+    if (taken.has(key) || liveDrafts.some((existing) => isProbableDuplicateDraft(candidate, existing))) {
       selection.skippedDup.push(candidate.title);
       continue;
     }

@@ -171,6 +171,88 @@ describe("selectTaskCandidates", () => {
     expect(selection.create).toHaveLength(1);
     expect(selection.skippedDup).toEqual(["same  Task"]);
   });
+
+  it("skips a reworded candidate sharing an originRef with an existing draft", () => {
+    // The real gate failure: extract-tasks rewords the same follow-up every
+    // run, so exact-match dedupe never fired and every app run duplicated the
+    // headless pipeline's drafts.
+    const selection = selectTaskCandidates(
+      [
+        candidate({
+          title: "연세대 8/4 발표자료 최종본 확인·회신",
+          originRefs: ["inbox/items/pending/260801-mso-yonsei/raw/mail.md"],
+        }),
+      ],
+      [
+        draft({
+          title: "연세대 8/4 발표자료 최종본 확인 회신 (최예승 팀장)",
+          status: "new",
+          originRefs: ["inbox/items/pending/260801-mso-yonsei/raw/mail.md"],
+        }),
+      ],
+      "low",
+    );
+    expect(selection.create).toEqual([]);
+    expect(selection.skippedDup).toEqual(["연세대 8/4 발표자료 최종본 확인·회신"]);
+  });
+
+  it("keeps distinct follow-ups that share a source but not title words", () => {
+    const selection = selectTaskCandidates(
+      [
+        candidate({
+          title: "우즈벡 방문 초청장 발송",
+          originRefs: ["meetings/2026-07-17-budget.md"],
+        }),
+        candidate({
+          title: "기본배분금 집행 계획 회람",
+          originRefs: ["meetings/2026-07-17-budget.md"],
+        }),
+      ],
+      [],
+      "low",
+    );
+    expect(selection.create).toHaveLength(2);
+  });
+
+  it("keeps similar titles with no shared originRef", () => {
+    const selection = selectTaskCandidates(
+      [
+        candidate({
+          title: "연세대 8/4 발표자료 최종본 확인·회신",
+          originRefs: ["meetings/other.md"],
+        }),
+      ],
+      [
+        draft({
+          title: "연세대 8/4 발표자료 최종본 확인 회신 (최예승 팀장)",
+          status: "new",
+          originRefs: ["inbox/items/pending/260801-mso-yonsei/raw/mail.md"],
+        }),
+      ],
+      "low",
+    );
+    expect(selection.create).toHaveLength(1);
+  });
+
+  it("does not treat a discarded draft as an overlap duplicate", () => {
+    const selection = selectTaskCandidates(
+      [
+        candidate({
+          title: "연세대 8/4 발표자료 최종본 확인·회신",
+          originRefs: ["inbox/items/pending/260801-mso-yonsei/raw/mail.md"],
+        }),
+      ],
+      [
+        draft({
+          title: "연세대 8/4 발표자료 최종본 확인 회신 (최예승 팀장)",
+          status: "discarded",
+          originRefs: ["inbox/items/pending/260801-mso-yonsei/raw/mail.md"],
+        }),
+      ],
+      "low",
+    );
+    expect(selection.create).toHaveLength(1);
+  });
 });
 
 describe("importanceRank", () => {
