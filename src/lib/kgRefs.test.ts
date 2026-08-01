@@ -3,6 +3,7 @@ import type { DocumentRefMap, KgNodeRef } from "./types";
 import {
   buildByteToCharTable,
   byteOffsetToCharIndex,
+  mapSpansToPmTextNodes,
   mapSpansToRenderedText,
   refMapToCharSpans,
   refStepsByParagraph,
@@ -311,6 +312,135 @@ describe("mapSpansToRenderedText", () => {
     expect(mapped).toHaveLength(1);
     expect(mapped[0].nodePath).toBe("real.md");
     expect(rendered.slice(mapped[0].start, mapped[0].end)).toBe("실체");
+  });
+});
+
+describe("mapSpansToPmTextNodes", () => {
+  // Text blocks mimicking a ProseMirror walk: one entry per textblock, each
+  // listing its inline text nodes (inline formatting can split one paragraph
+  // into several nodes).
+  it("locates an entity span and returns doc positions", () => {
+    const content = "# 제목\n\n본문에 KPI 언급.";
+    const spans = refMapToCharSpans(
+      content,
+      refMap([
+        {
+          nodePath: "glossary.md",
+          nodeTitle: "용어집",
+          matchKind: "entity",
+          spans: [
+            {
+              start: byteLen(content.slice(0, content.indexOf("KPI"))),
+              end: byteLen(content.slice(0, content.indexOf("KPI") + 3)),
+              paragraph: 2,
+            },
+          ],
+        },
+      ]),
+    );
+    // Rich editor renders the heading and paragraph as separate blocks.
+    const blocks = [
+      [{ pos: 1, text: "제목" }],
+      [{ pos: 8, text: "본문에 KPI 언급." }],
+    ];
+    const ranges = mapSpansToPmTextNodes(blocks, spans, (span) => content.slice(span.start, span.end));
+    expect(ranges).toHaveLength(1);
+    expect(ranges[0].nodePath).toBe("glossary.md");
+    expect(blocks[1][0].text.slice(ranges[0].from - 8, ranges[0].to - 8)).toBe("KPI");
+  });
+
+  it("resolves a wikilink rendered as its alias text", () => {
+    const content = "링크 [[maru-project|Maru 사업]] 끝";
+    const spans = refMapToCharSpans(
+      content,
+      refMap([
+        {
+          nodePath: "maru-project.md",
+          nodeTitle: "Maru Project",
+          matchKind: "wikilink",
+          spans: [
+            {
+              start: byteLen("링크 "),
+              end: byteLen("링크 [[maru-project|Maru 사업]]"),
+              paragraph: 0,
+            },
+          ],
+        },
+      ]),
+    );
+    const blocks = [[{ pos: 1, text: "링크 Maru 사업 끝" }]];
+    const ranges = mapSpansToPmTextNodes(blocks, spans, (span) => content.slice(span.start, span.end));
+    expect(ranges).toHaveLength(1);
+    expect(blocks[0][0].text.slice(ranges[0].from - 1, ranges[0].to - 1)).toBe("Maru 사업");
+  });
+
+  it("splits a span crossing inline node boundaries into adjacent ranges", () => {
+    const content = "본문 Maru Project 언급";
+    const spans = refMapToCharSpans(
+      content,
+      refMap([
+        {
+          nodePath: "maru-project.md",
+          nodeTitle: "Maru Project",
+          matchKind: "entity",
+          spans: [
+            {
+              start: byteLen("본문 "),
+              end: byteLen("본문 Maru Project"),
+              paragraph: 0,
+            },
+          ],
+        },
+      ]),
+    );
+    // "본문 Maru " (8 units) and "Project 언급" are separate inline text
+    // nodes (e.g. a format boundary); positions follow ProseMirror inline
+    // content layout (content starts at block pos + 1).
+    const blocks = [[
+      { pos: 1, text: "본문 Maru " },
+      { pos: 9, text: "Project 언급" },
+    ]];
+    const ranges = mapSpansToPmTextNodes(blocks, spans, (span) => content.slice(span.start, span.end));
+    expect(ranges).toHaveLength(2);
+    expect(ranges[0]).toMatchObject({ from: 4, to: 9, nodePath: "maru-project.md" });
+    expect(ranges[1]).toMatchObject({ from: 9, to: 16, nodePath: "maru-project.md" });
+  });
+
+  it("skips spans the renderer dropped without desyncing later spans", () => {
+    const content = "---\ntype: meeting\n---\n본문 실체";
+    const spans = refMapToCharSpans(
+      content,
+      refMap([
+        {
+          nodePath: "ghost.md",
+          nodeTitle: "유령",
+          matchKind: "entity",
+          spans: [{ start: byteLen("---\ntype: "), end: byteLen("---\ntype: meeting"), paragraph: 0 }],
+        },
+        {
+          nodePath: "real.md",
+          nodeTitle: "실체",
+          matchKind: "entity",
+          spans: [
+            {
+              start: byteLen(content.slice(0, content.indexOf("실체"))),
+              end: byteLen(content),
+              paragraph: 2,
+            },
+          ],
+        },
+      ]),
+    );
+    // Frontmatter is gone from the rich editor document.
+    const blocks = [[{ pos: 1, text: "본문 실체" }]];
+    const ranges = mapSpansToPmTextNodes(blocks, spans, (span) => content.slice(span.start, span.end));
+    expect(ranges).toHaveLength(1);
+    expect(ranges[0].nodePath).toBe("real.md");
+    expect(blocks[0][0].text.slice(ranges[0].from - 1, ranges[0].to - 1)).toBe("실체");
+  });
+
+  it("returns no ranges for empty span lists", () => {
+    expect(mapSpansToPmTextNodes([[{ pos: 1, text: "본문" }]], [], () => "")).toEqual([]);
   });
 });
 

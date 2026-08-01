@@ -263,3 +263,78 @@ export function mapSpansToRenderedText(
   }
   return mapped;
 }
+
+/** One text leaf of a ProseMirror document: doc position + text content. */
+export interface KgPmTextNode {
+  /** ProseMirror document position at which the text starts. */
+  pos: number;
+  text: string;
+}
+
+/** A span re-located inside a ProseMirror document, as a mark range. */
+export interface KgPmMarkRange {
+  from: number;
+  to: number;
+  nodePath: string;
+  nodeTitle: string;
+  matchKind: KgRefMatchKind;
+}
+
+/**
+ * Map source spans onto ProseMirror text nodes (the rich editor surface).
+ *
+ * Raw char offsets do not apply there: the rich editor strips frontmatter
+ * and renders `[[wikilink|alias]]` differently from the source text. So the
+ * inline text nodes of each block are concatenated (a span CAN cross an
+ * inline boundary, e.g. a format split), the block texts are joined with
+ * "\n" (a span never legitimately crosses a block boundary), searched with
+ * the same moving-cursor logic the preview uses (mapSpansToRenderedText),
+ * and each hit is translated back to document positions. A hit spanning
+ * several inline text nodes becomes one mark range per node — the visual
+ * result is the same as a single mark.
+ *
+ * `textBlocks` is one entry per textblock, in document order, each listing
+ * that block's inline text nodes with their doc positions.
+ */
+export function mapSpansToPmTextNodes(
+  textBlocks: readonly (readonly KgPmTextNode[])[],
+  spans: KgCharSpan[],
+  sourceTextFor: (span: KgCharSpan) => string,
+): KgPmMarkRange[] {
+  const blockTexts = textBlocks.map((block) => block.map((node) => node.text).join(""));
+  const blockStarts: number[] = [];
+  let joined = "";
+  for (const text of blockTexts) {
+    blockStarts.push(joined.length);
+    joined += `${text}\n`;
+  }
+  const mapped = mapSpansToRenderedText(joined, spans, sourceTextFor);
+  const ranges: KgPmMarkRange[] = [];
+  for (const span of mapped) {
+    for (let b = 0; b < textBlocks.length; b += 1) {
+      const blockStart = blockStarts[b];
+      if (blockStart >= span.end) break;
+      const blockEnd = blockStart + blockTexts[b].length;
+      const hitFrom = Math.max(span.start, blockStart);
+      const hitTo = Math.min(span.end, blockEnd);
+      if (hitTo <= hitFrom) continue;
+      let nodeOffset = 0;
+      for (const node of textBlocks[b]) {
+        const nodeStart = blockStart + nodeOffset;
+        nodeOffset += node.text.length;
+        const nodeEnd = blockStart + nodeOffset;
+        const from = Math.max(hitFrom, nodeStart);
+        const to = Math.min(hitTo, nodeEnd);
+        if (to <= from) continue;
+        ranges.push({
+          from: node.pos + (from - nodeStart),
+          to: node.pos + (to - nodeStart),
+          nodePath: span.nodePath,
+          nodeTitle: span.nodeTitle,
+          matchKind: span.matchKind,
+        });
+      }
+    }
+  }
+  return ranges;
+}
