@@ -44,6 +44,7 @@ import type {
 } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
 import { EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
+import { NewDraftDialog } from "./NewDraftDialog";
 import { PromoteDraftDialog } from "./PromoteDraftDialog";
 import { SchedulerSection } from "./SchedulerSection";
 import { useIdeationDrafts } from "./useIdeationDrafts";
@@ -103,6 +104,7 @@ export function DraftsPane({
   const [editing, setEditing] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [promoteTarget, setPromoteTarget] = useState<DraftEntry | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Held in a ref, not read from state, so the open/promote callbacks keep a
   // stable identity while the user types — onOpenDraft feeds useIdeationDrafts'
@@ -320,9 +322,14 @@ export function DraftsPane({
         title={t("drafts.header.title")}
         subtitle={t("drafts.header.subtitle")}
         actions={
-          <IconButton label={t("drafts.refresh")} onClick={() => void refresh()}>
-            <RefreshCcw size={15} />
-          </IconButton>
+          <>
+            <IconButton label={t("drafts.create.open")} onClick={() => setCreateOpen(true)}>
+              <PenLine size={15} />
+            </IconButton>
+            <IconButton label={t("drafts.refresh")} onClick={() => void refresh()}>
+              <RefreshCcw size={15} />
+            </IconButton>
+          </>
         }
       />
 
@@ -653,6 +660,18 @@ export function DraftsPane({
           )}
         </div>
       </div>
+
+      <NewDraftDialog
+        open={createOpen}
+        workPath={workPath}
+        onClose={() => setCreateOpen(false)}
+        onError={onError}
+        onCreated={(entry) => {
+          setCreateOpen(false);
+          void refresh();
+          void openDraft(entry);
+        }}
+      />
 
       <PromoteDraftDialog
         draft={promoteTarget}

@@ -101,6 +101,25 @@ function seedBackend(page: import("@playwright/test").Page) {
         record("scratchpad_list", args);
         return ideation.map((entry) => ({ ...entry }));
       },
+      drafts_create: (args) => {
+        record("drafts_create", args);
+        const entry = {
+          id: "d-manual",
+          kind: args.kind as string,
+          title: args.title as string,
+          status: "new",
+          importance: (args.importance as string | null) ?? null,
+          confidence: (args.confidence as number | null) ?? null,
+          source: args.source as string,
+          originRefs: (args.originRefs as string[]) ?? [],
+          bodyPath: ".maru/drafts/d-manual/body.md",
+          promotedTo: null,
+          createdAt: "2026-07-30T00:00:00Z",
+          updatedAt: "2026-07-30T00:00:00Z",
+        };
+        drafts.push(entry);
+        return { ...entry };
+      },
       scheduler_list: (args) => {
         record("scheduler_list", args);
         return schedules.map((entry) => ({ ...entry }));
@@ -371,4 +390,36 @@ test("ingests task candidates from a completed scheduler run into drafts", async
       ),
     )
     .toBe(1);
+});
+
+test("manual create dialog writes a draft and opens it", async ({ page }) => {
+  const pane = await openDraftsMode(page);
+
+  await pane.getByRole("button", { name: "새 초안", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByPlaceholder("초안 제목").fill("손으로 쓴 초안");
+  await dialog.getByPlaceholder("마크다운으로 작성").fill("직접 작성한 본문");
+  await dialog.getByRole("button", { name: "만들기", exact: true }).click();
+
+  await expect(dialog).toHaveCount(0);
+  const createArgs = await page.evaluate(
+    () =>
+      (
+        (window as unknown as {
+          __MARU_DRAFTS_CALLS__?: Array<{ command: string; args: Record<string, unknown> }>;
+        }).__MARU_DRAFTS_CALLS__ ?? []
+      ).find((call) => call.command === "drafts_create")?.args ?? null,
+  );
+  expect(createArgs).toMatchObject({
+    kind: "task",
+    title: "손으로 쓴 초안",
+    source: "manual",
+    body: "직접 작성한 본문",
+  });
+
+  // The created draft opens in the detail view.
+  await expect(pane.locator(".drafts-detail")).toContainText("손으로 쓴 초안", {
+    timeout: 10000,
+  });
 });
