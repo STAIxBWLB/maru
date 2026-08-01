@@ -251,8 +251,17 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   const [previewHtml, setPreviewHtml] = useState("");
   // Preview rebuilds the whole DOM per render — debounce so a keystroke
   // burst coalesces into one renderMarkdown pass. KG span mapping in preview
-  // mode keys off the same debounced value (below).
-  const debouncedPreviewDraft = useDebouncedValue(draftContent, 200);
+  // mode keys off the same debounced value (below). The debounced entry
+  // carries the document it came from: a document switch is not a keystroke
+  // burst, so it snaps to the live draft instead of showing the previous
+  // note's body for the rest of the window.
+  const previewDraftEntry = useMemo(
+    () => ({ path: document?.path ?? null, text: draftContent }),
+    [document?.path, draftContent],
+  );
+  const debouncedEntry = useDebouncedValue(previewDraftEntry, 200);
+  const debouncedPreviewDraft =
+    debouncedEntry.path === previewDraftEntry.path ? debouncedEntry.text : draftContent;
   useEffect(() => {
     if (!document || isHtml || viewMode !== "preview") {
       setPreviewHtml("");
@@ -345,11 +354,15 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   // Source mode: the backdrop is pointer-events:none, so a click on a
   // highlighted span lands on the textarea. The caret offset (selectionStart)
   // is in the same char coordinates as kgSpans — hit-test directly.
+  // Only a collapsed caret counts: selectionStart is the LEFT edge of a
+  // range, so a drag-select or double-click that merely starts inside a span
+  // is not someone clicking the reference.
   const handleSourceClick = useCallback(
     (event: React.MouseEvent<HTMLTextAreaElement>) => {
       autocompleteHandlers.onClick();
       if (!kgSpans || !onKgRefNodeClick) return;
-      const offset = event.currentTarget.selectionStart;
+      const { selectionStart: offset, selectionEnd } = event.currentTarget;
+      if (offset !== selectionEnd) return;
       const span = kgSpans.find((candidate) => offset >= candidate.start && offset < candidate.end);
       if (span) onKgRefNodeClick(span.nodePath);
     },
@@ -736,6 +749,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
                   onChange={onChange}
                   readOnly={readOnly}
                   kgSpans={kgSpans}
+                  kgTitleFor={kgTitleFor}
                   onKgRefNodeClick={onKgRefNodeClick}
                 />
               )}

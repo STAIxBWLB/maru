@@ -209,6 +209,9 @@ test("highlight toggle decorates rich mode and mark click focuses the graph", as
   await expect(marks).toHaveCount(1);
   await expect(marks.first()).toHaveText("KPI");
   await expect(marks.first()).toHaveAttribute("data-kg-node", "references/maru-glossary.md");
+  // Same match-kind class and tooltip as the preview/source marks.
+  await expect(marks.first()).toHaveClass(/kg-ref-entity/);
+  await expect(marks.first()).toHaveAttribute("title", /Maru 용어집/);
 
   // Mark click → same graph-focus path as the preview mark.
   await marks.first().click();

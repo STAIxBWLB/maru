@@ -47,13 +47,20 @@ const doc: DocumentPayload = {
   fileKind: "markdown",
 };
 
+const otherDoc: DocumentPayload = {
+  ...doc,
+  path: "/workspace/other.md",
+  relPath: "other.md",
+  title: "other",
+};
+
 const noop = () => {};
 
-function renderPane(root: Root, draftContent: string) {
+function renderPane(root: Root, draftContent: string, document: DocumentPayload = doc) {
   root.render(
     <LocaleContext.Provider value={{ locale: "en", setLocale: noop, t }}>
       <EditorPane
-        document={doc}
+        document={document}
         openingEntry={null}
         draftContent={draftContent}
         saving={false}
@@ -127,24 +134,59 @@ describe("EditorPane preview debounce", () => {
     expect(mocks.renderMarkdown).toHaveBeenLastCalledWith("첫 번째");
     expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>첫 번째</p>");
 
-    // A burst of draft changes inside the 200ms window schedules nothing yet.
+    // A realistic typing cadence: each keystroke lands inside the window and
+    // must re-arm the timer. (Firing the whole burst at t=0 instead would
+    // pass even without clearTimeout, since React batches the pending
+    // setStates into one render — that tests batching, not debouncing.)
     for (const draft of ["두 번째", "세 번째", "네 번째"]) {
       await act(async () => {
         renderPane(root!, draft);
       });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+      });
+      expect(mocks.renderMarkdown).toHaveBeenCalledTimes(1);
+      expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>첫 번째</p>");
     }
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(199);
-    });
-    expect(mocks.renderMarkdown).toHaveBeenCalledTimes(1);
-    expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>첫 번째</p>");
 
-    // The window elapses: exactly one re-render, with the latest draft only.
+    // The window finally elapses: exactly one re-render, latest draft only.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(200);
     });
     expect(mocks.renderMarkdown).toHaveBeenCalledTimes(2);
     expect(mocks.renderMarkdown).toHaveBeenLastCalledWith("네 번째");
     expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>네 번째</p>");
+  });
+
+  it("snaps to the new document instead of holding the previous one", async () => {
+    root = createRoot(container);
+    await act(async () => {
+      renderPane(root!, "노트 A 본문");
+    });
+    expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>노트 A 본문</p>");
+
+    // A document switch is not a keystroke burst: the preview must never
+    // paint the previous note's body under the new note.
+    await act(async () => {
+      renderPane(root!, "노트 B 본문", otherDoc);
+    });
+    expect(mocks.renderMarkdown).toHaveBeenLastCalledWith("노트 B 본문");
+    expect(container.querySelector(".preview-surface")?.innerHTML).toBe("<p>노트 B 본문</p>");
+
+    // Once the debounce has caught up with the new document, edits coalesce
+    // again. (In the window right after a switch the live draft wins, which
+    // is the point: no stale paint, at the cost of a few live renders.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    const settled = mocks.renderMarkdown.mock.calls.length;
+    await act(async () => {
+      renderPane(root!, "노트 B 수정", otherDoc);
+    });
+    expect(mocks.renderMarkdown).toHaveBeenCalledTimes(settled);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(mocks.renderMarkdown).toHaveBeenLastCalledWith("노트 B 수정");
   });
 });

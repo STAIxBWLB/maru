@@ -3982,21 +3982,12 @@ a {
   text-underline-offset: 2px;
 }
 
-.preview-surface .kg-ref-mark {
-  cursor: pointer;
-  padding: 0 1px;
-}
-
-/* Rich mode renders marks as BlockNote style spans (single kg-ref-mark
- * class — the style spec carries only the node path), so give the surface
- * its own highlight treatment instead of the kind-specific classes. */
+/* Rich mode renders marks as BlockNote style spans carrying the same
+ * kind classes as the preview, so both clickable surfaces share this. */
+.preview-surface .kg-ref-mark,
 .rich-editor-surface .kg-ref-mark {
   cursor: pointer;
   padding: 0 1px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-underline-offset: 2px;
 }
 
 .rich-editor-surface {

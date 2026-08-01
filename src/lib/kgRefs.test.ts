@@ -439,6 +439,28 @@ describe("mapSpansToPmTextNodes", () => {
     expect(blocks[0][0].text.slice(ranges[0].from - 1, ranges[0].to - 1)).toBe("실체");
   });
 
+  it("never matches a span across a block boundary", () => {
+    // "예산" ends one block and "집행률" starts the next; concatenated they
+    // read as the compound "예산집행률", which must NOT count as a hit.
+    const content = "본문 예산집행률 보고";
+    const spans = refMapToCharSpans(
+      content,
+      refMap([
+        {
+          nodePath: "budget.md",
+          nodeTitle: "예산집행률",
+          matchKind: "entity",
+          spans: [
+            { start: byteLen("본문 "), end: byteLen("본문 예산집행률"), paragraph: 0 },
+          ],
+        },
+      ]),
+    );
+    const blocks = [[{ pos: 1, text: "2026년 예산" }], [{ pos: 12, text: "집행률 보고" }]];
+    expect(mapSpansToPmTextNodes(blocks, spans, (span) => content.slice(span.start, span.end)))
+      .toEqual([]);
+  });
+
   it("returns no ranges for empty span lists", () => {
     expect(mapSpansToPmTextNodes([[{ pos: 1, text: "본문" }]], [], () => "")).toEqual([]);
   });
