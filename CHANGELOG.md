@@ -8,6 +8,18 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.37 - 2026-08-01 - References You Can Touch
+
+- **KG reference marks reach rich mode.** Referenced ranges are now marked
+  in the BlockNote editor, not just in source and preview, and the toolbar
+  toggle works there. Clicking a mark in rich mode — or clicking inside a
+  span in the source editor — focuses the node in the graph, so every editor
+  mode can answer "where does this come from" the same way.
+- **The preview stops re-wrapping on every keystroke.** Editing in a split
+  source-and-preview view rebuilt the entire preview DOM per keystroke.
+  The preview now renders on a short debounce, so layout settles instead of
+  churning while you type.
+
 ## v0.4.36 - 2026-08-01 - The Loop Learns
 
 - **The feedback digest is fresh at every dispatch.** Scheduled inbox
