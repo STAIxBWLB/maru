@@ -2,7 +2,7 @@
 
 > **Mission** — Bring 사업단(business unit) + 대학본부조직(university headquarters) document operations into one Maru desktop workspace. The roadmap is a redefinition of Phase 3 and beyond into a **7-module** decomposition with weekly deliverables.
 >
-> **Status maru** — Updated through W14 Evidence Binder V2 on 2026-07-25. Phases 0–5 through W14, Diagram mode, and Graph mode 8a/8b/8c are implemented. W15–W26 remain planned. See README's Status table for the canonical state column and CHANGELOG.md for release history; this file is the deeper "what's next + how to continue" reference.
+> **Status maru** — Updated through the desk-automation track on 2026-08-01. Phases 0–5 through W14, Diagram mode, Graph mode 8a/8b/8c, and the desk-automation side track (§9) are implemented. W15–W26 remain planned. See README's Status table for the canonical state column and CHANGELOG.md for release history; this file is the deeper "what's next + how to continue" reference.
 >
 > **Spec sources** — All design decisions trace back to `~/workspace/work/_meta/rules/{frontmatter-schema,document-lifecycle,hub-contract,evidence-policy}.md` (formerly `_sys/rules`, with `bu-lifecycle`→`document-lifecycle` and `hub-sync`→`hub-contract`). The work-repo-internal 26-week plan file it was mirrored from has since been consolidated; this file is the live Maru-side reference.
 
@@ -201,3 +201,45 @@ Spec 정본: work repo `_meta/migrations/2607-deep-restructure/specs/maru-vault-
 NewDocumentDialog 이웃 패널, 미해소 위키링크→CreateNoteDialog, 결정 체인 타임라인 레인(`decisionChains.ts`). (보류) Hub 그래프 메타 sync — Hub 소비자 생기기 전까지 범위 외.
 
 V1은 쓰기 리스크 0으로 가치 출하, V2가 capability 모델을 바꾸고, V3는 V1+V2 프리미티브 위의 순수 프론트다. 세 단계 모두 출하되었으므로 Phase 8의 유일한 잔여 항목은 보류된 Hub 그래프 메타 sync이며, 이는 Hub 소비자가 생길 때까지 범위 외로 유지된다.
+
+## 9. Desk automation (side track, shipped)
+
+Outside the M1–M7 backbone, a track that turns incoming material into drafts a
+person reviews. Its governing rule is that **nothing lands confirmed**: every
+unattended stage may only produce pending artifacts, and each transition that
+makes something real sits behind a gate that already existed (inbox routing's
+`require_confirm_before_route`, the `drafts.promote` approval).
+
+| Layer | Where | State |
+|-------|-------|-------|
+| Collection | work repo `_meta/scripts/daily_mail_digest.py`, launchd 03:30 | ✅ mail staged to `inbox/items/pending/` with bodies |
+| Extraction | `inbox-process extract-tasks` (read-only) | ✅ |
+| Drafting | `draft-writer write-drafts` → `scratchpad/drafts/` | ✅ unreleased |
+| Driver | work repo `_meta/scripts/desk_pipeline.sh`, launchd 04:30 | ✅ |
+| Review | Drafts pane → promote | ✅ v0.4.33 |
+
+Maru-side pieces, all shipped in v0.4.33 unless noted:
+
+- **Drafts** (`src-tauri/src/drafts.rs`, `src/components/drafts/`) — one
+  first-class unconfirmed concept for AI task drafts and ideation, promoted
+  through an approval gate into a document or a task note. `drafts_list` adopts
+  loose markdown in the collection, which is how the headless pipeline's output
+  becomes visible without a new command. Doc: `docs/drafts.md`.
+- **Scheduler** — recurring skill runs per workspace (`.maru/schedules.json`), a
+  60s in-app ticker, catch-up on launch, `scheduler.add` approval.
+- **Gap analysis** (`src-tauri/src/gap.rs`, `src/components/gap/`) — diffs the
+  frozen promote baseline against the published document, classifies each hunk,
+  and feeds a digest back into the next drafting run. Unreleased work made the log
+  queryable (type + date filters, entry→draft selection) and recorded
+  provenance (`baselineLines`, `draftKind`, `generatedBy`) so churn can be read
+  against document size. Doc: `docs/gap-analysis.md`.
+- **KG document references** (`src-tauri/src/kg_refs.rs`, `src/lib/kgRefs.ts`) —
+  maps a document's wikilinks and entity mentions to graph nodes, highlights
+  them in the editor, and animates them in the graph. Unreleased work walks the
+  animation paragraph by paragraph, which is what the per-span paragraph index
+  was computed for.
+
+Remaining: manual draft creation and voice intake were scoped out. There is no
+typed draft-create path today (`drafts_create` has only the two ingestion
+callers), so a create UI comes before audio, and audio needs a transcriber the
+workspace does not have.
