@@ -1027,6 +1027,13 @@ export interface GapLogEntry {
   removedLines: number;
   byType: GapTypeCounts;
   hunkCount: number;
+  /** Provenance, absent on rows written before it was recorded. */
+  baselineHash?: string;
+  /** Baseline size, so churn can be read against the document it belongs to. */
+  baselineLines?: number;
+  draftKind?: string;
+  /** AI runtime that produced the draft. */
+  generatedBy?: string;
 }
 
 export interface GapReportSummary {

@@ -101,16 +101,21 @@ export interface GapLogDayGroup {
 
 /** Group log entries (already newest-first) by local calendar day, keeping
  *  the newest day first and the newest entry first within each day. */
+/** Local day key for a log timestamp. Grouping and date filtering must agree
+ *  on this, or a filter range silently drops the rows it should keep. */
+export function gapLogDayKey(at: string): string {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return at.slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 export function groupGapLogByDay(entries: GapLogEntry[]): GapLogDayGroup[] {
   const groups: GapLogDayGroup[] = [];
   const indexByDay = new Map<string, number>();
   for (const entry of entries) {
-    const date = new Date(entry.at);
-    const day = Number.isNaN(date.getTime())
-      ? entry.at.slice(0, 10)
-      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-          date.getDate(),
-        ).padStart(2, "0")}`;
+    const day = gapLogDayKey(entry.at);
     const existing = indexByDay.get(day);
     if (existing === undefined) {
       indexByDay.set(day, groups.length);
