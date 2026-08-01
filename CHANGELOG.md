@@ -8,6 +8,26 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.35 - 2026-08-01 - Skills Get Their Own Repo
+
+- **Skills ship from their own repository now.** The skill tree and its whole
+  publish pipeline moved to
+  [`STAIxBWLB/skills`](https://github.com/STAIxBWLB/skills), history intact,
+  and bundles publish to that repo's `skills-channel` on every skill change —
+  same signing key, same immutable asset naming, revisions keep climbing. A
+  skill edit reaches every running app without an app release, and cutting an
+  app release no longer touches skills at all.
+- **A pending skills update no longer hides.** The app re-checks the channel
+  every 6 hours, not just once at launch, and an update it cannot apply by
+  itself (runtime env changed, local skill edits, app too old) raises a
+  notification with a jump to the skills settings instead of waiting silently
+  for you to open the pane. Updates it can apply cleanly still land on their
+  own, now with the revision in the toast.
+- **The embedded skill snapshot refreshes with one command.**
+  `make skills-bootstrap-refresh` downloads the newest signed bundle, verifies
+  both signatures and every file hash, and replaces the offline first-run
+  snapshot — a step that used to be a manual, unverified copy.
+
 ## v0.4.34 - 2026-08-01 - The Desk Runs Itself
 
 - **The whole desk pipeline runs unattended, and still lands nothing.** The new
