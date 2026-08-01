@@ -249,6 +249,19 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     });
 
   const [previewHtml, setPreviewHtml] = useState("");
+  // Preview rebuilds the whole DOM per render — debounce so a keystroke
+  // burst coalesces into one renderMarkdown pass. KG span mapping in preview
+  // mode keys off the same debounced value (below). The debounced entry
+  // carries the document it came from: a document switch is not a keystroke
+  // burst, so it snaps to the live draft instead of showing the previous
+  // note's body for the rest of the window.
+  const previewDraftEntry = useMemo(
+    () => ({ path: document?.path ?? null, text: draftContent }),
+    [document?.path, draftContent],
+  );
+  const debouncedEntry = useDebouncedValue(previewDraftEntry, 200);
+  const debouncedPreviewDraft =
+    debouncedEntry.path === previewDraftEntry.path ? debouncedEntry.text : draftContent;
   useEffect(() => {
     if (!document || isHtml || viewMode !== "preview") {
       setPreviewHtml("");
@@ -256,12 +269,12 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     }
     let cancelled = false;
     void import("../lib/markdown").then(({ renderMarkdown }) => {
-      if (!cancelled) setPreviewHtml(renderMarkdown(draftContent));
+      if (!cancelled) setPreviewHtml(renderMarkdown(debouncedPreviewDraft));
     });
     return () => {
       cancelled = true;
     };
-  }, [draftContent, document, isHtml, viewMode]);
+  }, [debouncedPreviewDraft, document, isHtml, viewMode]);
 
   // F3(b): mark unresolved wikilinks in the preview (red dotted) — clicking
   // one routes to onWikilinkClick, which seeds the note-creation dialog.
@@ -282,17 +295,21 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
   // KG reference highlight (Feature B): byte-offset spans → JS indices over
   // the current draft. Offsets come from the saved document; a dirty draft
   // can shift them slightly — purely decorative, never written back.
+  // Preview mode keys off the debounced draft so refMapToCharSpans does not
+  // run per keystroke; source/rich keep the live draft (identical char
+  // coordinates are required for source-mode click hit-testing).
   const kgHighlightActive = Boolean(kgHighlightRefs && document && !isHtml);
+  const kgSpanSource = viewMode === "preview" ? debouncedPreviewDraft : draftContent;
   const kgSpans = useMemo<KgCharSpan[] | null>(() => {
     if (!kgHighlightActive || !document || !kgHighlightRefs) return null;
-    return refMapToCharSpans(draftContent, {
+    return refMapToCharSpans(kgSpanSource, {
       docPath: document.relPath,
       docHash: "",
       vaultStamp: "",
       refs: kgHighlightRefs,
       computedAt: "",
     });
-  }, [kgHighlightActive, document, kgHighlightRefs, draftContent]);
+  }, [kgHighlightActive, document, kgHighlightRefs, kgSpanSource]);
   const kgTitleFor = useCallback(
     (span: { nodeTitle: string; matchKind: "wikilink" | "entity" }) =>
       `${span.nodeTitle} · ${t(span.matchKind === "wikilink" ? "kgref.kind.wikilink" : "kgref.kind.entity")}`,
@@ -307,11 +324,11 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     const mapped = mapSpansToRenderedText(
       container.textContent ?? "",
       kgSpans,
-      (span) => draftContent.slice(span.start, span.end),
+      (span) => kgSpanSource.slice(span.start, span.end),
     );
     applyKgPreviewHighlights(container, mapped, kgTitleFor);
     return () => clearKgPreviewHighlights(container);
-  }, [kgSpans, previewHtml, isHtml, viewMode, draftContent, kgTitleFor]);
+  }, [kgSpans, previewHtml, isHtml, viewMode, kgSpanSource, kgTitleFor]);
 
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -332,6 +349,24 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       if (target) onWikilinkClick(target);
     },
     [onWikilinkClick, onKgRefNodeClick],
+  );
+
+  // Source mode: the backdrop is pointer-events:none, so a click on a
+  // highlighted span lands on the textarea. The caret offset (selectionStart)
+  // is in the same char coordinates as kgSpans — hit-test directly.
+  // Only a collapsed caret counts: selectionStart is the LEFT edge of a
+  // range, so a drag-select or double-click that merely starts inside a span
+  // is not someone clicking the reference.
+  const handleSourceClick = useCallback(
+    (event: React.MouseEvent<HTMLTextAreaElement>) => {
+      autocompleteHandlers.onClick();
+      if (!kgSpans || !onKgRefNodeClick) return;
+      const { selectionStart: offset, selectionEnd } = event.currentTarget;
+      if (offset !== selectionEnd) return;
+      const span = kgSpans.find((candidate) => offset >= candidate.start && offset < candidate.end);
+      if (span) onKgRefNodeClick(span.nodePath);
+    },
+    [autocompleteHandlers, kgSpans, onKgRefNodeClick],
   );
 
   useEffect(() => {
@@ -629,13 +664,8 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
               type="button"
               className={kgHighlightActive ? "icon-button active" : "icon-button"}
               onClick={onToggleKgHighlight}
-              disabled={viewMode === "rich"}
               aria-pressed={kgHighlightActive}
-              title={
-                viewMode === "rich"
-                  ? t("kgref.highlight.richUnsupported")
-                  : t("kgref.highlight")
-              }
+              title={t("kgref.highlight")}
               aria-label={t("kgref.highlight")}
               data-testid="kg-highlight-toggle"
             >
@@ -718,6 +748,9 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
                   value={draftContent}
                   onChange={onChange}
                   readOnly={readOnly}
+                  kgSpans={kgSpans}
+                  kgTitleFor={kgTitleFor}
+                  onKgRefNodeClick={onKgRefNodeClick}
                 />
               )}
             </Suspense>
@@ -740,7 +773,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
                 readOnly={readOnly}
                 onKeyDown={autocompleteHandlers.onKeyDown}
                 onKeyUp={autocompleteHandlers.onKeyUp}
-                onClick={autocompleteHandlers.onClick}
+                onClick={handleSourceClick}
                 onCompositionStart={autocompleteHandlers.onCompositionStart}
                 onCompositionEnd={autocompleteHandlers.onCompositionEnd}
                 spellCheck={false}

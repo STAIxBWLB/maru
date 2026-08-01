@@ -3982,7 +3982,10 @@ a {
   text-underline-offset: 2px;
 }
 
-.preview-surface .kg-ref-mark {
+/* Rich mode renders marks as BlockNote style spans carrying the same
+ * kind classes as the preview, so both clickable surfaces share this. */
+.preview-surface .kg-ref-mark,
+.rich-editor-surface .kg-ref-mark {
   cursor: pointer;
   padding: 0 1px;
 }

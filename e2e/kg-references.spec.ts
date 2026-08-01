@@ -190,6 +190,61 @@ test("highlight toggle decorates preview and mark click focuses the graph", asyn
   await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
 });
 
+test("highlight toggle decorates rich mode and mark click focuses the graph", async ({
+  page,
+}) => {
+  await openMeetingDoc(page);
+  await page.locator(".tab-trigger", { hasText: "리치" }).click();
+  const surface = page.locator(".rich-editor-surface");
+  await expect(surface).toContainText("KPI");
+
+  // The toggle is no longer gated off in rich mode.
+  const toggle = page.getByTestId("kg-highlight-toggle");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+
+  // Frontmatter is stripped by BlockNote too, so only the body entity maps.
+  // The mark is a BlockNote style span carrying the node path.
+  const marks = surface.locator(".kg-ref-mark");
+  await expect(marks).toHaveCount(1);
+  await expect(marks.first()).toHaveText("KPI");
+  await expect(marks.first()).toHaveAttribute("data-kg-node", "references/maru-glossary.md");
+  // Same match-kind class and tooltip as the preview/source marks.
+  await expect(marks.first()).toHaveClass(/kg-ref-entity/);
+  await expect(marks.first()).toHaveAttribute("title", /Maru 용어집/);
+
+  // Mark click → same graph-focus path as the preview mark.
+  await marks.first().click();
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
+});
+
+test("source mode mark click focuses the graph", async ({ page }) => {
+  await openMeetingDoc(page);
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await expect(page.locator("textarea.source-editor")).toHaveValue(/# Maru 사업 주간 점검 회의/);
+
+  await page.getByTestId("kg-highlight-toggle").click();
+  const mark = page.locator(".kg-source-backdrop .kg-ref-entity");
+  await expect(mark).toHaveText("KPI");
+
+  // A click outside any span must not focus a node. (panel-graph-surface is
+  // always mounted in this layout, so the absence signal is the focus bar.)
+  const textarea = page.locator("textarea.source-editor");
+  const taBox = await textarea.boundingBox();
+  if (!taBox) throw new Error("source textarea not laid out");
+  await page.mouse.click(taBox.x + taBox.width / 2, taBox.y + taBox.height - 4);
+  await expect(page.getByTestId("graph-focus-bar")).toHaveCount(0);
+
+  // The backdrop is pointer-events:none, so the click lands on the textarea;
+  // the caret offset hit-tests against the span.
+  const box = await mark.boundingBox();
+  if (!box) throw new Error("backdrop mark not laid out");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("graph-focus-bar")).toContainText("Maru 용어집");
+});
+
 // --- Feature A: the converge animation actually moves nodes ------------------
 // This exists because the animation shipped as a visual no-op: the tick called
 // renderer.refresh() with no arguments, which takes sigma's full-refresh path

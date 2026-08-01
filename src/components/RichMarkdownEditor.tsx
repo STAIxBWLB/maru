@@ -4,6 +4,12 @@ import { BlockNoteSchema, defaultStyleSpecs } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/mantine";
 import { createReactStyleSpec, useCreateBlockNote } from "@blocknote/react";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import {
+  mapSpansToPmTextNodes,
+  type KgCharSpan,
+  type KgPmTextNode,
+} from "../lib/kgRefs";
+import type { KgRefMatchKind } from "../lib/types";
 import type { GaejosikLintIssue } from "../lib/studio";
 import { splitFrontmatter } from "../lib/wikilinks";
 
@@ -12,6 +18,39 @@ interface RichMarkdownEditorProps {
   onChange: (content: string) => void;
   readOnly?: boolean;
   lintIssues?: GaejosikLintIssue[];
+  /** KG reference spans (raw source char offsets) to highlight in the rich
+   *  surface; mapped onto BlockNote text by search, like the preview. */
+  kgSpans?: KgCharSpan[] | null;
+  /** Localized "<title> · <kind>" label for a mark, as preview/source use. */
+  kgTitleFor?: (span: { nodeTitle: string; matchKind: KgRefMatchKind }) => string;
+  /** Click on a highlighted KG reference → focus the node in the graph. */
+  onKgRefNodeClick?: (nodePath: string) => void;
+}
+
+/**
+ * A BlockNote style spec carries exactly one string prop, but a KG mark needs
+ * three things (node path for the click, match kind for the color, label for
+ * the tooltip) to look and behave like the preview/source marks. JSON keeps
+ * paths and titles free to contain any character.
+ */
+interface KgRefMarkValue {
+  path: string;
+  kind: KgRefMatchKind;
+  title: string;
+}
+
+function parseKgRefMarkValue(value: string): KgRefMarkValue {
+  try {
+    const parsed = JSON.parse(value) as Partial<KgRefMarkValue>;
+    return {
+      path: parsed.path ?? "",
+      kind: parsed.kind === "wikilink" ? "wikilink" : "entity",
+      title: parsed.title ?? "",
+    };
+  } catch {
+    // Older marks stored the bare path; keep them clickable.
+    return { path: value, kind: "entity", title: "" };
+  }
 }
 
 const gaejosikLintStyle = createReactStyleSpec(
@@ -32,10 +71,37 @@ const gaejosikLintStyle = createReactStyleSpec(
   },
 );
 
+const kgRefStyle = createReactStyleSpec(
+  {
+    type: "kgRef",
+    propSchema: "string",
+  },
+  {
+    render: ({
+      value,
+      contentRef,
+    }: {
+      value: string;
+      contentRef: (el: HTMLElement | null) => void;
+    }) => {
+      const { path, kind, title } = parseKgRefMarkValue(value);
+      return (
+        <span
+          ref={contentRef}
+          className={`kg-ref-mark kg-ref-${kind}`}
+          data-kg-node={path}
+          title={title || undefined}
+        />
+      );
+    },
+  },
+);
+
 const richEditorSchema = BlockNoteSchema.create({
   styleSpecs: {
     ...defaultStyleSpecs,
     gaejosikLint: gaejosikLintStyle,
+    kgRef: kgRefStyle,
   },
 });
 
@@ -48,6 +114,9 @@ export function RichMarkdownEditor({
   onChange,
   readOnly = false,
   lintIssues = [],
+  kgSpans = null,
+  kgTitleFor,
+  onKgRefNodeClick,
 }: RichMarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: richEditorSchema });
   const latestValueRef = useRef(value);
@@ -59,6 +128,12 @@ export function RichMarkdownEditor({
     () => lintIssues.map((issue) => `${issue.id}:${issue.line}:${issue.column}`).join("|"),
     [lintIssues],
   );
+  const kgSpansRef = useRef(kgSpans);
+  const kgTitleForRef = useRef(kgTitleFor);
+  const kgSignature = useMemo(
+    () => (kgSpans ?? []).map((span) => `${span.start}:${span.end}:${span.nodePath}`).join("|"),
+    [kgSpans],
+  );
 
   useEffect(() => {
     latestValueRef.current = value;
@@ -67,6 +142,11 @@ export function RichMarkdownEditor({
   useEffect(() => {
     lintIssuesRef.current = lintIssues;
   }, [lintIssues]);
+
+  useEffect(() => {
+    kgSpansRef.current = kgSpans;
+    kgTitleForRef.current = kgTitleFor;
+  }, [kgSpans, kgTitleFor]);
 
   useEffect(() => {
     if (value === lastImportedValueRef.current) return;
@@ -85,6 +165,13 @@ export function RichMarkdownEditor({
         editor.replaceBlocks(editor.document, blocks);
         lastImportedValueRef.current = value;
         applyRichLintMarks(editor, lintIssuesRef.current, suppressChangeRef);
+        applyRichKgRefMarks(
+          editor,
+          kgSpansRef.current,
+          latestValueRef.current,
+          kgTitleForRef.current,
+          suppressChangeRef,
+        );
       } catch (err) {
         // Keep the source tab authoritative if BlockNote cannot parse a body.
         // eslint-disable-next-line no-console
@@ -105,6 +192,16 @@ export function RichMarkdownEditor({
     applyRichLintMarks(editor, lintIssuesRef.current, suppressChangeRef);
   }, [editor, lintSignature]);
 
+  useEffect(() => {
+    applyRichKgRefMarks(
+      editor,
+      kgSpansRef.current,
+      latestValueRef.current,
+      kgTitleForRef.current,
+      suppressChangeRef,
+    );
+  }, [editor, kgSignature]);
+
   async function handleChange() {
     if (readOnly) return;
     if (suppressChangeRef.current) return;
@@ -120,11 +217,93 @@ export function RichMarkdownEditor({
     }
   }
 
+  function handleSurfaceClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!onKgRefNodeClick) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const nodePath = target.closest("[data-kg-node]")?.getAttribute("data-kg-node");
+    if (!nodePath) return;
+    event.preventDefault();
+    onKgRefNodeClick(nodePath);
+  }
+
   return (
-    <div className="rich-editor-surface">
+    <div className="rich-editor-surface" onClick={handleSurfaceClick}>
       <BlockNoteView editor={editor} editable={!readOnly} onChange={() => void handleChange()} />
     </div>
   );
+}
+
+/**
+ * Clear and re-apply KG reference marks. Source char offsets do not survive
+ * the rich editor (frontmatter is stripped, wikilinks render differently),
+ * so spans are re-located by searching the document text with a moving
+ * cursor — the same approach the preview highlight uses.
+ */
+function applyRichKgRefMarks(
+  editor: any,
+  spans: KgCharSpan[] | null,
+  sourceContent: string,
+  titleFor: RichMarkdownEditorProps["kgTitleFor"],
+  suppressChangeRef: MutableRefObject<boolean>,
+) {
+  const markType = editor.pmSchema?.marks?.kgRef;
+  const state = editor.prosemirrorState;
+  const view = editor.prosemirrorView;
+  if (!markType || !state || !view) return;
+
+  const textBlocks: KgPmTextNode[][] = [];
+  state.doc.descendants((node: any, pos: number) => {
+    if (!node.isTextblock) return true;
+    const inline: KgPmTextNode[] = [];
+    node.forEach((child: any, offset: number) => {
+      if (child.isText && child.text) {
+        inline.push({ pos: pos + 1 + offset, text: child.text });
+      }
+    });
+    textBlocks.push(inline);
+    return false;
+  });
+  const ranges = mapSpansToPmTextNodes(textBlocks, spans ?? [], (span) =>
+    sourceContent.slice(span.start, span.end),
+  );
+
+  let tr = state.tr.removeMark(0, state.doc.content.size, markType);
+  for (const range of ranges) {
+    const stringValue = JSON.stringify({
+      path: range.nodePath,
+      kind: range.matchKind,
+      title: titleFor?.(range) ?? "",
+    } satisfies KgRefMarkValue);
+    tr = tr.addMark(range.from, range.to, markType.create({ stringValue }));
+  }
+
+  dispatchDecoration(view, tr, suppressChangeRef);
+}
+
+/**
+ * Dispatch a decoration-only transaction.
+ *
+ * `addToHistory: false` keeps a purely visual mark refresh out of the undo
+ * stack, so Cmd-Z always undoes the user's edit. The suppress flag is saved
+ * and restored rather than cleared: an in-flight markdown import owns it
+ * across its await, and clearing it there would let the import's own
+ * replaceBlocks emit an onChange that dirties a just-opened document.
+ */
+function dispatchDecoration(
+  view: any,
+  tr: any,
+  suppressChangeRef: MutableRefObject<boolean>,
+) {
+  if (!tr.docChanged) return;
+  tr.setMeta("addToHistory", false);
+  const previous = suppressChangeRef.current;
+  suppressChangeRef.current = true;
+  try {
+    view.dispatch(tr);
+  } finally {
+    suppressChangeRef.current = previous;
+  }
 }
 
 function applyRichLintMarks(
@@ -157,13 +336,7 @@ function applyRichLintMarks(
     return true;
   });
 
-  if (!tr.docChanged) return;
-  suppressChangeRef.current = true;
-  try {
-    view.dispatch(tr);
-  } finally {
-    suppressChangeRef.current = false;
-  }
+  dispatchDecoration(view, tr, suppressChangeRef);
 }
 
 function findIssueRangeInTextNode(
