@@ -8,6 +8,40 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.34 - 2026-08-01 - The Desk Runs Itself
+
+- **The whole desk pipeline runs unattended, and still lands nothing.** The new
+  `draft-writer` skill turns task candidates into reviewable drafts, so a
+  scheduled run can go from staged mail to a draft without the app being open.
+  It writes files rather than emitting an artifact, and Maru adopts any markdown
+  dropped into `scratchpad/drafts/` on the next listing, reading title, kind,
+  importance, confidence, runtime, and provenance from the file's own
+  frontmatter. `promoted_to` is never adopted: only a promote sets it. A
+  malformed drop degrades to a plain idea instead of wedging the list.
+- **Drafts you did not create in the app are no longer invisible.** `drafts_list`
+  adopts orphan bodies in the collection, which is what connects an unattended
+  pipeline to the review gate without a new command.
+- **The gap log answers questions now.** Clicking a type in the distribution
+  filters the log to entries containing it, a date range narrows by day, and a
+  log entry selects the draft it names. Entries also carry the baseline size,
+  the draft kind, and the runtime that wrote it, so churn can be read against
+  the document it belongs to instead of as a bare line count.
+- **Saving the same analysis twice no longer double-counts it.** `Save to log`
+  could be pressed repeatedly and each press appended a row, doubling that
+  document's weight in every aggregate and in the feedback digest sent to the
+  next drafting run.
+- **The reference animation walks the document.** Instead of lighting every
+  referenced node at once, the graph steps through one paragraph at a time in
+  document order, with play, pause, and per-step controls. The per-span
+  paragraph index had been computed since the feature shipped and never read.
+
+### Fixed
+
+- Skills bundle repair no longer hangs when Maru runs it without a terminal,
+  which had left every user's OTA skill updates stalled.
+- A task-lifecycle test asserted against a hardcoded month and began failing on
+  the 1st of every month.
+
 ## v0.4.33 - 2026-07-30 - Nothing Lands Unconfirmed
 
 - **Drafts mode holds AI output until you confirm it.** A new activity-rail mode
