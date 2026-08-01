@@ -23,7 +23,7 @@ and doctor output, but never increase the 43 managed skills or 86 installs.
 | Tier | Location | Identity | Change Path |
 |------|----------|----------|-------------|
 | T1 Core | `STAIxBWLB/skills` repo, `skills/<name>/` | Maru-bundled skill, deployed via the `skills-channel` OTA bundle (no app release needed) | `STAIxBWLB/skills` PR → auto-published bundle |
-| T2 Public | `~/.maru/skills/_sources/skills-public/skills/<name>/` | Public reusable skill | `STAIxBWLB/skills` PR |
+| T2 Public | `~/.maru/skills/_sources/skills-public/skills/<name>/` | Public reusable skill | frozen on the `archive/legacy-catalog` branch of `STAIxBWLB/skills` (that repo is now the T1 bundle source) |
 | T3 Private | `~/.maru/skills/_sources/skills-private/skills/<name>/` | Private or identity-bearing skill | `entelecheia/skills` push |
 | T4 Imported | `~/.maru/skills/_imported/skills/<name>/` | Explicitly imported external skill | `maru skills import` |
 | T5 Managed Local | `~/.maru/skills/_managed/<name>/` | Local-only managed skill | Maru local registry |
