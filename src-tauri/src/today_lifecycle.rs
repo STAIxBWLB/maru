@@ -732,8 +732,13 @@ mod tests {
         assert!(!tmp.path().join(&rel).exists());
         assert!(tmp.path().join(&outcome.trashed_path).exists());
         assert!(list_records(tmp.path()).unwrap().is_empty());
+        // task_trash takes no date, so its event lands in the current UTC
+        // month's file. Hardcoding one made this test fail on the 1st of every
+        // month; derive it the way today_store does.
+        let month = &Utc::now().to_rfc3339()[..7];
         let events =
-            fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
+            fs::read_to_string(tmp.path().join(format!(".maru/today/events/{month}.jsonl")))
+                .unwrap();
         assert!(events.contains("\"kind\":\"task_trashed\""));
 
         // Opt-in: provider delete queued.
