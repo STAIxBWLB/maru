@@ -111,6 +111,45 @@ export function uniqueRefNodePaths(refs: KgNodeRef[]): string[] {
   return out;
 }
 
+/** One step of the reference walk: a paragraph and the nodes it cites. */
+export interface KgRefStep {
+  /** 0-based paragraph index within the document. */
+  paragraph: number;
+  /** Unique node paths cited in that paragraph, in first-appearance order. */
+  nodePaths: string[];
+}
+
+/**
+ * Group references by the paragraph that cites them, in document order.
+ *
+ * `uniqueRefNodePaths` answers "which nodes does this document touch"; this
+ * answers "which part of the document touches them", which is the question the
+ * reference visualization was meant to show. Paragraphs that cite nothing are
+ * not steps: they would animate an empty set.
+ */
+export function refStepsByParagraph(refs: KgNodeRef[]): KgRefStep[] {
+  const byParagraph = new Map<number, string[]>();
+  const seenPerParagraph = new Map<number, Set<string>>();
+  for (const ref of refs) {
+    for (const span of ref.spans) {
+      let paths = byParagraph.get(span.paragraph);
+      let seen = seenPerParagraph.get(span.paragraph);
+      if (!paths || !seen) {
+        paths = [];
+        seen = new Set<string>();
+        byParagraph.set(span.paragraph, paths);
+        seenPerParagraph.set(span.paragraph, seen);
+      }
+      if (seen.has(ref.nodePath)) continue;
+      seen.add(ref.nodePath);
+      paths.push(ref.nodePath);
+    }
+  }
+  return [...byParagraph.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([paragraph, nodePaths]) => ({ paragraph, nodePaths }));
+}
+
 function joinRoot(root: string, relative: string): string {
   return `${root.replace(/[\\/]+$/, "")}/${relative.replace(/\\/g, "/").replace(/^\/+/, "")}`;
 }

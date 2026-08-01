@@ -5,6 +5,7 @@ import {
   byteOffsetToCharIndex,
   mapSpansToRenderedText,
   refMapToCharSpans,
+  refStepsByParagraph,
   resolveReferenceNodeIds,
   segmentsFromSpans,
   spanSearchTexts,
@@ -142,6 +143,45 @@ describe("uniqueRefNodePaths", () => {
       { nodePath: "b.md", nodeTitle: "b", matchKind: "entity", spans: [] },
     ]);
     expect(paths).toEqual(["a.md", "b.md"]);
+  });
+});
+
+describe("refStepsByParagraph", () => {
+  const span = (paragraph: number, start: number) => ({
+    start,
+    end: start + 4,
+    paragraph,
+  });
+
+  it("walks paragraphs in document order, deduping per paragraph", () => {
+    const steps = refStepsByParagraph([
+      {
+        nodePath: "a.md",
+        nodeTitle: "a",
+        matchKind: "wikilink",
+        spans: [span(2, 0), span(0, 10), span(0, 20)],
+      },
+      { nodePath: "b.md", nodeTitle: "b", matchKind: "entity", spans: [span(0, 30)] },
+    ]);
+    expect(steps).toEqual([
+      { paragraph: 0, nodePaths: ["a.md", "b.md"] },
+      { paragraph: 2, nodePaths: ["a.md"] },
+    ]);
+  });
+
+  it("skips paragraphs that cite nothing rather than emitting empty steps", () => {
+    const steps = refStepsByParagraph([
+      { nodePath: "a.md", nodeTitle: "a", matchKind: "entity", spans: [span(5, 0)] },
+    ]);
+    expect(steps).toEqual([{ paragraph: 5, nodePaths: ["a.md"] }]);
+  });
+
+  it("returns no steps for refs without spans", () => {
+    expect(
+      refStepsByParagraph([
+        { nodePath: "a.md", nodeTitle: "a", matchKind: "entity", spans: [] },
+      ]),
+    ).toEqual([]);
   });
 });
 
