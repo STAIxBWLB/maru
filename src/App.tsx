@@ -579,6 +579,13 @@ type UpdateToast =
   | { kind: "skillsAvailable"; version: string }
   | { kind: "error"; message: string };
 
+// Shared empty list so `?? NO_ENTRIES` keeps a stable identity: a fresh `[]`
+// every render re-keys the graph model, tears the canvas down, and restarts
+// FA2 on the rebuilt renderer — mid-flight camera math then lands wrong and,
+// with settle re-fit disabled, stays wrong (graph.spec.ts:342 flake, and
+// visible graph churn during a workspace scan).
+const NO_ENTRIES: VaultEntry[] = [];
+
 function tabIdForEntry(entry: VaultEntry): string {
   return entry.path;
 }
@@ -7847,7 +7854,7 @@ function MainApp() {
       ? graphVaultPath ?? activeDocumentWorkspacePath
       : graphWorkspacePath ?? activeDocumentWorkspacePath;
   const graphEntries = graphDataPath
-    ? workspaceStates[graphDataPath]?.entries ?? []
+    ? workspaceStates[graphDataPath]?.entries ?? NO_ENTRIES
     : activeDocumentEntries;
   const graphSurfaceVisible = visibleAppMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
