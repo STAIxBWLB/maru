@@ -671,22 +671,29 @@ fn last_entry_for(log_path: &Path, draft_id: &str) -> Option<GapLogEntry> {
         .next_back()
 }
 
-#[tauri::command]
-pub fn gap_log_list(work_path: String, limit: Option<u32>) -> Result<Vec<GapLogEntry>, String> {
-    assert_scratchpad_workspace_access(Path::new(&work_path))?;
-    let work = normalize_existing_dir(&work_path)?;
-    let log_path = gap_log_path(&work);
+/// Read and parse the gap log for a workspace, newest-first. Corrupt lines
+/// are skipped so one bad write can never wedge the log. Shared by the
+/// `gap_log_list` command and the scheduler's dispatch-time digest build.
+pub(crate) fn read_gap_log_entries(work: &Path) -> Result<Vec<GapLogEntry>, String> {
+    let log_path = gap_log_path(work);
     if !log_path.is_file() {
         return Ok(Vec::new());
     }
     let raw = fs::read_to_string(&log_path)
         .map_err(|err| format!("Cannot read gap log {}: {err}", log_path.display()))?;
-    // Corrupt lines are skipped so one bad write can never wedge the log.
     let mut entries: Vec<GapLogEntry> = raw
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
     entries.reverse();
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn gap_log_list(work_path: String, limit: Option<u32>) -> Result<Vec<GapLogEntry>, String> {
+    assert_scratchpad_workspace_access(Path::new(&work_path))?;
+    let work = normalize_existing_dir(&work_path)?;
+    let mut entries = read_gap_log_entries(&work)?;
     entries.truncate(limit.unwrap_or(100) as usize);
     Ok(entries)
 }
@@ -721,6 +728,108 @@ fn rewrite_gap_log(work: &Path, entries: &[GapLogEntry]) -> Result<(), String> {
     }
     write_atomic(&gap_log_path(work), body.as_bytes())
 }
+
+// === Feedback digest (gap → scheduler prompt loop) ===
+//
+// Rust port of `buildGapFeedbackDigest` / `appendGapFeedbackDigest` in
+// `src/lib/gapAnalysis.ts` — the two must stay in sync. The scheduler
+// attaches the digest to inbox-process schedule prompts at dispatch time;
+// the frontend renders the same digest as a read-only preview in the
+// schedule dialog. Keep the header string and the Korean copy identical.
+
+/// Delimited prompt section header marking the auto-attached digest.
+pub(crate) const GAP_FEEDBACK_SECTION_HEADER: &str = "## 최근 수정 경향 (자동 첨부)";
+
+/// How many of the most recent log entries the digest aggregates.
+pub(crate) const GAP_FEEDBACK_DEFAULT_MAX_ENTRIES: usize = 20;
+
+/// (label, hint) per edit type, in declaration order — stable ties in the
+/// dominant-type pick keep this order, same as the TS port.
+const GAP_TYPE_FEEDBACK: [(&str, &str); 4] = [
+    ("외부 정보 추가", "초안에 출처·수치·날짜 등 근거 정보를 더 포함할 것"),
+    ("직접 수정", "초안 문장을 최종 문서 톤에 맞춰 더 다듬어 작성할 것"),
+    ("교차 문서 참조", "관련 문서의 [[위키링크]]를 초안에 미리 포함할 것"),
+    ("서식 정리", "초안의 서식·공백·프론트매터를 최종 문서 형식에 맞출 것"),
+];
+
+/// Short Korean digest of recent user edit tendencies, appended to
+/// inbox-process schedule prompts so future drafts need fewer manual edits.
+/// Entries may arrive in any order; the most recent `max_entries` (by `at`)
+/// are used. Returns an empty string when there is nothing to say.
+pub(crate) fn build_gap_feedback_digest(entries: &[GapLogEntry], max_entries: usize) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+    let mut recent: Vec<&GapLogEntry> = entries.iter().collect();
+    recent.sort_by(|a, b| b.at.cmp(&a.at));
+    recent.truncate(max_entries.max(1));
+    let mut totals = GapTypeCounts::default();
+    let mut added_lines = 0usize;
+    let mut removed_lines = 0usize;
+    for entry in &recent {
+        added_lines += entry.added_lines;
+        removed_lines += entry.removed_lines;
+        totals.external_info += entry.by_type.external_info;
+        totals.direct_edit += entry.by_type.direct_edit;
+        totals.cross_doc_reference += entry.by_type.cross_doc_reference;
+        totals.formatting += entry.by_type.formatting;
+    }
+    let counts = [
+        totals.external_info,
+        totals.direct_edit,
+        totals.cross_doc_reference,
+        totals.formatting,
+    ];
+    let mut lines = vec![format!(
+        // One line, no literal continuation: the frontend TS builds this with
+        // a single space and the two digests must stay byte-identical.
+        "최근 초안 {}건의 수정 분석: 추가 {}줄, 삭제 {}줄 (외부 정보 {}건, 직접 수정 {}건, 교차 참조 {}건, 서식 {}건)",
+        recent.len(),
+        added_lines,
+        removed_lines,
+        counts[0],
+        counts[1],
+        counts[2],
+        counts[3],
+    )];
+    // sort_by is stable, so ties keep the declaration order above.
+    let mut ranked: Vec<usize> = (0..counts.len()).collect();
+    ranked.sort_by(|a, b| counts[*b].cmp(&counts[*a]));
+    let dominant = ranked[0];
+    if counts[dominant] > 0 {
+        let (label, hint) = GAP_TYPE_FEEDBACK[dominant];
+        lines.push(format!("가장 잦은 수정 유형은 {label}: {hint}"));
+    }
+    lines.join("\n")
+}
+
+/// Append the digest to a schedule prompt under the section header. A prompt
+/// is returned unchanged when the digest is empty.
+pub(crate) fn append_gap_feedback_digest(prompt: &str, digest: &str) -> String {
+    if digest.is_empty() {
+        return prompt.to_string();
+    }
+    let section = format!("{GAP_FEEDBACK_SECTION_HEADER}\n\n{digest}");
+    if prompt.is_empty() {
+        section
+    } else {
+        format!("{prompt}\n\n{section}")
+    }
+}
+
+/// Remove a previously attached digest section — the header line through
+/// end-of-prompt — so a stale add-time snapshot baked into a legacy schedule
+/// never survives to dispatch.
+pub(crate) fn strip_gap_feedback_section(prompt: &str) -> String {
+    let Some(index) = prompt.find(GAP_FEEDBACK_SECTION_HEADER) else {
+        return prompt.to_string();
+    };
+    // Back up to the start of the header line so the blank-line separator
+    // before the section goes with it.
+    let line_start = prompt[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    prompt[..line_start].trim_end().to_string()
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1133,5 +1242,136 @@ mod tests {
         assert_eq!(first.promoted_at, "2026-07-02T00:00:00Z");
         let second = rows.iter().find(|row| row.draft_id == "draft-rep-2").unwrap();
         assert!(!second.has_baseline);
+    }
+
+    // === Feedback digest (mirrors src/__tests__/gapAnalysis.test.ts) ===
+
+    fn feedback_entry(at: &str, added: usize, removed: usize, by_type: GapTypeCounts) -> GapLogEntry {
+        GapLogEntry {
+            at: at.to_string(),
+            draft_id: "draft-fb".to_string(),
+            promoted_to: "notes/fb.md".to_string(),
+            added_lines: added,
+            removed_lines: removed,
+            by_type,
+            hunk_count: 0,
+            baseline_hash: None,
+            baseline_lines: None,
+            draft_kind: None,
+            generated_by: None,
+        }
+    }
+
+    fn counts(external: usize, direct: usize, cross: usize, format: usize) -> GapTypeCounts {
+        GapTypeCounts {
+            external_info: external,
+            direct_edit: direct,
+            cross_doc_reference: cross,
+            formatting: format,
+        }
+    }
+
+    #[test]
+    fn digest_is_empty_for_no_entries() {
+        assert_eq!(build_gap_feedback_digest(&[], 20), "");
+    }
+
+    #[test]
+    fn digest_aggregates_line_and_per_type_totals() {
+        let digest = build_gap_feedback_digest(
+            &[
+                feedback_entry("2026-07-29T09:00:00", 3, 1, counts(2, 1, 0, 0)),
+                feedback_entry("2026-07-30T09:00:00", 2, 2, counts(1, 0, 1, 1)),
+            ],
+            20,
+        );
+        let first = digest.lines().next().unwrap();
+        assert!(first.contains("최근 초안 2건"), "{first}");
+        assert!(first.contains("추가 5줄"), "{first}");
+        assert!(first.contains("삭제 3줄"), "{first}");
+        assert!(first.contains("외부 정보 3건"), "{first}");
+        assert!(first.contains("직접 수정 1건"), "{first}");
+        assert!(first.contains("교차 참조 1건"), "{first}");
+        assert!(first.contains("서식 1건"), "{first}");
+    }
+
+    #[test]
+    fn digest_hints_the_dominant_type_only() {
+        let digest = build_gap_feedback_digest(
+            &[feedback_entry("2026-07-30T09:00:00", 5, 0, counts(4, 1, 0, 0))],
+            20,
+        );
+        assert!(digest.contains("가장 잦은 수정 유형은 외부 정보 추가"), "{digest}");
+        assert!(digest.contains("출처·수치·날짜"), "{digest}");
+    }
+
+    #[test]
+    fn digest_hints_cross_doc_references_when_those_dominate() {
+        let digest = build_gap_feedback_digest(
+            &[feedback_entry("2026-07-30T09:00:00", 4, 0, counts(0, 0, 3, 1))],
+            20,
+        );
+        assert!(digest.contains("교차 문서 참조"), "{digest}");
+        assert!(digest.contains("[[위키링크]]"), "{digest}");
+    }
+
+    #[test]
+    fn digest_omits_the_hint_when_every_type_count_is_zero() {
+        let digest = build_gap_feedback_digest(
+            &[feedback_entry("2026-07-30T09:00:00", 0, 0, counts(0, 0, 0, 0))],
+            20,
+        );
+        assert_eq!(digest.lines().count(), 1, "{digest}");
+    }
+
+    #[test]
+    fn digest_keeps_only_the_most_recent_max_entries() {
+        let entries: Vec<GapLogEntry> = (0..5)
+            .map(|index| {
+                feedback_entry(
+                    &format!("2026-07-2{index}T09:00:00"),
+                    1,
+                    0,
+                    counts(if index == 0 { 9 } else { 0 }, 1, 0, 0),
+                )
+            })
+            .collect();
+        let digest = build_gap_feedback_digest(&entries, 2);
+        // Only the two newest (07-23, 07-24) count: the old 9-external-info
+        // entry is out.
+        assert!(digest.contains("최근 초안 2건"), "{digest}");
+        assert!(digest.contains("추가 2줄"), "{digest}");
+        assert!(digest.contains("외부 정보 0건"), "{digest}");
+        assert!(digest.contains("가장 잦은 수정 유형은 직접 수정"), "{digest}");
+    }
+
+    #[test]
+    fn append_returns_the_prompt_unchanged_for_an_empty_digest() {
+        assert_eq!(append_gap_feedback_digest("run extract-tasks", ""), "run extract-tasks");
+    }
+
+    #[test]
+    fn append_adds_a_delimited_section() {
+        assert_eq!(
+            append_gap_feedback_digest("run extract-tasks", "digest body"),
+            format!("run extract-tasks\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\ndigest body"),
+        );
+        assert_eq!(
+            append_gap_feedback_digest("", "digest body"),
+            format!("{GAP_FEEDBACK_SECTION_HEADER}\n\ndigest body"),
+        );
+    }
+
+    #[test]
+    fn strip_removes_a_baked_in_section_and_its_separator() {
+        let baked = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
+        assert_eq!(strip_gap_feedback_section(&baked), "do stuff");
+        // A prompt without the section is untouched.
+        assert_eq!(strip_gap_feedback_section("do stuff"), "do stuff");
+        // A section-only prompt strips to empty.
+        assert_eq!(
+            strip_gap_feedback_section(&format!("{GAP_FEEDBACK_SECTION_HEADER}\n\nstale")),
+            ""
+        );
     }
 }

@@ -110,9 +110,10 @@ via `drafts_create` (`src/lib/taskIngestion.ts`).
   then writes: two un-awaited runs sharing a candidate title would both miss the
   other's pending create.
 - The skill contract lives in `skills/skills/inbox-process/SKILL.md`. When the
-  schedule prompt carries a `## 최근 수정 경향` section (auto-attached gap
-  feedback, see [gap-analysis.md](gap-analysis.md)), the skill applies its
-  hints to every `draftBody`.
+  schedule prompt carries a `## 최근 수정 경향` section (gap feedback attached
+  fresh at dispatch time by the Rust scheduler, see
+  [gap-analysis.md](gap-analysis.md)), the skill applies its hints to every
+  `draftBody`.
 
 ## Ideation drafts
 

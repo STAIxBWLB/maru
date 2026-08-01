@@ -23170,6 +23170,32 @@ select:focus-visible,
   margin: 12px 0;
 }
 
+.drafts-schedule-gap-digest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: var(--type-meta-size);
+}
+
+.drafts-schedule-gap-digest-title {
+  font-size: var(--type-label-size);
+}
+
+.drafts-schedule-gap-digest-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.drafts-schedule-gap-digest-body {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
 .drafts-schedule-time {
   display: flex;
   gap: 8px;
