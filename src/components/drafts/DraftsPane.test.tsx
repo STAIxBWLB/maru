@@ -15,6 +15,7 @@ vi.mock("../../lib/api", () => ({
   saveDraft: vi.fn(),
   setDraftStatus: vi.fn(),
   discardDraft: vi.fn(),
+  createDraft: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(true) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
@@ -25,7 +26,7 @@ vi.mock("./useIdeationDrafts", () => ({
   useIdeationDrafts: () => ({ pendingIdeaPaths: new Set<string>(), generate: vi.fn() }),
 }));
 
-import { listDrafts, listScratchpad, readDraft, saveDraft, setDraftStatus } from "../../lib/api";
+import { listDrafts, listScratchpad, readDraft, saveDraft, setDraftStatus, createDraft } from "../../lib/api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -184,5 +185,106 @@ describe("DraftsPane unsaved-edit guards", () => {
     expect(confirm).toHaveBeenCalledWith(translate("ko", "drafts.discardEdits"));
     // Declined: the other draft must not be loaded over the buffer.
     expect(vi.mocked(readDraft)).not.toHaveBeenCalled();
+  });
+});
+
+describe("DraftsPane manual draft creation", () => {
+  function dialogRoot(): HTMLElement {
+    const dialog = document.body.querySelector<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("create dialog not open");
+    return dialog;
+  }
+
+  async function typeIntoInput(input: Element, value: string) {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("creates a manual draft through the dialog and opens it", async () => {
+    vi.mocked(createDraft).mockImplementation(async (params) => ({
+      ...DRAFT,
+      id: "d3",
+      kind: params.kind,
+      title: params.title,
+      status: "new",
+      source: params.source,
+      importance: params.importance ?? undefined,
+    }));
+    const host = await render();
+
+    const openButton = [...host.querySelectorAll("button")].find(
+      (el) => el.getAttribute("aria-label") === translate("ko", "drafts.create.open"),
+    );
+    if (!openButton) throw new Error("create button not found");
+    await act(async () => {
+      openButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const dialog = dialogRoot();
+    const titleInput = dialog.querySelector("input:not([type=radio])");
+    if (!titleInput) throw new Error("title input not found");
+    await typeIntoInput(titleInput, "손으로 쓴 초안");
+
+    const textareas = dialog.querySelectorAll("textarea");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(textareas[0], "본문 내용");
+      textareas[0].dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const submit = [...dialog.querySelectorAll("button")].find(
+      (el) => (el.textContent ?? "").trim() === translate("ko", "drafts.create.submit"),
+    );
+    if (!submit) throw new Error("submit button not found");
+    await act(async () => {
+      submit.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(vi.mocked(createDraft)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createDraft).mock.calls[0][0]).toEqual({
+      workPath: "/w",
+      kind: "task",
+      title: "손으로 쓴 초안",
+      source: "manual",
+      originRefs: [],
+      importance: null,
+      confidence: null,
+      body: "본문 내용",
+    });
+    // The created draft opens in the detail view (auto new → in-review).
+    expect(vi.mocked(readDraft)).toHaveBeenCalledWith("/w", "d3");
+    expect(document.body.querySelector("[role=dialog]")).toBeNull();
+  });
+
+  it("keeps the submit disabled until a title is entered", async () => {
+    const host = await render();
+    const openButton = [...host.querySelectorAll("button")].find(
+      (el) => el.getAttribute("aria-label") === translate("ko", "drafts.create.open"),
+    );
+    if (!openButton) throw new Error("create button not found");
+    await act(async () => {
+      openButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const dialog = dialogRoot();
+    const submit = [...dialog.querySelectorAll("button")].find(
+      (el) => (el.textContent ?? "").trim() === translate("ko", "drafts.create.submit"),
+    );
+    if (!submit) throw new Error("submit button not found");
+    expect(submit.disabled).toBe(true);
+
+    const titleInput = dialog.querySelector("input:not([type=radio])");
+    if (!titleInput) throw new Error("title input not found");
+    await typeIntoInput(titleInput, "제목");
+    expect(submit.disabled).toBe(false);
   });
 });
