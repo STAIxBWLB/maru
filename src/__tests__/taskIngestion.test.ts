@@ -253,6 +253,17 @@ describe("selectTaskCandidates", () => {
     );
     expect(selection.create).toHaveLength(1);
   });
+
+  it("keeps short same-source follow-ups that share one subject word", () => {
+    // Two-token titles: "솔트룩스 회의" vs "솔트룩스 예산" would hit 0.5
+    // overlap, far above 0.3 — too little signal to suppress.
+    const selection = selectTaskCandidates(
+      [candidate({ title: "솔트룩스 예산", originRefs: ["meetings/m.md"] })],
+      [draft({ title: "솔트룩스 회의", status: "new", originRefs: ["meetings/m.md"] })],
+      "low",
+    );
+    expect(selection.create).toHaveLength(1);
+  });
 });
 
 describe("importanceRank", () => {

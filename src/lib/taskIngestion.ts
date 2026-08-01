@@ -103,23 +103,32 @@ export function titleTokenSet(title: string): Set<string> {
 }
 
 const DUP_TITLE_TOKEN_OVERLAP = 0.3;
+const DUP_MIN_TOKENS = 3;
 
 /** Probable duplicate of an existing draft: shares at least one originRef AND
  *  has >= 0.3 title-token overlap with the smaller set. Either condition alone
  *  is wrong — one meeting note legitimately yields several distinct
- *  follow-ups, and unrelated tasks share stock words. Bias toward
- *  suppressing: a missed draft comes back next run, a duplicate is triage. */
-export function isProbableDuplicateDraft(candidate: TaskCandidate, existing: DraftEntry): boolean {
+ *  follow-ups, and unrelated tasks share stock words. Titles with fewer than
+ *  DUP_MIN_TOKENS tokens are exempt from the overlap rule: one shared subject
+ *  word ("솔트룩스 회의" vs "솔트룩스 예산") would otherwise outvote the whole
+ *  title. Bias toward suppressing: a missed draft comes back next run, a
+ *  duplicate is triage. */
+export function isProbableDuplicateDraft(
+  candidate: TaskCandidate,
+  existing: DraftEntry,
+  candidateTokens?: Set<string>,
+): boolean {
   const sharedRef = candidate.originRefs.some((ref) => existing.originRefs.includes(ref));
   if (!sharedRef) return false;
-  const candidateTokens = titleTokenSet(candidate.title);
-  const existingTokens = titleTokenSet(existing.title);
-  if (candidateTokens.size === 0 || existingTokens.size === 0) return false;
+  const candidateSet = candidateTokens ?? titleTokenSet(candidate.title);
+  const existingSet = titleTokenSet(existing.title);
+  const smaller = Math.min(candidateSet.size, existingSet.size);
+  if (smaller < DUP_MIN_TOKENS) return false;
   let overlap = 0;
-  for (const token of candidateTokens) {
-    if (existingTokens.has(token)) overlap += 1;
+  for (const token of candidateSet) {
+    if (existingSet.has(token)) overlap += 1;
   }
-  return overlap / Math.min(candidateTokens.size, existingTokens.size) >= DUP_TITLE_TOKEN_OVERLAP;
+  return overlap / smaller >= DUP_TITLE_TOKEN_OVERLAP;
 }
 
 /** Apply the importance threshold and title dedupe. Existing discarded drafts
@@ -139,7 +148,12 @@ export function selectTaskCandidates(
       continue;
     }
     const key = normalizeDraftTitleKey(candidate.title);
-    if (taken.has(key) || liveDrafts.some((existing) => isProbableDuplicateDraft(candidate, existing))) {
+    // Computed once per candidate, not once per comparison.
+    const candidateTokens = titleTokenSet(candidate.title);
+    if (
+      taken.has(key) ||
+      liveDrafts.some((existing) => isProbableDuplicateDraft(candidate, existing, candidateTokens))
+    ) {
       selection.skippedDup.push(candidate.title);
       continue;
     }
