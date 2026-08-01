@@ -55,6 +55,12 @@ spaces, lowercase ASCII or Hangul, hyphen-separated.
 **Never overwrite an existing file.** If the path is taken, the candidate was
 already drafted; skip it and record it in `skipped`.
 
+A free path is not proof the candidate is new. Task titles get reworded between
+extraction runs, so the same follow-up produces a different slug and lands
+beside its own duplicate. Before writing, list the collection and skip any
+candidate whose `originRefs` overlap an existing draft's `origin_refs` and whose
+title covers much the same ground, naming that file in the `skipped` reason.
+
 Each file is YAML frontmatter followed by the draft body:
 
 ```markdown
