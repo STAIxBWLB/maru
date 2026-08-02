@@ -7,6 +7,7 @@ function decision(id: string, date: string | null): GraphNode {
     id,
     label: id,
     relPath: `notes/${id}.md`,
+    origin: "workspace",
     type: "decision",
     domain: "operations",
     degree: 0,
@@ -18,7 +19,7 @@ function decision(id: string, date: string | null): GraphNode {
 }
 
 function supersedes(source: string, target: string): GraphEdge {
-  return { source, target, relation: "supersedes", fromFrontmatter: true };
+  return { source, target, relation: "supersedes", fromFrontmatter: true, origin: "workspace" };
 }
 
 function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
@@ -61,8 +62,8 @@ describe("buildDecisionChains", () => {
       model(
         [decision("d1", "2026-01-01"), decision("d2", "2026-02-01"), insight],
         [
-          { source: "d1", target: "not-a-decision", relation: "supersedes", fromFrontmatter: true },
-          { source: "d2", target: "d1", relation: "superseded_by", fromFrontmatter: true },
+          { source: "d1", target: "not-a-decision", relation: "supersedes", fromFrontmatter: true, origin: "workspace" },
+          { source: "d2", target: "d1", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" },
         ],
       ),
     );

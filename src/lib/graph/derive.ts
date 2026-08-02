@@ -15,6 +15,7 @@ import { graphNodeMatchesSearch } from "./search";
 
 export interface DerivedGraphFacets {
   domains: { value: string; count: number }[];
+  origins: { value: string; count: number }[];
   types: { value: string; count: number }[];
   relations: { value: string; count: number }[];
   communities: { value: number; count: number }[];
@@ -88,7 +89,7 @@ function distinctNeighborCounts(model: GraphModel): Map<string, number> {
   return new Map([...neighbors].map(([id, ids]) => [id, ids.size]));
 }
 
-type NodeFacet = "domain" | "type" | "community" | null;
+type NodeFacet = "domain" | "origin" | "type" | "community" | null;
 
 function nodePasses(
   node: GraphNode,
@@ -96,6 +97,7 @@ function nodePasses(
   generatedPatterns: readonly string[],
   focusNodeId: string | null,
   activeDomains: ReadonlySet<string>,
+  activeOrigins: ReadonlySet<string>,
   activeTypes: ReadonlySet<string>,
   communityActive: boolean,
   omit: NodeFacet = null,
@@ -104,6 +106,10 @@ function nodePasses(
   if (!profile.showUnresolved && node.type === "unresolved") return false;
   if (!profile.showGenerated && isGeneratedNode(node, generatedPatterns)) return false;
   if (omit !== "domain" && activeDomains.size > 0 && (!node.domain || !activeDomains.has(node.domain))) {
+    return false;
+  }
+  // Ghosts have no origin; an origin filter hides them along with the rest.
+  if (omit !== "origin" && activeOrigins.size > 0 && !activeOrigins.has(node.origin)) {
     return false;
   }
   if (omit !== "type" && activeTypes.size > 0 && !activeTypes.has(node.type)) return false;
@@ -160,10 +166,12 @@ export function deriveGraphView(args: {
   } = args;
 
   const modelDomains = new Set<string>();
+  const modelOrigins = new Set<string>();
   const modelTypes = new Set<string>();
   const modelCommunities = new Set<number>();
   for (const node of model.nodes) {
     if (node.domain) modelDomains.add(node.domain);
+    if (node.origin !== "unknown") modelOrigins.add(node.origin);
     modelTypes.add(node.type);
     if (node.community != null) modelCommunities.add(node.community);
   }
@@ -173,6 +181,11 @@ export function deriveGraphView(args: {
   const activeDomains = new Set(profile.domains.filter((value) => {
     if (modelDomains.has(value)) return true;
     pausedFilters.push(`domain:${value}`);
+    return false;
+  }));
+  const activeOrigins = new Set(profile.origins.filter((value) => {
+    if (modelOrigins.has(value)) return true;
+    pausedFilters.push(`origin:${value}`);
     return false;
   }));
   const activeTypes = new Set(profile.types.filter((value) => {
@@ -198,6 +211,7 @@ export function deriveGraphView(args: {
     generatedPatterns,
     protectedFocusId,
     activeDomains,
+    activeOrigins,
     activeTypes,
     communityActive,
     omit,
@@ -206,6 +220,10 @@ export function deriveGraphView(args: {
   // Self-excluding facets keep additive choices visible. Relation counts use
   // the fully node-filtered graph before the relation facet applies itself.
   const domainCounts = countNodeFacet(model.nodes.filter((node) => pass(node, "domain")), (node) => node.domain);
+  const originCounts = countNodeFacet(
+    model.nodes.filter((node) => pass(node, "origin")),
+    (node) => (node.origin === "unknown" ? null : node.origin),
+  );
   const typeCounts = countNodeFacet(model.nodes.filter((node) => pass(node, "type")), (node) => node.type);
   const communityCounts = countNodeFacet(
     model.nodes.filter((node) => pass(node, "community")),
@@ -245,6 +263,10 @@ export function deriveGraphView(args: {
 
   const facets: DerivedGraphFacets = {
     domains: facetItems(domainCounts, profile.domains, (a, b) => a.localeCompare(b)),
+    // Workspace before knowledge, matching the legend and the color slots.
+    origins: facetItems(originCounts, profile.origins, (a, b) => a.localeCompare(b)).sort(
+      (a, b) => (a.value === b.value ? 0 : a.value === "workspace" ? -1 : 1),
+    ),
     types: facetItems(typeCounts, profile.types, (a, b) => a.localeCompare(b)),
     relations: facetItems(relationCounts, profile.relations, (a, b) => a.localeCompare(b)),
     communities: facetItems(

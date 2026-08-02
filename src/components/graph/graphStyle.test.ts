@@ -4,9 +4,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   communityColor,
   domainColor,
+  edgeColor,
   graphTheme,
   nodeColor,
+  originEdgeColor,
   refreshGraphTheme,
+  relationColor,
 } from "./graphStyle";
 import type { GraphNode } from "../../lib/graph/model";
 
@@ -98,5 +101,46 @@ describe("graph theme", () => {
     expect(domainColor("nope")).toBe(theme.fallback);
     expect(domainColor(null)).toBe(theme.fallback);
     expect(graphTheme().domainColors.research).toBe(domainColor("research"));
+  });
+
+  it("colors nodes by origin, ghosts excepted", () => {
+    const theme = refreshGraphTheme();
+    const workspace = nodeColor(node({ origin: "workspace" }), false, "origin");
+    const knowledge = nodeColor(node({ origin: "knowledge" }), false, "origin");
+    expect(workspace).toBe(theme.communityColors[0]);
+    expect(knowledge).toBe(theme.communityColors[2]);
+    expect(workspace).not.toBe(knowledge);
+    expect(nodeColor(node({ origin: "unknown" }), false, "origin")).toBe(theme.fallback);
+    // Ghost styling still wins over every color mode.
+    expect(nodeColor(node({ type: "unresolved", origin: "unknown" }), false, "origin"))
+      .toBe(theme.ghostFill);
+  });
+
+  it("origin colors follow the theme", () => {
+    const light = refreshGraphTheme().originColors.workspace;
+    setTokens(DARK);
+    expect(refreshGraphTheme().originColors.workspace).not.toBe(light);
+  });
+
+  it("edgeColor keys the three origin classes and leaves other modes alone", () => {
+    const theme = refreshGraphTheme();
+    const origin = { relationColors: false, colorMode: "origin" } as const;
+    const classes = (["workspace", "knowledge", "cross"] as const).map((value) =>
+      edgeColor({ relation: "wiki_link", fromFrontmatter: false, origin: value }, origin),
+    );
+    expect(new Set(classes).size).toBe(3);
+    expect(classes).toEqual([
+      originEdgeColor("workspace"),
+      originEdgeColor("knowledge"),
+      originEdgeColor("cross"),
+    ]);
+    // Edges stay subordinate to their nodes.
+    expect(classes[0]).not.toBe(theme.originColors.workspace);
+
+    const edge = { relation: "supersedes", fromFrontmatter: true, origin: "cross" } as const;
+    expect(edgeColor(edge, { relationColors: false, colorMode: "neutral" })).toBe(theme.edge);
+    expect(edgeColor(edge, { relationColors: true, colorMode: "neutral" })).toBe(
+      relationColor("supersedes"),
+    );
   });
 });

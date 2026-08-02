@@ -687,12 +687,13 @@ test("enriched overlay renders the communities badge, legend, and color groups",
   });
   await enterGraph(page);
 
-  // Neutral rendering keeps the canvas free of a meaningless color legend.
+  // The mock workspace has no vault, so origin coloring (the default) finds a
+  // single class and keeps the canvas free of a meaningless color legend.
   await expect(page.getByTestId("graph-legend")).toHaveCount(0);
   await expect(page.getByTestId("graph-degraded-hint")).toHaveCount(0);
 
-  // Default rendering is neutral. Opt into community colors and confirm the
-  // legend expands to the two mock communities.
+  // Opt into community colors and confirm the legend expands to the two mock
+  // communities.
   const filters = await openFilters(page);
   await filters.getByTestId("graph-display-color-mode").selectOption("community");
   const legend = page.getByTestId("graph-legend");
@@ -706,6 +707,18 @@ test("enriched overlay renders the communities badge, legend, and color groups",
   expect(meeting.color).toBeTruthy();
   expect(glossary.color).toBeTruthy();
   expect(meeting.color).not.toBe(glossary.color);
+
+  // Origin coloring paints both notes with the same workspace color, and that
+  // color is not the neutral grey.
+  await filters.getByTestId("graph-display-color-mode").selectOption("neutral");
+  const neutral = await screenState(page, "maru-weekly-meeting");
+  await filters.getByTestId("graph-display-color-mode").selectOption("origin");
+  await expect
+    .poll(() => screenState(page, "maru-weekly-meeting").then((s) => s.color))
+    .not.toBe(neutral.color);
+  const originGlossary = await screenState(page, "maru-glossary");
+  const originMeeting = await screenState(page, "maru-weekly-meeting");
+  expect(originGlossary.color).toBe(originMeeting.color);
 
   expect(forbidden).toEqual([]);
 });

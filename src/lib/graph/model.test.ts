@@ -112,6 +112,52 @@ describe("buildVaultGraph", () => {
   });
 });
 
+describe("node and edge origin", () => {
+  const NOTE = entry({
+    relPath: "vault/notes/kg-note.md",
+    frontmatter: { source_ref: "[[weekly-report]]" },
+  });
+  const DOC = entry({
+    relPath: "projects/weekly-report.md",
+    links: ["kg-note", "nowhere"],
+  });
+  const OTHER_DOC = entry({ relPath: "projects/plan.md", links: ["weekly-report"] });
+
+  const originOf = (relPath: string) =>
+    buildVaultGraph([NOTE, DOC, OTHER_DOC], undefined, "vault/").nodes.find(
+      (node) => node.relPath === relPath,
+    )?.origin;
+
+  it("classifies nodes under the knowledge root as knowledge", () => {
+    expect(originOf("vault/notes/kg-note.md")).toBe("knowledge");
+    expect(originOf("projects/weekly-report.md")).toBe("workspace");
+  });
+
+  it("classifies edges by the pair they connect", () => {
+    const model = buildVaultGraph([NOTE, DOC, OTHER_DOC], undefined, "vault/");
+    const find = (source: string, target: string) =>
+      model.edges.find((edge) => edge.source === source && edge.target === target);
+    expect(find("plan", "weekly-report")?.origin).toBe("workspace");
+    expect(find("weekly-report", "kg-note")?.origin).toBe("cross");
+    expect(find("kg-note", "weekly-report")?.origin).toBe("cross");
+  });
+
+  it("gives ghost nodes no origin and lets their edges keep the known side", () => {
+    const model = buildVaultGraph([NOTE, DOC, OTHER_DOC], undefined, "vault/");
+    expect(model.nodes.find((node) => node.id === "nowhere")?.origin).toBe("unknown");
+    expect(
+      model.edges.find((edge) => edge.target === "nowhere")?.origin,
+    ).toBe("workspace");
+  });
+
+  it("marks everything knowledge for a vault-source graph and workspace without a root", () => {
+    const vault = buildVaultGraph([NOTE, DOC], undefined, "");
+    expect(vault.nodes.filter((n) => n.relPath).every((n) => n.origin === "knowledge")).toBe(true);
+    const none = buildVaultGraph([NOTE, DOC]);
+    expect(none.nodes.filter((n) => n.relPath).every((n) => n.origin === "workspace")).toBe(true);
+  });
+});
+
 describe("enrichGraph", () => {
   const file: VaultGraphFile = {
     nodes: [

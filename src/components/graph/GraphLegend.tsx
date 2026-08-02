@@ -5,12 +5,25 @@
 import { ChevronDown, ChevronUp, Palette } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import { communityColor, domainColor } from "./graphStyle";
+import type { GraphEdgeOrigin } from "../../lib/graph/model";
+import { communityColor, domainColor, originColor, originEdgeColor } from "./graphStyle";
 import type { FacetItem, GraphFilters } from "./GraphFilterPanel";
 
+interface LegendItem {
+  key: string;
+  label: string;
+  color: string;
+  count?: number;
+  active?: boolean;
+  toggle?: () => void;
+  /** Render the swatch as a line — the item keys an edge color, not a node. */
+  line?: boolean;
+}
+
 interface GraphLegendProps {
-  mode: "domain" | "community";
+  mode: "domain" | "community" | "origin";
   domains: FacetItem<string>[];
+  origins: FacetItem<string>[];
   communities: FacetItem<number>[];
   filters: GraphFilters;
   onFiltersChange: (next: GraphFilters) => void;
@@ -21,6 +34,7 @@ interface GraphLegendProps {
 export function GraphLegend({
   mode,
   domains,
+  origins,
   communities,
   filters,
   onFiltersChange,
@@ -33,7 +47,35 @@ export function GraphLegend({
     if (!iconOnly) setCollapsed(false);
   }, [iconOnly]);
 
-  const items = mode === "community"
+  // Origin mode: the two node classes filter on click, and one extra row keys
+  // the cross-boundary edge color (same-origin edges reuse their node hue).
+  // A single-class graph (vault source, or a workspace with no vault) has no
+  // color grouping to key — the legend stays out of the way.
+  const originItems: LegendItem[] = (origins.length > 1 ? origins : []).map((o) => ({
+    key: o.value,
+    label: t(`graph.origin.${o.value}`),
+    count: o.count,
+    color: originColor(o.value as GraphEdgeOrigin),
+    active: filters.origins.has(o.value),
+    toggle: () => {
+      const next = new Set(filters.origins);
+      if (next.has(o.value)) next.delete(o.value);
+      else next.add(o.value);
+      onFiltersChange({ ...filters, origins: next });
+    },
+  }));
+  if (originItems.length > 1) {
+    originItems.push({
+      key: "cross",
+      label: t("graph.legend.origin.cross"),
+      color: originEdgeColor("cross"),
+      line: true,
+    });
+  }
+
+  const items: LegendItem[] = mode === "origin"
+    ? originItems
+    : mode === "community"
     ? communities.map((c) => ({
         key: `c${c.value}`,
         label: `#${c.value}`,
@@ -62,13 +104,20 @@ export function GraphLegend({
 
   if (items.length === 0) return null;
 
+  const legendTitle =
+    mode === "origin"
+      ? t("graph.legend.origin")
+      : mode === "community"
+        ? t("graph.legend.community")
+        : t("graph.legend.domain");
+
   if (iconOnly && collapsed) {
     return (
       <button
         type="button"
         className="graph-legend-icon"
         data-testid="graph-legend"
-        title={mode === "community" ? t("graph.legend.community") : t("graph.legend.domain")}
+        title={legendTitle}
         aria-expanded={false}
         onClick={() => setCollapsed(false)}
       >
@@ -85,27 +134,43 @@ export function GraphLegend({
         onClick={() => setCollapsed((c) => !c)}
         aria-expanded={!collapsed}
       >
-        <span>{mode === "community" ? t("graph.legend.community") : t("graph.legend.domain")}</span>
+        <span>{legendTitle}</span>
         {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {!collapsed ? (
         <ul className="graph-legend-list">
-          {items.map((item) => (
-            <li key={item.key}>
-              <button
-                type="button"
-                className={item.active ? "graph-legend-item active" : "graph-legend-item"}
-                aria-pressed={item.active}
-                onClick={item.toggle}
-              >
-                <span className="graph-swatch" style={{ background: item.color }} />
+          {items.map((item) => {
+            const body = (
+              <>
+                <span
+                  className={item.line ? "graph-swatch graph-swatch-line" : "graph-swatch"}
+                  style={{ background: item.color }}
+                />
                 <span className="graph-legend-label">{item.label}</span>
-                <span className="graph-legend-count" aria-hidden>
-                  {item.count}
-                </span>
-              </button>
-            </li>
-          ))}
+                {item.count != null ? (
+                  <span className="graph-legend-count" aria-hidden>
+                    {item.count}
+                  </span>
+                ) : null}
+              </>
+            );
+            return (
+              <li key={item.key}>
+                {item.toggle ? (
+                  <button
+                    type="button"
+                    className={item.active ? "graph-legend-item active" : "graph-legend-item"}
+                    aria-pressed={item.active}
+                    onClick={item.toggle}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <span className="graph-legend-item static">{body}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>

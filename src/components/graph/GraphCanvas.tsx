@@ -16,13 +16,14 @@ import { EdgeArrowProgram, EdgeLineProgram } from "sigma/rendering";
 import {
   graphEdgeVisibilityKey,
   type GraphEdge,
+  type GraphEdgeOrigin,
   type GraphNode,
 } from "../../lib/graph/model";
 import { isUsableCoordinate } from "../../lib/graph/positions";
 import { graphNodeMatchesSearch } from "../../lib/graph/search";
 import { rasterise } from "../../lib/diagram/export";
 import type { GraphDisplaySettings } from "../../lib/settings";
-import { edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius, relationColor } from "./graphStyle";
+import { edgeColor, edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 import { graphBridgeEnabled } from "./graphBridge";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
 import { useTranslation } from "../../lib/i18n";
@@ -84,6 +85,7 @@ type SigmaEdgeAttributes = {
   hidden?: boolean;
   relation: string;
   fromFrontmatter: boolean;
+  origin: GraphEdgeOrigin;
   sourceId: string;
   targetId: string;
   visibilityKey: string;
@@ -259,15 +261,12 @@ function buildSigmaGraph(
     graph.addDirectedEdgeWithKey(`edge:${index}:${edge.source}:${edge.target}:${edge.relation}`, edge.source, edge.target, {
       size: baseSize * display.edgeScale,
       baseSize,
-      // Frontmatter edges carry their relation color; body wiki_link edges
-      // stay neutral. Highlight/dim rules in the reducer stay dominant.
-      color:
-        display.relationColors && edge.fromFrontmatter
-          ? relationColor(edge.relation)
-          : graphTheme().edge,
+      // Resting color only — highlight/dim rules in the reducer stay dominant.
+      color: edgeColor(edge, display),
       type: edgeArrowType(edge, display.arrows),
       relation: edge.relation,
       fromFrontmatter: edge.fromFrontmatter,
+      origin: edge.origin,
       sourceId: edge.source,
       targetId: edge.target,
       visibilityKey: graphEdgeVisibilityKey(edge),
@@ -361,10 +360,7 @@ function fallbackGraphToSvg(
     const source = pointById.get(edge.source);
     const target = pointById.get(edge.target);
     if (!source || !target) return [];
-    const color =
-      display.relationColors && edge.fromFrontmatter
-        ? relationColor(edge.relation)
-        : graphTheme().edge;
+    const color = edgeColor(edge, display);
     const marker = edgeArrowType(edge, display.arrows) === "arrow"
       ? ' marker-end="url(#graph-arrow)"'
       : "";
@@ -491,7 +487,7 @@ function StaticGraphFallback({
           if (!isVisible(nodes[si]) || !isVisible(nodes[ti])) return null;
           const [x1, y1] = point(si);
           const [x2, y2] = point(ti);
-          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" stroke={display.relationColors && edge.fromFrontmatter ? relationColor(edge.relation) : undefined} strokeWidth={(edge.fromFrontmatter ? 0.55 : 0.35) * display.edgeScale} />;
+          return <line key={`${edgeKey(edge.source, edge.target)}:${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="graph-edge" stroke={edgeColor(edge, display)} strokeWidth={(edge.fromFrontmatter ? 0.55 : 0.35) * display.edgeScale} />;
         })}
       </g>
       <g className="graph-nodes labels-on">
@@ -1579,16 +1575,12 @@ export function GraphCanvas({
     const graph = graphRef.current;
     if (!renderer || !graph) return;
     graph.forEachEdge((key, attrs) => {
-      graph.setEdgeAttribute(
-        key,
-        "color",
-        display.relationColors && attrs.fromFrontmatter
-          ? relationColor(attrs.relation)
-          : graphTheme().edge,
-      );
+      graph.setEdgeAttribute(key, "color", edgeColor(attrs, display));
     });
     renderer.refresh();
-  }, [display.relationColors]);
+    // colorMode belongs here too: origin mode owns the edge color, so switching
+    // into or out of it must repaint edges without a rebuild.
+  }, [display.relationColors, display.colorMode]);
 
   useEffect(() => {
     const renderer = rendererRef.current;

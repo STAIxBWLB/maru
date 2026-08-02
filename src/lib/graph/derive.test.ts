@@ -15,6 +15,7 @@ function node(over: Partial<GraphNode> & { id: string }): GraphNode {
     label: over.id,
     relPath: `notes/${over.id}.md`,
     ownerWorkspacePath: null,
+    origin: "workspace",
     type: "insight",
     domain: null,
     degree: 0,
@@ -27,7 +28,7 @@ function node(over: Partial<GraphNode> & { id: string }): GraphNode {
 }
 
 function edge(source: string, target: string, relation = "wiki_link"): GraphEdge {
-  return { source, target, relation, fromFrontmatter: relation !== "wiki_link" };
+  return { source, target, relation, fromFrontmatter: relation !== "wiki_link", origin: "workspace" };
 }
 
 function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
@@ -37,6 +38,7 @@ function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
 function profile(over: Partial<GraphFilterProfile> = {}): GraphFilterProfile {
   return {
     domains: [],
+    origins: [],
     types: [],
     relations: [],
     community: null,
@@ -332,6 +334,44 @@ describe("deriveGraphView — facets", () => {
       { value: 2, count: 1 },
     ]);
     expect(d.facets.maxVisibleNeighbors).toBe(1);
+  });
+});
+
+describe("deriveGraphView — origin facet", () => {
+  const m = () =>
+    model(
+      [
+        node({ id: "doc", origin: "workspace" }),
+        node({ id: "plan", origin: "workspace" }),
+        node({ id: "note", origin: "knowledge" }),
+        node({ id: "ghost", origin: "unknown", type: "unresolved", relPath: null }),
+      ],
+      [edge("doc", "note"), edge("doc", "plan"), edge("doc", "ghost")],
+    );
+
+  it("counts workspace before knowledge and ignores ghosts", () => {
+    const d = derive(m(), profile({ showUnresolved: true }));
+    expect(d.facets.origins).toEqual([
+      { value: "workspace", count: 2 },
+      { value: "knowledge", count: 1 },
+    ]);
+  });
+
+  it("filters to the selected origins", () => {
+    const d = derive(m(), profile({ origins: ["knowledge"] }));
+    expect(ids(d.visibleModel)).toEqual(["note"]);
+    // Self-excluding counts keep the unselected class clickable.
+    expect(d.facets.origins).toEqual([
+      { value: "workspace", count: 2 },
+      { value: "knowledge", count: 1 },
+    ]);
+  });
+
+  it("pauses an origin absent from the current graph", () => {
+    const workspaceOnly = model([node({ id: "doc", origin: "workspace" })], []);
+    const d = derive(workspaceOnly, profile({ origins: ["knowledge"] }));
+    expect(d.pausedFilters).toContain("origin:knowledge");
+    expect(ids(d.visibleModel)).toEqual(["doc"]);
   });
 });
 

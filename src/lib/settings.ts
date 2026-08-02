@@ -350,6 +350,8 @@ export type GraphMode = "global" | "local" | "chains";
 
 export interface GraphFilterProfile {
   domains: string[];
+  /** Node origins to keep; empty = all. Values: "workspace" | "knowledge". */
+  origins: string[];
   types: string[];
   relations: string[];
   community: number | null;
@@ -362,7 +364,7 @@ export interface GraphFilterProfile {
 export interface GraphDisplaySettings {
   arrows: "typed" | "all" | "none";
   labels: "low" | "balanced" | "high";
-  colorMode: "neutral" | "domain" | "community";
+  colorMode: "neutral" | "domain" | "community" | "origin";
   relationColors: boolean;
   theme: "dark" | "light" | "app";
   accent: "violet" | "green";
@@ -427,6 +429,7 @@ export const DEFAULT_GRAPH_GENERATED_PATTERNS = ["reports/", "log.md"];
 export function defaultGraphFilterProfile(): GraphFilterProfile {
   return {
     domains: [],
+    origins: [],
     types: [],
     relations: [],
     community: null,
@@ -440,7 +443,7 @@ export function defaultGraphDisplay(): GraphDisplaySettings {
   return {
     arrows: "none",
     labels: "low",
-    colorMode: "neutral",
+    colorMode: "origin",
     relationColors: false,
     theme: "dark",
     accent: "violet",
@@ -1119,12 +1122,14 @@ function cloneDefaultSettings(): MaruSettings {
         vault: {
           ...DEFAULT_MARU_SETTINGS.graph.profiles.vault,
           domains: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.domains],
+          origins: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.origins],
           types: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.types],
           relations: [...DEFAULT_MARU_SETTINGS.graph.profiles.vault.relations],
         },
         workspace: {
           ...DEFAULT_MARU_SETTINGS.graph.profiles.workspace,
           domains: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.domains],
+          origins: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.origins],
           types: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.types],
           relations: [...DEFAULT_MARU_SETTINGS.graph.profiles.workspace.relations],
         },
@@ -1194,6 +1199,9 @@ function normalizeGraphFilterProfile(value: unknown): GraphFilterProfile {
   const minNeighbors = Number(profile.minVisibleNeighbors);
   return {
     domains: parseStringArray(profile.domains),
+    origins: parseStringArray(profile.origins).filter(
+      (origin) => origin === "workspace" || origin === "knowledge",
+    ),
     types: parseStringArray(profile.types),
     relations: parseStringArray(profile.relations),
     community:
@@ -1218,7 +1226,10 @@ function normalizeGraphDisplay(value: unknown): GraphDisplaySettings {
     labels:
       display.labels === "balanced" || display.labels === "high" ? display.labels : defaults.labels,
     colorMode:
-      display.colorMode === "domain" || display.colorMode === "community"
+      display.colorMode === "domain"
+      || display.colorMode === "community"
+      || display.colorMode === "neutral"
+      || display.colorMode === "origin"
         ? display.colorMode
         : defaults.colorMode,
     relationColors:
@@ -1387,6 +1398,7 @@ function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
   });
   const profile: GraphFilterProfile = {
     domains: parseStringArray(filters.domains),
+    origins: [],
     types,
     relations: [],
     community:
@@ -1431,6 +1443,7 @@ function migrateGraphSettingsV1(graph: GraphSettingsV1): GraphSettingsV2 {
 function isLegacyDefaultProfile(profile: GraphFilterProfile): boolean {
   return (
     profile.domains.length === 0 &&
+    profile.origins.length === 0 &&
     profile.types.length === 0 &&
     profile.relations.length === 0 &&
     profile.community == null &&

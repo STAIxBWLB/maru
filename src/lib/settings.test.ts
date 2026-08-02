@@ -593,6 +593,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.generatedPatterns).toEqual(["reports/", "archive/", "log.md"]);
     expect(settings.graph.profiles.workspace).toEqual({
       domains: ["research", "projects"],
+      origins: [],
       types: ["decision"],
       relations: ["supersedes"],
       community: 3,
@@ -603,6 +604,7 @@ describe("normalizeMaruSettings", () => {
     // Missing profile falls back to defaults.
     expect(settings.graph.profiles.vault).toEqual({
       domains: [],
+      origins: [],
       types: [],
       relations: [],
       community: null,
@@ -681,6 +683,30 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.panels).toEqual({ pinned: true, width: 372 });
   });
 
+  it("colors the graph by origin out of the box and keeps a chosen mode", () => {
+    expect(normalizeMaruSettings({}).graph.display.colorMode).toBe("origin");
+    const chosen = normalizeMaruSettings({
+      graph: { schemaVersion: 3, display: { colorMode: "neutral" } },
+    });
+    expect(chosen.graph.display.colorMode).toBe("neutral");
+    const garbage = normalizeMaruSettings({
+      graph: { schemaVersion: 3, display: { colorMode: "rainbow" } },
+    });
+    expect(garbage.graph.display.colorMode).toBe("origin");
+  });
+
+  it("normalizes the origin filter and drops unknown values", () => {
+    const settings = normalizeMaruSettings({
+      graph: {
+        schemaVersion: 3,
+        profiles: { workspace: { origins: ["knowledge", "elsewhere"] } },
+      },
+    });
+    expect(settings.graph.profiles.workspace.origins).toEqual(["knowledge"]);
+    // Absent in older stored settings.
+    expect(settings.graph.profiles.vault.origins).toEqual([]);
+  });
+
   it("migrates V1 graph settings through V2 to V3", () => {
     const settings = normalizeMaruSettings({
       graph: {
@@ -709,6 +735,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.graph.generatedPatterns).toEqual(["reports/", "archive/", "log.md"]);
     expect(settings.graph.profiles.workspace).toEqual({
       domains: ["research", "projects"],
+      origins: [],
       // showNoise made the legacy "unknown" authored-note bucket visible.
       types: ["decision", "untyped"],
       relations: [],

@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphNode } from "../../lib/graph/model";
+import type { GraphEdge, GraphEdgeOrigin, GraphNode } from "../../lib/graph/model";
 import type { GraphDisplaySettings } from "../../lib/settings";
 
 // dataviz-validated categorical palettes (12 slots, same hue per slot across
@@ -12,6 +12,21 @@ const DARK_COMMUNITY_COLORS = [
   "#3987e5", "#c98500", "#17913a", "#e25b70", "#1a95aa", "#d95926",
   "#9085e9", "#7a9630", "#d55181", "#b07b28", "#199e70", "#a678d8",
 ];
+// Origin classes reuse palette slots 0/1/2, whose adjacency carries the
+// palette's guaranteed deutan separation. Workspace and knowledge nodes share
+// their hue with the same-origin edges; cross edges get the third.
+const ORIGIN_SLOTS: Record<GraphEdgeOrigin, number> = {
+  workspace: 0, // blue
+  knowledge: 2, // green
+  cross: 1, // amber
+};
+// Edges are subordinate to nodes: same-origin lines sit closer to the canvas
+// than their nodes, and the boundary-crossing ones stay the loudest.
+const ORIGIN_EDGE_MIX: Record<GraphEdgeOrigin, number> = {
+  workspace: 0.6,
+  knowledge: 0.6,
+  cross: 0.4,
+};
 // Domains map onto palette slots so domain and community coloring share hues.
 const DOMAIN_SLOTS: Record<string, number> = {
   research: 0,      // blue
@@ -39,6 +54,10 @@ export interface GraphTheme {
   dark: boolean;
   communityColors: string[];
   domainColors: Record<string, string>;
+  /** Node/legend color per origin class. */
+  originColors: Record<GraphEdgeOrigin, string>;
+  /** Edge color per origin class — the same hues, mixed toward the canvas. */
+  originEdgeColors: Record<GraphEdgeOrigin, string>;
   fallback: string;
   neutralNode: string;
   neutralNodeStrong: string;
@@ -59,28 +78,47 @@ const DARK_DEFAULTS = {
   accent: "#8b5cf6",
 };
 
-function colorLuminance(color: string): number {
+function colorChannels(color: string): [number, number, number] | null {
   const value = color.trim();
   const shortHex = /^#([0-9a-f]{3})$/i.exec(value);
   const longHex = /^#?([0-9a-f]{6})$/i.exec(value);
-  let channels: [number, number, number] | null = null;
   if (shortHex) {
-    channels = shortHex[1]
+    return shortHex[1]
       .split("")
       .map((digit) => parseInt(`${digit}${digit}`, 16)) as [number, number, number];
-  } else if (longHex) {
+  }
+  if (longHex) {
     const packed = parseInt(longHex[1], 16);
-    channels = [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff];
-  } else if (/^rgba?\(/i.test(value)) {
+    return [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff];
+  }
+  if (/^rgba?\(/i.test(value)) {
     const components = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
     if (components?.length === 3 && components.every(Number.isFinite)) {
-      channels = components.map((component) => Math.min(255, Math.max(0, component))) as [
+      return components.map((component) => Math.min(255, Math.max(0, component))) as [
         number,
         number,
         number,
       ];
     }
   }
+  return null;
+}
+
+/** Blend `color` `amount` of the way toward `toward`. Returns opaque hex —
+ *  Sigma's parseColor only understands hex/rgb(a). */
+function mixColor(color: string, toward: string, amount: number): string {
+  const from = colorChannels(color);
+  const to = colorChannels(toward);
+  if (!from || !to) return color;
+  const channel = (index: number) =>
+    Math.round(from[index] + (to[index] - from[index]) * amount)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+function colorLuminance(color: string): number {
+  const channels = colorChannels(color);
   if (!channels) return 1;
   const channel = (component: number) => {
     const c = component / 255;
@@ -102,6 +140,16 @@ function buildTheme(read: (name: string, fallback: string) => string): GraphThem
   const domainColors = Object.fromEntries(
     Object.entries(DOMAIN_SLOTS).map(([domain, slot]) => [domain, communityColors[slot]]),
   );
+  const originEntries = Object.entries(ORIGIN_SLOTS) as [GraphEdgeOrigin, number][];
+  const originColors = Object.fromEntries(
+    originEntries.map(([origin, slot]) => [origin, communityColors[slot]]),
+  ) as Record<GraphEdgeOrigin, string>;
+  const originEdgeColors = Object.fromEntries(
+    originEntries.map(([origin, slot]) => [
+      origin,
+      mixColor(communityColors[slot], bg, ORIGIN_EDGE_MIX[origin]),
+    ]),
+  ) as Record<GraphEdgeOrigin, string>;
   return {
     bg,
     ink,
@@ -125,6 +173,8 @@ function buildTheme(read: (name: string, fallback: string) => string): GraphThem
     dark,
     communityColors,
     domainColors,
+    originColors,
+    originEdgeColors,
     fallback: dark ? "#686b66" : "#aaa69c",
     neutralNode: dark ? "#686b66" : "#aaa69c",
     neutralNodeStrong: dark ? "#d2d5cf" : "#565248",
@@ -174,6 +224,9 @@ export function nodeColor(
   const theme = activeTheme;
   if (node.type === "unresolved") return theme.ghostFill;
   if (colorMode === "neutral") return theme.neutralNode;
+  if (colorMode === "origin") {
+    return node.origin === "unknown" ? theme.fallback : theme.originColors[node.origin];
+  }
   if (colorMode === "community" && enriched && node.community != null) {
     return theme.communityColors[node.community % theme.communityColors.length];
   }
@@ -201,6 +254,26 @@ export function relationColor(relation: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return palette[(hash >>> 0) % palette.length];
+}
+
+export function originColor(origin: GraphEdgeOrigin): string {
+  return activeTheme.originColors[origin];
+}
+
+export function originEdgeColor(origin: GraphEdgeOrigin): string {
+  return activeTheme.originEdgeColors[origin];
+}
+
+/** Resting edge color. Origin mode colors every edge by the pair it connects;
+ *  otherwise the relation-color opt-in still owns frontmatter edges and body
+ *  `wiki_link` edges stay neutral. Hover/selection reducers override this. */
+export function edgeColor(
+  edge: Pick<GraphEdge, "relation" | "fromFrontmatter" | "origin">,
+  display: Pick<GraphDisplaySettings, "relationColors" | "colorMode">,
+): string {
+  if (display.colorMode === "origin") return activeTheme.originEdgeColors[edge.origin];
+  if (display.relationColors && edge.fromFrontmatter) return relationColor(edge.relation);
+  return activeTheme.edge;
 }
 
 export function edgeKey(a: string, b: string): string {
