@@ -92,11 +92,8 @@ import {
   SKILLS_UPDATED_EVENT,
   type SkillsUpdatedPayload,
 } from "../lib/skillEditorEvents";
-import {
-  SETTINGS_WINDOW_OPEN_TAB_EVENT,
-  emitSettingsTerminalLaunch,
-  type SettingsWindowOpenTabPayload,
-} from "../lib/settingsWindowEvents";
+import { emitSettingsTerminalLaunch } from "../lib/settingsWindowEvents";
+import type { SettingsTabId } from "./settings/settingsNav";
 import { DIAGRAM_ENABLE_STORAGE_KEY } from "../lib/diagramFlag";
 import type {
   InboxChannelConfig,
@@ -155,138 +152,40 @@ import { MeetingsSettingsTab } from "./meetings/MeetingsSettingsTab";
 import { TasksSettingsTab } from "./tasks/TasksSettingsTab";
 import { Button } from "./ui/Button";
 
-type SystemTab =
-  | "preferences"
-  | "ai"
-  | "agents"
-  | "terminal"
-  | "comms"
-  | "meetings"
-  | "tasks"
-  | "inbox-channels"
-  | "secrets"
-  | "connectors"
-  | "rules"
-  | "templates"
-  | "mcp"
-  | "projects"
-  | "skills"
-  | "jobs";
-
-function isSystemTab(value: string | null | undefined): value is SystemTab {
-  return (
-    value === "preferences" ||
-    value === "ai" ||
-    value === "agents" ||
-    value === "terminal" ||
-    value === "comms" ||
-    value === "meetings" ||
-    value === "tasks" ||
-    value === "inbox-channels" ||
-    value === "secrets" ||
-    value === "connectors" ||
-    value === "rules" ||
-    value === "templates" ||
-    value === "mcp" ||
-    value === "projects" ||
-    value === "skills" ||
-    value === "jobs"
-  );
-}
-
 /** Emit a terminal launch request for the main window. Re-exported from
  *  ../lib/settingsWindowEvents so sibling tabs share one implementation. */
 
-interface SystemPaneProps {
+interface SettingsTabBodyProps {
   workPath: string | null;
   settings: MaruSettings;
   onSettingsChange: (settings: MaruSettings) => void;
   onInboxRuntimeConfigChange?: (config: InboxRuntimeConfig) => void;
-  initialTab?: string | null;
+  tab: SettingsTabId;
+  onTabChange: (tab: SettingsTabId) => void;
 }
 
-export function SystemPane({
+export function SettingsTabBody({
   workPath,
   settings,
   onSettingsChange,
   onInboxRuntimeConfigChange,
-  initialTab,
-}: SystemPaneProps) {
+  tab,
+  onTabChange,
+}: SettingsTabBodyProps) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<SystemTab>(
-    isSystemTab(initialTab) ? initialTab : "preferences",
-  );
-
-  useEffect(() => {
-    let dispose: (() => void) | null = null;
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen(SETTINGS_WINDOW_OPEN_TAB_EVENT, (event) => {
-          const payload = event.payload as SettingsWindowOpenTabPayload | null;
-          if (isSystemTab(payload?.tab)) setTab(payload.tab);
-        }),
-      )
-      .then((off) => {
-        dispose = off;
-      })
-      .catch(() => {
-        // Browser dev shell without Tauri event bridge.
-      });
-    return () => dispose?.();
-  }, []);
 
   if (!workPath) {
     return (
-      <main className="system-pane system-empty">
+      <div className="system-empty">
         <div className="empty-document-plate">
           <h2>{t("system.title")}</h2>
           <p>{t("system.empty")}</p>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="system-pane">
-      <header className="system-header">
-        <div>
-          <h2>{t("system.title")}</h2>
-          <p className="muted">{t("system.subtitle")}</p>
-        </div>
-      </header>
-      <nav className="system-tabs" role="tablist">
-        {(
-          [
-            ["preferences", "system.tab.preferences"],
-            ["ai", "system.tab.ai"],
-            ["agents", "system.tab.agents"],
-            ["terminal", "system.tab.terminal"],
-            ["comms", "system.tab.comms"],
-            ["meetings", "system.tab.meetings"],
-            ["tasks", "system.tab.tasks"],
-            ["inbox-channels", "system.tab.inboxChannels"],
-            ["secrets", "system.tab.secrets"],
-            ["connectors", "system.tab.connectors"],
-            ["rules", "system.tab.rules"],
-            ["templates", "system.tab.templates"],
-            ["mcp", "system.tab.mcp"],
-            ["projects", "system.tab.projects"],
-            ["skills", "system.tab.skills"],
-            ["jobs", "system.tab.jobs"],
-          ] as Array<[SystemTab, string]>
-        ).map(([id, key]) => (
-          <button
-            key={id}
-            type="button"
-            className={tab === id ? "system-tab active" : "system-tab"}
-            onClick={() => setTab(id)}
-            role="tab"
-            aria-selected={tab === id}
-          >
-            {t(key)}
-          </button>
-        ))}
-      </nav>
       <section className="system-body">
         {tab === "preferences" ? (
           <PreferencesTab settings={settings} onSettingsChange={onSettingsChange} />
@@ -321,7 +220,7 @@ export function SystemPane({
             settings={settings}
             onSettingsChange={onSettingsChange}
             onSaved={onInboxRuntimeConfigChange}
-            onOpenSkills={() => setTab("skills")}
+            onOpenSkills={() => onTabChange("skills")}
           />
         ) : null}
         {tab === "meetings" ? (
@@ -368,7 +267,6 @@ export function SystemPane({
         {tab === "skills" ? <SkillsTab workPath={workPath} /> : null}
         {tab === "jobs" ? <JobsTab workPath={workPath} /> : null}
       </section>
-    </main>
   );
 }
 

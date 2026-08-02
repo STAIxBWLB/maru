@@ -1,49 +1,10 @@
 import type { MaruSettings, LayoutSettings } from "./settings";
-import {
-  SETTINGS_WINDOW_OPEN_TAB_EVENT,
-  type SettingsWindowOpenTabPayload,
-} from "./settingsWindowEvents";
 import { SKILL_EDITOR_OPEN_EVENT, type SkillEditorOpenPayload } from "./skillEditorEvents";
 
 type LayoutPatch = Partial<MaruSettings["ui"]["layout"]>;
 
 export function tauriAvailable(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
-}
-
-export async function openSettingsWindow(workPath: string | null, tab?: string): Promise<void> {
-  if (!tauriAvailable()) {
-    throw new Error("Settings window requires the Tauri app.");
-  }
-  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-  const existing = await WebviewWindow.getByLabel("settings");
-  if (existing) {
-    await existing.setFocus();
-    if (tab) {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      const payload: SettingsWindowOpenTabPayload = { tab };
-      await emitTo("settings", SETTINGS_WINDOW_OPEN_TAB_EVENT, payload);
-    }
-    return;
-  }
-
-  const params = new URLSearchParams({ window: "settings" });
-  if (workPath) params.set("workPath", workPath);
-  if (tab) params.set("tab", tab);
-  const settingsWindow = new WebviewWindow("settings", {
-    url: `/?${params.toString()}`,
-    title: "Maru Settings",
-    width: 980,
-    height: 720,
-    minWidth: 760,
-    minHeight: 560,
-    resizable: true,
-    focus: true,
-  });
-  await new Promise<void>((resolve, reject) => {
-    void settingsWindow.once("tauri://created", () => resolve());
-    void settingsWindow.once("tauri://error", (event) => reject(event.payload));
-  });
 }
 
 export async function openSkillEditorWindow(

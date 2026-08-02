@@ -6,16 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   agentsUsageStatus: vi.fn(),
-  openSettingsWindow: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
   AGENT_PROVIDERS: ["claude", "codex", "kimi", "kiro"],
   agentsUsageStatus: mocks.agentsUsageStatus,
-}));
-
-vi.mock("../lib/windowLayout", () => ({
-  openSettingsWindow: mocks.openSettingsWindow,
 }));
 
 import { AgentUsageBar } from "../components/AgentUsageBar";
@@ -53,7 +48,6 @@ describe("AgentUsageBar", () => {
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    mocks.openSettingsWindow.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -66,14 +60,14 @@ describe("AgentUsageBar", () => {
   });
 
   async function render(
-    workPath: string | null = "/work",
+    onOpenSettings?: (tab: string) => void,
     commandOverrides = { claude: "/opt/bin/claude" },
   ) {
     root = createRoot(container);
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <AgentUsageBar workPath={workPath} commandOverrides={commandOverrides} />
+          <AgentUsageBar commandOverrides={commandOverrides} onOpenSettings={onOpenSettings} />
         </LocaleContext.Provider>,
       );
     });
@@ -131,17 +125,18 @@ describe("AgentUsageBar", () => {
     expect(container.querySelector(".agent-usage-bar")).toBeNull();
   });
 
-  it("opens the settings window Agents tab when a chip is clicked", async () => {
+  it("opens the settings Agents tab when a chip is clicked", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([
       usageEntry({ id: "claude", windows: [{ label: "Session", usedPercent: 1, resetsAt: null }] }),
     ]);
-    await render("/work/vault");
+    const onOpenSettings = vi.fn();
+    await render(onOpenSettings);
 
     const chip = container.querySelector<HTMLButtonElement>(".agent-usage-chip");
     await act(async () => {
       chip?.click();
     });
-    expect(mocks.openSettingsWindow).toHaveBeenCalledWith("/work/vault", "agents");
+    expect(onOpenSettings).toHaveBeenCalledWith("agents");
   });
 
   it("debounces focus reloads to at most one per 30s", async () => {

@@ -53,7 +53,6 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
-import { SystemPane } from "./components/SystemPane";
 import type {
   TerminalLaunchRequest,
   TerminalPanelHandle,
@@ -359,7 +358,6 @@ import {
   subscribeToSystemTheme,
 } from "./lib/theme";
 import {
-  openSettingsWindow,
   restoreMainWindowLayout,
   startWindowDrag,
   subscribeMainWindowLayout,
@@ -421,6 +419,7 @@ const LazyFilesWorkbench = lazy(() =>
     default: module.FilesWorkbench,
   })),
 );
+const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
 
 interface ProviderRefreshCache {
   fetchedAt: number | null;
@@ -741,9 +740,6 @@ export default function App() {
   useSuppressNativeContextMenu();
   const params =
     typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  if (params?.get("window") === "settings") {
-    return <SettingsWindowRoot workPath={params.get("workPath")} initialTab={params.get("tab")} />;
-  }
   if (params?.get("window") === "skill-editor") {
     return (
       <SkillEditorWindowRoot
@@ -768,121 +764,6 @@ function useSuppressNativeContextMenu() {
       window.document.removeEventListener("contextmenu", suppressUnhandledContextMenu);
     };
   }, []);
-}
-
-function SettingsWindowRoot({
-  workPath,
-  initialTab,
-}: {
-  workPath: string | null;
-  initialTab: string | null;
-}) {
-  const localeValue = useLocaleState();
-  const { t } = localeValue;
-  const [settings, setSettings] = useState<MaruSettings>(() =>
-    normalizeMaruSettings(DEFAULT_MARU_SETTINGS),
-  );
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const apply = () => {
-      applyThemePreference(settings.ui.themeMode);
-      applyThemeVars(buildThemeVars(settings));
-    };
-    apply();
-    return subscribeToSystemTheme(settings.ui.themeMode, apply);
-  }, [settings]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!workPath) {
-      setSettings(normalizeMaruSettings(DEFAULT_MARU_SETTINGS));
-      return;
-    }
-    void readMaruSettings(workPath)
-      .then((next) => {
-        if (!cancelled) setSettings(next);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workPath]);
-
-  useEffect(() => {
-    let dispose: (() => void) | null = null;
-    void listenMaruSettingsUpdated((payload) => {
-      if (payload.workPath === workPath) {
-        setSettings(normalizeMaruSettings(payload.settings));
-      } else if (payload.globalChanged && workPath) {
-        void readMaruSettings(workPath)
-          .then((next) => setSettings(next))
-          .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-      }
-    }).then((off) => {
-      dispose = off;
-    });
-    return () => dispose?.();
-  }, [workPath]);
-
-  useEffect(() => {
-    let dispose: (() => void) | null = null;
-    void listenForMenuCommand((id) => {
-      if (id !== "file.close_active" && id !== "window.close") return;
-      void import("@tauri-apps/api/window")
-        .then(({ getCurrentWindow }) => getCurrentWindow().close())
-        .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    }).then((off) => {
-      dispose = off;
-    });
-    return () => dispose?.();
-  }, []);
-
-  const updateSettings = useCallback(
-    (nextSettings: MaruSettings) => {
-      const normalized = normalizeMaruSettings(nextSettings);
-      setSettings((current) => {
-        if (workPath) {
-          void saveMaruSettings(workPath, normalized, current).catch((err) => {
-            setError(err instanceof Error ? err.message : String(err));
-          });
-        }
-        return normalized;
-      });
-    },
-    [workPath],
-  );
-
-  return (
-    <LocaleContext.Provider value={localeValue}>
-      <div className="settings-window-shell">
-        <SystemPane
-          workPath={workPath}
-          settings={settings}
-          onSettingsChange={updateSettings}
-          initialTab={initialTab}
-        />
-        {error ? (
-          <div className="toast-stack">
-            <div className="toast" title={error}>
-              <AlertTriangle size={15} />
-              <span>{error}</span>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={() => setError(null)}
-                aria-label={t("app.errorClose")}
-                title={t("app.errorClose")}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </LocaleContext.Provider>
-  );
 }
 
 function clampPaneWidth(value: number, min: number, max: number): number {
@@ -981,6 +862,16 @@ function MainApp() {
   const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
     useState<WorkspaceVisibility>("private");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  // Settings opens as an in-app overlay, not a separate window. Seeded from
+  // the URL so the legacy `?window=settings&tab=…` deep link keeps working.
+  const [settingsOverlay, setSettingsOverlay] = useState<{ tab: string | null } | null>(
+    () => {
+      if (typeof window === "undefined") return null;
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("window") !== "settings") return null;
+      return { tab: params.get("tab") };
+    },
+  );
   const [editorPaneViewModes, setEditorPaneViewModes] = useState<EditorPaneViewModes>(
     DEFAULT_MARU_SETTINGS.ui.editorPaneViewModes,
   );
@@ -4585,8 +4476,15 @@ function MainApp() {
         if (initialPath) {
           // Maru Today: first-eligible-launch auto-open. Best-effort — any
           // failure falls back to the normal persisted-mode restore above.
+          // A `?window=settings` deep link seeds the settings overlay at
+          // mount (this effect closes over the initial value), and explicit
+          // navigation wins without probing Today at all.
           const todaySettings = bootSettings?.tasks.today;
-          if (todaySettings?.enabled && todaySettings.autoOpenFirstDailyLaunch) {
+          if (
+            settingsOverlay === null &&
+            todaySettings?.enabled &&
+            todaySettings.autoOpenFirstDailyLaunch
+          ) {
             try {
               const tasksSettings = bootSettings!.tasks;
               const timezone = tasksSettings.timezone ?? "Asia/Seoul";
@@ -4622,8 +4520,8 @@ function MainApp() {
                   logicalDay: info.logicalDay,
                   dayState: snapshot.dayState,
                   // The main-window boot has no explicit initial-mode
-                  // mechanism; explicit modes only exist in the separate
-                  // settings/skill-editor windows, which return earlier.
+                  // mechanism other than the settings-overlay seed, which is
+                  // already handled by skipping this block entirely.
                   explicitMode: false,
                 });
                 if (decision) {
@@ -6002,10 +5900,12 @@ function MainApp() {
   // Maru Today: logical-day (03:30) watcher. Recomputes the logical day every
   // minute; on a boundary crossed while running, rolls the store over and
   // surfaces the new day exactly once (native notification, else banner).
+  // Paused while the settings overlay is up — a `?window=settings` deep link
+  // session then records no Today probes at all.
   useEffect(() => {
     const workPath = inboxWorkspacePath;
     const todaySettings = effectiveTasksSettings.today;
-    if (!workPath || !todaySettings.enabled) return;
+    if (!workPath || !todaySettings.enabled || settingsOverlay !== null) return;
     const timezone = effectiveTasksSettings.timezone ?? "Asia/Seoul";
     let cancelled = false;
     let rolloverInFlight = false;
@@ -6078,7 +5978,7 @@ function MainApp() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [inboxWorkspacePath, effectiveTasksSettings, t]);
+  }, [inboxWorkspacePath, effectiveTasksSettings, settingsOverlay, t]);
 
   // Show the pending new-day banner on the next window focus.
   useEffect(() => {
@@ -6124,34 +6024,24 @@ function MainApp() {
   }, [explorerVisibility]);
 
   const openPreferences = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath).catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  }, [settingsWorkPath]);
+    setSettingsOverlay((current) => current ?? { tab: null });
+  }, []);
 
   const openInboxSettings = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath, "inbox-channels").catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  }, [settingsWorkPath]);
+    setSettingsOverlay({ tab: "inbox-channels" });
+  }, []);
 
   const openCommsSettings = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath, "comms").catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  }, [settingsWorkPath]);
+    setSettingsOverlay({ tab: "comms" });
+  }, []);
 
   const openMeetingsSettings = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath, "meetings").catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  }, [settingsWorkPath]);
+    setSettingsOverlay({ tab: "meetings" });
+  }, []);
 
   const openTasksSettings = useCallback(() => {
-    void openSettingsWindow(settingsWorkPath, "tasks").catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  }, [settingsWorkPath]);
+    setSettingsOverlay({ tab: "tasks" });
+  }, []);
 
   const startTelegramPollingFromSettings = useCallback(() => {
     if (!inboxWorkspacePath) return;
@@ -7951,6 +7841,7 @@ function MainApp() {
   // cannot stack under DOM modals, so SitesPane hides it while any is open.
   const sitesOverlayOpen =
     commandPaletteOpen ||
+    settingsOverlay !== null ||
     newDocumentOpen ||
     addWorkspaceOpen ||
     composeSeed !== null ||
@@ -9399,9 +9290,7 @@ function MainApp() {
                   className="button button-ghost button-sm"
                   onClick={() => {
                     setUpdateToast(null);
-                    void openSettingsWindow(settingsWorkPath, "skills").catch((err) => {
-                      console.info("[maru] open settings window failed:", err);
-                    });
+                    setSettingsOverlay({ tab: "skills" });
                   }}
                 >
                   {t("updates.skillsOpen")}
@@ -9432,8 +9321,8 @@ function MainApp() {
         </div>
 
         <AgentUsageBar
-          workPath={settingsWorkPath}
           commandOverrides={terminalRuntimeCommands}
+          onOpenSettings={(tab) => setSettingsOverlay({ tab })}
         />
 
         {pendingDestructiveAction ? (
@@ -9519,6 +9408,19 @@ function MainApp() {
           skillActions={commandPaletteSkillActions}
           diagramEnabled={diagramEnabled}
         />
+        {settingsOverlay ? (
+          <Suspense fallback={null}>
+            <LazySettingsSurface
+              workPath={settingsWorkPath}
+              settings={maruSettings}
+              onSettingsChange={(next) => updateSettings(next, { flush: true })}
+              onInboxRuntimeConfigChange={setInboxRuntimeConfig}
+              tab={settingsOverlay.tab}
+              onTabChange={(tab) => setSettingsOverlay({ tab })}
+              onClose={() => setSettingsOverlay(null)}
+            />
+          </Suspense>
+        ) : null}
         <CommitDialog
           open={commitDialog !== null}
           vaultPath={commitDialog?.path ?? null}
