@@ -102,7 +102,7 @@ export function JobsTab({ workPath }: JobsTabProps) {
           </button>
         }
       />
-      <SettingsSection title={t("system.jobs.title")}>
+      <SettingsSection title={t("system.jobs.title")} padded>
         {error ? <p className="jobs-error">{error}</p> : null}
         {jobs === null ? (
           <p className="muted">{t("system.jobs.loading")}</p>

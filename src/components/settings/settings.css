@@ -172,6 +172,11 @@
   margin-bottom: 20px;
 }
 
+/* Sub-tab bars inside a tab (agents) must not touch the first card. */
+.settings-tab .agents-subtabs {
+  margin-bottom: 16px;
+}
+
 /* Section card + row primitives */
 
 .settings-section {
@@ -212,6 +217,13 @@
 .settings-section-body {
   display: flex;
   flex-direction: column;
+}
+
+/* Custom (non-row) content: grids, lists, tables, editors. Keeps child
+   borders off the card edge so lines never double up. */
+.settings-section-body.padded {
+  padding: 14px 16px;
+  gap: 12px;
 }
 
 .settings-row {
