@@ -48,7 +48,7 @@ function errorMessage(error: unknown): string {
  * Completion: a done mission's run events carry one
  * `maru_implementation_draft_v1` artifact, ingested into Drafts once per
  * run — live via `ai://mission_update`, and on mount for runs that finished
- * while the pane was unmounted (same pattern as SchedulerSection).
+ * while the pane was unmounted (same pattern as useTaskCandidateIngestion).
  */
 export function useIdeationDrafts({
   workPath,
