@@ -1,5 +1,8 @@
 import type { MeetingsSettings } from "../../lib/settings";
 import { useTranslation } from "../../lib/i18n";
+import { Toggle } from "../ui/Toggle";
+import { SettingsSection } from "../settings/SettingsSection";
+import { SettingsRow } from "../settings/SettingsRow";
 
 interface MeetingsSettingsTabProps {
   settings: MeetingsSettings;
@@ -20,107 +23,124 @@ export function MeetingsSettingsTab({
     update({ hooks: { ...settings.hooks, [key]: value } });
   return (
     <div className="settings-form meetings-settings-form">
-      <section className="settings-section-panel">
-        <div className="settings-section-heading">
-          <div>
-            <strong>{t("meetings.settings.path.title")}</strong>
-            <span>{t("meetings.settings.path.description")}</span>
-          </div>
-        </div>
-        <label className="field checkbox-field">
-          <input
-            type="checkbox"
-            checked={settings.enabled}
-            onChange={(event) => update({ enabled: event.target.checked })}
-          />
-          <span>{t("meetings.settings.enabled")}</span>
-        </label>
-        <div className="settings-grid two">
-          <label className="field">
-            <span>{t("meetings.settings.root")}</span>
+      <SettingsSection
+        title={t("meetings.settings.path.title")}
+        description={t("meetings.settings.path.description")}
+      >
+        <SettingsRow
+          label={t("meetings.settings.enabled")}
+          control={
+            <Toggle
+              checked={settings.enabled}
+              onChange={(enabled) => update({ enabled })}
+              aria-label={t("meetings.settings.enabled")}
+            />
+          }
+        />
+        <SettingsRow
+          label={t("meetings.settings.root")}
+          htmlFor="meetings-settings-root"
+          control={
             <input
+              id="meetings-settings-root"
               value={settings.root ?? ""}
               placeholder={effectiveSettings?.root ?? "meetings"}
               onChange={(event) => update({ root: event.target.value.trim() || null })}
             />
-          </label>
-          <label className="field">
-            <span>{t("meetings.settings.filenameTemplate")}</span>
+          }
+        />
+        <SettingsRow
+          label={t("meetings.settings.filenameTemplate")}
+          htmlFor="meetings-settings-filename-template"
+          control={
             <input
+              id="meetings-settings-filename-template"
               value={settings.filenameTemplate}
               onChange={(event) => update({ filenameTemplate: event.target.value })}
             />
-          </label>
-        </div>
-        <div className="settings-grid two">
-          {(["quickStart", "glossary", "people", "tagStandards", "notesGuidelines"] as const).map((key) => (
-            <label className="field" key={key}>
-              <span>{t(`meetings.settings.guides.${key}`)}</span>
-              <input
-                value={settings.guides[key] ?? ""}
-                placeholder={effectiveSettings?.guides[key] ?? ""}
-                onChange={(event) => updateGuide(key, event.target.value)}
-              />
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="settings-section-panel">
-        <div className="settings-section-heading">
-          <div>
-            <strong>{t("meetings.settings.hooks.title")}</strong>
-            <span>{t("meetings.settings.hooks.description")}</span>
-          </div>
-        </div>
-        {(["autoTaskExtract", "autoVaultExtract", "autoVaultConnect", "appendVaultLog"] as const).map((key) => (
-          <label className="field checkbox-field" key={key}>
-            <input
-              type="checkbox"
-              checked={settings.hooks[key]}
-              onChange={(event) => updateHook(key, event.target.checked)}
+          }
+        />
+        {(["quickStart", "glossary", "people", "tagStandards", "notesGuidelines"] as const).map(
+          (key) => (
+            <SettingsRow
+              key={key}
+              label={t(`meetings.settings.guides.${key}`)}
+              htmlFor={`meetings-settings-guide-${key}`}
+              control={
+                <input
+                  id={`meetings-settings-guide-${key}`}
+                  value={settings.guides[key] ?? ""}
+                  placeholder={effectiveSettings?.guides[key] ?? ""}
+                  onChange={(event) => updateGuide(key, event.target.value)}
+                />
+              }
             />
-            <span>{t(`meetings.settings.hooks.${key}`)}</span>
-          </label>
-        ))}
-      </section>
+          ),
+        )}
+      </SettingsSection>
 
-      <section className="settings-section-panel">
-        <div className="settings-section-heading">
-          <div>
-            <strong>{t("meetings.settings.types.title")}</strong>
-            <span>{t("meetings.settings.types.description")}</span>
-          </div>
-        </div>
-        <label className="field">
-          <span>{t("meetings.settings.types.default")}</span>
-          <input
-            value={settings.defaultTypes.join(", ")}
-            onChange={(event) =>
-              update({
-                defaultTypes: event.target.value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-        </label>
-        <label className="field">
-          <span>{t("meetings.settings.calendarStartHour")}</span>
-          <input
-            type="number"
-            min={0}
-            max={23}
-            value={settings.calendarStartHour}
-            onChange={(event) =>
-              update({
-                calendarStartHour: Math.max(0, Math.min(23, Number(event.target.value) || 0)),
-              })
-            }
-          />
-        </label>
-      </section>
+      <SettingsSection
+        title={t("meetings.settings.hooks.title")}
+        description={t("meetings.settings.hooks.description")}
+      >
+        {(["autoTaskExtract", "autoVaultExtract", "autoVaultConnect", "appendVaultLog"] as const).map(
+          (key) => (
+            <SettingsRow
+              key={key}
+              label={t(`meetings.settings.hooks.${key}`)}
+              control={
+                <Toggle
+                  checked={settings.hooks[key]}
+                  onChange={(value) => updateHook(key, value)}
+                  aria-label={t(`meetings.settings.hooks.${key}`)}
+                />
+              }
+            />
+          ),
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title={t("meetings.settings.types.title")}
+        description={t("meetings.settings.types.description")}
+      >
+        <SettingsRow
+          label={t("meetings.settings.types.default")}
+          htmlFor="meetings-settings-default-types"
+          control={
+            <input
+              id="meetings-settings-default-types"
+              value={settings.defaultTypes.join(", ")}
+              onChange={(event) =>
+                update({
+                  defaultTypes: event.target.value
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          }
+        />
+        <SettingsRow
+          label={t("meetings.settings.calendarStartHour")}
+          htmlFor="meetings-settings-calendar-start-hour"
+          control={
+            <input
+              id="meetings-settings-calendar-start-hour"
+              type="number"
+              min={0}
+              max={23}
+              value={settings.calendarStartHour}
+              onChange={(event) =>
+                update({
+                  calendarStartHour: Math.max(0, Math.min(23, Number(event.target.value) || 0)),
+                })
+              }
+            />
+          }
+        />
+      </SettingsSection>
     </div>
   );
 }

@@ -238,9 +238,9 @@ import {
 } from "./lib/telegram";
 import { normalizeTelegramMonitorConfig } from "./lib/telegramMonitor";
 import {
-  SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT,
-  type SettingsWindowTerminalLaunchPayload,
-} from "./lib/settingsWindowEvents";
+  SETTINGS_TERMINAL_LAUNCH_EVENT,
+  type SettingsTerminalLaunchPayload,
+} from "./lib/settingsEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { requestSiteViewCloseActive } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
@@ -2032,8 +2032,8 @@ function MainApp() {
     let dispose: (() => void) | null = null;
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
-        listen(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, (event) => {
-          const payload = event.payload as SettingsWindowTerminalLaunchPayload | null;
+        listen(SETTINGS_TERMINAL_LAUNCH_EVENT, (event) => {
+          const payload = event.payload as SettingsTerminalLaunchPayload | null;
           if (!payload) return;
           setTerminalLaunchRequest({
             kind: "shell",

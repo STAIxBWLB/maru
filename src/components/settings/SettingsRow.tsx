@@ -7,13 +7,15 @@ interface SettingsRowProps {
   description?: ReactNode;
   htmlFor?: string;
   control: ReactNode;
+  /** Stack the control below the copy (for textarea-scale controls). */
+  wide?: boolean;
 }
 
-export function SettingsRow({ label, description, htmlFor, control }: SettingsRowProps) {
+export function SettingsRow({ label, description, htmlFor, control, wide }: SettingsRowProps) {
   const autoId = useId();
   const labelId = `settings-row-label-${autoId}`;
   return (
-    <div className="settings-row">
+    <div className={wide ? "settings-row wide" : "settings-row"}>
       <div className="settings-row-copy">
         {htmlFor ? (
           <label className="settings-row-label" htmlFor={htmlFor} id={labelId}>
