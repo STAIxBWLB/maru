@@ -537,6 +537,63 @@ pub fn get_agent(id: &str) -> Option<AgentRecord> {
         .find(|record| record.id == id)
 }
 
+// ---------------------------------------------------------------------------
+// Global AI settings
+// ---------------------------------------------------------------------------
+
+/// The user-global `ai` block of `~/.maru/settings.json`.
+///
+/// The scheduler needs this because a timed dispatch has no frontend to read
+/// settings from. Without it every scheduled run resolves its CLI through PATH
+/// and runs at permission mode `plan`, so a runtime installed outside PATH
+/// fails on a schedule while the same agent succeeds from the UI.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct GlobalAiSettings {
+    pub default_runtime: Option<String>,
+    pub permission_mode: Option<String>,
+    pub command_overrides: BTreeMap<String, String>,
+}
+
+impl GlobalAiSettings {
+    pub fn command_override_for(&self, runtime: &str) -> Option<String> {
+        self.command_overrides.get(runtime).cloned()
+    }
+}
+
+pub fn global_ai_settings() -> GlobalAiSettings {
+    read_global_ai_block().map(parse_ai_block).unwrap_or_default()
+}
+
+fn read_global_ai_block() -> Option<JsonValue> {
+    let path = maru_home().ok()?.join("settings.json");
+    let raw = fs::read_to_string(path).ok()?;
+    let value: JsonValue = serde_json::from_str(&raw).ok()?;
+    value.get("ai").cloned()
+}
+
+fn parse_ai_block(ai: JsonValue) -> GlobalAiSettings {
+    let non_empty = |value: Option<&JsonValue>| {
+        value
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    let mut command_overrides = BTreeMap::new();
+    if let Some(map) = ai.get("commandOverrides").and_then(JsonValue::as_object) {
+        for (runtime, value) in map {
+            if let Some(path) = non_empty(Some(value)) {
+                command_overrides.insert(runtime.clone(), path);
+            }
+        }
+    }
+    GlobalAiSettings {
+        default_runtime: non_empty(ai.get("defaultRuntime")),
+        permission_mode: non_empty(ai.get("permissionMode")),
+        command_overrides,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,6 +756,27 @@ mod tests {
         let listed = agents_list().unwrap();
         assert_eq!(listed.iter().filter(|a| a.id == "git-sync").count(), 1);
         assert!(listed.iter().find(|a| a.id == "git-sync").unwrap().builtin);
+    }
+
+    #[test]
+    fn global_ai_settings_reads_overrides_and_skips_blanks() {
+        let parsed = parse_ai_block(serde_json::json!({
+            "defaultRuntime": "claude",
+            "permissionMode": "bypassPermissions",
+            "commandOverrides": { "claude": null, "kimi": "/opt/kimi", "kiro": "  " },
+        }));
+        assert_eq!(parsed.default_runtime.as_deref(), Some("claude"));
+        assert_eq!(parsed.permission_mode.as_deref(), Some("bypassPermissions"));
+        assert_eq!(
+            parsed.command_override_for("kimi").as_deref(),
+            Some("/opt/kimi")
+        );
+        assert!(parsed.command_override_for("claude").is_none());
+        assert!(parsed.command_override_for("kiro").is_none());
+
+        // A missing file must degrade to defaults, never fail a dispatch.
+        let _home = test_home_for_bundle_tests();
+        assert_eq!(global_ai_settings(), GlobalAiSettings::default());
     }
 
     #[test]

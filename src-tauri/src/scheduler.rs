@@ -6,9 +6,11 @@
 // schedule whose nextRunAt lies in the past fires exactly once (catch-up)
 // and is then re-aligned to its next future slot.
 
+use crate::agents::{agent_can_run_standalone, get_agent, global_ai_settings, AgentRecord, GlobalAiSettings};
 use crate::approval::{require_approval, ApprovalState};
 use crate::atomic_file::write_atomic;
 use crate::skill_host::skills_dispatch_background;
+use crate::skill_host::store::resolve_skill_id;
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -47,6 +49,12 @@ pub struct SchedulerSchedule {
     #[serde(default)]
     pub days_of_week: Vec<u32>,
     pub enabled: bool,
+    /// Agent this schedule runs. `#[serde(default)]` so a pre-agent
+    /// `schedules.json` parses unchanged. When it resolves to an enabled,
+    /// standalone agent that agent's current configuration wins at dispatch;
+    /// otherwise the fields above are dispatched as the stored snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,6 +74,8 @@ pub struct SchedulerScheduleInput {
     pub days_of_week: Vec<u32>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -219,6 +229,7 @@ fn add_impl(work_path: &str, input: SchedulerScheduleInput) -> Result<SchedulerS
         minute: input.minute,
         days_of_week,
         enabled: input.enabled,
+        agent_id: input.agent_id.filter(|id| !id.trim().is_empty()),
         last_run_at: None,
         next_run_at: if input.enabled {
             Some(next_run.to_rfc3339())
@@ -284,16 +295,16 @@ fn mark_fired(work: &Path, id: &str, now: DateTime<Local>) -> Result<SchedulerSc
 /// ONLY the baked-in section) and there is no fresh digest to add, the
 /// original stored prompt is dispatched instead — a stale digest beats a
 /// `skill_prompt_required` failure.
-fn build_dispatch_prompt(work: &Path, schedule: &SchedulerSchedule) -> String {
-    if !is_builtin_inbox_process(&schedule.skill_id) {
-        return schedule.prompt.clone();
+fn build_dispatch_prompt(work: &Path, skill_id: &str, prompt: &str) -> String {
+    if !is_builtin_inbox_process(skill_id) {
+        return prompt.to_string();
     }
-    let stripped = crate::gap::strip_gap_feedback_section(&schedule.prompt);
+    let stripped = crate::gap::strip_gap_feedback_section(prompt);
     let entries = crate::gap::read_gap_log_entries(work).unwrap_or_default();
     let digest =
         crate::gap::build_gap_feedback_digest(&entries, crate::gap::GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
     if stripped.trim().is_empty() && digest.is_empty() {
-        return schedule.prompt.clone();
+        return prompt.to_string();
     }
     crate::gap::append_gap_feedback_digest(&stripped, &digest)
 }
@@ -305,25 +316,110 @@ fn is_builtin_inbox_process(skill_id: &str) -> bool {
     skill_id == "inbox-process" || skill_id == "maru-builtin::inbox-process"
 }
 
+/// What a schedule actually dispatches, after the agent it points at (if any)
+/// and the user-global AI settings have been folded in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DispatchPlan {
+    /// Skill name or registry id; `resolve_skill_id` accepts either.
+    skill_ref: String,
+    runtime: String,
+    prompt: String,
+    permission_mode: Option<String>,
+    command_override: Option<String>,
+    agent_id: Option<String>,
+}
+
+/// Resolve a schedule against its agent. An enabled, standalone agent's current
+/// skill / runtime / permission mode / prompt win, so editing the agent updates
+/// every schedule that uses it. A missing, disabled or feature-bound agent
+/// falls back to the schedule's own stored snapshot, so deleting or pausing an
+/// agent never silently breaks — or silently empties — a live schedule.
+fn resolve_dispatch(
+    schedule: &SchedulerSchedule,
+    agent: Option<&AgentRecord>,
+    ai: &GlobalAiSettings,
+) -> DispatchPlan {
+    let agent = agent.filter(|agent| agent.enabled && agent_can_run_standalone(agent));
+    let runtime = match agent.map(|agent| agent.runtime.as_str()) {
+        Some("inherit") => ai
+            .default_runtime
+            .clone()
+            .unwrap_or_else(|| schedule.runtime.clone()),
+        Some(explicit) => explicit.to_string(),
+        None => schedule.runtime.clone(),
+    };
+    // No agent used to mean "no permission mode", which `normalize_permission_mode`
+    // then read as `plan` — silently ignoring the user's setting on every timed run.
+    let permission_mode = match agent.map(|agent| agent.permission_mode.as_str()) {
+        Some("inherit") | None => ai.permission_mode.clone(),
+        Some(explicit) => Some(explicit.to_string()),
+    };
+    // An agent names its skill portably; the schedule stores the machine-local
+    // registry id it was created with. Either is accepted by `resolve_skill_id`.
+    let skill_ref = agent
+        .map(|agent| agent.skill_name.clone())
+        .unwrap_or_else(|| schedule.skill_id.clone());
+    DispatchPlan {
+        command_override: ai.command_override_for(&runtime),
+        skill_ref,
+        runtime,
+        prompt: agent
+            .map(|agent| agent.prompt.clone())
+            .unwrap_or_else(|| schedule.prompt.clone()),
+        permission_mode,
+        agent_id: schedule.agent_id.clone(),
+    }
+}
+
+/// Metadata every scheduled run carries. `workspacePath` and `skillName` are
+/// what `skillRunView` needs to render a run as anything other than a raw run
+/// id; `agentId` is the join key the Agents pane groups by.
+fn dispatch_metadata(
+    schedule: &SchedulerSchedule,
+    plan: &DispatchPlan,
+    skill_id: &str,
+    work: &Path,
+) -> serde_json::Value {
+    serde_json::json!({
+        "scheduler": true,
+        "scheduleId": schedule.id,
+        "scheduleName": schedule.name,
+        "agentId": plan.agent_id,
+        "skillName": skill_name_of(skill_id),
+        "runtime": plan.runtime,
+        "permissionMode": plan.permission_mode,
+        "workspacePath": work.to_string_lossy().to_string(),
+    })
+}
+
+/// `<sourceId>::<name>` -> `<name>`; anything else passes through.
+fn skill_name_of(skill_id: &str) -> String {
+    skill_id
+        .rsplit("::")
+        .next()
+        .unwrap_or(skill_id)
+        .to_string()
+}
+
 fn dispatch_schedule(
     app: &AppHandle,
     work: &Path,
     schedule: &SchedulerSchedule,
 ) -> Result<String, String> {
+    let agent = schedule.agent_id.as_deref().and_then(get_agent);
+    let plan = resolve_dispatch(schedule, agent.as_ref(), &global_ai_settings());
+    let skill_id = resolve_skill_id(&plan.skill_ref)?;
+    let metadata = dispatch_metadata(schedule, &plan, &skill_id, work);
     skills_dispatch_background(
         app.clone(),
-        schedule.skill_id.clone(),
-        schedule.runtime.clone(),
-        build_dispatch_prompt(work, schedule),
+        skill_id.clone(),
+        plan.runtime.clone(),
+        build_dispatch_prompt(work, &skill_id, &plan.prompt),
         Some(work.to_string_lossy().to_string()),
         None,
-        Some(serde_json::json!({
-            "scheduler": true,
-            "scheduleId": schedule.id,
-            "scheduleName": schedule.name,
-        })),
-        None,
-        None,
+        Some(metadata),
+        plan.command_override.clone(),
+        plan.permission_mode.clone(),
     )
 }
 
@@ -562,6 +658,7 @@ mod tests {
             minute: 30,
             days_of_week: Vec::new(),
             enabled,
+            agent_id: None,
             last_run_at: None,
             next_run_at,
         }
@@ -704,6 +801,7 @@ mod tests {
             minute: 30,
             days_of_week: vec![1, 1, 3],
             enabled: true,
+            agent_id: None,
         };
         let added = add_impl(&work, input).unwrap();
         assert_eq!(added.runtime, "claude");
@@ -735,6 +833,7 @@ mod tests {
             minute: 0,
             days_of_week: Vec::new(),
             enabled: true,
+            agent_id: None,
         };
         let bad_runtime = SchedulerScheduleInput {
             runtime: "openai".to_string(),
@@ -773,6 +872,7 @@ mod tests {
                 minute: 30,
                 days_of_week: Vec::new(),
                 enabled: true,
+                agent_id: None,
             },
         )
         .unwrap();
@@ -796,6 +896,142 @@ mod tests {
             prompt: prompt.to_string(),
             ..sample_schedule(None, true)
         }
+    }
+
+    fn agent(id: &str, prompt: &str, runtime: &str, enabled: bool) -> AgentRecord {
+        AgentRecord {
+            id: id.to_string(),
+            label_key: None,
+            label: Some(id.to_string()),
+            description: None,
+            skill_name: "vault-lint".to_string(),
+            runtime: runtime.to_string(),
+            permission_mode: "inherit".to_string(),
+            prompt: prompt.to_string(),
+            kind: "background".to_string(),
+            enabled,
+            builtin: false,
+            customized: false,
+            recommended_schedule: None,
+        }
+    }
+
+    fn ai_settings() -> GlobalAiSettings {
+        GlobalAiSettings {
+            default_runtime: Some("codex".to_string()),
+            permission_mode: Some("bypassPermissions".to_string()),
+            command_overrides: [("kimi".to_string(), "/opt/kimi".to_string())]
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn dispatch_without_an_agent_keeps_the_schedule_snapshot() {
+        let schedule = sample_schedule(None, true);
+        let plan = resolve_dispatch(&schedule, None, &ai_settings());
+        assert_eq!(plan.skill_ref, "vault-sync");
+        assert_eq!(plan.runtime, "claude");
+        assert_eq!(plan.prompt, "Run it");
+        // The bug this fixes: both of these used to be hardcoded None, so every
+        // timed run ignored the user's CLI path override and ran at `plan`.
+        assert_eq!(plan.permission_mode.as_deref(), Some("bypassPermissions"));
+        assert!(plan.command_override.is_none());
+    }
+
+    #[test]
+    fn dispatch_takes_the_agents_current_configuration() {
+        let schedule = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
+        let agent = agent("vault-hygiene", "정합성 점검", "kimi", true);
+        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings());
+        assert_eq!(plan.skill_ref, "vault-lint");
+        assert_eq!(plan.runtime, "kimi");
+        assert_eq!(plan.prompt, "정합성 점검");
+        assert_eq!(plan.command_override.as_deref(), Some("/opt/kimi"));
+        assert_eq!(plan.agent_id.as_deref(), Some("vault-hygiene"));
+    }
+
+    #[test]
+    fn an_agent_on_inherit_resolves_through_global_settings() {
+        let schedule = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
+        let agent = agent("vault-hygiene", "정합성 점검", "inherit", true);
+        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings());
+        assert_eq!(plan.runtime, "codex");
+
+        // With no global default the schedule's own runtime is the floor, so a
+        // dispatch never resolves to nothing.
+        let plan = resolve_dispatch(&schedule, Some(&agent), &GlobalAiSettings::default());
+        assert_eq!(plan.runtime, "claude");
+        assert!(plan.permission_mode.is_none());
+    }
+
+    #[test]
+    fn a_disabled_or_feature_bound_agent_falls_back_to_the_snapshot() {
+        let schedule = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
+        // Pausing an agent must not silently repoint or empty a live schedule.
+        let disabled = agent("vault-hygiene", "정합성 점검", "kimi", false);
+        let plan = resolve_dispatch(&schedule, Some(&disabled), &ai_settings());
+        assert_eq!(plan.skill_ref, "vault-sync");
+        assert_eq!(plan.prompt, "Run it");
+        assert_eq!(plan.runtime, "claude");
+
+        // A feature-bound agent carries no prompt of its own; taking it would
+        // dispatch an empty prompt.
+        let feature_bound = agent("inbox-triage", "", "kimi", true);
+        let plan = resolve_dispatch(&schedule, Some(&feature_bound), &ai_settings());
+        assert_eq!(plan.prompt, "Run it");
+
+        // A deleted agent resolves to None and behaves the same way.
+        let plan = resolve_dispatch(&schedule, None, &ai_settings());
+        assert_eq!(plan.skill_ref, "vault-sync");
+    }
+
+    #[test]
+    fn dispatch_metadata_carries_what_the_run_panel_reads() {
+        let temp = TempDir::new().unwrap();
+        let schedule = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
+        let plan = resolve_dispatch(&schedule, None, &ai_settings());
+        let metadata = dispatch_metadata(&schedule, &plan, "maru-builtin::vault-sync", temp.path());
+
+        // Without workspacePath and skillName, skillRunView renders a scheduled
+        // run as its raw run id.
+        assert_eq!(metadata["skillName"], "vault-sync");
+        assert_eq!(
+            metadata["workspacePath"],
+            temp.path().to_string_lossy().to_string()
+        );
+        assert_eq!(metadata["agentId"], "vault-hygiene");
+        assert_eq!(metadata["runtime"], "claude");
+        assert_eq!(metadata["permissionMode"], "bypassPermissions");
+        assert_eq!(metadata["scheduleId"], "sched-test");
+    }
+
+    #[test]
+    fn a_pre_agent_schedules_json_still_parses() {
+        let legacy = r#"[{"id":"sched-1","name":"Inbox extract-tasks",
+            "skillId":"maru-builtin::inbox-process","runtime":"claude",
+            "prompt":"extract-tasks","hour":7,"minute":0,"daysOfWeek":[],
+            "enabled":true,"lastRunAt":"2026-08-02T07:00:20+09:00",
+            "nextRunAt":"2026-08-03T07:00:00+09:00"}]"#;
+        let parsed: Vec<SchedulerSchedule> = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].agent_id.is_none());
+        assert_eq!(parsed[0].prompt, "extract-tasks");
+        // Round-trips without inventing an agentId key.
+        let written = serde_json::to_string(&parsed).unwrap();
+        assert!(!written.contains("agentId"), "{written}");
     }
 
     fn gap_entry(at: &str, added: usize, removed: usize, by_type: GapTypeCounts) -> GapLogEntry {
@@ -832,7 +1068,7 @@ mod tests {
             prompt: baked.clone(),
             ..sample_schedule(None, true) // skill_id "vault-sync"
         };
-        assert_eq!(build_dispatch_prompt(temp.path(), &schedule), baked);
+        assert_eq!(build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt), baked);
     }
 
     #[test]
@@ -852,7 +1088,7 @@ mod tests {
             )],
         );
         let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&legacy));
+        let prompt = { let schedule = inbox_schedule(&legacy); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
         assert!(!prompt.contains("stale digest"), "{prompt}");
         assert_eq!(
             prompt.matches(GAP_FEEDBACK_SECTION_HEADER).count(),
@@ -878,7 +1114,8 @@ mod tests {
                 },
             )],
         );
-        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule("do stuff"));
+        let schedule = inbox_schedule("do stuff");
+        let prompt = build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt);
         assert_eq!(
             prompt,
             format!(
@@ -895,7 +1132,7 @@ mod tests {
     fn dispatch_prompt_without_log_returns_stripped_bare_prompt() {
         let temp = TempDir::new().unwrap(); // no gap log at all
         let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&legacy));
+        let prompt = { let schedule = inbox_schedule(&legacy); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
         assert_eq!(prompt, "do stuff");
     }
 
@@ -905,7 +1142,7 @@ mod tests {
         // A legacy schedule whose stored prompt was ONLY the baked-in digest
         // section: stripping must not produce an empty dispatch prompt.
         let only_digest = format!("{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = build_dispatch_prompt(temp.path(), &inbox_schedule(&only_digest));
+        let prompt = { let schedule = inbox_schedule(&only_digest); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
         assert_eq!(prompt, only_digest);
     }
 
@@ -918,6 +1155,6 @@ mod tests {
             prompt: baked.clone(),
             ..sample_schedule(None, true)
         };
-        assert_eq!(build_dispatch_prompt(temp.path(), &schedule), baked);
+        assert_eq!(build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt), baked);
     }
 }
