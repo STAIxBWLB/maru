@@ -15,7 +15,7 @@ test("deep link selects the agents tab and shows the four agent sub-tabs", async
 }) => {
   await page.goto(SETTINGS_URL);
 
-  await expect(page.getByRole("tab", { name: "에이전트" })).toHaveAttribute(
+  await expect(page.getByRole("tab", { name: "AI 런타임" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -108,7 +108,7 @@ test("launch command override persists across reload via the settings fallback",
     });
 
   await page.reload();
-  await expect(page.getByRole("tab", { name: "에이전트" })).toHaveAttribute(
+  await expect(page.getByRole("tab", { name: "AI 런타임" })).toHaveAttribute(
     "aria-selected",
     "true",
   );

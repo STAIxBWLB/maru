@@ -46,8 +46,22 @@ export const SETTINGS_NAV = [
     id: "agents",
     group: "ai",
     icon: Bot,
+    // The tab id stays `agents` (three code refs plus the persisted last-tab);
+    // only the label moved, so the Agents *mode* can own that word. This tab is
+    // about CLI runtime accounts, not about the user's named agents.
     labelKey: "system.tab.agents",
-    keywords: ["agents", "에이전트", "login", "usage", "provider"],
+    keywords: [
+      "agents",
+      "에이전트",
+      "runtime",
+      "런타임",
+      "계정",
+      "binary",
+      "quota",
+      "login",
+      "usage",
+      "provider",
+    ],
   },
   {
     id: "preferences",

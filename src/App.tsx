@@ -8740,6 +8740,7 @@ function MainApp() {
             onConfirmApproval={approvalGate.confirmApproval}
             onError={setError}
             onOpenScratchpad={openScratchpadSurface}
+            onOpenAgents={() => setPersistedAppMode("agents")}
             onOpenGapAnalysis={openGapAnalysis}
           />
         ) : visibleAppMode === "gap" ? (
@@ -8761,7 +8762,7 @@ function MainApp() {
             onStopMission={(id) => void stopProcessingMission(id)}
             onMissionStarted={handleMeetingsMissionStarted}
             onConfirmApproval={approvalGate.confirmApproval}
-            onAgentsChanged={() => void refreshAgents()}
+            onAgentsChanged={refreshAgents}
             onError={setError}
           />
         ) : visibleAppMode === "inbox" ? (

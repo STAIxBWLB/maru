@@ -16,12 +16,13 @@ vi.mock("../../lib/api", () => ({
   setDraftStatus: vi.fn(),
   discardDraft: vi.fn(),
   createDraft: vi.fn(),
+  listAiMissions: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(true) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
-// The scheduler section owns its own mission/ingestion plumbing; it is covered by
-// taskIngestionGuard.test.ts and would otherwise pull the whole agent surface in.
-vi.mock("./SchedulerSection", () => ({ SchedulerSection: () => null }));
+// Ingestion and the ideation lifecycle own their own mission plumbing; they are
+// covered by taskIngestionGuard.test.ts and would otherwise pull the whole agent
+// surface in.
 vi.mock("./useIdeationDrafts", () => ({
   useIdeationDrafts: () => ({ pendingIdeaPaths: new Set<string>(), generate: vi.fn() }),
 }));
@@ -82,6 +83,7 @@ async function render(): Promise<HTMLElement> {
           onConfirmApproval={async () => "approval-1"}
           onError={() => {}}
           onOpenScratchpad={() => {}}
+          onOpenAgents={() => {}}
         />
       </LocaleContext.Provider>,
     );

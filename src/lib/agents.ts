@@ -73,11 +73,41 @@ export interface AgentRecord {
 
 // === Registry ===
 
+/**
+ * Ids of the builtin seeds the frontend binds features to. Rust owns the real
+ * records; this list exists only so the browser dev shell and the e2e seam
+ * resolve them at all — the same reason `MOCK_BUILTIN_SKILLS` exists in
+ * skills.ts. An empty list there would make every converted feature fail with
+ * `agent_not_found`.
+ */
+const MOCK_BUILTIN_AGENTS: Array<Pick<AgentRecord, "id" | "labelKey" | "skillName" | "kind">> = [
+  { id: "inbox-triage", labelKey: "agents.builtin.inboxTriage", skillName: "inbox-process", kind: "background" },
+  { id: "inbox-classify", labelKey: "agents.builtin.inboxClassify", skillName: "", kind: "inline" },
+  { id: "meeting-notes", labelKey: "agents.builtin.meetingNotes", skillName: "meeting-notes", kind: "background" },
+  { id: "task-extract", labelKey: "agents.builtin.taskExtract", skillName: "task-management", kind: "background" },
+  { id: "ideation-draft", labelKey: "agents.builtin.ideationDraft", skillName: "ideation-drafts", kind: "background" },
+  { id: "commit-message", labelKey: "agents.builtin.commitMessage", skillName: "", kind: "inline" },
+];
+
+function mockBuiltinAgents(): AgentRecord[] {
+  return MOCK_BUILTIN_AGENTS.map((seed) => ({
+    ...seed,
+    label: null,
+    description: null,
+    runtime: "inherit",
+    permissionMode: "inherit",
+    prompt: "",
+    enabled: true,
+    builtin: true,
+    customized: false,
+  }));
+}
+
 export async function listAgents(): Promise<AgentRecord[]> {
   if (!isTauri()) {
     const override = await invokeE2EOverride<AgentRecord[]>("agents_list", {});
     if (override) return override;
-    return [];
+    return mockBuiltinAgents();
   }
   return invoke<AgentRecord[]>("agents_list");
 }

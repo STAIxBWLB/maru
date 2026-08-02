@@ -34,8 +34,8 @@ The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md)
 
 ## Modes
 
-The activity rail exposes fourteen top-level modes (Settings opens as a separate
-window, so it is not an app mode). Diagram and Graph default on; E2E Flow is
+The activity rail exposes fifteen top-level modes (Settings opens as an in-app
+overlay, so it is not an app mode). Diagram and Graph default on; E2E Flow is
 flag-gated.
 
 | Mode | Label (ko / en) | What it does |
@@ -48,6 +48,7 @@ flag-gated.
 | `tasks` | 태스크 / Tasks | File-backed tasks with Google Tasks/Calendar links; edit details, month/week/day calendar. |
 | `drafts` | 초안 / Drafts | Unconfirmed AI-generated task/idea/implementation drafts (accept → promote, discard) plus the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
 | `gap` | 갭 분석 / Gap Analysis | Diffs promoted drafts against their frozen baselines, classifies the human edits, and feeds the tendencies back into draft prompts. See [docs/gap-analysis.md](docs/gap-analysis.md). |
+| `agents` | 에이전트 / Agents | Every AI job Maru can run: status, run, stop, backend, permission mode, prompt, schedule, plus user-created agents. See [docs/agents.md](docs/agents.md). |
 | `catalog` | 카탈로그 / Catalog | M1 Operations Catalog — deadlines, in-flight approvals, unlinked evidence, inbox pending. |
 | `studio` | 스튜디오 / Studio | M2 Document Studio 7-step authoring wizard. See [docs/studio.md](docs/studio.md). |
 | `diagram` | 다이어그램 / Diagram | Concept-map editor. See [docs/diagram.md](docs/diagram.md). |
@@ -127,8 +128,8 @@ only.
 
 Three surfaces close the loop between AI generation and the confirmed vault:
 
-- **Drafts + scheduler** — AI skill runs (scheduled via the Drafts Automation
-  section, or manual) emit task/idea/implementation draft artifacts that Maru
+- **Drafts + scheduler** — AI skill runs (scheduled from the Agents mode, or
+  manual) emit task/idea/implementation draft artifacts that Maru
   ingests into an unconfirmed store (`scratchpad/drafts/` bodies +
   `.maru/drafts/index.json` metadata). Accepting a draft promotes it into the
   vault through the approval gate. See [docs/drafts.md](docs/drafts.md).
@@ -252,7 +253,12 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 Maru treats Claude Code, Codex, Kimi, and Kiro as first-class AI runtimes
 (`ai.defaultRuntime`, terminal launchers, and per-agent command overrides).
 
-- The Settings window **Agents** tab (`system.tab.agents`) shows per-agent
+Every AI feature runs as a named **agent** that binds a skill to one of those
+runtimes, so the backend is a per-feature choice rather than a global one. The
+`agents` mode manages them; the Settings tab below covers the runtime *accounts*
+those agents dispatch to. See [docs/agents.md](docs/agents.md).
+
+- The Settings **AI 런타임 / AI Runtimes** tab (`system.tab.agents`) shows per-agent
   sub-tabs with authentication status (Connected / Not connected / Not
   installed), account details (version, provider, login method, organization,
   email), a "Run login" action that launches the provider's login command in

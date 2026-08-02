@@ -23,8 +23,15 @@ import {
   type AgentRecord,
   type AgentRow,
   type AgentRunStatus,
+  type RecommendedSchedule,
 } from "../../lib/agents";
-import { addSchedule, listSchedules, removeSchedule, runScheduleNow } from "../../lib/api";
+import {
+  addSchedule,
+  isTauri,
+  listSchedules,
+  removeSchedule,
+  runScheduleNow,
+} from "../../lib/api";
 import { formatRelativeDate } from "../../lib/document";
 import { formatScheduleTime } from "../../lib/drafts";
 import { useTranslation } from "../../lib/i18n";
@@ -127,14 +134,24 @@ export function AgentsPane({
   // A schedule fired or changed elsewhere (the ticker, another pane) must show
   // up here without a manual reload.
   useEffect(() => {
+    // `listen` reaches into the Tauri runtime, which the browser dev and e2e
+    // shells do not have; without this guard the pane throws on mount there.
+    if (!isTauri()) return;
+    let disposed = false;
     const offs: Array<() => void> = [];
     for (const event of ["scheduler://changed", "scheduler://fired", "scheduler://error"]) {
       void listen(event, () => {
         void refresh();
         onRefreshMissions();
-      }).then((off) => offs.push(off));
+      })
+        .then((off) => {
+          if (disposed) off();
+          else offs.push(off);
+        })
+        .catch(() => undefined);
     }
     return () => {
+      disposed = true;
       for (const off of offs) off();
     };
   }, [onRefreshMissions, refresh]);
@@ -214,14 +231,13 @@ export function AgentsPane({
   );
 
   const attachSchedule = useCallback(
-    async (row: AgentRow) => {
-      const recommended = row.agent.recommendedSchedule;
-      if (!workPath || !recommended) return;
+    async (row: AgentRow, when: RecommendedSchedule) => {
+      if (!workPath) return;
       const approvalId = await onConfirmApproval({
         kind: SCHEDULE_ADD_APPROVAL_KIND,
         summary: t("agents.schedule.approval", { name: agentLabel(row.agent, t) }),
         target: workPath,
-        payloadPreview: `${formatScheduleTime(recommended.hour, recommended.minute)} · ${row.agent.skillName}`,
+        payloadPreview: `${formatScheduleTime(when.hour, when.minute)} · ${row.agent.skillName}`,
       });
       if (!approvalId) return;
       setBusy(true);
@@ -233,9 +249,9 @@ export function AgentsPane({
             skillId: row.agent.skillName,
             runtime: resolveAgentRuntime(row.agent, ai),
             prompt: row.agent.prompt,
-            hour: recommended.hour,
-            minute: recommended.minute,
-            daysOfWeek: recommended.daysOfWeek,
+            hour: when.hour,
+            minute: when.minute,
+            daysOfWeek: when.daysOfWeek,
             enabled: true,
             agentId: row.agent.id,
           },
@@ -394,7 +410,7 @@ export function AgentsPane({
               onStop={() => {
                 if (selected.activeMissionId) onStopMission(selected.activeMissionId);
               }}
-              onAttachSchedule={() => void attachSchedule(selected)}
+              onAttachSchedule={(when) => void attachSchedule(selected, when)}
               onDetachSchedule={() => {
                 if (selected.schedule) void detachSchedule(selected.schedule);
               }}
@@ -544,7 +560,7 @@ function AgentDetail({
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
   onRun: () => void;
   onStop: () => void;
-  onAttachSchedule: () => void;
+  onAttachSchedule: (when: RecommendedSchedule) => void;
   onDetachSchedule: () => void;
   onSave: (agent: AgentRecord) => void | Promise<void>;
   onDelete: () => void;
@@ -662,33 +678,12 @@ function AgentDetail({
                     {t("agents.schedule.remove")}
                   </Button>
                 </>
-              ) : agent.recommendedSchedule ? (
-                <>
-                  <p>
-                    {t("agents.schedule.recommended", {
-                      time: formatScheduleTime(
-                        agent.recommendedSchedule.hour,
-                        agent.recommendedSchedule.minute,
-                      ),
-                      days:
-                        agent.recommendedSchedule.daysOfWeek.length === 0
-                          ? t("agents.schedule.daily")
-                          : agent.recommendedSchedule.daysOfWeek
-                              .map((day) => t(`drafts.weekday.${day}`))
-                              .join(" "),
-                    })}
-                  </p>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy || !workPath}
-                    onClick={onAttachSchedule}
-                  >
-                    {t("agents.schedule.add")}
-                  </Button>
-                </>
               ) : (
-                <p>{t("agents.schedule.none")}</p>
+                <ScheduleForm
+                  recommended={agent.recommendedSchedule ?? null}
+                  disabled={busy || !workPath || !agentCanRunStandalone(agent)}
+                  onAdd={onAttachSchedule}
+                />
               )}
             </div>
           )}
@@ -717,6 +712,94 @@ function AgentDetail({
           <AgentEditor agent={agent} skills={skills} busy={busy} onSave={onSave} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Attach-a-schedule form. Pre-filled from the agent's recommendation when it
+ * has one, but always editable — a user-created agent has no recommendation
+ * and would otherwise have no way to be scheduled at all.
+ */
+function ScheduleForm({
+  recommended,
+  disabled,
+  onAdd,
+}: {
+  recommended: RecommendedSchedule | null;
+  disabled: boolean;
+  onAdd: (when: RecommendedSchedule) => void;
+}) {
+  const { t } = useTranslation();
+  const [hour, setHour] = useState(recommended?.hour ?? 9);
+  const [minute, setMinute] = useState(recommended?.minute ?? 0);
+  const [days, setDays] = useState<number[]>(recommended?.daysOfWeek ?? []);
+
+  useEffect(() => {
+    setHour(recommended?.hour ?? 9);
+    setMinute(recommended?.minute ?? 0);
+    setDays(recommended?.daysOfWeek ?? []);
+  }, [recommended]);
+
+  return (
+    <div className="agents-schedule-form">
+      {recommended ? (
+        <p>
+          {t("agents.schedule.recommended", {
+            time: formatScheduleTime(recommended.hour, recommended.minute),
+            days:
+              recommended.daysOfWeek.length === 0
+                ? t("agents.schedule.daily")
+                : recommended.daysOfWeek.map((day) => t(`drafts.weekday.${day}`)).join(" "),
+          })}
+        </p>
+      ) : null}
+      <div className="agents-schedule-inputs">
+        <label>
+          <span>{t("agents.schedule.time")}</span>
+          <input
+            type="number"
+            min={0}
+            max={23}
+            value={hour}
+            onChange={(event) => setHour(Number(event.target.value))}
+          />
+          <input
+            type="number"
+            min={0}
+            max={59}
+            value={minute}
+            onChange={(event) => setMinute(Number(event.target.value))}
+          />
+        </label>
+        <div className="agents-schedule-days" role="group" aria-label={t("agents.schedule.days")}>
+          {[0, 1, 2, 3, 4, 5, 6].map((day) => (
+            <label key={day}>
+              <input
+                type="checkbox"
+                checked={days.includes(day)}
+                onChange={(event) =>
+                  setDays((current) =>
+                    event.target.checked
+                      ? [...current, day].sort()
+                      : current.filter((value) => value !== day),
+                  )
+                }
+              />
+              <span>{t(`drafts.weekday.${day}`)}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={disabled}
+        title={disabled ? t("agents.schedule.blocked") : undefined}
+        onClick={() => onAdd({ hour, minute, daysOfWeek: days })}
+      >
+        {t("agents.schedule.add")}
+      </Button>
     </div>
   );
 }

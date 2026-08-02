@@ -23719,7 +23719,7 @@ select:focus-visible,
 }
 
 .agents-status-dot {
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   line-height: 1;
   color: var(--muted);
 }
@@ -23878,5 +23878,47 @@ select:focus-visible,
 
 .agents-editor-actions {
   display: flex;
+  gap: 8px;
+}
+
+.agents-schedule-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.agents-schedule-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.agents-schedule-inputs label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-inputs input[type="number"] {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+}
+
+.agents-schedule-days {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
