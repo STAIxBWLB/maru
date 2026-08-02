@@ -1,6 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauri, listAiMissions, readScratchpadDocument } from "../../lib/api";
+import {
+  requireAgent,
+  runAgent,
+  type AgentRecord,
+} from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import {
   activeImplementationDraft,
@@ -11,14 +16,15 @@ import {
   ingestImplementationDraftRun,
   isCompletedImplementationDraftMission,
 } from "../../lib/ideationDrafts";
-import type { AiRuntime } from "../../lib/settings";
-import { skillsDispatchBackground, type SkillRecord } from "../../lib/skills";
+import type { AiSettings } from "../../lib/settings";
+import type { SkillRecord } from "../../lib/skills";
 import type { DraftEntry, MissionRecord, ScratchpadEntry } from "../../lib/types";
 
 interface UseIdeationDraftsParams {
   workPath: string | null;
   skills: SkillRecord[];
-  runtime: AiRuntime;
+  agents: AgentRecord[];
+  ai: AiSettings;
   drafts: DraftEntry[];
   onError: (message: string | null) => void;
   /** Opens a draft in the detail column (existing or freshly ingested). */
@@ -31,13 +37,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
-  return (
-    skills.find((skill) => skill.name === name) ??
-    skills.find((skill) => skill.id === name || skill.id.endsWith(`:${name}`)) ??
-    null
-  );
-}
 
 /**
  * Ideation -> implementation-draft mission lifecycle.
@@ -54,7 +53,8 @@ function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
 export function useIdeationDrafts({
   workPath,
   skills,
-  runtime,
+  agents,
+  ai,
   drafts,
   onError,
   onOpenDraft,
@@ -177,18 +177,15 @@ export function useIdeationDrafts({
         onOpenDraft(existing);
         return;
       }
-      const skill = findSkill(skills, IDEATION_DRAFTS_SKILL_NAME);
-      if (!skill) {
-        onError(t("drafts.idea.skillMissing", { skill: IDEATION_DRAFTS_SKILL_NAME }));
-        return;
-      }
       onError(null);
       try {
         const doc = await readScratchpadDocument(workPath, "ideation", ideaPath);
-        const runId = await skillsDispatchBackground({
-          skillId: skill.id,
-          runtime,
-          cwd: workPath,
+        // Gains the runtime-availability probe and the command-override /
+        // permission-mode threading this call site used to skip.
+        const runId = await runAgent(requireAgent(agents, "ideation-draft"), {
+          skills,
+          ai,
+          workPath,
           prompt: buildIdeateToDraftPrompt({
             title: idea.name,
             relativePath: ideaPath,
@@ -200,9 +197,6 @@ export function useIdeationDrafts({
             kind: IMPLEMENTATION_DRAFT_MISSION_KIND,
             ideaPath,
             ideaName: idea.name,
-            workspacePath: workPath,
-            skillName: IDEATION_DRAFTS_SKILL_NAME,
-            runtime,
           },
         });
         setPendingRuns((current) => ({ ...current, [ideaPath]: runId }));
@@ -210,7 +204,7 @@ export function useIdeationDrafts({
         onError(errorMessage(error));
       }
     },
-    [drafts, onError, onOpenDraft, runtime, skills, t, workPath],
+    [agents, ai, drafts, onError, onOpenDraft, skills, workPath],
   );
 
   return { pendingIdeaPaths: new Set(Object.keys(pendingRuns)), generate };

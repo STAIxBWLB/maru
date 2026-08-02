@@ -184,6 +184,17 @@ export function findAgent(agents: AgentRecord[], id: string): AgentRecord | null
   return agents.find((agent) => agent.id === id) ?? null;
 }
 
+/**
+ * The agent a feature is bound to. Builtin seeds always exist, so a miss means
+ * the registry could not be read — a clear error beats silently falling back to
+ * global settings and ignoring whatever the user configured.
+ */
+export function requireAgent(agents: AgentRecord[], id: string): AgentRecord {
+  const agent = findAgent(agents, id);
+  if (!agent) throw new Error(`agent_not_found: ${id}`);
+  return agent;
+}
+
 // === Runner ===
 
 export interface RunAgentContext {
@@ -220,6 +231,9 @@ export async function runAgentDetailed(
   if (agent.kind !== "background") {
     throw new Error(`agent_not_background: ${agent.id}`);
   }
+  // Turning an agent off has to actually stop its feature, not just hide the
+  // row. One guard here covers every call site and the scheduler alike.
+  if (!agent.enabled) throw new Error(`agent_disabled: ${agent.id}`);
   const prompt = (ctx.prompt ?? agent.prompt).trim();
   if (!prompt) throw new Error("agent_prompt_required");
 

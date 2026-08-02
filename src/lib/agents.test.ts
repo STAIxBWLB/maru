@@ -261,6 +261,15 @@ describe("runAgentDetailed", () => {
       }),
     ).rejects.toThrow("agent_not_background: inbox-triage");
 
+    // Turning an agent off must stop its feature, not just hide its row.
+    await expect(
+      runAgentDetailed(agent({ enabled: false, prompt: "x" }), {
+        skills,
+        ai,
+        workPath: "/w",
+      }),
+    ).rejects.toThrow("agent_disabled: inbox-triage");
+
     expect(skillsDispatchBackground).not.toHaveBeenCalled();
   });
 });

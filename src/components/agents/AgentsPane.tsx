@@ -54,6 +54,8 @@ interface AgentsPaneProps {
   onStopMission: (id: string) => void;
   onMissionStarted: (id: string) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
+  /** App holds its own copy for the converted call sites; keep it in step. */
+  onAgentsChanged: () => void;
   onError: (message: string | null) => void;
 }
 
@@ -89,6 +91,7 @@ export function AgentsPane({
   onStopMission,
   onMissionStarted,
   onConfirmApproval,
+  onAgentsChanged,
   onError,
 }: AgentsPaneProps) {
   const { t, locale } = useTranslation();
@@ -103,15 +106,19 @@ export function AgentsPane({
 
   const refresh = useCallback(async () => {
     try {
-      setAgents(await listAgents());
+      const next = await listAgents();
+      setAgents(next);
       setSchedules(workPath ? await listSchedules(workPath) : []);
       setLocalError(null);
+      // Every converted AI feature reads App's copy, so an edit here has to
+      // reach it or the Inbox would keep dispatching on the old backend.
+      onAgentsChanged();
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
       onError(message);
     }
-  }, [onError, workPath]);
+  }, [onAgentsChanged, onError, workPath]);
 
   useEffect(() => {
     void refresh();

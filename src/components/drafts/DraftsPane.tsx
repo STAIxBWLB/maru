@@ -29,9 +29,10 @@ import {
   type DraftListItem,
   type DraftStatusFilter,
 } from "../../lib/drafts";
+import type { AgentRecord } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
-import type { AiRuntime, AiTaskIngestMinImportance } from "../../lib/settings";
+import type { AiRuntime, AiSettings, AiTaskIngestMinImportance } from "../../lib/settings";
 import type { SkillRecord } from "../../lib/skills";
 import type {
   DraftDocument,
@@ -53,6 +54,8 @@ interface DraftsPaneProps {
   workPath: string | null;
   skills: SkillRecord[];
   defaultRuntime: AiRuntime;
+  agents: AgentRecord[];
+  ai: AiSettings;
   taskIngestMinImportance: AiTaskIngestMinImportance;
   onTaskIngestMinImportanceChange: (value: AiTaskIngestMinImportance) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
@@ -83,6 +86,8 @@ export function DraftsPane({
   workPath,
   skills,
   defaultRuntime,
+  agents,
+  ai,
   taskIngestMinImportance,
   onTaskIngestMinImportanceChange,
   onConfirmApproval,
@@ -218,7 +223,8 @@ export function DraftsPane({
   const { pendingIdeaPaths, generate } = useIdeationDrafts({
     workPath,
     skills,
-    runtime: defaultRuntime,
+    agents,
+    ai,
     drafts,
     onError,
     onOpenDraft: handleOpenDraft,

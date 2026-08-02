@@ -6,6 +6,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { useState } from "react";
+import { findSkill } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
 import type { TaskDetailsPatch, TaskMetadata } from "../../lib/types";
@@ -180,14 +181,6 @@ export function TaskDetailDrawer({
   );
 }
 
-function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
-  const normalized = name.toLowerCase();
-  return (
-    skills.find((skill) => skill.id.toLowerCase() === normalized)
-    ?? skills.find((skill) => skill.name.toLowerCase() === normalized)
-    ?? null
-  );
-}
 
 function formatValue(value: unknown): string {
   if (typeof value === "string") return value;

@@ -68,6 +68,15 @@ async function render(): Promise<HTMLElement> {
           workPath="/w"
           skills={[]}
           defaultRuntime="claude"
+          agents={[]}
+          ai={{
+            defaultRuntime: "claude",
+            classifierRuntime: "inherit",
+            taskIngestMinImportance: "medium",
+            permissionMode: "plan",
+            commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
+            extra: {},
+          }}
           taskIngestMinImportance="low"
           onTaskIngestMinImportanceChange={() => {}}
           onConfirmApproval={async () => "approval-1"}

@@ -250,14 +250,19 @@ import {
   skillsApplyBundleUpdate,
   skillsCheckBundleUpdate,
   skillsListSkills,
-  skillsDispatchBackground,
-  skillsRuntimeStatus,
   type SkillContextItem,
   type SkillDispatchRuntime,
   type SkillRecord,
   type TerminalDispatchSpec,
 } from "./lib/skills";
 import { activeTrackedAgentMissions, isTrackedAgentMission } from "./lib/skillRuns";
+import {
+  inlineAgentRuntime,
+  listAgents,
+  requireAgent,
+  runAgent,
+  type AgentRecord,
+} from "./lib/agents";
 import {
   checkAppUpdate,
   installAppUpdate,
@@ -1083,6 +1088,10 @@ function MainApp() {
     useState<TerminalLaunchRequest | null>(null);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
+  // Agent records back every AI feature's backend/permission/prompt choice.
+  // Builtin seeds always resolve, so an empty list only ever means the registry
+  // read failed; `requireAgent` turns that into a visible error at dispatch.
+  const [agents, setAgents] = useState<AgentRecord[]>([]);
   const skillsStartupLoadKeyRef = useRef<string | null>(null);
   const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
@@ -2139,6 +2148,26 @@ function MainApp() {
     },
     [activeDocumentWorkspacePath, t],
   );
+
+  // Inline agent: git_generate_commit_message already takes a runtime and a
+  // command override, so agentifying it is only a question of where those two
+  // values come from.
+  const commitMessageRuntime = useMemo(
+    () => inlineAgentRuntime(agents, "commit-message", maruSettings.ai),
+    [agents, maruSettings.ai],
+  );
+
+  const refreshAgents = useCallback(async () => {
+    try {
+      setAgents(await listAgents());
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAgents();
+  }, [refreshAgents]);
 
   const refreshSkills = useCallback(async (options: { refresh?: boolean } = {}) => {
     if (!settingsWorkPath) {
@@ -3585,13 +3614,6 @@ function MainApp() {
     ) => {
       if (!inboxWorkspacePath) return;
       const trimmedContext = processingContext?.trim() ?? "";
-      const processSkill =
-        skills.find((skill) => skill.name === "inbox-process") ??
-        skills.find((skill) => skill.id.endsWith(":inbox-process") || skill.id === "inbox-process");
-      if (!processSkill) {
-        setError("inbox-process skill is not installed or indexed.");
-        return;
-      }
       const selectedEntryIds = new Set(
         keys.filter((key) => key.startsWith("entry:")).map((key) => key.slice("entry:".length)),
       );
@@ -3615,17 +3637,6 @@ function MainApp() {
       setInboxActionBusy(true);
       setError(null);
       try {
-        const runtime: SkillDispatchRuntime = maruSettings.ai.defaultRuntime;
-        const commandOverride = aiRuntimeCommands[runtime] ?? null;
-        const runtimeStatus = await skillsRuntimeStatus({ runtime, commandOverride });
-        if (!runtimeStatus.available) {
-          throw new Error(
-            [
-              runtimeStatus.message,
-              runtimeStatus.suggestedAction,
-            ].filter(Boolean).join(" "),
-          );
-        }
         const prompt = buildInboxProcessPrompt({
           entries: selectedEntries,
           config: inboxRuntimeConfig,
@@ -3637,24 +3648,17 @@ function MainApp() {
           path: entry.kind === "pendingItem" ? entry.manifestPath ?? entry.path : entry.path,
           kind: entry.kind === "pendingItem" ? "manifest" : "file",
         }));
-        const inputPaths = context.map((item) => item.path);
-        const invocationId = await skillsDispatchBackground({
-          skillId: processSkill.id,
-          runtime,
+        const invocationId = await runAgent(requireAgent(agents, "inbox-triage"), {
+          skills,
+          ai: maruSettings.ai,
+          workPath: inboxWorkspacePath,
           prompt,
-          cwd: inboxWorkspacePath,
           context,
-          commandOverride,
-          permissionMode: maruSettings.ai.permissionMode,
           metadata: {
             origin: "inboxProcess",
             channel: channels[0] ?? "incoming",
             channels,
             reviewFlow,
-            inputPaths,
-            workspacePath: inboxWorkspacePath,
-            skillName: "inbox-process",
-            runtime,
             ...(trimmedContext ? { processingContext: trimmedContext } : {}),
           },
         });
@@ -3671,13 +3675,12 @@ function MainApp() {
       }
     },
     [
+      agents,
       inboxEntries,
       inboxRuntimeConfig,
       inboxWorkspacePath,
       refreshProcessingMissions,
-      aiRuntimeCommands,
-      maruSettings.ai.defaultRuntime,
-      maruSettings.ai.permissionMode,
+      maruSettings.ai,
       skills,
     ],
   );
@@ -3900,7 +3903,15 @@ function MainApp() {
       if (!target) return;
       updateInboxCarry(id, { classifying: true, classifyError: null });
       try {
-        const runtime = resolveClassifierRuntime(maruSettings.ai);
+        // Inline agent: classification is a typed request/response under a hard
+        // timeout, not a tracked mission, so only the backend comes from the
+        // record. `ai.classifierRuntime` remains the fallback when the registry
+        // could not be read.
+        const { runtime, commandOverride } = inlineAgentRuntime(
+          agents,
+          "inbox-classify",
+          { ...maruSettings.ai, defaultRuntime: resolveClassifierRuntime(maruSettings.ai) },
+        );
         const contextEnv = buildMaruBackgroundContextEnv(
           {
             workspaceRoot: inboxWorkspacePath,
@@ -3918,7 +3929,7 @@ function MainApp() {
           target,
           runtime,
           inboxWorkspacePath,
-          maruSettings.ai.commandOverrides[runtime],
+          commandOverride,
           maruSettings.ai.permissionMode,
           contextEnv,
         );
@@ -3931,6 +3942,7 @@ function MainApp() {
       }
     },
     [
+      agents,
       maruSettings.ai,
       maruSettings.terminal.injectActiveContext,
       explorerVisibility,
@@ -8716,6 +8728,8 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             skills={skills}
             defaultRuntime={maruSettings.ai.defaultRuntime}
+            agents={agents}
+            ai={maruSettings.ai}
             taskIngestMinImportance={maruSettings.ai.taskIngestMinImportance}
             onTaskIngestMinImportanceChange={(value) =>
               updateSettings((current) => ({
@@ -8747,6 +8761,7 @@ function MainApp() {
             onStopMission={(id) => void stopProcessingMission(id)}
             onMissionStarted={handleMeetingsMissionStarted}
             onConfirmApproval={approvalGate.confirmApproval}
+            onAgentsChanged={() => void refreshAgents()}
             onError={setError}
           />
         ) : visibleAppMode === "inbox" ? (
@@ -8868,6 +8883,8 @@ function MainApp() {
             labelMode={maruSettings.ui.documentLabelMode}
             skills={skills}
             runtimeCommands={aiRuntimeCommands}
+            agents={agents}
+            ai={maruSettings.ai}
             permissionMode={maruSettings.ai.permissionMode}
             processingMissions={activeMeetingsMissions(processingMissions)}
             processingLogLines={processingLogLines}
@@ -8904,6 +8921,8 @@ function MainApp() {
               runtimeCommands: aiRuntimeCommands,
               permissionMode: maruSettings.ai.permissionMode,
               defaultRuntime: maruSettings.ai.defaultRuntime,
+              agents,
+              ai: maruSettings.ai,
               processingMissions: activeTasksMissions(processingMissions),
               processingLogLines,
               onRefreshMissions: refreshProcessingMissions,
@@ -9451,8 +9470,8 @@ function MainApp() {
           open={commitDialog !== null}
           vaultPath={commitDialog?.path ?? null}
           status={commitDialog?.status ?? null}
-          aiRuntime={maruSettings.ai.defaultRuntime}
-          aiCommandOverride={aiRuntimeCommands[maruSettings.ai.defaultRuntime] ?? null}
+          aiRuntime={commitMessageRuntime.runtime}
+          aiCommandOverride={commitMessageRuntime.commandOverride}
           onConfirmApproval={approvalGate.confirmApproval}
           onClose={() => setCommitDialog(null)}
           onCommitted={() => setGitRefreshTick((n) => n + 1)}

@@ -23,14 +23,17 @@ import {
   updateTaskDetails,
   updateTaskStatus,
 } from "../../lib/api";
+import {
+  requireAgent,
+  runAgentDetailed,
+  type AgentRecord,
+} from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
-import type { DocumentLabelMode, LayoutSettings, TasksSettings } from "../../lib/settings";
+import type { AiSettings, DocumentLabelMode, LayoutSettings, TasksSettings } from "../../lib/settings";
 import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
 import { resolveDisplayLabel } from "../../lib/document";
 import { listWorkspaceProjects } from "../../lib/maruDir";
 import {
-  skillsDispatchBackground,
-  skillsRuntimeStatus,
   type SkillContextItem,
   type SkillDispatchRuntime,
   type SkillRecord,
@@ -76,6 +79,8 @@ export interface TasksPaneProps {
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
   permissionMode?: string | null;
   defaultRuntime?: SkillDispatchRuntime;
+  agents: AgentRecord[];
+  ai: AiSettings;
   processingMissions: MissionRecord[];
   processingLogLines: Record<string, string[]>;
   onRefreshMissions: () => void;
@@ -121,6 +126,8 @@ export function TasksPane({
   runtimeCommands,
   permissionMode,
   defaultRuntime,
+  agents,
+  ai,
   processingMissions,
   processingLogLines,
   onRefreshMissions,
@@ -412,56 +419,28 @@ export function TasksPane({
     [detailDirty, selectedRelPath, t],
   );
 
-  const resolveRuntime = useCallback(async (): Promise<SkillDispatchRuntime | null> => {
-    const preferred: SkillDispatchRuntime = defaultRuntime ?? "claude";
-    const order = taskRuntimeFallbackOrder(preferred);
-    for (const runtime of order) {
-      try {
-        const status = await skillsRuntimeStatus({ runtime, commandOverride: runtimeCommands[runtime] ?? null });
-        if (status.available) return runtime;
-      } catch {
-        // Try the next runtime.
-      }
-    }
-    return null;
-  }, [defaultRuntime, runtimeCommands]);
-
   // Schedule-from-text and Sync now run as tracked, reviewable missions (mirror
   // of meeting-notes): a proposal-first background run that surfaces in the
   // tasks runs panel with diff review + confirm checks + followups.
   const dispatchTaskSkill = useCallback(
     async (mode: "schedule" | "sync", prompt: string, contextPaths: string[]) => {
       if (!workPath) return;
-      const skill = findSkill(skills, "task-management");
-      if (!skill) {
-        onError(t("tasks.error.skillMissing", { skill: "task-management" }));
-        return;
-      }
-      const runtime = await resolveRuntime();
-      if (!runtime) {
-        onError(t("tasks.error.runtimeUnavailable"));
-        return;
-      }
       onError(null);
       try {
         const origin = mode === "sync" ? "taskManagementSync" : "taskManagementSchedule";
-        const invocationId = await skillsDispatchBackground({
-          skillId: skill.id,
-          runtime,
-          cwd: workPath,
-          prompt,
-          context: contextPaths.map((path) => ({ path, kind: "file" as const })),
-          commandOverride: runtimeCommands[runtime] ?? null,
-          permissionMode: permissionMode ?? null,
-          metadata: {
-            origin,
-            runtime,
-            reviewFlow: true,
-            inputPaths: contextPaths,
-            workspacePath: workPath,
-            skillName: "task-management",
+        // The runtime is whichever fallback actually answered, which is what
+        // the optimistic row has to show.
+        const { invocationId, runtime } = await runAgentDetailed(
+          requireAgent(agents, "task-extract"),
+          {
+            skills,
+            ai,
+            workPath,
+            prompt,
+            context: contextPaths.map((path) => ({ path, kind: "file" as const })),
+            metadata: { origin, reviewFlow: true },
           },
-        });
+        );
         setLocalRuns((current) => [
           createOptimisticTaskMission({ id: invocationId, runtime, origin, inputPaths: contextPaths }),
           ...current.filter((mission) => mission.id !== invocationId),
@@ -482,16 +461,14 @@ export function TasksPane({
       }
     },
     [
+      agents,
+      ai,
       workPath,
       skills,
-      resolveRuntime,
-      runtimeCommands,
-      permissionMode,
       onMissionStarted,
       onRefreshMissions,
       effectiveSettings.hooks.appendVaultLog,
       onError,
-      t,
     ],
   );
 
@@ -879,25 +856,6 @@ export function canSwitchTaskDetails(
   return !dirty || confirmDiscard();
 }
 
-export function taskRuntimeFallbackOrder(
-  preferred: SkillDispatchRuntime,
-): SkillDispatchRuntime[] {
-  return [
-    preferred,
-    ...(["claude", "codex", "kimi", "kiro"] as SkillDispatchRuntime[]).filter(
-      (runtime) => runtime !== preferred,
-    ),
-  ];
-}
-
-function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
-  const normalized = name.toLowerCase();
-  return (
-    skills.find((skill) => skill.id.toLowerCase() === normalized)
-    ?? skills.find((skill) => skill.name.toLowerCase() === normalized)
-    ?? null
-  );
-}
 
 function mergeTaskMissions(missions: MissionRecord[], localRuns: MissionRecord[]): MissionRecord[] {
   const byId = new Map<string, MissionRecord>();
