@@ -1095,6 +1095,8 @@ export interface SchedulerSchedule {
   /** 0 = Sunday .. 6 = Saturday; empty means daily. */
   daysOfWeek: number[];
   enabled: boolean;
+  /** Agent this schedule runs; its current config wins at dispatch. */
+  agentId?: string | null;
   lastRunAt?: string | null;
   nextRunAt?: string | null;
 }
@@ -1108,6 +1110,7 @@ export interface SchedulerScheduleInput {
   minute: number;
   daysOfWeek?: number[];
   enabled?: boolean;
+  agentId?: string | null;
 }
 
 export interface SchedulerChangedEvent {

@@ -33,16 +33,19 @@ import {
   agentCanRunStandalone,
   agentIdOf,
   agentLabel,
+  agentRunStatus,
   agentRuntimeFallbackOrder,
+  buildAgentRows,
   findSkill,
   missionsForAgent,
   resolveAgentPermissionMode,
   resolveAgentRuntime,
   runAgentDetailed,
+  slugifyAgentId,
   type AgentRecord,
 } from "./agents";
 import type { AiSettings } from "./settings";
-import type { MissionRecord, SkillMissionMetadata } from "./types";
+import type { MissionRecord, SchedulerSchedule, SkillMissionMetadata } from "./types";
 import type { SkillRecord } from "./skills";
 
 const ai: AiSettings = {
@@ -127,6 +130,19 @@ describe("resolution helpers", () => {
     expect(agentCanRunStandalone(agent({ prompt: "  " }))).toBe(false);
     expect(agentCanRunStandalone(agent({ prompt: "점검" }))).toBe(true);
     expect(agentCanRunStandalone(agent({ kind: "inline", prompt: "x" }))).toBe(false);
+  });
+
+  it("derives an id that satisfies the Rust id rule, or nothing", () => {
+    expect(slugifyAgentId("Weekly report draft")).toBe("weekly-report-draft");
+    expect(slugifyAgentId("  주간 보고서 ")).toBe("");
+    expect(slugifyAgentId("2026 리포트")).toBe("2026");
+    expect(slugifyAgentId("--Docs--")).toBe("docs");
+    expect(slugifyAgentId("!!!")).toBe("");
+    // Truncation must not leave a trailing hyphen, which the Rust rule allows
+    // but reads as an unfinished id.
+    const long = slugifyAgentId(`${"a".repeat(47)} b`);
+    expect(long).toHaveLength(47);
+    expect(long.endsWith("-")).toBe(false);
   });
 
   it("renders a builtin through i18n and a user agent through its literal label", () => {
@@ -277,5 +293,86 @@ describe("agentIdOf", () => {
       mission("c", { origin: "inboxProcess" }),
     ];
     expect(missionsForAgent(missions, "inbox-triage").map((m) => m.id)).toEqual(["a", "c"]);
+  });
+});
+
+describe("buildAgentRows", () => {
+  function run(
+    id: string,
+    agentId: string,
+    status: MissionRecord["status"],
+    at: string,
+  ): MissionRecord {
+    return {
+      id,
+      status,
+      startedAt: at,
+      lastOutputAt: at,
+      metadata: { agentId },
+    } as unknown as MissionRecord;
+  }
+
+  function schedule(agentId: string, nextRunAt: string): SchedulerSchedule {
+    return { id: `s-${agentId}`, agentId, nextRunAt } as unknown as SchedulerSchedule;
+  }
+
+  it("shows a live run over a stale failure", () => {
+    expect(
+      agentRunStatus([
+        run("old", "a", "failed", "2026-08-01T09:00:00Z"),
+        run("new", "a", "running", "2026-08-02T09:00:00Z"),
+      ]),
+    ).toBe("running");
+    expect(
+      agentRunStatus([
+        run("old", "a", "done", "2026-08-02T09:00:00Z"),
+        run("new", "a", "failed", "2026-08-02T10:00:00Z"),
+      ]),
+    ).toBe("failed");
+    expect(agentRunStatus([])).toBe("never");
+  });
+
+  it("orders rows the way the pane reads: live, then soonest, then recent", () => {
+    const agents = [
+      agent({ id: "never-run" }),
+      agent({ id: "paused", enabled: false }),
+      agent({ id: "scheduled-later" }),
+      agent({ id: "running-now" }),
+      agent({ id: "broke" }),
+      agent({ id: "scheduled-soon" }),
+      agent({ id: "ran-recently" }),
+    ];
+    const schedules = [
+      schedule("scheduled-later", "2026-08-05T09:00:00Z"),
+      schedule("scheduled-soon", "2026-08-03T09:00:00Z"),
+    ];
+    const missions = [
+      run("m1", "running-now", "running", "2026-08-02T12:00:00Z"),
+      run("m2", "ran-recently", "done", "2026-08-02T11:00:00Z"),
+      run("m3", "paused", "running", "2026-08-02T12:30:00Z"),
+      run("m4", "broke", "failed", "2026-08-01T08:00:00Z"),
+    ];
+
+    const rows = buildAgentRows(agents, schedules, missions);
+    expect(rows.map((row) => row.agent.id)).toEqual([
+      "running-now",
+      // A failure outranks a schedule: it is the one quiet state wanting a human.
+      "broke",
+      // Quiet rows answer "what is coming up", so a schedule beats a past run.
+      "scheduled-soon",
+      "scheduled-later",
+      "ran-recently",
+      "never-run",
+      // Disabled sinks below its peers even while a run of its own is live.
+      "paused",
+    ]);
+
+    const live = rows[0];
+    expect(live.status).toBe("running");
+    expect(live.activeMissionId).toBe("m1");
+    expect(rows.find((row) => row.agent.id === "scheduled-soon")?.schedule?.id).toBe(
+      "s-scheduled-soon",
+    );
+    expect(rows.find((row) => row.agent.id === "never-run")?.status).toBe("never");
   });
 });

@@ -21,7 +21,7 @@ import {
   type SkillDispatchRuntime,
   type SkillRecord,
 } from "./skills";
-import type { MissionRecord } from "./types";
+import type { MissionRecord, SchedulerSchedule } from "./types";
 
 declare global {
   interface Window {
@@ -162,6 +162,22 @@ export function agentLabel(agent: AgentRecord, t: (key: string) => string): stri
   if (agent.labelKey) return t(agent.labelKey);
   const label = agent.label?.trim();
   return label && label.length > 0 ? label : agent.id;
+}
+
+/**
+ * Kebab-case id derived from a user agent's name. Mirrors the Rust id rule
+ * (`^[a-z0-9][a-z0-9-]{0,47}$`) so the editor can reject a bad name before the
+ * round trip; returns "" when the name yields nothing valid.
+ */
+export function slugifyAgentId(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+  return /^[a-z0-9]/.test(slug) ? slug : "";
 }
 
 export function findAgent(agents: AgentRecord[], id: string): AgentRecord | null {
@@ -323,4 +339,96 @@ export function missionsForAgent(
   agentId: string,
 ): MissionRecord[] {
   return missions.filter((mission) => agentIdOf(mission) === agentId);
+}
+
+// === Pane rows ===
+
+export type AgentRunStatus = "running" | "idle" | "failed" | "stopped" | "done" | "never";
+
+export interface AgentRow {
+  agent: AgentRecord;
+  /** The schedule pointing at this agent, if the user attached one. */
+  schedule: SchedulerSchedule | null;
+  /** This agent's missions, newest first. */
+  missions: MissionRecord[];
+  status: AgentRunStatus;
+  /** Mission to stop, when one is in flight. */
+  activeMissionId: string | null;
+}
+
+/**
+ * Attention tiers. Everything at tier 3 is quiet, and quiet rows are ordered by
+ * what happens next rather than by what happened last — so the list answers
+ * "what is coming up" instead of re-sorting itself every time something runs.
+ * A failure stays above that: it is the one quiet state that wants a human.
+ */
+const STATUS_TIER: Record<AgentRunStatus, number> = {
+  running: 0,
+  idle: 1,
+  failed: 2,
+  stopped: 3,
+  done: 3,
+  never: 3,
+};
+
+function newestFirst(a: MissionRecord, b: MissionRecord): number {
+  return (
+    b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt)
+  );
+}
+
+/**
+ * An agent is "running" while any of its missions is, "idle" while one has
+ * gone quiet (60s without output), and otherwise wears its newest mission's
+ * outcome. A live run outranks a stale failure so the row reflects now, not
+ * history.
+ */
+export function agentRunStatus(missions: MissionRecord[]): AgentRunStatus {
+  if (missions.length === 0) return "never";
+  if (missions.some((mission) => mission.status === "running")) return "running";
+  if (missions.some((mission) => mission.status === "idle")) return "idle";
+  const newest = [...missions].sort(newestFirst)[0];
+  return newest.status === "failed" || newest.status === "stopped" || newest.status === "done"
+    ? newest.status
+    : "never";
+}
+
+/**
+ * One row per agent, sorted the way the pane reads top-down: what is happening
+ * now, then what is scheduled soonest, then what ran most recently, then what
+ * has never run. Disabled agents sink below their peers so the list opens on
+ * work that is actually live.
+ */
+export function buildAgentRows(
+  agents: AgentRecord[],
+  schedules: SchedulerSchedule[],
+  missions: MissionRecord[],
+): AgentRow[] {
+  const rows = agents.map((agent): AgentRow => {
+    const own = missionsForAgent(missions, agent.id).sort(newestFirst);
+    const active = own.find(
+      (mission) => mission.status === "running" || mission.status === "idle",
+    );
+    return {
+      agent,
+      schedule: schedules.find((schedule) => schedule.agentId === agent.id) ?? null,
+      missions: own,
+      status: agentRunStatus(own),
+      activeMissionId: active?.id ?? null,
+    };
+  });
+  return rows.sort((a, b) => {
+    if (a.agent.enabled !== b.agent.enabled) return a.agent.enabled ? -1 : 1;
+    const byTier = STATUS_TIER[a.status] - STATUS_TIER[b.status];
+    if (byTier !== 0) return byTier;
+    const nextA = a.schedule?.nextRunAt ?? null;
+    const nextB = b.schedule?.nextRunAt ?? null;
+    if (nextA && nextB && nextA !== nextB) return nextA.localeCompare(nextB);
+    if (nextA && !nextB) return -1;
+    if (!nextA && nextB) return 1;
+    const ranA = a.missions[0]?.lastOutputAt ?? "";
+    const ranB = b.missions[0]?.lastOutputAt ?? "";
+    if (ranA !== ranB) return ranB.localeCompare(ranA);
+    return a.agent.id.localeCompare(b.agent.id);
+  });
 }

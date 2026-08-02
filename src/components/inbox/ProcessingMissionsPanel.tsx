@@ -14,6 +14,7 @@ export function ProcessingMissionsPanel({
   onDismiss,
   emptyLabel,
   waitingLabel,
+  title,
 }: {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -21,6 +22,8 @@ export function ProcessingMissionsPanel({
   onDismiss?: (id: string) => void;
   emptyLabel?: string;
   waitingLabel?: string;
+  /** Card heading. Defaults to the inbox-process wording this panel started as. */
+  title?: string;
 }) {
   const { t } = useTranslation();
   const resolvedEmptyLabel = emptyLabel ?? t("inbox.missions.empty");
@@ -39,6 +42,7 @@ export function ProcessingMissionsPanel({
           mission={mission}
           lines={logLines[mission.id] ?? EMPTY_LINES}
           waitingLabel={resolvedWaitingLabel}
+          title={title}
           onStop={onStop}
           onDismiss={onDismiss}
         />
@@ -53,12 +57,14 @@ function MissionCard({
   waitingLabel,
   onStop,
   onDismiss,
+  title,
 }: {
   mission: MissionRecord;
   lines: string[];
   waitingLabel: string;
   onStop: (id: string) => void | Promise<void>;
   onDismiss?: (id: string) => void;
+  title?: string;
 }) {
   const { t } = useTranslation();
   const logRef = useRef<HTMLPreElement>(null);
@@ -74,7 +80,7 @@ function MissionCard({
     <article className={`processing-card ${mission.status}`}>
       <div className="processing-card-header">
         <div>
-          <strong>{channel ? `inbox-process ${channel}` : "inbox-process"}</strong>
+          <strong>{title ?? (channel ? `inbox-process ${channel}` : "inbox-process")}</strong>
           <span>
             {mission.status} · {elapsed ?? formatShortDate(mission.startedAt)}
           </span>

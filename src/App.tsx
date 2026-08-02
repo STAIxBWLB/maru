@@ -11,6 +11,7 @@ import {
 import type React from "react";
 import {
   AlertTriangle,
+  Bot,
   ChevronUp,
   Clock3,
   Code2,
@@ -408,6 +409,7 @@ const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then(
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
 const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
+const LazyAgentsPane = lazy(() => import("./components/agents/AgentsPane").then((module) => ({ default: module.AgentsPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
@@ -7709,6 +7711,7 @@ function MainApp() {
     files: " files-mode",
     drafts: " drafts-mode",
     gap: " gap-mode",
+    agents: " agents-mode",
   };
   const graphWorkspacePath =
     workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
@@ -8425,6 +8428,15 @@ function MainApp() {
           </button>
           <button
             type="button"
+            className={visibleAppMode === "agents" ? "activity-button active" : "activity-button"}
+            onClick={() => setPersistedAppMode("agents")}
+            title={t("mode.agents")}
+            aria-label={t("mode.agents")}
+          >
+            <Bot size={20} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
             className={visibleAppMode === "catalog" ? "activity-button active" : "activity-button"}
             onClick={() => setPersistedAppMode("catalog")}
             title={t("mode.catalog")}
@@ -8721,6 +8733,20 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             initialDraftId={gapDraftId}
             onConsumeInitialDraftId={() => setGapDraftId(null)}
+            onError={setError}
+          />
+        ) : visibleAppMode === "agents" ? (
+          <LazyAgentsPane
+            workPath={inboxWorkspacePath}
+            skills={skills}
+            ai={maruSettings.ai}
+            missions={processingMissions}
+            logLines={processingLogLines}
+            runtimeCommands={aiRuntimeCommands}
+            onRefreshMissions={() => void refreshProcessingMissions()}
+            onStopMission={(id) => void stopProcessingMission(id)}
+            onMissionStarted={handleMeetingsMissionStarted}
+            onConfirmApproval={approvalGate.confirmApproval}
             onError={setError}
           />
         ) : visibleAppMode === "inbox" ? (
