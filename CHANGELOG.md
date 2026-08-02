@@ -8,6 +8,26 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.40 - 2026-08-03 - Where Things Come From
+
+- **The graph tells your workspace and your knowledge apart.** A workspace
+  graph has always held both, your work tree plus the vault notes nested
+  inside it, but everything drew in the same grey, so the boundary between
+  them (and the links that cross it) was invisible. Nodes are now colored by
+  origin: workspace blue, knowledge green. Edges follow the pair they connect,
+  so workspace-to-workspace and knowledge-to-knowledge lines carry their own
+  side's hue while boundary-crossing links stand out in amber. Origin is the
+  default color mode, the legend keys the colors and filters by them on click,
+  and it stays out of the way when a graph holds only one kind (a vault-only
+  view, or a workspace with no vault). Ghost nodes are unchanged: an
+  unresolved link is not evidence of a crossing, so its edge keeps the color
+  of the side that does exist.
+- **Two edge-color fixes ride along.** Switching color modes used to leave
+  every edge painted for the previous mode until something else forced a
+  rebuild, and in the static fallback renderer (the one that takes over when
+  WebGL fails) a stylesheet rule silently overrode per-edge colors, so
+  relation coloring never appeared there at all.
+
 ## v0.4.39 - 2026-08-02 - Agents You Can Point Somewhere
 
 - **Every AI feature is now a named agent with its own backend.** Maru's
