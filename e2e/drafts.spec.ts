@@ -181,16 +181,6 @@ test("lists drafts and ideas, hiding discarded drafts by default", async ({ page
   await expect(list.getByText("Review weekly report")).toHaveCount(0);
 });
 
-test("shows schedules in the automation section", async ({ page }) => {
-  const pane = await openDraftsMode(page);
-
-  await pane.getByRole("button", { name: /자동화/ }).first().click();
-  const row = pane.locator(".drafts-schedule-row", { hasText: "Inbox digest" });
-  await expect(row).toBeVisible();
-  await expect(row).toContainText("07:30");
-  await expect(row).toContainText("매일");
-});
-
 test("opens a draft detail and moves it to in-review", async ({ page }) => {
   const pane = await openDraftsMode(page);
 
@@ -246,7 +236,7 @@ test("discards a draft after confirmation", async ({ page }) => {
 });
 
 // Ingestion e2e: a completed scheduler skill mission exposes its run events
-// through the same __MARU_E2E_INVOKE__ seam. The SchedulerSection mount scan
+// through the same __MARU_E2E_INVOKE__ seam. The useTaskCandidateIngestion mount scan
 // picks the mission up, parses the maru_task_candidates_v1 artifact, and
 // imports candidates as task drafts (threshold + dedupe applied).
 function seedIngestionRun(page: import("@playwright/test").Page) {
@@ -372,9 +362,8 @@ test("ingests task candidates from a completed scheduler run into drafts", async
   await expect(pane.locator(".drafts-list").getByText("예산 검토 보고서 초안 작성")).toBeVisible();
   await expect(pane.locator(".drafts-list").getByText("Optional tidy-up")).toHaveCount(0);
 
-  // The automation section surfaces the ingestion result line.
-  await pane.getByRole("button", { name: /자동화/ }).first().click();
-  await expect(pane.locator(".drafts-automation-ingest")).toContainText(
+  // The ingest bar surfaces the result line.
+  await expect(pane.locator(".drafts-ingest-status")).toContainText(
     "마지막 수집: 초안 1개 생성 (중요도 미달 1개 · 중복 1개 제외)",
   );
 

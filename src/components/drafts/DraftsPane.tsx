@@ -29,9 +29,10 @@ import {
   type DraftListItem,
   type DraftStatusFilter,
 } from "../../lib/drafts";
+import type { AgentRecord } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
-import type { AiRuntime, AiTaskIngestMinImportance } from "../../lib/settings";
+import type { AiRuntime, AiSettings, AiTaskIngestMinImportance } from "../../lib/settings";
 import type { SkillRecord } from "../../lib/skills";
 import type {
   DraftDocument,
@@ -43,22 +44,26 @@ import type {
   ScratchpadEntry,
 } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
-import { EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
+import { CompactSelect, EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
 import { NewDraftDialog } from "./NewDraftDialog";
 import { PromoteDraftDialog } from "./PromoteDraftDialog";
-import { SchedulerSection } from "./SchedulerSection";
 import { useIdeationDrafts } from "./useIdeationDrafts";
+import { useTaskCandidateIngestion } from "./useTaskCandidateIngestion";
 
 interface DraftsPaneProps {
   workPath: string | null;
   skills: SkillRecord[];
   defaultRuntime: AiRuntime;
+  agents: AgentRecord[];
+  ai: AiSettings;
   taskIngestMinImportance: AiTaskIngestMinImportance;
   onTaskIngestMinImportanceChange: (value: AiTaskIngestMinImportance) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   onError: (message: string | null) => void;
   /** Switches to the scratchpad (memo) surface that owns ideation entries. */
   onOpenScratchpad: () => void;
+  /** Switches to the Agents mode, which now owns schedules. */
+  onOpenAgents: () => void;
   /** Switches to gap-analysis mode with this draft preselected. */
   onOpenGapAnalysis?: (draftId: string) => void;
 }
@@ -83,11 +88,14 @@ export function DraftsPane({
   workPath,
   skills,
   defaultRuntime,
+  agents,
+  ai,
   taskIngestMinImportance,
   onTaskIngestMinImportanceChange,
   onConfirmApproval,
   onError,
   onOpenScratchpad,
+  onOpenAgents,
   onOpenGapAnalysis,
 }: DraftsPaneProps) {
   const { t, locale } = useTranslation();
@@ -215,10 +223,20 @@ export function DraftsPane({
   const handleOpenDraft = useCallback((draft: DraftEntry) => void openDraft(draft), [openDraft]);
   const handleDraftsChanged = useCallback(() => void refresh(), [refresh]);
 
+  // Ingestion has to live here, not with the schedules: it only runs while its
+  // host is mounted, and the drafts it creates land in this pane.
+  const { ingesting, lastIngest } = useTaskCandidateIngestion({
+    workPath,
+    minImportance: taskIngestMinImportance,
+    onDraftsIngested: handleDraftsChanged,
+    onError,
+  });
+
   const { pendingIdeaPaths, generate } = useIdeationDrafts({
     workPath,
     skills,
-    runtime: defaultRuntime,
+    agents,
+    ai,
     drafts,
     onError,
     onOpenDraft: handleOpenDraft,
@@ -333,16 +351,39 @@ export function DraftsPane({
         }
       />
 
-      <SchedulerSection
-        workPath={workPath}
-        skills={skills}
-        defaultRuntime={defaultRuntime}
-        taskIngestMinImportance={taskIngestMinImportance}
-        onTaskIngestMinImportanceChange={onTaskIngestMinImportanceChange}
-        onConfirmApproval={onConfirmApproval}
-        onError={onError}
-        onDraftsIngested={() => void refresh()}
-      />
+      <div className="drafts-ingest-bar">
+        <label className="drafts-ingest-threshold">
+          <span>{t("drafts.automation.minImportance")}</span>
+          <CompactSelect
+            value={taskIngestMinImportance}
+            onChange={(event) =>
+              onTaskIngestMinImportanceChange(
+                event.target.value as AiTaskIngestMinImportance,
+              )
+            }
+          >
+            {(["low", "medium", "high"] as AiTaskIngestMinImportance[]).map((level) => (
+              <option key={level} value={level}>
+                {t(`drafts.importance.${level}`)}
+              </option>
+            ))}
+          </CompactSelect>
+        </label>
+        <span className="drafts-ingest-status">
+          {ingesting
+            ? t("drafts.automation.ingesting")
+            : lastIngest
+              ? t("drafts.automation.lastIngest", {
+                  created: lastIngest.created,
+                  skippedLow: lastIngest.skippedLow,
+                  skippedDup: lastIngest.skippedDup,
+                })
+              : ""}
+        </span>
+        <Button variant="ghost" size="sm" onClick={onOpenAgents}>
+          {t("drafts.automation.openAgents")}
+        </Button>
+      </div>
 
       {localError ? (
         <StatusBanner tone="danger">

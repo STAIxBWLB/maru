@@ -45,6 +45,7 @@ import {
   readMeetingsLog,
   scanMeetingNotes,
   searchCalendarNotes,
+  AGENT_PROVIDERS,
 } from "../../lib/api";
 import {
   logLinePhase,
@@ -55,6 +56,13 @@ import {
   type MeetingsLogEventInput,
   type MeetingsLogLine,
 } from "../../lib/meetingsLog";
+import {
+  findSkill,
+  agentErrorMessage,
+  requireAgent,
+  runAgentDetailed,
+  type AgentRecord,
+} from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import {
   createMeetingReviewChecks,
@@ -89,7 +97,7 @@ import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedMeetingEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView as UnifiedCalendarViewMode } from "../../lib/calendar/types";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
-import type { DocumentLabelMode, MeetingsSettings } from "../../lib/settings";
+import type { AiSettings, DocumentLabelMode, MeetingsSettings } from "../../lib/settings";
 import {
   SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
   agentApplySkillProposal,
@@ -129,6 +137,8 @@ interface MeetingsPaneProps {
   labelMode: DocumentLabelMode;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  agents: AgentRecord[];
+  ai: AiSettings;
   permissionMode?: string | null;
   processingMissions: MissionRecord[];
   processingLogLines: Record<string, string[]>;
@@ -161,6 +171,8 @@ export function MeetingsPane({
   labelMode,
   skills,
   runtimeCommands,
+  agents,
+  ai,
   permissionMode,
   processingMissions,
   processingLogLines,
@@ -455,6 +467,8 @@ export function MeetingsPane({
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
+            agents={agents}
+            ai={ai}
             permissionMode={permissionMode}
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
@@ -475,6 +489,8 @@ export function MeetingsPane({
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
+            agents={agents}
+            ai={ai}
             permissionMode={permissionMode}
             missions={visibleMeetingsMissions}
             logLines={processingLogLines}
@@ -1141,6 +1157,8 @@ function MeetingsTranscriptFlow(props: {
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  agents: AgentRecord[];
+  ai: AiSettings;
   permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -1163,6 +1181,8 @@ function MeetingsExternalFlow({
   settings,
   skills,
   runtimeCommands,
+  agents,
+  ai,
   permissionMode,
   missions,
   logLines,
@@ -1181,6 +1201,8 @@ function MeetingsExternalFlow({
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  agents: AgentRecord[];
+  ai: AiSettings;
   permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -1202,6 +1224,8 @@ function MeetingsExternalFlow({
       settings={settings}
       skills={skills}
       runtimeCommands={runtimeCommands}
+      agents={agents}
+      ai={ai}
       permissionMode={permissionMode}
       missions={missions}
       logLines={logLines}
@@ -1244,6 +1268,8 @@ function MeetingsSkillWorkbench({
   settings,
   skills,
   runtimeCommands,
+  agents,
+  ai,
   permissionMode,
   missions,
   logLines,
@@ -1263,6 +1289,8 @@ function MeetingsSkillWorkbench({
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  agents: AgentRecord[];
+  ai: AiSettings;
   permissionMode?: string | null;
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
@@ -1334,7 +1362,7 @@ function MeetingsSkillWorkbench({
     let cancelled = false;
     setRuntimeStatusLoading(true);
     Promise.all(
-      (["claude", "codex"] as SkillDispatchRuntime[]).map(async (runtime) => {
+      (AGENT_PROVIDERS as readonly SkillDispatchRuntime[]).map(async (runtime) => {
         const status = await skillsRuntimeStatus({
           runtime,
           commandOverride: runtimeCommands[runtime] ?? null,
@@ -1360,19 +1388,6 @@ function MeetingsSkillWorkbench({
 
   const run = async (runtime: SkillDispatchRuntime) => {
     if (!workPath || !canRun) return;
-    const status = runtimeStatuses[runtime] ?? await skillsRuntimeStatus({
-      runtime,
-      commandOverride: runtimeCommands[runtime] ?? null,
-    });
-    if (!status.available) {
-      onError([status.message, status.suggestedAction].filter(Boolean).join(" "));
-      return;
-    }
-    const skill = findSkill(skills, "meeting-notes");
-    if (!skill) {
-      onError(t("meetings.error.skillMissing", { skill: "meeting-notes" }));
-      return;
-    }
     setBusy(true);
     onError(null);
     try {
@@ -1386,30 +1401,32 @@ function MeetingsSkillWorkbench({
         note,
         guides,
       });
-      const invocationId = await skillsDispatchBackground({
-        skillId: skill.id,
-        runtime,
-        cwd: workPath,
-        prompt,
-        context: paths.map((path) => ({ path, kind: "file" })),
-        commandOverride: runtimeCommands[runtime] ?? null,
-        permissionMode: permissionMode ?? null,
-        metadata: {
-          origin: sourceKind === "transcript"
-            ? "meetingNotesFromTranscript"
-            : "meetingNotesExternalRefine",
-          runtime,
-          reviewFlow: true,
-          sourceKind,
-          inputPaths: paths,
-          workspacePath: workPath,
-          skillName: "meeting-notes",
+      // The chooser is a per-run override of the agent's stored backend, so
+      // the agent is cloned rather than mutated.
+      // `runAgentDetailed`, not `runAgent`: the chooser's pick can fall back to
+      // another CLI when the probe snapshot has gone stale, and the optimistic
+      // row, the audit log line and retry all have to record what actually ran.
+      const { invocationId, runtime: dispatched } = await runAgentDetailed(
+        { ...requireAgent(agents, "meeting-notes"), runtime },
+        {
+          skills,
+          ai,
+          workPath,
+          prompt,
+          context: paths.map((path) => ({ path, kind: "file" })),
+          metadata: {
+            origin: sourceKind === "transcript"
+              ? "meetingNotesFromTranscript"
+              : "meetingNotesExternalRefine",
+            reviewFlow: true,
+            sourceKind,
+          },
         },
-      });
+      );
       setRuntimeChooserOpen(false);
       const optimisticMission = createOptimisticMeetingMission({
         id: invocationId,
-        runtime,
+        runtime: dispatched,
         sourceKind,
         inputPaths: paths,
         workPath,
@@ -1423,7 +1440,7 @@ function MeetingsSkillWorkbench({
       onMissionStarted(invocationId);
       onRefreshMissions();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      onError(agentErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
@@ -1684,24 +1701,20 @@ function MeetingsSkillWorkbench({
                 <span>{t("meetings.runtime.description")}</span>
               </div>
           <div className="meetings-runtime-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={runtimeStatusUnavailable(runtimeStatuses.claude)}
-                  onClick={() => void run("claude")}
-                >
-                  {t("meetings.runtime.claude")}
-                  <small>{runtimeStatusLabel(runtimeStatuses.claude, runtimeStatusLoading, t)}</small>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={runtimeStatusUnavailable(runtimeStatuses.codex)}
-                  onClick={() => void run("codex")}
-                >
-                  {t("meetings.runtime.codex")}
-                  <small>{runtimeStatusLabel(runtimeStatuses.codex, runtimeStatusLoading, t)}</small>
-                </button>
+                {AGENT_PROVIDERS.map((provider) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    className="secondary-button"
+                    disabled={runtimeStatusUnavailable(runtimeStatuses[provider])}
+                    onClick={() => void run(provider)}
+                  >
+                    {t(`meetings.runtime.${provider}`)}
+                    <small>
+                      {runtimeStatusLabel(runtimeStatuses[provider], runtimeStatusLoading, t)}
+                    </small>
+                  </button>
+                ))}
               </div>
             </div>
           ) : null}
@@ -2681,13 +2694,6 @@ function CheckKindIcon({ kind }: { kind: MeetingReviewCheckKind }) {
   }
 }
 
-function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
-  return (
-    skills.find((skill) => skill.name === name) ??
-    skills.find((skill) => skill.id === name || skill.id.endsWith(`:${name}`)) ??
-    null
-  );
-}
 
 async function parseProposalFallback(raw: string): Promise<SkillProposal | null> {
   if (!raw.trim()) return null;

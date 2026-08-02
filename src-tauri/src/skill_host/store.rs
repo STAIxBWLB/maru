@@ -2683,6 +2683,37 @@ pub fn get_skill(skill_id: &str) -> Result<SkillRecord, String> {
         .ok_or_else(|| format!("unknown_skill: {skill_id}"))
 }
 
+/// Registry id for a skill *name* or id. Agents store the portable name
+/// because ids are `<sourceId>::<name>` and machine-local — the same skill
+/// installs from `maru-builtin`, a public catalog or an import on different
+/// machines. Mirrors `findSkill` in `src/lib/agents.ts`; keep the two in step.
+pub fn resolve_skill_id(name_or_id: &str) -> Result<String, String> {
+    let needle = name_or_id.trim().to_lowercase();
+    if needle.is_empty() {
+        return Err("unknown_skill: ".to_string());
+    }
+    let registry = load_registry()?;
+    let suffix = format!(":{needle}");
+    registry
+        .skills
+        .iter()
+        .find(|skill| skill.name.to_lowercase() == needle)
+        .or_else(|| {
+            registry
+                .skills
+                .iter()
+                .find(|skill| skill.id.to_lowercase() == needle)
+        })
+        .or_else(|| {
+            registry
+                .skills
+                .iter()
+                .find(|skill| skill.id.to_lowercase().ends_with(&suffix))
+        })
+        .map(|skill| skill.id.clone())
+        .ok_or_else(|| format!("unknown_skill: {name_or_id}"))
+}
+
 pub fn env_vars_for_runs(work_path: Option<&Path>) -> Result<BTreeMap<String, String>, String> {
     let env_root = host_fs::env_root()?;
     let bin = env_root.join(".venv").join("bin");
@@ -7246,5 +7277,54 @@ mod tests {
         assert!(normalize_skills_subdir(Some(".")).is_ok());
         assert!(normalize_skills_subdir(Some("../outside")).is_err());
         assert!(normalize_skills_subdir(Some("/absolute")).is_err());
+    }
+
+    #[test]
+    fn resolve_skill_id_accepts_a_portable_name_or_an_id() {
+        let _home = test_home();
+        let skills_root = host_fs::skills_root().unwrap();
+        let mut registry = SkillsRegistry::default();
+        for (id, name) in [
+            ("stai-public::vault-lint", "vault-lint"),
+            ("my-import::vault-sync", "vault-sync"),
+        ] {
+            registry.skills.push(SkillRecord {
+                id: id.to_string(),
+                source_id: id.split("::").next().unwrap().to_string(),
+                name: name.to_string(),
+                rel_path: format!("skills/{name}"),
+                abs_path: path_string(&skills_root.join(name)),
+                title: name.to_string(),
+                description: None,
+                runtime: None,
+                category: None,
+                tier: "managed".to_string(),
+                valid: true,
+                validation_errors: Vec::new(),
+                editable: true,
+                dirty: false,
+                content_hash: None,
+                saved_hash: None,
+            });
+        }
+        save_registry_unlocked(&registry).unwrap();
+
+        // An agent stores the portable name; the id it maps to is whatever this
+        // machine installed it from.
+        assert_eq!(
+            resolve_skill_id("vault-lint").unwrap(),
+            "stai-public::vault-lint"
+        );
+        assert_eq!(
+            resolve_skill_id("VAULT-SYNC").unwrap(),
+            "my-import::vault-sync"
+        );
+        // A schedule created before agents stores the full registry id.
+        assert_eq!(
+            resolve_skill_id("my-import::vault-sync").unwrap(),
+            "my-import::vault-sync"
+        );
+        assert!(resolve_skill_id("ghost").is_err());
+        assert!(resolve_skill_id("  ").is_err());
     }
 }

@@ -352,6 +352,15 @@ a {
     "activity terminal terminal terminal";
 }
 
+.app-shell.agents-mode {
+  --documents-col: 0px;
+  --outline-col: 0px;
+  grid-template-areas:
+    "topbar topbar topbar topbar"
+    "activity agents agents agents"
+    "activity terminal terminal terminal";
+}
+
 .app-shell.meetings-mode {
   grid-template-areas:
     "topbar topbar topbar topbar"
@@ -490,6 +499,12 @@ a {
     "activity gap gap gap terminal";
 }
 
+.app-shell.terminal-dock-right.agents-mode {
+  grid-template-areas:
+    "topbar topbar topbar topbar topbar"
+    "activity agents agents agents terminal";
+}
+
 .app-shell.terminal-maximized {
   grid-template-rows: 44px minmax(0, 1fr) 0;
   grid-template-areas:
@@ -574,6 +589,9 @@ a {
 }
 .gap-pane {
   grid-area: gap;
+}
+.agents-pane {
+  grid-area: agents;
 }
 .meetings-pane {
   grid-area: meetings;
@@ -1465,6 +1483,7 @@ a {
 .inbox-pane,
 .comms-pane,
 .drafts-pane,
+.agents-pane,
 .meetings-pane,
 .tasks-pane,
 .sites-pane,
@@ -23614,4 +23633,326 @@ select:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+
+/* === Agents mode === */
+
+.agents-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  min-width: 0;
+  min-height: 0;
+}
+
+.agents-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.agents-list-col {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line-soft);
+  min-height: 0;
+}
+
+.agents-filter {
+  margin: 8px 8px 4px;
+}
+
+.agents-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agents-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agents-list-item:hover {
+  background: var(--hover);
+}
+
+.agents-list-item.active {
+  background: var(--selected);
+  border-color: var(--line);
+}
+
+.agents-list-item.disabled {
+  opacity: 0.55;
+}
+
+.agents-list-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agents-list-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-list-title em {
+  color: var(--muted);
+  font-size: var(--type-label-size);
+  font-style: normal;
+}
+
+.agents-status-dot {
+  font-size: var(--type-meta-size);
+  line-height: 1;
+  color: var(--muted);
+}
+
+.agents-status-dot.status-running {
+  color: var(--accent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.agents-status-dot.status-failed,
+.agents-status-dot.status-stopped {
+  color: var(--danger, #d9534f);
+}
+
+.agents-status-dot.status-done {
+  color: var(--ok, #3d9970);
+}
+
+.agents-list-skill,
+.agents-list-meta,
+.agents-list-run {
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agents-runtime-badge {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+.agents-detail-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agents-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.agents-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agents-detail-header h3 {
+  margin: 0;
+}
+
+.agents-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-detail-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.agents-detail-tabs {
+  align-self: flex-start;
+}
+
+.agents-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agents-next-run {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.agents-next-run h4 {
+  margin: 0;
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.agents-next-run p {
+  margin: 0;
+}
+
+.agents-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 640px;
+}
+
+.agents-editor-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agents-editor-row > .field {
+  flex: 1;
+  min-width: 160px;
+}
+
+.agents-editor-fixed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-editor-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-editor-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.agents-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agents-schedule-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.agents-schedule-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.agents-schedule-inputs label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-inputs input[type="number"] {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+}
+
+.agents-schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agents-orphans {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agents-orphans h4 {
+  margin: 0;
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.agents-orphans p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--type-meta-size);
+}
+
+.agents-orphan-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
 }

@@ -36,7 +36,8 @@ export type MaruAppMode =
   | "sites"
   | "graph"
   | "drafts"
-  | "gap";
+  | "gap"
+  | "agents";
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export interface EditorPaneViewModes {
@@ -1828,7 +1829,7 @@ function parseMaruAppMode(value: unknown): MaruAppMode | null {
   return value === "pkm" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "tasks" || value === "catalog" || value === "studio" || value === "e2e"
     || value === "diagram" || value === "sites" || value === "graph" || value === "drafts"
-    || value === "gap"
+    || value === "gap" || value === "agents"
     ? value
     : null;
 }

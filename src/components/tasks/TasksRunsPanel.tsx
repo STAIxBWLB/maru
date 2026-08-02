@@ -11,6 +11,7 @@ import {
   Square,
 } from "lucide-react";
 import { useState } from "react";
+import { findSkill } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import { appendTasksLog, readDocument } from "../../lib/api";
 import {
@@ -791,13 +792,6 @@ function taskFollowupOrigin(skill: string): string {
   return "taskManagementVaultExtract";
 }
 
-function findSkill(skills: SkillRecord[], name: string): SkillRecord | null {
-  return (
-    skills.find((skill) => skill.name === name) ??
-    skills.find((skill) => skill.id === name || skill.id.endsWith(`:${name}`)) ??
-    null
-  );
-}
 
 function taskMissionMetadata(mission: MissionRecord): Record<string, unknown> | null {
   const metadata = mission.metadata;

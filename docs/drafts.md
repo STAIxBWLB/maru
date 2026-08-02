@@ -6,7 +6,7 @@ promotes it through the approval gate.
 
 Backend: `src-tauri/src/drafts.rs` (store + promote),
 `src-tauri/src/scheduler.rs` (recurring skill runs).
-Frontend: `src/components/drafts/` (DraftsPane, SchedulerSection),
+Frontend: `src/components/drafts/` (DraftsPane, useTaskCandidateIngestion),
 `src/lib/taskIngestion.ts` (extract-tasks artifact ingestion),
 `src/lib/ideationDrafts.ts` (ideation artifact ingestion).
 
@@ -73,19 +73,28 @@ search.
 
 ## Scheduler
 
-The Drafts pane's Automation section manages recurring skill runs
-(`SchedulerSection.tsx`). A schedule has a name, `skillId`, AI runtime,
+Recurring runs are managed from the **Agents** mode
+(`src/components/agents/AgentsPane.tsx`), not from Drafts — see
+[agents.md](agents.md). A schedule has a name, `skillId`, AI runtime,
 free-form prompt, local time (hour/minute), optional weekdays (empty means
-daily), and an enabled flag.
+daily), an enabled flag, and an optional `agentId` whose agent supplies the
+live configuration at dispatch.
 
-- Schedules persist per workspace at `<work>/.maru/schedules.json`.
+Drafts keeps only the ingestion half: `useTaskCandidateIngestion` has to run
+where the drafts it creates appear, since ingestion only runs while its host
+component is mounted.
+
+- Schedules persist per workspace at `<work>/.maru/schedules.json`; agent
+  definitions are global, at `~/.maru/agents.json`.
 - A ticker started in app setup scans every registered workspace every 60
   seconds and dispatches due schedules through the existing skill-run
   machinery (`skills_dispatch_background`) — no new AI invocation path.
 - On launch, a schedule whose `nextRunAt` lies in the past fires exactly once
   (catch-up) and is then re-aligned to its next future slot.
 - Adding a schedule requires the `scheduler.add` approval; the app emits
-  `scheduler://changed|fired|error` events the pane listens to.
+  `scheduler://changed|fired|error` events the pane listens to. A dispatch now
+  also carries the user's CLI command override and permission mode, which it
+  previously dropped.
 
 ## Extract-tasks flow
 

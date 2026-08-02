@@ -1,5 +1,6 @@
 pub mod agent_host;
 mod agent_runtime_env;
+mod agents;
 mod ai_router;
 mod app_menu;
 mod approval;
@@ -167,6 +168,7 @@ use scratchpad::{
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
 };
+use agents::{agents_delete, agents_list, agents_reset, agents_upsert};
 use scheduler::{
     scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
@@ -425,6 +427,10 @@ pub fn run() {
             scheduler_remove,
             scheduler_set_enabled,
             scheduler_run_now,
+            agents_list,
+            agents_upsert,
+            agents_delete,
+            agents_reset,
             start_claude_cli_invocation,
             start_agent_cli_invocation,
             list_ai_missions,
