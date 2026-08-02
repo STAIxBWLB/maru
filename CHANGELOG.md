@@ -8,6 +8,29 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.38 - 2026-08-02 - Settings Moves In
+
+- **Settings lives in the main window now.** The separate 980x720 settings
+  window is gone. Cmd+, opens a full-screen overlay above the workbench —
+  grouped sidebar with search and "Back to app", Escape to return with
+  editor tabs, terminal, and scroll position untouched. One window, one
+  settings state, and every existing deep link (pane gear buttons, the
+  agent usage footer, the skills-update toast) lands on the right tab.
+- **All sixteen settings tabs were rebuilt on one visual language.** Card
+  sections with label-and-description rows on the left and the control on
+  the right; booleans are real switches, selects are segmented or compact.
+  Preferences split into General, Appearance, and Terminal, and the raw
+  JSON terminal editor is now actual controls. Rules, templates, secrets,
+  and skills keep their master/detail and table layouts inside the new
+  frame.
+- **The agent usage footer survives bad luck.** Usage probes used to hang
+  forever in dev builds — the status commands ran a blocking HTTP client
+  on an async runtime worker, which deadlocks. They now run where blocking
+  work belongs, so the footer (and the Agents settings tab) loads
+  everywhere. And when usage data is unavailable, the bar no longer
+  vanishes: it shows the active skills bundle version at the right end,
+  with an update dot and a click-through to the Skills tab.
+
 ## v0.4.37 - 2026-08-01 - References You Can Touch
 
 - **KG reference marks reach rich mode.** Referenced ranges are now marked
