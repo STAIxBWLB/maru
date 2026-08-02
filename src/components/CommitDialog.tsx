@@ -32,6 +32,8 @@ interface Props {
   vaultPath: string | null;
   status: GitStatus | null;
   aiRuntime: AgentProvider;
+  /** False when the commit-message agent is switched off. */
+  aiEnabled: boolean;
   aiCommandOverride?: string | null;
   onConfirmApproval: (input: {
     kind: string;
@@ -51,6 +53,7 @@ export function CommitDialog({
   vaultPath,
   status,
   aiRuntime,
+  aiEnabled,
   aiCommandOverride,
   onConfirmApproval,
   onClose,
@@ -433,7 +436,15 @@ export function CommitDialog({
                 variant="ghost"
                 size="sm"
                 onClick={() => void generateMessage()}
-                disabled={generating || submitting || autoCommitting || syncing || selectedPaths.size === 0}
+                disabled={
+                  !aiEnabled
+                  || generating
+                  || submitting
+                  || autoCommitting
+                  || syncing
+                  || selectedPaths.size === 0
+                }
+                title={aiEnabled ? undefined : t("commit.generate.agentDisabled")}
                 icon={<WandSparkles size={13} />}
               >
                 {generating ? t("commit.generate.loading") : t("commit.generate")}

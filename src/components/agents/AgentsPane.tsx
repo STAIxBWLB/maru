@@ -13,7 +13,7 @@ import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
   agentCanRunStandalone,
   agentLabel,
-  buildAgentRows,
+  buildAgentBoard,
   deleteAgent,
   listAgents,
   resetAgent,
@@ -31,6 +31,7 @@ import {
   listSchedules,
   removeSchedule,
   runScheduleNow,
+  setScheduleEnabled,
 } from "../../lib/api";
 import { formatRelativeDate } from "../../lib/document";
 import { formatScheduleTime } from "../../lib/drafts";
@@ -156,8 +157,8 @@ export function AgentsPane({
     };
   }, [onRefreshMissions, refresh]);
 
-  const rows = useMemo(
-    () => buildAgentRows(agents, schedules, missions),
+  const { rows, orphans } = useMemo(
+    () => buildAgentBoard(agents, schedules, missions),
     [agents, missions, schedules],
   );
 
@@ -166,7 +167,7 @@ export function AgentsPane({
       case "running":
         return rows.filter((row) => row.status === "running" || row.status === "idle");
       case "scheduled":
-        return rows.filter((row) => row.schedule !== null);
+        return rows.filter((row) => row.schedules.length > 0);
       case "mine":
         return rows.filter((row) => !row.agent.builtin);
       default:
@@ -182,7 +183,8 @@ export function AgentsPane({
   const runningCount = rows.filter(
     (row) => row.status === "running" || row.status === "idle",
   ).length;
-  const scheduledCount = rows.filter((row) => row.schedule !== null).length;
+  const scheduledCount =
+    rows.reduce((total, row) => total + row.schedules.length, 0) + orphans.length;
 
   const save = useCallback(
     async (agent: AgentRecord) => {
@@ -212,8 +214,8 @@ export function AgentsPane({
         // A schedule carries the prompt and cwd the user already approved, so
         // running through it keeps a scheduled agent's manual run identical to
         // its timed one.
-        const invocationId = row.schedule
-          ? await runScheduleNow(workPath, row.schedule.id)
+        const invocationId = row.schedules[0]
+          ? await runScheduleNow(workPath, row.schedules[0].id)
           : await runAgent(row.agent, { skills, ai, workPath });
         onMissionStarted(invocationId);
         onRefreshMissions();
@@ -268,6 +270,45 @@ export function AgentsPane({
       }
     },
     [ai, onConfirmApproval, onError, refresh, t, workPath],
+  );
+
+  const runOrphan = useCallback(
+    async (schedule: SchedulerSchedule) => {
+      if (!workPath) return;
+      setBusy(true);
+      try {
+        const invocationId = await runScheduleNow(workPath, schedule.id);
+        onMissionStarted(invocationId);
+        onRefreshMissions();
+        setLocalError(null);
+      } catch (error) {
+        const message = errorMessage(error);
+        setLocalError(message);
+        onError(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onError, onMissionStarted, onRefreshMissions, workPath],
+  );
+
+  const toggleOrphan = useCallback(
+    async (schedule: SchedulerSchedule) => {
+      if (!workPath) return;
+      setBusy(true);
+      try {
+        await setScheduleEnabled(workPath, schedule.id, !schedule.enabled);
+        await refresh();
+        setLocalError(null);
+      } catch (error) {
+        const message = errorMessage(error);
+        setLocalError(message);
+        onError(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onError, refresh, workPath],
   );
 
   const detachSchedule = useCallback(
@@ -392,6 +433,50 @@ export function AgentsPane({
               />
             ))}
           </div>
+          {orphans.length > 0 && filter !== "mine" ? (
+            <div className="agents-orphans">
+              <h4>{t("agents.orphans.title")}</h4>
+              <p>{t("agents.orphans.hint")}</p>
+              {orphans.map((schedule) => (
+                <div key={schedule.id} className="agents-schedule-row">
+                  <span>
+                    {schedule.name}
+                    {" · "}
+                    {formatScheduleTime(schedule.hour, schedule.minute)}
+                    {schedule.enabled ? "" : ` · ${t("agents.schedule.paused")}`}
+                  </span>
+                  <span className="agents-orphan-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy || !workPath}
+                      onClick={() => void runOrphan(schedule)}
+                    >
+                      {t("agents.action.run")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy || !workPath}
+                      onClick={() => void toggleOrphan(schedule)}
+                    >
+                      {schedule.enabled
+                        ? t("agents.orphans.pause")
+                        : t("agents.orphans.resume")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy || !workPath}
+                      onClick={() => void detachSchedule(schedule)}
+                    >
+                      {t("agents.schedule.remove")}
+                    </Button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="agents-detail-col">
@@ -411,9 +496,7 @@ export function AgentsPane({
                 if (selected.activeMissionId) onStopMission(selected.activeMissionId);
               }}
               onAttachSchedule={(when) => void attachSchedule(selected, when)}
-              onDetachSchedule={() => {
-                if (selected.schedule) void detachSchedule(selected.schedule);
-              }}
+              onDetachSchedule={(schedule) => void detachSchedule(schedule)}
               onSave={save}
               onDelete={() => void remove(selected.agent)}
               onReset={() => void reset(selected.agent)}
@@ -479,7 +562,8 @@ function AgentListItem({
   onSelect: () => void;
 }) {
   const { t, locale } = useTranslation();
-  const { agent, schedule, status } = row;
+  const { agent, status } = row;
+  const schedule = row.schedules[0] ?? null;
   const runtimeLabel =
     agent.runtime === "inherit" ? t("agents.runtime.inherit") : agent.runtime;
   const scheduleLabel = schedule
@@ -489,6 +573,7 @@ function AgentListItem({
           : schedule.daysOfWeek.map((day) => t(`drafts.weekday.${day}`)).join(" ")
       }`
     : t("agents.schedule.manual");
+  const extraSchedules = row.schedules.length - 1;
   const lastRun = row.missions[0]?.lastOutputAt ?? null;
 
   return (
@@ -516,6 +601,9 @@ function AgentListItem({
       <span className="agents-list-meta">
         <span className="agents-runtime-badge">{runtimeLabel}</span>
         <span>{scheduleLabel}</span>
+        {extraSchedules > 0 ? (
+          <span>{t("agents.schedule.more", { count: extraSchedules })}</span>
+        ) : null}
       </span>
       <span className="agents-list-run">
         {lastRun
@@ -561,7 +649,7 @@ function AgentDetail({
   onRun: () => void;
   onStop: () => void;
   onAttachSchedule: (when: RecommendedSchedule) => void;
-  onDetachSchedule: () => void;
+  onDetachSchedule: (schedule: SchedulerSchedule) => void;
   onSave: (agent: AgentRecord) => void | Promise<void>;
   onDelete: () => void;
   onReset: () => void;
@@ -572,13 +660,14 @@ function AgentDetail({
   onError: (message: string | null) => void;
 }) {
   const { t, locale } = useTranslation();
-  const { agent, schedule } = row;
+  const { agent } = row;
   const label = agentLabel(agent, t);
   const inline = agent.kind === "inline";
   // A feature-bound agent has no prompt of its own; its owning surface builds
   // one per run, so "run now" here would dispatch nothing. A schedule supplies
   // one, which is why an attached schedule re-enables the button.
-  const canRun = Boolean(workPath) && !inline && (agentCanRunStandalone(agent) || schedule !== null);
+  const canRun =
+    Boolean(workPath) && !inline && (agentCanRunStandalone(agent) || row.schedules.length > 0);
   const liveMissions = row.missions.filter(
     (mission) => mission.status === "running" || mission.status === "idle",
   );
@@ -665,26 +754,31 @@ function AgentDetail({
           {inline ? null : (
             <div className="agents-next-run">
               <h4>{t("agents.schedule.title")}</h4>
-              {schedule ? (
-                <>
-                  <p>
+              {row.schedules.map((schedule) => (
+                <div key={schedule.id} className="agents-schedule-row">
+                  <span>
                     {schedule.nextRunAt
                       ? formatRelativeDate(schedule.nextRunAt, locale)
                       : t("agents.schedule.paused")}
                     {" · "}
                     {formatScheduleTime(schedule.hour, schedule.minute)}
-                  </p>
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={onDetachSchedule}>
+                    {schedule.agentId ? null : ` · ${t("agents.schedule.inferred")}`}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => onDetachSchedule(schedule)}
+                  >
                     {t("agents.schedule.remove")}
                   </Button>
-                </>
-              ) : (
-                <ScheduleForm
-                  recommended={agent.recommendedSchedule ?? null}
-                  disabled={busy || !workPath || !agentCanRunStandalone(agent)}
-                  onAdd={onAttachSchedule}
-                />
-              )}
+                </div>
+              ))}
+              <ScheduleForm
+                recommended={agent.recommendedSchedule ?? null}
+                disabled={busy || !workPath || !agentCanRunStandalone(agent)}
+                onAdd={onAttachSchedule}
+              />
             </div>
           )}
         </div>

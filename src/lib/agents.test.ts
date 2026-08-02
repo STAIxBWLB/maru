@@ -35,7 +35,8 @@ import {
   agentLabel,
   agentRunStatus,
   agentRuntimeFallbackOrder,
-  buildAgentRows,
+  buildAgentBoard,
+  inlineAgentRuntime,
   findSkill,
   missionsForAgent,
   resolveAgentPermissionMode,
@@ -305,7 +306,7 @@ describe("agentIdOf", () => {
   });
 });
 
-describe("buildAgentRows", () => {
+describe("buildAgentBoard", () => {
   function run(
     id: string,
     agentId: string,
@@ -367,7 +368,7 @@ describe("buildAgentRows", () => {
       run("m4", "broke", "failed", "2026-08-01T08:00:00Z"),
     ];
 
-    const rows = buildAgentRows(agents, schedules, missions);
+    const { rows } = buildAgentBoard(agents, schedules, missions);
     expect(rows.map((row) => row.agent.id)).toEqual([
       "running-now",
       // A failure outranks a schedule: it is the one quiet state wanting a human.
@@ -384,7 +385,7 @@ describe("buildAgentRows", () => {
     const live = rows[0];
     expect(live.status).toBe("running");
     expect(live.activeMissionId).toBe("m1");
-    expect(rows.find((row) => row.agent.id === "scheduled-soon")?.schedule?.id).toBe(
+    expect(rows.find((row) => row.agent.id === "scheduled-soon")?.schedules[0]?.id).toBe(
       "s-scheduled-soon",
     );
     expect(rows.find((row) => row.agent.id === "never-run")?.status).toBe("never");
@@ -406,15 +407,15 @@ describe("buildAgentRows", () => {
       nextRunAt: "2026-08-03T07:00:00+09:00",
     } as unknown as SchedulerSchedule;
 
-    const rows = buildAgentRows(
+    const { rows } = buildAgentBoard(
       [agent({ id: "inbox-triage", skillName: "inbox-process" }), agent({ id: "other", skillName: "vault-lint" })],
       [legacy],
       [],
     );
-    expect(rows.find((row) => row.agent.id === "inbox-triage")?.schedule?.id).toBe(
+    expect(rows.find((row) => row.agent.id === "inbox-triage")?.schedules[0]?.id).toBe(
       "sched-bb4e8305",
     );
-    expect(rows.find((row) => row.agent.id === "other")?.schedule).toBeNull();
+    expect(rows.find((row) => row.agent.id === "other")?.schedules).toEqual([]);
   });
 
   it("never shows one schedule against two agents", () => {
@@ -424,7 +425,7 @@ describe("buildAgentRows", () => {
       daysOfWeek: [],
       enabled: true,
     } as unknown as SchedulerSchedule;
-    const rows = buildAgentRows(
+    const { rows } = buildAgentBoard(
       [
         agent({ id: "a-first", skillName: "inbox-process" }),
         agent({ id: "b-second", skillName: "inbox-process" }),
@@ -432,8 +433,60 @@ describe("buildAgentRows", () => {
       [legacy],
       [],
     );
-    const withSchedule = rows.filter((row) => row.schedule !== null);
+    const withSchedule = rows.filter((row) => row.schedules.length > 0);
     expect(withSchedule).toHaveLength(1);
     expect(withSchedule[0].agent.id).toBe("a-first");
+  });
+
+  it("keeps every schedule of an agent reachable, not just the soonest", () => {
+    const twice = [
+      { id: "s-morning", agentId: "inbox-triage", nextRunAt: "2026-08-03T07:00:00Z", skillId: "" },
+      { id: "s-evening", agentId: "inbox-triage", nextRunAt: "2026-08-03T19:00:00Z", skillId: "" },
+    ] as unknown as SchedulerSchedule[];
+
+    const { rows, orphans } = buildAgentBoard([agent({ id: "inbox-triage" })], twice, []);
+    // Rendering only one would leave the other firing in the Rust ticker with
+    // no way to inspect, pause or remove it.
+    expect(rows[0].schedules.map((s) => s.id)).toEqual(["s-morning", "s-evening"]);
+    expect(orphans).toEqual([]);
+  });
+
+  it("surfaces a schedule that belongs to no agent instead of hiding it", () => {
+    const orphan = {
+      id: "s-ghost",
+      name: "Legacy digest",
+      skillId: "maru-builtin::some-removed-skill",
+      nextRunAt: "2026-08-03T07:00:00Z",
+      enabled: true,
+    } as unknown as SchedulerSchedule;
+
+    const { rows, orphans } = buildAgentBoard(
+      [agent({ id: "inbox-triage", skillName: "inbox-process" })],
+      [orphan],
+      [],
+    );
+    expect(rows[0].schedules).toEqual([]);
+    expect(orphans.map((s) => s.id)).toEqual(["s-ghost"]);
+  });
+});
+
+describe("inlineAgentRuntime", () => {
+  it("reports the agent's enabled state so the feature can stop", () => {
+    // Inline features are request/response calls with no mission for
+    // runAgentDetailed's disabled guard to refuse, so they must check.
+    const off = agent({ id: "commit-message", kind: "inline", enabled: false });
+    expect(inlineAgentRuntime([off], "commit-message", ai).enabled).toBe(false);
+
+    const on = agent({ id: "commit-message", kind: "inline", runtime: "kimi" });
+    const resolved = inlineAgentRuntime([on], "commit-message", ai);
+    expect(resolved).toEqual({ runtime: "kimi", commandOverride: "/opt/kimi", enabled: true });
+  });
+
+  it("falls back to global settings, still enabled, when the registry is empty", () => {
+    expect(inlineAgentRuntime([], "commit-message", ai)).toEqual({
+      runtime: "claude",
+      commandOverride: null,
+      enabled: true,
+    });
   });
 });

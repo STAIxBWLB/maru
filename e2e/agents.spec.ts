@@ -22,6 +22,20 @@ function seedBackend(page: import("@playwright/test").Page) {
         customized: false,
       },
       {
+        id: "commit-message",
+        labelKey: "agents.builtin.commitMessage",
+        label: null,
+        description: null,
+        skillName: "",
+        runtime: "inherit",
+        permissionMode: "inherit",
+        prompt: "",
+        kind: "inline",
+        enabled: true,
+        builtin: true,
+        customized: false,
+      },
+      {
         id: "vault-hygiene",
         labelKey: "agents.builtin.vaultHygiene",
         label: null,
@@ -97,7 +111,7 @@ test("lists the registered agents with their backend and schedule", async ({ pag
   const pane = await openAgentsMode(page);
 
   const rows = pane.locator(".agents-list-item");
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(3);
   await expect(pane).toContainText("받은편지함 정리");
   await expect(pane).toContainText("지식 그래프 정합성 점검");
   // "inherit" renders as the resolved default rather than as jargon.
@@ -137,4 +151,29 @@ test("a feature-bound agent cannot be run standalone, a prompted one can", async
 
   await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
   await expect(pane.getByRole("button", { name: "지금 실행" })).toBeEnabled();
+});
+
+test("an inline agent can change and save its backend", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  // Inline agents carry no skill by design; requiring one used to leave Save
+  // permanently disabled on the very agents whose only editable field is the
+  // backend.
+  await pane.locator(".agents-list-item", { hasText: "커밋 메시지 작성" }).click();
+  await pane.getByRole("button", { name: "설정" }).click();
+
+  const save = pane.getByRole("button", { name: "저장" });
+  await expect(save).toBeEnabled();
+  await pane.locator("select").first().selectOption("kimi");
+  await save.click();
+
+  const saved = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __MARU_AGENT_CALLS__: Array<{ command: string; args: Record<string, unknown> }>;
+      }
+    ).__MARU_AGENT_CALLS__.filter((call) => call.command === "agents_upsert"),
+  );
+  expect(saved).toHaveLength(1);
+  expect((saved[0].args.agent as { runtime: string }).runtime).toBe("kimi");
 });

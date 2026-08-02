@@ -23922,3 +23922,37 @@ select:focus-visible,
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.agents-orphans {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agents-orphans h4 {
+  margin: 0;
+  font-size: var(--type-label-size);
+  color: var(--muted);
+}
+
+.agents-orphans p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.agents-schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--type-meta-size);
+}
+
+.agents-orphan-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}

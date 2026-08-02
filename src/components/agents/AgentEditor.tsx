@@ -65,7 +65,10 @@ export function AgentEditor({
   const id = create ? slugifyAgentId(draft.label ?? "") : draft.id;
   const duplicateId = create && id.length > 0 && takenIds.includes(id);
   const missingId = create && id.length === 0;
-  const missingSkill = draft.skillName.trim().length === 0;
+  // Inline agents carry no skill by design — Maru builds their prompt
+  // internally — so requiring one here would permanently block Save on the very
+  // agents whose only editable field is the backend.
+  const missingSkill = draft.kind === "background" && draft.skillName.trim().length === 0;
   // A builtin without a prompt is feature-bound: its owning surface supplies
   // one per run, so an empty prompt is valid there and only there.
   const missingPrompt = !draft.builtin && draft.prompt.trim().length === 0;

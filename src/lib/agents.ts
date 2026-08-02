@@ -334,15 +334,32 @@ export async function resolveAvailableRuntime(
   throw new Error(firstFailure || `agent_runtime_unavailable: ${preferred}`);
 }
 
+export interface InlineAgentRuntime {
+  runtime: AiRuntime;
+  commandOverride: string | null;
+  /**
+   * False when the user switched this agent off. Inline features are plain
+   * request/response calls with no mission to refuse, so the caller has to
+   * check: `runAgentDetailed`'s disabled guard never runs for them.
+   */
+  enabled: boolean;
+}
+
 /** The runtime an inline (non-mission) feature should use for this agent. */
 export function inlineAgentRuntime(
   agents: AgentRecord[],
   id: string,
   ai: AiSettings,
-): { runtime: AiRuntime; commandOverride: string | null } {
+): InlineAgentRuntime {
   const agent = findAgent(agents, id);
   const runtime = agent ? resolveAgentRuntime(agent, ai) : ai.defaultRuntime;
-  return { runtime, commandOverride: ai.commandOverrides[runtime] ?? null };
+  return {
+    runtime,
+    commandOverride: ai.commandOverrides[runtime] ?? null,
+    // A registry that could not be read leaves the feature working on global
+    // settings rather than dead.
+    enabled: agent?.enabled ?? true,
+  };
 }
 
 // === Mission correlation ===
@@ -391,13 +408,24 @@ export type AgentRunStatus = "running" | "idle" | "failed" | "stopped" | "done" 
 
 export interface AgentRow {
   agent: AgentRecord;
-  /** The schedule pointing at this agent, if the user attached one. */
-  schedule: SchedulerSchedule | null;
+  /**
+   * Every schedule attached to this agent, soonest first. A list, not a single
+   * schedule: this pane is the only `listSchedules` consumer now, so anything
+   * it does not render keeps firing in the Rust ticker while being impossible
+   * to inspect, pause or remove.
+   */
+  schedules: SchedulerSchedule[];
   /** This agent's missions, newest first. */
   missions: MissionRecord[];
   status: AgentRunStatus;
   /** Mission to stop, when one is in flight. */
   activeMissionId: string | null;
+}
+
+export interface AgentBoard {
+  rows: AgentRow[];
+  /** Schedules belonging to no agent — still live, so still manageable. */
+  orphans: SchedulerSchedule[];
 }
 
 /**
@@ -416,32 +444,45 @@ const STATUS_TIER: Record<AgentRunStatus, number> = {
 };
 
 /**
- * A schedule created before agents existed carries no `agentId`, so it is
- * matched by the skill it dispatches — otherwise the user's existing schedules
- * would have no row at all now that the old scheduler section is gone. This is
- * display-only inference: dispatch still reads the schedule's own snapshot
- * until the user re-attaches it, so nothing about what runs changes.
+ * Schedules belonging to `agent`: those that name it explicitly, plus — for
+ * schedules created before agents existed, which carry no `agentId` — those
+ * dispatching its skill. Without the second rule the user's existing schedules
+ * would have no row at all now that the old scheduler section is gone.
  *
+ * The skill inference is display-only: dispatch still reads the schedule's own
+ * snapshot until the user re-attaches it, so nothing about what runs changes.
  * `claimed` keeps two agents sharing a skill from showing the same schedule.
  */
-function matchSchedule(
+function matchSchedules(
   schedules: SchedulerSchedule[],
   agent: AgentRecord,
   claimed: Set<string>,
-): SchedulerSchedule | null {
-  const linked = schedules.find((schedule) => schedule.agentId === agent.id);
-  if (linked) return linked;
-  if (!agent.skillName) return null;
-  const needle = agent.skillName.toLowerCase();
-  return (
-    schedules.find(
+): SchedulerSchedule[] {
+  const needle = agent.skillName.trim().toLowerCase();
+  const dispatchesOwnSkill = (schedule: SchedulerSchedule) =>
+    needle.length > 0
+    && !schedule.agentId
+    && (schedule.skillId.toLowerCase() === needle
+      || schedule.skillId.toLowerCase().endsWith(`:${needle}`));
+
+  return schedules
+    .filter(
       (schedule) =>
-        !schedule.agentId
-        && !claimed.has(schedule.id)
-        && (schedule.skillId.toLowerCase() === needle
-          || schedule.skillId.toLowerCase().endsWith(`:${needle}`)),
-    ) ?? null
-  );
+        !claimed.has(schedule.id)
+        && (schedule.agentId === agent.id || dispatchesOwnSkill(schedule)),
+    )
+    .sort(bySoonest);
+}
+
+function bySoonest(a: SchedulerSchedule, b: SchedulerSchedule): number {
+  const nextA = a.nextRunAt ?? "";
+  const nextB = b.nextRunAt ?? "";
+  if (nextA !== nextB) {
+    if (!nextA) return 1;
+    if (!nextB) return -1;
+    return nextA.localeCompare(nextB);
+  }
+  return a.id.localeCompare(b.id);
 }
 
 function newestFirst(a: MissionRecord, b: MissionRecord): number {
@@ -472,33 +513,33 @@ export function agentRunStatus(missions: MissionRecord[]): AgentRunStatus {
  * has never run. Disabled agents sink below their peers so the list opens on
  * work that is actually live.
  */
-export function buildAgentRows(
+export function buildAgentBoard(
   agents: AgentRecord[],
   schedules: SchedulerSchedule[],
   missions: MissionRecord[],
-): AgentRow[] {
+): AgentBoard {
   const claimed = new Set<string>();
   const rows = agents.map((agent): AgentRow => {
     const own = missionsForAgent(missions, agent.id).sort(newestFirst);
     const active = own.find(
       (mission) => mission.status === "running" || mission.status === "idle",
     );
-    const schedule = matchSchedule(schedules, agent, claimed);
-    if (schedule) claimed.add(schedule.id);
+    const matched = matchSchedules(schedules, agent, claimed);
+    for (const schedule of matched) claimed.add(schedule.id);
     return {
       agent,
-      schedule,
+      schedules: matched,
       missions: own,
       status: agentRunStatus(own),
       activeMissionId: active?.id ?? null,
     };
   });
-  return rows.sort((a, b) => {
+  rows.sort((a, b) => {
     if (a.agent.enabled !== b.agent.enabled) return a.agent.enabled ? -1 : 1;
     const byTier = STATUS_TIER[a.status] - STATUS_TIER[b.status];
     if (byTier !== 0) return byTier;
-    const nextA = a.schedule?.nextRunAt ?? null;
-    const nextB = b.schedule?.nextRunAt ?? null;
+    const nextA = a.schedules[0]?.nextRunAt ?? null;
+    const nextB = b.schedules[0]?.nextRunAt ?? null;
     if (nextA && nextB && nextA !== nextB) return nextA.localeCompare(nextB);
     if (nextA && !nextB) return -1;
     if (!nextA && nextB) return 1;
@@ -507,4 +548,8 @@ export function buildAgentRows(
     if (ranA !== ranB) return ranB.localeCompare(ranA);
     return a.agent.id.localeCompare(b.agent.id);
   });
+  return {
+    rows,
+    orphans: schedules.filter((schedule) => !claimed.has(schedule.id)).sort(bySoonest),
+  };
 }

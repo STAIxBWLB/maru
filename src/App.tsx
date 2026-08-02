@@ -3907,11 +3907,14 @@ function MainApp() {
         // timeout, not a tracked mission, so only the backend comes from the
         // record. `ai.classifierRuntime` remains the fallback when the registry
         // could not be read.
-        const { runtime, commandOverride } = inlineAgentRuntime(
+        const { runtime, commandOverride, enabled } = inlineAgentRuntime(
           agents,
           "inbox-classify",
           { ...maruSettings.ai, defaultRuntime: resolveClassifierRuntime(maruSettings.ai) },
         );
+        // Switching the agent off has to stop the feature, not silently keep
+        // spawning a CLI. Inline features have no mission for runAgent to refuse.
+        if (!enabled) throw new Error("agent_disabled: inbox-classify");
         const contextEnv = buildMaruBackgroundContextEnv(
           {
             workspaceRoot: inboxWorkspacePath,
@@ -9472,6 +9475,7 @@ function MainApp() {
           vaultPath={commitDialog?.path ?? null}
           status={commitDialog?.status ?? null}
           aiRuntime={commitMessageRuntime.runtime}
+          aiEnabled={commitMessageRuntime.enabled}
           aiCommandOverride={commitMessageRuntime.commandOverride}
           onConfirmApproval={approvalGate.confirmApproval}
           onClose={() => setCommitDialog(null)}
