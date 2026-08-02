@@ -15,9 +15,11 @@ import {
   type MaruSettings,
   type TerminalLauncherSettings,
 } from "../../lib/settings";
-import { emitSettingsTerminalLaunch } from "../../lib/settingsWindowEvents";
+import { emitSettingsTerminalLaunch } from "../../lib/settingsEvents";
 import { formatUsageResetIn } from "../../lib/usageFormat";
+import { SettingsSection } from "../settings/SettingsSection";
 import { Button } from "../ui/Button";
+import { ModeHeader } from "../ui/ModeChrome";
 
 const LOGIN_COMMANDS: Record<AgentProvider, string> = {
   claude: "claude auth login",
@@ -105,7 +107,21 @@ export function AgentsSettingsTab({
   };
 
   return (
-    <div className="system-detail" style={{ width: "100%" }}>
+    <div className="settings-tab wide">
+      <ModeHeader
+        title={t("system.tab.agents")}
+        actions={
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={refreshing}
+            onClick={() => void load(true)}
+            icon={<RefreshCcw size={14} className={refreshing ? "spin" : undefined} />}
+          >
+            {t("system.agents.refresh")}
+          </Button>
+        }
+      />
       <div className="agents-subtabs" role="tablist">
         {AGENT_PROVIDERS.map((id) => (
           <button
@@ -120,81 +136,64 @@ export function AgentsSettingsTab({
           </button>
         ))}
       </div>
-      <div className="settings-form">
-        <section className="agents-section">
-          <header className="agents-section-header">
-            <strong>{t("system.agents.authentication")}</strong>
-            <span
-              className={
-                account?.authStatus === "authenticated"
-                  ? "agents-badge connected"
-                  : "agents-badge"
-              }
-            >
-              {account
-                ? account.authStatus === "authenticated"
-                  ? t("system.agents.connected")
-                  : account.authStatus === "cli_missing"
-                    ? t("system.agents.notInstalled")
-                    : t("system.agents.notConnected")
-                : "…"}
-            </span>
-            <span style={{ flex: 1 }} />
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={refreshing}
-              onClick={() => void load(true)}
-              icon={<RefreshCcw size={14} className={refreshing ? "spin" : undefined} />}
-            >
-              {t("system.agents.refresh")}
-            </Button>
-          </header>
-          {account ? (
-            <table className="agents-account-table">
-              <tbody>
-                <AccountInfoRow label={t("system.agents.version")} value={account.version} />
-                <AccountInfoRow label={t("system.agents.provider")} value={account.provider} />
-                <AccountInfoRow
-                  label={t("system.agents.loginMethod")}
-                  value={account.loginMethod}
-                />
-                <AccountInfoRow
-                  label={t("system.agents.organization")}
-                  value={account.organization}
-                />
-                <AccountInfoRow label={t("system.agents.email")} value={account.email} />
-              </tbody>
-            </table>
-          ) : null}
-          {account?.message ? <p className="settings-hint">{account.message}</p> : null}
-          <div className="agents-actions">
-            <Button size="sm" variant="secondary" onClick={() => void runLogin()}>
-              {t("system.agents.runLogin", { command: loginCommand })}
-            </Button>
-          </div>
-          {hint ? <p className="settings-hint">{hint}</p> : null}
-        </section>
+      <SettingsSection
+        title={t("system.agents.authentication")}
+        actions={
+          <span
+            className={
+              account?.authStatus === "authenticated"
+                ? "agents-badge connected"
+                : "agents-badge"
+            }
+          >
+            {account
+              ? account.authStatus === "authenticated"
+                ? t("system.agents.connected")
+                : account.authStatus === "cli_missing"
+                  ? t("system.agents.notInstalled")
+                  : t("system.agents.notConnected")
+              : "…"}
+          </span>
+        }
+      >
+        {account ? (
+          <table className="agents-account-table">
+            <tbody>
+              <AccountInfoRow label={t("system.agents.version")} value={account.version} />
+              <AccountInfoRow label={t("system.agents.provider")} value={account.provider} />
+              <AccountInfoRow
+                label={t("system.agents.loginMethod")}
+                value={account.loginMethod}
+              />
+              <AccountInfoRow
+                label={t("system.agents.organization")}
+                value={account.organization}
+              />
+              <AccountInfoRow label={t("system.agents.email")} value={account.email} />
+            </tbody>
+          </table>
+        ) : null}
+        {account?.message ? <p className="settings-hint">{account.message}</p> : null}
+        <div className="agents-actions">
+          <Button size="sm" variant="secondary" onClick={() => void runLogin()}>
+            {t("system.agents.runLogin", { command: loginCommand })}
+          </Button>
+        </div>
+        {hint ? <p className="settings-hint">{hint}</p> : null}
+      </SettingsSection>
 
-        <section className="agents-section">
-          <header className="agents-section-header">
-            <strong>{t("system.agents.launchCommand")}</strong>
-          </header>
-          <LaunchCommandFields
-            key={agent}
-            agent={agent}
-            settings={settings}
-            onSettingsChange={onSettingsChange}
-          />
-        </section>
+      <SettingsSection title={t("system.agents.launchCommand")}>
+        <LaunchCommandFields
+          key={agent}
+          agent={agent}
+          settings={settings}
+          onSettingsChange={onSettingsChange}
+        />
+      </SettingsSection>
 
-        <section className="agents-section">
-          <header className="agents-section-header">
-            <strong>{t("system.agents.usage")}</strong>
-          </header>
-          <AgentUsageSection usage={agentUsage} />
-        </section>
-      </div>
+      <SettingsSection title={t("system.agents.usage")}>
+        <AgentUsageSection usage={agentUsage} />
+      </SettingsSection>
     </div>
   );
 }

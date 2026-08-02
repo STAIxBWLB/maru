@@ -1,12 +1,12 @@
 // Settings surface — full-screen overlay inside the main window. Owns the
 // sidebar nav and hosts the (still legacy-styled) tab bodies from
-// SystemPane.tsx until the per-tab rewrite lands.
+// SettingsTabBody.tsx until the per-tab rewrite lands.
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MaruSettings } from "../../lib/settings";
 import type { InboxRuntimeConfig } from "../../lib/types";
-import { SettingsTabBody } from "../SystemPane";
+import { SettingsTabBody } from "./SettingsTabBody";
 import { SettingsNavSidebar } from "./SettingsNavSidebar";
 import { isSettingsTabId, type SettingsTabId } from "./settingsNav";
 import "./settings.css";

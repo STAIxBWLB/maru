@@ -158,6 +158,20 @@
   flex: 1;
 }
 
+/* Tab bodies (PR 2 conversions) */
+
+.settings-tab {
+  max-width: 880px;
+}
+
+.settings-tab.wide {
+  max-width: none;
+}
+
+.settings-tab .mode-header {
+  margin-bottom: 20px;
+}
+
 /* Section card + row primitives */
 
 .settings-section {
@@ -210,6 +224,11 @@
 
 .settings-row + .settings-row {
   border-top: 1px solid var(--line);
+}
+
+.settings-row.wide {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .settings-row-copy {
