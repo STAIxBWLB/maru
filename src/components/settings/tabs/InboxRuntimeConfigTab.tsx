@@ -366,6 +366,7 @@ export function InboxRuntimeConfigTab({
       <SettingsSection
         title={t("system.inboxChannels.channels.title")}
         description={t("system.inboxChannels.channels.subtitle")}
+        padded
       >
         <div className="inbox-channel-editor">
           <div className="inbox-channel-list" role="listbox" aria-label={t("system.inboxChannels.channels.listLabel")}>

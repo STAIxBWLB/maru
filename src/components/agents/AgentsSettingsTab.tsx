@@ -107,7 +107,7 @@ export function AgentsSettingsTab({
   };
 
   return (
-    <div className="settings-tab wide">
+    <div className="settings-tab">
       <ModeHeader
         title={t("system.tab.agents")}
         actions={
@@ -155,6 +155,7 @@ export function AgentsSettingsTab({
               : "…"}
           </span>
         }
+        padded
       >
         {account ? (
           <table className="agents-account-table">
@@ -182,7 +183,7 @@ export function AgentsSettingsTab({
         {hint ? <p className="settings-hint">{hint}</p> : null}
       </SettingsSection>
 
-      <SettingsSection title={t("system.agents.launchCommand")}>
+      <SettingsSection title={t("system.agents.launchCommand")} padded>
         <LaunchCommandFields
           key={agent}
           agent={agent}
@@ -191,7 +192,7 @@ export function AgentsSettingsTab({
         />
       </SettingsSection>
 
-      <SettingsSection title={t("system.agents.usage")}>
+      <SettingsSection title={t("system.agents.usage")} padded>
         <AgentUsageSection usage={agentUsage} />
       </SettingsSection>
     </div>

@@ -6,6 +6,9 @@ interface SettingsSectionProps {
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  /** Pad the body for custom (non-SettingsRow) content: grids, lists,
+   *  tables, editors. Row children bring their own padding. */
+  padded?: boolean;
   children: ReactNode;
 }
 
@@ -13,6 +16,7 @@ export function SettingsSection({
   title,
   description,
   actions,
+  padded,
   children,
 }: SettingsSectionProps) {
   return (
@@ -26,7 +30,9 @@ export function SettingsSection({
         </div>
         {actions ? <div className="settings-section-actions">{actions}</div> : null}
       </header>
-      <div className="settings-section-body">{children}</div>
+      <div className={padded ? "settings-section-body padded" : "settings-section-body"}>
+        {children}
+      </div>
     </section>
   );
 }

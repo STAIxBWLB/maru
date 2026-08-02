@@ -19,7 +19,7 @@ export function ConnectorsTab({
   return (
     <div className="settings-tab">
       <ModeHeader title={t("system.tab.connectors")} subtitle={t("system.connectors.title")} />
-      <SettingsSection title={t("system.connectors.title")}>
+      <SettingsSection title={t("system.connectors.title")} padded>
         <SettingsJsonTab
           value={settings.connectors}
           onSave={(value) =>

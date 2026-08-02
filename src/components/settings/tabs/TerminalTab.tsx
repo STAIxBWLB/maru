@@ -139,6 +139,7 @@ export function TerminalTab({
       <SettingsSection
         title={t("system.terminal.section.shortcuts")}
         description={t("system.preferences.terminalShortcuts.help")}
+        padded
       >
         <div className="terminal-shortcut-grid">
           {TERMINAL_SHORTCUT_ACTIONS.map((action) => {

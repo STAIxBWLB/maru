@@ -316,6 +316,7 @@ export function CommsSettingsTab({
       <SettingsSection
         title={t("comms.telegram.title")}
         description={t("comms.telegram.settings.description")}
+        padded
       >
         {telegramEnvHealthy === false ? (
           <div className="comms-setup-banner">

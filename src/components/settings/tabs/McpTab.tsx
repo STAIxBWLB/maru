@@ -69,7 +69,7 @@ export function McpTab({ workPath }: { workPath: string }) {
           </>
         }
       />
-      <SettingsSection title={t("system.tab.mcp")}>
+      <SettingsSection title={t("system.tab.mcp")} padded>
         <div className="system-detail" style={{ width: "100%" }}>
           <textarea
             className="source-editor"
