@@ -69,6 +69,10 @@
   flex: 1;
   min-width: 0;
   border: none;
+  /* WKWebView draws a native focused bezel on text inputs regardless of
+     border/outline; appearance:none is what actually removes it. */
+  appearance: none;
+  -webkit-appearance: none;
   background: none;
   color: var(--text);
   font: inherit;

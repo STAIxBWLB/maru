@@ -8,6 +8,7 @@ import {
   type AgentUsageStatus,
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
+import { skillsBundleStatus, type SkillBundleStatus } from "../lib/skills";
 import { formatUsageWindowSegment } from "../lib/usageFormat";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -16,9 +17,10 @@ const POLL_INTERVAL_MS = 60_000;
 const FOCUS_RELOAD_MIN_AGE_MS = 30_000;
 
 /**
- * Main-window footer with one quota chip per agent. Polls usage every 60s and
- * on window focus (debounced to one reload per 30s); clicking a chip opens
- * the settings Agents tab.
+ * Main-window footer. Left: one quota chip per agent (when usage data is
+ * available). When it is not, the right end falls back to the next most
+ * important status — the active skills bundle version — so the bar still
+ * says something useful.
  */
 export function AgentUsageBar({
   commandOverrides,
@@ -29,6 +31,7 @@ export function AgentUsageBar({
 }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AgentUsageStatus[] | null>(null);
+  const [bundleStatus, setBundleStatus] = useState<SkillBundleStatus | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // Ticks once per poll so "reset in" text stays roughly current.
   const [now, setNow] = useState(() => Date.now());
@@ -41,12 +44,16 @@ export function AgentUsageBar({
     async (force = false) => {
       setRefreshing(true);
       try {
-        const next = await agentsUsageStatus(commandOverrides, force);
+        const [nextUsage, nextBundleStatus] = await Promise.all([
+          agentsUsageStatus(commandOverrides, force).catch(() => null),
+          skillsBundleStatus().catch(() => null),
+        ]);
         if (!mountedRef.current) return;
-        setUsage(next);
-        setNow(Date.now());
-      } catch {
-        // Keep stale chips; per-agent failures are modeled in the payload.
+        if (nextUsage) {
+          setUsage(nextUsage);
+          setNow(Date.now());
+        }
+        setBundleStatus(nextBundleStatus);
       } finally {
         lastLoadedAtRef.current = Date.now();
         if (mountedRef.current) setRefreshing(false);
@@ -76,44 +83,69 @@ export function AgentUsageBar({
     };
   }, [load]);
 
-  const openAgentsSettings = () => {
-    onOpenSettings?.("agents");
+  const openSettings = (tab: string) => {
+    onOpenSettings?.(tab);
   };
 
-  if (!usage) return null;
-  const usable = usage.filter((entry) => entry.state !== "cli_missing");
-  if (usable.length === 0) return null;
+  const usable = (usage ?? []).filter((entry) => entry.state !== "cli_missing");
+  const skillsVersion = bundleStatus?.active?.displayVersion ?? null;
+  const skillsUpdateAvailable = bundleStatus?.updateAvailable ?? false;
+
+  // Agent chips take priority; the skills bundle status fills the bar when
+  // no agent usage data is available.
+  if (usable.length === 0 && !skillsVersion) return null;
 
   return (
     <footer className="agent-usage-bar" aria-label={t("agents.usage.openSettings")}>
-      <div className="agent-usage-chips">
-        {usable.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            className={
-              entry.state === "ok" ? "agent-usage-chip" : "agent-usage-chip dimmed"
-            }
-            onClick={openAgentsSettings}
-            title={t("agents.usage.openSettings")}
-          >
-            <span className="agent-usage-chip-name">
-              {(AGENT_PROVIDERS as readonly string[]).includes(entry.id)
-                ? t(`system.agents.agent.${entry.id}`)
-                : entry.id}
-            </span>
-            <span className="agent-usage-chip-value">
-              {entry.state === "ok"
-                ? entry.windows
-                    .map((window) =>
-                      formatUsageWindowSegment(window, t("agents.usage.usedSuffix"), now),
-                    )
-                    .join(" · ")
-                : "—"}
-            </span>
-          </button>
-        ))}
-      </div>
+      {usable.length > 0 ? (
+        <div className="agent-usage-chips">
+          {usable.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className={
+                entry.state === "ok" ? "agent-usage-chip" : "agent-usage-chip dimmed"
+              }
+              onClick={() => openSettings("agents")}
+              title={t("agents.usage.openSettings")}
+            >
+              <span className="agent-usage-chip-name">
+                {(AGENT_PROVIDERS as readonly string[]).includes(entry.id)
+                  ? t(`system.agents.agent.${entry.id}`)
+                  : entry.id}
+              </span>
+              <span className="agent-usage-chip-value">
+                {entry.state === "ok"
+                  ? entry.windows
+                      .map((window) =>
+                        formatUsageWindowSegment(window, t("agents.usage.usedSuffix"), now),
+                      )
+                      .join(" · ")
+                  : "—"}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="agent-usage-spacer" />
+      )}
+      {usable.length === 0 && skillsVersion ? (
+        <button
+          type="button"
+          className="agent-usage-skills"
+          onClick={() => openSettings("skills")}
+          title={
+            skillsUpdateAvailable
+              ? t("agents.usage.skillsUpdate")
+              : t("agents.usage.openSkillsSettings")
+          }
+        >
+          {skillsUpdateAvailable ? (
+            <span className="agent-usage-skills-dot" aria-hidden="true" />
+          ) : null}
+          <span>{t("agents.usage.skillsVersion", { version: skillsVersion })}</span>
+        </button>
+      ) : null}
       <button
         type="button"
         className="icon-button agent-usage-refresh"

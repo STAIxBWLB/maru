@@ -2730,6 +2730,10 @@ a {
   width: 100%;
   border: 0;
   outline: 0;
+  /* WKWebView draws a native focused bezel on text inputs regardless of
+     border/outline; appearance:none is what actually removes it. */
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--ink);
   font-size: var(--type-body-size);
@@ -10894,6 +10898,8 @@ button.git-badge:hover {
   width: 100%;
   border: 0;
   outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--ink);
   font-size: var(--type-heading-size);
@@ -21549,6 +21555,37 @@ button.git-badge:hover {
   gap: 6px;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.agent-usage-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-usage-skills {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.agent-usage-skills:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.agent-usage-skills-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .agent-usage-chip {

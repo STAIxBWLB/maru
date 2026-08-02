@@ -65,9 +65,10 @@ pub struct AgentUsageStatus {
     pub message: Option<String>,
 }
 
-// `async` commands run on Tauri's blocking thread pool instead of the main
-// thread; the bodies stay synchronous (CLI spawns, reqwest::blocking).
-#[tauri::command(async)]
+// Plain sync commands: Tauri runs them on a blocking-safe thread. Do NOT
+// mark them `command(async)` — the body would then run inline on an async
+// runtime worker, and `reqwest::blocking` deadlocks in that context.
+#[tauri::command]
 pub fn agents_account_status(
     command_overrides: Option<HashMap<String, String>>,
 ) -> Vec<AgentAccountStatus> {
@@ -77,7 +78,7 @@ pub fn agents_account_status(
         .collect()
 }
 
-#[tauri::command(async)]
+#[tauri::command]
 pub fn agents_usage_status(
     command_overrides: Option<HashMap<String, String>>,
     force: Option<bool>,
