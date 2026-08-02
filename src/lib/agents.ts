@@ -415,6 +415,35 @@ const STATUS_TIER: Record<AgentRunStatus, number> = {
   never: 3,
 };
 
+/**
+ * A schedule created before agents existed carries no `agentId`, so it is
+ * matched by the skill it dispatches — otherwise the user's existing schedules
+ * would have no row at all now that the old scheduler section is gone. This is
+ * display-only inference: dispatch still reads the schedule's own snapshot
+ * until the user re-attaches it, so nothing about what runs changes.
+ *
+ * `claimed` keeps two agents sharing a skill from showing the same schedule.
+ */
+function matchSchedule(
+  schedules: SchedulerSchedule[],
+  agent: AgentRecord,
+  claimed: Set<string>,
+): SchedulerSchedule | null {
+  const linked = schedules.find((schedule) => schedule.agentId === agent.id);
+  if (linked) return linked;
+  if (!agent.skillName) return null;
+  const needle = agent.skillName.toLowerCase();
+  return (
+    schedules.find(
+      (schedule) =>
+        !schedule.agentId
+        && !claimed.has(schedule.id)
+        && (schedule.skillId.toLowerCase() === needle
+          || schedule.skillId.toLowerCase().endsWith(`:${needle}`)),
+    ) ?? null
+  );
+}
+
 function newestFirst(a: MissionRecord, b: MissionRecord): number {
   return (
     b.lastOutputAt.localeCompare(a.lastOutputAt) || b.startedAt.localeCompare(a.startedAt)
@@ -448,14 +477,17 @@ export function buildAgentRows(
   schedules: SchedulerSchedule[],
   missions: MissionRecord[],
 ): AgentRow[] {
+  const claimed = new Set<string>();
   const rows = agents.map((agent): AgentRow => {
     const own = missionsForAgent(missions, agent.id).sort(newestFirst);
     const active = own.find(
       (mission) => mission.status === "running" || mission.status === "idle",
     );
+    const schedule = matchSchedule(schedules, agent, claimed);
+    if (schedule) claimed.add(schedule.id);
     return {
       agent,
-      schedule: schedules.find((schedule) => schedule.agentId === agent.id) ?? null,
+      schedule,
       missions: own,
       status: agentRunStatus(own),
       activeMissionId: active?.id ?? null,

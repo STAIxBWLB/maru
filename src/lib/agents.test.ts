@@ -322,7 +322,12 @@ describe("buildAgentRows", () => {
   }
 
   function schedule(agentId: string, nextRunAt: string): SchedulerSchedule {
-    return { id: `s-${agentId}`, agentId, nextRunAt } as unknown as SchedulerSchedule;
+    return {
+      id: `s-${agentId}`,
+      agentId,
+      nextRunAt,
+      skillId: "",
+    } as unknown as SchedulerSchedule;
   }
 
   it("shows a live run over a stale failure", () => {
@@ -383,5 +388,52 @@ describe("buildAgentRows", () => {
       "s-scheduled-soon",
     );
     expect(rows.find((row) => row.agent.id === "never-run")?.status).toBe("never");
+  });
+
+  it("adopts a pre-agent schedule by the skill it dispatches", () => {
+    // The user's real schedule: created before agents existed, so it carries a
+    // machine-local skill id and no agentId. Without adoption it would have no
+    // row at all now that the old scheduler section is gone.
+    const legacy = {
+      id: "sched-bb4e8305",
+      name: "Inbox extract-tasks",
+      skillId: "maru-builtin::inbox-process",
+      prompt: "extract-tasks",
+      hour: 7,
+      minute: 0,
+      daysOfWeek: [],
+      enabled: true,
+      nextRunAt: "2026-08-03T07:00:00+09:00",
+    } as unknown as SchedulerSchedule;
+
+    const rows = buildAgentRows(
+      [agent({ id: "inbox-triage", skillName: "inbox-process" }), agent({ id: "other", skillName: "vault-lint" })],
+      [legacy],
+      [],
+    );
+    expect(rows.find((row) => row.agent.id === "inbox-triage")?.schedule?.id).toBe(
+      "sched-bb4e8305",
+    );
+    expect(rows.find((row) => row.agent.id === "other")?.schedule).toBeNull();
+  });
+
+  it("never shows one schedule against two agents", () => {
+    const legacy = {
+      id: "sched-shared",
+      skillId: "inbox-process",
+      daysOfWeek: [],
+      enabled: true,
+    } as unknown as SchedulerSchedule;
+    const rows = buildAgentRows(
+      [
+        agent({ id: "a-first", skillName: "inbox-process" }),
+        agent({ id: "b-second", skillName: "inbox-process" }),
+      ],
+      [legacy],
+      [],
+    );
+    const withSchedule = rows.filter((row) => row.schedule !== null);
+    expect(withSchedule).toHaveLength(1);
+    expect(withSchedule[0].agent.id).toBe("a-first");
   });
 });
