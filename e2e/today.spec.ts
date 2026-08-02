@@ -84,9 +84,9 @@ test("explicit settings-window navigation wins over the Today auto-open", async 
   await installTodayMocks(page, buildTodaySeed({ markerDay: null }));
   await page.goto("/?window=settings&workPath=mock%3A%2F%2Fmaru-sample-workspace&tab=tasks");
 
-  // The separate settings window returns before the main-app boot, so no
-  // Today command fires at all — explicit navigation always wins.
-  await expect(page.locator(".settings-window-shell")).toBeVisible();
+  // The settings deep link seeds the in-app overlay at boot, and explicit
+  // navigation wins — no Today command fires at all.
+  await expect(page.locator(".settings-overlay")).toBeVisible();
   await expect(page.locator(".today-pane")).toHaveCount(0);
   const calls = await readTodayCalls(page);
   expect(calls.filter((call) => call.command.startsWith("today_"))).toHaveLength(0);

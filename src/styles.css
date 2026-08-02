@@ -1474,7 +1474,6 @@ a {
   overflow: hidden;
 }
 
-.settings-window-shell,
 .skill-editor-window-shell {
   height: 100dvh;
   display: grid;
@@ -1483,12 +1482,6 @@ a {
   background: var(--bg);
   color: var(--ink);
   overflow: hidden;
-}
-
-.settings-window-shell .system-pane {
-  grid-area: 1 / 1;
-  width: 100%;
-  height: 100%;
 }
 
 .skill-editor-window-shell {
@@ -8674,7 +8667,9 @@ button.git-badge:hover {
   display: flex;
   flex-direction: column-reverse;
   gap: 10px;
-  z-index: 70;
+  /* Above the settings overlay (82) and command palette (80), still below
+     dialogs (90). */
+  z-index: 84;
   pointer-events: none;
 }
 

@@ -9,7 +9,6 @@ import {
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import { formatUsageWindowSegment } from "../lib/usageFormat";
-import { openSettingsWindow } from "../lib/windowLayout";
 
 const POLL_INTERVAL_MS = 60_000;
 // Focus/visibility events fire on every alt-tab; only reload when the last
@@ -19,14 +18,14 @@ const FOCUS_RELOAD_MIN_AGE_MS = 30_000;
 /**
  * Main-window footer with one quota chip per agent. Polls usage every 60s and
  * on window focus (debounced to one reload per 30s); clicking a chip opens
- * the settings window Agents tab.
+ * the settings Agents tab.
  */
 export function AgentUsageBar({
-  workPath,
   commandOverrides,
+  onOpenSettings,
 }: {
-  workPath: string | null;
   commandOverrides?: AgentCommandOverrides;
+  onOpenSettings?: (tab: string) => void;
 }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AgentUsageStatus[] | null>(null);
@@ -78,9 +77,7 @@ export function AgentUsageBar({
   }, [load]);
 
   const openAgentsSettings = () => {
-    void openSettingsWindow(workPath, "agents").catch(() => {
-      // Settings window requires the Tauri shell; ignore in browser dev.
-    });
+    onOpenSettings?.("agents");
   };
 
   if (!usage) return null;

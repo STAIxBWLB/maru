@@ -1,9 +1,4 @@
-export const SETTINGS_WINDOW_OPEN_TAB_EVENT = "settings://open-tab";
 export const SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT = "settings://terminal-launch";
-
-export interface SettingsWindowOpenTabPayload {
-  tab: string;
-}
 
 export interface SettingsWindowTerminalLaunchPayload {
   command: string | null;
@@ -11,24 +6,13 @@ export interface SettingsWindowTerminalLaunchPayload {
   cwd: string | null;
 }
 
-/** Emit a terminal launch request for the main window. The only listener (and
- *  the terminal itself) lives in the main window, so bring it forward first —
- *  emitting with no listener would silently drop the launch. Returns false
- *  when the main window is gone and the launch cannot be delivered. */
+/** Emit a terminal launch request. Settings now lives inside the main window,
+ *  so a plain same-window emit reaches the listener in MainApp. Returns false
+ *  only if the emit itself throws outside the browser dev shell. */
 export async function emitSettingsTerminalLaunch(
   payload: SettingsWindowTerminalLaunchPayload,
 ): Promise<boolean> {
   try {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const mainWindow = await WebviewWindow.getByLabel("main");
-    if (!mainWindow) return false;
-    try {
-      await mainWindow.show();
-      await mainWindow.unminimize();
-      await mainWindow.setFocus();
-    } catch {
-      // Focusing is best-effort; the emit below still reaches the listener.
-    }
     const { emit } = await import("@tauri-apps/api/event");
     await emit(SETTINGS_WINDOW_TERMINAL_LAUNCH_EVENT, payload);
     return true;

@@ -603,7 +603,7 @@ test("manages secrets settings with full-width scroll and explicit reveal", asyn
     "aria-selected",
     "true",
   );
-  const body = page.locator(".settings-window-shell .system-body");
+  const body = page.locator(".settings-overlay .system-body");
   const form = body.locator(".secrets-settings-form");
   await expect(form).toBeVisible();
   await expect(form).toContainText("Workspace 시크릿");
@@ -1436,25 +1436,23 @@ test("centers the empty editor placeholder", async ({ page }) => {
   expect(Math.abs(editorCenter.y - plateCenter.y)).toBeLessThan(2);
 });
 
-test("keeps the settings window content anchored at the top", async ({ page }) => {
+test("keeps the settings overlay content anchored at the top", async ({ page }) => {
   await page.goto("/?window=settings&workPath=mock://maru-sample-workspace");
 
-  const pane = page.locator(".settings-window-shell .system-pane");
-  const header = pane.locator(".system-header");
-  const activeTab = pane.locator(".system-tab.active");
+  const overlay = page.locator(".settings-overlay");
+  const activeTab = overlay.locator(".settings-nav-item.active");
+  const body = overlay.locator(".system-body");
 
-  await expect(header.getByRole("heading", { name: "시스템" })).toBeVisible();
+  await expect(overlay).toBeVisible();
   await expect(activeTab).toHaveText("Preferences");
+  await expect(body).toBeVisible();
 
-  const paneBox = await pane.boundingBox();
-  const headerBox = await header.boundingBox();
-  const tabBox = await activeTab.boundingBox();
-  expect(paneBox).not.toBeNull();
-  expect(headerBox).not.toBeNull();
-  expect(tabBox).not.toBeNull();
-  if (!paneBox || !headerBox || !tabBox) return;
+  const overlayBox = await overlay.boundingBox();
+  const bodyBox = await body.boundingBox();
+  expect(overlayBox).not.toBeNull();
+  expect(bodyBox).not.toBeNull();
+  if (!overlayBox || !bodyBox) return;
 
-  expect(paneBox.y).toBeLessThan(2);
-  expect(headerBox.y).toBeLessThan(24);
-  expect(tabBox.y).toBeLessThan(96);
+  expect(overlayBox.y).toBeLessThan(2);
+  expect(bodyBox.y).toBeLessThan(96);
 });
