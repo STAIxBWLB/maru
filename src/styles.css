@@ -2730,6 +2730,10 @@ a {
   width: 100%;
   border: 0;
   outline: 0;
+  /* WKWebView draws a native focused bezel on text inputs regardless of
+     border/outline; appearance:none is what actually removes it. */
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--ink);
   font-size: var(--type-body-size);
@@ -10894,6 +10898,8 @@ button.git-badge:hover {
   width: 100%;
   border: 0;
   outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--ink);
   font-size: var(--type-heading-size);
@@ -12135,18 +12141,6 @@ button.git-badge:hover {
   box-shadow: var(--shadow-sm);
 }
 
-.skills-overview-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.skills-overview-title > svg {
-  color: var(--accent);
-}
-
-.skills-overview-title h3,
 .skills-section-heading h3,
 .skills-editor-header h3 {
   margin: 0;
@@ -12156,7 +12150,6 @@ button.git-badge:hover {
   letter-spacing: 0;
 }
 
-.skills-overview-title p,
 .skills-editor-header p {
   margin: 2px 0 0;
   color: var(--muted);
@@ -13830,71 +13823,10 @@ button.git-badge:hover {
 
 /* =============================== System mode =============================== */
 
-.app-shell.system-mode {
-  grid-template-areas:
-    "topbar topbar topbar topbar"
-    "activity system system system"
-    "activity terminal terminal terminal";
-}
-.system-pane {
-  grid-area: system;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
-  background: var(--bg);
-  font-size: var(--type-label-size);
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-/* Guard: bare headings dropped into the 12.5px pane get sane sizes instead
-   of browser defaults. :where() keeps specificity at 0-0-1 so EVERY styled
-   heading rule (including equal-specificity ones like the skills headings)
-   still wins regardless of source order. */
-:where(.system-pane) h3 {
-  margin: 0;
-  font-size: var(--type-body-size);
-  font-weight: 700;
-}
-:where(.system-pane) h4 {
-  margin: 0;
-  font-size: var(--type-label-size);
-  font-weight: 650;
-}
 .system-empty {
   display: grid;
   place-items: center;
   background: var(--panel-2);
-}
-.system-header {
-  padding: 18px 24px 12px;
-  border-bottom: 1px solid var(--line-soft);
-  background: var(--panel);
-  display: grid;
-  gap: 4px;
-}
-.system-header h2 {
-  margin: 0;
-  font-size: var(--type-title-size);
-  font-weight: 700;
-  letter-spacing: 0;
-  text-wrap: balance;
-}
-.system-header p {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--type-label-size);
-  line-height: 1.45;
-  text-wrap: pretty;
-}
-.system-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 9px 24px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--panel-2) 86%, var(--bg));
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 .system-tab {
   min-height: 28px;
@@ -14187,13 +14119,6 @@ button.git-badge:hover {
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
 }
 
-.inbox-runtime-editor {
-  max-width: none;
-  display: grid;
-  gap: 12px;
-  font-size: var(--type-label-size);
-}
-
 .settings-section-panel {
   display: grid;
   gap: 13px;
@@ -14445,71 +14370,7 @@ button.git-badge:hover {
   gap: 8px;
 }
 
-.inbox-runtime-editor .field {
-  gap: 4px;
-  font-size: var(--type-meta-size);
-}
-
-.inbox-runtime-editor input,
-.inbox-runtime-editor select,
-.inbox-runtime-editor .settings-textarea {
-  height: 30px;
-  border-radius: 7px;
-  font-size: var(--type-label-size);
-}
-
-.inbox-runtime-editor input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  padding: 0;
-  accent-color: var(--accent);
-}
-
-.inbox-runtime-editor .button-sm {
-  height: 24px;
-  padding: 0 8px;
-  font-size: var(--type-meta-size);
-}
-
-.inbox-channel-list .system-list-item {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  padding: 7px 9px;
-  border-radius: 7px;
-  font-size: var(--type-meta-size);
-}
-
-.inbox-channel-list .system-list-item strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink);
-  font-size: var(--type-label-size);
-}
-
-.inbox-channel-list .system-list-item span {
-  color: var(--muted);
-  font-size: var(--type-meta-size);
-}
-
-.inbox-channel-fields .system-detail-actions.compact strong {
-  font-size: var(--type-body-size);
-}
-
-.settings-form .settings-textarea {
-  min-height: 180px;
-  height: auto;
-  padding: 10px;
-  font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
-  font-size: var(--type-label-size);
-  line-height: 1.45;
-  resize: vertical;
-}
-
 @media (max-width: 720px) {
-  .system-header,
-  .system-tabs,
   .system-detail {
     padding-left: 14px;
     padding-right: 14px;
@@ -14536,11 +14397,6 @@ button.git-badge:hover {
   .secrets-root-card {
     grid-column: auto;
   }
-}
-
-.inbox-runtime-editor .settings-textarea {
-  min-height: 118px;
-  font-size: var(--type-meta-size);
 }
 
 @media (max-width: 820px) {
@@ -21701,6 +21557,37 @@ button.git-badge:hover {
   scrollbar-width: none;
 }
 
+.agent-usage-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-usage-skills {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.agent-usage-skills:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.agent-usage-skills-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .agent-usage-chip {
   display: inline-flex;
   align-items: baseline;
@@ -21739,24 +21626,6 @@ button.git-badge:hover {
   gap: 4px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line-soft);
-}
-
-.agents-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.agents-section:last-child {
-  border-bottom: none;
-}
-
-.agents-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .agents-badge {

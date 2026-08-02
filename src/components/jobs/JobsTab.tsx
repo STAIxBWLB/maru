@@ -13,6 +13,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import { ModeHeader } from "../ui/ModeChrome";
+import { SettingsSection } from "../settings/SettingsSection";
 import {
   jobsInstall,
   jobsList,
@@ -84,13 +86,11 @@ export function JobsTab({ workPath }: JobsTabProps) {
   };
 
   return (
-    <div className="settings-form jobs-settings-form">
-      <section className="settings-section-panel">
-        <div className="settings-section-heading">
-          <div>
-            <strong>{t("system.jobs.title")}</strong>
-            <span>{t("system.jobs.description")}</span>
-          </div>
+    <div className="settings-tab wide jobs-settings-form">
+      <ModeHeader
+        title={t("system.tab.jobs")}
+        subtitle={t("system.jobs.description")}
+        actions={
           <button
             type="button"
             className="secondary-button"
@@ -100,7 +100,9 @@ export function JobsTab({ workPath }: JobsTabProps) {
             <RefreshCcw size={14} />
             <span>{t("system.jobs.refresh")}</span>
           </button>
-        </div>
+        }
+      />
+      <SettingsSection title={t("system.jobs.title")} padded>
         {error ? <p className="jobs-error">{error}</p> : null}
         {jobs === null ? (
           <p className="muted">{t("system.jobs.loading")}</p>
@@ -218,7 +220,7 @@ export function JobsTab({ workPath }: JobsTabProps) {
             ))}
           </ul>
         )}
-      </section>
+      </SettingsSection>
     </div>
   );
 }

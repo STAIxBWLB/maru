@@ -1444,7 +1444,7 @@ test("keeps the settings overlay content anchored at the top", async ({ page }) 
   const body = overlay.locator(".system-body");
 
   await expect(overlay).toBeVisible();
-  await expect(activeTab).toHaveText("Preferences");
+  await expect(activeTab).toHaveText("일반");
   await expect(body).toBeVisible();
 
   const overlayBox = await overlay.boundingBox();

@@ -37,7 +37,7 @@ test("claude sub-tab shows the connected badge and account details from the mock
 }) => {
   await page.goto(SETTINGS_URL);
 
-  const authSection = page.locator(".agents-section", { hasText: "인증" }).first();
+  const authSection = page.locator(".settings-section", { hasText: "인증" }).first();
   await expect(authSection.locator(".agents-badge.connected")).toHaveText("연결됨");
 
   const accountTable = authSection.locator(".agents-account-table");
@@ -51,7 +51,7 @@ test("claude sub-tab shows the connected badge and account details from the mock
     page.getByRole("button", { name: "claude auth login 실행" }),
   ).toBeVisible();
 
-  const usageSection = page.locator(".agents-section", { hasText: "사용량" }).first();
+  const usageSection = page.locator(".settings-section", { hasText: "사용량" }).first();
   await expect(usageSection).toContainText("19% 사용");
   await expect(usageSection).toContainText("89% 사용");
 });
@@ -61,12 +61,12 @@ test("kiro sub-tab shows the unauthenticated state", async ({ page }) => {
 
   await page.locator(".agents-subtabs").getByRole("tab", { name: "Kiro" }).click();
 
-  const authSection = page.locator(".agents-section", { hasText: "인증" }).first();
+  const authSection = page.locator(".settings-section", { hasText: "인증" }).first();
   await expect(authSection.locator(".agents-badge")).toHaveText("연결 안 됨");
   await expect(authSection.locator(".agents-badge.connected")).toHaveCount(0);
   await expect(authSection).toContainText("Not logged in.");
 
-  const usageSection = page.locator(".agents-section", { hasText: "사용량" }).first();
+  const usageSection = page.locator(".settings-section", { hasText: "사용량" }).first();
   await expect(usageSection).toContainText("이 에이전트는 사용량 조회를 지원하지 않습니다.");
 });
 

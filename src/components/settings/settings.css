@@ -69,6 +69,10 @@
   flex: 1;
   min-width: 0;
   border: none;
+  /* WKWebView draws a native focused bezel on text inputs regardless of
+     border/outline; appearance:none is what actually removes it. */
+  appearance: none;
+  -webkit-appearance: none;
   background: none;
   color: var(--text);
   font: inherit;
@@ -158,6 +162,25 @@
   flex: 1;
 }
 
+/* Tab bodies (PR 2 conversions) */
+
+.settings-tab {
+  max-width: 880px;
+}
+
+.settings-tab.wide {
+  max-width: none;
+}
+
+.settings-tab .mode-header {
+  margin-bottom: 20px;
+}
+
+/* Sub-tab bars inside a tab (agents) must not touch the first card. */
+.settings-tab .agents-subtabs {
+  margin-bottom: 16px;
+}
+
 /* Section card + row primitives */
 
 .settings-section {
@@ -200,6 +223,13 @@
   flex-direction: column;
 }
 
+/* Custom (non-row) content: grids, lists, tables, editors. Keeps child
+   borders off the card edge so lines never double up. */
+.settings-section-body.padded {
+  padding: 14px 16px;
+  gap: 12px;
+}
+
 .settings-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -210,6 +240,11 @@
 
 .settings-row + .settings-row {
   border-top: 1px solid var(--line);
+}
+
+.settings-row.wide {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .settings-row-copy {

@@ -1,6 +1,7 @@
 // Settings navigation — the single declarative source for the settings
 // sidebar. Replaces the hand-duplicated SystemTab union / isSystemTab
-// validator pair that used to live in SystemPane.tsx.
+// validator pair from the pre-split SystemPane.tsx (now
+// settings/SettingsTabBody.tsx + settings/tabs/).
 
 import {
   Bot,
@@ -13,6 +14,7 @@ import {
   ListTodo,
   MessagesSquare,
   Network,
+  Palette,
   Plug,
   Puzzle,
   ScrollText,
@@ -53,6 +55,13 @@ export const SETTINGS_NAV = [
     icon: SlidersHorizontal,
     labelKey: "system.tab.preferences",
     keywords: ["general", "일반", "appearance", "theme", "workspace", "files"],
+  },
+  {
+    id: "appearance",
+    group: "general",
+    icon: Palette,
+    labelKey: "system.tab.appearance",
+    keywords: ["appearance", "외관", "theme", "테마", "accent", "color", "색상"],
   },
   {
     id: "terminal",
