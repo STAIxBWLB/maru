@@ -611,6 +611,8 @@ export type MissionStatus = "running" | "idle" | "done" | "failed" | "stopped";
 
 export interface InboxProcessMissionMetadata {
   origin: "inboxProcess";
+  /** Agent that owns this run — the join key the Agents pane groups by. */
+  agentId?: string | null;
   /** First/primary channel (kept for back-compat with `inboxProcessChannel`). */
   channel: string;
   /** All distinct channels covered by a bundled review-flow run. */
@@ -630,6 +632,8 @@ export interface InboxProcessMissionMetadata {
 
 export interface SkillMissionMetadata {
   origin?: string | null;
+  /** Agent that owns this run — the join key the Agents pane groups by. */
+  agentId?: string | null;
   skillName?: string | null;
   runtime?: string | null;
   permissionMode?: string | null;
