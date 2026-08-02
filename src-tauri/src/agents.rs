@@ -29,7 +29,7 @@ use crate::atomic_file::write_atomic;
 use crate::skill_host::fs::maru_home;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -39,14 +39,7 @@ const AGENTS_FILE_VERSION: u32 = 1;
 /// the list on purpose: a call site is bound to its agent's output contract, so
 /// re-pointing a builtin at another skill would break the feature that consumes
 /// it rather than customize it.
-const OVERRIDABLE_FIELDS: &[&str] = &[
-    "runtime",
-    "permissionMode",
-    "prompt",
-    "enabled",
-    "label",
-    "description",
-];
+const OVERRIDABLE_FIELDS: &[&str] = &["runtime", "permissionMode", "prompt", "enabled"];
 
 const RUNTIMES: &[&str] = &["inherit", "claude", "codex", "kimi", "kiro"];
 const PERMISSION_MODES: &[&str] = &[
@@ -332,12 +325,26 @@ fn merged(file: &AgentsFile) -> Result<Vec<AgentRecord>, String> {
     for seed in SEEDS {
         let base = seed_record(seed);
         let patch = file.overrides.get(seed.id).and_then(JsonValue::as_object);
+        // One malformed override must not take the registry down with it: a
+        // failed merge falls back to the seed for that agent alone. Propagating
+        // would leave `agents_list` empty, which makes every feature-bound
+        // builtin fail with `agent_not_found` and hides the very pane the user
+        // would reset it from — with no way back except editing the file.
         out.push(match patch {
-            Some(patch) if !patch.is_empty() => apply_patch(&base, patch)?,
+            Some(patch) if !patch.is_empty() => {
+                apply_patch(&base, patch).unwrap_or_else(|_| seed_record(seed))
+            }
             _ => base,
         });
     }
+    let seed_ids: BTreeSet<&str> = SEEDS.iter().map(|seed| seed.id).collect();
     for agent in &file.agents {
+        // A release that adds a seed id a user agent already uses would
+        // otherwise list both, and the duplicate would be uneditable (upsert
+        // routes to the builtin) and undeletable (delete refuses builtins).
+        if seed_ids.contains(agent.id.as_str()) {
+            continue;
+        }
         let mut agent = agent.clone();
         agent.builtin = false;
         agent.customized = false;
@@ -788,5 +795,43 @@ mod tests {
 
         assert_eq!(get_agent("vault-hygiene").unwrap().runtime, "kimi");
         assert!(get_agent("nope").is_none());
+    }
+
+    #[test]
+    fn a_malformed_override_degrades_to_the_seed_instead_of_emptying_the_registry() {
+        let _home = test_home_for_bundle_tests();
+        // Hand-edited or written by an older release with a different type.
+        let mut file = AgentsFile::default();
+        file.overrides.insert(
+            "vault-hygiene".to_string(),
+            serde_json::json!({ "enabled": "yes" }),
+        );
+        save_file(&file).unwrap();
+
+        // Propagating would leave agents_list empty, which makes every
+        // feature-bound builtin fail with agent_not_found and hides the pane
+        // the user would reset it from.
+        let listed = agents_list().unwrap();
+        assert_eq!(listed.len(), SEEDS.len());
+        let hygiene = listed.iter().find(|a| a.id == "vault-hygiene").unwrap();
+        assert!(hygiene.enabled);
+        assert!(listed.iter().any(|a| a.id == "inbox-triage"));
+    }
+
+    #[test]
+    fn a_seed_id_added_later_never_lists_twice() {
+        let _home = test_home_for_bundle_tests();
+        // A user agent created before a release introduced the same seed id
+        // would otherwise be listed twice, uneditable (upsert routes to the
+        // builtin) and undeletable (delete refuses builtins).
+        let mut file = AgentsFile::default();
+        let mut squatter = user_agent("git-sync");
+        squatter.label = Some("내 동기화".to_string());
+        file.agents.push(squatter);
+        save_file(&file).unwrap();
+
+        let listed = agents_list().unwrap();
+        assert_eq!(listed.iter().filter(|a| a.id == "git-sync").count(), 1);
+        assert!(listed.iter().find(|a| a.id == "git-sync").unwrap().builtin);
     }
 }

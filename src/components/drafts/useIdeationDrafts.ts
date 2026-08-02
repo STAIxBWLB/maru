@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauri, listAiMissions, readScratchpadDocument } from "../../lib/api";
 import {
+  agentErrorMessage,
   requireAgent,
   runAgent,
   type AgentRecord,
@@ -201,10 +202,10 @@ export function useIdeationDrafts({
         });
         setPendingRuns((current) => ({ ...current, [ideaPath]: runId }));
       } catch (error) {
-        onError(errorMessage(error));
+        onError(agentErrorMessage(error, t));
       }
     },
-    [agents, ai, drafts, onError, onOpenDraft, skills, workPath],
+    [agents, ai, drafts, onError, onOpenDraft, skills, t, workPath],
   );
 
   return { pendingIdeaPaths: new Set(Object.keys(pendingRuns)), generate };

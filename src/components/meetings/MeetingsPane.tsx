@@ -58,8 +58,9 @@ import {
 } from "../../lib/meetingsLog";
 import {
   findSkill,
+  agentErrorMessage,
   requireAgent,
-  runAgent,
+  runAgentDetailed,
   type AgentRecord,
 } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
@@ -1402,7 +1403,10 @@ function MeetingsSkillWorkbench({
       });
       // The chooser is a per-run override of the agent's stored backend, so
       // the agent is cloned rather than mutated.
-      const invocationId = await runAgent(
+      // `runAgentDetailed`, not `runAgent`: the chooser's pick can fall back to
+      // another CLI when the probe snapshot has gone stale, and the optimistic
+      // row, the audit log line and retry all have to record what actually ran.
+      const { invocationId, runtime: dispatched } = await runAgentDetailed(
         { ...requireAgent(agents, "meeting-notes"), runtime },
         {
           skills,
@@ -1422,7 +1426,7 @@ function MeetingsSkillWorkbench({
       setRuntimeChooserOpen(false);
       const optimisticMission = createOptimisticMeetingMission({
         id: invocationId,
-        runtime,
+        runtime: dispatched,
         sourceKind,
         inputPaths: paths,
         workPath,
@@ -1436,7 +1440,7 @@ function MeetingsSkillWorkbench({
       onMissionStarted(invocationId);
       onRefreshMissions();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      onError(agentErrorMessage(err, t));
     } finally {
       setBusy(false);
     }

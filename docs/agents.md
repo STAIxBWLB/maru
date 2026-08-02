@@ -31,7 +31,7 @@ and what a schedule uses to pick up its agent's current configuration.
 | `permissionMode` | `inherit` \| `plan` \| `acceptEdits` \| `default` \| `bypassPermissions`. |
 | `prompt` | Literal text. Empty on a feature-bound builtin, whose owning surface builds one per run. |
 | `kind` | `background` = tracked, stoppable mission. `inline` = request/response. |
-| `enabled` | `false` stops the agent's feature, not just its row: `runAgent` refuses a disabled agent. |
+| `enabled` | `false` stops the agent's feature, not just its row: `runAgent` refuses a disabled agent, the inline callers check `inlineAgentRuntime().enabled`, and the ticker skips any schedule naming it. |
 | `recommendedSchedule` | Derived from the seed; pre-fills the 일정 추가 form. Never creates a schedule by itself. |
 
 ## Storage
@@ -51,10 +51,15 @@ nothing to clobber. The user layer stores a **sparse patch** per builtin:
 ```
 
 On load, every field the user did not touch picks up the new seed value and
-every field they did touch survives. Reset drops the patch. Only
-`runtime`, `permissionMode`, `prompt`, `enabled`, `label` and `description` are
-overridable: a builtin's `skillName` is fixed because its call site depends on
-that skill's output contract.
+every field they did touch survives. Reset drops the patch. Only `runtime`,
+`permissionMode`, `prompt` and `enabled` are overridable: a builtin's
+`skillName` is fixed because its call site depends on that skill's output
+contract.
+
+A malformed override degrades to the seed **for that agent alone**. Propagating
+the error would leave `agents_list` empty, which makes every feature-bound
+builtin fail with `agent_not_found` and hides the very pane the user would
+reset it from.
 
 Builtins cannot be deleted (`agent_builtin_not_deletable`); `enabled: false` is
 the delete.
@@ -113,14 +118,32 @@ mission, so run/stop/schedule are disabled honestly instead of returning
 
 ## Schedules
 
-A schedule may name an `agentId`. At dispatch, an enabled and standalone agent's
-current skill/runtime/permission mode/prompt win, so editing the agent updates
-every schedule that uses it. A missing, disabled or feature-bound agent falls
-back to the schedule's own stored snapshot, so pausing or deleting an agent
-never silently repoints or empties a live schedule.
+A schedule may name an `agentId`. At dispatch, an enabled and standalone
+agent's current skill/runtime/permission mode/prompt win, so editing the agent
+updates every schedule that uses it.
+
+Switching an agent **off stops its schedules outright** (`agent_disabled`,
+skipped before the ticker's day claim so it stays silent rather than erroring
+once a minute). Only a **missing or feature-bound** agent falls back to the
+schedule's own stored snapshot — that fallback exists so deleting an agent
+never breaks a live schedule, and it must not double as a way for a disabled
+agent to keep running: the snapshot is byte-identical to what the agent used to
+run, so "off" would mean nothing on the one path nobody is watching.
+
+**Unattended runs default to permission mode `plan`** regardless of
+`ai.permissionMode`. The global setting is for runs the user is sitting in
+front of; silently promoting a 07:00 timer to `bypassPermissions` is the
+"agent-autonomous edits as default behavior" the README rules out. An agent
+that needs more sets its own `permissionMode` explicitly.
 
 `agentId` is serde-default and omitted when absent, so a pre-agent
-`schedules.json` parses and round-trips unchanged.
+`schedules.json` parses and round-trips unchanged. Such a schedule is adopted
+into its agent's row by the skill it dispatches (display-only inference), and
+its runs group there via `metadata.scheduleId` since they carry no `agentId`.
+
+A schedule matching no agent still appears, under 연결되지 않은 일정, with
+run / pause / remove — the pane is the only `listSchedules` consumer, so
+anything it fails to render would keep firing invisibly.
 
 ## Naming
 

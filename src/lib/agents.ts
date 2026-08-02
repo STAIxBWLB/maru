@@ -210,6 +210,31 @@ export function slugifyAgentId(name: string): string {
   return /^[a-z0-9]/.test(slug) ? slug : "";
 }
 
+/**
+ * Human-readable text for the machine tokens `runAgent` throws. The converted
+ * call sites all surface what they catch, but the user used to read a sentence
+ * in their language where they would now read `agent_skill_missing: …`.
+ */
+export function agentErrorMessage(
+  error: unknown,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const [token, detail] = raw.split(/:\s*/, 2);
+  switch (token) {
+    case "agent_skill_missing":
+      return t("agents.error.skillMissing", { skill: detail ?? "" });
+    case "agent_disabled":
+      return t("agents.error.disabled", { agent: detail ?? "" });
+    case "agent_not_found":
+      return t("agents.error.notFound", { agent: detail ?? "" });
+    case "agent_prompt_required":
+      return t("agents.error.promptRequired");
+    default:
+      return raw;
+  }
+}
+
 export function findAgent(agents: AgentRecord[], id: string): AgentRecord | null {
   return agents.find((agent) => agent.id === id) ?? null;
 }
@@ -395,6 +420,14 @@ export function agentIdOf(mission: MissionRecord): string | null {
   );
 }
 
+/** Schedule that fired this run, when the scheduler stamped one. */
+export function scheduleIdOf(mission: MissionRecord): string | null {
+  const metadata = mission.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const value = (metadata as Record<string, unknown>).scheduleId;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 export function missionsForAgent(
   missions: MissionRecord[],
   agentId: string,
@@ -520,12 +553,21 @@ export function buildAgentBoard(
 ): AgentBoard {
   const claimed = new Set<string>();
   const rows = agents.map((agent): AgentRow => {
-    const own = missionsForAgent(missions, agent.id).sort(newestFirst);
+    const matched = matchSchedules(schedules, agent, claimed);
+    for (const schedule of matched) claimed.add(schedule.id);
+    // A run fired by a pre-agent schedule carries no `agentId` and no origin
+    // the prefix map knows, so it would show under no agent at all — even
+    // though the schedule itself is displayed on this row.
+    const scheduleIds = new Set(matched.map((schedule) => schedule.id));
+    const own = missions
+      .filter(
+        (mission) =>
+          agentIdOf(mission) === agent.id || scheduleIds.has(scheduleIdOf(mission) ?? ""),
+      )
+      .sort(newestFirst);
     const active = own.find(
       (mission) => mission.status === "running" || mission.status === "idle",
     );
-    const matched = matchSchedules(schedules, agent, claimed);
-    for (const schedule of matched) claimed.add(schedule.id);
     return {
       agent,
       schedules: matched,

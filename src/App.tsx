@@ -257,6 +257,7 @@ import {
 } from "./lib/skills";
 import { activeTrackedAgentMissions, isTrackedAgentMission } from "./lib/skillRuns";
 import {
+  agentErrorMessage,
   inlineAgentRuntime,
   listAgents,
   requireAgent,
@@ -3308,7 +3309,7 @@ function MainApp() {
         updateInboxCarry(id, { decision });
         void refreshInbox();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(agentErrorMessage(err, t));
       } finally {
         setInboxActionBusy(false);
       }
@@ -3872,6 +3873,19 @@ function MainApp() {
     [refreshProcessingMissions],
   );
 
+  /** Same tracking, no banner: a successful start is not an error. */
+  const trackMissionQuietly = useCallback(
+    (invocationId: string) => {
+      processingMissionIdsRef.current = new Set([
+        ...processingMissionIdsRef.current,
+        invocationId,
+      ]);
+      setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
+      void refreshProcessingMissions();
+    },
+    [refreshProcessingMissions],
+  );
+
   const stageInboxFiles = useCallback(
     async (sourcePaths: string[]) => {
       if (!inboxWorkspacePath || sourcePaths.length === 0) return;
@@ -3940,7 +3954,7 @@ function MainApp() {
       } catch (err) {
         updateInboxCarry(id, {
           classifying: false,
-          classifyError: err instanceof Error ? err.message : String(err),
+          classifyError: agentErrorMessage(err, t),
         });
       }
     },
@@ -8761,9 +8775,9 @@ function MainApp() {
             missions={processingMissions}
             logLines={processingLogLines}
             runtimeCommands={aiRuntimeCommands}
-            onRefreshMissions={() => void refreshProcessingMissions()}
-            onStopMission={(id) => void stopProcessingMission(id)}
-            onMissionStarted={handleMeetingsMissionStarted}
+            onRefreshMissions={refreshProcessingMissions}
+            onStopMission={stopProcessingMission}
+            onMissionStarted={trackMissionQuietly}
             onConfirmApproval={approvalGate.confirmApproval}
             onAgentsChanged={refreshAgents}
             onError={setError}
@@ -8924,7 +8938,6 @@ function MainApp() {
               skills,
               runtimeCommands: aiRuntimeCommands,
               permissionMode: maruSettings.ai.permissionMode,
-              defaultRuntime: maruSettings.ai.defaultRuntime,
               agents,
               ai: maruSettings.ai,
               processingMissions: activeTasksMissions(processingMissions),

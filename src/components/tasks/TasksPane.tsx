@@ -24,6 +24,7 @@ import {
   updateTaskStatus,
 } from "../../lib/api";
 import {
+  agentErrorMessage,
   requireAgent,
   runAgentDetailed,
   type AgentRecord,
@@ -78,7 +79,6 @@ export interface TasksPaneProps {
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
   permissionMode?: string | null;
-  defaultRuntime?: SkillDispatchRuntime;
   agents: AgentRecord[];
   ai: AiSettings;
   processingMissions: MissionRecord[];
@@ -125,7 +125,6 @@ export function TasksPane({
   skills,
   runtimeCommands,
   permissionMode,
-  defaultRuntime,
   agents,
   ai,
   processingMissions,
@@ -457,7 +456,7 @@ export function TasksPane({
           ).catch(() => {});
         }
       } catch (err) {
-        onError(err instanceof Error ? err.message : String(err));
+        onError(agentErrorMessage(err, t));
       }
     },
     [
@@ -469,6 +468,7 @@ export function TasksPane({
       onRefreshMissions,
       effectiveSettings.hooks.appendVaultLog,
       onError,
+      t,
     ],
   );
 

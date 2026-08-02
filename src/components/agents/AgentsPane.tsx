@@ -7,7 +7,7 @@
 // stop button are the same components the Inbox and Skills surfaces use.
 
 import { Bot, Plus, RefreshCcw, RotateCcw, Square, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
@@ -71,8 +71,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function blankAgent(): AgentRecord {
-  return {
+/**
+ * Frozen, not a factory called in JSX: `AgentEditor` resets its draft whenever
+ * the `agent` prop's identity changes, so a fresh object per render wiped
+ * whatever the user had typed every time a background mission logged a line.
+ */
+const BLANK_AGENT: AgentRecord = Object.freeze({
     id: "",
     labelKey: null,
     label: "",
@@ -83,10 +87,9 @@ function blankAgent(): AgentRecord {
     prompt: "",
     kind: "background",
     enabled: true,
-    builtin: false,
-    customized: false,
-  };
-}
+  builtin: false,
+  customized: false,
+});
 
 export function AgentsPane({
   workPath,
@@ -102,7 +105,7 @@ export function AgentsPane({
   onAgentsChanged,
   onError,
 }: AgentsPaneProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [schedules, setSchedules] = useState<SchedulerSchedule[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -111,6 +114,12 @@ export function AgentsPane({
   const [createOpen, setCreateOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Held in a ref so the listen effect below does not depend on a prop whose
+  // identity changes every App render.
+  const missionsRef = useRef(onRefreshMissions);
+  useEffect(() => {
+    missionsRef.current = onRefreshMissions;
+  }, [onRefreshMissions]);
 
   const refresh = useCallback(async () => {
     try {
@@ -141,9 +150,15 @@ export function AgentsPane({
     let disposed = false;
     const offs: Array<() => void> = [];
     for (const event of ["scheduler://changed", "scheduler://fired", "scheduler://error"]) {
-      void listen(event, () => {
+      void listen<{ message?: string }>(event, (payload) => {
+        // A schedule that fails every morning must not look identical to one
+        // that never fired. The retired scheduler section was the only surface
+        // that showed these.
+        if (event === "scheduler://error" && payload.payload?.message) {
+          setLocalError(payload.payload.message);
+        }
         void refresh();
-        onRefreshMissions();
+        missionsRef.current();
       })
         .then((off) => {
           if (disposed) off();
@@ -155,7 +170,7 @@ export function AgentsPane({
       disposed = true;
       for (const off of offs) off();
     };
-  }, [onRefreshMissions, refresh]);
+  }, [refresh]);
 
   const { rows, orphans } = useMemo(
     () => buildAgentBoard(agents, schedules, missions),
@@ -175,9 +190,12 @@ export function AgentsPane({
     }
   }, [filter, rows]);
 
+  // Scoped to `visibleRows`, not `rows`: searching all rows kept the detail
+  // pane rendering an agent that the filter had just hidden, with a live
+  // delete button on a row the user could no longer see.
   const selected = useMemo(
-    () => rows.find((row) => row.agent.id === selectedId) ?? visibleRows[0] ?? null,
-    [rows, selectedId, visibleRows],
+    () => visibleRows.find((row) => row.agent.id === selectedId) ?? visibleRows[0] ?? null,
+    [selectedId, visibleRows],
   );
 
   const runningCount = rows.filter(
@@ -235,15 +253,15 @@ export function AgentsPane({
   const attachSchedule = useCallback(
     async (row: AgentRow, when: RecommendedSchedule) => {
       if (!workPath) return;
-      const approvalId = await onConfirmApproval({
-        kind: SCHEDULE_ADD_APPROVAL_KIND,
-        summary: t("agents.schedule.approval", { name: agentLabel(row.agent, t) }),
-        target: workPath,
-        payloadPreview: `${formatScheduleTime(when.hour, when.minute)} · ${row.agent.skillName}`,
-      });
-      if (!approvalId) return;
       setBusy(true);
       try {
+        const approvalId = await onConfirmApproval({
+          kind: SCHEDULE_ADD_APPROVAL_KIND,
+          summary: t("agents.schedule.approval", { name: agentLabel(row.agent, t) }),
+          target: workPath,
+          payloadPreview: `${formatScheduleTime(when.hour, when.minute)} · ${row.agent.skillName}`,
+        });
+        if (!approvalId) return;
         await addSchedule(
           workPath,
           {
@@ -272,7 +290,7 @@ export function AgentsPane({
     [ai, onConfirmApproval, onError, refresh, t, workPath],
   );
 
-  const runOrphan = useCallback(
+  const runSchedule = useCallback(
     async (schedule: SchedulerSchedule) => {
       if (!workPath) return;
       setBusy(true);
@@ -292,7 +310,7 @@ export function AgentsPane({
     [onError, onMissionStarted, onRefreshMissions, workPath],
   );
 
-  const toggleOrphan = useCallback(
+  const toggleSchedule = useCallback(
     async (schedule: SchedulerSchedule) => {
       if (!workPath) return;
       setBusy(true);
@@ -314,6 +332,11 @@ export function AgentsPane({
   const detachSchedule = useCallback(
     async (schedule: SchedulerSchedule) => {
       if (!workPath) return;
+      // schedules.json has no undo, and a skill-matched schedule may be one the
+      // user built in the old UI with a prompt this agent never owned.
+      if (!window.confirm(t("drafts.automation.removeConfirm", { name: schedule.name }))) {
+        return;
+      }
       setBusy(true);
       try {
         await removeSchedule(workPath, schedule.id);
@@ -326,7 +349,7 @@ export function AgentsPane({
         setBusy(false);
       }
     },
-    [onError, refresh, workPath],
+    [onError, refresh, t, workPath],
   );
 
   const remove = useCallback(
@@ -450,7 +473,7 @@ export function AgentsPane({
                       variant="ghost"
                       size="sm"
                       disabled={busy || !workPath}
-                      onClick={() => void runOrphan(schedule)}
+                      onClick={() => void runSchedule(schedule)}
                     >
                       {t("agents.action.run")}
                     </Button>
@@ -458,7 +481,7 @@ export function AgentsPane({
                       variant="ghost"
                       size="sm"
                       disabled={busy || !workPath}
-                      onClick={() => void toggleOrphan(schedule)}
+                      onClick={() => void toggleSchedule(schedule)}
                     >
                       {schedule.enabled
                         ? t("agents.orphans.pause")
@@ -497,6 +520,7 @@ export function AgentsPane({
               }}
               onAttachSchedule={(when) => void attachSchedule(selected, when)}
               onDetachSchedule={(schedule) => void detachSchedule(schedule)}
+              onToggleSchedule={(schedule) => void toggleSchedule(schedule)}
               onSave={save}
               onDelete={() => void remove(selected.agent)}
               onReset={() => void reset(selected.agent)}
@@ -524,7 +548,7 @@ export function AgentsPane({
         <DialogSurfaceTitle>{t("agents.new")}</DialogSurfaceTitle>
         <AgentEditor
           create
-          agent={blankAgent()}
+          agent={BLANK_AGENT}
           skills={skills}
           busy={busy}
           takenIds={agents.map((agent) => agent.id)}
@@ -628,6 +652,7 @@ function AgentDetail({
   onStop,
   onAttachSchedule,
   onDetachSchedule,
+  onToggleSchedule,
   onSave,
   onDelete,
   onReset,
@@ -650,6 +675,7 @@ function AgentDetail({
   onStop: () => void;
   onAttachSchedule: (when: RecommendedSchedule) => void;
   onDetachSchedule: (schedule: SchedulerSchedule) => void;
+  onToggleSchedule: (schedule: SchedulerSchedule) => void;
   onSave: (agent: AgentRecord) => void | Promise<void>;
   onDelete: () => void;
   onReset: () => void;
@@ -667,7 +693,10 @@ function AgentDetail({
   // one per run, so "run now" here would dispatch nothing. A schedule supplies
   // one, which is why an attached schedule re-enables the button.
   const canRun =
-    Boolean(workPath) && !inline && (agentCanRunStandalone(agent) || row.schedules.length > 0);
+    Boolean(workPath)
+    && !inline
+    && agent.enabled
+    && (agentCanRunStandalone(agent) || row.schedules.length > 0);
   const liveMissions = row.missions.filter(
     (mission) => mission.status === "running" || mission.status === "idle",
   );
@@ -757,21 +786,37 @@ function AgentDetail({
               {row.schedules.map((schedule) => (
                 <div key={schedule.id} className="agents-schedule-row">
                   <span>
-                    {schedule.nextRunAt
-                      ? formatRelativeDate(schedule.nextRunAt, locale)
+                    {schedule.enabled
+                      ? schedule.nextRunAt
+                        ? formatRelativeDate(schedule.nextRunAt, locale)
+                        : t("agents.schedule.unscheduled")
                       : t("agents.schedule.paused")}
                     {" · "}
                     {formatScheduleTime(schedule.hour, schedule.minute)}
                     {schedule.agentId ? null : ` · ${t("agents.schedule.inferred")}`}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => onDetachSchedule(schedule)}
-                  >
-                    {t("agents.schedule.remove")}
-                  </Button>
+                  <span className="agents-orphan-actions">
+                    {/* The retired scheduler section had a per-schedule enable
+                        checkbox; without one, pausing for a week meant delete. */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onToggleSchedule(schedule)}
+                    >
+                      {schedule.enabled
+                        ? t("agents.orphans.pause")
+                        : t("agents.orphans.resume")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onDetachSchedule(schedule)}
+                    >
+                      {t("agents.schedule.remove")}
+                    </Button>
+                  </span>
                 </div>
               ))}
               <ScheduleForm

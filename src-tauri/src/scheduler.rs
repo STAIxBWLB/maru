@@ -51,8 +51,10 @@ pub struct SchedulerSchedule {
     pub enabled: bool,
     /// Agent this schedule runs. `#[serde(default)]` so a pre-agent
     /// `schedules.json` parses unchanged. When it resolves to an enabled,
-    /// standalone agent that agent's current configuration wins at dispatch;
-    /// otherwise the fields above are dispatched as the stored snapshot.
+    /// standalone agent that agent's current configuration wins at dispatch.
+    /// A *disabled* agent stops the schedule outright; a missing or
+    /// feature-bound one falls back to the fields above as a stored snapshot,
+    /// so deleting an agent never breaks a live schedule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -338,8 +340,18 @@ fn resolve_dispatch(
     schedule: &SchedulerSchedule,
     agent: Option<&AgentRecord>,
     ai: &GlobalAiSettings,
-) -> DispatchPlan {
-    let agent = agent.filter(|agent| agent.enabled && agent_can_run_standalone(agent));
+) -> Result<DispatchPlan, String> {
+    // Switching an agent off has to stop its schedule, not fall through to the
+    // snapshot captured when it was attached — that snapshot is byte-identical
+    // to what the agent used to run, so "off" would mean nothing on the one
+    // path nobody is watching. Only a *missing* or feature-bound agent falls
+    // back, which is what keeps a deleted agent from breaking a live schedule.
+    if let Some(agent) = agent {
+        if !agent.enabled {
+            return Err(format!("agent_disabled: {}", agent.id));
+        }
+    }
+    let agent = agent.filter(|agent| agent_can_run_standalone(agent));
     let runtime = match agent.map(|agent| agent.runtime.as_str()) {
         Some("inherit") => ai
             .default_runtime
@@ -348,10 +360,13 @@ fn resolve_dispatch(
         Some(explicit) => explicit.to_string(),
         None => schedule.runtime.clone(),
     };
-    // No agent used to mean "no permission mode", which `normalize_permission_mode`
-    // then read as `plan` — silently ignoring the user's setting on every timed run.
+    // An unattended run defaults to `plan` regardless of the global setting: the
+    // user chose that setting for runs they are sitting in front of, and
+    // silently promoting a 07:00 timer to `bypassPermissions` is exactly the
+    // "agent-autonomous edits as default behavior" the README rules out. An
+    // agent that needs more says so explicitly, per agent.
     let permission_mode = match agent.map(|agent| agent.permission_mode.as_str()) {
-        Some("inherit") | None => ai.permission_mode.clone(),
+        Some("inherit") | None => None,
         Some(explicit) => Some(explicit.to_string()),
     };
     // An agent names its skill portably; the schedule stores the machine-local
@@ -359,7 +374,7 @@ fn resolve_dispatch(
     let skill_ref = agent
         .map(|agent| agent.skill_name.clone())
         .unwrap_or_else(|| schedule.skill_id.clone());
-    DispatchPlan {
+    Ok(DispatchPlan {
         command_override: ai.command_override_for(&runtime),
         skill_ref,
         runtime,
@@ -368,7 +383,18 @@ fn resolve_dispatch(
             .unwrap_or_else(|| schedule.prompt.clone()),
         permission_mode,
         agent_id: schedule.agent_id.clone(),
-    }
+    })
+}
+
+/// True when a schedule must not fire because the agent it names is switched
+/// off. Checked before the ticker claims the day, so a paused agent costs
+/// nothing and emits nothing rather than erroring once a minute.
+fn schedule_is_paused_by_agent(schedule: &SchedulerSchedule) -> bool {
+    schedule
+        .agent_id
+        .as_deref()
+        .and_then(get_agent)
+        .is_some_and(|agent| !agent.enabled)
 }
 
 /// Metadata every scheduled run carries. `workspacePath` and `skillName` are
@@ -407,7 +433,7 @@ fn dispatch_schedule(
     schedule: &SchedulerSchedule,
 ) -> Result<String, String> {
     let agent = schedule.agent_id.as_deref().and_then(get_agent);
-    let plan = resolve_dispatch(schedule, agent.as_ref(), &global_ai_settings());
+    let plan = resolve_dispatch(schedule, agent.as_ref(), &global_ai_settings())?;
     let skill_id = resolve_skill_id(&plan.skill_ref)?;
     let metadata = dispatch_metadata(schedule, &plan, &skill_id, work);
     skills_dispatch_background(
@@ -427,6 +453,11 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
     let schedules = load_schedules(work)?;
     for schedule in &schedules {
         if !schedule.enabled {
+            continue;
+        }
+        // Checked before the day claim so a paused agent costs nothing and
+        // stays silent, rather than erroring once a minute forever.
+        if schedule_is_paused_by_agent(schedule) {
             continue;
         }
         // A nextRunAt that no longer parses is re-aligned without firing:
@@ -929,13 +960,15 @@ mod tests {
     #[test]
     fn dispatch_without_an_agent_keeps_the_schedule_snapshot() {
         let schedule = sample_schedule(None, true);
-        let plan = resolve_dispatch(&schedule, None, &ai_settings());
+        let plan = resolve_dispatch(&schedule, None, &ai_settings()).unwrap();
         assert_eq!(plan.skill_ref, "vault-sync");
         assert_eq!(plan.runtime, "claude");
         assert_eq!(plan.prompt, "Run it");
         // The bug this fixes: both of these used to be hardcoded None, so every
         // timed run ignored the user's CLI path override and ran at `plan`.
-        assert_eq!(plan.permission_mode.as_deref(), Some("bypassPermissions"));
+        // Unattended runs stay at `plan`; the command override is the half of
+        // the old hardcoded `None, None` that genuinely was a bug.
+        assert!(plan.permission_mode.is_none());
         assert!(plan.command_override.is_none());
     }
 
@@ -946,7 +979,7 @@ mod tests {
             ..sample_schedule(None, true)
         };
         let agent = agent("vault-hygiene", "정합성 점검", "kimi", true);
-        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings());
+        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings()).unwrap();
         assert_eq!(plan.skill_ref, "vault-lint");
         assert_eq!(plan.runtime, "kimi");
         assert_eq!(plan.prompt, "정합성 점검");
@@ -961,38 +994,72 @@ mod tests {
             ..sample_schedule(None, true)
         };
         let agent = agent("vault-hygiene", "정합성 점검", "inherit", true);
-        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings());
+        let plan = resolve_dispatch(&schedule, Some(&agent), &ai_settings()).unwrap();
         assert_eq!(plan.runtime, "codex");
 
         // With no global default the schedule's own runtime is the floor, so a
         // dispatch never resolves to nothing.
-        let plan = resolve_dispatch(&schedule, Some(&agent), &GlobalAiSettings::default());
+        let plan = resolve_dispatch(&schedule, Some(&agent), &GlobalAiSettings::default()).unwrap();
         assert_eq!(plan.runtime, "claude");
-        assert!(plan.permission_mode.is_none());
     }
 
     #[test]
-    fn a_disabled_or_feature_bound_agent_falls_back_to_the_snapshot() {
+    fn a_disabled_agent_stops_its_schedule_instead_of_running_the_snapshot() {
         let schedule = SchedulerSchedule {
             agent_id: Some("vault-hygiene".to_string()),
             ..sample_schedule(None, true)
         };
-        // Pausing an agent must not silently repoint or empty a live schedule.
+        // The snapshot is byte-identical to what the agent used to run, so
+        // falling back to it would make "off" mean nothing on the one path
+        // nobody is watching.
         let disabled = agent("vault-hygiene", "정합성 점검", "kimi", false);
-        let plan = resolve_dispatch(&schedule, Some(&disabled), &ai_settings());
-        assert_eq!(plan.skill_ref, "vault-sync");
-        assert_eq!(plan.prompt, "Run it");
-        assert_eq!(plan.runtime, "claude");
+        assert_eq!(
+            resolve_dispatch(&schedule, Some(&disabled), &ai_settings()).unwrap_err(),
+            "agent_disabled: vault-hygiene"
+        );
+    }
 
+    #[test]
+    fn a_missing_or_feature_bound_agent_falls_back_to_the_snapshot() {
+        let schedule = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
         // A feature-bound agent carries no prompt of its own; taking it would
         // dispatch an empty prompt.
         let feature_bound = agent("inbox-triage", "", "kimi", true);
-        let plan = resolve_dispatch(&schedule, Some(&feature_bound), &ai_settings());
+        let plan = resolve_dispatch(&schedule, Some(&feature_bound), &ai_settings()).unwrap();
         assert_eq!(plan.prompt, "Run it");
-
-        // A deleted agent resolves to None and behaves the same way.
-        let plan = resolve_dispatch(&schedule, None, &ai_settings());
         assert_eq!(plan.skill_ref, "vault-sync");
+
+        // A deleted agent must never break a live schedule.
+        let plan = resolve_dispatch(&schedule, None, &ai_settings()).unwrap();
+        assert_eq!(plan.skill_ref, "vault-sync");
+        assert_eq!(plan.runtime, "claude");
+    }
+
+    #[test]
+    fn an_unattended_run_does_not_inherit_a_permissive_global_mode() {
+        // The user's global bypassPermissions is for runs they are sitting in
+        // front of. A 07:00 timer silently promoted to it is the
+        // agent-autonomous default the README rules out.
+        let schedule = sample_schedule(None, true);
+        let plan = resolve_dispatch(&schedule, None, &ai_settings()).unwrap();
+        assert!(plan.permission_mode.is_none(), "{plan:?}");
+
+        let inheriting = agent("vault-hygiene", "점검", "kimi", true);
+        let with_agent = SchedulerSchedule {
+            agent_id: Some("vault-hygiene".to_string()),
+            ..sample_schedule(None, true)
+        };
+        let plan = resolve_dispatch(&with_agent, Some(&inheriting), &ai_settings()).unwrap();
+        assert!(plan.permission_mode.is_none());
+
+        // An agent that needs more says so explicitly.
+        let mut explicit = agent("git-sync", "커밋", "codex", true);
+        explicit.permission_mode = "acceptEdits".to_string();
+        let plan = resolve_dispatch(&with_agent, Some(&explicit), &ai_settings()).unwrap();
+        assert_eq!(plan.permission_mode.as_deref(), Some("acceptEdits"));
     }
 
     #[test]
@@ -1002,7 +1069,7 @@ mod tests {
             agent_id: Some("vault-hygiene".to_string()),
             ..sample_schedule(None, true)
         };
-        let plan = resolve_dispatch(&schedule, None, &ai_settings());
+        let plan = resolve_dispatch(&schedule, None, &ai_settings()).unwrap();
         let metadata = dispatch_metadata(&schedule, &plan, "maru-builtin::vault-sync", temp.path());
 
         // Without workspacePath and skillName, skillRunView renders a scheduled
@@ -1014,7 +1081,7 @@ mod tests {
         );
         assert_eq!(metadata["agentId"], "vault-hygiene");
         assert_eq!(metadata["runtime"], "claude");
-        assert_eq!(metadata["permissionMode"], "bypassPermissions");
+        assert!(metadata["permissionMode"].is_null());
         assert_eq!(metadata["scheduleId"], "sched-test");
     }
 

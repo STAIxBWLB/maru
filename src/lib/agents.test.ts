@@ -451,6 +451,32 @@ describe("buildAgentBoard", () => {
     expect(orphans).toEqual([]);
   });
 
+  it("groups a legacy schedule's runs under the agent that shows the schedule", () => {
+    // The scheduler stamps agentId: null for a pre-agent schedule, and its
+    // origin is not in the prefix map, so without the scheduleId fallback the
+    // schedule would be displayed on the row while its runs showed nowhere.
+    const legacy = {
+      id: "sched-bb4e8305",
+      skillId: "maru-builtin::inbox-process",
+      daysOfWeek: [],
+      enabled: true,
+    } as unknown as SchedulerSchedule;
+    const scheduledRun = {
+      id: "m-timed",
+      status: "done",
+      startedAt: "2026-08-02T07:00:00Z",
+      lastOutputAt: "2026-08-02T07:01:00Z",
+      metadata: { scheduler: true, scheduleId: "sched-bb4e8305", agentId: null },
+    } as unknown as MissionRecord;
+
+    const { rows } = buildAgentBoard(
+      [agent({ id: "inbox-triage", skillName: "inbox-process" })],
+      [legacy],
+      [scheduledRun],
+    );
+    expect(rows[0].missions.map((m) => m.id)).toEqual(["m-timed"]);
+  });
+
   it("surfaces a schedule that belongs to no agent instead of hiding it", () => {
     const orphan = {
       id: "s-ghost",
