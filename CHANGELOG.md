@@ -8,6 +8,38 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.39 - 2026-08-02 - Agents You Can Point Somewhere
+
+- **Every AI feature is now a named agent with its own backend.** Maru's
+  thirteen AI call sites each used to resolve a skill, read the global
+  default runtime, probe availability and dispatch on their own; they now
+  run through one agent record that binds a skill to Claude Code, Codex,
+  Kimi or Kiro. Choosing a backend is a per-feature decision instead of one
+  global switch, and every feature inherits the cross-runtime fallback that
+  only Tasks had — a missing CLI degrades instead of failing the run. Ten
+  agents ship: inbox triage and classification, meeting notes, task
+  extraction, ideation drafts, commit messages, plus four recurring ones for
+  knowledge-graph integrity, graph sync proposals, a daily briefing and git
+  sync. The last two ship switched off because they send and push.
+- **A new Agents mode shows what the AI is actually doing.** One place for
+  status, live log tail, run history, run and stop, backend and permission
+  mode, prompt, and schedules — including agents you create yourself from
+  any installed skill. Read-only and proposal-only agents ship enabled, but
+  nothing fires on a timer until you attach a schedule, which still passes
+  through the approval dialog. The Drafts Automation section is gone; its
+  schedules moved here, and the Settings tab that used to be called Agents
+  is now AI Runtimes, since it is about CLI accounts rather than your
+  agents.
+- **Scheduled runs stopped ignoring your AI settings.** A timed dispatch
+  passed no command override, so a runtime installed outside PATH failed on
+  a schedule while the same skill succeeded from the UI, and its runs
+  rendered as raw ids because the metadata carried no skill name or
+  workspace. Both are fixed. Unattended runs now also stay at permission
+  mode `plan` unless an agent explicitly asks for more, rather than
+  inheriting whatever the global setting is, and switching an agent off
+  stops its schedules instead of quietly running the configuration it had
+  when the schedule was attached.
+
 ## v0.4.38 - 2026-08-02 - Settings Moves In
 
 - **Settings lives in the main window now.** The separate 980x720 settings
