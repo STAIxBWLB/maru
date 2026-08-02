@@ -14,10 +14,12 @@ import {
   type GraphDisplaySettings,
   type GraphFilterProfile,
 } from "../../lib/settings";
-import { communityColor, domainColor, relationColor } from "./graphStyle";
+import type { GraphEdgeOrigin } from "../../lib/graph/model";
+import { communityColor, domainColor, originColor, relationColor } from "./graphStyle";
 
 export interface GraphFilters {
   domains: Set<string>;
+  origins: Set<string>;
   types: Set<string>;
   relations: Set<string>;
   community: number | null;
@@ -32,6 +34,7 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilters = filtersFromSettings(defaultGr
 export function filtersFromSettings(f: GraphFilterProfile): GraphFilters {
   return {
     domains: new Set(f.domains),
+    origins: new Set(f.origins),
     types: new Set(f.types),
     relations: new Set(f.relations),
     community: f.community,
@@ -44,6 +47,7 @@ export function filtersFromSettings(f: GraphFilterProfile): GraphFilters {
 export function filtersToSettings(f: GraphFilters): GraphFilterProfile {
   return {
     domains: [...f.domains],
+    origins: [...f.origins],
     types: [...f.types],
     relations: [...f.relations],
     community: f.community,
@@ -61,6 +65,7 @@ export interface FacetItem<T> {
 export function filtersAreDefault(filters: GraphFilters): boolean {
   return (
     filters.domains.size === 0 &&
+    filters.origins.size === 0 &&
     filters.types.size === 0 &&
     filters.relations.size === 0 &&
     filters.community == null &&
@@ -141,6 +146,7 @@ function FacetGroup<T extends string | number>({
 interface GraphFilterPanelProps {
   filters: GraphFilters;
   domains: FacetItem<string>[];
+  origins: FacetItem<string>[];
   types: FacetItem<string>[];
   relations: FacetItem<string>[];
   communities: FacetItem<number>[];
@@ -156,6 +162,7 @@ interface GraphFilterPanelProps {
 export function GraphFilterPanel({
   filters,
   domains,
+  origins,
   types,
   relations,
   communities,
@@ -235,6 +242,14 @@ export function GraphFilterPanel({
         />
       </section>
 
+      <FacetGroup
+        title={t("graph.filter.origin")}
+        items={origins}
+        selected={(value) => filters.origins.has(value)}
+        swatch={(value) => originColor(value as GraphEdgeOrigin)}
+        format={(value) => t(`graph.origin.${value}`)}
+        onToggle={(value) => onFiltersChange({ ...filters, origins: toggle(filters.origins, value) })}
+      />
       <FacetGroup
         title={t("graph.filter.domain")}
         items={domains}
@@ -335,6 +350,7 @@ export function GraphFilterPanel({
               })
             }
           >
+            <option value="origin">{t("graph.display.colors.origin")}</option>
             <option value="neutral">{t("graph.display.colors.neutral")}</option>
             <option value="domain">{t("graph.display.colors.domain")}</option>
             <option value="community">{t("graph.display.colors.community")}</option>

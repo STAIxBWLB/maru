@@ -6,6 +6,7 @@
 // degrades gracefully to the live graph (enriched=false).
 
 import { collectWikilinkTargets } from "../neighborhood";
+import type { GraphSource } from "../settings";
 import type { VaultEntry } from "../types";
 import {
   buildEntryIndex,
@@ -13,12 +14,18 @@ import {
   type EntryIndex,
 } from "../wikilinkSuggestions";
 
+/** Where a node came from. "unknown" = ghost (no path to classify). */
+export type GraphNodeOrigin = "workspace" | "knowledge" | "unknown";
+/** The pair an edge connects; "cross" spans the workspace/knowledge boundary. */
+export type GraphEdgeOrigin = "workspace" | "knowledge" | "cross";
+
 export interface GraphNode {
   id: string;
   label: string;
   /** null = ghost (unresolved wikilink target — F3(b)'s input). */
   relPath: string | null;
   ownerWorkspacePath?: string | null;
+  origin: GraphNodeOrigin;
   type: string;
   domain: string | null;
   degree: number;
@@ -36,6 +43,7 @@ export interface GraphEdge {
   /** frontmatter field name, or "wiki_link" for body links. */
   relation: string;
   fromFrontmatter: boolean;
+  origin: GraphEdgeOrigin;
 }
 
 export interface GraphModel {
@@ -98,13 +106,39 @@ function frontmatterString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/** relPath prefix (lowercase, trailing slash) whose notes count as knowledge.
+ *  A vault-source graph is knowledge end to end; a workspace-source graph holds
+ *  the vault under `vault/`.
+ *  ponytail: convention — the nested vault is always `<workspace>/vault`, which
+ *  is the only place `vault_graph_root` (src-tauri/src/vault_graph.rs) looks.
+ *  Take the probed root as a prop if that ever stops holding. */
+export function knowledgeRootFor(source: GraphSource): string {
+  return source === "vault" ? "" : "vault/";
+}
+
+/** Edge class from its endpoints. A ghost endpoint is not evidence of a
+ *  crossing, so "unknown" inherits the known side instead of counting as cross. */
+export function edgeOrigin(
+  a: GraphNodeOrigin,
+  b: GraphNodeOrigin,
+): GraphEdgeOrigin {
+  if (a === "unknown") return b === "unknown" ? "workspace" : b;
+  if (b === "unknown" || a === b) return a;
+  return "cross";
+}
+
 /** Build the live graph from scanned entries. Node id = lowercase stem
  *  (matches build-graph.py `f.stem`); every member of a stem collision uses
  *  its rel-path-without-extension so ids stay unique and scan-order stable. */
 export function buildVaultGraph(
   entries: VaultEntry[],
   index?: EntryIndex,
+  knowledgeRoot?: string | null,
 ): GraphModel {
+  const originOf = (relPath: string): GraphNodeOrigin =>
+    knowledgeRoot != null && relPath.toLowerCase().startsWith(knowledgeRoot)
+      ? "knowledge"
+      : "workspace";
   const idx = index ?? buildEntryIndex(entries);
   const docs = entries.filter((entry) =>
     MARKDOWN_KINDS.has(entry.fileKind.toLowerCase()),
@@ -137,6 +171,7 @@ export function buildVaultGraph(
       label: entry.title,
       relPath: entry.relPath,
       ownerWorkspacePath: entry.ownerWorkspacePath ?? null,
+      origin: originOf(entry.relPath),
       type: frontmatterString(meta.type) ?? "untyped",
       domain: frontmatterString(meta.domain),
       degree: 0,
@@ -165,7 +200,16 @@ export function buildVaultGraph(
     const key = `${source}\u0000${target}\u0000${relation}`;
     if (seenEdges.has(key)) return;
     seenEdges.add(key);
-    edges.push({ source, target, relation, fromFrontmatter });
+    edges.push({
+      source,
+      target,
+      relation,
+      fromFrontmatter,
+      origin: edgeOrigin(
+        nodes.get(source)?.origin ?? "unknown",
+        nodes.get(target)?.origin ?? "unknown",
+      ),
+    });
   };
 
   const resolveToId = (target: string): string => {
@@ -182,6 +226,7 @@ export function buildVaultGraph(
         label: target.trim(),
         relPath: null,
         ownerWorkspacePath: null,
+        origin: "unknown",
         type: "unresolved",
         domain: null,
         degree: 0,

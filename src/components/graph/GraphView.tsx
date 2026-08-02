@@ -23,6 +23,7 @@ import {
 import {
   buildVaultGraph,
   enrichGraph,
+  knowledgeRootFor,
   type GraphModel,
   type GraphNode,
 } from "../../lib/graph/model";
@@ -393,7 +394,10 @@ export function GraphView({
   }, [searchOpen]);
 
   const index = useMemo(() => buildEntryIndex(entries), [entries]);
-  const liveModel = useMemo(() => buildVaultGraph(entries, index), [entries, index]);
+  const liveModel = useMemo(
+    () => buildVaultGraph(entries, index, knowledgeRootFor(source)),
+    [entries, index, source],
+  );
   const overlayRequestRef = useRef(0);
 
   const loadOverlay = useCallback(
@@ -516,6 +520,8 @@ export function GraphView({
       const value = descriptor.slice(separator + 1);
       if (kind === "domain") {
         setFilters((current) => ({ ...current, domains: new Set([...current.domains].filter((v) => v !== value)) }));
+      } else if (kind === "origin") {
+        setFilters((current) => ({ ...current, origins: new Set([...current.origins].filter((v) => v !== value)) }));
       } else if (kind === "type") {
         setFilters((current) => ({ ...current, types: new Set([...current.types].filter((v) => v !== value)) }));
       } else if (kind === "relation") {
@@ -999,6 +1005,7 @@ export function GraphView({
 
   const activeFilterCount =
     filters.domains.size +
+    filters.origins.size +
     filters.types.size +
     filters.relations.size +
     (filters.community == null ? 0 : 1) +
@@ -1052,6 +1059,7 @@ export function GraphView({
         <GraphFilterPanel
           filters={filters}
           domains={derived.facets.domains}
+          origins={derived.facets.origins}
           types={derived.facets.types}
           relations={derived.facets.relations}
           communities={derived.facets.communities}
@@ -1275,10 +1283,12 @@ export function GraphView({
               overlay={
                 <>
                   {display.colorMode === "domain" ||
+                  display.colorMode === "origin" ||
                   (display.colorMode === "community" && model.enriched) ? (
                     <GraphLegend
                       mode={display.colorMode}
                       domains={derived.facets.domains}
+                      origins={derived.facets.origins}
                       communities={derived.facets.communities}
                       filters={filters}
                       onFiltersChange={setFilters}

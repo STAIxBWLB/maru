@@ -465,6 +465,13 @@
   flex-shrink: 0;
 }
 
+/* Keys an edge color rather than a node color. */
+.graph-swatch-line {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+
 .graph-community-list {
   display: flex;
   flex-direction: column;
@@ -724,6 +731,16 @@
   background: var(--accent-tint, transparent);
 }
 
+/* Color key with nothing to filter (edge classes). */
+.graph-legend-item.static {
+  cursor: default;
+  color: var(--muted);
+}
+
+.graph-legend-item.static:hover {
+  background: transparent;
+}
+
 .graph-legend-item.active {
   background: var(--accent-tint, transparent);
   color: var(--accent);
@@ -744,8 +761,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-.graph-edge {
+/* The default stroke lives on the group so it arrives by inheritance: a
+   declaration on .graph-edge itself would outrank the per-edge `stroke`
+   presentation attribute and silence origin/relation edge colors. */
+.graph-edges {
   stroke: var(--line-strong, var(--muted));
+}
+
+.graph-edge {
   stroke-opacity: 0.45;
   stroke-width: 1.2;
   transition: none;

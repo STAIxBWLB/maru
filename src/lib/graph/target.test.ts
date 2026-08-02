@@ -8,6 +8,7 @@ function node(over: Partial<GraphNode> = {}): GraphNode {
     label: "Duplicate title",
     relPath: "notes/one/Duplicate title.md",
     ownerWorkspacePath: null,
+    origin: "workspace",
     type: "note",
     domain: null,
     degree: 0,

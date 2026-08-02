@@ -93,7 +93,7 @@ overlay is produced out-of-band by the `vault-graph` skill
 - `MaruSettings.graph` is `GraphSettingsV3` (`schemaVersion: 3`): `source`
   (vault|workspace), `mode` (global|local|chains), `localDepth`/
   `localDirection`, `searchAsFilter`, `generatedPatterns`, per-source
-  `profiles` (domains/types/relations/community/showUnresolved/showGenerated/
+  `profiles` (domains/origins/types/relations/community/showUnresolved/showGenerated/
   minVisibleNeighbors — `minVisibleNeighbors` replaces the old scope toggle
   and minDegree; the V1→V2 migration maps `all`→workspace and
   `max(minDegree, connected ? 1 : 0)`), `display` (arrows typed|all|none,
@@ -184,14 +184,27 @@ from the fallback and observes the same node/edge visibility masks.
 
 ## Visualization & export (V3)
 
-- **Legend** — bottom-left overlay keying community (enriched) or domain colors
-  with counts; clicking a swatch drives the corresponding filter. It is the
-  only color key (no separate area overlay).
+- **Legend** — bottom-left overlay keying origin, community (enriched) or domain
+  colors with counts; clicking a swatch drives the corresponding filter. It is
+  the only color key (no separate area overlay). In origin mode it also carries
+  one non-clickable row for the cross-boundary edge color, and it stays hidden
+  when the graph holds a single origin class (vault source, or a workspace with
+  no `vault/`).
 - **Color groups**: communities are color groups, not shapes; each node is
-  colored by community (enriched) or domain (degraded) via theme-aware
-  12-slot palettes, one palette for light and one for dark, with a fixed
-  hue-per-slot mapping so colors stay CVD-safe and consistent across theme
+  colored by origin (default), community (enriched) or domain (degraded) via
+  theme-aware 12-slot palettes, one palette for light and one for dark, with a
+  fixed hue-per-slot mapping so colors stay CVD-safe and consistent across theme
   flips (`src/components/graph/graphStyle.ts`).
+- **Origin colors** (default): every node carries a `GraphNodeOrigin`
+  (`workspace` | `knowledge` | `unknown` for ghosts) stamped in
+  `buildVaultGraph` from the relPath prefix (`vault/` in a workspace-source
+  graph, everything in a vault-source one), and every edge a `GraphEdgeOrigin`
+  (`workspace` | `knowledge` | `cross`) derived from its endpoints, where a
+  ghost endpoint inherits the known side. Workspace is palette slot 0 (blue),
+  knowledge slot 2 (green), cross-boundary edges slot 1 (amber); same-origin
+  edges are their node hue mixed toward the canvas so lines stay subordinate to
+  nodes. Origin is also a filter facet, so a legend or facet click isolates one
+  side of the boundary.
 - **Label fade**: Obsidian-style zoom-linked label fade via custom drawers
   (`src/components/graph/graphLabels.ts`); labels ramp in as a node grows on
   screen (zoom-in or high degree) instead of an all-or-nothing cutoff.
