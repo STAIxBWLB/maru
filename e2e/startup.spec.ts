@@ -11,7 +11,7 @@ test("keeps the full terminal renderer out of the collapsed startup path", async
 }) => {
   await page.goto("/?startupProfile=1");
 
-  await expect(page.getByRole("button", { name: "Sample Workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sample Workspace", exact: true })).toBeVisible();
   await expect(page.locator(".terminal-panel.collapsed")).toBeVisible();
   await expect(page.locator(".native-terminal-view")).toHaveCount(0);
 
