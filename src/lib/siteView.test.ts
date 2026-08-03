@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 import {
   buildSiteViewOpenRequests,
   nextSiteViewOpenRequests,
+  unroutedSiteViewOpenRequestId,
   sanitizeSiteViewOpenedUrls,
   SITE_VIEW_OPEN_REQUESTED_EVENT,
   siteViewOpenSafari,
@@ -91,6 +92,21 @@ describe("site view opened URL bridge", () => {
     expect(
       nextSiteViewOpenRequests(requests, new Set(first.map((request) => request.id)), 1),
     ).toEqual([requests[12]]);
+  });
+
+  it("routes once per arriving request so a capped request cannot reopen Sites", () => {
+    const requests = [
+      { id: 1, url: "https://example.com/1" },
+      { id: 2, url: "https://example.com/2" },
+    ];
+    expect(unroutedSiteViewOpenRequestId([], 0)).toBeNull();
+    expect(unroutedSiteViewOpenRequestId(requests, 0)).toBe(2);
+    // Still pending because Sites could not fit it: no second route.
+    expect(unroutedSiteViewOpenRequestId(requests, 2)).toBeNull();
+    // A newly arrived request routes again.
+    expect(
+      unroutedSiteViewOpenRequestId([...requests, { id: 3, url: "https://example.com/3" }], 2),
+    ).toBe(3);
   });
 
   it("treats an open event as a queue wake-up and does not replay drained URLs", async () => {

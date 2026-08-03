@@ -19,6 +19,7 @@ import {
 } from "react";
 import { gitChanges, searchWorkspaceContents } from "../lib/api";
 import {
+  contentSearchFileEntry,
   parseGlobList,
   shouldRunContentSearch,
   splitMatchSegments,
@@ -695,12 +696,13 @@ export function ExplorerPane({
               collapsed={collapsedResults.has(file.path)}
               onToggle={() => toggleResult(file.path)}
               onOpen={(line) => {
-                const entry = entries.find(
-                  (candidate) =>
-                    candidate.path === file.path ||
-                    candidate.relPath === file.relPath,
-                );
-                if (entry) onOpenFile(entry, line);
+                const entry =
+                  entries.find(
+                    (candidate) =>
+                      candidate.path === file.path ||
+                      candidate.relPath === file.relPath,
+                  ) ?? contentSearchFileEntry(file);
+                onOpenFile(entry, line);
               }}
             />
           ))}

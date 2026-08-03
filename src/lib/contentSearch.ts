@@ -1,3 +1,5 @@
+import type { ContentSearchFile, WorkspaceFileEntry } from "./types";
+
 export interface MatchSegment {
   text: string;
   hit: boolean;
@@ -55,6 +57,30 @@ export function parseGlobList(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+/**
+ * Backend content search does not depend on the workspace file scan, so a hit
+ * can arrive for a file the scan has not produced yet (still scanning, scan
+ * failed, or scan filters differ). Synthesize the entry the open handler needs
+ * from the hit itself so a result click is never a silent no-op.
+ */
+export function contentSearchFileEntry(file: ContentSearchFile): WorkspaceFileEntry {
+  const normalized = file.relPath.replace(/\\/g, "/");
+  const name = normalized.split("/").pop() || normalized;
+  const dot = name.lastIndexOf(".");
+  const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : null;
+  return {
+    path: file.path,
+    relPath: file.relPath,
+    name,
+    extension,
+    fileKind: extension ?? "file",
+    sizeBytes: 0,
+    updatedAt: null,
+    gitTracked: false,
+    binary: false,
+  };
 }
 
 export function shouldRunContentSearch(input: {
