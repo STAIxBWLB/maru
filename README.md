@@ -64,9 +64,10 @@ profiles without adding them to the workspace-local `.maru/jobs.json` registry:
 
 - Cloud mirror status, owner, propagation policy, filters, push/pull schedules,
   pause/resume, preview, run, and bounded log tail.
-- Mac peer SSH target, safe bidirectional schedule, doctor/diff, preview/run,
-  secret allow patterns, and host-path allowlist. Peer deletion propagation is
-  always disabled by dot, including for legacy profile files.
+- Mac peer SSH target, bidirectional schedule with quarantined deletions,
+  doctor/diff, preview/run, secret allow patterns, and host-path allowlist.
+  dot limits deletion to baseline-recorded paths and caps new profiles at 100
+  paths per run.
 - Confirmed Homebrew install/update when dot is missing or older than the
   minimum compatible JSON API version.
 

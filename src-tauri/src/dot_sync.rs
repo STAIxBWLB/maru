@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::cli_path::resolve_program;
 use crate::win_process::NoWindow;
 
-const MIN_DOT_VERSION: &str = "2.62.0";
+const MIN_DOT_VERSION: &str = "2.63.0";
 const MAX_OUTPUT_BYTES: usize = 512 * 1024;
 static DOT_ACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -697,8 +697,8 @@ mod tests {
             parse_dot_version("dot v2.61.2 (5564167)"),
             Some("2.61.2".to_string())
         );
-        assert!(!version_compatible("2.61.2"));
-        assert!(version_compatible("2.62.0"));
+        assert!(!version_compatible("2.62.0"));
+        assert!(version_compatible("2.63.0"));
         assert!(version_compatible("3.0.0"));
     }
 

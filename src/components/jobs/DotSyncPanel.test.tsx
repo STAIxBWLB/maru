@@ -32,7 +32,7 @@ const missing: DotSyncOverview = {
     compatible: false,
     path: null,
     version: null,
-    minimumVersion: "2.62.0",
+    minimumVersion: "2.63.0",
     message: null,
   },
   mirror: null,
@@ -40,7 +40,7 @@ const missing: DotSyncOverview = {
 };
 
 const configured: DotSyncOverview = {
-  cli: { ...missing.cli, available: true, compatible: true, version: "2.62.0" },
+  cli: { ...missing.cli, available: true, compatible: true, version: "2.63.0" },
   mirror: {
     schemaVersion: 1,
     kind: "mirror",

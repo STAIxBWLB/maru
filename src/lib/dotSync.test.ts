@@ -40,7 +40,7 @@ function profile(patch: Partial<DotSyncProfileStatus> = {}): DotSyncProfileStatu
 
 function overview(mirror = profile()): DotSyncOverview {
   return {
-    cli: { ...EMPTY_DOT_SYNC_OVERVIEW.cli, available: true, compatible: true, version: "2.62.0" },
+    cli: { ...EMPTY_DOT_SYNC_OVERVIEW.cli, available: true, compatible: true, version: "2.63.0" },
     mirror,
     peer: null,
   };

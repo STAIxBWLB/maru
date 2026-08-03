@@ -2733,7 +2733,7 @@ export const EMPTY_DOT_SYNC_OVERVIEW: DotSyncOverview = {
     path: null,
     version: null,
     compatible: false,
-    minimumVersion: "2.62.0",
+    minimumVersion: "2.63.0",
     message: null,
   },
   mirror: null,
