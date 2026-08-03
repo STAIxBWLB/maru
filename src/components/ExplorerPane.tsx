@@ -2,7 +2,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
-  EyeOff,
   File,
   FileText,
   Folder,
@@ -13,17 +12,13 @@ import {
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { createPortal } from "react-dom";
-import type React from "react";
 import { gitChanges, searchWorkspaceContents } from "../lib/api";
 import {
-  contentSearchFileEntry,
   parseGlobList,
   shouldRunContentSearch,
   splitMatchSegments,
@@ -33,8 +28,6 @@ import {
   type GitDecoration,
 } from "../lib/gitStatusDisplay";
 import { useTranslation } from "../lib/i18n";
-import { clampMenuPosition } from "../lib/menu";
-import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
   ContentSearchFile,
   ContentSearchResult,
@@ -63,8 +56,6 @@ export interface ExplorerPaneProps {
   onRefresh: () => void;
   onOpenFile: (entry: WorkspaceFileEntry, line?: number) => void;
   includeDotFolders: string[];
-  /** Hide this entry from the workspace listings by adding it to `.maruignore`. */
-  onIgnore?: (relPath: string, kind: "file" | "directory") => void;
 }
 
 type ExplorerMode = "names" | "contents";
@@ -131,7 +122,6 @@ export function ExplorerPane({
   onRefresh,
   onOpenFile,
   includeDotFolders,
-  onIgnore,
 }: ExplorerPaneProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<ExplorerMode>("names");
@@ -157,58 +147,6 @@ export function ExplorerPane({
   const treeScrollRef = useRef<HTMLDivElement | null>(null);
   const searchSeqRef = useRef(0);
   const gitSeqRef = useRef(0);
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    relPath: string;
-    title: string;
-    kind: "file" | "directory";
-  } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
-  const handleContextMenuKeyDown = useContextMenuKeyboard(
-    contextMenuRef,
-    !!contextMenu,
-    () => setContextMenu(null),
-  );
-
-  useLayoutEffect(() => {
-    if (!contextMenu) return;
-    const menu = contextMenuRef.current;
-    if (!menu) return;
-    const next = clampMenuPosition(
-      { x: contextMenu.x, y: contextMenu.y },
-      { width: menu.offsetWidth, height: menu.offsetHeight },
-      { width: window.innerWidth, height: window.innerHeight },
-    );
-    if (next.x === contextMenu.x && next.y === contextMenu.y) return;
-    setContextMenu({ ...contextMenu, ...next });
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [contextMenu]);
-
-  const openContextMenu = useCallback(
-    (
-      event: React.MouseEvent,
-      target: { relPath: string; title: string; kind: "file" | "directory" },
-    ) => {
-      if (!onIgnore) return;
-      event.preventDefault();
-      setContextMenu({ x: event.clientX, y: event.clientY, ...target });
-    },
-    [onIgnore],
-  );
 
   const debouncedQuery = useDebouncedValue(query, 250);
   const debouncedInclude = useDebouncedValue(includeValue, 250);
@@ -660,13 +598,6 @@ export function ExplorerPane({
                       tabIndex={tabIndex}
                       onFocus={() => setFocusedTreeRowId(row.id)}
                       onClick={() => toggleTreeFolder(row)}
-                      onContextMenu={(event) =>
-                        openContextMenu(event, {
-                          relPath: row.path,
-                          title: row.name,
-                          kind: "directory",
-                        })
-                      }
                       onKeyDown={(event) =>
                         handleTreeKeyDown(event, row, index)
                       }
@@ -709,13 +640,6 @@ export function ExplorerPane({
                     tabIndex={tabIndex}
                     onFocus={() => setFocusedTreeRowId(row.id)}
                     onClick={() => onOpenFile(row.entry)}
-                    onContextMenu={(event) =>
-                      openContextMenu(event, {
-                        relPath: row.entry.relPath,
-                        title: row.entry.name,
-                        kind: "file",
-                      })
-                    }
                     onKeyDown={(event) =>
                       handleTreeKeyDown(event, row, index)
                     }
@@ -771,13 +695,12 @@ export function ExplorerPane({
               collapsed={collapsedResults.has(file.path)}
               onToggle={() => toggleResult(file.path)}
               onOpen={(line) => {
-                const entry =
-                  entries.find(
-                    (candidate) =>
-                      candidate.path === file.path ||
-                      candidate.relPath === file.relPath,
-                  ) ?? contentSearchFileEntry(file);
-                onOpenFile(entry, line);
+                const entry = entries.find(
+                  (candidate) =>
+                    candidate.path === file.path ||
+                    candidate.relPath === file.relPath,
+                );
+                if (entry) onOpenFile(entry, line);
               }}
             />
           ))}
@@ -794,36 +717,6 @@ export function ExplorerPane({
           ) : null}
         </div>
       )}
-      {contextMenu && onIgnore
-        ? createPortal(
-            <div
-              ref={contextMenuRef}
-              className="context-menu"
-              role="menu"
-              tabIndex={-1}
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-              onKeyDown={handleContextMenuKeyDown}
-            >
-              <div className="context-menu-title" title={contextMenu.relPath}>
-                {contextMenu.title}
-              </div>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const { relPath, kind } = contextMenu;
-                  setContextMenu(null);
-                  onIgnore(relPath, kind);
-                }}
-              >
-                <EyeOff size={13} />
-                {t("context.addToIgnore")}
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
     </section>
   );
 }

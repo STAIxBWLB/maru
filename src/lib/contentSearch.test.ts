@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  contentSearchFileEntry,
   MIN_CONTENT_QUERY_LENGTH,
   parseGlobList,
   shouldRunContentSearch,
@@ -62,51 +61,5 @@ describe("content search helpers", () => {
     expect(
       shouldRunContentSearch({ mode: "contents", query: "word", workspacePath: null }),
     ).toBe(false);
-  });
-
-  it("synthesizes an openable entry from a hit the file scan has not produced", () => {
-    expect(
-      contentSearchFileEntry({
-        path: "/w/notes/Meeting Notes.MD",
-        relPath: "notes/Meeting Notes.MD",
-        matches: [],
-      }),
-    ).toEqual({
-      path: "/w/notes/Meeting Notes.MD",
-      relPath: "notes/Meeting Notes.MD",
-      name: "Meeting Notes.MD",
-      extension: "md",
-      fileKind: "md",
-      sizeBytes: 0,
-      updatedAt: null,
-      gitTracked: false,
-      binary: false,
-    });
-
-    const extensionless = contentSearchFileEntry({
-      path: "/w/Makefile",
-      relPath: "Makefile",
-      matches: [],
-    });
-    expect(extensionless.extension).toBeNull();
-    expect(extensionless.fileKind).toBe("file");
-
-    // A leading dot is not an extension.
-    const dotfile = contentSearchFileEntry({
-      path: "/w/.gitignore",
-      relPath: ".gitignore",
-      matches: [],
-    });
-    expect(dotfile.extension).toBeNull();
-    expect(dotfile.name).toBe(".gitignore");
-
-    // Windows-style separators still yield the bare file name.
-    expect(
-      contentSearchFileEntry({
-        path: "C:\\w\\docs\\a.ts",
-        relPath: "docs\\a.ts",
-        matches: [],
-      }).name,
-    ).toBe("a.ts");
   });
 });

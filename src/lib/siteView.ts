@@ -221,19 +221,6 @@ export function nextSiteViewOpenRequests(
     .slice(0, availableSlots);
 }
 
-/** Id of the newest request that has not been routed to a Sites surface yet,
- *  or null when there is nothing new. Ids are monotonic, so the tail carries
- *  the newest. Routing once per arrival — rather than while anything is
- *  pending — keeps a request Sites cannot fit yet (tab cap) from reopening the
- *  workbench the user just closed. */
-export function unroutedSiteViewOpenRequestId(
-  requests: readonly SiteViewOpenRequest[],
-  lastRoutedId: number,
-): number | null {
-  const newest = requests[requests.length - 1];
-  return newest && newest.id > lastRoutedId ? newest.id : null;
-}
-
 const openedUrlSubscribers = new Set<(urls: string[]) => void>();
 let openedUrlBacklog: string[] = [];
 const MAX_OPENED_URL_BACKLOG = 64;

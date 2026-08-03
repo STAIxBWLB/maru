@@ -10,28 +10,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { resolveNotaryCredentials } from "./lib/appleNotary.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const profileValue = process.env.MARU_MACOS_PROVISIONING_PROFILE?.trim();
 const identity = process.env.APPLE_SIGNING_IDENTITY?.trim();
 const stagedProfile = resolve(repoRoot, "src-tauri/Passkeys.provisionprofile");
 const appPath = resolve(repoRoot, "src-tauri/target/release/bundle/macos/Maru.app");
-const notarize = process.argv.includes("--notarize");
-
-if (process.argv.includes("--help")) {
-  console.log(`usage: node scripts/build-macos-passkeys.mjs [--notarize]
-
-Builds the opt-in, locally provisioned macOS browser-passkey bundle.
-
-Options:
-  --notarize  submit the signed app to Apple's notary service and staple the
-              ticket. Required before the artifact can be distributed.
-`);
-  process.exit(0);
-}
 
 function abort(message) {
   console.error(`[error] ${message}`);
@@ -58,14 +44,6 @@ if (!profileValue) {
 }
 if (!identity || identity === "-") {
   abort("APPLE_SIGNING_IDENTITY must name a Developer ID Application identity");
-}
-
-// Resolve notary credentials before the long build so a missing key fails fast.
-const notary = notarize ? resolveNotaryCredentials() : null;
-if (notary?.missing.length) {
-  abort(
-    `--notarize requires App Store Connect credentials in ${notary.secretsDir}; missing: ${notary.missing.join(", ")}`,
-  );
 }
 
 if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
@@ -139,35 +117,6 @@ try {
     throw new Error("built app signature does not contain the browser-passkey entitlement");
   }
   console.log(`[ok] provisioned browser-passkey app built at ${appPath}`);
-
-  if (notary) {
-    // Apple requires notarization before distribution, and Gatekeeper
-    // re-evaluates the embedded Developer ID profile at every launch.
-    const zipPath = resolve(tmpdir(), `maru-passkeys-${process.pid}.zip`);
-    try {
-      run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, zipPath]);
-      run("xcrun", [
-        "notarytool",
-        "submit",
-        zipPath,
-        "--wait",
-        "--key",
-        notary.apiKeyPath,
-        "--key-id",
-        notary.apiKeyId,
-        "--issuer",
-        notary.apiIssuerId,
-      ]);
-    } finally {
-      if (existsSync(zipPath)) unlinkSync(zipPath);
-    }
-    run("xcrun", ["stapler", "staple", appPath]);
-    run("spctl", ["-a", "-vvv", "-t", "install", appPath]);
-    console.log(`[ok] notarized and stapled ${appPath}`);
-  } else {
-    console.warn("[warn] artifact is signed but NOT notarized — not distributable");
-    console.warn("[warn] re-run with --notarize (or make macos-passkey-notarized-build) to ship it");
-  }
 } finally {
   if (previousProfile) {
     writeFileSync(stagedProfile, previousProfile.bytes, { mode: previousProfile.mode });

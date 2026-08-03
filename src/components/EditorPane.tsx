@@ -95,9 +95,49 @@ export interface EditorTabSummary {
   writeBlockedReason: string | null;
 }
 
-export interface EditorPaneProps {
-  scope: EditorPaneScope;
-  commands: EditorPaneCommands;
+interface EditorPaneProps {
+  document: DocumentPayload | null;
+  openingEntry: VaultEntry | null;
+  draftContent: string;
+  saving: boolean;
+  dirty: boolean;
+  outlineOpen: boolean;
+  activeWorkspaceLabel: string | null;
+  documentLabel: string | null;
+  readOnly: boolean;
+  canSnapshot: boolean;
+  readOnlyReason: string | null;
+  viewMode: EditorViewMode;
+  tabs: EditorTabSummary[];
+  activeTabId: string | null;
+  entries: VaultEntry[];
+  bodyOverride?: React.ReactNode;
+  onChange: (content: string) => void;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
+  onCloseOtherTabs: (tabId: string) => void;
+  onCloseTabsToRight: (tabId: string) => void;
+  onCloseSavedTabs: () => void;
+  onCloseAllTabs: () => void;
+  onCopyTabName: (tabId: string) => void;
+  onCopyTabPath: (tabId: string) => void;
+  onCopyTabRelativePath: (tabId: string) => void;
+  onRenameTab: (tabId: string) => void;
+  onMoveTab: (tabId: string) => void;
+  onDuplicateTab: (tabId: string) => void;
+  onDeleteTab: (tabId: string) => void;
+  onOpenTabPreview: (tabId: string) => void;
+  onRevealTabInFinder: (tabId: string) => void;
+  onRevealTabInExplorer: (tabId: string) => void;
+  onSave: () => void;
+  onSnapshot: () => void;
+  onSplitRight: () => void;
+  onOpenSourcePreview?: () => void;
+  onOpenGraphRight: () => void;
+  onFocusPane?: () => void;
+  onToggleOutline: () => void;
+  onViewModeChange: (mode: EditorViewMode) => void;
+  onWikilinkClick: (target: string) => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   htmlFlushRef?: React.RefObject<HtmlEditorFlushHandle | null>;
 }
@@ -194,6 +234,38 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     readOnlyReason,
     entries: presentationEntries,
     bodyOverride,
+    onChange,
+    onSelectTab,
+    onCloseTab,
+    onCloseOtherTabs,
+    onCloseTabsToRight,
+    onCloseSavedTabs,
+    onCloseAllTabs,
+    onCopyTabName,
+    onCopyTabPath,
+    onCopyTabRelativePath,
+    onRenameTab,
+    onMoveTab,
+    onDuplicateTab,
+    onDeleteTab,
+    onOpenTabPreview,
+    onRevealTabInFinder,
+    onRevealTabInExplorer,
+    onSave,
+    onSnapshot,
+    onSplitRight,
+    onOpenSourcePreview,
+    onOpenGraphRight,
+    onFocusPane,
+    onToggleOutline,
+    onViewModeChange,
+    onWikilinkClick,
+    textareaRef,
+    htmlViewMode,
+    onHtmlViewModeChange,
+    htmlRiskAckDigest,
+    onHtmlRiskAck,
+    htmlFlushRef,
     vaultPath,
     isManagedVaultNote,
   } = presentation;
@@ -883,8 +955,20 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
             if (isHtml) onHtmlViewModeChange?.(value as HtmlViewMode);
             else onViewModeChange(value as EditorViewMode);
           }}
-          toolbarAction={
-            isMarkdown && onOpenSourcePreview ? (
+        >
+          <div className="editor-view-toolbar">
+            <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
+              <Tabs.Trigger className="tab-trigger" value={isHtml ? "visual" : "rich"}>
+                {isHtml ? t("editor.tab.visual") : t("editor.tab.rich")}
+              </Tabs.Trigger>
+              <Tabs.Trigger className="tab-trigger" value="source">
+                {t("editor.tab.source")}
+              </Tabs.Trigger>
+              <Tabs.Trigger className="tab-trigger" value="preview">
+                {t("editor.tab.preview")}
+              </Tabs.Trigger>
+            </Tabs.List>
+            {isMarkdown && onOpenSourcePreview ? (
               <button
                 type="button"
                 className="editor-source-preview-preset"
@@ -895,80 +979,9 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
                 <Columns2 size={12} />
                 <span>{t("editor.sourcePreview.label")}</span>
               </button>
-            ) : null
-          }
-          auxiliary={
-            findOpen ? (
-              <div className="editor-find-bar" role="search">
-                <input
-                  ref={findInputRef}
-                  className="editor-find-input"
-                  value={findQuery}
-                  placeholder={t("editor.find.placeholder")}
-                  aria-label={t("editor.find.placeholder")}
-                  onChange={(event) => {
-                    setFindQuery(event.target.value);
-                    setFindIndex(0);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      cycleFind(event.shiftKey ? -1 : 1);
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      closeFind();
-                    }
-                  }}
-                />
-                {findSupported ? (
-                  <>
-                    <span className="editor-find-count" aria-live="polite">
-                      {findQuery.trim() === ""
-                        ? ""
-                        : findMatchList.length === 0
-                          ? t("editor.find.noResults")
-                          : t("editor.find.count", {
-                              current: findCurrent + 1,
-                              total: findMatchList.length,
-                            })}
-                    </span>
-                    <button
-                      type="button"
-                      className="editor-find-nav"
-                      onClick={() => cycleFind(-1)}
-                      title={t("editor.find.previous")}
-                      aria-label={t("editor.find.previous")}
-                    >
-                      <ChevronUp size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className="editor-find-nav"
-                      onClick={() => cycleFind(1)}
-                      title={t("editor.find.next")}
-                      aria-label={t("editor.find.next")}
-                    >
-                      <ChevronDown size={12} />
-                    </button>
-                  </>
-                ) : (
-                  <span className="editor-find-unsupported">
-                    {t("editor.find.unsupported")}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="editor-find-nav"
-                  onClick={closeFind}
-                  title={t("editor.find.close")}
-                  aria-label={t("editor.find.close")}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ) : null
-          }
-          richPanel={
+            ) : null}
+          </div>
+          <Tabs.Content className="tab-panel" value={isHtml ? "visual" : "rich"}>
             <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
               {isHtml && document ? (
                 <LazyHtmlVisualEditor

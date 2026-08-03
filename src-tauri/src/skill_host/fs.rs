@@ -69,6 +69,26 @@ fn resolve_codex_home(home: &Path, configured: Option<PathBuf>) -> PathBuf {
         .unwrap_or_else(|| home.join(".codex"))
 }
 
+/// Resolve Codex's active home. Isolated hosts such as Orca set `CODEX_HOME`
+/// to a profile-specific directory instead of using the default `~/.codex`.
+/// Test homes always win so tool-sync tests cannot escape their sandbox.
+pub fn codex_home() -> Result<PathBuf, String> {
+    if let Some(path) = test_maru_home_override() {
+        return Ok(path.join(".codex"));
+    }
+    let home = home_dir()?;
+    Ok(resolve_codex_home(
+        &home,
+        std::env::var_os("CODEX_HOME").map(PathBuf::from),
+    ))
+}
+
+fn resolve_codex_home(home: &Path, configured: Option<PathBuf>) -> PathBuf {
+    configured
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| home.join(".codex"))
+}
+
 pub fn expand_tilde(input: &str) -> PathBuf {
     let trimmed = input.trim();
     if trimmed == "~" {
@@ -272,43 +292,6 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(value, json!({ "new": true }));
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn maru_home_rejects_relative_test_home() {
-        // SCAN-04: a non-absolute home base must fail loudly via Err on every
-        // return path — a relative base otherwise materializes directory
-        // trees in the process cwd (the stray `Users/` incident class).
-        let _guard = test_maru_home_lock();
-        let previous = std::env::var_os("MARU_TEST_HOME");
-        std::env::set_var("MARU_TEST_HOME", "relative-home");
-
-        let home_result = maru_home();
-        let env_result = env_root();
-        let install_result = install_root_base();
-
-        // Restore the previous env value on all paths (BundleTestHome Drop
-        // idiom) so the mutation cannot leak into sibling tests.
-        if let Some(previous) = previous.as_ref() {
-            std::env::set_var("MARU_TEST_HOME", previous);
-        } else {
-            std::env::remove_var("MARU_TEST_HOME");
-        }
-
-        assert!(
-            home_result.is_err(),
-            "maru_home() must reject a relative base, got: {home_result:?}"
-        );
-        assert!(
-            env_result.is_err(),
-            "env_root() must reject a relative base (derived from maru_home), got: {env_result:?}"
-        );
-        assert!(
-            install_result.is_err(),
-            "install_root_base() must reject a relative base, got: {install_result:?}"
-        );
-        // The guard must fire before anything is created: no tree in cwd.
-        assert!(!Path::new("relative-home").exists());
     }
 
     #[test]

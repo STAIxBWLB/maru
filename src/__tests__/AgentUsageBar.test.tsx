@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   agentsUsageStatus: vi.fn(),
-  dotSyncOverview: vi.fn(),
   skillsBundleStatus: vi.fn(),
   activeMissions: [] as Array<{
     id: string;
@@ -29,6 +28,14 @@ vi.mock("../lib/useActiveMissions", () => ({
   useActiveMissions: () => mocks.activeMissions,
 }));
 
+vi.mock("../lib/skills", () => ({
+  skillsBundleStatus: mocks.skillsBundleStatus,
+}));
+
+vi.mock("../lib/useActiveMissions", () => ({
+  useActiveMissions: () => mocks.activeMissions,
+}));
+
 import { AgentUsageBar } from "../components/AgentUsageBar";
 import { LocaleContext } from "../lib/i18n";
 import type { AgentUsageStatus, DotSyncOverview } from "../lib/api";
@@ -39,14 +46,7 @@ import type { AgentUsageStatus, DotSyncOverview } from "../lib/api";
 const t = (key: string, vars?: Record<string, string | number>) => {
   if (key === "agents.usage.usedSuffix") return "used";
   if (key === "agents.usage.filesLabel") return "files";
-  if (key === "agents.usage.docsLabel") return "docs";
-  if (key === "agents.usage.state.cliMissing") return "not installed";
-  if (key === "agents.usage.state.unsupported") return "usage n/a";
-  if (key === "agents.usage.state.unavailable") return "unavailable";
-  if (key === "agents.usage.usageUnavailable") return "unavailable";
-  if (key === "agents.usage.skillsUnknown") return "Skills —";
   if (key === "agents.usage.skillsVersion") return `Skills ${vars?.version ?? ""}`;
-  if (key === "agents.usage.sync.scheduled") return `${vars?.count ?? 0} jobs`;
   if (key.startsWith("system.agents.agent.")) return key.slice("system.agents.agent.".length);
   let result = key;
   for (const [name, value] of Object.entries(vars ?? {})) {
@@ -74,18 +74,6 @@ describe("AgentUsageBar", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     mocks.agentsUsageStatus.mockResolvedValue([]);
-    mocks.dotSyncOverview.mockResolvedValue({
-      cli: {
-        available: false,
-        compatible: false,
-        path: null,
-        version: null,
-        minimumVersion: "2.63.0",
-        message: null,
-      },
-      mirror: null,
-      peer: null,
-    } satisfies DotSyncOverview);
     mocks.skillsBundleStatus.mockResolvedValue(null);
     mocks.activeMissions = [];
   });
@@ -105,9 +93,7 @@ describe("AgentUsageBar", () => {
     statusProps: {
       onOpenAgents?: () => void;
       workspaceName?: string | null;
-      workspacePath?: string | null;
       workspaceFileCount?: number | null;
-      workspaceDocumentCount?: number | null;
     } = {},
   ) {
     root = createRoot(container);
@@ -175,28 +161,17 @@ describe("AgentUsageBar", () => {
     expect(chip?.getAttribute("title")).toBe("No usage API available.");
   });
 
-  it("keeps a chip for agents whose CLI is missing", async () => {
+  it("keeps the status bar and an empty chips region when every agent is cli_missing", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([
       usageEntry({ id: "claude", state: "cli_missing", message: "claude CLI not found" }),
       usageEntry({ id: "kiro", state: "cli_missing" }),
     ]);
     await render();
 
-    const chips = container.querySelectorAll(".agent-usage-chip");
-    expect(chips).toHaveLength(2);
-    expect(chips[0].textContent).toContain("not installed");
-    expect(chips[0].getAttribute("title")).toBe("claude CLI not found");
-    expect(chips[1].classList.contains("dimmed")).toBe(true);
+    expect(container.querySelector(".agent-usage-bar")).not.toBeNull();
+    expect(container.querySelector(".agent-usage-chips")).not.toBeNull();
+    expect(container.querySelectorAll(".agent-usage-chip")).toHaveLength(0);
     expect(container.querySelector(".agent-usage-stat")?.textContent).toContain("0");
-  });
-
-  it("shows an unavailable chip when the usage call fails", async () => {
-    mocks.agentsUsageStatus.mockRejectedValue(new Error("backend down"));
-    await render();
-
-    const chip = container.querySelector(".agent-usage-chip");
-    expect(chip?.textContent).toContain("unavailable");
-    expect(chip?.getAttribute("title")).toContain("backend down");
   });
 
   it("shows the active mission count and opens Agents", async () => {
@@ -238,19 +213,7 @@ describe("AgentUsageBar", () => {
     ).toBe("42 files");
   });
 
-  it("falls back to the document count while the file scan is not ready", async () => {
-    await render(undefined, undefined, {
-      workspaceName: "Private notes",
-      workspaceFileCount: null,
-      workspaceDocumentCount: 10552,
-    });
-
-    expect(
-      container.querySelector(".agent-usage-workspace-name")?.nextElementSibling?.textContent,
-    ).toBe("10,552 docs");
-  });
-
-  it("shows a dash when neither count is known", async () => {
+  it("shows a dash while the workspace file count is unknown", async () => {
     await render(undefined, undefined, {
       workspaceName: "Private notes",
       workspaceFileCount: null,
@@ -261,22 +224,8 @@ describe("AgentUsageBar", () => {
     ).toBe("— files");
   });
 
-  it("falls back to the workspace path basename when there is no label", async () => {
-    await render(undefined, undefined, {
-      workspaceName: null,
-      workspacePath: "/Users/me/workspace/work",
-      workspaceDocumentCount: 3,
-    });
-
-    expect(container.querySelector(".agent-usage-workspace-name")?.textContent).toBe("work");
-  });
-
-  it("omits the workspace chip only when there is no workspace at all", async () => {
-    await render(undefined, undefined, {
-      workspaceName: null,
-      workspacePath: null,
-      workspaceFileCount: 0,
-    });
+  it("omits the workspace chip when there is no workspace", async () => {
+    await render(undefined, undefined, { workspaceName: null, workspaceFileCount: 0 });
 
     expect(container.querySelector(".agent-usage-workspace-name")).toBeNull();
   });
@@ -294,60 +243,6 @@ describe("AgentUsageBar", () => {
         ?.parentElement?.click();
     });
     expect(onOpenSettings).toHaveBeenCalledWith("projects");
-  });
-
-  it("shows dot sync job health and opens Jobs", async () => {
-    const syncOverview: DotSyncOverview = {
-      cli: {
-        available: true,
-        compatible: true,
-        path: "/opt/homebrew/bin/dot",
-        version: "2.63.0",
-        minimumVersion: "2.63.0",
-        message: null,
-      },
-      mirror: {
-        schemaVersion: 1,
-        kind: "mirror",
-        profile: "sync",
-        configured: true,
-        workspacePath: "/work",
-        storeDir: "/work/.dotfiles/sync",
-        target: { kind: "local", spec: "local:/mirror", path: "/mirror" },
-        localExists: true,
-        targetExists: true,
-        paused: false,
-        lockHeld: false,
-        owner: "mac-a",
-        canPush: true,
-        machineNames: ["mac-a"],
-        filterMode: "include",
-        allowCount: 0,
-        submoduleCount: 0,
-        propagation: { create: true, update: true, delete: false },
-        maxDelete: 1000,
-        lastPullAt: null,
-        lastPushAt: null,
-        lastIntakeAt: null,
-        conflictCount: 0,
-        logPath: "/log",
-        includePath: "/include",
-        excludePath: "/exclude",
-        ignorePath: "/ignore",
-        allowPath: "/allow",
-        jobs: [{ id: "push", action: "push", label: "push", intervalSeconds: 600, mode: "clean", state: "running", lastRunAt: null }],
-      },
-      peer: null,
-    };
-    mocks.dotSyncOverview.mockResolvedValue(syncOverview);
-    const onOpenSettings = vi.fn();
-    await render(onOpenSettings);
-
-    const sync = container.querySelector<HTMLButtonElement>(".dot-sync-status");
-    expect(sync?.classList.contains("scheduled")).toBe(true);
-    expect(sync?.textContent).toContain("1");
-    await act(async () => sync?.click());
-    expect(onOpenSettings).toHaveBeenCalledWith("jobs");
   });
 
   it("shows the skills version alongside usage chips", async () => {
@@ -372,14 +267,6 @@ describe("AgentUsageBar", () => {
       skills?.click();
     });
     expect(onOpenSettings).toHaveBeenCalledWith("skills");
-  });
-
-  it("keeps a dimmed skills chip when the bundle status is unknown", async () => {
-    await render();
-
-    const skills = container.querySelector(".agent-usage-skills");
-    expect(skills?.textContent).toBe("Skills —");
-    expect(skills?.classList.contains("dimmed")).toBe(true);
   });
 
   it("opens the settings Agents tab when a chip is clicked", async () => {

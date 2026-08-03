@@ -307,9 +307,12 @@ import {
   type SettingsTerminalLaunchPayload,
 } from "./lib/settingsEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
-import { browserPasskeyBuildOnce } from "./lib/browserPasskeys";
-import { bootAppMode } from "./lib/startupAppMode";
-import { requestSiteViewCloseActive } from "./lib/siteView";
+import {
+  buildSiteViewOpenRequests,
+  requestSiteViewCloseActive,
+  subscribeSiteViewOpenRequests,
+  type SiteViewOpenRequest,
+} from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
@@ -444,25 +447,12 @@ import {
   type FilesSortKey,
   type SortKey,
   type RightPaneTab,
-  type RightWorkbenchMode,
   type RightWorkbenchSurface,
   type TerminalDock,
   type TerminalTheme,
   type ToolPanelSurface,
   type WorkspaceFileFilter,
 } from "./lib/settings";
-import {
-  updateShellSettings,
-  useShellSettings,
-} from "./lib/shellSettingsStore";
-import { getModeDescriptor, ModeSurfaceHost } from "./lib/modeRegistry";
-import {
-  planningModeController,
-  TodayLifecycleBridge,
-  TodayNewDayBanner,
-} from "./lib/planningModeStore";
-import { knowledgeModeController } from "./lib/knowledgeModeStore";
-import { SitesOpenRequestBridge, visualModeController } from "./lib/visualModeStore";
 import {
   availableRightWorkbenchSurface,
   minimumWorkbenchWidth,
@@ -492,10 +482,13 @@ import {
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
+  isCurrentWorkspaceFilesScanRequest,
   mergeFreshEntry,
   planVaultStartup,
   shouldLazyScanWorkspaceFiles,
   workspaceFileScanPaneMode,
+  workspaceFilesScanStatusAfterFailure,
+  type WorkspaceFilesScanStatus,
 } from "./lib/vaultStartup";
 // Workspace system: external store (src/lib/workspaceStore.ts). Slices
 // subscribe via useSyncExternalStore; orchestrators read the current state at
@@ -655,6 +648,46 @@ function joinWorkspaceRelPath(workspacePath: string, relPath: string): string {
   return `${workspacePath.replace(/\/+$/, "")}/${relPath.replace(/^\/+/, "")}`;
 }
 
+interface StoredTabs {
+  activeRelPath: string | null;
+  leftRelPath: string | null;
+  rightRelPath: string | null;
+  focusedGroup: EditorGroupId;
+  relPaths: string[];
+}
+
+type EditorGroupId = "left" | "right";
+
+interface WorkspaceEntriesState {
+  entries: VaultEntry[];
+  loading: boolean;
+  refreshing: boolean;
+  startupIoReady: boolean;
+}
+
+const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
+  entries: [],
+  loading: false,
+  refreshing: false,
+  startupIoReady: false,
+};
+
+interface WorkspaceFilesState {
+  entries: WorkspaceFileEntry[];
+  nodes: WorkspaceEntryNode[];
+  scanStatus: WorkspaceFilesScanStatus;
+  loading: boolean;
+  refreshing: boolean;
+}
+
+const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
+  entries: [],
+  nodes: [],
+  scanStatus: "unscanned",
+  loading: false,
+  refreshing: false,
+};
+
 type AppMode = MaruAppMode;
 
 interface ActivityModeButtonProps {
@@ -704,146 +737,6 @@ function ActivityModeButton({
     </div>
   );
 }
-
-interface ActivityRailProps {
-  visibleAppMode: AppMode;
-  rightWorkbenchMode: AppMode | null;
-  rightWorkbenchOpen: boolean;
-  e2eFlowEnabled: boolean;
-  diagramEnabled: boolean;
-  outlineOpen: boolean;
-  documentsPaneOpen: boolean;
-  settingsWorkPath: string | null;
-  onOpenPrimary: (mode: Exclude<AppMode, "pkm">) => void;
-  onOpenRight: (mode: RightWorkbenchMode) => void;
-  onOpenPkm: () => void;
-  onOpenCommandPalette: () => void;
-  onToggleOutline: () => void;
-  onToggleDocuments: () => void;
-  onOpenPreferences: () => void;
-}
-
-const ActivityRail = memo(function ActivityRail({
-  visibleAppMode,
-  rightWorkbenchMode,
-  rightWorkbenchOpen,
-  e2eFlowEnabled,
-  diagramEnabled,
-  outlineOpen,
-  documentsPaneOpen,
-  settingsWorkPath,
-  onOpenPrimary,
-  onOpenRight,
-  onOpenPkm,
-  onOpenCommandPalette,
-  onToggleOutline,
-  onToggleDocuments,
-  onOpenPreferences,
-}: ActivityRailProps) {
-  recordShellSurfaceRender("ActivityRail");
-  const { t } = useTranslation();
-
-  return (
-    <nav className="activity-rail" aria-label={t("activity.label")}>
-      <ActivityModeButton
-        label={t("mode.dashboard")}
-        active={visibleAppMode === "dashboard"}
-        secondaryActive={rightWorkbenchMode === "dashboard"}
-        icon={<LayoutDashboard size={20} strokeWidth={1.9} />}
-        onOpenPrimary={() => onOpenPrimary("dashboard")}
-        onOpenRight={() => onOpenRight("dashboard")}
-        openRightLabel={t("workbench.openRight", { name: t("mode.dashboard") })}
-      />
-      <ActivityModeButton
-        label={t("mode.pkm")}
-        active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
-        icon={<FileText size={20} />}
-        onOpenPrimary={onOpenPkm}
-      />
-      <ActivityModeButton
-        label={t("mode.scratchpad")}
-        active={visibleAppMode === "scratchpad"}
-        icon={<StickyNote size={20} strokeWidth={1.9} />}
-        onOpenPrimary={() => onOpenPrimary("scratchpad")}
-      />
-      {([
-        ["files", FolderOpen],
-        ["inbox", Inbox],
-        ["comms", MessageSquare],
-        ["meetings", UsersRound],
-        ["today", CalendarCheck],
-        ["tasks", ListTodo],
-        ["drafts", PenLine],
-        ["gap", Diff],
-        ["agents", Bot],
-        ["catalog", LayoutGrid],
-        ["studio", Workflow],
-        ["sites", Globe],
-      ] as const).map(([mode, Icon]) => (
-        <ActivityModeButton
-          key={mode}
-          label={t(`mode.${mode}`)}
-          active={visibleAppMode === mode}
-          secondaryActive={rightWorkbenchMode === mode}
-          icon={<Icon size={20} strokeWidth={1.9} />}
-          onOpenPrimary={() => onOpenPrimary(mode)}
-          onOpenRight={() => onOpenRight(mode)}
-          openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
-        />
-      ))}
-      {e2eFlowEnabled ? (
-        <ActivityModeButton
-          label={t("mode.e2e")}
-          active={visibleAppMode === "e2e"}
-          secondaryActive={rightWorkbenchMode === "e2e"}
-          icon={<Route size={20} strokeWidth={1.9} />}
-          onOpenPrimary={() => onOpenPrimary("e2e")}
-          onOpenRight={() => onOpenRight("e2e")}
-          openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
-        />
-      ) : null}
-      {diagramEnabled ? (
-        <ActivityModeButton
-          label={t("mode.diagram")}
-          active={visibleAppMode === "diagram"}
-          secondaryActive={rightWorkbenchMode === "diagram"}
-          icon={<Network size={20} strokeWidth={1.9} />}
-          onOpenPrimary={() => onOpenPrimary("diagram")}
-          onOpenRight={() => onOpenRight("diagram")}
-          openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
-        />
-      ) : null}
-      <ActivityModeButton
-        label={t("mode.graph")}
-        active={visibleAppMode === "graph"}
-        secondaryActive={rightWorkbenchMode === "graph"}
-        icon={<Waypoints size={20} strokeWidth={1.9} />}
-        onOpenPrimary={() => onOpenPrimary("graph")}
-        onOpenRight={() => onOpenRight("graph")}
-        openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
-      />
-      <button type="button" className="activity-button" onClick={onOpenCommandPalette} title={t("sidebar.commandPalette")} aria-label={t("sidebar.commandPalette")}>
-        <Command size={19} />
-      </button>
-      {visibleAppMode === "pkm" || visibleAppMode === "inbox" ? (
-        <button type="button" className={outlineOpen ? "activity-button active" : "activity-button"} onClick={onToggleOutline} title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")} aria-label={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}>
-          {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
-        </button>
-      ) : null}
-      {visibleAppMode === "pkm" ? (
-        <button type="button" className={documentsPaneOpen ? "activity-button active" : "activity-button"} onClick={onToggleDocuments} title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")} aria-label={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}>
-          <FileText size={19} />
-        </button>
-      ) : null}
-      <span className="activity-spacer" />
-      {settingsWorkPath ? (
-        <button type="button" className="activity-button" onClick={onOpenPreferences} title={t("mode.system")} aria-label={t("mode.system")}>
-          <Settings2 size={20} />
-        </button>
-      ) : null}
-    </nav>
-  );
-});
 
 interface InboxCarry {
   decision: InboxDecision;
@@ -983,33 +876,76 @@ export function MainApp() {
     markStartup("app:mounted");
   }, []);
 
-  const workspaceRegistry = useWorkspaceRegistry();
-  const workspaceStates = useWorkspaceStates();
-  const workspaceFileStates = useWorkspaceFileStates();
-  const explorerVisibility = useExplorerVisibility();
-  // Editor tab system: external store (src/lib/editorTabsStore.ts). Slices
-  // subscribe via useSyncExternalStore; orchestrators read the current state
-  // at call time with getEditorTabsState() instead of capturing it in deps.
-  const tabs = useDocTabs();
-  const binaryTabs = useBinaryTabs();
-  const tabOrder = useTabOrder();
-  const { activeTabId, leftActiveTabId, rightActiveTabId } = useActiveTabIds();
-  const focusedEditorGroup = useFocusedEditorGroup();
+  const [workspaceRegistry, setWorkspaceRegistry] = useState<WorkspaceRegistry>({
+    workspaces: [],
+    activeByVisibility: {
+      private: null,
+      public: null,
+    },
+    hiddenDefaults: [],
+  });
+  const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
+  const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
+  const workspaceFileRequestSeqRef = useRef<Record<string, number>>({});
+  const [explorerVisibility, setExplorerVisibility] =
+    useState<WorkspaceVisibility>("private");
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [binaryTabs, setBinaryTabs] = useState<BinaryTab[]>([]);
+  const [tabOrder, setTabOrder] = useState<string[]>([]);
+  // Mirror of `tabs` for close/relaunch guards that run outside React flow
+  // (onCloseRequested, update toast actions). Binary tabs are never dirty.
+  const tabsRef = useRef<EditorTab[]>([]);
+  // Dirty-draft guard: "close" = window close requested, "relaunch" = update
+  // ready. Non-null shows the confirm dialog; the action runs on confirm.
+  const [pendingDestructiveAction, setPendingDestructiveAction] =
+    useState<"close" | "relaunch" | null>(null);
+  const closeConfirmedRef = useRef(false);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
+  const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
+  const [focusedEditorGroup, setFocusedEditorGroup] = useState<EditorGroupId>("left");
   const [focusedWorkbenchSide, setFocusedWorkbenchSide] = useState<EditorGroupId>("left");
-  const queryByVisibility = useQueryByVisibility();
-  const fileQueryByVisibility = useFileQueryByVisibility();
-  const documentFilterByVisibility = useDocumentFilterByVisibility();
-  const collapsedTreeFoldersByVisibility = useCollapsedTreeFoldersByVisibility();
-  const collapsedFileFoldersByVisibility = useCollapsedFileFoldersByVisibility();
-  const selectedFilePathsByWorkspace = useSelectedFilePathsByWorkspace();
-  const filesPresentation = useFilesPresentationSlice();
-  const {
-    filters: filesPaneFilters,
-    pendingReveal: pendingExplorerReveal,
-    editorErrors: filesEditorErrors,
-    saving,
-    savingTabId,
-  } = filesPresentation;
+  const [queryByVisibility, setQueryByVisibility] = useState<Record<WorkspaceVisibility, string>>({
+    private: "",
+    public: "",
+  });
+  const [fileQueryByVisibility, setFileQueryByVisibility] = useState<
+    Record<WorkspaceVisibility, string>
+  >({
+    private: "",
+    public: "",
+  });
+  const [documentFilterByVisibility, setDocumentFilterByVisibility] = useState<
+    Record<WorkspaceVisibility, DocumentFilter>
+  >({
+    private: ALL_DOCUMENTS_FILTER,
+    public: ALL_DOCUMENTS_FILTER,
+  });
+  const [collapsedTreeFoldersByVisibility, setCollapsedTreeFoldersByVisibility] = useState<
+    Record<WorkspaceVisibility, string[]>
+  >({
+    private: [],
+    public: [],
+  });
+  const [collapsedFileFoldersByVisibility, setCollapsedFileFoldersByVisibility] = useState<
+    Record<WorkspaceVisibility, string[]>
+  >({
+    private: [],
+    public: [],
+  });
+  const [selectedFilePathsByWorkspace, setSelectedFilePathsByWorkspace] = useState<
+    Record<string, string[]>
+  >({});
+  const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
+  const [selectedFileQueueItemIds, setSelectedFileQueueItemIds] = useState<string[]>([]);
+  const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
+    EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  );
+  const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
+    null,
+  );
+  const [pendingOpenedSiteUrls, setPendingOpenedSiteUrls] = useState<SiteViewOpenRequest[]>([]);
+  const nextOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   // Global error toast lives in the error store (step 9); setError is a
   // module action now, so every call site below keeps its old shape.
@@ -1421,6 +1357,8 @@ export function MainApp() {
   const rightWorkbenchMode = workbenchPlacement.rightMode;
   const rightWorkbenchOpen = workbenchPlacement.rightOpen && rightWorkbenchMode !== null;
   const surfaceMode = rightWorkbenchMode ?? visibleAppMode;
+  const panelGraphOpen =
+    layoutSettings.terminalOpen && layoutSettings.toolPanelSurface === "graph";
   const editorViewMode = editorPaneViewModes[focusedEditorGroup];
   const firstTabId = orderedAnyTabs[0]?.id ?? null;
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
@@ -2287,7 +2225,30 @@ export function MainApp() {
     (rightPaneTab: RightPaneTab) => {
       editorSurfacePersistence.setRightPaneTab(rightPaneTab);
     },
-    [editorSurfacePersistence],
+    [updateSettings],
+  );
+
+  const openScratchpadSurface = useCallback(() => {
+    setPersistedAppMode("pkm");
+    setPersistedRightWorkbenchSurface("editor");
+    setPersistedRightPaneTab("memo");
+    updateLayoutSettings({ outlineOpen: true, editorSplitOpen: false });
+  }, [
+    setPersistedAppMode,
+    setPersistedRightPaneTab,
+    setPersistedRightWorkbenchSurface,
+    updateLayoutSettings,
+  ]);
+
+  // Draft handoff into gap mode: the pane consumes it once on mount, so a
+  // later rail-button revisit does not reselect the same draft.
+  const [gapDraftId, setGapDraftId] = useState<string | null>(null);
+  const openGapAnalysis = useCallback(
+    (draftId?: string) => {
+      setGapDraftId(draftId ?? null);
+      setPersistedAppMode("gap");
+    },
+    [setPersistedAppMode],
   );
 
   const restoredWindowKeyRef = useRef<string | null>(null);
@@ -2691,9 +2652,9 @@ export function MainApp() {
         ? (["done", "failed", "duplicate"] as InboxProcessedStatus[])
         : [processedStatusFilter];
     const channel =
-      Object.is(surfaceMode, "comms")
+      surfaceMode === "comms"
         ? commsSourceFilter
-        : Object.is(surfaceMode, "inbox")
+        : surfaceMode === "inbox"
           ? inboxSourceFilter
           : null;
     const requestKey = JSON.stringify([
@@ -2721,7 +2682,7 @@ export function MainApp() {
         limit: 120,
       };
       const snapshot =
-        Object.is(surfaceMode, "comms")
+        surfaceMode === "comms"
           ? await scanInboxProcessedSnapshot(request)
           : {
               items: await scanInboxProcessedItems(request),
@@ -2748,9 +2709,6 @@ export function MainApp() {
       }
     }
   }, [
-    processedItemsKeyRef,
-    processedItemsRef,
-    processedRequestSeqRef,
     surfaceMode,
     commsSourceFilter,
     inboxSourceFilter,
@@ -3489,29 +3447,97 @@ export function MainApp() {
     ],
   );
 
-  // Event subscriptions extracted in step 9: inbox runtime config + notify
-  // watcher, the telegram comms mirror, and the ai://output log tail live in
-  // dedicated hooks now, with the same gating and handler bodies.
-  useInboxEvents({
-    inboxWorkspacePath,
-    surfaceModeInbox: Object.is(surfaceMode, "inbox"),
-    refreshInbox,
-    refreshProcessedItems,
-    setInboxRuntimeConfig,
-    setInboxSourceFilter,
-    setInboxDrops,
-    setInboxEntries,
-  });
-  useTelegramEvents({
-    enabled:
-      Object.is(surfaceMode, "comms") &&
-      inboxWorkspaceConfigLoad.status !== "idle" &&
-      inboxWorkspaceConfigLoad.status !== "pending",
-    configStatus: inboxWorkspaceConfigLoad.status,
-    inboxWorkspacePath,
-    refreshCommsDashboardRef,
-  });
-  useCommunicationsRefreshRouting({
+  useEffect(() => {
+    if (!inboxWorkspacePath) {
+      setInboxRuntimeConfig(DEFAULT_INBOX_RUNTIME_CONFIG);
+      setInboxSourceFilter(null);
+      return;
+    }
+    let cancelled = false;
+    let unlistenConfigEvent: (() => void) | null = null;
+    void readInboxRuntimeConfig(inboxWorkspacePath)
+      .then((config) => {
+        if (!cancelled) setInboxRuntimeConfig(config);
+      })
+      .catch(() => {
+        if (!cancelled) setInboxRuntimeConfig(DEFAULT_INBOX_RUNTIME_CONFIG);
+      });
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("inbox://runtime_config_updated", (event) => {
+          const payload = event.payload as
+            | { workPath?: string; config?: InboxRuntimeConfig }
+            | null;
+          if (!payload?.config || payload.workPath !== inboxWorkspacePath) return;
+          setInboxRuntimeConfig(payload.config);
+          setInboxSourceFilter(null);
+          void refreshInbox();
+          void refreshProcessedItems();
+        }),
+      )
+      .then((off) => {
+        if (cancelled) off();
+        else unlistenConfigEvent = off;
+      })
+      .catch(() => {
+        // Browser dev shell without Tauri event bridge.
+      });
+    return () => {
+      cancelled = true;
+      unlistenConfigEvent?.();
+    };
+  }, [inboxWorkspacePath, refreshInbox, refreshProcessedItems]);
+
+  useEffect(() => {
+    if (
+      surfaceMode !== "comms" ||
+      inboxWorkspaceConfigLoad.status === "idle" ||
+      inboxWorkspaceConfigLoad.status === "pending"
+    ) {
+      return;
+    }
+    let disposed = false;
+    let unlistenTelegram: (() => void) | null = null;
+    void refreshCommsDashboardRef.current();
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("telegram://messages", (event) => {
+          const payload = event.payload as
+            | {
+                workPath?: string | null;
+                messages?: TelegramMessage[];
+                status?: TelegramPollingStatus;
+              }
+            | null;
+          if (payload?.workPath && payload.workPath !== inboxWorkspacePath) return;
+          if (payload?.messages) setTelegramMessages(payload.messages);
+          if (payload?.status) setTelegramPolling(payload.status);
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlistenTelegram = off;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlistenTelegram?.();
+    };
+  }, [surfaceMode, inboxWorkspaceConfigLoad.status, inboxWorkspacePath]);
+
+  useEffect(() => {
+    // In comms this is also the filter/search refetch path: the callback
+    // identity changes with the query and channel, re-running this effect.
+    if (surfaceMode === "inbox" || surfaceMode === "comms") void refreshProcessedItems();
+    if (!booting && settingsWorkspaceStartupReady && (
+      surfaceMode === "inbox" ||
+      surfaceMode === "meetings" ||
+      surfaceMode === "tasks" ||
+      rightPaneTab === "skills"
+    )) {
+      void refreshProcessingMissions();
+    }
+  }, [
     surfaceMode,
     booting,
     settingsWorkspaceStartupReady,
@@ -3535,20 +3561,131 @@ export function MainApp() {
     agentRuntimeController.publishMissionLog(id, tail.lines);
   }, []);
 
-  useMissionCompletionLifecycle({
-    processingMissions,
-    isInboxProcessMission,
-    matchesActiveMission,
-    refreshProcessedItems,
-    refreshSourceRuns,
-    readMissionLog: readCompletedMissionLog,
-  });
+  // Inbox scan + watcher subscription, scoped to the active workspace and
+  // deferred until Inbox mode so startup document paint owns the I/O lane.
+  // The watcher overlays the polling baseline: any file_event triggers
+  // a re-scan rather than a delta apply, which keeps the UI source of
+  // truth a single `scan_inbox_drop` snapshot.
+  useEffect(() => {
+    if (!inboxWorkspacePath) {
+      setInboxDrops([]);
+      setInboxEntries([]);
+      return;
+    }
+    if (surfaceMode !== "inbox") {
+      return;
+    }
+    let cancelled = false;
+    let unlistenFileEvent: (() => void) | null = null;
 
-  const refreshWorkspaceFiles = useWorkspaceFilesLifecycle({ scanOptions, setError });
-  useInitialWorkspaceFilesScan(
-    explorerWorkspacePath,
-    shouldScanExplorerWorkspaceFiles,
-    refreshWorkspaceFiles,
+    void (async () => {
+      // Cold scan first — watcher only catches subsequent events.
+      void refreshInbox();
+
+      try {
+        await startInboxWatcher(inboxWorkspacePath);
+      } catch (err) {
+        // Most likely cause: <workspace>/inbox/downloads doesn't exist yet.
+        // Surface a soft notice but keep polling functional.
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.info("[maru] inbox watcher not started:", err);
+        }
+        return;
+      }
+
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const off = await listen("inbox://file_event", () => {
+          if (!cancelled) void refreshInbox();
+        });
+        if (cancelled) {
+          off();
+        } else {
+          unlistenFileEvent = off;
+        }
+      } catch (err) {
+        // Browser dev shell — `@tauri-apps/api/event` may not be wired.
+        // eslint-disable-next-line no-console
+        console.info("[maru] inbox event listener unavailable:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlistenFileEvent) unlistenFileEvent();
+      void stopInboxWatcher().catch(() => {
+        // best-effort
+      });
+    };
+  }, [inboxWorkspacePath, surfaceMode, refreshInbox]);
+
+  const refreshWorkspaceFiles = useCallback(
+    async (path: string, initial = false) => {
+      const requestSeq = (workspaceFileRequestSeqRef.current[path] ?? 0) + 1;
+      workspaceFileRequestSeqRef.current[path] = requestSeq;
+      updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
+      try {
+        const snapshot = await scanWorkspaceEntries(path, scanOptions);
+        if (
+          !isCurrentWorkspaceFilesScanRequest(
+            workspaceFileRequestSeqRef.current,
+            path,
+            requestSeq,
+          )
+        ) {
+          return;
+        }
+        const files = snapshot.entries
+          .filter(
+            (entry) =>
+              entry.kind === "file" ||
+              (entry.kind === "symlink" && entry.targetKind === "file"),
+          )
+          .map((entry) => ({
+            path: entry.path,
+            relPath: entry.relPath,
+            name: entry.name,
+            extension: entry.extension,
+            fileKind: entry.fileKind,
+            sizeBytes: entry.sizeBytes,
+            updatedAt: entry.updatedAt,
+            gitTracked: entry.gitTracked,
+            binary: entry.binary,
+          }));
+        updateWorkspaceFileState(path, {
+          entries: files,
+          nodes: snapshot.entries,
+          scanStatus: "ready",
+          loading: false,
+          refreshing: false,
+        });
+      } catch (err) {
+        if (
+          !isCurrentWorkspaceFilesScanRequest(
+            workspaceFileRequestSeqRef.current,
+            path,
+            requestSeq,
+          )
+        ) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
+        setWorkspaceFileStates((current) => {
+          const previous = current[path] ?? EMPTY_WORKSPACE_FILES_STATE;
+          return {
+            ...current,
+            [path]: {
+              ...previous,
+              scanStatus: workspaceFilesScanStatusAfterFailure(previous.scanStatus),
+              loading: false,
+              refreshing: false,
+            },
+          };
+        });
+      }
+    },
+    [scanOptions, updateWorkspaceFileState],
   );
 
   const loadWorkspace = useCallback(
@@ -4093,9 +4230,7 @@ export function MainApp() {
         setPersistedAppMode("files");
         setExplorerVisibility(visibility);
         try {
-          // Read at call time: the scan may have completed while the async
-          // gap above was in flight.
-          if (getWorkspaceStoreState().fileStates[workspacePath]?.scanStatus !== "ready") {
+          if (workspaceFileStates[workspacePath]?.scanStatus !== "ready") {
             await refreshWorkspaceFiles(workspacePath, true);
           }
           setWorkspaceFileFilter("all");
@@ -5059,24 +5194,19 @@ export function MainApp() {
   }, [locale, setLocale]);
 
   const refreshActiveSurface = useCallback(() => {
-    if (Object.is(surfaceMode, "inbox")) {
+    if (surfaceMode === "inbox") {
       void refreshInbox();
       void refreshProcessedItems();
       void refreshProcessingMissions();
-    } else if (Object.is(surfaceMode, "comms")) {
+    } else if (surfaceMode === "comms") {
       void refreshCommsDashboard({ retryWorkspaceConfig: true });
       void refreshProcessedItems();
-    } else if (Object.is(surfaceMode, "meetings")) {
+    } else if (surfaceMode === "meetings") {
       void refreshProcessingMissions();
-    } else if (Object.is(surfaceMode, "today")) {
-      planningModeController.requestTodayRefresh();
-    } else if (Object.is(surfaceMode, "scratchpad")) {
-      knowledgeModeController.requestScratchpadRefresh();
-    } else if (Object.is(surfaceMode, "tasks")) {
-      // TasksPane owns its task-data refresh (in-pane Refresh button); the
-      // shared surface refresh still re-pulls the AI runs feeding its panel.
+    } else if (surfaceMode === "tasks") {
+      setTodayRefreshEpoch((epoch) => epoch + 1);
       void refreshProcessingMissions();
-    } else if (Object.is(surfaceMode, "files") && explorerWorkspacePath) {
+    } else if (surfaceMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
       void refreshCurrent();
@@ -5782,13 +5912,10 @@ export function MainApp() {
   );
 
   const closeRightEditorPane = useCallback(() => {
-    patchEditorIds({
-      rightActiveTabId: null,
-      focusedEditorGroup: "left",
-      ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
-    });
-    if (rightTab) cleanupEditorPaneGroup(rightTab.workspacePath, "right");
+    setRightActiveTabId(null);
+    setFocusedEditorGroup("left");
     setFocusedWorkbenchSide("left");
+    if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
     updateLayoutSettings({ editorSplitOpen: false });
   }, [leftResolvedTabId, rightTab, updateLayoutSettings]);
 
@@ -5818,10 +5945,8 @@ export function MainApp() {
     }
     if (rightWorkbenchMode && focusedWorkbenchSide === "right") {
       setFocusedWorkbenchSide("left");
-      patchEditorIds({
-        focusedEditorGroup: "left",
-        ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
-      });
+      setFocusedEditorGroup("left");
+      if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
       updateLayoutSettings({ editorSplitOpen: false });
       return;
     }
@@ -5875,55 +6000,49 @@ export function MainApp() {
     const target = findTab(activeId) ?? findTab(leftId) ?? orderedTabsInState(state)[0] ?? null;
     if (!target) return;
     setPersistedRightWorkbenchSurface("editor");
-    patchEditorIds({
-      rightActiveTabId: target.id,
-      activeTabId: target.id,
-      focusedEditorGroup: "right",
-    });
+    setRightActiveTabId(target.id);
+    setActiveTabId(target.id);
+    setFocusedEditorGroup("right");
     setFocusedWorkbenchSide("right");
     updateLayoutSettings({
       editorSplitOpen: true,
     });
   }, [
-    editorSplitOpen,
+    activeTab,
+    leftTab,
+    orderedAnyTabs,
     setPersistedRightWorkbenchSurface,
     updateLayoutSettings,
   ]);
 
   const openSourcePreviewSplit = useCallback(() => {
-    const state = getEditorTabsState();
-    const { leftResolvedTabId: leftId, resolvedActiveTabId: activeId } = resolveEditorTabIds(
-      state,
-      editorSplitOpen,
-    );
-    const findTab = (id: string | null): AnyTab | null =>
-      id
-        ? state.tabs.find((tab) => tab.id === id) ??
-          state.binaryTabs.find((tab) => tab.id === id) ??
-          null
-        : null;
-    const target = findTab(activeId) ?? findTab(leftId) ?? orderedTabsInState(state)[0] ?? null;
+    const target = activeTab ?? leftTab ?? orderedAnyTabs[0] ?? null;
     if (!target || isBinaryTab(target)) return;
     const kind = target.document.fileKind.toLowerCase();
     if (kind !== "md" && kind !== "markdown") return;
     setPersistedRightWorkbenchSurface("editor");
-    patchEditorIds({
-      rightActiveTabId: target.id,
-      leftActiveTabId: target.id,
-      activeTabId: target.id,
-      focusedEditorGroup: "left",
-    });
+    setRightActiveTabId(target.id);
+    setLeftActiveTabId(target.id);
+    setActiveTabId(target.id);
+    setFocusedEditorGroup("left");
     setFocusedWorkbenchSide("left");
-    editorSurfacePersistence.setEditorPaneViewModes(
-      target.workspacePath,
-      { left: "source", right: "preview" },
-    );
+    setEditorPaneViewModes({ left: "source", right: "preview" });
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        editorViewMode: "source",
+        editorPaneViewModes: { left: "source", right: "preview" },
+      },
+    }));
     updateLayoutSettings({ editorSplitOpen: true });
   }, [
-    editorSurfacePersistence,
-    editorSplitOpen,
+    activeTab,
+    leftTab,
+    orderedAnyTabs,
     setPersistedRightWorkbenchSurface,
     updateLayoutSettings,
+    updateSettings,
   ]);
 
   const openGraphPanel = useCallback(
@@ -6062,11 +6181,14 @@ export function MainApp() {
         case "meetings":
           openMeetings();
           break;
+        case "tasks":
+          openTasks();
+          break;
         case "sites":
           openSites();
           break;
         case "gap":
-          setPersistedAppMode("gap");
+          openGapAnalysis();
           break;
         case "graph":
           openGraphWorkspace();
@@ -6077,19 +6199,22 @@ export function MainApp() {
     },
     [
       openComms,
+      openGapAnalysis,
       openGraphWorkspace,
       openInboxAndFocus,
       openMeetings,
       openSites,
+      openTasks,
       setPersistedAppMode,
       updateLayoutSettings,
     ],
   );
 
   const openWorkbenchModeRight = useCallback(
-    (mode: RightWorkbenchMode) => {
+    (mode: Exclude<AppMode, "pkm">) => {
       if (mode === "inbox") setInboxFocusTick((value) => value + 1);
-      if (mode === "gap") knowledgeModeController.clearGapDraft();
+      if (mode === "tasks") setTodayRoute("all");
+      if (mode === "gap") setGapDraftId(null);
       if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
         updateLayoutSettings({
           terminalOpen: false,
@@ -6110,12 +6235,48 @@ export function MainApp() {
     ],
   );
 
+  const enqueueOpenedSiteUrls = useCallback((urls: unknown) => {
+    const batch = buildSiteViewOpenRequests(urls, nextOpenedSiteUrlIdRef.current);
+    nextOpenedSiteUrlIdRef.current = batch.nextId;
+    if (batch.requests.length > 0) {
+      setPendingOpenedSiteUrls((current) => [...current, ...batch.requests]);
+    }
+  }, []);
+
+  const acknowledgeOpenedSiteUrls = useCallback((handledIds: readonly number[]) => {
+    const handled = new Set(handledIds);
+    setPendingOpenedSiteUrls((current) => current.filter((request) => !handled.has(request.id)));
+  }, []);
+
+  // The subscription installs its native listener before draining the cold
+  // queue and returns synchronous cleanup, so effect teardown cannot consume
+  // and discard a URL while an async listener promise is still resolving.
+  useEffect(() => {
+    if (booting) return;
+    return subscribeSiteViewOpenRequests(enqueueOpenedSiteUrls);
+  }, [booting, enqueueOpenedSiteUrls]);
+
+  // Preserve the active document when possible: an OS-opened web URL uses the
+  // right Sites workbench from Docs, and otherwise opens/keeps primary Sites.
+  useEffect(() => {
+    if (pendingOpenedSiteUrls.length === 0) return;
+    if (visibleAppMode === "pkm") {
+      if (rightWorkbenchMode !== "sites") openWorkbenchModeRight("sites");
+      return;
+    }
+    if (visibleAppMode !== "sites") openPrimaryWorkbenchMode("sites");
+  }, [
+    openPrimaryWorkbenchMode,
+    openWorkbenchModeRight,
+    pendingOpenedSiteUrls.length,
+    rightWorkbenchMode,
+    visibleAppMode,
+  ]);
+
   const closeRightWorkbench = useCallback(() => {
     setFocusedWorkbenchSide("left");
-    patchEditorIds({
-      focusedEditorGroup: "left",
-      ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
-    });
+    setFocusedEditorGroup("left");
+    if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
     updateLayoutSettings({ editorSplitOpen: false });
   }, [leftResolvedTabId, updateLayoutSettings]);
 
@@ -6295,123 +6456,13 @@ export function MainApp() {
     ],
   );
 
-  const graphVaultPathRef = useRef<string | null>(null);
-
-  const outlinePaneCommands = useMemo(
-    () =>
-      createOutlinePaneCommands({
-        getState: () => getOutlinePaneState(outlinePaneScope),
-        closeOutline: () => updateLayoutSettings({ outlineOpen: false }),
-        jumpToLine: (line) => jumpToOutlineLine(line),
-        setRightPaneTab: setPersistedRightPaneTab,
-        updateField,
-        selectEntry: async (entry) => {
-          await selectEntry(entry);
-        },
-        openMissingWikilink: handleWikilinkClick,
-        openGraph: (localTarget) => openGraphMode({
-          source: activeDocumentWorkspacePath === graphVaultPathRef.current ? "vault" : "workspace",
-          localTarget,
-        }),
-        setDocumentFilter: setExplorerDocumentFilter,
-        updateDocumentViews,
-        setDocumentSubmoduleScope,
-        openNewDocument: openNewDocumentDialog,
-        openCommandPalette,
-        setExplorerExpandedFolders: setCollapsedFileFolders,
-        refreshExplorer: () =>
-          explorerWorkspacePath ? refreshWorkspaceFiles(explorerWorkspacePath) : undefined,
-        openWorkspaceFile: openWorkspaceFileEntry,
-        ignoreWorkspaceEntry: (relPath) => ignoreEntry(relPath),
-        setFilesPaneFilters,
-        revealFileInFinder: revealTargetInFinder,
-        queueExternalFiles,
-        queueFileSources: addFileQueueSources,
-        updateFileQueueItem,
-        applyFileQueue: applyQueuedFiles,
-      }),
-    [
-      activeDocumentWorkspacePath,
-      addFileQueueSources,
-      applyQueuedFiles,
-      explorerWorkspacePath,
-      handleWikilinkClick,
-      ignoreEntry,
-      jumpToOutlineLine,
-      openGraphMode,
-      openNewDocumentDialog,
-      openWorkspaceFileEntry,
-      outlinePaneScope,
-      queueExternalFiles,
-      refreshWorkspaceFiles,
-      revealTargetInFinder,
-      selectEntry,
-      setCollapsedFileFolders,
-      setDocumentSubmoduleScope,
-      setExplorerDocumentFilter,
-      setPersistedRightPaneTab,
-      updateDocumentViews,
-      updateField,
-      updateFileQueueItem,
-      updateLayoutSettings,
-    ],
-  );
-
-  const {
-    prepareDocument: prepareFilesPreviewDocument,
-    saveDocument: saveFilesPreviewDocument,
-    reloadDocument: reloadFilesPreviewDocument,
-  } = useFilesDocumentLifecycle({
-    selectedPath: filesSelectedDocumentNode?.path ?? null,
-    workspacePath: explorerWorkspacePath,
-    workspaceVisibility: explorerVisibility,
-    workspaceEntryVisibility: explorerWorkspace?.visibility,
-    previewTab: filesPreviewTab,
-    setEditorError: setFilesEditorErrors,
-    saveTab,
-    refreshWorkspaceFiles,
-    confirmReload: () => window.confirm(t("files.editor.reloadConfirm")),
-  });
-
-  const openFilesPreviewInDocuments = useCallback(() => {
-    if (!filesPreviewTab) return;
-    activateEditorTab(filesPreviewTab.id, "left");
-    setPersistedAppMode("pkm");
-  }, [filesPreviewTab, setPersistedAppMode]);
-
-  const filesHtmlKey = filesPreviewTab ? `files:${filesPreviewTab.id}` : null;
-  const filesHtmlState = filesHtmlKey ? htmlPaneModes[filesHtmlKey] : undefined;
-  const handleFilesHtmlModeChange = useCallback(
-    (mode: HtmlViewMode) => {
-      if (!filesHtmlKey) return;
-      setHtmlPaneModes((current) => ({
-        ...current,
-        [filesHtmlKey]: { ...current[filesHtmlKey], mode },
-      }));
-    },
-    [filesHtmlKey],
-  );
-  const handleFilesHtmlRiskAck = useCallback(
-    (digest: string) => {
-      if (!filesHtmlKey) return;
-      setHtmlPaneModes((current) => ({
-        ...current,
-        [filesHtmlKey]: {
-          ...current[filesHtmlKey],
-          mode: current[filesHtmlKey]?.mode ?? "visual",
-          riskAckDigest: digest,
-        },
-      }));
-    },
-    [filesHtmlKey],
-  );
-
-  const saveActiveSurfaceDocument = useCallback(async () => {
-    const filesOwnFocus =
-      visibleAppMode === "files" ||
-      (rightWorkbenchMode === "files" && focusedWorkbenchSide === "right");
-    if (filesOwnFocus && filesPreviewTab) {
-      await saveFilesPreviewDocument();
+  // Track which heading the source editor is scrolled to so the outline can
+  // highlight the active one. Source mode only — the textarea has a uniform
+  // line height, the same line↔scroll mapping jumpToOutlineLine relies on.
+  const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null);
+  useEffect(() => {
+    if (!outlineOpen || rightPaneTab !== "outline" || editorViewMode !== "source") {
+      setActiveOutlineLine(null);
       return;
     }
     await saveCurrent();
@@ -7007,11 +7058,110 @@ export function MainApp() {
     gap: " gap-mode",
     agents: " agents-mode",
   };
-  // Graph discovers the nested vault and drives its watcher inside
-  // GraphModeAdapter. MainApp only retains this lightweight source hint for
-  // editor-originated Graph focus requests.
-  const graphVaultPath = workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
-  graphVaultPathRef.current = graphVaultPath;
+  const graphWorkspacePath =
+    workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
+  // The vault is usually a `vault/` submodule inside the workspace; only fall
+  // back to the public-workspace-as-vault setup when there is no such folder.
+  // The probe result is keyed by workspace so a switch A→B can never serve
+  // A's vault while B's probe is still in flight.
+  const [nestedVault, setNestedVault] = useState<{
+    workspace: string;
+    root: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!graphWorkspacePath) return;
+    let cancelled = false;
+    void vaultGraphRoot(graphWorkspacePath)
+      .then((root) => {
+        if (!cancelled) setNestedVault({ workspace: graphWorkspacePath, root });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [graphWorkspacePath]);
+  const nestedVaultPath =
+    nestedVault?.workspace === graphWorkspacePath ? nestedVault.root : null;
+  const graphVaultPath =
+    nestedVaultPath ??
+    workspaceRegistry.activeByVisibility.public ??
+    publicWorkspaces[0]?.path ??
+    null;
+  const graphDataPath =
+    maruSettings.graph.source === "vault"
+      ? graphVaultPath ?? activeDocumentWorkspacePath
+      : graphWorkspacePath ?? activeDocumentWorkspacePath;
+  const graphEntries = graphDataPath
+    ? workspaceStates[graphDataPath]?.entries ?? NO_ENTRIES
+    : activeDocumentEntries;
+  const graphSurfaceVisible =
+    visibleAppMode === "graph" || rightWorkbenchMode === "graph" || panelGraphOpen;
+  const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
+  // Read the current state through a ref: the first thing this effect does is
+  // patch workspaceStates, so depending on it would re-run the effect, cancel
+  // the scan it just started, and then bail on its own `loading: true` — the
+  // entries would never land for a path nothing else populates (e.g. the vault
+  // submodule, which only the graph scans).
+  const workspaceStatesRef = useRef(workspaceStates);
+  workspaceStatesRef.current = workspaceStates;
+  useEffect(() => {
+    if (!graphSurfaceVisible || !graphDataPath) return;
+    const current = workspaceStatesRef.current[graphDataPath];
+    if (current?.startupIoReady || current?.loading || current?.refreshing) return;
+    // Land every result, cancelled or not: the writes are keyed by path, so a
+    // late one is still correct for that key. Skipping them was the bug — any
+    // re-run (settings load swaps the `scanOptions` array identity, or the
+    // surface flips visible) cancelled the in-flight scan, and the guard above
+    // then saw the `loading: true` this effect had just set and bailed
+    // forever. `cancelled` now only suppresses a toast nobody asked for.
+    const path = graphDataPath;
+    let cancelled = false;
+    updateWorkspaceState(path, { loading: true });
+    void (async () => {
+      try {
+        const cached = await readVaultCache(path);
+        if (cached) updateWorkspaceState(path, { entries: cached, loading: false, refreshing: true });
+        const fresh = await scanVault(path, scanOptions);
+        updateWorkspaceState(path, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
+      } catch (err) {
+        updateWorkspaceState(path, { loading: false, refreshing: false });
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState]);
+  useEffect(() => {
+    if (!graphSurfaceVisible || !graphDataPath || !vaultWatchPath) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    void startVaultWatcher(vaultWatchPath).catch(() => undefined);
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<{ workspacePath: string; paths: string[] }>("vault://index-delta", (event) => {
+          if (event.payload.workspacePath !== vaultWatchPath) return;
+          if (refreshTimer) clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => {
+            void scanVault(vaultWatchPath, scanOptions).then((fresh) => {
+              if (!disposed) updateWorkspaceState(vaultWatchPath, { entries: fresh });
+            });
+          }, 150);
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unlisten?.();
+      void stopVaultWatcher().catch(() => undefined);
+    };
+  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, vaultWatchPath]);
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -7031,7 +7181,7 @@ export function MainApp() {
   }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
   useEffect(() => {
     // Inbox selection only feeds the Shared Outbox queue while in Inbox mode.
-    if (!Object.is(surfaceMode, "inbox") && inboxShareablePaths.length > 0) {
+    if (surfaceMode !== "inbox" && inboxShareablePaths.length > 0) {
       setInboxShareablePaths([]);
     }
   }, [surfaceMode, inboxShareablePaths.length]);
@@ -7231,580 +7381,8 @@ export function MainApp() {
     () =>
       visibleAppMode === "graph" || rightWorkbenchMode === "graph"
         ? null
-        : (
-          <ModeSurfaceHost
-            mode="graph"
-            placement="panel"
-            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
-            commands={{
-              renderPrimarySurface: () => null,
-              openGraphEntry: (entry) => {
-                setPersistedAppMode("pkm");
-                void selectEntry(entry as VaultEntry, "left");
-              },
-              createGraphNote: handleWikilinkClick,
-              isGraphFavorite: isFavorite,
-              toggleGraphFavorite: toggleFavorite,
-              onGraphChanged: (graphDataPath) => void rescanWorkspaceEntries(graphDataPath, scanOptions),
-              graphScanOptions: scanOptions,
-            }}
-          />
-        ),
-    [
-      documentBrowserScope,
-      handleWikilinkClick,
-      inboxWorkspacePath,
-      isFavorite,
-      rightWorkbenchMode,
-      scanOptions,
-      selectEntry,
-      setPersistedAppMode,
-      settingsWorkPath,
-      toggleFavorite,
-      visibleAppMode,
-    ],
-  );
-
-  // ------------------------------------------------------------------
-  // Stable props for the memoized panes (issue #201). Every non-primitive
-  // prop the mode panes and the editor receive is hoisted into a useCallback
-  // or useMemo keyed on its real inputs, so unrelated MainApp renders keep
-  // prop identities and memo() can skip those panes. Bodies are unchanged
-  // from the inline arrows they replace.
-  // ------------------------------------------------------------------
-
-  // Derived mission lists, keyed on the shared store snapshot.
-  const inboxProcessingMissions = useMemo(
-    () => inboxProcessMissions(processingMissions),
-    [processingMissions],
-  );
-  const meetingsProcessingMissions = useMemo(
-    () => activeMeetingsMissions(processingMissions),
-    [processingMissions],
-  );
-  const tasksProcessingMissions = useMemo(
-    () => activeTasksMissions(processingMissions),
-    [processingMissions],
-  );
-  const trackedAgentMissions = useMemo(
-    () => activeTrackedAgentMissions(processingMissions),
-    [processingMissions],
-  );
-
-  // Shared by Inbox/Comms/Meetings/Today and the skill runs panel.
-  const handleRevealPath = useCallback(
-    (path: string) => {
-      if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
-    },
-    [inboxWorkspacePath],
-  );
-  const handleStopProcessingMission = useCallback(
-    (id: string) => void stopProcessingMission(id),
-    [stopProcessingMission],
-  );
-  const handleRefreshProcessed = useCallback(
-    () => void refreshProcessedItems(),
-    [refreshProcessedItems],
-  );
-  const handleSelectProcessedItem = useCallback(
-    (item: InboxProcessedItem) => void selectProcessedItem(item),
-    [selectProcessedItem],
-  );
-
-  // Inbox pane callbacks.
-  const handleInboxRefresh = useCallback(() => {
-    void refreshInbox();
-    void refreshProcessedItems();
-    void refreshProcessingMissions();
-  }, [refreshInbox, refreshProcessedItems, refreshProcessingMissions]);
-  const handleOpenInboxFolder = useCallback(() => {
-    if (!inboxWorkspacePath) return;
-    void openInFileManager(inboxWorkspacePath, inboxRootPath(inboxRuntimeConfig)).catch(
-      (err) => setError(err instanceof Error ? err.message : String(err)),
-    );
-  }, [inboxWorkspacePath, inboxRuntimeConfig]);
-  const handleOpenSourceFolder = useCallback(
-    (key: string) => {
-      if (!inboxWorkspacePath) return;
-      void openInFileManager(inboxWorkspacePath, sourceFolderPath(inboxRuntimeConfig, key)).catch(
-        (err) => setError(err instanceof Error ? err.message : String(err)),
-      );
-    },
-    [inboxWorkspacePath, inboxRuntimeConfig],
-  );
-  const handleClassifyItem = useCallback((id: string) => void classifyItem(id), [classifyItem]);
-  const handleProcessEntries = useCallback(
-    (keys: string[], context?: string) => void processInboxKeys(keys, undefined, true, context),
-    [processInboxKeys],
-  );
-  const handleStageInboxFiles = useCallback(
-    (paths: string[]) => void stageInboxFiles(paths),
-    [stageInboxFiles],
-  );
-  const handleTrashInboxTargets = useCallback(
-    (targets: InboxTrashTarget[]) => void trashInboxTargets(targets),
-    [trashInboxTargets],
-  );
-  const handleInboxProcessApplied = useCallback(() => {
-    void refreshProcessedItems();
-    void refreshInbox();
-  }, [refreshProcessedItems, refreshInbox]);
-
-  const inboxModeProps = useMemo<InboxModeProps>(
-    () => ({
-      items: inboxItems,
-      entries: inboxEntries,
-      loading: inboxLoading,
-      processedItems,
-      processedLoading,
-      processedError,
-      processedStatusFilter,
-      processedQuery,
-      processedDetail,
-      processingMissions: inboxProcessingMissions,
-      processingLogLines,
-      sourceFilter: inboxSourceFilter,
-      onSourceFilter: setInboxSourceFilter,
-      sourceFolderKeys: inboxSourceFolderKeys,
-      fileDropTarget: inboxRuntimeConfig.file_drop,
-      focusRequest: inboxFocusTick,
-      actionBusy: inboxActionBusy,
-      onRefresh: handleInboxRefresh,
-      onOpenSettings: openInboxSettings,
-      onOpenInboxFolder: handleOpenInboxFolder,
-      onOpenSourceFolder: handleOpenSourceFolder,
-      onClassify: handleClassifyItem,
-      onDecide: decideInboxItem,
-      onBulkAccept: bulkAcceptInboxKeys,
-      onBulkReject: bulkRejectInboxKeys,
-      onBulkMoveFiles: bulkMoveInboxFiles,
-      onProcessEntries: handleProcessEntries,
-      onStageFiles: handleStageInboxFiles,
-      onProcessedStatusFilter: setProcessedStatusFilter,
-      onProcessedQuery: setProcessedQuery,
-      onRefreshProcessed: handleRefreshProcessed,
-      onSelectProcessedItem: handleSelectProcessedItem,
-      onRevealPath: handleRevealPath,
-      onTrashItems: handleTrashInboxTargets,
-      onStopProcessingMission: handleStopProcessingMission,
-      workPath: inboxWorkspacePath,
-      onConfirmApproval: approvalGate.confirmApproval,
-      onProcessApplied: handleInboxProcessApplied,
-      onShareSelectionChange: setInboxShareablePaths,
-    }),
-    [
-      approvalGate.confirmApproval,
-      bulkAcceptInboxKeys,
-      bulkMoveInboxFiles,
-      bulkRejectInboxKeys,
-      decideInboxItem,
-      handleClassifyItem,
-      handleInboxProcessApplied,
-      handleInboxRefresh,
-      handleOpenInboxFolder,
-      handleOpenSourceFolder,
-      handleProcessEntries,
-      handleRefreshProcessed,
-      handleRevealPath,
-      handleSelectProcessedItem,
-      handleStageInboxFiles,
-      handleStopProcessingMission,
-      handleTrashInboxTargets,
-      inboxActionBusy,
-      inboxEntries,
-      inboxFocusTick,
-      inboxItems,
-      inboxLoading,
-      inboxProcessingMissions,
-      inboxRuntimeConfig.file_drop,
-      inboxSourceFilter,
-      inboxSourceFolderKeys,
-      inboxWorkspacePath,
-      openInboxSettings,
-      processedDetail,
-      processedError,
-      processedItems,
-      processedLoading,
-      processedQuery,
-      processedStatusFilter,
-      processingLogLines,
-    ],
-  );
-  // Comms pane callbacks.
-  const handleProcessCommsNow = useCallback(
-    (channel: string) => void processCommsChannelNow(channel),
-    [processCommsChannelNow],
-  );
-  const handleDeepProcessComms = useCallback(
-    (channel: string) => void deepProcessCommsChannel(channel),
-    [deepProcessCommsChannel],
-  );
-  const handleUnloadMigration = useCallback(
-    (paths: string[]) => void unloadMigrationServices(paths),
-    [unloadMigrationServices],
-  );
-
-  const commsModeProps = useMemo<CommsModeProps>(
-    () => ({
-      runtimeConfig: inboxRuntimeConfig,
-      sourceRuns,
-      processedCounts,
-      processedItems,
-      processedLoading,
-      processedRefreshing,
-      processedError,
-      processedStatusFilter,
-      processedQuery,
-      processedDetail,
-      processingMissions: inboxProcessingMissions,
-      processingLogLines,
-      sourceFilter: commsSourceFilter,
-      actionBusy: inboxActionBusy,
-      telegramPollingStatus: telegramPolling,
-      authStatuses: commsAuthStatuses,
-      kakaoRelayStatus,
-      workPath: inboxWorkspacePath,
-      onConfirmApproval: approvalGate.confirmApproval,
-      refreshing: commsRefreshing,
-      migrationServices,
-      migrationBusy,
-      onSourceFilter: setCommsSourceFilter,
-      onProcessNow: handleProcessCommsNow,
-      onRefresh: refreshActiveSurface,
-      onProcessedStatusFilter: setProcessedStatusFilter,
-      onProcessedQuery: setProcessedQuery,
-      onRefreshProcessed: handleRefreshProcessed,
-      onSelectProcessedItem: handleSelectProcessedItem,
-      onStopProcessingMission: handleStopProcessingMission,
-      onRevealPath: handleRevealPath,
-      onGwsReauth: startGwsAuth,
-      onMsoReauth: startMsoLogin,
-      msoReauthDisabled: !inboxWorkspaceConfigReady,
-      msoProcessDisabled: !inboxWorkspaceConfigReady,
-      onStartTelegramPolling: startTelegramPollingFromSettings,
-      onStopTelegramPolling: stopTelegramPollingFromSettings,
-      onTelegramLogin: startTelegramLogin,
-      onDeepProcess: handleDeepProcessComms,
-      onOpenCommsSettings: openCommsSettings,
-      onRefreshMigration: refreshMigrationServices,
-      onUnloadMigration: handleUnloadMigration,
-    }),
-    [
-      approvalGate.confirmApproval,
-      commsAuthStatuses,
-      commsRefreshing,
-      commsSourceFilter,
-      handleDeepProcessComms,
-      handleProcessCommsNow,
-      handleRefreshProcessed,
-      handleRevealPath,
-      handleSelectProcessedItem,
-      handleStopProcessingMission,
-      handleUnloadMigration,
-      inboxActionBusy,
-      inboxProcessingMissions,
-      inboxRuntimeConfig,
-      inboxWorkspaceConfigReady,
-      inboxWorkspacePath,
-      kakaoRelayStatus,
-      migrationBusy,
-      migrationServices,
-      openCommsSettings,
-      processedCounts,
-      processedDetail,
-      processedError,
-      processedItems,
-      processedLoading,
-      processedQuery,
-      processedRefreshing,
-      processedStatusFilter,
-      processingLogLines,
-      refreshActiveSurface,
-      refreshMigrationServices,
-      sourceRuns,
-      startGwsAuth,
-      startMsoLogin,
-      startTelegramLogin,
-      startTelegramPollingFromSettings,
-      stopTelegramPollingFromSettings,
-      telegramPolling,
-    ],
-  );
-  // Meetings pane callbacks.
-  const handleMeetingsOpenSkillCompose = useCallback(
-    (skill: SkillRecord | null, context: SkillContextItem[], prompt?: string) =>
-      openSkillCompose(skill, context, prompt),
-    [openSkillCompose],
-  );
-  // Today pane: the whole tasksProps bundle, keyed on its members.
-  const handleTasksOpenSkillCompose = useCallback(
-    (
-      skill: SkillRecord | null,
-      context: SkillContextItem[],
-      prompt?: string,
-      cwd?: string | null,
-      onDispatched?: () => void | Promise<void>,
-    ) => openSkillCompose(skill, context, prompt, cwd, onDispatched),
-    [openSkillCompose],
-  );
-  const tasksProps = useMemo<TasksPaneProps>(
-    () => ({
-      workPath: inboxWorkspacePath,
-      effectiveSettings: effectiveTasksSettings,
-      labelMode: maruSettings.ui.documentLabelMode,
-      skills,
-      runtimeCommands: aiRuntimeCommands,
-      permissionMode: maruSettings.ai.permissionMode,
-      agents,
-      ai: maruSettings.ai,
-      processingMissions: tasksProcessingMissions,
-      processingLogLines,
-      onRefreshMissions: refreshProcessingMissions,
-      onOpenSettings: openTasksSettings,
-      onOpenSkillCompose: handleTasksOpenSkillCompose,
-      onMissionStarted: handleMeetingsMissionStarted,
-      onStopMission: handleStopProcessingMission,
-      onConfirmApproval: approvalGate.confirmApproval,
-      onRevealPath: handleRevealPath,
-    }),
-    [
-      inboxWorkspacePath,
-      effectiveTasksSettings,
-      maruSettings.ui.documentLabelMode,
-      skills,
-      aiRuntimeCommands,
-      maruSettings.ai,
-      agents,
-      tasksProcessingMissions,
-      processingLogLines,
-      refreshProcessingMissions,
-      openTasksSettings,
-      handleTasksOpenSkillCompose,
-      handleMeetingsMissionStarted,
-      handleStopProcessingMission,
-      approvalGate.confirmApproval,
-      handleRevealPath,
-    ],
-  );
-
-  const meetingsModeHost = useMemo(
-    () => ({
-      workPath: inboxWorkspacePath,
-      settings: maruSettings.meetings,
-      effectiveSettings: effectiveMeetingsSettings,
-      labelMode: maruSettings.ui.documentLabelMode,
-      skills,
-      runtimeCommands: aiRuntimeCommands,
-      agents,
-      ai: maruSettings.ai,
-      permissionMode: maruSettings.ai.permissionMode,
-      processingMissions: meetingsProcessingMissions,
-      processingLogLines,
-      onRefreshMissions: refreshProcessingMissions,
-      onOpenSettings: openMeetingsSettings,
-      onOpenSkillCompose: handleMeetingsOpenSkillCompose,
-      onMissionStarted: handleMeetingsMissionStarted,
-      onStopMission: handleStopProcessingMission,
-      onConfirmApproval: approvalGate.confirmApproval,
-      onRevealPath: handleRevealPath,
-    }),
-    [inboxWorkspacePath, maruSettings, effectiveMeetingsSettings, skills, aiRuntimeCommands, agents, meetingsProcessingMissions, processingLogLines, refreshProcessingMissions, openMeetingsSettings, handleMeetingsOpenSkillCompose, handleMeetingsMissionStarted, handleStopProcessingMission, approvalGate.confirmApproval, handleRevealPath],
-  );
-  const todayModeHost = useMemo(
-    () => ({ workPath: inboxWorkspacePath, effectiveSettings: effectiveTasksSettings, layout: layoutSettings, onLayoutChange: updateLayoutSettings, onOpenTasksMode: openTasks }),
-    [inboxWorkspacePath, effectiveTasksSettings, layoutSettings, updateLayoutSettings, openTasks],
-  );
-  const tasksModeHost = useMemo(
-    () => ({ ...tasksProps, layout: layoutSettings, onLayoutChange: updateLayoutSettings }),
-    [tasksProps, layoutSettings, updateLayoutSettings],
-  );
-  const dashboardModeHost = useMemo(
-    () => ({ workPath: inboxWorkspacePath, effectiveSettings: effectiveTasksSettings, listRows: maruSettings.ui.dashboardListRows, recentEntries, onOpenMode: openPrimaryWorkbenchMode, onOpenDocument: openDashboardDocument, onOpenSettings: openSettings }),
-    [inboxWorkspacePath, effectiveTasksSettings, maruSettings.ui.dashboardListRows, recentEntries, openPrimaryWorkbenchMode, openDashboardDocument],
-  );
-  const communicationsModeHost = useMemo(
-    () => ({ inbox: inboxModeProps, comms: commsModeProps }),
-    [commsModeProps, inboxModeProps],
-  );
-  const planningModeHost = useMemo(
-    () => ({ meetings: meetingsModeHost, today: todayModeHost, tasks: tasksModeHost, dashboard: dashboardModeHost }),
-    [dashboardModeHost, meetingsModeHost, tasksModeHost, todayModeHost],
-  );
-
-  // EditorPane callbacks. renderEditorPane is a plain function (hook calls
-  // are not allowed inside it), so the per-group closures it used to build
-  // inline are hoisted here as explicit left/right variants; the render
-  // sites select the matching variant on `group`.
-  const rightEditorGroupTabs = useMemo(
-    () =>
-      rightTab
-        ? editorTabSummaries.filter((summary) => summary.id === rightTab.id)
-        : editorTabSummaries,
-    [rightTab, editorTabSummaries],
-  );
-  const handleBinaryViewerError = useCallback((message: string) => setError(message), []);
-  const leftBinaryBody = useMemo(
-    () =>
-      isBinaryTab(leftTab) ? (
-        <BinaryViewerPane
-          entry={leftTab.fileEntry}
-          workspacePath={leftTab.workspacePath}
-          classification={leftTab.classification}
-          onError={handleBinaryViewerError}
-        />
-      ) : null,
-    [leftTab, handleBinaryViewerError],
-  );
-  const rightBinaryBody = useMemo(
-    () =>
-      isBinaryTab(rightTab) ? (
-        <BinaryViewerPane
-          entry={rightTab.fileEntry}
-          workspacePath={rightTab.workspacePath}
-          classification={rightTab.classification}
-          onError={handleBinaryViewerError}
-        />
-      ) : null,
-    [rightTab, handleBinaryViewerError],
-  );
-  const handleLeftSelectTab = useCallback(
-    (nextTabId: string) => selectTab(nextTabId, "left"),
-    [selectTab],
-  );
-  const handleRightSelectTab = useCallback(
-    (nextTabId: string) => selectTab(nextTabId, "right"),
-    [selectTab],
-  );
-  const handleLeftCloseTab = useCallback((nextTabId: string) => closeTab(nextTabId), [closeTab]);
-  const handleRightCloseTab = useCallback(() => closeRightEditorPane(), [closeRightEditorPane]);
-  const handleLeftOpenTabPreview = useCallback(
-    (nextTabId: string) => {
-      selectTab(nextTabId, "left");
-      setPersistedEditorViewMode("preview", "left");
-    },
-    [selectTab, setPersistedEditorViewMode],
-  );
-  const handleRightOpenTabPreview = useCallback(
-    (nextTabId: string) => {
-      selectTab(nextTabId, "right");
-      setPersistedEditorViewMode("preview", "right");
-    },
-    [selectTab, setPersistedEditorViewMode],
-  );
-  const handleLeftRevealTabInExplorer = useCallback(
-    (nextTabId: string) => revealTabInExplorer(nextTabId, "left"),
-    [revealTabInExplorer],
-  );
-  const handleRightRevealTabInExplorer = useCallback(
-    (nextTabId: string) => revealTabInExplorer(nextTabId, "right"),
-    [revealTabInExplorer],
-  );
-  const handleLeftFocusPane = useCallback(() => {
-    setFocusedWorkbenchSide("left");
-    if (leftResolvedTabId) activateEditorTab(leftResolvedTabId, "left");
-  }, [leftResolvedTabId]);
-  const handleRightFocusPane = useCallback(() => {
-    setFocusedWorkbenchSide("right");
-    if (rightResolvedTabId) activateEditorTab(rightResolvedTabId, "right");
-  }, [rightResolvedTabId]);
-  const handleRenameTab = useCallback(
-    (nextTabId: string) => void renameTabDocument(nextTabId),
-    [renameTabDocument],
-  );
-  const handleMoveTab = useCallback(
-    (nextTabId: string) => void moveTabDocument(nextTabId),
-    [moveTabDocument],
-  );
-  const handleDuplicateTab = useCallback(
-    (nextTabId: string) => void duplicateTabDocument(nextTabId),
-    [duplicateTabDocument],
-  );
-  const handleDeleteTab = useCallback(
-    (nextTabId: string) => void trashTabDocument(nextTabId),
-    [trashTabDocument],
-  );
-  const handleKgRefNodeClick = useCallback(
-    (nodePath: string) => {
-      // Same handoff as NeighborhoodPane "그래프에서 보기", but into the
-      // doc↔graph split (panel) so the document stays visible.
-      openGraphPanel({
-        source: activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
-        localTarget: { ownerWorkspacePath: null, relPath: nodePath },
-      });
-    },
-    [activeDocumentWorkspacePath, graphVaultPath, openGraphPanel],
-  );
-  const handleToggleOutline = useCallback(
-    () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
-    [outlineOpen, updateLayoutSettings],
-  );
-  const editorPaneScopesRef = useRef<Record<EditorGroupId, EditorPaneScope>>({
-    left: { workspacePath: "", group: "left", tabId: "" },
-    right: { workspacePath: "", group: "right", tabId: "" },
-  });
-  const editorPaneCommandDispatchRef = useRef<(
-    group: EditorGroupId,
-    operation: keyof EditorPaneCommands,
-    args: readonly unknown[],
-    scope: EditorPaneScope,
-  ) => void | Promise<void>>(() => {});
-  editorPaneCommandDispatchRef.current = async (group, operation, args, scope) => {
-    const tabId = args[0] as string;
-    switch (operation) {
-      case "selectTab": return group === "right" ? handleRightSelectTab(tabId) : handleLeftSelectTab(tabId);
-      case "closeTab": return group === "right" ? handleRightCloseTab() : handleLeftCloseTab(tabId);
-      case "closeOtherTabs": return closeOtherTabs(tabId);
-      case "closeTabsToRight": return closeTabsToRight(tabId);
-      case "closeSavedTabs": return closeSavedTabs();
-      case "closeAllTabs": return closeAllCleanTabs();
-      case "copyTabName": return copyTabName(tabId);
-      case "copyTabPath": return copyTabPath(tabId);
-      case "copyTabRelativePath": return copyTabRelativePath(tabId);
-      case "renameTab": return handleRenameTab(tabId);
-      case "moveTab": return handleMoveTab(tabId);
-      case "duplicateTab": return handleDuplicateTab(tabId);
-      case "deleteTab": return handleDeleteTab(tabId);
-      case "openTabPreview": return group === "right" ? handleRightOpenTabPreview(tabId) : handleLeftOpenTabPreview(tabId);
-      case "revealTabInFinder": return revealTabInFinder(tabId);
-      case "revealTabInExplorer": return group === "right" ? handleRightRevealTabInExplorer(tabId) : handleLeftRevealTabInExplorer(tabId);
-      case "save": return void saveTab(scope.tabId);
-      case "snapshot": return void snapshotTab(scope.tabId);
-      case "splitRight": return splitEditorRight();
-      case "openSourcePreview": return void openSourcePreviewSplit();
-      case "openGraphRight": return void openGraphPanel();
-      case "focusPane": return group === "right" ? handleRightFocusPane() : handleLeftFocusPane();
-      case "toggleOutline": return handleToggleOutline();
-      case "persistViewMode": return setPersistedEditorViewMode(args[0] as EditorViewMode, group);
-      case "flushHtmlDraft": return void flushHtmlDraft(scope.tabId);
-      case "visualizeRefs": {
-        const current = getEditorPaneState(scope).document.tab;
-        if (current) visualizeDocRefs(current);
-        return;
-      }
-      case "toggleKgHighlight": {
-        const current = getEditorPaneState(scope).document.tab;
-        if (current) toggleKgHighlight(current);
-        return;
-      }
-      case "openKgRefNode": return handleKgRefNodeClick(args[0] as string);
-      case "openWikilink": return handleWikilinkClick(args[0] as string);
-    }
-  };
-  const leftEditorPaneCommands = useMemo(
-    () => createEditorPaneCommands({
-      getState: () => getEditorPaneState(editorPaneScopesRef.current.left),
-      invoke: (operation, args, scope) =>
-        editorPaneCommandDispatchRef.current("left", operation, args, scope),
-    }),
-    [],
-  );
-  const rightEditorPaneCommands = useMemo(
-    () => createEditorPaneCommands({
-      getState: () => getEditorPaneState(editorPaneScopesRef.current.right),
-      invoke: (operation, args, scope) =>
-        editorPaneCommandDispatchRef.current("right", operation, args, scope),
-    }),
-    [],
+        : renderGraphSurface("panel"),
+    [renderGraphSurface, rightWorkbenchMode, visibleAppMode],
   );
 
   const renderEditorPane = (
@@ -7832,9 +7410,91 @@ export function MainApp() {
     editorPaneScopesRef.current[group] = scope;
     const commands = group === "right" ? rightEditorPaneCommands : leftEditorPaneCommands;
     return (
-      <EditorPaneFacade
-        scope={scope}
-        commands={commands}
+      <EditorPane
+        document={docTab?.document ?? null}
+        openingEntry={group === "left" ? openingEntry : null}
+        draftContent={docTab?.draftContent ?? ""}
+        saving={saving && resolvedActiveTabId === tabId && !binaryTab}
+        dirty={Boolean(docTab && docTab.draftContent !== docTab.document.content)}
+        outlineOpen={outlineOpen}
+        activeWorkspaceLabel={workspace?.label ?? null}
+        documentLabel={
+          docTab
+            ? documentDisplayName(docTab.document, maruSettings.ui.documentLabelMode)
+            : binaryTab?.fileEntry.name ?? null
+        }
+        readOnly={!caps.canModify || Boolean(binaryTab)}
+        canSnapshot={caps.canCreate && !binaryTab}
+        readOnlyReason={readOnlyReason}
+        isManagedVaultNote={isManagedVaultNote}
+        viewMode={editorPaneViewModes[group]}
+        tabs={groupTabs}
+        activeTabId={tabId}
+        bodyOverride={binaryBody}
+        entries={tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries}
+        onChange={(content) => {
+          if (!tabId) return;
+          activateEditorTab(tabId, group);
+          updateTabDraft(tabId, content);
+        }}
+        onSelectTab={(nextTabId) => selectTab(nextTabId, group)}
+        onCloseTab={(nextTabId) => {
+          if (group === "right") closeRightEditorPane();
+          else closeTab(nextTabId);
+        }}
+        onCloseOtherTabs={closeOtherTabs}
+        onCloseTabsToRight={closeTabsToRight}
+        onCloseSavedTabs={closeSavedTabs}
+        onCloseAllTabs={closeAllCleanTabs}
+        onCopyTabName={copyTabName}
+        onCopyTabPath={copyTabPath}
+        onCopyTabRelativePath={copyTabRelativePath}
+        onRenameTab={(nextTabId) => void renameTabDocument(nextTabId)}
+        onMoveTab={(nextTabId) => void moveTabDocument(nextTabId)}
+        onDuplicateTab={(nextTabId) => void duplicateTabDocument(nextTabId)}
+        onDeleteTab={(nextTabId) => void trashTabDocument(nextTabId)}
+        onOpenTabPreview={(nextTabId) => {
+          selectTab(nextTabId, group);
+          setPersistedEditorViewMode("preview", group);
+        }}
+        onRevealTabInFinder={revealTabInFinder}
+        onRevealTabInExplorer={(nextTabId) => revealTabInExplorer(nextTabId, group)}
+        onSave={() => void saveTab(tabId)}
+        onSnapshot={() => void snapshotTab(tabId)}
+        onSplitRight={splitEditorRight}
+        onOpenSourcePreview={docTab ? openSourcePreviewSplit : undefined}
+        onOpenGraphRight={openGraphPanel}
+        onVisualizeRefs={
+          docTab && !isHtmlFileKind(docTab.document.fileKind)
+            ? () => visualizeDocRefs(docTab)
+            : undefined
+        }
+        kgHighlightRefs={
+          docTab && kgHighlight?.docPath === docTab.document.relPath
+            ? kgHighlight.refs
+            : null
+        }
+        onToggleKgHighlight={
+          docTab && !isHtmlFileKind(docTab.document.fileKind)
+            ? () => toggleKgHighlight(docTab)
+            : undefined
+        }
+        onKgRefNodeClick={(nodePath) => {
+          // Same handoff as NeighborhoodPane "그래프에서 보기", but into the
+          // doc↔graph split (panel) so the document stays visible.
+          openGraphPanel({
+            source:
+              activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+            localTarget: { ownerWorkspacePath: null, relPath: nodePath },
+          });
+        }}
+        onFocusPane={() => {
+          setFocusedWorkbenchSide(group);
+          if (tabId) activateEditorTab(tabId, group);
+        }}
+        onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
+        onViewModeChange={(mode) => setPersistedEditorViewMode(mode, group)}
+        onWikilinkClick={handleWikilinkClick}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
         htmlFlushRef={group === "left" ? leftHtmlFlushRef : rightHtmlFlushRef}
         presentation={{
@@ -8309,44 +7969,117 @@ export function MainApp() {
 
         <TodayNewDayBanner translate={t} onOpenToday={openTodayForCurrentDay} />
 
-        <SitesOpenRequestBridge
-          booting={booting}
-          visibleMode={visibleAppMode}
-          rightWorkbenchMode={rightWorkbenchMode}
-          openPrimary={openPrimaryWorkbenchMode}
-          openRight={openWorkbenchModeRight}
-        />
-        <AgentRuntimeBootstrap
-          booting={booting}
-          workspacePath={settingsWorkPath}
-          workspaceReady={settingsWorkspaceStartupReady}
-        />
-        <AgentRuntimeMissionBridge />
-        <TodayLifecycleBridge
-          workPath={inboxWorkspacePath}
-          settingsOverlay={settingsOverlay}
-          timezone={effectiveTasksSettings.timezone}
-          today={effectiveTasksSettings.today}
-          translate={t}
-          onOpenToday={openTodayForCurrentDay}
-        />
-        <ActivityRail
-          visibleAppMode={visibleAppMode}
-          rightWorkbenchMode={rightWorkbenchMode}
-          rightWorkbenchOpen={rightWorkbenchOpen}
-          e2eFlowEnabled={e2eFlowEnabled}
-          diagramEnabled={diagramEnabled}
-          outlineOpen={outlineOpen}
-          documentsPaneOpen={documentsPaneOpen}
-          settingsWorkPath={settingsWorkPath}
-          onOpenPrimary={openPrimaryWorkbenchMode}
-          onOpenRight={openWorkbenchModeRight}
-          onOpenPkm={openPkmFromActivityRail}
-          onOpenCommandPalette={openCommandPalette}
-          onToggleOutline={toggleOutlineFromActivityRail}
-          onToggleDocuments={toggleDocumentsFromActivityRail}
-          onOpenPreferences={openPreferences}
-        />
+        <nav className="activity-rail" aria-label={t("activity.label")}>
+          <ActivityModeButton
+            label={t("mode.pkm")}
+            active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
+            icon={<FileText size={20} />}
+            onOpenPrimary={() => {
+              updateLayoutSettings({ editorSplitOpen: false });
+              setPersistedAppMode("pkm");
+            }}
+          />
+          {([
+            ["files", FolderOpen],
+            ["inbox", Inbox],
+            ["comms", MessageSquare],
+            ["meetings", UsersRound],
+            ["tasks", ListTodo],
+            ["drafts", PenLine],
+            ["gap", Diff],
+            ["agents", Bot],
+            ["catalog", LayoutGrid],
+            ["studio", Workflow],
+            ["sites", Globe],
+          ] as const).map(([mode, Icon]) => (
+            <ActivityModeButton
+              key={mode}
+              label={t(`mode.${mode}`)}
+              active={visibleAppMode === mode}
+              secondaryActive={rightWorkbenchMode === mode}
+              icon={<Icon size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode(mode)}
+              onOpenRight={() => openWorkbenchModeRight(mode)}
+              openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
+            />
+          ))}
+          {e2eFlowEnabled ? (
+            <ActivityModeButton
+              label={t("mode.e2e")}
+              active={visibleAppMode === "e2e"}
+              secondaryActive={rightWorkbenchMode === "e2e"}
+              icon={<Route size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode("e2e")}
+              onOpenRight={() => openWorkbenchModeRight("e2e")}
+              openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
+            />
+          ) : null}
+          {diagramEnabled ? (
+            <ActivityModeButton
+              label={t("mode.diagram")}
+              active={visibleAppMode === "diagram"}
+              secondaryActive={rightWorkbenchMode === "diagram"}
+              icon={<Network size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode("diagram")}
+              onOpenRight={() => openWorkbenchModeRight("diagram")}
+              openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
+            />
+          ) : null}
+          <ActivityModeButton
+            label={t("mode.graph")}
+            active={visibleAppMode === "graph"}
+            secondaryActive={rightWorkbenchMode === "graph"}
+            icon={<Waypoints size={20} strokeWidth={1.9} />}
+            onOpenPrimary={() => openPrimaryWorkbenchMode("graph")}
+            onOpenRight={() => openWorkbenchModeRight("graph")}
+            openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
+          />
+          <button
+            type="button"
+            className="activity-button"
+            onClick={openCommandPalette}
+            title={t("sidebar.commandPalette")}
+            aria-label={t("sidebar.commandPalette")}
+          >
+            <Command size={19} />
+          </button>
+          {visibleAppMode === "pkm" || visibleAppMode === "inbox" ? (
+            <button
+              type="button"
+              className={outlineOpen ? "activity-button active" : "activity-button"}
+              onClick={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
+              title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
+              aria-label={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
+            >
+              {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
+            </button>
+          ) : null}
+          {visibleAppMode === "pkm" ? (
+            <button
+              type="button"
+              className={documentsPaneOpen ? "activity-button active" : "activity-button"}
+              onClick={() => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen })}
+              title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}
+              aria-label={
+                documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")
+              }
+            >
+              <FileText size={19} />
+            </button>
+          ) : null}
+          <span className="activity-spacer" />
+          {settingsWorkPath ? (
+            <button
+              type="button"
+              className="activity-button"
+              onClick={openPreferences}
+              title={t("mode.system")}
+              aria-label={t("mode.system")}
+            >
+              <Settings2 size={20} />
+            </button>
+          ) : null}
+        </nav>
 
         <div
           className={
@@ -8412,14 +8145,378 @@ export function MainApp() {
             </button>
           </header>
         ) : null}
-        {getModeDescriptor(surfaceMode) && !Object.is(surfaceMode, "pkm") ? (
-          <ModeSurfaceHost
-            mode={surfaceMode}
-            placement={rightWorkbenchMode === surfaceMode ? "right" : "primary"}
-            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
-            commands={{
-              renderPrimarySurface: () => null,
-              revealPath: (path) => {
+        {surfaceMode === "e2e" ? (
+          <LazyE2EFlowPane
+            workPath={inboxWorkspacePath}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
+          />
+        ) : surfaceMode === "diagram" ? (
+          <LazyDiagramMode
+            workPath={inboxWorkspacePath ?? settingsWorkPath}
+            onError={setError}
+            activeDocument={
+              activeDocTab &&
+              activeDocTab.workspacePath === (inboxWorkspacePath ?? settingsWorkPath)
+                ? {
+                    path: activeDocTab.document.path,
+                    title: activeDocTab.document.title,
+                    revision: activeDocTab.document.revision,
+                    fileKind: activeDocTab.document.fileKind,
+                  }
+                : null
+            }
+            recentDocuments={recentEntries.map((entry) => ({
+              path: entry.path,
+              title: entry.title,
+            }))}
+            onSaveDocument={(path, content, expectedRevision) => {
+              const root = inboxWorkspacePath ?? settingsWorkPath;
+              if (!root) return Promise.reject(new Error("workspace required"));
+              return saveDocument(root, path, content, expectedRevision);
+            }}
+          />
+        ) : surfaceMode === "graph" ? (
+          renderGraphSurface("full")
+        ) : surfaceMode === "sites" ? (
+          <LazySitesPane
+            overlayOpen={sitesOverlayOpen}
+            onError={setError}
+            onEmptyClose={rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined}
+            openedUrls={pendingOpenedSiteUrls}
+            onOpenedUrlsHandled={acknowledgeOpenedSiteUrls}
+          />
+        ) : surfaceMode === "files" ? (
+          <LazyFilesWorkbench
+            entries={workspaceEntryNodes}
+            selectedPaths={selectedFilePaths}
+            query={fileQuery}
+            loading={
+              (booting ||
+                explorerWorkspaceFilesState.loading ||
+                shouldScanExplorerWorkspaceFiles) &&
+              workspaceEntryNodes.length === 0
+            }
+            refreshing={explorerWorkspaceFilesState.refreshing}
+            workspacePath={explorerWorkspacePath}
+            workspaceVisibility={explorerVisibility}
+            publicWorkspaceAvailable={publicWorkspaceAvailable}
+            activeWorkspaceLabel={explorerWorkspaceCaption}
+            filter={maruSettings.ui.workspaceFileFilter}
+            sortKey={maruSettings.ui.filesSortKey}
+            filesListAttributes={maruSettings.ui.filesListAttributes}
+            paneFilters={filesPaneFilters}
+            queuedSourcePaths={queuedSourcePaths}
+            expandedFolders={collapsedFileFolders}
+            treeOpen={layoutSettings.filesTreeOpen}
+            treeWidth={layoutSettings.filesTreeWidth}
+            previewOpen={layoutSettings.filesPreviewOpen}
+            previewWidth={layoutSettings.filesPreviewWidth}
+            favorites={maruSettings.ui.favorites}
+            canCreate={
+              explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed"
+            }
+            canRenameMove={
+              explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed"
+            }
+            canDelete={
+              explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed"
+            }
+            openDocumentPaths={explorerOpenDocumentPaths}
+            dirtyDocumentPaths={explorerDirtyDocumentPaths}
+            pendingRevealTargetPath={
+              pendingExplorerReveal?.pane === "files"
+                ? pendingExplorerReveal.targetPath
+                : null
+            }
+            onRevealHandled={() => setPendingExplorerReveal(null)}
+            onWorkspaceVisibilityChange={(visibility) => {
+              setExplorerVisibility(visibility);
+              const nextPath = workspaceRegistry.activeByVisibility[visibility];
+              if (nextPath && !workspaceStates[nextPath]?.entries.length) {
+                void loadWorkspace(nextPath, visibility);
+              }
+            }}
+            onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
+            onQueryChange={setWorkspaceFileQuery}
+            onFilterChange={setWorkspaceFileFilter}
+            onSortKeyChange={setFilesSortKey}
+            onFilesListAttributesChange={setFilesListAttributes}
+            onPaneFiltersChange={setFilesPaneFilters}
+            onExpandedFoldersChange={setCollapsedFileFolders}
+            onSelectionChange={setWorkspaceFileSelection}
+            onOpenDocument={(entry) => void openWorkspaceFileEntry(entry)}
+            onQueuePaths={(paths) => void queueExternalFiles(paths)}
+            onRevealInFinder={revealTargetInFinder}
+            onRefresh={() => {
+              if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
+            }}
+            onFilesystemMutated={handleFilesFilesystemMutated}
+            onLayoutChange={updateLayoutSettings}
+            onOpenFavorite={openFavorite}
+            onRemoveFavorite={removeFavorite}
+            onToggleFavorite={toggleFavorite}
+            isFavoriteMissing={isFavoriteMissing}
+            isFavorite={isFavorite}
+            onOpenInBrowser={(targetPath) => {
+              if (!explorerWorkspacePath) return;
+              void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch(
+                (err: unknown) =>
+                  setError(err instanceof Error ? err.message : String(err)),
+              );
+            }}
+            onApplySkillToTarget={applySkillToFileTarget}
+            onAttachToTerminal={attachPathToTerminal}
+            onError={setError}
+          />
+        ) : surfaceMode === "studio" ? (
+          <LazyStudioMode
+            workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
+            activeDocument={document}
+            canCreateDocument={activeWorkspaceCanCreate}
+            canModifyDocument={activeWorkspaceCanModify}
+            onCreateDocument={createDocumentAndOpen}
+            onApplyBody={applyStudioBody}
+            onFreezePackage={freezeStudioPackage}
+            lintDismissalsByDoc={maruSettings.composer.lintDismissals}
+            onLintDismissalsChange={(docId, dismissedIds) => {
+              updateSettings((current) => ({
+                ...current,
+                composer: {
+                  ...current.composer,
+                  lintDismissals: {
+                    ...current.composer.lintDismissals,
+                    [docId]: dismissedIds,
+                  },
+                },
+              }));
+            }}
+            onRevealPath={(path) => {
+              const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
+              if (root) void revealInFileManager(root, path);
+            }}
+            onError={setError}
+          />
+        ) : surfaceMode === "catalog" ? (
+          <LazyCatalogPane
+            workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
+            onReveal={(path) => {
+              const root = inboxWorkspacePath ?? settingsWorkPath;
+              if (root) void revealInFileManager(root, path);
+            }}
+          />
+        ) : surfaceMode === "drafts" ? (
+          <LazyDraftsPane
+            workPath={inboxWorkspacePath}
+            skills={skills}
+            defaultRuntime={maruSettings.ai.defaultRuntime}
+            agents={agents}
+            ai={maruSettings.ai}
+            taskIngestMinImportance={maruSettings.ai.taskIngestMinImportance}
+            onTaskIngestMinImportanceChange={(value) =>
+              updateSettings((current) => ({
+                ...current,
+                ai: { ...current.ai, taskIngestMinImportance: value },
+              }))
+            }
+            onConfirmApproval={approvalGate.confirmApproval}
+            onError={setError}
+            onOpenScratchpad={openScratchpadSurface}
+            onOpenAgents={() => setPersistedAppMode("agents")}
+            onOpenGapAnalysis={openGapAnalysis}
+          />
+        ) : surfaceMode === "gap" ? (
+          <LazyGapPane
+            workPath={inboxWorkspacePath}
+            initialDraftId={gapDraftId}
+            onConsumeInitialDraftId={() => setGapDraftId(null)}
+            onError={setError}
+          />
+        ) : surfaceMode === "agents" ? (
+          <LazyAgentsPane
+            workPath={inboxWorkspacePath}
+            skills={skills}
+            ai={maruSettings.ai}
+            missions={processingMissions}
+            logLines={processingLogLines}
+            runtimeCommands={aiRuntimeCommands}
+            onRefreshMissions={refreshProcessingMissions}
+            onStopMission={stopProcessingMission}
+            onMissionStarted={trackMissionQuietly}
+            onConfirmApproval={approvalGate.confirmApproval}
+            onAgentsChanged={refreshAgents}
+            onError={setError}
+          />
+        ) : surfaceMode === "inbox" ? (
+          <LazyInboxPane
+            items={inboxItems}
+            entries={inboxEntries}
+            loading={inboxLoading}
+            processedItems={processedItems}
+            processedLoading={processedLoading}
+            processedError={processedError}
+            processedStatusFilter={processedStatusFilter}
+            processedQuery={processedQuery}
+            processedDetail={processedDetail}
+            processingMissions={inboxProcessMissions(processingMissions)}
+            processingLogLines={processingLogLines}
+            sourceFilter={inboxSourceFilter}
+            onSourceFilter={setInboxSourceFilter}
+            sourceFolderKeys={inboxSourceFolderKeys}
+            fileDropTarget={inboxRuntimeConfig.file_drop}
+            focusRequest={inboxFocusTick}
+            actionBusy={inboxActionBusy}
+            onRefresh={() => {
+              void refreshInbox();
+              void refreshProcessedItems();
+              void refreshProcessingMissions();
+            }}
+            onOpenSettings={openInboxSettings}
+            onOpenInboxFolder={() => {
+              if (!inboxWorkspacePath) return;
+              void openInFileManager(
+                inboxWorkspacePath,
+                inboxRootPath(inboxRuntimeConfig),
+              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+            onOpenSourceFolder={(key) => {
+              if (!inboxWorkspacePath) return;
+              void openInFileManager(
+                inboxWorkspacePath,
+                sourceFolderPath(inboxRuntimeConfig, key),
+              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+            onClassify={(id) => void classifyItem(id)}
+            onDecide={decideInboxItem}
+            onBulkAccept={bulkAcceptInboxKeys}
+            onBulkReject={bulkRejectInboxKeys}
+            onBulkMoveFiles={bulkMoveInboxFiles}
+            onProcessEntries={(keys, context) => void processInboxKeys(keys, undefined, true, context)}
+            onStageFiles={(paths) => void stageInboxFiles(paths)}
+            onProcessedStatusFilter={setProcessedStatusFilter}
+            onProcessedQuery={setProcessedQuery}
+            onRefreshProcessed={() => void refreshProcessedItems()}
+            onSelectProcessedItem={(item) => void selectProcessedItem(item)}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onTrashItems={(targets) => void trashInboxTargets(targets)}
+            onStopProcessingMission={(id) => void stopProcessingMission(id)}
+            workPath={inboxWorkspacePath}
+            onConfirmApproval={approvalGate.confirmApproval}
+            onProcessApplied={() => {
+              void refreshProcessedItems();
+              void refreshInbox();
+            }}
+            onProcessError={setError}
+            onShareSelectionChange={setInboxShareablePaths}
+          />
+        ) : surfaceMode === "comms" ? (
+          <LazyCommsPane
+            runtimeConfig={inboxRuntimeConfig}
+            sourceRuns={sourceRuns}
+            processedCounts={processedCounts}
+            processedItems={processedItems}
+            processedLoading={processedLoading}
+            processedRefreshing={processedRefreshing}
+            processedError={processedError}
+            processedStatusFilter={processedStatusFilter}
+            processedQuery={processedQuery}
+            processedDetail={processedDetail}
+            processingMissions={inboxProcessMissions(processingMissions)}
+            processingLogLines={processingLogLines}
+            sourceFilter={commsSourceFilter}
+            actionBusy={inboxActionBusy}
+            telegramPollingStatus={telegramPolling}
+            authStatuses={commsAuthStatuses}
+            kakaoRelayStatus={kakaoRelayStatus}
+            workPath={inboxWorkspacePath}
+            onConfirmApproval={approvalGate.confirmApproval}
+            refreshing={commsRefreshing}
+            migrationServices={migrationServices}
+            migrationBusy={migrationBusy}
+            onSourceFilter={setCommsSourceFilter}
+            onProcessNow={(channel) => void processCommsChannelNow(channel)}
+            onRefresh={refreshActiveSurface}
+            onProcessedStatusFilter={setProcessedStatusFilter}
+            onProcessedQuery={setProcessedQuery}
+            onRefreshProcessed={() => void refreshProcessedItems()}
+            onSelectProcessedItem={(item) => void selectProcessedItem(item)}
+            onStopProcessingMission={(id) => void stopProcessingMission(id)}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onGwsReauth={startGwsAuth}
+            onMsoReauth={startMsoLogin}
+            msoReauthDisabled={!inboxWorkspaceConfigReady}
+            msoProcessDisabled={!inboxWorkspaceConfigReady}
+            onStartTelegramPolling={startTelegramPollingFromSettings}
+            onStopTelegramPolling={stopTelegramPollingFromSettings}
+            onTelegramLogin={startTelegramLogin}
+            onDeepProcess={(channel) => void deepProcessCommsChannel(channel)}
+            onOpenCommsSettings={openCommsSettings}
+            onRefreshMigration={refreshMigrationServices}
+            onUnloadMigration={(paths) => void unloadMigrationServices(paths)}
+          />
+        ) : surfaceMode === "meetings" ? (
+          <LazyMeetingsPane
+            workPath={inboxWorkspacePath}
+            settings={maruSettings.meetings}
+            effectiveSettings={effectiveMeetingsSettings}
+            labelMode={maruSettings.ui.documentLabelMode}
+            skills={skills}
+            runtimeCommands={aiRuntimeCommands}
+            agents={agents}
+            ai={maruSettings.ai}
+            permissionMode={maruSettings.ai.permissionMode}
+            processingMissions={activeMeetingsMissions(processingMissions)}
+            processingLogLines={processingLogLines}
+            onRefreshMissions={refreshProcessingMissions}
+            onOpenSettings={openMeetingsSettings}
+            onOpenSkillCompose={(skill, context, prompt) =>
+              openSkillCompose(skill, context, prompt)
+            }
+            onMissionStarted={handleMeetingsMissionStarted}
+            onStopMission={(id) => void stopProcessingMission(id)}
+            onConfirmApproval={approvalGate.confirmApproval}
+            onRevealPath={(path) => {
+              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+            }}
+            onError={setError}
+            requestedView={meetingsRequestedView}
+            onViewConsumed={() => setMeetingsRequestedView(null)}
+          />
+        ) : surfaceMode === "tasks" ? (
+          <LazyTodayPane
+            route={todayRoute}
+            onRouteChange={setTodayRoute}
+            workPath={inboxWorkspacePath}
+            effectiveSettings={effectiveTasksSettings}
+            layout={layoutSettings}
+            onLayoutChange={updateLayoutSettings}
+            rolloverEpoch={todayRolloverEpoch}
+            refreshRequestEpoch={todayRefreshEpoch}
+            tasksProps={{
+              workPath: inboxWorkspacePath,
+              effectiveSettings: effectiveTasksSettings,
+              labelMode: maruSettings.ui.documentLabelMode,
+              skills,
+              runtimeCommands: aiRuntimeCommands,
+              permissionMode: maruSettings.ai.permissionMode,
+              agents,
+              ai: maruSettings.ai,
+              processingMissions: activeTasksMissions(processingMissions),
+              processingLogLines,
+              onRefreshMissions: refreshProcessingMissions,
+              onOpenSettings: openTasksSettings,
+              onOpenSkillCompose: (skill, context, prompt, cwd, onDispatched) =>
+                openSkillCompose(skill, context, prompt, cwd, onDispatched),
+              onMissionStarted: handleMeetingsMissionStarted,
+              onStopMission: (id) => void stopProcessingMission(id),
+              onConfirmApproval: approvalGate.confirmApproval,
+              onRevealPath: (path) => {
                 if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
               },
               saveDocument: (path, content, expectedRevision) => {
@@ -8528,8 +8625,76 @@ export function MainApp() {
 
         {outlineOpen && visibleAppMode !== "files" && !rightWorkbenchOpen ? (
           <OutlinePane
-            scope={outlinePaneScope}
-            commands={outlinePaneCommands}
+            document={document}
+            draftContent={draftContent}
+            entries={activeDocumentEntries}
+            readOnly={!activeWorkspaceCanModify}
+            workspacePath={activeDocumentWorkspacePath}
+            scratchpadWorkPath={primaryWorkspacePath}
+            scratchpadSortKey={maruSettings.ui.scratchpadSortKey}
+            scratchpadListHeight={layoutSettings.scratchpadListHeight}
+            onScratchpadSortKeyChange={setScratchpadSortKey}
+            onScratchpadListHeightChange={(scratchpadListHeight) =>
+              updateLayoutSettings({ scratchpadListHeight })
+            }
+            activeLine={activeOutlineLine}
+            onJumpToLine={jumpToOutlineLine}
+            onClose={() => updateLayoutSettings({ outlineOpen: false })}
+            onError={setError}
+            onRefreshWorkspace={() => void refreshCurrent()}
+            onUpdateField={updateField}
+            onSelectEntry={selectEntry}
+            onMissingWikilink={handleWikilinkClick}
+            onOpenGraph={(localTarget) =>
+              openGraphMode({
+                source:
+                  activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+                localTarget,
+              })
+            }
+            isManagedVaultNote={Boolean(
+              activeDocumentWorkspace?.writePolicy === "managed" &&
+                document?.relPath.startsWith("notes/") &&
+                document.relPath.toLowerCase().endsWith(".md"),
+            )}
+            fileQueue={fileQueue}
+            canApplyFileQueue={canApplyFileQueue}
+            onUpdateFileQueueItem={updateFileQueueItem}
+            selectedFileQueueItemIds={selectedFileQueueItemIds}
+            onSelectFileQueueItem={selectFileQueueItem}
+            onQueueExternalFiles={queueExternalFiles}
+            onQueueFileSources={addFileQueueSources}
+            onApplyFileQueue={applyQueuedFiles}
+            onClearFileQueue={clearFileQueue}
+            onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
+            workspaceFileEntries={fileEntries}
+            explorerWorkspacePath={explorerWorkspacePath}
+            explorerExpandedFolders={collapsedFileFolders}
+            onExplorerExpandedFoldersChange={setCollapsedFileFolders}
+            explorerSelectedPath={selectedPath}
+            explorerLoading={
+              explorerWorkspaceFilesState.loading ||
+              explorerWorkspaceFilesState.refreshing ||
+              shouldScanExplorerWorkspaceFiles
+            }
+            explorerReady={explorerWorkspaceFilesState.scanStatus === "ready"}
+            explorerRefreshing={explorerWorkspaceFilesState.refreshing}
+            onExplorerRefresh={() => {
+              if (explorerWorkspacePath) {
+                void refreshWorkspaceFiles(explorerWorkspacePath);
+              }
+            }}
+            onOpenWorkspaceFile={(entry, line) =>
+              void openWorkspaceFileEntry(entry, line)
+            }
+            explorerIncludeDotFolders={maruSettings.scan.includeDotFolders}
+            selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
+            filesPaneFilters={filesPaneFilters}
+            onFilesPaneFiltersChange={setFilesPaneFilters}
+            explorerPaneMode={maruSettings.ui.explorerPaneMode}
+            onRevealFileInFinder={revealTargetInFinder}
+            activeTab={rightPaneTab}
+            onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
             slots={{
               shareWorkspacePath,
@@ -8730,14 +8895,12 @@ export function MainApp() {
 
         <AgentUsageBar
           commandOverrides={terminalRuntimeCommands}
-          onOpenSettings={openSettings}
+          onOpenSettings={(tab) => setSettingsOverlay({ tab })}
           onOpenAgents={() => setPersistedAppMode("agents")}
           workspaceName={explorerWorkspace?.label ?? null}
-          workspacePath={explorerWorkspacePath ?? null}
           workspaceFileCount={
             explorerWorkspaceFilesState.scanStatus === "ready" ? fileEntries.length : null
           }
-          workspaceDocumentCount={entries.length}
         />
 
         {pendingDestructiveAction ? (

@@ -1,6 +1,5 @@
 import { CircleStop, Loader2, PauseCircle } from "lucide-react";
 import { stopAiMission } from "../lib/api";
-import { setError } from "../lib/errorStore";
 import { useTranslation } from "../lib/i18n";
 import { useActiveMissions } from "../lib/useActiveMissions";
 

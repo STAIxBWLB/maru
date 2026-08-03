@@ -142,6 +142,28 @@ describe("normalizeMaruSettings", () => {
     expect(legacy.ui.layout.toolPanelSurface).toBe("graph");
   });
 
+  it("normalizes the persisted right workbench surface without consuming legacy graph split input", () => {
+    expect(
+      normalizeMaruSettings({ ui: { rightWorkbenchSurface: "sites" } }).ui
+        .rightWorkbenchSurface,
+    ).toBe("sites");
+    expect(
+      normalizeMaruSettings({ ui: { rightWorkbenchSurface: "pkm" } }).ui
+        .rightWorkbenchSurface,
+    ).toBe("editor");
+    expect(
+      normalizeMaruSettings({ ui: { rightWorkbenchSurface: "bogus" } }).ui
+        .rightWorkbenchSurface,
+    ).toBe("editor");
+
+    const legacy = normalizeMaruSettings({
+      ui: { layout: { editorSplitOpen: true, editorSplitSurface: "graph" } },
+    });
+    expect(legacy.ui.rightWorkbenchSurface).toBe("editor");
+    expect(legacy.ui.layout.editorSplitOpen).toBe(false);
+    expect(legacy.ui.layout.toolPanelSurface).toBe("graph");
+  });
+
   it("does not persist Telegram monitor secrets in Maru settings", () => {
     const settings = normalizeMaruSettings({
       comms: {

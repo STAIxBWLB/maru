@@ -1,11 +1,10 @@
 use crate::cli_path::resolve_program;
 use crate::inbox_settings::expand_tilde;
-use crate::paths::GENERATED_DIRS;
 use crate::vault::{
     lexical_normalize, load_maruignore, matches_maruignore, ScanFilter, ScanOptions,
 };
 use crate::win_process::NoWindow;
-use crate::workspace_files::is_binary_file;
+use crate::workspace_files::{is_binary_file, GENERATED_DIRS};
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -267,10 +266,7 @@ impl PendingFile {
 fn rg_visibility(scan_filter: &ScanFilter) -> RgVisibility {
     RgVisibility {
         hidden: scan_filter.includes_dot_folders(),
-        // `.git` is in GENERATED_DIRS, so the glob loop excludes it
-        // unconditionally — a generated dir can never be allowlisted back
-        // into search results (SCAN-02).
-        exclude_git: true,
+        exclude_git: !scan_filter.could_include_dot_folder_named(".git"),
     }
 }
 
@@ -898,12 +894,9 @@ mod tests {
             rg_visibility(&git_allowed),
             RgVisibility {
                 hidden: true,
-                exclude_git: true,
+                exclude_git: false,
             }
         );
-        // SCAN-02: generated dirs are un-allowlistable — allowlisting a path
-        // under .git must not resurrect it into rg results.
-        assert!(rg_visibility(&git_allowed).exclude_git);
     }
 
     #[test]
