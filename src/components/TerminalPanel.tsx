@@ -52,6 +52,7 @@ import {
   type TerminalSearchDirection,
   type TerminalSearchMatch,
 } from "../lib/api";
+import { isAgentKind } from "../lib/agentCapabilities";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import type {
@@ -1189,7 +1190,7 @@ export const TerminalPanel = memo(
         if (!tabId) return false;
         const tab = state.tabs.find((item) => item.id === tabId);
         if (!tab || !tab.running) return false;
-        if (tab.kind !== "claude" && tab.kind !== "codex") return false;
+        if (!isAgentKind(tab.kind)) return false;
         const sessionId = sessionByTabRef.current.get(tabId);
         if (!sessionId) return false;
         if (!inputPumpsRef.current.get(sessionId)?.push({ type: "text", text: mention })) {
@@ -1205,8 +1206,7 @@ export const TerminalPanel = memo(
       ref,
       (): TerminalPanelHandle => ({
         hasFocusedAgent: () =>
-          activeSurface === "terminal" &&
-          (focusedKind === "claude" || focusedKind === "codex"),
+          activeSurface === "terminal" && focusedKind != null && isAgentKind(focusedKind),
         hasFocus: () =>
           open &&
           terminalPanelRootRef.current != null &&

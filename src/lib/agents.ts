@@ -80,13 +80,19 @@ export interface AgentRecord {
  * skills.ts. An empty list there would make every converted feature fail with
  * `agent_not_found`.
  */
-const MOCK_BUILTIN_AGENTS: Array<Pick<AgentRecord, "id" | "labelKey" | "skillName" | "kind">> = [
+export const MOCK_BUILTIN_AGENTS: Array<
+  Pick<AgentRecord, "id" | "labelKey" | "skillName" | "kind">
+> = [
   { id: "inbox-triage", labelKey: "agents.builtin.inboxTriage", skillName: "inbox-process", kind: "background" },
   { id: "inbox-classify", labelKey: "agents.builtin.inboxClassify", skillName: "", kind: "inline" },
   { id: "meeting-notes", labelKey: "agents.builtin.meetingNotes", skillName: "meeting-notes", kind: "background" },
   { id: "task-extract", labelKey: "agents.builtin.taskExtract", skillName: "task-management", kind: "background" },
   { id: "ideation-draft", labelKey: "agents.builtin.ideationDraft", skillName: "ideation-drafts", kind: "background" },
   { id: "commit-message", labelKey: "agents.builtin.commitMessage", skillName: "", kind: "inline" },
+  { id: "vault-hygiene", labelKey: "agents.builtin.vaultHygiene", skillName: "vault-lint", kind: "background" },
+  { id: "vault-proposal", labelKey: "agents.builtin.vaultProposal", skillName: "vault-sync", kind: "background" },
+  { id: "daily-digest", labelKey: "agents.builtin.dailyDigest", skillName: "draft-writer", kind: "background" },
+  { id: "git-sync", labelKey: "agents.builtin.gitSync", skillName: "git-sync", kind: "background" },
 ];
 
 function mockBuiltinAgents(): AgentRecord[] {

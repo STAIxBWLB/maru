@@ -315,6 +315,9 @@ fn probe_usage(
             Some(format!("{} CLI not found", provider.default_binary_name())),
         );
     }
+    // Kept as an independent per-backend match rather than derived from
+    // `capabilities().usage`: `cli_backends_real_smoke` asserts the two agree,
+    // and that assertion is only worth running while they are two sources.
     match provider {
         CliProviderKind::Kimi => make(
             "unsupported",
@@ -408,6 +411,15 @@ struct ClaudeAuthInfo {
     api_provider: Option<String>,
     org_name: Option<String>,
     email: Option<String>,
+}
+
+/// Whether `claude auth status` output says the user is logged in. Fails closed
+/// on unparseable output, matching [`probe_claude_account`] — the skills gate
+/// and the account probe must not disagree about the same machine.
+pub(crate) fn claude_auth_logged_in(text: &str) -> bool {
+    parse_claude_auth_status(text)
+        .map(|info| info.logged_in)
+        .unwrap_or(false)
 }
 
 fn parse_claude_auth_status(text: &str) -> Option<ClaudeAuthInfo> {
@@ -760,11 +772,15 @@ fn override_for<'a>(
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(not(test))]
-const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-// Short timeout in tests so the sleeping-fake-CLI test stays fast.
-#[cfg(test)]
-const CLI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+/// 8s in production. Tests tighten it to 500ms so the sleeping-fake-CLI test
+/// stays fast — except under `MARU_CLI_SMOKE`, where the test drives the real
+/// binaries and a real `--version` can take most of that 500ms on its own.
+fn cli_probe_timeout() -> Duration {
+    if cfg!(test) && std::env::var_os("MARU_CLI_SMOKE").is_none() {
+        return Duration::from_millis(500);
+    }
+    Duration::from_secs(8)
+}
 
 fn run_cli(program: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut cmd = Command::new(program);
@@ -775,7 +791,7 @@ fn run_cli(program: &Path, args: &[&str]) -> Option<std::process::Output> {
         .stderr(std::process::Stdio::piped())
         .no_window();
     let mut child = crate::agent_host::provider::retry_etxtbsy(|| cmd.spawn()).ok()?;
-    let deadline = Instant::now() + CLI_PROBE_TIMEOUT;
+    let deadline = Instant::now() + cli_probe_timeout();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return child.wait_with_output().ok(),
@@ -1055,5 +1071,139 @@ mod tests {
         symlink(dir.path(), day.join("cycle")).unwrap();
 
         assert_eq!(newest_rollout_file(dir.path()), Some(rollout));
+    }
+
+    /// Smoke the *real* installed AI CLIs. Every other provider test drives a
+    /// fake shell script (provider.rs `write_fake_cli`), so nothing about the
+    /// actual integration is covered by `make verify`. Run with:
+    ///
+    ///   make verify-integration
+    ///   MARU_CLI_SMOKE_ROUNDTRIP=1 make verify-integration   # + one live prompt
+    ///
+    /// Backends that are not installed on this machine are skipped, not failed.
+    #[test]
+    #[ignore]
+    fn cli_backends_real_smoke() {
+        use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
+        use crate::agent_host::provider::{build_cli_command, CliProviderAdapter, ProviderAdapter};
+
+        if std::env::var("MARU_CLI_SMOKE").is_err() {
+            eprintln!("skipped: set MARU_CLI_SMOKE=1 (see `make verify-integration`)");
+            return;
+        }
+        // Not a tempdir: `codex exec` refuses to run outside a trusted (git)
+        // directory unless --skip-git-repo-check is passed, and the product
+        // never passes it (see aiInvoke.ts). The crate root is always a repo.
+        let cwd = env!("CARGO_MANIFEST_DIR").to_string();
+        let request = || CompletionRequest {
+            schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
+            provider: "cli".to_string(),
+            prompt: "Reply with OK.".to_string(),
+            cwd: cwd.clone(),
+            mode: "autonomous-loop".to_string(),
+            metadata: None,
+        };
+
+        let mut checked = 0;
+        for provider in AGENTS {
+            if resolve_provider_binary(provider, None).is_none() {
+                eprintln!("skip {}: not installed", provider.default_binary_name());
+                continue;
+            }
+            checked += 1;
+            let caps = provider.capabilities();
+            let id = provider.id();
+
+            // 1. the binary answers --version
+            let account = account_status(provider, None);
+            assert!(
+                account.installed && account.version.is_some(),
+                "{id}: `{} --version` produced no usable output",
+                provider.default_binary_name()
+            );
+
+            // 2. auth classification is a known state, never empty or a panic
+            assert!(
+                matches!(
+                    account.auth_status.as_str(),
+                    "authenticated" | "unauthenticated" | "unknown"
+                ),
+                "{id}: unexpected auth_status {:?}",
+                account.auth_status
+            );
+
+            // 3. the skills gate and the account probe agree about this machine
+            let gate = crate::skill_host::dispatch::runtime_status(id.to_string(), None).unwrap();
+            assert_eq!(
+                gate.available,
+                account.auth_status == "authenticated",
+                "{id}: skills gate available={} but account probe says {:?}",
+                gate.available,
+                account.auth_status
+            );
+
+            // 4. the usage capability flag matches what the probe actually does
+            assert_eq!(
+                usage_status(provider, None, true).state == "unsupported",
+                !caps.usage,
+                "{id}: usage state contradicts capabilities()"
+            );
+
+            // 5. permission-flag argv against the real resolved binary
+            for (mode, needle) in permission_argv_expectations(provider) {
+                let (cmd, _stdin) = build_cli_command(provider, &request(), &[], None, mode)
+                    .unwrap_or_else(|err| panic!("{id} {mode}: {err}"));
+                let argv = cmd
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(argv.contains(needle), "{id} {mode}: {needle:?} not in {argv:?}");
+            }
+
+            // 6. one trivial round trip — opt-in: it costs tokens and 10-60s
+            if std::env::var("MARU_CLI_SMOKE_ROUNDTRIP").is_ok()
+                && account.auth_status == "authenticated"
+            {
+                let mut adapter =
+                    CliProviderAdapter::new(provider, Vec::new(), None, "plan".to_string());
+                let response = adapter
+                    .complete(request())
+                    .unwrap_or_else(|err| panic!("{id}: round trip failed: {err}"));
+                assert_eq!(response.provider, id);
+                // Deliberately not asserting the model's words — that is flaky,
+                // not a contract.
+                assert!(!response.content.trim().is_empty(), "{id}: empty completion");
+            }
+
+            eprintln!(
+                "{id}: {} auth={} usage={}",
+                account.version.as_deref().unwrap_or("?"),
+                account.auth_status,
+                caps.usage
+            );
+        }
+        assert!(
+            checked > 0,
+            "no AI CLI found on this machine — nothing was verified"
+        );
+    }
+
+    fn permission_argv_expectations(provider: CliProviderKind) -> [(&'static str, &'static str); 2] {
+        match provider {
+            CliProviderKind::Claude => [
+                ("plan", "--permission-mode plan"),
+                ("acceptEdits", "--permission-mode acceptEdits"),
+            ],
+            CliProviderKind::Codex => [
+                ("plan", "--sandbox read-only"),
+                ("acceptEdits", "--sandbox workspace-write"),
+            ],
+            CliProviderKind::Kimi => [("plan", "--plan"), ("acceptEdits", "-y")],
+            CliProviderKind::Kiro => [
+                ("plan", "--trust-tools=read,grep"),
+                ("acceptEdits", "--trust-tools=read,grep,write"),
+            ],
+        }
     }
 }

@@ -39,12 +39,14 @@ import {
   inlineAgentRuntime,
   findSkill,
   missionsForAgent,
+  MOCK_BUILTIN_AGENTS,
   resolveAgentPermissionMode,
   resolveAgentRuntime,
   runAgentDetailed,
   slugifyAgentId,
   type AgentRecord,
 } from "./agents";
+import RUST_AGENT_SEEDS from "../../src-tauri/src/agents.rs?raw";
 import type { AiSettings } from "./settings";
 import type { MissionRecord, SchedulerSchedule, SkillMissionMetadata } from "./types";
 import type { SkillRecord } from "./skills";
@@ -514,5 +516,19 @@ describe("inlineAgentRuntime", () => {
       commandOverride: null,
       enabled: true,
     });
+  });
+});
+
+describe("MOCK_BUILTIN_AGENTS", () => {
+  // Rust owns the real records; this list only exists so the browser dev shell
+  // and the e2e seam resolve builtin ids at all. When it drifts, a converted
+  // feature fails with `agent_not_found` in dev but works in the packaged app —
+  // the worst kind of divergence to debug.
+  it("mirrors every builtin seed id in agents.rs", () => {
+    const seeds = [...RUST_AGENT_SEEDS.matchAll(/AgentSeed \{\s*id: "([a-z0-9-]+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(seeds.length).toBeGreaterThan(0);
+    expect(MOCK_BUILTIN_AGENTS.map((agent) => agent.id).sort()).toEqual(seeds.sort());
   });
 });

@@ -98,12 +98,25 @@ pub fn skills_dispatch_terminal(
     command_override: Option<String>,
 ) -> Result<TerminalDispatchSpec, String> {
     let composition = compose(skill_id, prompt, cwd, context.unwrap_or_default())?;
-    let runtime = normalize_runtime(&runtime)?;
+    // Match the enum, not a string: a backend added without a terminal spec is
+    // then a compile error instead of a runtime `unsupported_dispatch_runtime`
+    // reached from a selector that offers all four.
+    let provider = CliProviderKind::parse(&runtime)?;
+    terminal_dispatch_spec(provider, composition, command_override)
+}
+
+/// Pure argv builder behind [`skills_dispatch_terminal`], split out so every
+/// backend's spec is testable without a skill registry.
+fn terminal_dispatch_spec(
+    provider: CliProviderKind,
+    composition: DispatchComposition,
+    command_override: Option<String>,
+) -> Result<TerminalDispatchSpec, String> {
     let command_override = command_override.filter(|value| !value.trim().is_empty());
     let add_dirs = add_dirs(&composition);
     let title = format!("Skill: {}", composition.skill_name);
-    match runtime.as_str() {
-        "claude" => {
+    match provider {
+        CliProviderKind::Claude => {
             let mut args = vec![
                 "-p".to_string(),
                 composition.prompt,
@@ -123,9 +136,13 @@ pub fn skills_dispatch_terminal(
                 title,
             })
         }
-        "codex" => {
+        CliProviderKind::Codex => {
+            // `--sandbox read-only` is codex's plan mode (provider.rs:97). It
+            // was missing here while the claude arm hardcoded `plan`, so a
+            // terminal-dispatched skill ran under codex's own default, which is
+            // more permissive than every other backend on this path.
             let mut command = format!(
-                "printf '%s' \"$MARU_SKILL_PROMPT\" | {} exec --cd {}",
+                "printf '%s' \"$MARU_SKILL_PROMPT\" | {} exec --sandbox read-only --cd {}",
                 shell_quote(command_override.as_deref().unwrap_or("codex")),
                 shell_quote(&composition.cwd)
             );
@@ -145,7 +162,45 @@ pub fn skills_dispatch_terminal(
                 title,
             })
         }
-        _ => Err(format!("unsupported_dispatch_runtime: {runtime}")),
+        CliProviderKind::Kimi => {
+            // Mirrors build_cli_command's kimi arm: permission flag, then
+            // `-p <prompt>`. Plan mode matches the claude arm above.
+            let mut args = vec![
+                "--plan".to_string(),
+                "-p".to_string(),
+                composition.prompt,
+            ];
+            for dir in add_dirs {
+                args.push("--add-dir".to_string());
+                args.push(dir);
+            }
+            Ok(TerminalDispatchSpec {
+                kind: "kimi".to_string(),
+                cwd: composition.cwd,
+                command: command_override,
+                extra_args: args,
+                extra_env: composition.extra_env,
+                title,
+            })
+        }
+        CliProviderKind::Kiro => {
+            // `chat` comes from the launcher spec (terminal/mod.rs), which adds
+            // it for kind=kiro whether or not a command override is set.
+            // kiro-cli has no --add-dir; its cwd is the PTY's.
+            let args = vec![
+                "--no-interactive".to_string(),
+                "--trust-tools=read,grep".to_string(),
+                composition.prompt,
+            ];
+            Ok(TerminalDispatchSpec {
+                kind: "kiro".to_string(),
+                cwd: composition.cwd,
+                command: command_override,
+                extra_args: args,
+                extra_env: composition.extra_env,
+                title,
+            })
+        }
     }
 }
 
@@ -540,7 +595,7 @@ fn spawn_background(
     Ok(invocation_id)
 }
 
-fn runtime_status(
+pub(crate) fn runtime_status(
     runtime: String,
     command_override: Option<&str>,
 ) -> Result<SkillRuntimeStatus, String> {
@@ -563,7 +618,16 @@ fn runtime_status(
     };
     let version = run_status_command(&binary, &["--version"]);
     let auth = match provider {
-        CliProviderKind::Claude => run_status_command(&binary, &["auth", "status"]),
+        CliProviderKind::Claude => {
+            // `claude auth status` exits 0 even when logged out, so the exit
+            // code alone would report ready while Settings reports
+            // unauthenticated. Parse the same payload the account probe does.
+            let mut result = run_status_command(&binary, &["auth", "status"]);
+            if !crate::agent_host::status::claude_auth_logged_in(&result.stdout) {
+                result.success = false;
+            }
+            result
+        }
         CliProviderKind::Codex => run_status_command(&binary, &["login", "status"]),
         CliProviderKind::Kimi => {
             // kimi has no auth-status subcommand; the local OAuth credentials
@@ -822,6 +886,47 @@ mod tests {
         assert!(prompt.contains("Summarize"));
     }
 
+    fn composition_for(prompt: &str) -> DispatchComposition {
+        DispatchComposition {
+            skill_id: "src::demo".to_string(),
+            skill_name: "demo".to_string(),
+            cwd: "/tmp/work".to_string(),
+            prompt: prompt.to_string(),
+            context: Vec::new(),
+            extra_env: BTreeMap::new(),
+        }
+    }
+
+    /// Every backend the runtime selector offers must produce a terminal spec.
+    /// kimi and kiro used to fall through to `unsupported_dispatch_runtime`,
+    /// which the UI surfaced as an error rather than a disabled control.
+    #[test]
+    fn terminal_dispatch_covers_every_backend() {
+        let cases = [
+            (CliProviderKind::Claude, "claude", "--permission-mode"),
+            (CliProviderKind::Codex, "codex", "--sandbox read-only"),
+            (CliProviderKind::Kimi, "kimi", "--plan"),
+            (CliProviderKind::Kiro, "kiro", "--trust-tools=read,grep"),
+        ];
+        for (provider, kind, plan_flag) in cases {
+            let spec =
+                terminal_dispatch_spec(provider, composition_for("Summarize the inbox"), None)
+                    .unwrap_or_else(|err| panic!("{kind}: {err}"));
+            assert_eq!(spec.kind, kind);
+            assert_eq!(spec.cwd, "/tmp/work");
+            // Codex pipes the prompt through an env var into a zsh -lc command;
+            // the other three carry it as an argv entry.
+            let haystack = spec.extra_args.join(" ");
+            let carries_prompt = spec.extra_args.iter().any(|a| a == "Summarize the inbox")
+                || spec.extra_env.values().any(|v| v == "Summarize the inbox");
+            assert!(carries_prompt, "{kind}: prompt missing from {spec:?}");
+            assert!(
+                haystack.contains(plan_flag),
+                "{kind}: plan-mode flag {plan_flag} missing from {haystack}"
+            );
+        }
+    }
+
     #[test]
     fn runtime_validation_rejects_unknown_targets() {
         assert!(normalize_runtime("claude").is_ok());
@@ -867,7 +972,7 @@ mod tests {
             dir.path().join("fake-claude"),
             r#"#!/bin/sh
 if [ "$1" = "--version" ]; then echo "fake claude 1.2.3"; exit 0; fi
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo "authenticated"; exit 0; fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo '{"loggedIn":true,"authMethod":"oauth"}'; exit 0; fi
 echo "unexpected args: $*" >&2
 exit 2
 "#,
@@ -877,6 +982,28 @@ exit 2
         assert_eq!(status.version.as_deref(), Some("fake claude 1.2.3"));
         assert_eq!(status.auth_status, "authenticated");
         assert_eq!(status.binary_path.as_deref(), Some(cli.to_str().unwrap()));
+    }
+
+    /// `claude auth status` exits 0 when logged out too, so the exit code alone
+    /// reported the skills gate as ready while Settings showed unauthenticated.
+    #[cfg(unix)]
+    #[test]
+    fn runtime_status_reads_claude_logged_out_payload_not_just_exit_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = write_fake_cli(
+            dir.path().join("fake-claude"),
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo "fake claude 1.2.3"; exit 0; fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo '{"loggedIn":false}'; exit 0; fi
+exit 2
+"#,
+        );
+        let status = runtime_status("claude".to_string(), Some(cli.to_str().unwrap())).unwrap();
+        assert!(!status.available);
+        // This struct's own vocabulary; the account probe reports the same
+        // machine as "unauthenticated".
+        assert_eq!(status.auth_status, "unavailable");
+        assert_eq!(status.error_kind.as_deref(), Some("auth_required"));
     }
 
     #[cfg(unix)]

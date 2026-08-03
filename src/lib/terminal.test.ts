@@ -528,7 +528,13 @@ describe("active-item context bridge", () => {
       label: "메모",
       enabled: true,
     });
+    // Attach is an agent-REPL predicate, not a per-CLI capability: every agent
+    // launcher accepts a pasted mention, only the plain shell does not.
+    expect(describeActiveContextChip(CTX, { focusedKind: "codex" }).enabled).toBe(true);
+    expect(describeActiveContextChip(CTX, { focusedKind: "kimi" }).enabled).toBe(true);
+    expect(describeActiveContextChip(CTX, { focusedKind: "kiro" }).enabled).toBe(true);
     expect(describeActiveContextChip(CTX, { focusedKind: "shell" }).enabled).toBe(false);
+    expect(describeActiveContextChip(CTX, { focusedKind: null }).enabled).toBe(false);
     expect(
       describeActiveContextChip(
         { ...CTX, docTitle: null, docRelPath: null, docAbsPath: null },
