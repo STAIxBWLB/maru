@@ -529,36 +529,24 @@ events are filtered into a bounded memory queue, emitted as
 fallback opens `com.apple.Safari` directly so Maru cannot recursively invoke
 itself when registered as the default HTTP/HTTPS handler.
 
-Passkey-enabled distribution additionally requires:
-
-1. Register the explicit App ID `kr.maru.desktop` and request Apple's managed
-   `com.apple.developer.web-browser.public-key-credential` capability.
-2. Confirm that Apple approves the capability for Developer ID distribution.
-   If Apple does not offer it for that distribution channel, keep the
-   system-browser fallback and do not enable the overlay.
-3. Create a Developer ID provisioning profile containing the approved
-   entitlement and supply its absolute path through
-   `MARU_MACOS_PROVISIONING_PROFILE`.
-
-Validate the profile and build a local provisioned app with:
+Passkey-enabled distribution requires an Apple-approved managed capability, a
+Developer ID provisioning profile, and notarization. The provisioned build also
+launches into Sites because Apple requires a browser surface on launch. The full
+runbook, including Apple's review criteria and the stop condition when the
+capability is not offered for Developer ID distribution, is
+[docs/macos-passkeys.md](docs/macos-passkeys.md):
 
 ```bash
 export MARU_MACOS_PROVISIONING_PROFILE=/absolute/path/to/Maru.provisionprofile
 export APPLE_SIGNING_IDENTITY='Developer ID Application: Example (TEAMID)'
 export APPLE_TEAM_ID=TEAMID
 make macos-passkey-readiness-check
-make macos-passkey-build
+make macos-passkey-notarized-build
 ```
 
-The probe validates profile expiration, team and application identifiers, the
-managed passkey entitlement, the non-Mach-O helper wrapper, and the opened-URL
-backend. The build command temporarily stages the ignored fixed profile source,
-embeds it as `Maru.app/Contents/embedded.provisionprofile`, builds with the
-overlay, verifies the app signature and entitlement, then removes or restores
-the staged source. The normal release workflow does not select this overlay;
-enable it there only after the approved profile and explicit release variable
-are configured. Calling `tauri build` with the overlay directly, without the
-staging and readiness checks, is unsupported.
+The normal release workflow never selects this overlay. Calling `tauri build`
+with the overlay directly, without the staging and readiness checks, is
+unsupported.
 
 Release asset versions come from `package.json`, `src-tauri/tauri.conf.json`,
 the root and CLI Cargo manifests, and their package entries in

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { evaluateProvisioningProfile } from "./lib/provisioningProfile.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const releaseRepo = process.env.MARU_RELEASE_REPO ?? "STAIxBWLB/maru";
@@ -228,11 +229,14 @@ function checkPasskeyPackaging() {
 
   const siteViewSource = readText("src-tauri/src/site_view.rs");
   const libSource = readText("src-tauri/src/lib.rs");
+  const appSource = readText("src/App.tsx");
   for (const [description, needle, source] of [
     ["opened-URL drain command", "site_view_take_opened_urls", siteViewSource],
     ["opened-URL event", "sites://open-requested", siteViewSource],
     ["HTTP/HTTPS RunEvent handler", "tauri::RunEvent::Opened { urls }", libSource],
     ["Safari passkey fallback", "site_view_open_safari", siteViewSource],
+    // Apple requires a browser surface on launch; see docs/macos-passkeys.md.
+    ["launch browser surface", "bootAppMode", appSource],
   ]) {
     if (source.includes(needle)) {
       ok(`passkey backend contains ${description}`);
@@ -259,32 +263,13 @@ function checkPasskeyPackaging() {
           encoding: "utf8",
           input: decodedXml,
         }));
-        const entitlements = profile.Entitlements ?? {};
-        if (entitlements["com.apple.developer.web-browser.public-key-credential"] === true) {
-          ok("provisioning profile contains the managed passkey entitlement");
-        } else {
-          fail("provisioning profile does not contain the managed passkey entitlement");
-        }
-
-        const expiration = new Date(profile.ExpirationDate ?? "");
-        if (Number.isFinite(expiration.getTime()) && expiration.getTime() > Date.now()) {
-          ok(`provisioning profile is valid until ${expiration.toISOString()}`);
-        } else {
-          fail("provisioning profile is expired or has no valid ExpirationDate");
-        }
-
-        const teamIdentifiers = Array.isArray(profile.TeamIdentifier) ? profile.TeamIdentifier : [];
-        const entitlementTeam = entitlements["com.apple.developer.team-identifier"];
-        const teamIdentifier = entitlementTeam ?? teamIdentifiers[0];
-        if (typeof teamIdentifier !== "string" || !teamIdentifiers.includes(teamIdentifier)) {
-          fail("provisioning profile TeamIdentifier and entitlement team identifier do not match");
-        } else if (entitlements["com.apple.application-identifier"] !== `${teamIdentifier}.${expectedBundleId}`) {
-          fail(`provisioning profile com.apple.application-identifier must be ${teamIdentifier}.${expectedBundleId}`);
-        } else if (process.env.APPLE_TEAM_ID && process.env.APPLE_TEAM_ID !== teamIdentifier) {
-          fail(`APPLE_TEAM_ID does not match provisioning profile team ${teamIdentifier}`);
-        } else {
-          ok(`provisioning profile matches team ${teamIdentifier} and ${expectedBundleId}`);
-        }
+        const evaluation = evaluateProvisioningProfile(profile, {
+          expectedBundleId,
+          appleTeamId: process.env.APPLE_TEAM_ID ?? null,
+        });
+        evaluation.successes.forEach(ok);
+        evaluation.warnings.forEach(warn);
+        evaluation.errors.forEach(fail);
 
         const selectedIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim();
         const certificates = Array.isArray(profile.DeveloperCertificates)

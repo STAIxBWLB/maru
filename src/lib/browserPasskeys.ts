@@ -35,6 +35,20 @@ export async function browserPasskeyStatus(): Promise<BrowserPasskeyStatus> {
   return invoke<BrowserPasskeyStatus>("browser_passkey_status");
 }
 
+let browserPasskeyBuildPromise: Promise<boolean> | null = null;
+
+/**
+ * True only in a provisioned browser-passkey build: `supported` is derived from
+ * the running process's effective code signature, so it cannot be spoofed by
+ * config. Memoized because the answer is fixed for the process lifetime.
+ */
+export function browserPasskeyBuildOnce(): Promise<boolean> {
+  browserPasskeyBuildPromise ??= browserPasskeyStatus()
+    .then((status) => status.supported)
+    .catch(() => false);
+  return browserPasskeyBuildPromise;
+}
+
 /** Must only be called from an explicit user action; macOS may show a system
  *  authorization prompt. */
 export async function browserPasskeyRequestAuthorization(): Promise<BrowserPasskeyStatus> {

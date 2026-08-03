@@ -244,6 +244,8 @@ import {
   type SettingsTerminalLaunchPayload,
 } from "./lib/settingsEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
+import { browserPasskeyBuildOnce } from "./lib/browserPasskeys";
+import { bootAppMode } from "./lib/startupAppMode";
 import {
   buildSiteViewOpenRequests,
   requestSiteViewCloseActive,
@@ -1066,6 +1068,9 @@ function MainApp() {
   // flips) — it must keep the auto-open decision instead of clobbering it.
   // Cleared on the first explicit user mode change.
   const todayAutoOpenPathRef = useRef<string | null>(null);
+  // Fixed for the process lifetime; see bootAppMode for why the provisioned
+  // browser-passkey build must land on Sites at launch.
+  const browserPasskeyBuildRef = useRef(false);
   const e2eFlowEnabled = useMemo(() => isE2EFlowEnabled(), []);
   const diagramEnabled = useMemo(() => isDiagramEnabled(), []);
   const visibleAppMode: AppMode =
@@ -1296,6 +1301,22 @@ function MainApp() {
       ),
     [maruSettings.ui.documentViews, documentIndex],
   );
+  // Resolve the provisioned-passkey build once and land on the browser surface
+  // Apple requires at launch. The boot paths that apply the stored mode also
+  // consult browserPasskeyBuildRef, so this only has to cover the case where
+  // the signature check resolves after they already ran.
+  useEffect(() => {
+    let cancelled = false;
+    void browserPasskeyBuildOnce().then((isPasskeyBuild) => {
+      if (cancelled) return;
+      browserPasskeyBuildRef.current = isPasskeyBuild;
+      if (isPasskeyBuild) setAppMode("sites");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     const viewIds = new Set(maruSettings.ui.documentViews.map((view) => view.id));
     setDocumentFilterByVisibility((current) => {
@@ -1848,9 +1869,13 @@ function MainApp() {
           // A boot-time Today auto-open beat this load; keep it instead of
           // re-applying the persisted mode over it.
           setAppMode(
-            todayAutoOpenPathRef.current === settingsWorkPath
-              ? "tasks"
-              : settings.ui.activeAppMode,
+            bootAppMode({
+              storedMode:
+                todayAutoOpenPathRef.current === settingsWorkPath
+                  ? "tasks"
+                  : settings.ui.activeAppMode,
+              browserPasskeyBuild: browserPasskeyBuildRef.current,
+            }),
           );
           setEditorPaneViewModes(settings.ui.editorPaneViewModes);
           setRightPaneTab(settings.ui.rightPaneTab);
@@ -1877,14 +1902,28 @@ function MainApp() {
       if (payload.workPath === settingsWorkPath) {
         const next = normalizeMaruSettings(payload.settings);
         setMaruSettings(next);
-        if (!keepAutoOpenMode()) setAppMode(next.ui.activeAppMode);
+        if (!keepAutoOpenMode()) {
+          setAppMode(
+            bootAppMode({
+              storedMode: next.ui.activeAppMode,
+              browserPasskeyBuild: browserPasskeyBuildRef.current,
+            }),
+          );
+        }
         setEditorPaneViewModes(next.ui.editorPaneViewModes);
         setRightPaneTab(next.ui.rightPaneTab);
       } else if (payload.globalChanged && settingsWorkPath) {
         void readMaruSettings(settingsWorkPath)
           .then((next) => {
             setMaruSettings(next);
-            if (!keepAutoOpenMode()) setAppMode(next.ui.activeAppMode);
+            if (!keepAutoOpenMode()) {
+              setAppMode(
+                bootAppMode({
+                  storedMode: next.ui.activeAppMode,
+                  browserPasskeyBuild: browserPasskeyBuildRef.current,
+                }),
+              );
+            }
             setEditorPaneViewModes(next.ui.editorPaneViewModes);
             setRightPaneTab(next.ui.rightPaneTab);
           })
@@ -4639,7 +4678,12 @@ function MainApp() {
             // A prior boot pass (StrictMode double-run) may already have
             // auto-opened Today — keep that over the persisted mode.
             if (todayAutoOpenPathRef.current === null) {
-              setAppMode(bootSettings.ui.activeAppMode);
+              setAppMode(
+                bootAppMode({
+                  storedMode: bootSettings.ui.activeAppMode,
+                  browserPasskeyBuild: browserPasskeyBuildRef.current,
+                }),
+              );
             }
             setEditorPaneViewModes(bootSettings.ui.editorPaneViewModes);
             setRightPaneTab(bootSettings.ui.rightPaneTab);
