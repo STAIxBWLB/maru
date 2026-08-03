@@ -311,6 +311,7 @@ import {
   buildSiteViewOpenRequests,
   requestSiteViewCloseActive,
   subscribeSiteViewOpenRequests,
+  unroutedSiteViewOpenRequestId,
   type SiteViewOpenRequest,
 } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
@@ -946,6 +947,7 @@ export function MainApp() {
   );
   const [pendingOpenedSiteUrls, setPendingOpenedSiteUrls] = useState<SiteViewOpenRequest[]>([]);
   const nextOpenedSiteUrlIdRef = useRef(0);
+  const routedOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   // Global error toast lives in the error store (step 9); setError is a
   // module action now, so every call site below keeps its old shape.
@@ -6258,8 +6260,16 @@ export function MainApp() {
 
   // Preserve the active document when possible: an OS-opened web URL uses the
   // right Sites workbench from Docs, and otherwise opens/keeps primary Sites.
+  // Route once per arriving request (ids are monotonic, so the tail carries the
+  // newest): a request Sites cannot fit yet — the tab cap — must not reopen the
+  // workbench the user just closed on every render.
   useEffect(() => {
-    if (pendingOpenedSiteUrls.length === 0) return;
+    const routeId = unroutedSiteViewOpenRequestId(
+      pendingOpenedSiteUrls,
+      routedOpenedSiteUrlIdRef.current,
+    );
+    if (routeId === null) return;
+    routedOpenedSiteUrlIdRef.current = routeId;
     if (visibleAppMode === "pkm") {
       if (rightWorkbenchMode !== "sites") openWorkbenchModeRight("sites");
       return;
@@ -6268,7 +6278,7 @@ export function MainApp() {
   }, [
     openPrimaryWorkbenchMode,
     openWorkbenchModeRight,
-    pendingOpenedSiteUrls.length,
+    pendingOpenedSiteUrls,
     rightWorkbenchMode,
     visibleAppMode,
   ]);
