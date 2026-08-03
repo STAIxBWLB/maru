@@ -2,12 +2,37 @@ import { describe, expect, it } from "vitest";
 import { mockEntries } from "./fixtures";
 import type { VaultEntry } from "./types";
 import {
+  isCurrentWorkspaceFilesScanRequest,
   mergeFreshEntry,
   planVaultStartup,
   shouldLazyScanWorkspaceFiles,
+  workspaceFileScanPaneMode,
+  workspaceFilesScanStatusAfterFailure,
 } from "./vaultStartup";
 
 describe("vault startup planning", () => {
+  it("demands a file scan only for Files or a visible PKM Explorer", () => {
+    const base = {
+      visibleAppMode: "pkm" as const,
+      outlineOpen: true,
+      rightPaneTab: "explorer" as const,
+      explorerPaneMode: "documents" as const,
+    };
+    expect(workspaceFileScanPaneMode(base)).toBe("files");
+    expect(workspaceFileScanPaneMode({ ...base, outlineOpen: false })).toBe("documents");
+    expect(
+      workspaceFileScanPaneMode({ ...base, visibleAppMode: "inbox" }),
+    ).toBe("documents");
+    expect(
+      workspaceFileScanPaneMode({
+        ...base,
+        visibleAppMode: "files",
+        outlineOpen: false,
+        rightPaneTab: "workspace",
+      }),
+    ).toBe("files");
+  });
+
   it("prefers the requested cached entry and restores it as the first tab", () => {
     const entries = mockEntries();
     const plan = planVaultStartup(
@@ -59,7 +84,7 @@ describe("vault startup planning", () => {
       shouldLazyScanWorkspaceFiles({
         paneMode: "documents",
         startupIoReady: true,
-        hasEntries: false,
+        scanStatus: "unscanned",
         loading: false,
         refreshing: false,
       }),
@@ -69,7 +94,7 @@ describe("vault startup planning", () => {
       shouldLazyScanWorkspaceFiles({
         paneMode: "files",
         startupIoReady: false,
-        hasEntries: false,
+        scanStatus: "unscanned",
         loading: false,
         refreshing: false,
       }),
@@ -79,17 +104,29 @@ describe("vault startup planning", () => {
       shouldLazyScanWorkspaceFiles({
         paneMode: "files",
         startupIoReady: true,
-        hasEntries: false,
+        scanStatus: "unscanned",
         loading: false,
         refreshing: false,
       }),
     ).toBe(true);
 
+    // A successful scan is complete even when the workspace is empty.
     expect(
       shouldLazyScanWorkspaceFiles({
         paneMode: "files",
         startupIoReady: true,
-        hasEntries: true,
+        scanStatus: "ready",
+        loading: false,
+        refreshing: false,
+      }),
+    ).toBe(false);
+
+    // Failed automatic scans wait for an explicit refresh instead of looping.
+    expect(
+      shouldLazyScanWorkspaceFiles({
+        paneMode: "files",
+        startupIoReady: true,
+        scanStatus: "failed",
         loading: false,
         refreshing: false,
       }),
@@ -99,7 +136,7 @@ describe("vault startup planning", () => {
       shouldLazyScanWorkspaceFiles({
         paneMode: "files",
         startupIoReady: true,
-        hasEntries: false,
+        scanStatus: "unscanned",
         loading: true,
         refreshing: false,
       }),
@@ -109,10 +146,23 @@ describe("vault startup planning", () => {
       shouldLazyScanWorkspaceFiles({
         paneMode: "files",
         startupIoReady: true,
-        hasEntries: false,
+        scanStatus: "unscanned",
         loading: false,
         refreshing: true,
       }),
     ).toBe(false);
+  });
+
+  it("preserves a successful file snapshot when a refresh fails", () => {
+    expect(workspaceFilesScanStatusAfterFailure("ready")).toBe("ready");
+    expect(workspaceFilesScanStatusAfterFailure("unscanned")).toBe("failed");
+    expect(workspaceFilesScanStatusAfterFailure("failed")).toBe("failed");
+  });
+
+  it("guards scan completions independently per workspace", () => {
+    const latest = { private: 3, public: 1 };
+    expect(isCurrentWorkspaceFilesScanRequest(latest, "private", 2)).toBe(false);
+    expect(isCurrentWorkspaceFilesScanRequest(latest, "private", 3)).toBe(true);
+    expect(isCurrentWorkspaceFilesScanRequest(latest, "public", 1)).toBe(true);
   });
 });

@@ -107,6 +107,8 @@ import type {
   TempCleanupSelection,
   ScratchpadMigrationResult,
   StoredFileOutcome,
+  ContentSearchOptions,
+  ContentSearchResult,
   CreateTaskDraft,
   TaskBucket,
   TaskDetailsPatch,
@@ -407,6 +409,21 @@ export async function searchCalendarNotes(
 ): Promise<string[]> {
   if (!isTauri()) return [];
   return invoke<string[]>("search_calendar_notes", { workPath, roots, query });
+}
+
+export async function searchWorkspaceContents(
+  workspacePath: string,
+  query: string,
+  options?: ContentSearchOptions,
+): Promise<ContentSearchResult> {
+  if (!isTauri()) {
+    return { files: [], fileCount: 0, totalMatches: 0, truncated: false };
+  }
+  return invoke<ContentSearchResult>("search_workspace_contents", {
+    workspacePath,
+    query,
+    options: options ?? null,
+  });
 }
 
 export async function scanTaskNotes(

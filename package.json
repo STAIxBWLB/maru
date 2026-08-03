@@ -20,7 +20,7 @@
     "clean:tauri-debug": "node scripts/prune-tauri-debug.mjs",
     "tauri:dev": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri dev",
     "tauri:build": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri build",
-    "test": "vitest run src",
+    "test": "vitest run src scripts",
     "test:e2e": "playwright test",
     "test:e2e:graph": "pnpm test:e2e:graph:behavior && pnpm test:e2e:graph:shell",
     "test:e2e:graph:behavior": "playwright test e2e/graph.spec.ts",

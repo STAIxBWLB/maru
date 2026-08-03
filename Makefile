@@ -100,7 +100,7 @@ tauri-build: install ## Native Tauri production build (cargo + bundle)
 
 .PHONY: cli-build
 cli-build: $(ICON_PATH) ## Build standalone Maru CLI
-	cd $(TAURI_DIR) && $(CARGO) build --release --bin maru-cli
+	cd $(TAURI_DIR) && $(CARGO) build --release -p maru-cli --bin maru-cli
 
 .PHONY: cli-install
 cli-install: cli-build ## Install standalone Maru CLI to CLI_INSTALL_DIR (default: ~/.local/bin)
@@ -171,7 +171,7 @@ test-rust: $(ICON_PATH) ## Rust unit + integration tests (cargo test --lib)
 
 .PHONY: test-cli
 test-cli: $(ICON_PATH) ## Compile and test standalone Maru CLI binary
-	cd $(TAURI_DIR) && $(CARGO) test --bin maru-cli
+	cd $(TAURI_DIR) && $(CARGO) test -p maru-cli --bin maru-cli
 
 .PHONY: test-e2e
 test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwright install` first)
@@ -188,15 +188,15 @@ bench-scan: $(ICON_PATH) ## Bench workspace scan (default: ~/workspace/work; ove
 
 .PHONY: skills-doctor
 skills-doctor: ## Run Maru skills doctor in quiet mode
-	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin maru-cli -- doctor --quiet
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml -p maru-cli --bin maru-cli -- doctor --quiet
 
 .PHONY: skills-doctor-json
 skills-doctor-json: ## Run Maru skills doctor and print JSON
-	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin maru-cli -- doctor --json
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml -p maru-cli --bin maru-cli -- doctor --json
 
 .PHONY: skills-dirty
 skills-dirty: ## List dirty Maru skills as JSON
-	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin maru-cli -- skills dirty --json
+	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml -p maru-cli --bin maru-cli -- skills dirty --json
 
 .PHONY: skills-bootstrap-verify
 skills-bootstrap-verify: ## Validate the embedded bootstrap snapshot against the OTA bundle schema
@@ -228,6 +228,18 @@ macos-distribution-check: ## Check repo config and GitHub secrets for notarized 
 macos-distribution-local-check: ## Check repo config and local Apple notarization secret files
 	$(NODE) scripts/check-macos-direct-distribution.mjs
 	$(NODE) scripts/notarize-local-smoke.mjs --check
+
+.PHONY: macos-passkey-readiness-check
+macos-passkey-readiness-check: ## Validate opt-in macOS browser-passkey packaging prerequisites
+	$(NODE) scripts/check-macos-direct-distribution.mjs --passkeys --require-local-identity
+
+.PHONY: macos-passkey-build
+macos-passkey-build: ## Build a locally provisioned macOS browser-passkey bundle (not notarized)
+	$(NODE) scripts/build-macos-passkeys.mjs
+
+.PHONY: macos-passkey-notarized-build
+macos-passkey-notarized-build: ## Build, notarize, and staple the browser-passkey bundle for distribution
+	$(NODE) scripts/build-macos-passkeys.mjs --notarize
 
 .PHONY: macos-notarize-local
 macos-notarize-local: ## Build, sign, and notarize locally with secrets from ~/workspace/work/.maru/secrets/apple

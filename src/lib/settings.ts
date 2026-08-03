@@ -38,6 +38,7 @@ export type MaruAppMode =
   | "drafts"
   | "gap"
   | "agents";
+export type RightWorkbenchSurface = "editor" | Exclude<MaruAppMode, "pkm">;
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export interface EditorPaneViewModes {
@@ -47,6 +48,7 @@ export interface EditorPaneViewModes {
 export type RightPaneTab =
   | "workspace"
   | "outline"
+  | "explorer"
   | "files"
   | "memo"
   | "info"
@@ -181,6 +183,7 @@ export interface MaruSettings {
     /** Legacy mirror of the left pane mode for downgrade compatibility. */
     editorViewMode: EditorViewModeSetting;
     editorPaneViewModes: EditorPaneViewModes;
+    rightWorkbenchSurface: RightWorkbenchSurface;
     rightPaneTab: RightPaneTab;
     explorerPaneMode: ExplorerPaneMode;
     documentBrowserMode: DocumentBrowserMode;
@@ -473,6 +476,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       left: "source",
       right: "source",
     },
+    rightWorkbenchSurface: "editor",
     rightPaneTab: "workspace",
     explorerPaneMode: "documents",
     documentBrowserMode: "tree",
@@ -687,6 +691,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       // can never desync, whatever junk the raw input contained.
       editorViewMode: editorPaneViewModes.left,
       editorPaneViewModes,
+      rightWorkbenchSurface: parseRightWorkbenchSurface(ui.rightWorkbenchSurface) ?? "editor",
       rightPaneTab: parseRightPaneTab(ui.rightPaneTab) ?? "workspace",
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
@@ -1847,6 +1852,12 @@ function parseMaruAppMode(value: unknown): MaruAppMode | null {
     : null;
 }
 
+function parseRightWorkbenchSurface(value: unknown): RightWorkbenchSurface | null {
+  if (value === "editor") return value;
+  const mode = parseMaruAppMode(value);
+  return mode && mode !== "pkm" ? mode : null;
+}
+
 function normalizeActiveAppMode(ui: Record<string, unknown>): MaruAppMode {
   const mode = parseMaruAppMode(ui.activeAppMode) ?? "pkm";
   const legacyExplorerMode = parseExplorerPaneMode(ui.explorerPaneMode);
@@ -1885,7 +1896,7 @@ function normalizeEditorPaneViewModes(
 }
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
-  return value === "workspace" || value === "outline" || value === "files" || value === "memo"
+  return value === "workspace" || value === "outline" || value === "explorer" || value === "files" || value === "memo"
     || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
     || value === "shareOutbox"
     ? value

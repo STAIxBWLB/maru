@@ -24,6 +24,7 @@ const isTauri = () =>
 export const SITE_VIEW_NAVIGATED_EVENT = "sites://navigated";
 export const SITE_VIEW_PAGE_LOAD_EVENT = "sites://page-load";
 export const SITE_VIEW_TITLE_EVENT = "sites://title-changed";
+export const SITE_VIEW_OPEN_REQUESTED_EVENT = "sites://open-requested";
 export const SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT = "maru:sites:close-active";
 
 export function requestSiteViewCloseActive(): void {
@@ -156,6 +157,157 @@ export async function siteViewOpenExternal(url: string): Promise<void> {
     return;
   }
   await invoke("site_view_open_external", { url });
+}
+
+/** Opens specifically in Safari so a Maru build registered for HTTP/HTTPS
+ *  cannot recursively route its own fallback back into Maru. */
+export async function siteViewOpenSafari(url: string): Promise<void> {
+  if (!isTauri()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  await invoke("site_view_open_safari", { url });
+}
+
+export async function siteViewTakeOpenedUrls(): Promise<string[]> {
+  if (!isTauri()) return [];
+  return invoke<string[]>("site_view_take_opened_urls");
+}
+
+export function sanitizeSiteViewOpenedUrls(urls: unknown): string[] {
+  if (!Array.isArray(urls)) return [];
+  return urls.filter((value): value is string => {
+    if (typeof value !== "string") return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  });
+}
+
+export interface SiteViewOpenRequest {
+  id: number;
+  url: string;
+}
+
+/** Assigns frontend-lifetime identities after validation. Equal URLs remain
+ *  separate requests, which preserves two deliberate OS opens while letting
+ *  React effects acknowledge each delivery exactly once. */
+export function buildSiteViewOpenRequests(
+  urls: unknown,
+  previousId: number,
+): { requests: SiteViewOpenRequest[]; nextId: number } {
+  let nextId = previousId;
+  const requests = sanitizeSiteViewOpenedUrls(urls).map((url) => ({
+    id: ++nextId,
+    url,
+  }));
+  return { requests, nextId };
+}
+
+/** Selects only unseen requests that currently fit. Requests beyond the cap
+ *  remain unacknowledged so closing a tab makes them eligible on the next
+ *  effect pass. */
+export function nextSiteViewOpenRequests(
+  requests: readonly SiteViewOpenRequest[],
+  handledIds: ReadonlySet<number>,
+  availableSlots: number,
+): SiteViewOpenRequest[] {
+  if (availableSlots <= 0) return [];
+  return requests
+    .filter((request) => !handledIds.has(request.id))
+    .slice(0, availableSlots);
+}
+
+/** Id of the newest request that has not been routed to a Sites surface yet,
+ *  or null when there is nothing new. Ids are monotonic, so the tail carries
+ *  the newest. Routing once per arrival — rather than while anything is
+ *  pending — keeps a request Sites cannot fit yet (tab cap) from reopening the
+ *  workbench the user just closed. */
+export function unroutedSiteViewOpenRequestId(
+  requests: readonly SiteViewOpenRequest[],
+  lastRoutedId: number,
+): number | null {
+  const newest = requests[requests.length - 1];
+  return newest && newest.id > lastRoutedId ? newest.id : null;
+}
+
+const openedUrlSubscribers = new Set<(urls: string[]) => void>();
+let openedUrlBacklog: string[] = [];
+const MAX_OPENED_URL_BACKLOG = 64;
+
+function deliverOpenedUrls(value: unknown): void {
+  const urls = sanitizeSiteViewOpenedUrls(value);
+  if (urls.length === 0) return;
+  if (openedUrlSubscribers.size === 0) {
+    openedUrlBacklog = [...openedUrlBacklog, ...urls].slice(-MAX_OPENED_URL_BACKLOG);
+    return;
+  }
+  for (const subscriber of openedUrlSubscribers) subscriber(urls);
+}
+
+/** Subscribe to native open notifications and return an immediately usable
+ *  cleanup. The event is only a wake-up; after the native listener is ready,
+ *  this drains both the cold-start queue and every later event atomically. */
+export function subscribeSiteViewOpenRequests(
+  handler: (urls: string[]) => void,
+): () => void {
+  if (!isTauri()) return () => {};
+  openedUrlSubscribers.add(handler);
+  if (openedUrlBacklog.length > 0) {
+    const backlog = openedUrlBacklog;
+    openedUrlBacklog = [];
+    handler(backlog);
+  }
+  let disposed = false;
+  let draining: Promise<void> | null = null;
+  let drainAgain = false;
+  let unlisten: (() => void) | null = null;
+
+  const drain = () => {
+    if (disposed) return;
+    if (draining) {
+      drainAgain = true;
+      return;
+    }
+    draining = siteViewTakeOpenedUrls()
+      // The native command atomically removes these URLs. If this subscription
+      // unmounts while the command is in flight, hand the result to the current
+      // subscriber (or retain it for the next one) instead of losing the opens.
+      .then(deliverOpenedUrls)
+      .catch((err) => {
+        if (!disposed) console.info("[maru] opened URL queue unavailable:", err);
+      })
+      .finally(() => {
+        draining = null;
+        if (!disposed && drainAgain) {
+          drainAgain = false;
+          drain();
+        }
+      });
+  };
+
+  void (async () => {
+    const { listen } = await import("@tauri-apps/api/event");
+    const off = await listen<unknown>(SITE_VIEW_OPEN_REQUESTED_EVENT, drain);
+    if (disposed) {
+      off();
+      return;
+    }
+    unlisten = off;
+    // Listener first, cold queue second: no launch/open event can be stranded.
+    drain();
+  })().catch((err) => {
+    if (!disposed) console.info("[maru] opened URL listener unavailable:", err);
+  });
+
+  return () => {
+    disposed = true;
+    openedUrlSubscribers.delete(handler);
+    unlisten?.();
+  };
 }
 
 export interface SiteViewEventHandlers {

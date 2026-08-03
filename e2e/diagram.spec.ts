@@ -27,13 +27,13 @@ test("shows Diagram mode behind the feature flag with localized activity labels"
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "다이어그램" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "다이어그램", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "다이어그램", exact: true }).click();
   await expect(page.getByTestId("diagram-mode")).toBeVisible();
   await expect(page.getByRole("tab", { name: "파일" })).toBeVisible();
 
   await page.getByRole("button", { name: "언어" }).click();
-  await expect(page.getByRole("button", { name: "Diagram" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Diagram", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "File" })).toBeVisible();
   expect(forbidden).toEqual([]);
 });

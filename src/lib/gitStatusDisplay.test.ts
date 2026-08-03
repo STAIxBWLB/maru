@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatGitStatusDisplay } from "./gitStatusDisplay";
-import type { GitStatus } from "./types";
+import { buildGitDecorations, formatGitStatusDisplay } from "./gitStatusDisplay";
+import type { GitFileChange, GitStatus } from "./types";
 
 function status(overrides: Partial<GitStatus>): GitStatus {
   return {
@@ -55,5 +55,60 @@ describe("formatGitStatusDisplay", () => {
     expect(display.dirty).toBe(false);
     expect(display.total).toBe(0);
     expect(display.tooltip).toBe("main · tracked clean · 0 new");
+  });
+});
+
+describe("buildGitDecorations", () => {
+  it("maps supported worktree states and normalizes path separators", () => {
+    const changes: GitFileChange[] = [
+      {
+        path: "src\\App.tsx",
+        indexStatus: " ",
+        worktreeStatus: "M",
+        staged: false,
+        untracked: false,
+      },
+      {
+        path: "new.md",
+        indexStatus: "?",
+        worktreeStatus: "?",
+        staged: false,
+        untracked: true,
+      },
+      {
+        path: "renamed.md",
+        indexStatus: "R",
+        worktreeStatus: " ",
+        staged: true,
+        untracked: false,
+      },
+      {
+        path: "ignored.md",
+        indexStatus: "C",
+        worktreeStatus: " ",
+        staged: true,
+        untracked: false,
+      },
+    ];
+
+    expect(Array.from(buildGitDecorations(changes))).toEqual([
+      ["src/App.tsx", "M"],
+      ["new.md", "U"],
+      ["renamed.md", "R"],
+    ]);
+  });
+
+  it("prefers a worktree state over an index state", () => {
+    expect(
+      buildGitDecorations([
+        {
+          path: "mixed.md",
+          indexStatus: "A",
+          worktreeStatus: "D",
+          staged: true,
+          untracked: false,
+        },
+      ]).get("mixed.md"),
+    ).toBe("D");
   });
 });

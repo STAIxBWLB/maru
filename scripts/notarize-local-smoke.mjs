@@ -6,17 +6,20 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  appleSecretsDir,
+  readSecretFrom as readSecretFromDir,
+  resolveNotaryCredentials,
+} from "./lib/appleNotary.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const defaultSecretsDir = resolve(homedir(), "workspace/work/.maru/secrets/apple");
-const secretsDir = resolve(process.env.MARU_APPLE_SECRETS_DIR ?? defaultSecretsDir);
+const secretsDir = appleSecretsDir();
 const userArgs = process.argv.slice(2);
 const target = userArgs.find((arg) => !arg.startsWith("--")) ?? process.env.MARU_NOTARIZE_TARGET ?? "aarch64-apple-darwin";
 const checkOnly = process.argv.includes("--check");
@@ -24,8 +27,6 @@ const checkOnly = process.argv.includes("--check");
 const secretFileCandidates = {
   certificatePassword: ["certificate-password", "APPLE_CERTIFICATE_PASSWORD"],
   keychainPassword: ["keychain-password", "KEYCHAIN_PASSWORD"],
-  apiIssuerId: ["api-issuer-id", "APPLE_API_ISSUER_ID"],
-  apiKeyId: ["api-key-id", "APPLE_API_KEY_ID"],
 };
 
 function usage() {
@@ -57,13 +58,7 @@ if (process.platform !== "darwin") {
 }
 
 function readSecretFrom(names) {
-  for (const name of names) {
-    const path = join(secretsDir, name);
-    if (existsSync(path)) {
-      return readFileSync(path, "utf8").trim();
-    }
-  }
-  return null;
+  return readSecretFromDir(secretsDir, names);
 }
 
 function requireFile(path, label, missing) {
@@ -72,23 +67,6 @@ function requireFile(path, label, missing) {
   }
   missing.push(label);
   return null;
-}
-
-function firstApiKeyPath() {
-  if (process.env.APPLE_API_KEY_PATH && existsSync(process.env.APPLE_API_KEY_PATH)) {
-    return process.env.APPLE_API_KEY_PATH;
-  }
-  if (!existsSync(secretsDir)) {
-    return null;
-  }
-  const matches = readdirSync(secretsDir)
-    .filter((name) => /^AuthKey_[A-Z0-9]+\.p8$/.test(name))
-    .sort();
-  return matches.length > 0 ? join(secretsDir, matches[0]) : null;
-}
-
-function apiKeyIdFromPath(path) {
-  return basename(path).match(/^AuthKey_([A-Z0-9]+)\.p8$/)?.[1] ?? null;
 }
 
 function ensureKeychainPassword(missing) {
@@ -172,23 +150,13 @@ function updaterSecret(name, envName) {
   return readFileSync(path, "utf8").trim();
 }
 
-const missing = [];
+const notary = resolveNotaryCredentials(secretsDir);
+const missing = [...notary.missing];
+const { apiKeyPath, apiIssuerId, apiKeyId } = notary;
 const p12Path = requireFile(join(secretsDir, "DeveloperIDApplication.p12"), "DeveloperIDApplication.p12", missing);
-const apiKeyPath = firstApiKeyPath();
-if (!apiKeyPath) {
-  missing.push("AuthKey_<APPLE_API_KEY_ID>.p8");
-}
 const certificatePassword = readSecretFrom(secretFileCandidates.certificatePassword);
 if (!certificatePassword) {
   missing.push("certificate-password");
-}
-const apiIssuerId = readSecretFrom(secretFileCandidates.apiIssuerId);
-if (!apiIssuerId) {
-  missing.push("api-issuer-id");
-}
-const apiKeyId = readSecretFrom(secretFileCandidates.apiKeyId) ?? (apiKeyPath ? apiKeyIdFromPath(apiKeyPath) : null);
-if (!apiKeyId) {
-  missing.push("api-key-id");
 }
 const keychainPassword = ensureKeychainPassword(missing);
 const updaterKey = updaterSecret("maru-updater.key", "TAURI_SIGNING_PRIVATE_KEY");

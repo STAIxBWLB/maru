@@ -27,6 +27,7 @@ target/
 Cargo.lock.bak
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/Passkeys.provisionprofile
 
 # === Logs ===
 *.log

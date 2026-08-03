@@ -5,6 +5,7 @@ import {
   Copy,
   ExternalLink,
   Globe,
+  KeyRound,
   Loader2,
   Plus,
   RotateCw,
@@ -16,8 +17,14 @@ import { readSites, saveSites } from "../../lib/maruDir";
 import { clipboardWriteText } from "../../lib/clipboard";
 import { useTranslation } from "../../lib/i18n";
 import {
+  browserPasskeyRequestAuthorization,
+  browserPasskeyStatus,
+  type BrowserPasskeyStatus,
+} from "../../lib/browserPasskeys";
+import {
   browserTabLabel,
   closeBrowserTab,
+  MAX_BROWSER_TABS,
   nextBrowserTabId,
   openBrowserTab,
   updateBrowserTab,
@@ -43,13 +50,16 @@ import {
   siteViewForward,
   siteViewHide,
   siteViewNavigate,
+  nextSiteViewOpenRequests,
   siteViewOpen,
   siteViewOpenExternal,
+  siteViewOpenSafari,
   siteViewReload,
   siteViewSetBounds,
   siteViewShow,
   siteViewTabRuntime,
   subscribeSiteViewEvents,
+  type SiteViewOpenRequest,
 } from "../../lib/siteView";
 import { ImportSitesDialog } from "./ImportSitesDialog";
 import { NewSiteDialog } from "./NewSiteDialog";
@@ -68,6 +78,9 @@ const isTauriShell = () =>
 // webviews, which also stay alive (hidden) across mode switches.
 let sessionTabs: BrowserTab[] = [];
 let sessionActiveTabId: string | null = null;
+const EMPTY_OPENED_URLS: readonly SiteViewOpenRequest[] = [];
+const PASSKEY_UNSUPPORTED_NOTICE_KEY = "maru:sites:passkey-unsupported-shown";
+const PASSKEY_UNSUPPORTED_NOTICE_MS = 5_000;
 
 interface SitesPaneProps {
   /** True while any App-level in-DOM overlay covers the content area
@@ -75,9 +88,18 @@ interface SitesPaneProps {
    *  stack under DOM modals, so we hide it for the duration. */
   overlayOpen: boolean;
   onError: (message: string | null) => void;
+  onEmptyClose?: () => void;
+  openedUrls?: readonly SiteViewOpenRequest[];
+  onOpenedUrlsHandled?: (ids: readonly number[]) => void;
 }
 
-export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
+export function SitesPane({
+  overlayOpen,
+  onError,
+  onEmptyClose,
+  openedUrls = EMPTY_OPENED_URLS,
+  onOpenedUrlsHandled,
+}: SitesPaneProps) {
   const { t } = useTranslation();
   const tauri = useMemo(isTauriShell, []);
 
@@ -93,6 +115,11 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
   const [newSiteOpen, setNewSiteOpen] = useState(false);
   const [editSite, setEditSite] = useState<SiteEntry | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [passkeyStatus, setPasskeyStatus] = useState<BrowserPasskeyStatus | null>(null);
+  const [passkeyLoading, setPasskeyLoading] = useState(tauri);
+  const [passkeyAction, setPasskeyAction] = useState<"enable" | "safari" | null>(null);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [unsupportedNoticeVisible, setUnsupportedNoticeVisible] = useState(false);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -100,6 +127,8 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
   const desiredVisibleRef = useRef(false);
   const activeTabRef = useRef<string | null>(activeTabId);
   const pendingOpenRef = useRef(new Map<string, string>());
+  const handledOpenedUrlIdsRef = useRef(new Set<number>());
+  const unsupportedNoticeClaimedRef = useRef(false);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
@@ -124,6 +153,29 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
     (err: unknown) => onError(err instanceof Error ? err.message : String(err)),
     [onError],
   );
+
+  // Status inspection is safe on mount. Authorization is intentionally never
+  // requested here: macOS prompts only after the explicit Enable click below.
+  useEffect(() => {
+    let cancelled = false;
+    setPasskeyLoading(true);
+    void browserPasskeyStatus()
+      .then((status) => {
+        if (!cancelled) setPasskeyStatus(status);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : String(err);
+          setPasskeyError(`${t("sites.passkeys.statusFailed")} ${message}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPasskeyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   // ── rAF-batched bounds/visibility sync for the active tab. Every layout
   // source (observer, window resize, visibility flips) funnels through here,
@@ -257,7 +309,11 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
   );
 
   const openInNewTab = useCallback(
-    (url: string, siteId: string | null) => {
+    (url: string, siteId: string | null): boolean => {
+      if (tabs.length >= MAX_BROWSER_TABS) {
+        onError(t("sites.tabs.limit"));
+        return false;
+      }
       setTabs((current) => {
         const id = nextBrowserTabId(current);
         const result = openBrowserTab(current, {
@@ -276,9 +332,37 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
         loadInTab(id, url);
         return result.tabs;
       });
+      return true;
     },
-    [loadInTab, onError, t, tauri],
+    [loadInTab, onError, t, tabs.length, tauri],
   );
+
+  // App owns the launch/open-event queue. Each accepted URL becomes a new
+  // browser tab here, then the exact batch is acknowledged back to App.
+  useEffect(() => {
+    const pendingIds = new Set(openedUrls.map((request) => request.id));
+    for (const id of handledOpenedUrlIdsRef.current) {
+      if (!pendingIds.has(id)) handledOpenedUrlIdsRef.current.delete(id);
+    }
+    const reservedSlots = [...handledOpenedUrlIdsRef.current].filter((id) =>
+      pendingIds.has(id),
+    ).length;
+    const availableSlots = Math.max(0, MAX_BROWSER_TABS - tabs.length - reservedSlots);
+    const handledIds: number[] = [];
+    const candidates = nextSiteViewOpenRequests(
+      openedUrls,
+      handledOpenedUrlIdsRef.current,
+      availableSlots,
+    );
+    for (const request of candidates) {
+      const normalized = normalizeSiteUrl(request.url);
+      if (!normalized) continue;
+      if (!openInNewTab(normalized, null)) continue;
+      handledOpenedUrlIdsRef.current.add(request.id);
+      handledIds.push(request.id);
+    }
+    if (handledIds.length > 0) onOpenedUrlsHandled?.(handledIds);
+  }, [onOpenedUrlsHandled, openInNewTab, openedUrls, tabs.length]);
 
   const activateTab = useCallback(
     (tabId: string) => {
@@ -307,11 +391,12 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
     const closeActiveTab = () => {
       const tabId = activeTabRef.current;
       if (tabId) closeTab(tabId);
+      else onEmptyClose?.();
     };
     window.addEventListener(SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT, closeActiveTab);
     return () =>
       window.removeEventListener(SITE_VIEW_CLOSE_ACTIVE_REQUEST_EVENT, closeActiveTab);
-  }, [closeTab]);
+  }, [closeTab, onEmptyClose]);
 
   // ── user actions
   const activateSite = useCallback(
@@ -444,10 +529,87 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
     [activeTab, reportError],
   );
 
+  const requestPasskeyAuthorization = useCallback(() => {
+    setPasskeyAction("enable");
+    setPasskeyError(null);
+    void browserPasskeyRequestAuthorization()
+      .then(setPasskeyStatus)
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setPasskeyError(`${t("sites.passkeys.requestFailed")} ${message}`);
+        setPasskeyStatus((current) => ({
+          supported: current?.supported ?? false,
+          authorization: "unknown",
+          requiresManagedEntitlement: current?.requiresManagedEntitlement ?? true,
+        }));
+      })
+      .finally(() => setPasskeyAction(null));
+  }, [t]);
+
+  const openInSafari = useCallback(() => {
+    if (!activeTab?.url) return;
+    setPasskeyAction("safari");
+    setPasskeyError(null);
+    void siteViewOpenSafari(activeTab.url)
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setPasskeyError(`${t("sites.passkeys.safariFailed")} ${message}`);
+      })
+      .finally(() => setPasskeyAction(null));
+  }, [activeTab?.url, t]);
+
   const navDisabled = !tauri || !activeTab || !siteViewTabRuntime(activeTab.id);
   const bookmarked = Boolean(
     activeTab?.url && sites.some((site) => site.url === activeTab.url),
   );
+  const passkeyAuthorization = passkeyStatus?.authorization ?? "unknown";
+  const transientUnsupportedStatus =
+    !passkeyLoading &&
+    passkeyError === null &&
+    passkeyAuthorization === "unsupported" &&
+    passkeyStatus?.requiresManagedEntitlement === true;
+
+  // The default macOS build intentionally lacks the managed entitlement. Show
+  // that diagnostic once per window session, then reclaim the vertical space.
+  // Actionable states (Enable, authorized reload, denied/unknown Safari
+  // fallback, and errors) remain visible until the user acts.
+  useEffect(() => {
+    if (!transientUnsupportedStatus) return;
+
+    if (!unsupportedNoticeClaimedRef.current) {
+      try {
+        if (window.sessionStorage.getItem(PASSKEY_UNSUPPORTED_NOTICE_KEY) === "1") return;
+        window.sessionStorage.setItem(PASSKEY_UNSUPPORTED_NOTICE_KEY, "1");
+      } catch {
+        // A locked-down webview can reject storage; still show once per mount.
+      }
+      unsupportedNoticeClaimedRef.current = true;
+    }
+
+    setUnsupportedNoticeVisible(true);
+    const timer = window.setTimeout(
+      () => setUnsupportedNoticeVisible(false),
+      PASSKEY_UNSUPPORTED_NOTICE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [transientUnsupportedStatus]);
+
+  const showPasskeyStatus =
+    tauri &&
+    (passkeyError !== null ||
+      (passkeyStatus?.requiresManagedEntitlement === true &&
+        (!transientUnsupportedStatus || unsupportedNoticeVisible)));
+  const passkeyMessage = passkeyLoading
+    ? t("sites.passkeys.checking")
+    : passkeyAuthorization === "authorized"
+      ? t("sites.passkeys.authorized")
+      : passkeyAuthorization === "notDetermined"
+        ? t("sites.passkeys.notDetermined")
+        : passkeyAuthorization === "denied"
+          ? t("sites.passkeys.denied")
+          : passkeyAuthorization === "unsupported"
+            ? t("sites.passkeys.unsupported")
+            : t("sites.passkeys.unknown");
 
   return (
     <main className="sites-pane">
@@ -616,6 +778,69 @@ export function SitesPane({ overlayOpen, onError }: SitesPaneProps) {
           >
             <ExternalLink size={15} />
           </button>
+        </div>
+
+        <div
+          className={
+            showPasskeyStatus
+              ? `sites-passkey-status ${passkeyAuthorization}`
+              : "sites-passkey-status empty"
+          }
+          role={passkeyError ? "alert" : "status"}
+          aria-live="polite"
+          aria-hidden={showPasskeyStatus ? undefined : true}
+        >
+          {showPasskeyStatus ? (
+            <>
+              {passkeyLoading ? (
+                <Loader2 size={14} className="spin" aria-hidden="true" />
+              ) : (
+                <KeyRound size={14} aria-hidden="true" />
+              )}
+              <div className="sites-passkey-copy">
+                <strong>{t("sites.passkeys.title")}</strong>
+                <span>{passkeyError ?? passkeyMessage}</span>
+              </div>
+              <div className="sites-passkey-actions">
+                {!passkeyLoading && passkeyAuthorization === "notDetermined" ? (
+                  <button
+                    type="button"
+                    className="button button-primary button-sm"
+                    disabled={passkeyAction !== null}
+                    onClick={requestPasskeyAuthorization}
+                  >
+                    {passkeyAction === "enable"
+                      ? t("sites.passkeys.enabling")
+                      : t("sites.passkeys.enable")}
+                  </button>
+                ) : null}
+                {!passkeyLoading && passkeyAuthorization === "authorized" && activeTab ? (
+                  <button
+                    type="button"
+                    className="button button-secondary button-sm"
+                    disabled={navDisabled}
+                    onClick={() => void siteViewReload(activeTab.id).catch(reportError)}
+                  >
+                    {t("sites.passkeys.reload")}
+                  </button>
+                ) : null}
+                {!passkeyLoading &&
+                ["denied", "unsupported", "unknown"].includes(passkeyAuthorization) &&
+                activeTab?.url ? (
+                  <button
+                    type="button"
+                    className="button button-secondary button-sm"
+                    disabled={passkeyAction !== null}
+                    onClick={openInSafari}
+                  >
+                    {passkeyAction === "safari"
+                      ? t("sites.passkeys.openingSafari")
+                      : t("sites.passkeys.openSafari")}
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
         </div>
 
         {/* Measured spacer — the native child webview floats over this rect. */}

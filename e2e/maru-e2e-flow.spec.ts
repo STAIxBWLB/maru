@@ -20,7 +20,7 @@ test("runs the single-screen Maru E2E sample flow and re-queries saved metadata"
 }) => {
   await page.goto("/?maru-e2e=1");
 
-  await page.getByRole("button", { name: "E2E 플로우" }).click();
+  await page.getByRole("button", { name: "E2E 플로우", exact: true }).click();
   const pane = page.getByTestId("e2e-flow-pane");
   await expect(pane).toBeVisible();
   await expect(pane).toContainText("샘플 입력 선택");

@@ -799,6 +799,36 @@ export interface WorkspaceFileEntry {
   binary: boolean;
 }
 
+export interface ContentSearchOptions {
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+  include: string[];
+  exclude: string[];
+  includeDotFolders?: string[];
+}
+
+export interface ContentSearchMatch {
+  /** One-based source line number. */
+  line: number;
+  text: string;
+  /** JavaScript UTF-16 `[start, end]` ranges. */
+  ranges: [number, number][];
+}
+
+export interface ContentSearchFile {
+  path: string;
+  relPath: string;
+  matches: ContentSearchMatch[];
+}
+
+export interface ContentSearchResult {
+  files: ContentSearchFile[];
+  fileCount: number;
+  totalMatches: number;
+  truncated: boolean;
+}
+
 export type WorkspaceEntryKind = "file" | "directory" | "symlink";
 export type WorkspaceEntryTargetKind = "file" | "directory" | "missing";
 

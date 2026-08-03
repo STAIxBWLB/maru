@@ -1,42 +1,11 @@
 import { CircleStop, Loader2, PauseCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { listAiMissions, stopAiMission } from "../lib/api";
+import { stopAiMission } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
-import type { MissionRecord } from "../lib/types";
+import { useActiveMissions } from "../lib/useActiveMissions";
 
 export function MissionBadge({ onError }: { onError?: (message: string) => void }) {
   const { t } = useTranslation();
-  const [missions, setMissions] = useState<MissionRecord[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listAiMissions()
-      .then((records) => {
-        if (!cancelled) setMissions(records);
-      })
-      .catch(() => {});
-    let unlisten: (() => void) | null = null;
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen<MissionRecord>("ai://mission_update", (event) => {
-          setMissions((current) => upsertMission(current, event.payload));
-        }),
-      )
-      .then((off) => {
-        if (cancelled) off();
-        else unlisten = off;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  const active = useMemo(
-    () => missions.find((mission) => mission.status === "idle" || mission.status === "running"),
-    [missions],
-  );
+  const [active] = useActiveMissions();
   if (!active) return null;
 
   const idle = active.status === "idle";
@@ -59,12 +28,4 @@ export function MissionBadge({ onError }: { onError?: (message: string) => void 
       </button>
     </div>
   );
-}
-
-function upsertMission(current: MissionRecord[], next: MissionRecord): MissionRecord[] {
-  const exists = current.some((mission) => mission.id === next.id);
-  const merged = exists
-    ? current.map((mission) => (mission.id === next.id ? next : mission))
-    : [next, ...current];
-  return merged.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 8);
 }

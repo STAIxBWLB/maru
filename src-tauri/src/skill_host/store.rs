@@ -2835,6 +2835,7 @@ fn ensure_inventory_sources(registry: &mut SkillsRegistry) {
     let Ok(home) = host_fs::install_root_base() else {
         return;
     };
+    let codex_home = host_fs::codex_home().unwrap_or_else(|_| home.join(".codex"));
     let inventories = [
         (
             AGENTS_EXTERNAL_SOURCE_ID,
@@ -2845,7 +2846,7 @@ fn ensure_inventory_sources(registry: &mut SkillsRegistry) {
         (
             CODEX_NATIVE_SOURCE_ID,
             "tool-native",
-            home.join(".codex").join("skills").join(".system"),
+            codex_home.join("skills").join(".system"),
             ".",
         ),
     ];
@@ -5122,7 +5123,7 @@ fn copy_dir_all(from: &Path, to: &Path) -> Result<(), String> {
 fn install_root(target: &str) -> Result<PathBuf, String> {
     match target {
         "claude" => Ok(host_fs::install_root_base()?.join(".claude").join("skills")),
-        "codex" => Ok(host_fs::install_root_base()?.join(".codex").join("skills")),
+        "codex" => Ok(host_fs::codex_home()?.join("skills")),
         other => Err(format!("unsupported_install_target: {other}")),
     }
 }

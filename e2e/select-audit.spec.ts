@@ -31,7 +31,9 @@ test("every select shares the base chrome", async ({ page }) => {
   await page.waitForTimeout(2500);
   rows.push(...(await auditSelects(page)));
 
-  const buttons = await page.locator(".activity-bar button, .activity-rail button").all();
+  const buttons = await page
+    .locator(".activity-bar .activity-button, .activity-rail .activity-button")
+    .all();
   for (let i = 0; i < buttons.length; i += 1) {
     try {
       await buttons[i].click({ timeout: 2000 });

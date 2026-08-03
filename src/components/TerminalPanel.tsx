@@ -1878,6 +1878,7 @@ export const TerminalPanel = memo(
           key={task.id}
           className={className}
           role="option"
+          aria-label={task.name}
           aria-selected={isActive}
           tabIndex={0}
           onPointerDown={(event) => {

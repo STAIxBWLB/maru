@@ -6,10 +6,12 @@ mod app_menu;
 mod approval;
 mod atomic_file;
 mod binary_viewer;
+mod browser_passkeys;
 mod calendar_search;
 mod cli;
 mod cli_path;
 mod command_output;
+mod content_search;
 mod diagram;
 mod document;
 mod drafts;
@@ -87,7 +89,11 @@ use binary_viewer::{
     binary_viewer_prepare_asset, binary_viewer_preview_external, binary_viewer_read_archive,
     binary_viewer_read_text,
 };
+use browser_passkeys::{
+    browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
+};
 use calendar_search::search_calendar_notes;
+use content_search::search_workspace_contents;
 use diagram::{
     diagram_backup_document, diagram_delete_document, diagram_export_blob,
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
@@ -185,9 +191,10 @@ use shelf::{
     store_shelf_files_as,
 };
 use site_view::{
-    site_view_back, site_view_close, site_view_close_all, site_view_forward, site_view_hide,
-    site_view_navigate, site_view_open, site_view_open_external, site_view_reload,
-    site_view_set_bounds, site_view_show,
+    queue_opened_urls, site_view_back, site_view_close, site_view_close_all, site_view_forward,
+    site_view_hide, site_view_navigate, site_view_open, site_view_open_external,
+    site_view_open_safari, site_view_reload, site_view_set_bounds, site_view_show,
+    site_view_take_opened_urls, SiteOpenedUrlState,
 };
 use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{
@@ -278,6 +285,8 @@ pub fn run() {
         .manage(ApprovalState::default())
         .manage(MissionState::default())
         .manage(CatalogWatcherState::default())
+        .manage(BrowserPasskeyState::default())
+        .manage(SiteOpenedUrlState::default())
         .setup(|app| {
             // M0 Anchor→Maru one-time on-disk migration (~/.anchor → ~/.maru,
             // com.anchor.app → com.maru.app) — idempotent, before anything
@@ -362,6 +371,7 @@ pub fn run() {
             append_meetings_log,
             read_meetings_log,
             search_calendar_notes,
+            search_workspace_contents,
             scan_task_notes,
             read_task_metadata,
             create_task_note,
@@ -631,6 +641,8 @@ pub fn run() {
             diagram_pattern_delete,
             diagram_write_report_asset,
             // Sites (in-app browser pane + global registry + scanner)
+            browser_passkey_status,
+            browser_passkey_request_authorization,
             site_view_open,
             site_view_navigate,
             site_view_set_bounds,
@@ -642,20 +654,22 @@ pub fn run() {
             site_view_back,
             site_view_forward,
             site_view_open_external,
+            site_view_open_safari,
+            site_view_take_opened_urls,
             read_sites,
             save_sites,
             scan_work_sites,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Maru")
-        .run(|app_handle, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
+        .run(|app_handle, event| match event {
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => queue_opened_urls(app_handle, urls),
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 let state = app_handle.state::<TelegramIoState>();
                 stop_poller_on_exit(state.inner());
             }
+            _ => {}
         });
 }
 
