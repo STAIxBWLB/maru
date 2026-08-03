@@ -79,6 +79,8 @@ const isTauriShell = () =>
 let sessionTabs: BrowserTab[] = [];
 let sessionActiveTabId: string | null = null;
 const EMPTY_OPENED_URLS: readonly SiteViewOpenRequest[] = [];
+const PASSKEY_UNSUPPORTED_NOTICE_KEY = "maru:sites:passkey-unsupported-shown";
+const PASSKEY_UNSUPPORTED_NOTICE_MS = 5_000;
 
 interface SitesPaneProps {
   /** True while any App-level in-DOM overlay covers the content area
@@ -117,6 +119,7 @@ export function SitesPane({
   const [passkeyLoading, setPasskeyLoading] = useState(tauri);
   const [passkeyAction, setPasskeyAction] = useState<"enable" | "safari" | null>(null);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [unsupportedNoticeVisible, setUnsupportedNoticeVisible] = useState(false);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -125,6 +128,7 @@ export function SitesPane({
   const activeTabRef = useRef<string | null>(activeTabId);
   const pendingOpenRef = useRef(new Map<string, string>());
   const handledOpenedUrlIdsRef = useRef(new Set<number>());
+  const unsupportedNoticeClaimedRef = useRef(false);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
@@ -559,9 +563,42 @@ export function SitesPane({
     activeTab?.url && sites.some((site) => site.url === activeTab.url),
   );
   const passkeyAuthorization = passkeyStatus?.authorization ?? "unknown";
+  const transientUnsupportedStatus =
+    !passkeyLoading &&
+    passkeyError === null &&
+    passkeyAuthorization === "unsupported" &&
+    passkeyStatus?.requiresManagedEntitlement === true;
+
+  // The default macOS build intentionally lacks the managed entitlement. Show
+  // that diagnostic once per window session, then reclaim the vertical space.
+  // Actionable states (Enable, authorized reload, denied/unknown Safari
+  // fallback, and errors) remain visible until the user acts.
+  useEffect(() => {
+    if (!transientUnsupportedStatus) return;
+
+    if (!unsupportedNoticeClaimedRef.current) {
+      try {
+        if (window.sessionStorage.getItem(PASSKEY_UNSUPPORTED_NOTICE_KEY) === "1") return;
+        window.sessionStorage.setItem(PASSKEY_UNSUPPORTED_NOTICE_KEY, "1");
+      } catch {
+        // A locked-down webview can reject storage; still show once per mount.
+      }
+      unsupportedNoticeClaimedRef.current = true;
+    }
+
+    setUnsupportedNoticeVisible(true);
+    const timer = window.setTimeout(
+      () => setUnsupportedNoticeVisible(false),
+      PASSKEY_UNSUPPORTED_NOTICE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [transientUnsupportedStatus]);
+
   const showPasskeyStatus =
     tauri &&
-    (passkeyStatus?.requiresManagedEntitlement === true || passkeyError !== null);
+    (passkeyError !== null ||
+      (passkeyStatus?.requiresManagedEntitlement === true &&
+        (!transientUnsupportedStatus || unsupportedNoticeVisible)));
   const passkeyMessage = passkeyLoading
     ? t("sites.passkeys.checking")
     : passkeyAuthorization === "authorized"

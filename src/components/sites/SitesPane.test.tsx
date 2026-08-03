@@ -78,6 +78,7 @@ describe("SitesPane passkey and opened URL integration", () => {
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    window.sessionStorage.clear();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       value: {},
       configurable: true,
@@ -104,6 +105,47 @@ describe("SitesPane passkey and opened URL integration", () => {
     delete window.__TAURI_INTERNALS__;
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("shows the default macOS unsupported notice once and then collapses it", async () => {
+    vi.useFakeTimers();
+    mocks.browserPasskeyStatus.mockResolvedValue({
+      supported: false,
+      authorization: "unsupported",
+      requiresManagedEntitlement: true,
+    });
+
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+          <SitesPane overlayOpen={false} onError={() => {}} />
+        </LocaleContext.Provider>,
+      );
+    });
+    await act(async () => {});
+
+    expect(container.querySelector(".sites-passkey-status")?.classList).not.toContain("empty");
+    expect(container.textContent).toContain("Passkeys unsupported");
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(container.querySelector(".sites-passkey-status")?.classList).toContain("empty");
+
+    await act(async () => root?.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+          <SitesPane overlayOpen={false} onError={() => {}} />
+        </LocaleContext.Provider>,
+      );
+    });
+    await act(async () => {});
+
+    expect(container.querySelector(".sites-passkey-status")?.classList).toContain("empty");
   });
 
   it("checks on mount, opens queued URLs, and requests only after Enable", async () => {
