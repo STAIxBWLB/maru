@@ -8,6 +8,30 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.41 - 2026-08-03 - Everything Beside You
+
+- **The right rail is now a real Explorer.** Browse the workspace as a
+  virtualized tree, filter by name, or search inside files with include and
+  exclude globs, case and whole-word controls, regex support, highlighted
+  UTF-16-safe matches and line-aware opening. Git status letters travel with
+  files, while expansion state stays shared with the full Files workbench.
+- **Workbench surfaces can sit beside the document.** Sites, Files, Tasks,
+  Diagram, Graph, Drafts and the other primary tools can open on the right;
+  Markdown source and preview can share the editor at the same time. The
+  layout now keeps every surface usable with a right-docked terminal, down to
+  the compact 720px matrix that previously clipped or collapsed controls.
+- **The bottom edge carries ambient state.** The status bar remains present
+  without quota data and shows running missions, the active workspace and
+  file count, and the installed skills bundle. Isolated Codex profiles now
+  resolve skill inventory and installs from `CODEX_HOME` before falling back
+  to the normal dot-codex directory.
+- **Sites gains a fail-closed macOS passkey path.** Normal builds keep their
+  existing signature and Safari fallback. A separate provisioned build can
+  request browser passkey access only after Apple grants the managed
+  entitlement for Developer ID distribution; it launches into Sites, handles
+  HTTP and HTTPS opens directly, notarizes before distribution, and collapses
+  unsupported status after one brief notice.
+
 ## v0.4.40 - 2026-08-03 - Where Things Come From
 
 - **The graph tells your workspace and your knowledge apart.** A workspace
