@@ -14,6 +14,7 @@ mod command_output;
 mod content_search;
 mod diagram;
 mod document;
+mod dot_sync;
 mod drafts;
 mod e2e_flow;
 mod evidence_binder;
@@ -105,6 +106,7 @@ use document::{
     create_document, create_version, duplicate_document, move_document, read_document,
     save_document, trash_document, update_frontmatter_field,
 };
+use dot_sync::{dot_sync_overview, dot_sync_run};
 use drafts::{
     drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_read, drafts_save,
     drafts_set_status,
@@ -502,6 +504,8 @@ pub fn run() {
             jobs_stop,
             jobs_run_now,
             jobs_read_log,
+            dot_sync_overview,
+            dot_sync_run,
             prepare_approval,
             record_approval,
             // workspace pairing + .maru/ system mode

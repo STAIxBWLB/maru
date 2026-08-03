@@ -2612,6 +2612,144 @@ export async function jobsReadLog(workPath: string, jobId: string): Promise<JobL
   return invoke<JobLogsTail>("jobs_read_log", { workPath, jobId });
 }
 
+// === dot workspace sync (global dot configuration) ===
+
+export interface DotCliStatus {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  compatible: boolean;
+  minimumVersion: string;
+  message: string | null;
+}
+
+export interface DotSyncJobStatus {
+  id: string;
+  action: string;
+  label: string;
+  intervalSeconds: number;
+  mode: string;
+  state: string;
+  lastRunAt: string | null;
+}
+
+export interface DotSyncProfileStatus {
+  schemaVersion: number;
+  kind: "mirror" | "peer-profile";
+  profile: string;
+  configured: boolean;
+  workspacePath: string;
+  storeDir: string;
+  target: { kind: string; spec: string; host?: string; path: string };
+  localExists: boolean;
+  targetExists: boolean;
+  paused: boolean;
+  lockHeld: boolean;
+  owner?: string;
+  canPush: boolean;
+  machineNames: string[];
+  filterMode: string;
+  allowCount: number;
+  submoduleCount: number;
+  propagation: { create: boolean; update: boolean; delete: boolean };
+  maxDelete: number;
+  rsyncVersion?: string;
+  lastPullAt: string | null;
+  lastPushAt: string | null;
+  lastIntakeAt: string | null;
+  conflictCount: number;
+  logPath: string;
+  includePath: string;
+  excludePath: string;
+  ignorePath: string;
+  allowPath: string;
+  jobs: DotSyncJobStatus[];
+}
+
+export interface DotPeerStatus {
+  schemaVersion: number;
+  kind: "peer";
+  profile: DotSyncProfileStatus;
+  job: DotSyncJobStatus;
+  lastExitCode: number | null;
+  runCount: number | null;
+  homePathsPath: string;
+}
+
+export interface DotSyncOverview {
+  cli: DotCliStatus;
+  mirror: DotSyncProfileStatus | null;
+  peer: DotPeerStatus | null;
+}
+
+export type DotSyncMode = "clean" | "force";
+export type DotSyncActionRequest =
+  | {
+      type: "configureMirror";
+      target: string;
+      owner: string;
+      filterMode: "include" | "exclude";
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+      maxDelete: number;
+      pushIntervalSeconds: number;
+      pullIntervalSeconds: number;
+      pushMode: DotSyncMode;
+      pullMode: DotSyncMode;
+    }
+  | { type: "pauseMirror" | "resumeMirror" | "disablePeer" | "peerDoctor" | "peerDiff" | "readPeerHomePaths" | "installCli" | "updateCli" }
+  | { type: "runMirror"; direction: "push" | "pull"; mode: DotSyncMode; dryRun: boolean }
+  | {
+      type: "configurePeer";
+      host: string;
+      remotePath: string;
+      intervalSeconds: number;
+      allowPatterns: string;
+      homePaths: string;
+      acknowledgeSecrets: boolean;
+    }
+  | { type: "runPeer"; dryRun: boolean }
+  | {
+      type: "saveFilter";
+      profile: "sync" | "peer";
+      kind: "include" | "exclude" | "ignore" | "allow";
+      content: string;
+      acknowledgeSecrets: boolean;
+    }
+  | { type: "readFilter"; profile: "sync" | "peer"; kind: "include" | "exclude" | "ignore" | "allow" }
+  | { type: "savePeerHomePaths"; content: string }
+  | { type: "readLog"; profile: "sync" | "peer" };
+
+export interface DotSyncActionResult {
+  stdout: string;
+  stderr: string;
+  overview: DotSyncOverview;
+}
+
+export const EMPTY_DOT_SYNC_OVERVIEW: DotSyncOverview = {
+  cli: {
+    available: false,
+    path: null,
+    version: null,
+    compatible: false,
+    minimumVersion: "2.62.0",
+    message: null,
+  },
+  mirror: null,
+  peer: null,
+};
+
+export async function dotSyncOverview(): Promise<DotSyncOverview> {
+  if (!isTauri()) return EMPTY_DOT_SYNC_OVERVIEW;
+  return invoke<DotSyncOverview>("dot_sync_overview");
+}
+
+export async function dotSyncRun(request: DotSyncActionRequest): Promise<DotSyncActionResult> {
+  if (!isTauri()) return { stdout: "", stderr: "", overview: EMPTY_DOT_SYNC_OVERVIEW };
+  return invoke<DotSyncActionResult>("dot_sync_run", { request });
+}
+
 export async function readInboxSettings(vaultPath: string): Promise<InboxSettings> {
   if (!isTauri()) return { ...DEFAULT_INBOX_SETTINGS };
   return invoke<InboxSettings>("read_inbox_settings", { vaultPath });

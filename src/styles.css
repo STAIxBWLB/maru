@@ -6110,6 +6110,165 @@ button.git-badge:hover {
   word-break: break-all;
 }
 
+.dot-sync-setup,
+.dot-sync-card,
+.dot-sync-editor,
+.dot-sync-output {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.dot-sync-setup {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.dot-sync-setup.warning > svg,
+.dot-sync-checks .danger,
+.dot-sync-health.attention {
+  color: var(--danger);
+}
+
+.dot-sync-setup p {
+  margin: 3px 0 0;
+}
+
+.dot-sync-summary,
+.dot-sync-card-head,
+.dot-sync-card-title,
+.dot-sync-output-head,
+.dot-sync-home-paths-head {
+  display: flex;
+  align-items: center;
+}
+
+.dot-sync-summary,
+.dot-sync-card-head,
+.dot-sync-output-head,
+.dot-sync-home-paths-head {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dot-sync-card {
+  display: grid;
+  gap: 11px;
+  padding: 12px;
+}
+
+.dot-sync-card-title {
+  min-width: 0;
+  gap: 7px;
+  color: var(--ink);
+}
+
+.dot-sync-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.dot-sync-facts > div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-3);
+}
+
+.dot-sync-facts dt {
+  margin-bottom: 3px;
+  color: var(--faint);
+  font-size: var(--type-meta-size);
+}
+
+.dot-sync-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-label-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot-sync-jobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dot-sync-job {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: var(--type-meta-size);
+}
+
+.dot-sync-job strong,
+.dot-sync-job-state.active {
+  color: var(--muted);
+}
+
+.dot-sync-job-state {
+  color: var(--danger);
+}
+
+.dot-sync-editor {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.dot-sync-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.dot-sync-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta-size);
+}
+
+.dot-sync-textarea.compact {
+  min-height: 84px;
+}
+
+.dot-sync-advanced {
+  display: grid;
+  gap: 10px;
+}
+
+.dot-sync-advanced > .secondary-button {
+  justify-self: start;
+}
+
+.dot-sync-output {
+  padding: 10px;
+}
+
+@media (max-width: 760px) {
+  .dot-sync-setup,
+  .dot-sync-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .dot-sync-setup > svg {
+    display: none;
+  }
+}
+
 .inbox-empty {
   min-height: 124px;
   display: grid;
@@ -21982,9 +22141,12 @@ button.git-badge:hover {
 .agent-usage-status {
   flex: none;
   min-width: 0;
+  max-width: 60%;
   display: flex;
   align-items: center;
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .agent-usage-stat,
@@ -22009,6 +22171,22 @@ button.git-badge:hover {
 
 .agent-usage-stat.idle {
   opacity: 0.6;
+}
+
+.agent-usage-stat.dot-sync-status.setup,
+.agent-usage-stat.dot-sync-status.manual,
+.agent-usage-stat.dot-sync-status.paused {
+  opacity: 0.72;
+}
+
+.agent-usage-stat.dot-sync-status.syncing {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-soft));
+  color: var(--accent);
+}
+
+.agent-usage-stat.dot-sync-status.attention {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line-soft));
+  color: var(--danger);
 }
 
 .agent-usage-stat-name {
