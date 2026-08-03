@@ -7,7 +7,8 @@ runtime, a permission mode and a prompt. It is not a schedule (timing lives in
 Backend: `src-tauri/src/agents.rs` (registry + seeds),
 `src-tauri/src/scheduler.rs` (timed dispatch).
 Frontend: `src/lib/agents.ts` (types, `runAgent`, resolution),
-`src/components/agents/` (`AgentsPane`, `AgentEditor`).
+`src/lib/agentChat.ts` (conversation),
+`src/components/agents/` (`AgentsPane`, `AgentChatTab`, `AgentEditor`).
 
 ## Model
 
@@ -115,6 +116,77 @@ Inline agents (`inbox-classify`, `commit-message`) expose only the backend
 selector. They return a typed value under a timeout rather than emitting a
 mission, so run/stop/schedule are disabled honestly instead of returning
 `mission_not_running`.
+
+## Chat
+
+The 대화 tab talks to the selected agent's backend without a PTY. It exists as
+a tab rather than an app mode because the configuration a conversation needs is
+already the `AgentRecord`'s: runtime, permission mode, prompt and command
+override all resolve through the same helpers `runAgent` uses, so nothing is
+picked per message and chat stores no settings of its own.
+
+It dispatches through `start_agent_cli_invocation`, not
+`skills_dispatch_background`: the latter requires a skill id and prepends the
+whole `SKILL.md`, which is right for a job and wrong for a conversation. No
+Rust command was added.
+
+**Multi-turn is transcript replay.** Each turn re-sends the capped conversation
+as one prompt, because native resume is unavailable across the board today:
+`build_cli_command` ends the codex argv with `-`, so anything appended lands
+after the stdin sentinel; kiro has no resume flag; and no provider prints its
+session id in headless mode without `--output-format json` parsing. The ceiling
+(prompt grows O(turns²); every turn is a cold subprocess) and the upgrade path
+are recorded beside `buildChatPrompt`.
+
+`CHAT_PROMPT_MAX_CHARS` (24k) is sized for **argv**, not for a context window;
+claude, kimi and kiro pass the whole prompt as a single argument. Oldest turns
+drop first; the newest user message is never truncated, so an over-long
+question fails loudly instead of being silently mangled and answered anyway.
+
+Scrollback is `localStorage`, keyed by workspace and agent and capped at
+`CHAT_HISTORY_CAP`. It is UI state: anything worth keeping leaves through the
+turn actions: 할 일로 만들기 (`create_task_note`), 메모로 저장
+(`save_scratchpad_document`), and 제안 적용, which reuses `SkillRunsPanel`'s
+approval gate. All three write **new** files. There is deliberately no "insert
+into the active document": `save_document` is revision-checked, frontmatter
+byte-identity is a hard rule, and a chat turn carries no revision handle.
+
+## Backend capabilities
+
+`CliProviderKind::capabilities()` (`src-tauri/src/agent_host/provider.rs`) is
+the single declaration of what each CLI can do. `src/lib/agentCapabilities.ts`
+mirrors it (a mirror because the readers are synchronous argv builders, and
+because ComposeDialog runs in the browser dev shell where there is no Tauri),
+and `agentCapabilities.test.ts` parses the Rust file so drift fails the build.
+
+| | claude | codex | kimi | kiro |
+|---|---|---|---|---|
+| `resume` | ✅ `--resume` | ✅ `resume` | ✅ `--session` | ❌ |
+| `usage` | ✅ OAuth API | ✅ rollout JSONL | ❌ | ❌ |
+| `add_dirs` | ✅ | ✅ | ✅ | ❌ |
+
+Only flags a gate reads live here. Attach-mention is **not** a capability: the
+predicate is "is an agent launcher, not a shell", and `shell` is not a
+provider; `isAgentKind` covers it instead.
+
+Two things that look like capabilities but stay per-backend `match`es on
+purpose. Auth probing genuinely differs per CLI (`claude auth status` JSON,
+`codex login status`, kimi's credentials file, `kiro-cli whoami` + an `Email:`
+line). And `usage_status` reports `unsupported` from its own match rather than
+from the flag, so `make verify-integration` can assert the two agree instead of
+asserting a tautology.
+
+## Verifying the backends
+
+Every provider unit test drives a fake shell script, so `make verify` proves
+argv shape but nothing about the real integration. `make verify-integration`
+smokes the installed CLIs: `--version`, auth classification, agreement between
+the skills gate and the account probe, usage-vs-capability, and permission
+argv. Uninstalled backends are skipped, not failed.
+`MARU_CLI_SMOKE_ROUNDTRIP=1` adds one live prompt per authenticated backend.
+
+It stays out of `make verify` because that gate must be hermetic: a merge that
+fails on an expired OAuth token is a gate people learn to bypass.
 
 ## Schedules
 

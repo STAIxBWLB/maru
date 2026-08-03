@@ -45,10 +45,10 @@ flag-gated.
 | `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
-| `tasks` | 태스크 / Tasks | File-backed tasks with Google Tasks/Calendar links; edit details, month/week/day calendar. |
+| `tasks` | 태스크 / Tasks | Today planner (`src/components/today/`) over file-backed tasks with Google Tasks/Calendar links. Routes: prepare / execute / review stages, calendar, capture, upcoming, log, and the full task list with detail editing and a month/week/day calendar. |
 | `drafts` | 초안 / Drafts | Unconfirmed AI-generated task/idea/implementation drafts (accept → promote, discard) plus the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
 | `gap` | 갭 분석 / Gap Analysis | Diffs promoted drafts against their frozen baselines, classifies the human edits, and feeds the tendencies back into draft prompts. See [docs/gap-analysis.md](docs/gap-analysis.md). |
-| `agents` | 에이전트 / Agents | Every AI job Maru can run: status, run, stop, backend, permission mode, prompt, schedule, plus user-created agents. See [docs/agents.md](docs/agents.md). |
+| `agents` | 에이전트 / Agents | Every AI job Maru can run: status, chat, run, stop, backend, permission mode, prompt, schedule, plus user-created agents. The 대화 tab talks to the agent's backend in-app instead of through a PTY, and routes a turn into a task, a memo, or an approved proposal. See [docs/agents.md](docs/agents.md). |
 | `catalog` | 카탈로그 / Catalog | M1 Operations Catalog — deadlines, in-flight approvals, unlinked evidence, inbox pending. |
 | `studio` | 스튜디오 / Studio | M2 Document Studio 7-step authoring wizard. See [docs/studio.md](docs/studio.md). |
 | `diagram` | 다이어그램 / Diagram | Concept-map editor. See [docs/diagram.md](docs/diagram.md). |
@@ -364,6 +364,16 @@ pnpm build
 
 # Full verification (typecheck + vitest + cargo test --lib + build):
 make verify
+
+# Smoke the real installed AI CLIs. Every provider unit test drives a fake
+# shell script, so this is the only check that touches the actual integration:
+# --version, auth classification, skills-gate/account-probe agreement,
+# usage-vs-capability, and permission argv. Uninstalled backends are skipped.
+# Run it when touching agent_host/provider.rs, skill_host/dispatch.rs,
+# agent_host/status.rs, or terminal/mod.rs. It is deliberately NOT part of
+# make verify, which must stay hermetic.
+make verify-integration
+MARU_CLI_SMOKE_ROUNDTRIP=1 make verify-integration  # + one live prompt per backend
 
 # Signed native release build:
 make tauri-build
