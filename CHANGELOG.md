@@ -8,6 +8,19 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.42 - 2026-08-04 - Two Macs, One Rhythm
+
+- **Dot sync is visible and manageable from System.** Maru now reads the
+  versioned status API from dotfiles v2.63.0, shows the mirror and peer state,
+  manages their scheduled jobs, and runs push, pull or peer sync without
+  leaving the app. Peer deletion remains bounded by the recorded baseline,
+  quarantine and per-profile deletion cap rather than becoming a second
+  unrestricted file manager.
+- **Disabled sync jobs stay disabled and the right CLI wins.** Reopening and
+  saving a peer job preserves an explicit zero interval. Maru prefers the
+  unambiguous `dotfiles` executable, validates every candidate in order, and
+  skips Graphviz or stale binaries before falling back to a valid `dot` CLI.
+
 ## v0.4.41 - 2026-08-03 - Everything Beside You
 
 - **The right rail is now a real Explorer.** Browse the workspace as a
