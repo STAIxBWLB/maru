@@ -2,8 +2,8 @@
 
 Local-first AI workspace desktop app for Korean knowledge/document operations.
 Tauri 2 + Rust + React 19 + TypeScript. The current version is defined by the
-synced app manifests (`package.json`, `src-tauri/tauri.conf.json`, and
-`src-tauri/Cargo.toml`).
+synced app manifests (`package.json`, `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml`, and `src-tauri/maru-cli/Cargo.toml`).
 
 Maru is the author SSOT for a single user's `~/workspace/work/` — it edits
 markdown with byte-identical frontmatter, ingests an inbox, runs bundled Claude
@@ -390,17 +390,21 @@ pnpm test:e2e
 MARU_MCP_WORKSPACE="$PWD" node sidecars/maru-mcp/index.mjs
 
 # Skills registry doctor / reconcile:
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- --version
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- doctor --json
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills dirty --json
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills reconcile <name-or-id> --accept --dry-run
-cargo run --manifest-path src-tauri/Cargo.toml --bin maru-cli -- skills import /path/to/skill --copy
+cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- --version
+cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- doctor --json
+cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills dirty --json
+cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills reconcile <name-or-id> --accept --dry-run
+cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills import /path/to/skill --copy
 
 # Bench workspace scan on a real workspace:
 cd src-tauri && cargo test --release bench_scan_real_workspace \
     -- --ignored --nocapture --test-threads=1
 # → MARU_BENCH_WORKSPACE=/some/path overrides the default ~/workspace/work
 ```
+
+Codex skill sync writes to `$CODEX_HOME/skills` when `CODEX_HOME` is set, as
+it is for isolated Orca account profiles. Without that variable, it uses the
+standard `~/.codex/skills` directory.
 
 CI runs `make verify` (typecheck + vitest + cargo test --lib + build) and
 `make test-e2e` on every pull request and push to `main` via
@@ -457,11 +461,9 @@ to import or notarize with blank credentials.
 
 Minimum Apple Developer setup for direct distribution:
 
-1. In Apple Developer `Certificates, Identifiers & Profiles`, create only a
-   `Developer ID Application` certificate. Maru does not need an Identifier
-   or Provisioning Profile for the current direct-distribution path because it
-   does not use iCloud, Push Notifications, App Groups, or another advanced
-   entitlement that requires a Developer ID provisioning profile.
+1. Create a `Developer ID Application` certificate. The default Maru bundle
+   intentionally has no managed entitlement or HTTP/HTTPS browser-role
+   declaration, so it does not require an App ID or provisioning profile.
 2. Install the downloaded `.cer` into Keychain Access, then export it with its
    private key as a password-protected `.p12`.
 3. Encode the `.p12` and set the release secrets:
@@ -508,11 +510,61 @@ are separate from Apple Developer ID signing. The workflow fails on partial
 Apple signing configuration instead of silently producing an unintended ad-hoc
 macOS release.
 
-Release asset versions come from the app metadata in `package.json`,
-`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the `maru` package entry
-in `src-tauri/Cargo.lock`; keep all four in sync before tagging or publishing a
-release. `make macos-distribution-check` asserts the first three agree but does
-not read the lock file, and nothing checks the tag against the manifests: if the
+Browser-passkey packaging is a separate, fail-closed opt-in. The default
+`src-tauri/tauri.conf.json` omits both the managed entitlement and HTTP/HTTPS
+browser-role metadata; the runtime checks the effective code signature with
+`SecTaskCopyValueForEntitlement` and returns `unsupported` before loading or
+constructing Apple's browser passkey manager. This keeps `tauri dev`, CI,
+ad-hoc bundles, and older supported macOS releases launchable.
+
+`src-tauri/tauri.passkeys.conf.json` is an active, opt-in overlay. The app
+bundle contains one Mach-O executable (`maru`) plus an executable
+`Contents/Resources/maru-cli` shell wrapper that dispatches to
+`../MacOS/maru --maru-cli`; the standalone/Homebrew `maru-cli` Mach-O lives in
+the separate `src-tauri/maru-cli` workspace package, outside the app package's
+binary targets. This prevents Tauri from applying the
+managed entitlement to an unprovisioned helper. Incoming HTTP/HTTPS open
+events are filtered into a bounded memory queue, emitted as
+`sites://open-requested`, and can be drained after cold start. The Safari
+fallback opens `com.apple.Safari` directly so Maru cannot recursively invoke
+itself when registered as the default HTTP/HTTPS handler.
+
+Passkey-enabled distribution additionally requires:
+
+1. Register the explicit App ID `kr.maru.desktop` and request Apple's managed
+   `com.apple.developer.web-browser.public-key-credential` capability.
+2. Confirm that Apple approves the capability for Developer ID distribution.
+   If Apple does not offer it for that distribution channel, keep the
+   system-browser fallback and do not enable the overlay.
+3. Create a Developer ID provisioning profile containing the approved
+   entitlement and supply its absolute path through
+   `MARU_MACOS_PROVISIONING_PROFILE`.
+
+Validate the profile and build a local provisioned app with:
+
+```bash
+export MARU_MACOS_PROVISIONING_PROFILE=/absolute/path/to/Maru.provisionprofile
+export APPLE_SIGNING_IDENTITY='Developer ID Application: Example (TEAMID)'
+export APPLE_TEAM_ID=TEAMID
+make macos-passkey-readiness-check
+make macos-passkey-build
+```
+
+The probe validates profile expiration, team and application identifiers, the
+managed passkey entitlement, the non-Mach-O helper wrapper, and the opened-URL
+backend. The build command temporarily stages the ignored fixed profile source,
+embeds it as `Maru.app/Contents/embedded.provisionprofile`, builds with the
+overlay, verifies the app signature and entitlement, then removes or restores
+the staged source. The normal release workflow does not select this overlay;
+enable it there only after the approved profile and explicit release variable
+are configured. Calling `tauri build` with the overlay directly, without the
+staging and readiness checks, is unsupported.
+
+Release asset versions come from `package.json`, `src-tauri/tauri.conf.json`,
+the root and CLI Cargo manifests, and their package entries in
+`src-tauri/Cargo.lock`; keep them in sync before tagging or publishing a
+release. `make macos-distribution-check` asserts the four manifests agree but
+does not read the lock file, and nothing checks the tag against the manifests: if the
 tag names a version the manifests do not, the bundle jobs still succeed with the
 old asset names and `latest.json` advertises the old version, so no installed
 client is ever offered the update.

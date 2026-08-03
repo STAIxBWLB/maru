@@ -8,8 +8,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5307",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build",
-    "beforeBundleCommand": "node scripts/sign-macos-app-binaries.mjs"
+    "beforeBuildCommand": "pnpm build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -63,6 +62,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "files": {
+        "Resources/maru-cli": "bundle/macos/maru-cli"
+      },
       "signingIdentity": "-"
     }
   },

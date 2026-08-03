@@ -1,4 +1,29 @@
-import type { GitStatus } from "./types";
+import type { GitFileChange, GitStatus } from "./types";
+
+export type GitDecoration = "M" | "A" | "D" | "R" | "U";
+
+export function buildGitDecorations(
+  changes: GitFileChange[],
+): Map<string, GitDecoration> {
+  const decorations = new Map<string, GitDecoration>();
+  for (const change of changes) {
+    const candidate = change.untracked
+      ? "U"
+      : (change.worktreeStatus.trim() || change.indexStatus.trim())
+          .slice(0, 1)
+          .toUpperCase();
+    if (
+      candidate === "M" ||
+      candidate === "A" ||
+      candidate === "D" ||
+      candidate === "R" ||
+      candidate === "U"
+    ) {
+      decorations.set(change.path.replace(/\\/g, "/"), candidate);
+    }
+  }
+  return decorations;
+}
 
 export interface GitStatusDisplay {
   branch: string;

@@ -108,6 +108,7 @@ interface EditorPaneProps {
   onSave: () => void;
   onSnapshot: () => void;
   onSplitRight: () => void;
+  onOpenSourcePreview?: () => void;
   onOpenGraphRight: () => void;
   onFocusPane?: () => void;
   onToggleOutline: () => void;
@@ -174,6 +175,7 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
     onSave,
     onSnapshot,
     onSplitRight,
+    onOpenSourcePreview,
     onOpenGraphRight,
     onFocusPane,
     onToggleOutline,
@@ -196,6 +198,10 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
 ) {
   const { t, locale } = useTranslation();
   const isHtml = document ? isHtmlFileKind(document.fileKind) : false;
+  const isMarkdown = document
+    ? document.fileKind.toLowerCase() === "md" ||
+      document.fileKind.toLowerCase() === "markdown"
+    : false;
   const activeMode: EditorViewMode | HtmlViewMode = isHtml
     ? (htmlViewMode ?? "visual")
     : viewMode;
@@ -717,17 +723,31 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
             else onViewModeChange(value as EditorViewMode);
           }}
         >
-          <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
-            <Tabs.Trigger className="tab-trigger" value={isHtml ? "visual" : "rich"}>
-              {isHtml ? t("editor.tab.visual") : t("editor.tab.rich")}
-            </Tabs.Trigger>
-            <Tabs.Trigger className="tab-trigger" value="source">
-              {t("editor.tab.source")}
-            </Tabs.Trigger>
-            <Tabs.Trigger className="tab-trigger" value="preview">
-              {t("editor.tab.preview")}
-            </Tabs.Trigger>
-          </Tabs.List>
+          <div className="editor-view-toolbar">
+            <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
+              <Tabs.Trigger className="tab-trigger" value={isHtml ? "visual" : "rich"}>
+                {isHtml ? t("editor.tab.visual") : t("editor.tab.rich")}
+              </Tabs.Trigger>
+              <Tabs.Trigger className="tab-trigger" value="source">
+                {t("editor.tab.source")}
+              </Tabs.Trigger>
+              <Tabs.Trigger className="tab-trigger" value="preview">
+                {t("editor.tab.preview")}
+              </Tabs.Trigger>
+            </Tabs.List>
+            {isMarkdown && onOpenSourcePreview ? (
+              <button
+                type="button"
+                className="editor-source-preview-preset"
+                onClick={onOpenSourcePreview}
+                title={t("editor.sourcePreview.title")}
+                aria-label={t("editor.sourcePreview.title")}
+              >
+                <Columns2 size={12} />
+                <span>{t("editor.sourcePreview.label")}</span>
+              </button>
+            ) : null}
+          </div>
           <Tabs.Content className="tab-panel" value={isHtml ? "visual" : "rich"}>
             <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
               {isHtml && document ? (

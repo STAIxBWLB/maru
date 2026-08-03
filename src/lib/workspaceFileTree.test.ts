@@ -11,9 +11,11 @@ import {
   groupWorkspaceFilesByMtime,
   isOpenableDocumentFile,
   isOpenableFile,
+  nextCollapsedFileFolders,
   sortWorkspaceFiles,
   virtualizeWorkspaceFileListRows,
   virtualizeWorkspaceFileTreeRows,
+  workspaceFileTreeTabStopId,
   type WorkspaceFilesPaneFilters,
 } from "./workspaceFileTree";
 import type { WorkspaceFileEntry } from "./types";
@@ -98,6 +100,36 @@ describe("workspace file tree", () => {
     expect(rows[0]).toMatchObject({ kind: "folder", count: 2, collapsed: false });
   });
 
+  it("adds a collapsed folder to the expanded set and removes an open folder", () => {
+    const collapsedRow = buildWorkspaceFileTreeRows(
+      [file("docs/a.md")],
+      [],
+    )[0];
+    expect(collapsedRow).toMatchObject({ kind: "folder", collapsed: true });
+    if (collapsedRow.kind !== "folder") throw new Error("expected folder row");
+
+    const expanded = nextCollapsedFileFolders(
+      [],
+      collapsedRow.path,
+      !collapsedRow.collapsed,
+    );
+    expect(expanded).toEqual(["docs"]);
+
+    const openRow = buildWorkspaceFileTreeRows(
+      [file("docs/a.md")],
+      expanded,
+    )[0];
+    expect(openRow).toMatchObject({ kind: "folder", collapsed: false });
+    if (openRow.kind !== "folder") throw new Error("expected folder row");
+    expect(
+      nextCollapsedFileFolders(
+        expanded,
+        openRow.path,
+        !openRow.collapsed,
+      ),
+    ).toEqual([]);
+  });
+
   it("collects folder paths and virtualizes visible rows", () => {
     const entries = [file("a/b/c.md"), file("a/d/e.md"), file("root.md")];
     expect(collectWorkspaceFileFolderPaths(entries)).toEqual(["a", "a/b", "a/d"]);
@@ -105,6 +137,22 @@ describe("workspace file tree", () => {
     const layout = virtualizeWorkspaceFileTreeRows(rows, 30, 60, 0, 30);
     expect(layout.totalHeight).toBe(rows.length * 30);
     expect(layout.rows.map(({ top }) => top)).toEqual([30, 60, 90]);
+  });
+
+  it("keeps a tab stop in the mounted virtual window after manual scrolling", () => {
+    const rows = buildWorkspaceFileTreeRows(
+      [file("a.md"), file("b.md"), file("c.md"), file("d.md")],
+      [],
+    );
+    const topWindow = virtualizeWorkspaceFileTreeRows(rows, 0, 30, 0, 30).rows;
+    const bottomWindow = virtualizeWorkspaceFileTreeRows(rows, 90, 30, 0, 30).rows;
+    const originalFocus = topWindow[0].row.id;
+
+    expect(workspaceFileTreeTabStopId(topWindow, originalFocus)).toBe(originalFocus);
+    expect(workspaceFileTreeTabStopId(bottomWindow, originalFocus)).toBe(
+      bottomWindow[0].row.id,
+    );
+    expect(workspaceFileTreeTabStopId([], originalFocus)).toBeNull();
   });
 
   it("expands every ancestor for a revealed workspace file", () => {

@@ -1,0 +1,15 @@
+[package]
+name = "maru-cli"
+version = "0.4.40"
+description = "Standalone command-line interface for Maru"
+authors = ["Maru Contributors"]
+license = "UNLICENSED"
+edition = "2021"
+rust-version = "1.77.2"
+
+[[bin]]
+name = "maru-cli"
+path = "src/main.rs"
+
+[dependencies]
+maru_lib = { package = "maru", path = ".." }

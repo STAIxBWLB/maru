@@ -29,6 +29,7 @@ import {
   PanelRight,
   PanelRightClose,
   PanelRightOpen,
+  PanelTopOpen,
   PenLine,
   RefreshCcw,
   Route,
@@ -243,7 +244,12 @@ import {
   type SettingsTerminalLaunchPayload,
 } from "./lib/settingsEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
-import { requestSiteViewCloseActive } from "./lib/siteView";
+import {
+  buildSiteViewOpenRequests,
+  requestSiteViewCloseActive,
+  subscribeSiteViewOpenRequests,
+  type SiteViewOpenRequest,
+} from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
@@ -335,12 +341,19 @@ import {
   type FilesSortKey,
   type SortKey,
   type RightPaneTab,
+  type RightWorkbenchSurface,
   type TerminalDock,
   type TerminalTheme,
   type ToolPanelSurface,
   type WorkspaceFileFilter,
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
+import {
+  availableRightWorkbenchSurface,
+  minimumWorkbenchWidth,
+  resolveWorkbenchPlacement,
+  shouldCloseRightSites,
+} from "./lib/workbenchLayout";
 import { useWorkspaceConfigLoad } from "./lib/useWorkspaceConfigLoad";
 import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
@@ -372,9 +385,13 @@ import {
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
+  isCurrentWorkspaceFilesScanRequest,
   mergeFreshEntry,
   planVaultStartup,
   shouldLazyScanWorkspaceFiles,
+  workspaceFileScanPaneMode,
+  workspaceFilesScanStatusAfterFailure,
+  type WorkspaceFilesScanStatus,
 } from "./lib/vaultStartup";
 import {
   providerLabel,
@@ -388,6 +405,7 @@ import {
 } from "./lib/documentTree";
 import {
   EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  isOpenableDocumentFile,
   type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
 import { usesAssetProtocol } from "./lib/binaryViewer";
@@ -534,6 +552,7 @@ const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
 interface WorkspaceFilesState {
   entries: WorkspaceFileEntry[];
   nodes: WorkspaceEntryNode[];
+  scanStatus: WorkspaceFilesScanStatus;
   loading: boolean;
   refreshing: boolean;
 }
@@ -541,11 +560,60 @@ interface WorkspaceFilesState {
 const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
   entries: [],
   nodes: [],
+  scanStatus: "unscanned",
   loading: false,
   refreshing: false,
 };
 
 type AppMode = MaruAppMode;
+
+interface ActivityModeButtonProps {
+  label: string;
+  active: boolean;
+  secondaryActive?: boolean;
+  icon: React.ReactNode;
+  onOpenPrimary: () => void;
+  onOpenRight?: () => void;
+  openRightLabel?: string;
+}
+
+function ActivityModeButton({
+  label,
+  active,
+  secondaryActive = false,
+  icon,
+  onOpenPrimary,
+  onOpenRight,
+  openRightLabel,
+}: ActivityModeButtonProps) {
+  return (
+    <div className={secondaryActive ? "activity-item secondary-active" : "activity-item"}>
+      <button
+        type="button"
+        className={active ? "activity-button active" : "activity-button"}
+        onClick={(event) => {
+          if (event.altKey && onOpenRight) onOpenRight();
+          else onOpenPrimary();
+        }}
+        title={onOpenRight && openRightLabel ? `${label} · ${openRightLabel}` : label}
+        aria-label={label}
+      >
+        {icon}
+      </button>
+      {onOpenRight ? (
+        <button
+          type="button"
+          className="activity-open-right"
+          onClick={onOpenRight}
+          title={openRightLabel ?? label}
+          aria-label={openRightLabel ?? label}
+        >
+          <PanelRightOpen size={11} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 interface InboxCarry {
   decision: InboxDecision;
@@ -799,6 +867,7 @@ function MainApp() {
   });
   const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
   const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
+  const workspaceFileRequestSeqRef = useRef<Record<string, number>>({});
   const [explorerVisibility, setExplorerVisibility] =
     useState<WorkspaceVisibility>("private");
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -816,6 +885,7 @@ function MainApp() {
   const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
   const [rightActiveTabId, setRightActiveTabId] = useState<string | null>(null);
   const [focusedEditorGroup, setFocusedEditorGroup] = useState<EditorGroupId>("left");
+  const [focusedWorkbenchSide, setFocusedWorkbenchSide] = useState<EditorGroupId>("left");
   const [queryByVisibility, setQueryByVisibility] = useState<Record<WorkspaceVisibility, string>>({
     private: "",
     public: "",
@@ -855,6 +925,8 @@ function MainApp() {
   const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
     null,
   );
+  const [pendingOpenedSiteUrls, setPendingOpenedSiteUrls] = useState<SiteViewOpenRequest[]>([]);
+  const nextOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1288,8 +1360,20 @@ function MainApp() {
     [tabOrder, unorderedAnyTabs],
   );
   const layoutSettings = maruSettings.ui.layout;
-  const editorSplitOpen =
-    layoutSettings.editorSplitOpen && Boolean(rightActiveTabId);
+  const availableRightSurface = availableRightWorkbenchSurface(
+    maruSettings.ui.rightWorkbenchSurface,
+    { e2e: e2eFlowEnabled, diagram: diagramEnabled },
+  );
+  const workbenchPlacement = resolveWorkbenchPlacement({
+    visibleAppMode,
+    splitOpen: layoutSettings.editorSplitOpen,
+    rightSurface: availableRightSurface,
+    hasRightEditorTab: Boolean(rightActiveTabId),
+  });
+  const editorSplitOpen = workbenchPlacement.rightEditorOpen;
+  const rightWorkbenchMode = workbenchPlacement.rightMode;
+  const rightWorkbenchOpen = workbenchPlacement.rightOpen && rightWorkbenchMode !== null;
+  const surfaceMode = rightWorkbenchMode ?? visibleAppMode;
   const panelGraphOpen =
     layoutSettings.terminalOpen && layoutSettings.toolPanelSurface === "graph";
   const editorViewMode = editorPaneViewModes[focusedEditorGroup];
@@ -1359,7 +1443,7 @@ function MainApp() {
       workspaceRoot: activeDocumentWorkspacePath ?? null,
       scratchpadRoot,
       workspaceVisibility: explorerVisibility,
-      appMode,
+      appMode: surfaceMode,
       docAbsPath: selectedEntry?.path ?? document?.path ?? null,
       docRelPath: selectedEntry?.relPath ?? null,
       docTitle: selectedEntry?.title ?? document?.title ?? null,
@@ -1367,7 +1451,7 @@ function MainApp() {
     };
   }, [
     activeDocumentWorkspacePath,
-    appMode,
+    surfaceMode,
     document?.path,
     document?.title,
     explorerVisibility,
@@ -1379,10 +1463,14 @@ function MainApp() {
   ]);
   const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
-    paneMode:
-      visibleAppMode === "files" ? "files" : maruSettings.ui.explorerPaneMode,
+    paneMode: workspaceFileScanPaneMode({
+      visibleAppMode: rightWorkbenchMode === "files" ? "files" : visibleAppMode,
+      outlineOpen: layoutSettings.outlineOpen,
+      rightPaneTab,
+      explorerPaneMode: maruSettings.ui.explorerPaneMode,
+    }),
     startupIoReady: explorerWorkspaceState.startupIoReady,
-    hasEntries: explorerWorkspaceFilesState.entries.length > 0,
+    scanStatus: explorerWorkspaceFilesState.scanStatus,
     loading: explorerWorkspaceFilesState.loading,
     refreshing: explorerWorkspaceFilesState.refreshing,
   });
@@ -2243,6 +2331,16 @@ function MainApp() {
     [updateSettings],
   );
 
+  const setPersistedRightWorkbenchSurface = useCallback(
+    (rightWorkbenchSurface: RightWorkbenchSurface) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, rightWorkbenchSurface },
+      }));
+    },
+    [updateSettings],
+  );
+
   const openGraphMode = useCallback(
     (target?: GraphOpenTarget) => {
       setGraphOpenTarget(target ?? null);
@@ -2280,6 +2378,18 @@ function MainApp() {
     }
   }, [appMode, diagramEnabled, setPersistedAppMode]);
 
+  useEffect(() => {
+    if (maruSettings.ui.rightWorkbenchSurface === availableRightSurface) return;
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        rightWorkbenchSurface: availableRightSurface,
+        layout: { ...current.ui.layout, editorSplitOpen: false },
+      },
+    }));
+  }, [availableRightSurface, maruSettings.ui.rightWorkbenchSurface, updateSettings]);
+
   const setPersistedEditorViewMode = useCallback(
     (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedEditorGroup) => {
       setEditorPaneViewModes((current) => ({ ...current, [group]: editorViewMode }));
@@ -2315,9 +2425,15 @@ function MainApp() {
 
   const openScratchpadSurface = useCallback(() => {
     setPersistedAppMode("pkm");
+    setPersistedRightWorkbenchSurface("editor");
     setPersistedRightPaneTab("memo");
-    updateLayoutSettings({ outlineOpen: true });
-  }, [setPersistedAppMode, setPersistedRightPaneTab, updateLayoutSettings]);
+    updateLayoutSettings({ outlineOpen: true, editorSplitOpen: false });
+  }, [
+    setPersistedAppMode,
+    setPersistedRightPaneTab,
+    setPersistedRightWorkbenchSurface,
+    updateLayoutSettings,
+  ]);
 
   // Draft handoff into gap mode: the pane consumes it once on mount, so a
   // later rail-button revisit does not reselect the same draft.
@@ -2436,7 +2552,7 @@ function MainApp() {
   useEffect(() => {
     if (!settingsLoaded || maruSettings.ui.fileTreeStateInitialized) return;
     if (!privateWorkspacePath || explorerVisibility !== "private") return;
-    if (explorerWorkspaceFilesState.loading || explorerWorkspaceFilesState.entries.length === 0) return;
+    if (explorerWorkspaceFilesState.scanStatus !== "ready") return;
     const collapsedFolders: string[] = [];
     setCollapsedFileFoldersByVisibility((current) => ({
       ...current,
@@ -2453,8 +2569,7 @@ function MainApp() {
   }, [
     maruSettings.ui.fileTreeStateInitialized,
     explorerVisibility,
-    explorerWorkspaceFilesState.entries,
-    explorerWorkspaceFilesState.loading,
+    explorerWorkspaceFilesState.scanStatus,
     privateWorkspacePath,
     settingsLoaded,
     updateSettings,
@@ -3007,9 +3122,9 @@ function MainApp() {
         ? (["done", "failed", "duplicate"] as InboxProcessedStatus[])
         : [processedStatusFilter];
     const channel =
-      appMode === "comms"
+      surfaceMode === "comms"
         ? commsSourceFilter
-        : appMode === "inbox"
+        : surfaceMode === "inbox"
           ? inboxSourceFilter
           : null;
     const requestKey = JSON.stringify([
@@ -3037,7 +3152,7 @@ function MainApp() {
         limit: 120,
       };
       const snapshot =
-        appMode === "comms"
+        surfaceMode === "comms"
           ? await scanInboxProcessedSnapshot(request)
           : {
               items: await scanInboxProcessedItems(request),
@@ -3064,7 +3179,7 @@ function MainApp() {
       }
     }
   }, [
-    appMode,
+    surfaceMode,
     commsSourceFilter,
     inboxSourceFilter,
     inboxWorkspacePath,
@@ -4013,7 +4128,7 @@ function MainApp() {
 
   useEffect(() => {
     if (
-      appMode !== "comms" ||
+      surfaceMode !== "comms" ||
       inboxWorkspaceConfigLoad.status === "idle" ||
       inboxWorkspaceConfigLoad.status === "pending"
     ) {
@@ -4046,22 +4161,22 @@ function MainApp() {
       disposed = true;
       unlistenTelegram?.();
     };
-  }, [appMode, inboxWorkspaceConfigLoad.status, inboxWorkspacePath]);
+  }, [surfaceMode, inboxWorkspaceConfigLoad.status, inboxWorkspacePath]);
 
   useEffect(() => {
     // In comms this is also the filter/search refetch path: the callback
     // identity changes with the query and channel, re-running this effect.
-    if (appMode === "inbox" || appMode === "comms") void refreshProcessedItems();
+    if (surfaceMode === "inbox" || surfaceMode === "comms") void refreshProcessedItems();
     if (!booting && settingsWorkspaceStartupReady && (
-      appMode === "inbox" ||
-      appMode === "meetings" ||
-      appMode === "tasks" ||
+      surfaceMode === "inbox" ||
+      surfaceMode === "meetings" ||
+      surfaceMode === "tasks" ||
       rightPaneTab === "skills"
     )) {
       void refreshProcessingMissions();
     }
   }, [
-    appMode,
+    surfaceMode,
     booting,
     refreshProcessedItems,
     refreshProcessingMissions,
@@ -4135,7 +4250,7 @@ function MainApp() {
       setInboxEntries([]);
       return;
     }
-    if (appMode !== "inbox") {
+    if (surfaceMode !== "inbox") {
       return;
     }
     let cancelled = false;
@@ -4181,13 +4296,24 @@ function MainApp() {
         // best-effort
       });
     };
-  }, [inboxWorkspacePath, appMode, refreshInbox]);
+  }, [inboxWorkspacePath, surfaceMode, refreshInbox]);
 
   const refreshWorkspaceFiles = useCallback(
     async (path: string, initial = false) => {
+      const requestSeq = (workspaceFileRequestSeqRef.current[path] ?? 0) + 1;
+      workspaceFileRequestSeqRef.current[path] = requestSeq;
       updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
       try {
         const snapshot = await scanWorkspaceEntries(path, scanOptions);
+        if (
+          !isCurrentWorkspaceFilesScanRequest(
+            workspaceFileRequestSeqRef.current,
+            path,
+            requestSeq,
+          )
+        ) {
+          return;
+        }
         const files = snapshot.entries
           .filter(
             (entry) =>
@@ -4208,12 +4334,33 @@ function MainApp() {
         updateWorkspaceFileState(path, {
           entries: files,
           nodes: snapshot.entries,
+          scanStatus: "ready",
           loading: false,
           refreshing: false,
         });
       } catch (err) {
+        if (
+          !isCurrentWorkspaceFilesScanRequest(
+            workspaceFileRequestSeqRef.current,
+            path,
+            requestSeq,
+          )
+        ) {
+          return;
+        }
         setError(err instanceof Error ? err.message : String(err));
-        updateWorkspaceFileState(path, { loading: false, refreshing: false });
+        setWorkspaceFileStates((current) => {
+          const previous = current[path] ?? EMPTY_WORKSPACE_FILES_STATE;
+          return {
+            ...current,
+            [path]: {
+              ...previous,
+              scanStatus: workspaceFilesScanStatusAfterFailure(previous.scanStatus),
+              loading: false,
+              refreshing: false,
+            },
+          };
+        });
       }
     },
     [scanOptions, updateWorkspaceFileState],
@@ -4958,12 +5105,12 @@ function MainApp() {
         if (knownFiles.some((entry) => entry.relPath === relPath || entry.path === targetPath)) {
           return false;
         }
-        return knownFiles.length > 0;
+        return workspaceFileState.scanStatus === "ready";
       }
       const prefix = `${relPath}/`;
       if (docEntries.some((entry) => entry.relPath.startsWith(prefix))) return false;
       if (knownFiles.some((entry) => entry.relPath.startsWith(prefix))) return false;
-      return knownFiles.length > 0;
+      return workspaceFileState.scanStatus === "ready";
     },
     [explorerWorkspacePath, settingsWorkPath, workspaceFileStates, workspaceStates],
   );
@@ -4985,7 +5132,7 @@ function MainApp() {
         setPersistedAppMode("files");
         setExplorerVisibility(visibility);
         try {
-          if ((workspaceFileStates[workspacePath]?.nodes ?? []).length === 0) {
+          if (workspaceFileStates[workspacePath]?.scanStatus !== "ready") {
             await refreshWorkspaceFiles(workspacePath, true);
           }
           setWorkspaceFileFilter("all");
@@ -6189,26 +6336,25 @@ function MainApp() {
   }, [locale, setLocale]);
 
   const refreshActiveSurface = useCallback(() => {
-    if (appMode === "inbox") {
+    if (surfaceMode === "inbox") {
       void refreshInbox();
       void refreshProcessedItems();
       void refreshProcessingMissions();
-    } else if (appMode === "comms") {
+    } else if (surfaceMode === "comms") {
       void refreshCommsDashboard({ retryWorkspaceConfig: true });
       void refreshProcessedItems();
-    } else if (appMode === "meetings") {
+    } else if (surfaceMode === "meetings") {
       void refreshProcessingMissions();
-    } else if (appMode === "tasks") {
+    } else if (surfaceMode === "tasks") {
       setTodayRefreshEpoch((epoch) => epoch + 1);
       void refreshProcessingMissions();
-    } else if (maruSettings.ui.explorerPaneMode === "files" && explorerWorkspacePath) {
+    } else if (surfaceMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
       void refreshCurrent();
     }
   }, [
-    maruSettings.ui.explorerPaneMode,
-    appMode,
+    surfaceMode,
     explorerWorkspacePath,
     refreshCurrent,
     refreshCommsDashboard,
@@ -6959,6 +7105,7 @@ function MainApp() {
   const closeRightEditorPane = useCallback(() => {
     setRightActiveTabId(null);
     setFocusedEditorGroup("left");
+    setFocusedWorkbenchSide("left");
     if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
     updateLayoutSettings({ editorSplitOpen: false });
   }, [leftResolvedTabId, updateLayoutSettings]);
@@ -6974,6 +7121,26 @@ function MainApp() {
       return;
     }
     if (visibleAppMode !== "pkm") return;
+    // A native Sites child webview cannot report focus into this DOM. Its
+    // webview owns Cmd+W when the right side was explicitly focused or the
+    // main webview lost focus; live left-side DOM focus still closes the doc.
+    if (
+      shouldCloseRightSites({
+        rightWorkbenchMode,
+        focusedWorkbenchSide,
+        documentHasFocus: globalThis.document.hasFocus(),
+      })
+    ) {
+      requestSiteViewCloseActive();
+      return;
+    }
+    if (rightWorkbenchMode && focusedWorkbenchSide === "right") {
+      setFocusedWorkbenchSide("left");
+      setFocusedEditorGroup("left");
+      if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
+      updateLayoutSettings({ editorSplitOpen: false });
+      return;
+    }
     if (focusedEditorGroup === "right" && rightResolvedTabId) {
       closeRightEditorPane();
       return;
@@ -6984,8 +7151,11 @@ function MainApp() {
     closeRightEditorPane,
     closeTab,
     focusedEditorGroup,
+    focusedWorkbenchSide,
     leftResolvedTabId,
+    rightWorkbenchMode,
     rightResolvedTabId,
+    updateLayoutSettings,
   ]);
 
   const requestWindowClose = useCallback(() => {
@@ -7016,13 +7186,51 @@ function MainApp() {
   const splitEditorRight = useCallback(() => {
     const target = activeTab ?? leftTab ?? orderedAnyTabs[0] ?? null;
     if (!target) return;
+    setPersistedRightWorkbenchSurface("editor");
     setRightActiveTabId(target.id);
     setActiveTabId(target.id);
     setFocusedEditorGroup("right");
+    setFocusedWorkbenchSide("right");
     updateLayoutSettings({
       editorSplitOpen: true,
     });
-  }, [activeTab, leftTab, orderedAnyTabs, updateLayoutSettings]);
+  }, [
+    activeTab,
+    leftTab,
+    orderedAnyTabs,
+    setPersistedRightWorkbenchSurface,
+    updateLayoutSettings,
+  ]);
+
+  const openSourcePreviewSplit = useCallback(() => {
+    const target = activeTab ?? leftTab ?? orderedAnyTabs[0] ?? null;
+    if (!target || isBinaryTab(target)) return;
+    const kind = target.document.fileKind.toLowerCase();
+    if (kind !== "md" && kind !== "markdown") return;
+    setPersistedRightWorkbenchSurface("editor");
+    setRightActiveTabId(target.id);
+    setLeftActiveTabId(target.id);
+    setActiveTabId(target.id);
+    setFocusedEditorGroup("left");
+    setFocusedWorkbenchSide("left");
+    setEditorPaneViewModes({ left: "source", right: "preview" });
+    updateSettings((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        editorViewMode: "source",
+        editorPaneViewModes: { left: "source", right: "preview" },
+      },
+    }));
+    updateLayoutSettings({ editorSplitOpen: true });
+  }, [
+    activeTab,
+    leftTab,
+    orderedAnyTabs,
+    setPersistedRightWorkbenchSurface,
+    updateLayoutSettings,
+    updateSettings,
+  ]);
 
   const openGraphPanel = useCallback(
     (rawTarget?: GraphOpenTarget) => {
@@ -7116,6 +7324,119 @@ function MainApp() {
     setPersistedAppMode,
     updateLayoutSettings,
   ]);
+
+  const openPrimaryWorkbenchMode = useCallback(
+    (mode: Exclude<AppMode, "pkm">) => {
+      updateLayoutSettings({ editorSplitOpen: false });
+      setFocusedWorkbenchSide("left");
+      switch (mode) {
+        case "inbox":
+          openInboxAndFocus();
+          break;
+        case "comms":
+          openComms();
+          break;
+        case "meetings":
+          openMeetings();
+          break;
+        case "tasks":
+          openTasks();
+          break;
+        case "sites":
+          openSites();
+          break;
+        case "gap":
+          openGapAnalysis();
+          break;
+        case "graph":
+          openGraphWorkspace();
+          break;
+        default:
+          setPersistedAppMode(mode);
+      }
+    },
+    [
+      openComms,
+      openGapAnalysis,
+      openGraphWorkspace,
+      openInboxAndFocus,
+      openMeetings,
+      openSites,
+      openTasks,
+      setPersistedAppMode,
+      updateLayoutSettings,
+    ],
+  );
+
+  const openWorkbenchModeRight = useCallback(
+    (mode: Exclude<AppMode, "pkm">) => {
+      if (mode === "inbox") setInboxFocusTick((value) => value + 1);
+      if (mode === "tasks") setTodayRoute("all");
+      if (mode === "gap") setGapDraftId(null);
+      if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
+        updateLayoutSettings({
+          terminalOpen: false,
+          terminalMaximized: false,
+          toolPanelSurface: "terminal",
+        });
+      }
+      setPersistedAppMode("pkm");
+      setPersistedRightWorkbenchSurface(mode);
+      setFocusedWorkbenchSide("right");
+      updateLayoutSettings({ editorSplitOpen: true });
+    },
+    [
+      layoutSettings.toolPanelSurface,
+      setPersistedAppMode,
+      setPersistedRightWorkbenchSurface,
+      updateLayoutSettings,
+    ],
+  );
+
+  const enqueueOpenedSiteUrls = useCallback((urls: unknown) => {
+    const batch = buildSiteViewOpenRequests(urls, nextOpenedSiteUrlIdRef.current);
+    nextOpenedSiteUrlIdRef.current = batch.nextId;
+    if (batch.requests.length > 0) {
+      setPendingOpenedSiteUrls((current) => [...current, ...batch.requests]);
+    }
+  }, []);
+
+  const acknowledgeOpenedSiteUrls = useCallback((handledIds: readonly number[]) => {
+    const handled = new Set(handledIds);
+    setPendingOpenedSiteUrls((current) => current.filter((request) => !handled.has(request.id)));
+  }, []);
+
+  // The subscription installs its native listener before draining the cold
+  // queue and returns synchronous cleanup, so effect teardown cannot consume
+  // and discard a URL while an async listener promise is still resolving.
+  useEffect(() => {
+    if (booting) return;
+    return subscribeSiteViewOpenRequests(enqueueOpenedSiteUrls);
+  }, [booting, enqueueOpenedSiteUrls]);
+
+  // Preserve the active document when possible: an OS-opened web URL uses the
+  // right Sites workbench from Docs, and otherwise opens/keeps primary Sites.
+  useEffect(() => {
+    if (pendingOpenedSiteUrls.length === 0) return;
+    if (visibleAppMode === "pkm") {
+      if (rightWorkbenchMode !== "sites") openWorkbenchModeRight("sites");
+      return;
+    }
+    if (visibleAppMode !== "sites") openPrimaryWorkbenchMode("sites");
+  }, [
+    openPrimaryWorkbenchMode,
+    openWorkbenchModeRight,
+    pendingOpenedSiteUrls.length,
+    rightWorkbenchMode,
+    visibleAppMode,
+  ]);
+
+  const closeRightWorkbench = useCallback(() => {
+    setFocusedWorkbenchSide("left");
+    setFocusedEditorGroup("left");
+    if (leftResolvedTabId) setActiveTabId(leftResolvedTabId);
+    updateLayoutSettings({ editorSplitOpen: false });
+  }, [leftResolvedTabId, updateLayoutSettings]);
 
   const handleToolPanelSurfaceChange = useCallback(
     (toolPanelSurface: ToolPanelSurface) => {
@@ -7228,10 +7549,11 @@ function MainApp() {
     [activeDocumentWorkspacePath, blockWorkspaceWrite],
   );
 
-  const jumpToOutlineLine = useCallback((line: number) => {
+  const jumpToOutlineLine = useCallback((line: number, requestedGroup?: EditorGroupId) => {
+    const targetGroup = requestedGroup ?? focusedEditorGroup;
     const jump = () => {
       const ta =
-        focusedEditorGroup === "right"
+        targetGroup === "right"
           ? rightEditorTextareaRef.current
           : editorTextareaRef.current;
       if (!ta) return false;
@@ -7245,11 +7567,52 @@ function MainApp() {
       return true;
     };
     if (jump()) return;
-    setPersistedEditorViewMode("source");
+    setPersistedEditorViewMode("source", targetGroup);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(jump);
     });
   }, [focusedEditorGroup, setPersistedEditorViewMode]);
+
+  const openWorkspaceFileEntry = useCallback(
+    async (entry: WorkspaceFileEntry, line?: number) => {
+      if (!isOpenableDocumentFile(entry)) {
+        if (explorerWorkspacePath) {
+          revealPathInFiles(
+            explorerWorkspacePath,
+            explorerVisibility,
+            entry.path,
+          );
+        }
+        return;
+      }
+      const docEntry =
+        entries.find(
+          (candidate) =>
+            candidate.path === entry.path || candidate.relPath === entry.relPath,
+        ) ?? null;
+      if (!docEntry) {
+        setError(t("files.openUnavailable"));
+        return;
+      }
+      setPersistedAppMode("pkm");
+      const opened = await selectEntry(docEntry, "left");
+      if (opened && line != null) {
+        window.requestAnimationFrame(() =>
+          jumpToOutlineLine(Math.max(0, line - 1), "left"),
+        );
+      }
+    },
+    [
+      entries,
+      explorerVisibility,
+      explorerWorkspacePath,
+      jumpToOutlineLine,
+      revealPathInFiles,
+      selectEntry,
+      setPersistedAppMode,
+      t,
+    ],
+  );
 
   // Track which heading the source editor is scrolled to so the outline can
   // highlight the active one. Source mode only — the textarea has a uniform
@@ -7778,7 +8141,8 @@ function MainApp() {
   const graphEntries = graphDataPath
     ? workspaceStates[graphDataPath]?.entries ?? NO_ENTRIES
     : activeDocumentEntries;
-  const graphSurfaceVisible = visibleAppMode === "graph" || panelGraphOpen;
+  const graphSurfaceVisible =
+    visibleAppMode === "graph" || rightWorkbenchMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
   // Read the current state through a ref: the first thing this effect does is
   // patch workspaceStates, so depending on it would re-run the effect, cancel
@@ -7864,10 +8228,10 @@ function MainApp() {
   }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
   useEffect(() => {
     // Inbox selection only feeds the Shared Outbox queue while in Inbox mode.
-    if (visibleAppMode !== "inbox" && inboxShareablePaths.length > 0) {
+    if (surfaceMode !== "inbox" && inboxShareablePaths.length > 0) {
       setInboxShareablePaths([]);
     }
-  }, [visibleAppMode, inboxShareablePaths.length]);
+  }, [surfaceMode, inboxShareablePaths.length]);
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   // In-DOM overlays that cover the content area; the native sites webview
   // cannot stack under DOM modals, so SitesPane hides it while any is open.
@@ -7889,6 +8253,11 @@ function MainApp() {
     documentsPaneOpen ? "" : " documents-closed"
   }${terminalMaximizedClass}${terminalDockClass}`;
   const themeVars = useMemo(() => buildThemeVars(maruSettings), [maruSettings]);
+  const reservedWorkbenchWidth = minimumWorkbenchWidth({
+    visibleAppMode,
+    rightWorkbenchMode,
+    editorSplitOpen,
+  });
   const shellStyle = useMemo(
     () =>
       ({
@@ -7897,17 +8266,13 @@ function MainApp() {
           ? `${layoutSettings.documentsPaneWidth}px`
           : "0px",
         "--outline-col": outlineOpen ? `${layoutSettings.outlinePaneWidth}px` : "0px",
-        // In graph mode the canvas column must keep >= 420px, so clamp only the
-        // effective terminal column (the stored terminalWidth stays untouched).
-        // Graph mode: activity 48px + documents/outline 0 -> 100vw - 48 - 420.
+        // Keep one usable workbench column beside a right-docked terminal in
+        // every mode. The stored preference stays untouched and is restored on
+        // a wider window.
         "--terminal-col":
           layoutSettings.terminalDock === "right"
             ? layoutSettings.terminalOpen
-              ? visibleAppMode === "graph"
-                ? `min(${layoutSettings.terminalWidth}px, calc(100vw - 468px))`
-                : panelGraphOpen
-                  ? `min(${layoutSettings.terminalWidth}px, max(40px, calc(100vw - 48px - var(--documents-col) - var(--outline-col) - 720px)))`
-                  : `${layoutSettings.terminalWidth}px`
+              ? `min(${layoutSettings.terminalWidth}px, max(40px, calc(100vw - var(--activity-col) - ${reservedWorkbenchWidth}px)))`
               : "40px"
             : "0px",
       }) as React.CSSProperties & Record<`--${string}`, string>,
@@ -7919,13 +8284,18 @@ function MainApp() {
       layoutSettings.terminalOpen,
       layoutSettings.terminalWidth,
       outlineOpen,
-      panelGraphOpen,
+      reservedWorkbenchWidth,
       themeVars,
-      visibleAppMode,
     ],
   );
   const editorSplitStyle =
     editorSplitOpen && rightTab
+      ? {
+          gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr 6px ${1 - layoutSettings.editorSplitRatio}fr`,
+        }
+      : undefined;
+  const workbenchSplitStyle =
+    rightWorkbenchOpen && rightWorkbenchMode
       ? {
           gridTemplateColumns: `${layoutSettings.editorSplitRatio}fr 6px ${1 - layoutSettings.editorSplitRatio}fr`,
         }
@@ -8109,8 +8479,11 @@ function MainApp() {
   // Stable element so TerminalPanel's memo() keeps working; null while the
   // full graph mode is visible so two Sigma instances never run at once.
   const panelGraphNode = useMemo(
-    () => (visibleAppMode === "graph" ? null : renderGraphSurface("panel")),
-    [renderGraphSurface, visibleAppMode],
+    () =>
+      visibleAppMode === "graph" || rightWorkbenchMode === "graph"
+        ? null
+        : renderGraphSurface("panel"),
+    [renderGraphSurface, rightWorkbenchMode, visibleAppMode],
   );
 
   const renderEditorPane = (
@@ -8197,6 +8570,7 @@ function MainApp() {
         onSave={() => void saveTab(tabId)}
         onSnapshot={() => void snapshotTab(tabId)}
         onSplitRight={splitEditorRight}
+        onOpenSourcePreview={docTab ? openSourcePreviewSplit : undefined}
         onOpenGraphRight={openGraphPanel}
         onVisualizeRefs={
           docTab && !isHtmlFileKind(docTab.document.fileKind)
@@ -8223,6 +8597,7 @@ function MainApp() {
           });
         }}
         onFocusPane={() => {
+          setFocusedWorkbenchSide(group);
           if (tabId) activateEditorTab(tabId, group);
         }}
         onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
@@ -8383,147 +8758,70 @@ function MainApp() {
         )}
 
         <nav className="activity-rail" aria-label={t("activity.label")}>
-          <button
-            type="button"
-            className={visibleAppMode === "pkm" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("pkm")}
-            title={t("mode.pkm")}
-            aria-label={t("mode.pkm")}
-          >
-            <FileText size={20} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "files" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("files")}
-            title={t("mode.files")}
-            aria-label={t("mode.files")}
-          >
-            <FolderOpen size={20} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "inbox" ? "activity-button active" : "activity-button"}
-            onClick={openInboxAndFocus}
-            title={t("mode.inbox")}
-            aria-label={t("mode.inbox")}
-          >
-            <Inbox size={20} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "comms" ? "activity-button active" : "activity-button"}
-            onClick={openComms}
-            title={t("mode.comms")}
-            aria-label={t("mode.comms")}
-          >
-            <MessageSquare size={20} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "meetings" ? "activity-button active" : "activity-button"}
-            onClick={openMeetings}
-            title={t("mode.meetings")}
-            aria-label={t("mode.meetings")}
-          >
-            <UsersRound size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "tasks" ? "activity-button active" : "activity-button"}
-            onClick={openTasks}
-            title={t("mode.tasks")}
-            aria-label={t("mode.tasks")}
-          >
-            <ListTodo size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "drafts" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("drafts")}
-            title={t("mode.drafts")}
-            aria-label={t("mode.drafts")}
-          >
-            <PenLine size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "gap" ? "activity-button active" : "activity-button"}
-            onClick={() => openGapAnalysis()}
-            title={t("mode.gap")}
-            aria-label={t("mode.gap")}
-          >
-            <Diff size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "agents" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("agents")}
-            title={t("mode.agents")}
-            aria-label={t("mode.agents")}
-          >
-            <Bot size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "catalog" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("catalog")}
-            title={t("mode.catalog")}
-            aria-label={t("mode.catalog")}
-          >
-            <LayoutGrid size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "studio" ? "activity-button active" : "activity-button"}
-            onClick={() => setPersistedAppMode("studio")}
-            title={t("mode.studio")}
-            aria-label={t("mode.studio")}
-          >
-            <Workflow size={20} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            className={visibleAppMode === "sites" ? "activity-button active" : "activity-button"}
-            onClick={openSites}
-            title={t("mode.sites")}
-            aria-label={t("mode.sites")}
-          >
-            <Globe size={20} strokeWidth={1.9} />
-          </button>
+          <ActivityModeButton
+            label={t("mode.pkm")}
+            active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
+            icon={<FileText size={20} />}
+            onOpenPrimary={() => {
+              updateLayoutSettings({ editorSplitOpen: false });
+              setPersistedAppMode("pkm");
+            }}
+          />
+          {([
+            ["files", FolderOpen],
+            ["inbox", Inbox],
+            ["comms", MessageSquare],
+            ["meetings", UsersRound],
+            ["tasks", ListTodo],
+            ["drafts", PenLine],
+            ["gap", Diff],
+            ["agents", Bot],
+            ["catalog", LayoutGrid],
+            ["studio", Workflow],
+            ["sites", Globe],
+          ] as const).map(([mode, Icon]) => (
+            <ActivityModeButton
+              key={mode}
+              label={t(`mode.${mode}`)}
+              active={visibleAppMode === mode}
+              secondaryActive={rightWorkbenchMode === mode}
+              icon={<Icon size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode(mode)}
+              onOpenRight={() => openWorkbenchModeRight(mode)}
+              openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
+            />
+          ))}
           {e2eFlowEnabled ? (
-            <button
-              type="button"
-              className={visibleAppMode === "e2e" ? "activity-button active" : "activity-button"}
-              onClick={() => setPersistedAppMode("e2e")}
-              title={t("mode.e2e")}
-              aria-label={t("mode.e2e")}
-            >
-              <Route size={20} strokeWidth={1.9} />
-            </button>
+            <ActivityModeButton
+              label={t("mode.e2e")}
+              active={visibleAppMode === "e2e"}
+              secondaryActive={rightWorkbenchMode === "e2e"}
+              icon={<Route size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode("e2e")}
+              onOpenRight={() => openWorkbenchModeRight("e2e")}
+              openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
+            />
           ) : null}
           {diagramEnabled ? (
-            <button
-              type="button"
-              className={
-                visibleAppMode === "diagram" ? "activity-button active" : "activity-button"
-              }
-              onClick={() => setPersistedAppMode("diagram")}
-              title={t("mode.diagram")}
-              aria-label={t("mode.diagram")}
-            >
-              <Network size={20} strokeWidth={1.9} />
-            </button>
+            <ActivityModeButton
+              label={t("mode.diagram")}
+              active={visibleAppMode === "diagram"}
+              secondaryActive={rightWorkbenchMode === "diagram"}
+              icon={<Network size={20} strokeWidth={1.9} />}
+              onOpenPrimary={() => openPrimaryWorkbenchMode("diagram")}
+              onOpenRight={() => openWorkbenchModeRight("diagram")}
+              openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
+            />
           ) : null}
-          <button
-            type="button"
-            className={visibleAppMode === "graph" ? "activity-button active" : "activity-button"}
-            onClick={openGraphWorkspace}
-            title={t("mode.graph")}
-            aria-label={t("mode.graph")}
-          >
-            <Waypoints size={20} strokeWidth={1.9} />
-          </button>
+          <ActivityModeButton
+            label={t("mode.graph")}
+            active={visibleAppMode === "graph"}
+            secondaryActive={rightWorkbenchMode === "graph"}
+            icon={<Waypoints size={20} strokeWidth={1.9} />}
+            onOpenPrimary={() => openPrimaryWorkbenchMode("graph")}
+            onOpenRight={() => openWorkbenchModeRight("graph")}
+            openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
+          />
           <button
             type="button"
             className="activity-button"
@@ -8571,8 +8869,71 @@ function MainApp() {
           ) : null}
         </nav>
 
+        <div
+          className={
+            rightWorkbenchOpen
+              ? "app-workbench workbench-secondary-open"
+              : editorSplitOpen
+                ? "app-workbench editor-split-active"
+                : "app-workbench"
+          }
+          style={workbenchSplitStyle}
+          ref={rightWorkbenchOpen ? editorSplitShellRef : undefined}
+        >
         <Suspense fallback={<div className="mode-loading" role="status">…</div>}>
-        {visibleAppMode === "e2e" ? (
+        {rightWorkbenchMode ? renderEditorPane("left", leftTab, leftResolvedTabId) : null}
+        {rightWorkbenchMode ? (
+          <div
+            className="workbench-split-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuemin={30}
+            aria-valuemax={70}
+            aria-valuenow={Math.round(layoutSettings.editorSplitRatio * 100)}
+            onPointerDown={startEditorSplitResize}
+          />
+        ) : null}
+        <div
+          className={
+            rightWorkbenchMode
+              ? "workbench-secondary-surface"
+              : "workbench-primary-surface"
+          }
+          onPointerDownCapture={() => {
+            if (rightWorkbenchMode) setFocusedWorkbenchSide("right");
+          }}
+          onFocusCapture={() => {
+            if (rightWorkbenchMode) setFocusedWorkbenchSide("right");
+          }}
+        >
+        {rightWorkbenchMode ? (
+          <header
+            className="workbench-secondary-header"
+            onPointerDown={() => setFocusedWorkbenchSide("right")}
+          >
+            <strong>{t(`mode.${rightWorkbenchMode}`)}</strong>
+            <span className="workbench-secondary-spacer" />
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => openPrimaryWorkbenchMode(rightWorkbenchMode)}
+              title={t("workbench.moveToMain")}
+              aria-label={t("workbench.moveToMain")}
+            >
+              <PanelTopOpen size={13} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={closeRightWorkbench}
+              title={t("workbench.closeRight")}
+              aria-label={t("workbench.closeRight")}
+            >
+              <X size={13} />
+            </button>
+          </header>
+        ) : null}
+        {surfaceMode === "e2e" ? (
           <LazyE2EFlowPane
             workPath={inboxWorkspacePath}
             onRevealPath={(path) => {
@@ -8580,7 +8941,7 @@ function MainApp() {
             }}
             onError={setError}
           />
-        ) : visibleAppMode === "diagram" ? (
+        ) : surfaceMode === "diagram" ? (
           <LazyDiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}
             onError={setError}
@@ -8605,11 +8966,17 @@ function MainApp() {
               return saveDocument(root, path, content, expectedRevision);
             }}
           />
-        ) : visibleAppMode === "graph" ? (
+        ) : surfaceMode === "graph" ? (
           renderGraphSurface("full")
-        ) : visibleAppMode === "sites" ? (
-          <LazySitesPane overlayOpen={sitesOverlayOpen} onError={setError} />
-        ) : visibleAppMode === "files" ? (
+        ) : surfaceMode === "sites" ? (
+          <LazySitesPane
+            overlayOpen={sitesOverlayOpen}
+            onError={setError}
+            onEmptyClose={rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined}
+            openedUrls={pendingOpenedSiteUrls}
+            onOpenedUrlsHandled={acknowledgeOpenedSiteUrls}
+          />
+        ) : surfaceMode === "files" ? (
           <LazyFilesWorkbench
             entries={workspaceEntryNodes}
             selectedPaths={selectedFilePaths}
@@ -8668,19 +9035,7 @@ function MainApp() {
             onPaneFiltersChange={setFilesPaneFilters}
             onExpandedFoldersChange={setCollapsedFileFolders}
             onSelectionChange={setWorkspaceFileSelection}
-            onOpenDocument={(entry) => {
-              const docEntry =
-                entries.find(
-                  (candidate) =>
-                    candidate.path === entry.path || candidate.relPath === entry.relPath,
-                ) ?? null;
-              if (!docEntry) {
-                setError(t("files.openUnavailable"));
-                return;
-              }
-              setPersistedAppMode("pkm");
-              void selectEntry(docEntry);
-            }}
+            onOpenDocument={(entry) => void openWorkspaceFileEntry(entry)}
             onQueuePaths={(paths) => void queueExternalFiles(paths)}
             onRevealInFinder={revealTargetInFinder}
             onRefresh={() => {
@@ -8704,7 +9059,7 @@ function MainApp() {
             onAttachToTerminal={attachPathToTerminal}
             onError={setError}
           />
-        ) : visibleAppMode === "studio" ? (
+        ) : surfaceMode === "studio" ? (
           <LazyStudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
             activeDocument={document}
@@ -8732,7 +9087,7 @@ function MainApp() {
             }}
             onError={setError}
           />
-        ) : visibleAppMode === "catalog" ? (
+        ) : surfaceMode === "catalog" ? (
           <LazyCatalogPane
             workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
             onReveal={(path) => {
@@ -8740,7 +9095,7 @@ function MainApp() {
               if (root) void revealInFileManager(root, path);
             }}
           />
-        ) : visibleAppMode === "drafts" ? (
+        ) : surfaceMode === "drafts" ? (
           <LazyDraftsPane
             workPath={inboxWorkspacePath}
             skills={skills}
@@ -8760,14 +9115,14 @@ function MainApp() {
             onOpenAgents={() => setPersistedAppMode("agents")}
             onOpenGapAnalysis={openGapAnalysis}
           />
-        ) : visibleAppMode === "gap" ? (
+        ) : surfaceMode === "gap" ? (
           <LazyGapPane
             workPath={inboxWorkspacePath}
             initialDraftId={gapDraftId}
             onConsumeInitialDraftId={() => setGapDraftId(null)}
             onError={setError}
           />
-        ) : visibleAppMode === "agents" ? (
+        ) : surfaceMode === "agents" ? (
           <LazyAgentsPane
             workPath={inboxWorkspacePath}
             skills={skills}
@@ -8782,7 +9137,7 @@ function MainApp() {
             onAgentsChanged={refreshAgents}
             onError={setError}
           />
-        ) : visibleAppMode === "inbox" ? (
+        ) : surfaceMode === "inbox" ? (
           <LazyInboxPane
             items={inboxItems}
             entries={inboxEntries}
@@ -8846,7 +9201,7 @@ function MainApp() {
             onProcessError={setError}
             onShareSelectionChange={setInboxShareablePaths}
           />
-        ) : visibleAppMode === "comms" ? (
+        ) : surfaceMode === "comms" ? (
           <LazyCommsPane
             runtimeConfig={inboxRuntimeConfig}
             sourceRuns={sourceRuns}
@@ -8893,7 +9248,7 @@ function MainApp() {
             onRefreshMigration={refreshMigrationServices}
             onUnloadMigration={(paths) => void unloadMigrationServices(paths)}
           />
-        ) : visibleAppMode === "meetings" ? (
+        ) : surfaceMode === "meetings" ? (
           <LazyMeetingsPane
             workPath={inboxWorkspacePath}
             settings={maruSettings.meetings}
@@ -8921,7 +9276,7 @@ function MainApp() {
             requestedView={meetingsRequestedView}
             onViewConsumed={() => setMeetingsRequestedView(null)}
           />
-        ) : visibleAppMode === "tasks" ? (
+        ) : surfaceMode === "tasks" ? (
           <LazyTodayPane
             route={todayRoute}
             onRouteChange={setTodayRoute}
@@ -9074,9 +9429,10 @@ function MainApp() {
 
           </>
         )}
+        </div>
         </Suspense>
 
-        {outlineOpen && visibleAppMode !== "files" ? (
+        {outlineOpen && visibleAppMode !== "files" && !rightWorkbenchOpen ? (
           <div
             className="pane-resize-handle outline-pane-resize"
             role="separator"
@@ -9091,7 +9447,7 @@ function MainApp() {
           />
         ) : null}
 
-        {outlineOpen && visibleAppMode !== "files" ? (
+        {outlineOpen && visibleAppMode !== "files" && !rightWorkbenchOpen ? (
           <OutlinePane
             document={document}
             draftContent={draftContent}
@@ -9136,6 +9492,26 @@ function MainApp() {
             onClearFileQueue={clearFileQueue}
             onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
             workspaceFileEntries={fileEntries}
+            explorerWorkspacePath={explorerWorkspacePath}
+            explorerExpandedFolders={collapsedFileFolders}
+            onExplorerExpandedFoldersChange={setCollapsedFileFolders}
+            explorerSelectedPath={selectedPath}
+            explorerLoading={
+              explorerWorkspaceFilesState.loading ||
+              explorerWorkspaceFilesState.refreshing ||
+              shouldScanExplorerWorkspaceFiles
+            }
+            explorerReady={explorerWorkspaceFilesState.scanStatus === "ready"}
+            explorerRefreshing={explorerWorkspaceFilesState.refreshing}
+            onExplorerRefresh={() => {
+              if (explorerWorkspacePath) {
+                void refreshWorkspaceFiles(explorerWorkspacePath);
+              }
+            }}
+            onOpenWorkspaceFile={(entry, line) =>
+              void openWorkspaceFileEntry(entry, line)
+            }
+            explorerIncludeDotFolders={maruSettings.scan.includeDotFolders}
             selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
             filesPaneFilters={filesPaneFilters}
             onFilesPaneFiltersChange={setFilesPaneFilters}
@@ -9203,6 +9579,7 @@ function MainApp() {
             }
           />
         ) : null}
+        </div>
 
         <TerminalPanel
           ref={terminalPanelRef}
@@ -9385,6 +9762,11 @@ function MainApp() {
         <AgentUsageBar
           commandOverrides={terminalRuntimeCommands}
           onOpenSettings={(tab) => setSettingsOverlay({ tab })}
+          onOpenAgents={() => setPersistedAppMode("agents")}
+          workspaceName={explorerWorkspace?.label ?? null}
+          workspaceFileCount={
+            explorerWorkspaceFilesState.scanStatus === "ready" ? fileEntries.length : null
+          }
         />
 
         {pendingDestructiveAction ? (

@@ -95,7 +95,7 @@ async function ensureRightPaneVisible(page: Page) {
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "Sample Workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sample Workspace", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Private" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Public 추가" })).toBeVisible();
   const documentList = page.locator(".document-list");
@@ -118,6 +118,82 @@ test("boots the sample workspace and opens multiple editor tabs", async ({ page 
   await expect(page.locator(".evidence-card")).toContainText("receipt.pdf");
 });
 
+test("opens the right-rail Explorer on demand and filters the workspace tree", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await page.goto("/");
+  await ensureRightPaneVisible(page);
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "Explorer" }).click();
+  const explorer = rightPane.locator(".explorer-pane");
+  await expect(explorer).toBeVisible();
+  const tree = explorer.getByRole("tree", { name: "Workspace 파일 트리" });
+  await expect(tree).toBeVisible();
+
+  const attachments = tree.getByRole("treeitem", { name: "attachments" });
+  await expect(attachments).toHaveAttribute("aria-level", "1");
+  await expect(attachments).toHaveAttribute("aria-expanded", "false");
+  await attachments.focus();
+  await attachments.press("ArrowRight");
+  await expect(attachments).toHaveAttribute("aria-expanded", "true");
+  await attachments.press("ArrowDown");
+  await expect(tree.getByRole("treeitem", { name: "raw-dump.bin" })).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(attachments).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(attachments).toHaveAttribute("aria-expanded", "false");
+
+  const namesSearch = explorer.getByRole("textbox", {
+    name: "파일 이름 및 경로 검색",
+  });
+  await namesSearch.fill(".");
+  await expect
+    .poll(() =>
+      tree.evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+  await tree.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  const mountedTabStop = tree.locator('[role="treeitem"][tabindex="0"]');
+  await expect(mountedTabStop).toHaveCount(1);
+  const contentsTab = explorer.getByRole("tab", { name: "Contents" });
+  await contentsTab.focus();
+  await page.keyboard.press("Tab");
+  await expect(mountedTabStop).toBeFocused();
+
+  await namesSearch.fill("minutes");
+  await expect(explorer.getByRole("treeitem", { name: "minutes-template.md" })).toBeVisible();
+  await expect(explorer.locator(".files-tree-target", { hasText: "rise-budget-review.pdf" })).toHaveCount(0);
+
+  await contentsTab.click();
+  await explorer.getByRole("textbox", { name: "파일 내용 검색" }).fill("meeting");
+  await expect(explorer).toContainText("일치하는 내용이 없습니다.");
+});
+
+test("routes a non-document Explorer result to the selected Files row", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await ensureRightPaneVisible(page);
+
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "Explorer" }).click();
+  const explorer = rightPane.locator(".explorer-pane");
+  await explorer
+    .getByRole("textbox", { name: "파일 이름 및 경로 검색" })
+    .fill("raw-dump");
+  await explorer.getByRole("treeitem", { name: "raw-dump.bin" }).click();
+
+  await expect(page.locator(".files-workbench")).toBeVisible();
+  await expect(
+    page.locator('[data-files-path$="/attachments/raw-dump.bin"]'),
+  ).toHaveAttribute("aria-selected", "true");
+});
+
 test("keeps the Sites address bar at the top and closes the active tab with Cmd+W", async ({
   page,
 }) => {
@@ -129,6 +205,8 @@ test("keeps the Sites address bar at the top and closes the active tab with Cmd+
   const surface = page.locator(".sites-surface");
   await expect(toolbar).toBeVisible();
   await expect(surface).toBeVisible();
+  await expect(page.locator(".sites-passkey-status.empty")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "패스키 활성화" })).toHaveCount(0);
 
   const [tabstripBox, toolbarBox, surfaceBox] = await Promise.all([
     tabstrip.boundingBox(),
@@ -154,6 +232,124 @@ test("keeps the Sites address bar at the top and closes the active tab with Cmd+
   );
   await page.keyboard.press(closeShortcut);
   await expect(page.getByRole("tab", { name: /halla\.ai/ })).toHaveCount(0);
+});
+
+test("opens Sites as a singleton beside the active document", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "사이트", exact: true }).click({ modifiers: ["Alt"] });
+
+  const workbench = page.locator(".app-workbench.workbench-secondary-open");
+  const editor = workbench.locator(":scope > .editor-pane");
+  const sites = workbench.locator(":scope > .workbench-secondary-surface > .sites-pane");
+  await expect(workbench).toBeVisible();
+  await expect(editor).toBeVisible();
+  await expect(sites).toBeVisible();
+  await expect(page.locator(".sites-pane")).toHaveCount(1);
+
+  const [editorBox, sitesBox] = await Promise.all([editor.boundingBox(), sites.boundingBox()]);
+  expect(editorBox).not.toBeNull();
+  expect(sitesBox).not.toBeNull();
+  if (!editorBox || !sitesBox) return;
+  expect(sitesBox.x).toBeGreaterThanOrEqual(editorBox.x + editorBox.width - 1);
+  expect(sitesBox.width).toBeGreaterThan(250);
+  const sitesSidebarBox = await sites.locator(".sites-sidebar").boundingBox();
+  expect(sitesSidebarBox).not.toBeNull();
+  if (sitesSidebarBox) expect(sitesSidebarBox.width).toBeLessThanOrEqual(90);
+  const closeShortcut = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta+w" : "Control+w",
+  );
+
+  await page.getByRole("button", { name: "회의록 오른쪽에 열기 (Option-click)" }).click();
+  const meetings = workbench.locator(":scope > .workbench-secondary-surface > .meetings-pane");
+  await expect(meetings).toBeVisible();
+  const [meetingsSidebarBox, meetingsMainBox] = await Promise.all([
+    meetings.locator(".meetings-sidebar").boundingBox(),
+    meetings.locator(".meetings-main").boundingBox(),
+  ]);
+  expect(meetingsSidebarBox).not.toBeNull();
+  expect(meetingsMainBox).not.toBeNull();
+  if (meetingsSidebarBox && meetingsMainBox) {
+    expect(Math.abs(meetingsSidebarBox.x - meetingsMainBox.x)).toBeLessThanOrEqual(1);
+    expect(meetingsMainBox.y).toBeGreaterThanOrEqual(
+      meetingsSidebarBox.y + meetingsSidebarBox.height - 1,
+    );
+  }
+  await meetings.locator("button").first().focus();
+  await page.keyboard.press(closeShortcut);
+  await expect(workbench).toBeHidden();
+
+  await page.getByRole("button", { name: "사이트 오른쪽에 열기 (Option-click)" }).click();
+  await expect(sites).toBeVisible();
+  const leftDocumentTabs = editor.locator(".document-tab");
+  const leftDocumentTabCount = await leftDocumentTabs.count();
+  expect(leftDocumentTabCount).toBeGreaterThan(0);
+  await editor.click();
+  await page.keyboard.press(closeShortcut);
+  await expect(leftDocumentTabs).toHaveCount(leftDocumentTabCount - 1);
+  await expect(workbench).toBeVisible();
+  await expect(sites).toBeVisible();
+
+  await sites.getByRole("button", { name: "새 탭", exact: true }).focus();
+  await page.keyboard.press(closeShortcut);
+  await expect(workbench).toBeHidden();
+
+  await page.getByRole("button", { name: "사이트 오른쪽에 열기 (Option-click)" }).click();
+  await expect(sites).toBeVisible();
+  await page.getByRole("button", { name: "메인 화면으로 이동" }).click();
+  await expect(page.locator(".sites-pane")).toHaveCount(1);
+  await expect(page.locator(".app-shell")).toHaveClass(/sites-mode/);
+});
+
+test("opens Markdown source and live preview side by side", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await page.goto("/");
+  await page.getByRole("button", {
+    name: "마크다운 소스와 미리보기를 나란히 열기",
+  }).click();
+
+  const panes = page.locator(".editor-split-shell.split > .editor-pane");
+  await expect(panes).toHaveCount(2);
+  const splitGeometry = await page.locator(".editor-split-shell.split").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    style: element.getAttribute("style"),
+    parentClass: element.parentElement?.className,
+    workbenchWidth: element.closest(".app-workbench")?.clientWidth,
+  }));
+  const source = panes.nth(0).locator("textarea.source-editor");
+  const preview = panes.nth(1).locator(".preview-surface");
+  await expect(source).toBeVisible();
+  await expect(preview).toBeVisible();
+
+  const marker = "Live preview marker 8472";
+  await source.fill(`${await source.inputValue()}\n\n${marker}`);
+  await expect(preview).toContainText(marker);
+  await expect(source).toBeFocused();
+
+  for (const pane of await panes.all()) {
+    const paneOverflow = await pane.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      children: Array.from(element.children).map((child) => ({
+        className: child.className,
+        clientWidth: (child as HTMLElement).clientWidth,
+        scrollWidth: (child as HTMLElement).scrollWidth,
+      })),
+    }));
+    expect(
+      paneOverflow.scrollWidth,
+      JSON.stringify({ splitGeometry, paneOverflow }),
+    ).toBeLessThanOrEqual(
+      paneOverflow.clientWidth + 1,
+    );
+    const toolbar = pane.locator(".editor-view-toolbar");
+    expect(
+      await toolbar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+  }
+  await expect(panes.first().locator(".editor-source-preview-preset span")).toBeHidden();
 });
 
 test("binds, targets, verifies, selects, undoes, and unbinds evidence explicitly", async ({
@@ -450,7 +646,10 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await page.clock.setFixedTime(new Date("2026-05-04T09:00:00"));
   await page.goto("/");
 
-  await page.locator(".activity-rail").getByRole("button", { name: "회의록" }).click();
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "회의록", exact: true })
+    .click();
   await expect(page.locator(".meetings-pane")).toBeVisible();
   const meetingsPane = page.locator(".meetings-pane");
   await expect(
@@ -544,7 +743,10 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
 
   await page.reload();
   const reloadedMeetingsPane = page.locator(".meetings-pane");
-  await page.locator(".activity-rail").getByRole("button", { name: "회의록" }).click();
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "회의록", exact: true })
+    .click();
   await reloadedMeetingsPane.getByRole("button", { name: /녹취록/ }).click();
   await page.locator(".meetings-source-card textarea").fill("새 회의록 작업으로 저장된 패널 높이를 확인한다.");
   await reloadedMeetingsPane.getByRole("button", { name: "회의록 생성" }).click();
@@ -571,7 +773,10 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
 test("opens document studio with the seven-step shell", async ({ page }) => {
   await page.goto("/");
 
-  await page.locator(".activity-rail").getByRole("button", { name: "스튜디오" }).click();
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "스튜디오", exact: true })
+    .click();
   await expect(page.locator(".studio-pane")).toBeVisible();
   await expect(page.locator(".studio-header")).toContainText("Document Studio");
   await expect(page.locator(".studio-step-button")).toHaveCount(7);

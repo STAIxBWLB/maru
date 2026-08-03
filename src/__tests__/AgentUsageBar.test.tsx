@@ -6,11 +6,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   agentsUsageStatus: vi.fn(),
+  skillsBundleStatus: vi.fn(),
+  activeMissions: [] as Array<{
+    id: string;
+    status: "idle" | "running";
+    startedAt: string;
+  }>,
 }));
 
 vi.mock("../lib/api", () => ({
   AGENT_PROVIDERS: ["claude", "codex", "kimi", "kiro"],
   agentsUsageStatus: mocks.agentsUsageStatus,
+}));
+
+vi.mock("../lib/skills", () => ({
+  skillsBundleStatus: mocks.skillsBundleStatus,
+}));
+
+vi.mock("../lib/useActiveMissions", () => ({
+  useActiveMissions: () => mocks.activeMissions,
 }));
 
 import { AgentUsageBar } from "../components/AgentUsageBar";
@@ -22,6 +36,8 @@ import type { AgentUsageStatus } from "../lib/api";
 
 const t = (key: string, vars?: Record<string, string | number>) => {
   if (key === "agents.usage.usedSuffix") return "used";
+  if (key === "agents.usage.filesLabel") return "files";
+  if (key === "agents.usage.skillsVersion") return `Skills ${vars?.version ?? ""}`;
   if (key.startsWith("system.agents.agent.")) return key.slice("system.agents.agent.".length);
   let result = key;
   for (const [name, value] of Object.entries(vars ?? {})) {
@@ -48,6 +64,9 @@ describe("AgentUsageBar", () => {
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    mocks.agentsUsageStatus.mockResolvedValue([]);
+    mocks.skillsBundleStatus.mockResolvedValue(null);
+    mocks.activeMissions = [];
   });
 
   afterEach(async () => {
@@ -62,12 +81,21 @@ describe("AgentUsageBar", () => {
   async function render(
     onOpenSettings?: (tab: string) => void,
     commandOverrides = { claude: "/opt/bin/claude" },
+    statusProps: {
+      onOpenAgents?: () => void;
+      workspaceName?: string | null;
+      workspaceFileCount?: number | null;
+    } = {},
   ) {
     root = createRoot(container);
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <AgentUsageBar commandOverrides={commandOverrides} onOpenSettings={onOpenSettings} />
+          <AgentUsageBar
+            commandOverrides={commandOverrides}
+            onOpenSettings={onOpenSettings}
+            {...statusProps}
+          />
         </LocaleContext.Provider>,
       );
     });
@@ -115,14 +143,112 @@ describe("AgentUsageBar", () => {
     expect(chip?.textContent).toContain("—");
   });
 
-  it("renders nothing when every agent is cli_missing", async () => {
+  it("keeps the status bar and an empty chips region when every agent is cli_missing", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([
       usageEntry({ id: "claude", state: "cli_missing" }),
       usageEntry({ id: "kiro", state: "cli_missing" }),
     ]);
     await render();
 
-    expect(container.querySelector(".agent-usage-bar")).toBeNull();
+    expect(container.querySelector(".agent-usage-bar")).not.toBeNull();
+    expect(container.querySelector(".agent-usage-chips")).not.toBeNull();
+    expect(container.querySelectorAll(".agent-usage-chip")).toHaveLength(0);
+    expect(container.querySelector(".agent-usage-stat")?.textContent).toContain("0");
+  });
+
+  it("shows the active mission count and opens Agents", async () => {
+    mocks.activeMissions = [
+      { id: "mission-1", status: "running", startedAt: "2026-08-03T00:00:00Z" },
+      { id: "mission-2", status: "idle", startedAt: "2026-08-02T00:00:00Z" },
+    ];
+    const onOpenAgents = vi.fn();
+    await render(undefined, undefined, { onOpenAgents });
+
+    const missions = container.querySelector<HTMLButtonElement>(".agent-usage-stat");
+    expect(missions?.textContent).toContain("2");
+    expect(missions?.classList.contains("idle")).toBe(false);
+    await act(async () => {
+      missions?.click();
+    });
+    expect(onOpenAgents).toHaveBeenCalledOnce();
+  });
+
+  it("dims the mission chip at zero", async () => {
+    await render();
+
+    const missions = container.querySelector(".agent-usage-stat");
+    expect(missions?.textContent).toContain("0");
+    expect(missions?.classList.contains("idle")).toBe(true);
+  });
+
+  it("shows the workspace label and ready file count", async () => {
+    await render(undefined, undefined, {
+      workspaceName: "Private notes",
+      workspaceFileCount: 42,
+    });
+
+    expect(container.querySelector(".agent-usage-workspace-name")?.textContent).toBe(
+      "Private notes",
+    );
+    expect(
+      container.querySelector(".agent-usage-workspace-name")?.nextElementSibling?.textContent,
+    ).toBe("42 files");
+  });
+
+  it("shows a dash while the workspace file count is unknown", async () => {
+    await render(undefined, undefined, {
+      workspaceName: "Private notes",
+      workspaceFileCount: null,
+    });
+
+    expect(
+      container.querySelector(".agent-usage-workspace-name")?.nextElementSibling?.textContent,
+    ).toBe("— files");
+  });
+
+  it("omits the workspace chip when there is no workspace", async () => {
+    await render(undefined, undefined, { workspaceName: null, workspaceFileCount: 0 });
+
+    expect(container.querySelector(".agent-usage-workspace-name")).toBeNull();
+  });
+
+  it("opens Projects when the workspace chip is clicked", async () => {
+    const onOpenSettings = vi.fn();
+    await render(onOpenSettings, undefined, {
+      workspaceName: "Private notes",
+      workspaceFileCount: 3,
+    });
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(".agent-usage-workspace-name")
+        ?.parentElement?.click();
+    });
+    expect(onOpenSettings).toHaveBeenCalledWith("projects");
+  });
+
+  it("shows the skills version alongside usage chips", async () => {
+    mocks.agentsUsageStatus.mockResolvedValue([
+      usageEntry({
+        id: "claude",
+        windows: [{ label: "Session", usedPercent: 4, resetsAt: null }],
+      }),
+    ]);
+    mocks.skillsBundleStatus.mockResolvedValue({
+      active: { displayVersion: "2026.08.03" },
+      updateAvailable: true,
+    });
+    const onOpenSettings = vi.fn();
+    await render(onOpenSettings);
+
+    expect(container.querySelector(".agent-usage-chip")).not.toBeNull();
+    const skills = container.querySelector<HTMLButtonElement>(".agent-usage-skills");
+    expect(skills?.textContent).toContain("2026.08.03");
+    expect(skills?.querySelector(".agent-usage-skills-dot")).not.toBeNull();
+    await act(async () => {
+      skills?.click();
+    });
+    expect(onOpenSettings).toHaveBeenCalledWith("skills");
   });
 
   it("opens the settings Agents tab when a chip is clicked", async () => {

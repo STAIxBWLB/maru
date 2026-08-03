@@ -287,15 +287,18 @@ fn emit_new_events(app: &AppHandle, offsets: &Arc<Mutex<HashMap<PathBuf, u64>>>,
 // Installer: Claude settings.json + Kimi config.toml hooks
 // ---------------------------------------------------------------------------
 
-/// Resolve an absolute path to the bundled `maru-cli`, falling back to the
-/// bare name (relying on PATH) when the sibling binary cannot be located.
+fn bundled_maru_cli_for_exe(exe: &Path) -> Option<PathBuf> {
+    let contents = exe.parent()?.parent()?;
+    let candidate = contents.join("Resources").join("maru-cli");
+    candidate.exists().then_some(candidate)
+}
+
+/// Resolve an absolute path to the bundled Resources wrapper, falling back to
+/// the bare name (relying on PATH) when the app-bundle wrapper is unavailable.
 fn resolve_maru_cli() -> String {
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("maru-cli");
-            if candidate.exists() {
-                return candidate.to_string_lossy().to_string();
-            }
+        if let Some(candidate) = bundled_maru_cli_for_exe(&exe) {
+            return candidate.to_string_lossy().to_string();
         }
     }
     "maru-cli".to_string()
@@ -821,6 +824,20 @@ mod tests {
             ),
             PathBuf::from("/tmp/custom-kimi/config.toml")
         );
+    }
+
+    #[test]
+    fn bundled_cli_resolves_from_contents_resources() {
+        let tmp = TempDir::new().unwrap();
+        let contents = tmp.path().join("Maru.app").join("Contents");
+        let main = contents.join("MacOS").join("maru");
+        let wrapper = contents.join("Resources").join("maru-cli");
+        std::fs::create_dir_all(main.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
+        std::fs::write(&main, b"main").unwrap();
+        std::fs::write(&wrapper, b"#!/bin/sh\n").unwrap();
+
+        assert_eq!(bundled_maru_cli_for_exe(&main), Some(wrapper));
     }
 
     #[cfg(unix)]

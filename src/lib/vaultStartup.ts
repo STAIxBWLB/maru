@@ -1,4 +1,9 @@
 import type { VaultEntry } from "./types";
+import type {
+  ExplorerPaneMode,
+  MaruAppMode,
+  RightPaneTab,
+} from "./settings";
 
 export interface StoredVaultTabs {
   activeRelPath: string | null;
@@ -13,9 +18,39 @@ export interface VaultStartupPlan {
 export interface WorkspaceFilesScanState {
   paneMode: "documents" | "files";
   startupIoReady: boolean;
-  hasEntries: boolean;
+  scanStatus: WorkspaceFilesScanStatus;
   loading: boolean;
   refreshing: boolean;
+}
+
+export type WorkspaceFilesScanStatus = "unscanned" | "ready" | "failed";
+
+export function workspaceFileScanPaneMode(input: {
+  visibleAppMode: MaruAppMode;
+  outlineOpen: boolean;
+  rightPaneTab: RightPaneTab;
+  explorerPaneMode: ExplorerPaneMode;
+}): ExplorerPaneMode {
+  if (input.visibleAppMode === "files") return "files";
+  return input.visibleAppMode === "pkm" &&
+    input.outlineOpen &&
+    input.rightPaneTab === "explorer"
+    ? "files"
+    : input.explorerPaneMode;
+}
+
+export function workspaceFilesScanStatusAfterFailure(
+  current: WorkspaceFilesScanStatus,
+): WorkspaceFilesScanStatus {
+  return current === "ready" ? "ready" : "failed";
+}
+
+export function isCurrentWorkspaceFilesScanRequest(
+  latestByPath: Readonly<Record<string, number>>,
+  path: string,
+  requestSeq: number,
+): boolean {
+  return latestByPath[path] === requestSeq;
 }
 
 export function planVaultStartup(
@@ -60,9 +95,15 @@ export function mergeFreshEntry<T extends { entry: VaultEntry }>(
 export function shouldLazyScanWorkspaceFiles({
   paneMode,
   startupIoReady,
-  hasEntries,
+  scanStatus,
   loading,
   refreshing,
 }: WorkspaceFilesScanState): boolean {
-  return paneMode === "files" && startupIoReady && !hasEntries && !loading && !refreshing;
+  return (
+    paneMode === "files" &&
+    startupIoReady &&
+    scanStatus === "unscanned" &&
+    !loading &&
+    !refreshing
+  );
 }

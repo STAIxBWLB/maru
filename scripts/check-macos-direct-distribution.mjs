@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,16 +8,17 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const releaseRepo = process.env.MARU_RELEASE_REPO ?? "STAIxBWLB/maru";
 const expectedBundleId = process.env.MARU_MACOS_BUNDLE_ID ?? "kr.maru.desktop";
 const args = new Set(process.argv.slice(2));
-const allowedArgs = new Set(["--github-secrets", "--require-local-identity", "--help"]);
+const allowedArgs = new Set(["--github-secrets", "--require-local-identity", "--passkeys", "--help"]);
 
 if (args.has("--help")) {
-  console.log(`usage: node scripts/check-macos-direct-distribution.mjs [--github-secrets] [--require-local-identity]
+  console.log(`usage: node scripts/check-macos-direct-distribution.mjs [--github-secrets] [--require-local-identity] [--passkeys]
 
 Checks Maru's minimum macOS direct-distribution setup.
 
 Options:
   --github-secrets          require all GitHub Actions secrets used for signed/notarized releases
   --require-local-identity  require a local Developer ID Application signing identity
+  --passkeys                validate the opt-in browser-passkey packaging prerequisites
 `);
   process.exit(0);
 }
@@ -30,6 +31,7 @@ if (unknownArgs.length > 0) {
 
 const requireGitHubSecrets = args.has("--github-secrets");
 const requireLocalIdentity = args.has("--require-local-identity");
+const requirePasskeys = args.has("--passkeys");
 const errors = [];
 const warnings = [];
 const successes = [];
@@ -73,7 +75,9 @@ function firstCargoPackageVersion(cargoToml) {
 
 const packageJson = readJson("package.json");
 const tauriConfig = readJson("src-tauri/tauri.conf.json");
+const passkeyConfig = requirePasskeys ? readJson("src-tauri/tauri.passkeys.conf.json") : null;
 const cargoToml = readText("src-tauri/Cargo.toml");
+const cliCargoToml = readText("src-tauri/maru-cli/Cargo.toml");
 const workflow = readText(".github/workflows/release-bundles.yml");
 
 if (packageJson && tauriConfig) {
@@ -82,6 +86,7 @@ if (packageJson && tauriConfig) {
     ["package.json", packageJson.version],
     ["src-tauri/tauri.conf.json", tauriConfig.version],
     ["src-tauri/Cargo.toml", cargoVersion],
+    ["src-tauri/maru-cli/Cargo.toml", firstCargoPackageVersion(cliCargoToml)],
   ];
   const uniqueVersions = new Set(versions.map(([, version]) => version).filter(Boolean));
   if (uniqueVersions.size === 1 && uniqueVersions.has(packageJson.version)) {
@@ -125,6 +130,206 @@ if (packageJson && tauriConfig) {
   } else {
     warn("repo default macOS signing identity is not '-' ; verify APPLE_SIGNING_IDENTITY still controls CI Developer ID signing");
   }
+
+  if (tauriConfig.bundle?.macOS?.entitlements == null && tauriConfig.bundle?.macOS?.infoPlist == null) {
+    ok("repo default macOS bundle has no managed passkey entitlement or browser-role metadata");
+  } else {
+    fail("repo default macOS bundle must not enable passkey entitlements or browser-role metadata");
+  }
+}
+
+function checkCliPackaging() {
+  const wrapperRelative = "src-tauri/bundle/macos/maru-cli";
+  const wrapperPath = resolve(repoRoot, wrapperRelative);
+  if (!existsSync(wrapperPath)) {
+    fail(`${wrapperRelative} is missing`);
+  } else {
+    const wrapper = readFileSync(wrapperPath);
+    const magic = wrapper.subarray(0, 4).toString("hex");
+    const machoMagic = new Set(["feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca"]);
+    if (machoMagic.has(magic)) {
+      fail("bundled maru-cli wrapper must not be a Mach-O executable");
+    } else if (!wrapper.toString("utf8").startsWith("#!/bin/sh\n")) {
+      fail("bundled maru-cli wrapper must be a POSIX shell script");
+    } else if ((statSync(wrapperPath).mode & 0o111) === 0) {
+      fail("bundled maru-cli wrapper is not executable");
+    } else if (!wrapper.toString("utf8").includes('../MacOS/maru" --maru-cli "$@"')) {
+      fail("bundled maru-cli wrapper does not dispatch through the GUI binary");
+    } else {
+      ok("bundled maru-cli is an executable non-Mach-O wrapper");
+    }
+  }
+
+  if (tauriConfig?.bundle?.macOS?.files?.["Resources/maru-cli"] === "bundle/macos/maru-cli") {
+    ok("default and passkey app bundles install the safe Resources maru-cli wrapper");
+  } else {
+    fail("default macOS bundle does not map the safe maru-cli wrapper under Resources");
+  }
+  if (/members\s*=\s*\[[^\]]*"maru-cli"/.test(cargoToml) && /default-members\s*=\s*\["\."\]/.test(cargoToml)) {
+    ok("standalone CLI is a non-default Cargo workspace member");
+  } else {
+    fail("standalone CLI must be a non-default Cargo workspace member");
+  }
+  if (!/\[\[bin\]\][\s\S]*?name\s*=\s*"maru-cli"/.test(cargoToml)) {
+    ok("root Tauri package has no maru-cli binary target");
+  } else {
+    fail("root Tauri package must not declare a maru-cli binary target");
+  }
+  if (/name\s*=\s*"maru-cli"/.test(cliCargoToml) && /package\s*=\s*"maru"[\s\S]*path\s*=\s*"\.\."/.test(cliCargoToml)) {
+    ok("standalone CLI package reuses the Maru library from its workspace member");
+  } else {
+    fail("standalone CLI workspace package is missing or does not depend on Maru");
+  }
+  if (workflow.includes("-p maru-cli --bin maru-cli")) {
+    ok("standalone CLI release builds its dedicated workspace package");
+  } else {
+    fail("standalone CLI release does not select its dedicated workspace package");
+  }
+  if (tauriConfig?.build?.beforeBundleCommand == null) {
+    ok("Tauri app bundling does not mutate or sign standalone CLI artifacts");
+  } else {
+    fail("Tauri app bundling must not run a standalone CLI helper hook");
+  }
+}
+
+checkCliPackaging();
+
+function checkPasskeyPackaging() {
+  const overlayMacOS = passkeyConfig?.bundle?.macOS;
+  if (overlayMacOS?.entitlements === "Entitlements.plist" && overlayMacOS?.infoPlist === "Info.passkeys.plist") {
+    ok("passkey overlay references the managed entitlement and browser-role metadata");
+  } else {
+    fail("passkey overlay does not reference Entitlements.plist and Info.passkeys.plist");
+  }
+
+  if (passkeyConfig?.bundle?.active === true) {
+    ok("passkey overlay enables bundling explicitly");
+  } else {
+    fail("passkey overlay must enable bundling");
+  }
+  if (overlayMacOS?.files?.["embedded.provisionprofile"] === "Passkeys.provisionprofile") {
+    ok("passkey overlay embeds the staged provisioning profile at Contents root");
+  } else {
+    fail("passkey overlay must map Passkeys.provisionprofile to embedded.provisionprofile");
+  }
+
+  const entitlementText = readText("src-tauri/Entitlements.plist");
+  const infoText = readText("src-tauri/Info.passkeys.plist");
+  if (/com\.apple\.developer\.web-browser\.public-key-credential<\/key>\s*<true\s*\/>/.test(entitlementText)) {
+    ok("passkey entitlement declaration is enabled");
+  } else {
+    fail("passkey entitlement declaration is missing or disabled");
+  }
+  if (/<string>http<\/string>[\s\S]*<string>https<\/string>/.test(infoText)) {
+    ok("passkey browser-role metadata declares HTTP and HTTPS");
+  } else {
+    fail("passkey browser-role metadata does not declare HTTP and HTTPS");
+  }
+
+  const siteViewSource = readText("src-tauri/src/site_view.rs");
+  const libSource = readText("src-tauri/src/lib.rs");
+  for (const [description, needle, source] of [
+    ["opened-URL drain command", "site_view_take_opened_urls", siteViewSource],
+    ["opened-URL event", "sites://open-requested", siteViewSource],
+    ["HTTP/HTTPS RunEvent handler", "tauri::RunEvent::Opened { urls }", libSource],
+    ["Safari passkey fallback", "site_view_open_safari", siteViewSource],
+  ]) {
+    if (source.includes(needle)) {
+      ok(`passkey backend contains ${description}`);
+    } else {
+      fail(`passkey backend is missing ${description}`);
+    }
+  }
+
+  const profileValue = process.env.MARU_MACOS_PROVISIONING_PROFILE?.trim();
+  if (!profileValue) {
+    fail("passkey packaging requires MARU_MACOS_PROVISIONING_PROFILE");
+  } else {
+    const profilePath = resolve(profileValue);
+    if (!existsSync(profilePath)) {
+      fail(`MARU_MACOS_PROVISIONING_PROFILE does not exist: ${profilePath}`);
+    } else if (process.platform !== "darwin") {
+      fail("passkey provisioning-profile validation requires macOS");
+    } else {
+      try {
+        const decodedXml = execFileSync("security", ["cms", "-D", "-i", profilePath], {
+          encoding: "utf8",
+        });
+        const profile = JSON.parse(execFileSync("plutil", ["-convert", "json", "-o", "-", "-"], {
+          encoding: "utf8",
+          input: decodedXml,
+        }));
+        const entitlements = profile.Entitlements ?? {};
+        if (entitlements["com.apple.developer.web-browser.public-key-credential"] === true) {
+          ok("provisioning profile contains the managed passkey entitlement");
+        } else {
+          fail("provisioning profile does not contain the managed passkey entitlement");
+        }
+
+        const expiration = new Date(profile.ExpirationDate ?? "");
+        if (Number.isFinite(expiration.getTime()) && expiration.getTime() > Date.now()) {
+          ok(`provisioning profile is valid until ${expiration.toISOString()}`);
+        } else {
+          fail("provisioning profile is expired or has no valid ExpirationDate");
+        }
+
+        const teamIdentifiers = Array.isArray(profile.TeamIdentifier) ? profile.TeamIdentifier : [];
+        const entitlementTeam = entitlements["com.apple.developer.team-identifier"];
+        const teamIdentifier = entitlementTeam ?? teamIdentifiers[0];
+        if (typeof teamIdentifier !== "string" || !teamIdentifiers.includes(teamIdentifier)) {
+          fail("provisioning profile TeamIdentifier and entitlement team identifier do not match");
+        } else if (entitlements["com.apple.application-identifier"] !== `${teamIdentifier}.${expectedBundleId}`) {
+          fail(`provisioning profile com.apple.application-identifier must be ${teamIdentifier}.${expectedBundleId}`);
+        } else if (process.env.APPLE_TEAM_ID && process.env.APPLE_TEAM_ID !== teamIdentifier) {
+          fail(`APPLE_TEAM_ID does not match provisioning profile team ${teamIdentifier}`);
+        } else {
+          ok(`provisioning profile matches team ${teamIdentifier} and ${expectedBundleId}`);
+        }
+
+        const selectedIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim();
+        const certificates = Array.isArray(profile.DeveloperCertificates)
+          ? profile.DeveloperCertificates
+          : [];
+        if (selectedIdentity && selectedIdentity !== "-") {
+          const identityOutput = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], {
+            encoding: "utf8",
+          });
+          const selectedLine = identityOutput
+            .split("\n")
+            .find((line) => line.includes(`"${selectedIdentity}"`));
+          const selectedHash = selectedLine?.match(/\b([0-9A-F]{40})\b/i)?.[1]?.toUpperCase();
+          const profileHashes = certificates.flatMap((encoded) => {
+            if (typeof encoded !== "string") return [];
+            try {
+              const output = execFileSync(
+                "openssl",
+                ["x509", "-inform", "DER", "-noout", "-fingerprint", "-sha1"],
+                { encoding: "utf8", input: Buffer.from(encoded, "base64") },
+              );
+              const hash = output.match(/Fingerprint=([0-9A-F:]+)/i)?.[1]?.replaceAll(":", "").toUpperCase();
+              return hash ? [hash] : [];
+            } catch {
+              return [];
+            }
+          });
+          if (!selectedHash) {
+            fail("cannot resolve APPLE_SIGNING_IDENTITY fingerprint from the local Keychain");
+          } else if (!profileHashes.includes(selectedHash)) {
+            fail("provisioning profile DeveloperCertificates does not include APPLE_SIGNING_IDENTITY");
+          } else {
+            ok("provisioning profile includes the selected Developer ID certificate");
+          }
+        }
+
+      } catch (error) {
+        fail(`cannot decode MARU_MACOS_PROVISIONING_PROFILE: ${error.message}`);
+      }
+    }
+  }
+
+  if (!process.env.APPLE_SIGNING_IDENTITY || process.env.APPLE_SIGNING_IDENTITY === "-") {
+    fail("passkey packaging requires APPLE_SIGNING_IDENTITY for a Developer ID Application identity");
+  }
 }
 
 for (const needle of [
@@ -143,16 +348,10 @@ for (const needle of [
   }
 }
 
-if (tauriConfig?.build?.beforeBundleCommand?.includes("sign-macos-app-binaries")) {
-  ok("Tauri beforeBundleCommand signs bundled macOS helper binaries");
-} else {
-  fail("Tauri beforeBundleCommand does not run sign-macos-app-binaries");
-}
-
 function checkLocalIdentity() {
   if (process.platform !== "darwin") {
     const message = "local Developer ID identity check requires macOS";
-    if (requireLocalIdentity) {
+    if (requireLocalIdentity || requirePasskeys) {
       fail(message);
     } else {
       warn(message);
@@ -167,7 +366,7 @@ function checkLocalIdentity() {
     });
   } catch (error) {
     const message = `security find-identity failed: ${error.message}`;
-    if (requireLocalIdentity) {
+    if (requireLocalIdentity || requirePasskeys) {
       fail(message);
     } else {
       warn(message);
@@ -183,7 +382,7 @@ function checkLocalIdentity() {
 
   if (envIdentity && !identities.includes(envIdentity)) {
     const message = `APPLE_SIGNING_IDENTITY is set but was not found as a local Developer ID Application identity: ${envIdentity}`;
-    if (requireLocalIdentity) {
+    if (requireLocalIdentity || requirePasskeys) {
       fail(message);
     } else {
       warn(message);
@@ -195,7 +394,7 @@ function checkLocalIdentity() {
     ok(`local Developer ID Application identity found: ${envIdentity ?? identities[0]}`);
   } else {
     const message = "no local Developer ID Application identity found in Keychain";
-    if (requireLocalIdentity) {
+    if (requireLocalIdentity || requirePasskeys) {
       fail(message);
     } else {
       warn(message);
@@ -239,7 +438,11 @@ function checkGitHubSecrets() {
   }
 }
 
-if (!requireGitHubSecrets || requireLocalIdentity) {
+if (requirePasskeys) {
+  checkPasskeyPackaging();
+}
+
+if (!requireGitHubSecrets || requireLocalIdentity || requirePasskeys) {
   checkLocalIdentity();
 }
 if (requireGitHubSecrets) {

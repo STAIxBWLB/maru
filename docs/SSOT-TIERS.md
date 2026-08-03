@@ -16,9 +16,10 @@ The default owned catalog is 43 skills: 34 bundled, 5 public, and 4 private.
 Synchronizing it to Claude and Codex produces 86 Maru install records. Tool
 native/plugin skills remain owned by their tool and are excluded from that
 count. Maru nevertheless inventories `~/.agents/skills` as `external-managed`
-and `~/.codex/skills/.system` as `tool-native` registry sources when those
-directories exist. These inventory-only skill counts appear in the registry
-and doctor output, but never increase the 43 managed skills or 86 installs.
+and `$CODEX_HOME/skills/.system` as `tool-native` when `CODEX_HOME` is set,
+falling back to `~/.codex/skills/.system`. These inventory-only skill counts
+appear in the registry and doctor output, but never increase the 43 managed
+skills or 86 installs.
 
 | Tier | Location | Identity | Change Path |
 |------|----------|----------|-------------|
@@ -71,3 +72,7 @@ maru skills reconcile <name-or-id> --discard
 maru skills import /path/to/skill --copy
 maru skills import-unmanage <name> --delete-files
 ```
+
+Codex installs follow `$CODEX_HOME/skills` when the runtime exports
+`CODEX_HOME` (including isolated Orca account profiles); otherwise they use
+`~/.codex/skills`.

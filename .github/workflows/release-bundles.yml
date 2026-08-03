@@ -272,7 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          cargo build --manifest-path src-tauri/Cargo.toml --release --bin maru-cli --target "$TARGET"
+          cargo build --manifest-path src-tauri/Cargo.toml --release -p maru-cli --bin maru-cli --target "$TARGET"
           rm -rf dist-cli
           mkdir -p dist-cli
           install -m 0755 "src-tauri/target/$TARGET/release/maru-cli" dist-cli/maru

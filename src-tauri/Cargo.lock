@@ -2427,14 +2427,17 @@ version = "0.4.40"
 dependencies = [
  "alacritty_terminal",
  "base64 0.22.1",
+ "block2",
  "chrono",
  "chrono-tz",
+ "core-foundation-sys",
  "dirs 5.0.1",
  "encoding_rs",
  "include_dir",
  "mime_guess",
  "minisign-verify",
  "notify",
+ "objc2",
  "portable-pty",
  "quick-xml",
  "rayon",
@@ -2459,6 +2462,13 @@ dependencies = [
  "walkdir",
  "windows-sys 0.59.0",
  "zip",
+]
+
+[[package]]
+name = "maru-cli"
+version = "0.4.40"
+dependencies = [
+ "maru",
 ]
 
 [[package]]

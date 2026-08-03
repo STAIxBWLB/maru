@@ -17,6 +17,7 @@ import {
   FileVideo,
   Files,
   Folder,
+  FolderTree,
   Hash,
   Info,
   Layers,
@@ -71,6 +72,7 @@ import {
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
+import { ExplorerPane } from "./ExplorerPane";
 import { ScratchpadPane } from "./ScratchpadPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
@@ -117,6 +119,16 @@ interface OutlinePaneProps {
   onClearFileQueue: () => void;
   onClearSelectedFileQueueItems: () => void;
   workspaceFileEntries: WorkspaceFileEntry[];
+  explorerWorkspacePath: string | null;
+  explorerExpandedFolders: string[];
+  onExplorerExpandedFoldersChange: (paths: string[]) => void;
+  explorerSelectedPath: string | null;
+  explorerLoading: boolean;
+  explorerReady: boolean;
+  explorerRefreshing: boolean;
+  onExplorerRefresh: () => void;
+  onOpenWorkspaceFile: (entry: WorkspaceFileEntry, line?: number) => void;
+  explorerIncludeDotFolders: string[];
   selectedWorkspaceFileEntries: WorkspaceFileEntry[];
   filesPaneFilters: WorkspaceFilesPaneFilters;
   onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
@@ -240,6 +252,16 @@ export function OutlinePane({
   onClearFileQueue,
   onClearSelectedFileQueueItems,
   workspaceFileEntries,
+  explorerWorkspacePath,
+  explorerExpandedFolders,
+  onExplorerExpandedFoldersChange,
+  explorerSelectedPath,
+  explorerLoading,
+  explorerReady,
+  explorerRefreshing,
+  onExplorerRefresh,
+  onOpenWorkspaceFile,
+  explorerIncludeDotFolders,
   selectedWorkspaceFileEntries,
   filesPaneFilters,
   onFilesPaneFiltersChange,
@@ -276,7 +298,7 @@ export function OutlinePane({
   // the workspace tab. Fall back to the first valid tab when the persisted
   // tab is not available in the current mode.
   const visibleTabs: readonly RightPaneTab[] = isPkm
-    ? ["workspace", "outline", "files", "memo", "shareOutbox", "skills", "guideline", "evidence", "info"]
+    ? ["workspace", "outline", "explorer", "files", "memo", "shareOutbox", "skills", "guideline", "evidence", "info"]
     : appMode === "inbox"
       ? ["workspace", "shareOutbox"]
       : ["workspace"];
@@ -402,6 +424,8 @@ export function OutlinePane({
                 <Layers size={20} />
               ) : id === "outline" ? (
                 <List size={20} />
+              ) : id === "explorer" ? (
+                <FolderTree size={20} />
               ) : id === "files" ? (
                 <Files size={20} />
               ) : id === "memo" ? (
@@ -486,6 +510,22 @@ export function OutlinePane({
                 />
               ) : null}
             </>
+          ) : null}
+
+          {tab === "explorer" ? (
+            <ExplorerPane
+              workspacePath={explorerWorkspacePath}
+              entries={workspaceFileEntries}
+              expandedFolders={explorerExpandedFolders}
+              onExpandedFoldersChange={onExplorerExpandedFoldersChange}
+              selectedPath={explorerSelectedPath}
+              loading={explorerLoading}
+              ready={explorerReady}
+              refreshing={explorerRefreshing}
+              onRefresh={onExplorerRefresh}
+              onOpenFile={onOpenWorkspaceFile}
+              includeDotFolders={explorerIncludeDotFolders}
+            />
           ) : null}
 
           {tab === "files" ? (

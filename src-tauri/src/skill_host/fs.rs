@@ -39,6 +39,26 @@ pub fn install_root_base() -> Result<PathBuf, String> {
     home_dir()
 }
 
+/// Resolve Codex's active home. Isolated hosts such as Orca set `CODEX_HOME`
+/// to a profile-specific directory instead of using the default `~/.codex`.
+/// Test homes always win so tool-sync tests cannot escape their sandbox.
+pub fn codex_home() -> Result<PathBuf, String> {
+    if let Some(path) = test_maru_home_override() {
+        return Ok(path.join(".codex"));
+    }
+    let home = home_dir()?;
+    Ok(resolve_codex_home(
+        &home,
+        std::env::var_os("CODEX_HOME").map(PathBuf::from),
+    ))
+}
+
+fn resolve_codex_home(home: &Path, configured: Option<PathBuf>) -> PathBuf {
+    configured
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| home.join(".codex"))
+}
+
 pub fn expand_tilde(input: &str) -> PathBuf {
     let trimmed = input.trim();
     if trimmed == "~" {
@@ -242,5 +262,22 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(value, json!({ "new": true }));
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn codex_home_prefers_configured_profile_and_falls_back_to_dot_codex() {
+        let home = Path::new("/users/tester");
+        assert_eq!(
+            resolve_codex_home(home, Some(PathBuf::from("/profiles/orca"))),
+            PathBuf::from("/profiles/orca")
+        );
+        assert_eq!(
+            resolve_codex_home(home, Some(PathBuf::new())),
+            PathBuf::from("/users/tester/.codex")
+        );
+        assert_eq!(
+            resolve_codex_home(home, None),
+            PathBuf::from("/users/tester/.codex")
+        );
     }
 }

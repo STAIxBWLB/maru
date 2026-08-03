@@ -32,6 +32,19 @@ export interface VirtualWorkspaceFileTreeLayout {
   totalHeight: number;
 }
 
+/** Keep one browser tab stop inside the mounted virtual window. The logical
+ * focus id remains unchanged while pointer scrolling moves it offscreen. */
+export function workspaceFileTreeTabStopId(
+  rows: readonly VirtualWorkspaceFileTreeRow[],
+  focusedRowId: string | null,
+): string | null {
+  if (rows.length === 0) return null;
+  if (focusedRowId && rows.some(({ row }) => row.id === focusedRowId)) {
+    return focusedRowId;
+  }
+  return rows[0].row.id;
+}
+
 interface TreeNode {
   name: string;
   path: string;

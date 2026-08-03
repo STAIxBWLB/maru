@@ -18,7 +18,7 @@ use crate::win_process::NoWindow;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
-const GENERATED_DIRS: &[&str] = &[
+pub(crate) const GENERATED_DIRS: &[&str] = &[
     "node_modules",
     "target",
     "dist",
@@ -1090,7 +1090,7 @@ fn git_tracked_paths(vault: &Path) -> HashSet<String> {
         .collect()
 }
 
-fn is_binary_file(path: &Path) -> bool {
+pub(crate) fn is_binary_file(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|value| value.to_str()) {
         let lower = ext.to_ascii_lowercase();
         if KNOWN_BINARY_EXTENSIONS.iter().any(|item| *item == lower) {

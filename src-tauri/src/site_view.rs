@@ -19,6 +19,7 @@
 
 use crate::win_process::NoWindow;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::process::Command;
 use std::sync::Mutex;
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
@@ -36,6 +37,41 @@ const MAX_TABS: usize = 12;
 const EVENT_NAVIGATED: &str = "sites://navigated";
 const EVENT_LOAD: &str = "sites://page-load";
 const EVENT_TITLE: &str = "sites://title-changed";
+const EVENT_OPEN_REQUESTED: &str = "sites://open-requested";
+const MAX_OPENED_URLS: usize = 64;
+
+#[derive(Default)]
+pub struct SiteOpenedUrlState {
+    queue: Mutex<VecDeque<String>>,
+}
+
+impl SiteOpenedUrlState {
+    fn enqueue(&self, urls: Vec<Url>) -> Vec<String> {
+        let accepted = filter_opened_urls(urls);
+        if accepted.is_empty() {
+            return accepted;
+        }
+        let mut queue = self
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for url in &accepted {
+            if queue.len() == MAX_OPENED_URLS {
+                queue.pop_front();
+            }
+            queue.push_back(url.clone());
+        }
+        accepted
+    }
+
+    fn take(&self) -> Vec<String> {
+        self.queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain(..)
+            .collect()
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +110,20 @@ fn parse_http_url(input: &str) -> Result<Url, String> {
         other => Err(format!(
             "Unsupported URL scheme {other:?} (http/https only)"
         )),
+    }
+}
+
+fn filter_opened_urls(urls: Vec<Url>) -> Vec<String> {
+    urls.into_iter()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .map(|url| url.to_string())
+        .collect()
+}
+
+pub fn queue_opened_urls(app: &AppHandle, urls: Vec<Url>) {
+    let accepted = app.state::<SiteOpenedUrlState>().enqueue(urls);
+    if !accepted.is_empty() {
+        emit_to_main(app, EVENT_OPEN_REQUESTED, accepted);
     }
 }
 
@@ -180,8 +230,7 @@ pub async fn site_view_open(
         // Do not steal keyboard focus from the main UI on open.
         .focused(false)
         .on_navigation(move |url| {
-            let allowed =
-                matches!(url.scheme(), "http" | "https") || url.as_str() == "about:blank";
+            let allowed = matches!(url.scheme(), "http" | "https") || url.as_str() == "about:blank";
             if allowed {
                 emit_to_main(
                     &app_nav,
@@ -351,6 +400,37 @@ pub async fn site_view_open_external(url: String) -> Result<(), String> {
     open_in_system_browser(target.as_str())
 }
 
+/// Open the URL specifically in Safari. This avoids recursively reopening
+/// Maru when its provisioned passkey build is registered for HTTP/HTTPS.
+#[tauri::command]
+pub async fn site_view_open_safari(url: String) -> Result<(), String> {
+    let target = parse_http_url(&url)?;
+    #[cfg(target_os = "macos")]
+    {
+        safari_command(target.as_str())
+            .no_window()
+            .spawn()
+            .map_err(|err| format!("Cannot open Safari: {err}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        open_in_system_browser(target.as_str())
+    }
+}
+
+#[tauri::command]
+pub fn site_view_take_opened_urls(state: tauri::State<'_, SiteOpenedUrlState>) -> Vec<String> {
+    state.take()
+}
+
+#[cfg(target_os = "macos")]
+fn safari_command(url: &str) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("-b").arg("com.apple.Safari").arg(url);
+    command
+}
+
 fn open_in_system_browser(url: &str) -> Result<(), String> {
     let mut command = if cfg!(target_os = "macos") {
         let mut c = Command::new("open");
@@ -371,4 +451,64 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
         .spawn()
         .map_err(|err| format!("Cannot open system browser: {err}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(value: &str) -> Url {
+        value.parse().expect("test URL")
+    }
+
+    #[test]
+    fn opened_url_filter_accepts_only_http_and_https() {
+        assert_eq!(
+            filter_opened_urls(vec![
+                url("https://example.com/a"),
+                url("file:///tmp/private"),
+                url("http://localhost:3000/path?q=1"),
+                url("maru://sites/open"),
+            ]),
+            vec![
+                "https://example.com/a".to_string(),
+                "http://localhost:3000/path?q=1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn opened_url_queue_is_memory_only_bounded_and_drained() {
+        let state = SiteOpenedUrlState::default();
+        let urls = (0..=MAX_OPENED_URLS)
+            .map(|index| url(&format!("https://example.com/{index}")))
+            .collect();
+        state.enqueue(urls);
+
+        let drained = state.take();
+        assert_eq!(drained.len(), MAX_OPENED_URLS);
+        assert_eq!(
+            drained.first().map(String::as_str),
+            Some("https://example.com/1")
+        );
+        assert_eq!(
+            drained.last().map(String::as_str),
+            Some("https://example.com/64")
+        );
+        assert!(state.take().is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn safari_fallback_bypasses_the_default_http_handler() {
+        let command = safari_command("https://example.com/passkey");
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["-b", "com.apple.Safari", "https://example.com/passkey"]
+        );
+    }
 }
