@@ -1,0 +1,235 @@
+// Multi-turn conversation with an agent's CLI backend.
+//
+// Deliberately not a skill dispatch: `skills_dispatch_background` requires a
+// skill id and prepends the whole SKILL.md, which is right for a job and wrong
+// for a conversation. Chat goes through `start_agent_cli_invocation`, the same
+// primitive the inbox classifier uses, so no new Rust command exists for it.
+
+import { startAgentCliInvocation, stopAiMission } from "./api";
+import type { AiDoneEvent, AiErrorEvent, AiOutputEvent } from "./aiInvoke";
+import {
+  resolveAgentPermissionMode,
+  resolveAgentRuntime,
+  resolveAvailableRuntime,
+  type AgentRecord,
+} from "./agents";
+import type { AiRuntime, AiSettings } from "./settings";
+
+const isTauri = () =>
+  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+  at: string;
+  /** Assistant turns only — what actually ran, after runtime fallback. */
+  runtime?: AiRuntime;
+  permissionMode?: string;
+  exitCode?: number | null;
+  elapsedMs?: number;
+}
+
+/**
+ * claude, kimi and kiro pass the whole prompt as a single argv entry, which the
+ * OS length-limits; codex pipes it over stdin. This cap is sized for the argv
+ * case, not for a model's context window.
+ */
+export const CHAT_PROMPT_MAX_CHARS = 24_000;
+
+/** Scrollback kept per agent. UI state — anything worth keeping leaves through
+ *  the turn actions, which write real files. */
+export const CHAT_HISTORY_CAP = 20;
+
+// ponytail: multi-turn = replay the capped transcript as one prompt. Ceiling:
+// the prompt grows O(turns^2) in tokens, and no server-side tool or file state
+// carries across turns — every turn is a cold subprocess. Upgrade path is
+// native resume (claude --resume, codex exec resume, kimi --session) through
+// startAgentCliInvocation's extraArgs, once (1) the session id is captured per
+// provider from --output-format json, (2) build_cli_command stops terminating
+// the codex argv with "-" so appended args still land before it, and (3) kiro
+// grows a resume flag. AGENT_CAPABILITIES.resume already records who could.
+export function buildChatPrompt(
+  agent: AgentRecord,
+  turns: ChatTurn[],
+  message: string,
+): { prompt: string; droppedTurns: number } {
+  const preamble = agent.prompt.trim();
+  const head = preamble ? `<agent_instructions>\n${preamble}\n</agent_instructions>\n\n` : "";
+  const tail = `User: ${message}`;
+
+  const render = (turn: ChatTurn) =>
+    `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`;
+
+  // Drop oldest first. The newest user message is never truncated: a silently
+  // mangled question answered confidently is worse than the CLI erroring.
+  let dropped = 0;
+  let kept = turns;
+  for (;;) {
+    const body = kept.map(render).join("\n\n");
+    const prompt = body ? `${head}${body}\n\n${tail}` : `${head}${tail}`;
+    if (prompt.length <= CHAT_PROMPT_MAX_CHARS || kept.length === 0) {
+      return { prompt, droppedTurns: dropped };
+    }
+    kept = kept.slice(1);
+    dropped += 1;
+  }
+}
+
+const storageKey = (workPath: string | null, agentId: string) =>
+  `maru:agent-chat:v1:${workPath ?? "no-workspace"}:${agentId}`;
+
+export function loadChatTurns(workPath: string | null, agentId: string): ChatTurn[] {
+  try {
+    const raw = window.localStorage.getItem(storageKey(workPath, agentId));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (turn): turn is ChatTurn =>
+        typeof turn === "object"
+        && turn !== null
+        && typeof (turn as ChatTurn).text === "string"
+        && ((turn as ChatTurn).role === "user" || (turn as ChatTurn).role === "assistant"),
+    );
+  } catch {
+    // A corrupt or unavailable store must not take the pane down with it.
+    return [];
+  }
+}
+
+export function saveChatTurns(
+  workPath: string | null,
+  agentId: string,
+  turns: ChatTurn[],
+): void {
+  try {
+    window.localStorage.setItem(
+      storageKey(workPath, agentId),
+      JSON.stringify(turns.slice(-CHAT_HISTORY_CAP)),
+    );
+  } catch {
+    // Quota or private mode — the conversation still works for this session.
+  }
+}
+
+export interface ChatSendResult {
+  text: string;
+  runtime: AiRuntime;
+  permissionMode: string;
+  exitCode: number | null;
+}
+
+export interface SendAgentChatTurnParams {
+  agent: AgentRecord;
+  ai: AiSettings;
+  workPath: string;
+  turns: ChatTurn[];
+  message: string;
+  /** Fires as soon as the subprocess is registered, so the UI can offer Stop. */
+  onInvocation?: (invocationId: string) => void;
+  /** Live stdout tail while the turn runs. */
+  onChunk?: (line: string) => void;
+}
+
+/** One chat turn against the agent's resolved backend. */
+export async function sendAgentChatTurn(
+  params: SendAgentChatTurnParams,
+): Promise<ChatSendResult> {
+  const { agent, ai, workPath, turns, message } = params;
+  // Turning an agent off has to stop its conversation too — runAgentDetailed's
+  // guard never runs on this path.
+  if (!agent.enabled) throw new Error(`agent_disabled: ${agent.id}`);
+  if (!message.trim()) throw new Error("agent_prompt_required");
+
+  const { runtime, commandOverride } = await resolveAvailableRuntime(
+    resolveAgentRuntime(agent, ai),
+    ai,
+  );
+  const permissionMode = resolveAgentPermissionMode(agent, ai);
+  const { prompt } = buildChatPrompt(agent, turns, message);
+
+  const invocationId = await startAgentCliInvocation(
+    runtime,
+    prompt,
+    workPath,
+    null,
+    null,
+    commandOverride,
+    permissionMode,
+  );
+  params.onInvocation?.(invocationId);
+
+  if (!isTauri()) {
+    // Browser dev shell: no ai:// bus, so the e2e override's return value is
+    // the assistant turn. Real event replay can come when a spec needs to
+    // assert streaming rather than the final answer.
+    return { text: invocationId, runtime, permissionMode, exitCode: 0 };
+  }
+
+  const { listen } = await import("@tauri-apps/api/event");
+  return await new Promise<ChatSendResult>((resolve, reject) => {
+    let stdout = "";
+    const stderr: string[] = [];
+    let settled = false;
+    const unlisteners: Array<() => void> = [];
+
+    const cleanup = () => {
+      settled = true;
+      for (const off of unlisteners) {
+        try {
+          off();
+        } catch {
+          // best-effort
+        }
+      }
+    };
+    const safeReject = (error: Error) => {
+      if (settled) return;
+      cleanup();
+      reject(error);
+    };
+
+    void listen<AiOutputEvent>("ai://output", (evt) => {
+      if (evt.payload.invocationId !== invocationId) return;
+      if (evt.payload.stream === "stdout") {
+        stdout += `${evt.payload.line}\n`;
+      } else {
+        stderr.push(evt.payload.line);
+      }
+      params.onChunk?.(evt.payload.line);
+    }).then((off) => unlisteners.push(off));
+
+    void listen<AiDoneEvent>("ai://done", (evt) => {
+      if (evt.payload.invocationId !== invocationId || settled) return;
+      if (!evt.payload.success) {
+        // stderr is only surfaced on failure; it is noise on the happy path.
+        const detail = stderr.join("\n").trim();
+        safeReject(
+          new Error(
+            detail
+              || `${runtime} CLI exited with code ${evt.payload.exitCode ?? "unknown"}`,
+          ),
+        );
+        return;
+      }
+      cleanup();
+      resolve({
+        text: stdout.trim(),
+        runtime,
+        permissionMode,
+        exitCode: evt.payload.exitCode,
+      });
+    }).then((off) => unlisteners.push(off));
+
+    void listen<AiErrorEvent>("ai://error", (evt) => {
+      if (evt.payload.invocationId !== invocationId) return;
+      safeReject(new Error(`${evt.payload.kind}: ${evt.payload.message}`));
+    }).then((off) => unlisteners.push(off));
+  });
+}
+
+/** Chat runs are foreground and visible in the tab, so they are stopped
+ *  directly rather than through the mission board. */
+export async function stopAgentChatTurn(invocationId: string): Promise<void> {
+  await stopAiMission(invocationId);
+}

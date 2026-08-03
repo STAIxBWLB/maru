@@ -44,10 +44,11 @@ import { SkillRunsPanel } from "../skills/SkillRunsPanel";
 import { Button, IconButton } from "../ui/Button";
 import { DialogSurface, DialogSurfaceTitle } from "../ui/DialogSurface";
 import { EmptyState, ModeHeader, SegmentedControl, StatusBanner } from "../ui/ModeChrome";
+import { AgentChatTab } from "./AgentChatTab";
 import { AgentEditor } from "./AgentEditor";
 
 type AgentFilter = "all" | "running" | "scheduled" | "mine";
-type DetailTab = "status" | "runs" | "config";
+type DetailTab = "status" | "chat" | "runs" | "config";
 
 const SCHEDULE_ADD_APPROVAL_KIND = "scheduler.add";
 
@@ -58,6 +59,9 @@ interface AgentsPaneProps {
   missions: MissionRecord[];
   logLines: Record<string, string[]>;
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  /** Configured tasks root, so a task created from chat lands where TasksPane
+   *  looks for it rather than in the default root. */
+  tasksRoot: string | null;
   onRefreshMissions: () => void;
   onStopMission: (id: string) => void;
   onMissionStarted: (id: string) => void;
@@ -98,6 +102,7 @@ export function AgentsPane({
   missions,
   logLines,
   runtimeCommands,
+  tasksRoot,
   onRefreshMissions,
   onStopMission,
   onMissionStarted,
@@ -514,6 +519,7 @@ export function AgentsPane({
               workPath={workPath}
               logLines={logLines}
               runtimeCommands={runtimeCommands}
+              tasksRoot={tasksRoot}
               onRun={() => void runNow(selected)}
               onStop={() => {
                 if (selected.activeMissionId) onStopMission(selected.activeMissionId);
@@ -653,6 +659,7 @@ function AgentDetail({
   onAttachSchedule,
   onDetachSchedule,
   onToggleSchedule,
+  tasksRoot,
   onSave,
   onDelete,
   onReset,
@@ -671,6 +678,7 @@ function AgentDetail({
   workPath: string | null;
   logLines: Record<string, string[]>;
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
+  tasksRoot: string | null;
   onRun: () => void;
   onStop: () => void;
   onAttachSchedule: (when: RecommendedSchedule) => void;
@@ -766,6 +774,7 @@ function AgentDetail({
         onChange={onTab}
         options={[
           { value: "status", label: t("agents.tab.status") },
+          { value: "chat", label: t("agents.tab.chat") },
           { value: "runs", label: t("agents.tab.runs") },
           { value: "config", label: t("agents.tab.config") },
         ]}
@@ -826,6 +835,24 @@ function AgentDetail({
               />
             </div>
           )}
+        </div>
+      ) : null}
+
+      {tab === "chat" ? (
+        <div className="agents-detail-body">
+          <AgentChatTab
+            agent={agent}
+            ai={ai}
+            workPath={workPath}
+            tasksRoot={tasksRoot}
+            runtimeCommands={runtimeCommands}
+            resolvedRuntime={resolveAgentRuntime(agent, ai) as SkillDispatchRuntime}
+            permissionMode={
+              agent.permissionMode === "inherit" ? ai.permissionMode : agent.permissionMode
+            }
+            onConfirmApproval={onConfirmApproval}
+            onError={onError}
+          />
         </div>
       ) : null}
 

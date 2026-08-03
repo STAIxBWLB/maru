@@ -9184,6 +9184,7 @@ function MainApp() {
             missions={processingMissions}
             logLines={processingLogLines}
             runtimeCommands={aiRuntimeCommands}
+            tasksRoot={effectiveTasksSettings.root}
             onRefreshMissions={refreshProcessingMissions}
             onStopMission={stopProcessingMission}
             onMissionStarted={trackMissionQuietly}

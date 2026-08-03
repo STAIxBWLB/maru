@@ -24243,6 +24243,120 @@ select:focus-visible,
   gap: 10px;
 }
 
+.agents-chat {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agents-chat-runtime {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--ink-3);
+  font-size: var(--type-meta-size);
+}
+
+.agents-chat-runtime-name {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+.agents-chat-runtime [data-ready="no"] {
+  color: var(--danger, var(--ink-2));
+}
+
+.agents-chat-runtime code {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro-size);
+  color: var(--ink-3);
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-chat-runtime-spacer {
+  flex: 1;
+}
+
+.agents-chat-turns {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.agents-chat-bubble {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agents-chat-bubble[data-role="user"] {
+  background: var(--surface-2, var(--panel));
+  align-self: flex-end;
+  max-width: 82%;
+}
+
+.agents-chat-text {
+  margin: 0;
+  font-size: var(--type-body-size);
+  line-height: 1.6;
+  color: var(--ink-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agents-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.agents-chat-meta {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-meta-size);
+}
+
+.agents-chat-truncated {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-meta-size);
+}
+
+.agents-chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.agents-chat-composer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink-1);
+  font-family: inherit;
+  font-size: var(--type-body-size);
+  line-height: 1.5;
+}
+
 .agents-next-run {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
