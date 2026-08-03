@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   agentsUsageStatus: vi.fn(),
+  dotSyncOverview: vi.fn(),
   skillsBundleStatus: vi.fn(),
   activeMissions: [] as Array<{
     id: string;
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../lib/api", () => ({
   AGENT_PROVIDERS: ["claude", "codex", "kimi", "kiro"],
   agentsUsageStatus: mocks.agentsUsageStatus,
+  dotSyncOverview: mocks.dotSyncOverview,
 }));
 
 vi.mock("../lib/skills", () => ({
@@ -29,7 +31,7 @@ vi.mock("../lib/useActiveMissions", () => ({
 
 import { AgentUsageBar } from "../components/AgentUsageBar";
 import { LocaleContext } from "../lib/i18n";
-import type { AgentUsageStatus } from "../lib/api";
+import type { AgentUsageStatus, DotSyncOverview } from "../lib/api";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -38,6 +40,7 @@ const t = (key: string, vars?: Record<string, string | number>) => {
   if (key === "agents.usage.usedSuffix") return "used";
   if (key === "agents.usage.filesLabel") return "files";
   if (key === "agents.usage.skillsVersion") return `Skills ${vars?.version ?? ""}`;
+  if (key === "agents.usage.sync.scheduled") return `${vars?.count ?? 0} jobs`;
   if (key.startsWith("system.agents.agent.")) return key.slice("system.agents.agent.".length);
   let result = key;
   for (const [name, value] of Object.entries(vars ?? {})) {
@@ -65,6 +68,18 @@ describe("AgentUsageBar", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     mocks.agentsUsageStatus.mockResolvedValue([]);
+    mocks.dotSyncOverview.mockResolvedValue({
+      cli: {
+        available: false,
+        compatible: false,
+        path: null,
+        version: null,
+        minimumVersion: "2.63.0",
+        message: null,
+      },
+      mirror: null,
+      peer: null,
+    } satisfies DotSyncOverview);
     mocks.skillsBundleStatus.mockResolvedValue(null);
     mocks.activeMissions = [];
   });
@@ -225,6 +240,60 @@ describe("AgentUsageBar", () => {
         ?.parentElement?.click();
     });
     expect(onOpenSettings).toHaveBeenCalledWith("projects");
+  });
+
+  it("shows dot sync job health and opens Jobs", async () => {
+    const syncOverview: DotSyncOverview = {
+      cli: {
+        available: true,
+        compatible: true,
+        path: "/opt/homebrew/bin/dot",
+        version: "2.63.0",
+        minimumVersion: "2.63.0",
+        message: null,
+      },
+      mirror: {
+        schemaVersion: 1,
+        kind: "mirror",
+        profile: "sync",
+        configured: true,
+        workspacePath: "/work",
+        storeDir: "/work/.dotfiles/sync",
+        target: { kind: "local", spec: "local:/mirror", path: "/mirror" },
+        localExists: true,
+        targetExists: true,
+        paused: false,
+        lockHeld: false,
+        owner: "mac-a",
+        canPush: true,
+        machineNames: ["mac-a"],
+        filterMode: "include",
+        allowCount: 0,
+        submoduleCount: 0,
+        propagation: { create: true, update: true, delete: false },
+        maxDelete: 1000,
+        lastPullAt: null,
+        lastPushAt: null,
+        lastIntakeAt: null,
+        conflictCount: 0,
+        logPath: "/log",
+        includePath: "/include",
+        excludePath: "/exclude",
+        ignorePath: "/ignore",
+        allowPath: "/allow",
+        jobs: [{ id: "push", action: "push", label: "push", intervalSeconds: 600, mode: "clean", state: "running", lastRunAt: null }],
+      },
+      peer: null,
+    };
+    mocks.dotSyncOverview.mockResolvedValue(syncOverview);
+    const onOpenSettings = vi.fn();
+    await render(onOpenSettings);
+
+    const sync = container.querySelector<HTMLButtonElement>(".dot-sync-status");
+    expect(sync?.classList.contains("scheduled")).toBe(true);
+    expect(sync?.textContent).toContain("1");
+    await act(async () => sync?.click());
+    expect(onOpenSettings).toHaveBeenCalledWith("jobs");
   });
 
   it("shows the skills version alongside usage chips", async () => {

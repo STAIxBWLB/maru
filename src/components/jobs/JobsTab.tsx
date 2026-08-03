@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "../../lib/i18n";
 import { ModeHeader } from "../ui/ModeChrome";
 import { SettingsSection } from "../settings/SettingsSection";
+import { DotSyncPanel } from "./DotSyncPanel";
 import {
   jobsInstall,
   jobsList,
@@ -89,7 +90,7 @@ export function JobsTab({ workPath }: JobsTabProps) {
     <div className="settings-tab wide jobs-settings-form">
       <ModeHeader
         title={t("system.tab.jobs")}
-        subtitle={t("system.jobs.description")}
+        subtitle={t("system.jobs.pageDescription")}
         actions={
           <button
             type="button"
@@ -102,7 +103,12 @@ export function JobsTab({ workPath }: JobsTabProps) {
           </button>
         }
       />
-      <SettingsSection title={t("system.jobs.title")} padded>
+      <DotSyncPanel />
+      <SettingsSection
+        title={t("system.jobs.title")}
+        description={t("system.jobs.description")}
+        padded
+      >
         {error ? <p className="jobs-error">{error}</p> : null}
         {jobs === null ? (
           <p className="muted">{t("system.jobs.loading")}</p>

@@ -4,9 +4,12 @@ import { RefreshCcw } from "lucide-react";
 import {
   agentsUsageStatus,
   AGENT_PROVIDERS,
+  dotSyncOverview,
   type AgentCommandOverrides,
   type AgentUsageStatus,
+  type DotSyncOverview,
 } from "../lib/api";
+import { deriveDotSyncBadge } from "../lib/dotSync";
 import { useTranslation } from "../lib/i18n";
 import { skillsBundleStatus, type SkillBundleStatus } from "../lib/skills";
 import { useActiveMissions } from "../lib/useActiveMissions";
@@ -39,6 +42,7 @@ export function AgentUsageBar({
   const activeMissions = useActiveMissions();
   const [usage, setUsage] = useState<AgentUsageStatus[] | null>(null);
   const [bundleStatus, setBundleStatus] = useState<SkillBundleStatus | null>(null);
+  const [syncOverview, setSyncOverview] = useState<DotSyncOverview | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // Ticks once per poll so "reset in" text stays roughly current.
   const [now, setNow] = useState(() => Date.now());
@@ -51,9 +55,10 @@ export function AgentUsageBar({
     async (force = false) => {
       setRefreshing(true);
       try {
-        const [nextUsage, nextBundleStatus] = await Promise.all([
+        const [nextUsage, nextBundleStatus, nextSyncOverview] = await Promise.all([
           agentsUsageStatus(commandOverrides, force).catch(() => null),
           skillsBundleStatus().catch(() => null),
+          dotSyncOverview().catch(() => null),
         ]);
         if (!mountedRef.current) return;
         if (nextUsage) {
@@ -61,6 +66,7 @@ export function AgentUsageBar({
           setNow(Date.now());
         }
         setBundleStatus(nextBundleStatus);
+        if (nextSyncOverview) setSyncOverview(nextSyncOverview);
       } finally {
         lastLoadedAtRef.current = Date.now();
         if (mountedRef.current) setRefreshing(false);
@@ -97,6 +103,7 @@ export function AgentUsageBar({
   const usable = (usage ?? []).filter((entry) => entry.state !== "cli_missing");
   const skillsVersion = bundleStatus?.active?.displayVersion ?? null;
   const skillsUpdateAvailable = bundleStatus?.updateAvailable ?? false;
+  const syncBadge = deriveDotSyncBadge(syncOverview);
 
   return (
     <footer className="agent-usage-bar" aria-label={t("agents.usage.barLabel")}>
@@ -153,6 +160,17 @@ export function AgentUsageBar({
             </span>
           </button>
         ) : null}
+        <button
+          type="button"
+          className={`agent-usage-stat dot-sync-status ${syncBadge.state}`}
+          onClick={() => openSettings("jobs")}
+          title={t("agents.usage.syncTitle")}
+        >
+          <span className="agent-usage-stat-name">{t("agents.usage.syncLabel")}</span>
+          <span className="agent-usage-stat-value">
+            {t(`agents.usage.sync.${syncBadge.state}`, { count: syncBadge.scheduledJobs })}
+          </span>
+        </button>
         {skillsVersion ? (
           <button
             type="button"

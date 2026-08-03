@@ -798,6 +798,18 @@ test("shows the meetings settings tab in the settings window shell", async ({ pa
   await expect(page.getByText("작업 로그 append", { exact: true })).toBeVisible();
 });
 
+test("opens dot sync management in Jobs without a Tauri runtime", async ({ page }) => {
+  await page.goto("/?window=settings&workPath=mock%3A%2F%2Fmaru-sample-workspace&tab=jobs");
+
+  await expect(page.getByRole("tab", { name: "작업" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByText("워크스페이스 동기화", { exact: true })).toBeVisible();
+  await expect(page.getByText("dot CLI가 설치되지 않음", { exact: true })).toBeVisible();
+  await expect(page.getByText("예약 작업 (launchd)", { exact: true })).toBeVisible();
+});
+
 test("manages secrets settings with full-width scroll and explicit reveal", async ({
   page,
 }) => {

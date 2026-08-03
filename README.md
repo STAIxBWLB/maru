@@ -56,6 +56,26 @@ flag-gated.
 | `sites` | 사이트 / Sites | Left-rail site switcher with an embedded native browser pane. |
 | `e2e` | E2E 플로우 / E2E Flow | Hidden end-to-end flow console (flag-gated `e2eFlowEnabled`). |
 
+## Workspace sync management
+
+Settings > Jobs includes a separate Workspace Sync section for the global dot
+workspace. It reads dot's versioned JSON status API and manages both sync
+profiles without adding them to the workspace-local `.maru/jobs.json` registry:
+
+- Cloud mirror status, owner, propagation policy, filters, push/pull schedules,
+  pause/resume, preview, run, and bounded log tail.
+- Mac peer SSH target, bidirectional schedule with quarantined deletions,
+  doctor/diff, preview/run, secret allow patterns, and host-path allowlist.
+  dot limits deletion to baseline-recorded paths and caps new profiles at 100
+  paths per run.
+- Confirmed Homebrew install/update when dot is missing or older than the
+  minimum compatible JSON API version.
+
+The permanent bottom status bar shows setup, manual, scheduled, syncing,
+paused, or attention state and opens Settings > Jobs when clicked. Maru invokes
+fixed dot arguments directly, never through a shell; mutating actions are
+serialized and destructive or secret-expanding changes require confirmation.
+
 ## HTML editing
 
 `.html` and `.htm` documents open in the document editor with three modes
