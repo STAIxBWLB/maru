@@ -712,6 +712,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Maru")
         .run(|app_handle, event| match event {
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => queue_opened_urls(app_handle, urls),
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 let state = app_handle.state::<TelegramIoState>();
