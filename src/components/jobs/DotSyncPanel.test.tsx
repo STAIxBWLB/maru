@@ -75,6 +75,38 @@ const configured: DotSyncOverview = {
   peer: null,
 };
 
+const configuredWithDisabledPeer: DotSyncOverview = {
+  ...configured,
+  peer: {
+    schemaVersion: 1,
+    kind: "peer",
+    profile: {
+      ...configured.mirror!,
+      kind: "peer-profile",
+      profile: "peer",
+      target: {
+        kind: "ssh",
+        spec: "ssh:user@peer:/work",
+        host: "user@peer",
+        path: "/work",
+      },
+      jobs: [],
+    },
+    job: {
+      id: "peer-sync",
+      action: "peer-sync",
+      label: "com.dotfiles.peer",
+      intervalSeconds: 0,
+      mode: "safe-bidirectional",
+      state: "not-installed",
+      lastRunAt: null,
+    },
+    lastExitCode: null,
+    runCount: null,
+    homePathsPath: "/work/.dotfiles/peer/home-paths.txt",
+  },
+};
+
 const t = (key: string, vars?: Record<string, string | number>) => {
   let result = key;
   for (const [name, value] of Object.entries(vars ?? {})) {
@@ -142,5 +174,29 @@ describe("DotSyncPanel", () => {
     await act(async () => install?.click());
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(mocks.run).toHaveBeenCalledWith({ type: "installCli" });
+  });
+
+  it("preserves an explicitly disabled peer schedule when saving", async () => {
+    mocks.overview.mockResolvedValue(configuredWithDisabledPeer);
+    mocks.run.mockResolvedValue({ stdout: "saved", stderr: "", overview: configuredWithDisabledPeer });
+    await render();
+
+    const editButtons = [...container.querySelectorAll<HTMLButtonElement>("button")].filter(
+      (button) => button.textContent?.includes("system.dotSync.edit"),
+    );
+    await act(async () => editButtons.at(-1)?.click());
+    const intervalLabel = [...container.querySelectorAll<HTMLLabelElement>("label")].find(
+      (label) => label.textContent?.includes("system.dotSync.peerInterval"),
+    );
+    expect(intervalLabel?.querySelector("select")?.value).toBe("0");
+
+    const save = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.includes("system.dotSync.savePeer"),
+    );
+    await act(async () => save?.click());
+    expect(mocks.run).toHaveBeenCalledWith(expect.objectContaining({
+      type: "configurePeer",
+      intervalSeconds: 0,
+    }));
   });
 });

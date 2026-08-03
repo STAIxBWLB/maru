@@ -140,13 +140,18 @@ struct CommandOutput {
     stderr: String,
 }
 
-fn dot_binary() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("MARU_DOT_BINARY").map(PathBuf::from) {
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    resolve_program("dot")
+fn dot_candidates() -> [Option<PathBuf>; 3] {
+    let configured = std::env::var_os("MARU_DOT_BINARY")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file());
+    // The Homebrew formula installs both names. Prefer the unambiguous alias,
+    // but validate every candidate because Graphviz also owns `dot` and a
+    // stale or unrelated `dotfiles` executable can precede the real CLI.
+    [
+        configured,
+        resolve_program("dotfiles"),
+        resolve_program("dot"),
+    ]
 }
 
 fn capped(bytes: Vec<u8>) -> String {
@@ -198,14 +203,37 @@ fn run_program(
 }
 
 fn parse_dot_version(output: &str) -> Option<String> {
-    output
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix('v'))
-        .map(|part| {
-            part.trim_matches(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-                .to_string()
-        })
-        .filter(|part| !part.is_empty())
+    let mut parts = output.split_whitespace();
+    if parts.next()? != "dot" {
+        return None;
+    }
+    let marker = parts.next()?;
+    let raw = if marker == "version" {
+        parts.next()?
+    } else {
+        marker.strip_prefix('v')?
+    };
+    let version = raw
+        .trim_matches(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .to_string();
+    version_tuple(&version).map(|_| version)
+}
+
+fn select_dot_binary(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    mut version_for: impl FnMut(&Path) -> Option<String>,
+) -> Option<(PathBuf, String)> {
+    candidates.into_iter().find_map(|binary| {
+        let version = version_for(&binary)?;
+        Some((binary, version))
+    })
+}
+
+fn dot_binary() -> Option<(PathBuf, String)> {
+    select_dot_binary(dot_candidates().into_iter().flatten(), |binary| {
+        let output = run_program(binary, &["--version".to_string()], None).ok()?;
+        parse_dot_version(&output.stdout)
+    })
 }
 
 fn version_tuple(value: &str) -> Option<(u32, u32, u32)> {
@@ -237,7 +265,7 @@ fn parse_status_json(output: &str, expected_kind: &str) -> Result<Value, String>
 }
 
 fn overview_sync() -> Result<DotSyncOverview, String> {
-    let Some(binary) = dot_binary() else {
+    let Some((binary, version)) = dot_binary() else {
         return Ok(DotSyncOverview {
             cli: DotCliStatus {
                 available: false,
@@ -251,13 +279,11 @@ fn overview_sync() -> Result<DotSyncOverview, String> {
             peer: None,
         });
     };
-    let version_output = run_program(&binary, &["--version".to_string()], None)?;
-    let version = parse_dot_version(&version_output.stdout);
-    let compatible = version.as_deref().is_some_and(version_compatible);
+    let compatible = version_compatible(&version);
     let cli = DotCliStatus {
         available: true,
         path: Some(binary.to_string_lossy().to_string()),
-        version: version.clone(),
+        version: Some(version),
         compatible,
         minimum_version: MIN_DOT_VERSION.to_string(),
         message: (!compatible).then(|| format!("dot {} or newer is required", MIN_DOT_VERSION)),
@@ -346,7 +372,7 @@ fn run_dot_action(request: DotSyncActionRequest) -> Result<DotSyncActionResult, 
         });
     }
 
-    let binary = dot_binary().ok_or_else(|| "dot_not_installed".to_string())?;
+    let (binary, _) = dot_binary().ok_or_else(|| "dot_not_installed".to_string())?;
     if matches!(&request, DotSyncActionRequest::UpdateCli) {
         let output = if binary.starts_with("/opt/homebrew") || binary.starts_with("/usr/local") {
             let brew =
@@ -694,12 +720,27 @@ mod tests {
     #[test]
     fn parses_release_version_and_checks_minimum() {
         assert_eq!(
+            parse_dot_version("dot version 2.63.0 (4ac6761)"),
+            Some("2.63.0".to_string())
+        );
+        assert_eq!(
             parse_dot_version("dot v2.61.2 (5564167)"),
             Some("2.61.2".to_string())
         );
+        assert_eq!(parse_dot_version("dot - graphviz version 12.2.1"), None);
+        assert_eq!(parse_dot_version("other version 2.63.0"), None);
         assert!(!version_compatible("2.62.0"));
         assert!(version_compatible("2.63.0"));
         assert!(version_compatible("3.0.0"));
+    }
+
+    #[test]
+    fn skips_invalid_dot_binary_candidates() {
+        let selected = select_dot_binary(
+            [PathBuf::from("dotfiles"), PathBuf::from("dot")],
+            |binary| (binary == Path::new("dot")).then(|| "2.63.0".to_string()),
+        );
+        assert_eq!(selected, Some((PathBuf::from("dot"), "2.63.0".to_string())));
     }
 
     #[test]
