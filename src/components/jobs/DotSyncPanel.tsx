@@ -109,7 +109,9 @@ function peerFormFrom(overview: DotSyncOverview): PeerForm {
     ...emptyPeerForm,
     host: peer?.profile.target.host ?? "",
     remotePath: peer?.profile.target.path || overview.mirror?.workspacePath || "",
-    intervalSeconds: peer?.job.intervalSeconds || emptyPeerForm.intervalSeconds,
+    intervalSeconds: peer?.profile.configured
+      ? peer.job.intervalSeconds
+      : emptyPeerForm.intervalSeconds,
   };
 }
 
