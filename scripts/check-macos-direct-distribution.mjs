@@ -334,20 +334,22 @@ for (const needle of [
 }
 
 const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
-const dmgNotarizationStep = workflow.indexOf("- name: Notarize, staple, and verify macOS disk image");
+const dmgNotarizationStep = workflow.indexOf("- name: Build, notarize, staple, and upload macOS disk image");
 if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
-  ok("release workflow notarizes the DMG after Tauri creates it");
+  ok("release workflow stages the DMG after the app and updater artifacts");
 } else {
-  fail("release workflow must notarize the DMG after Tauri creates it");
+  fail("release workflow must stage the DMG after the app and updater artifacts");
 }
 
 for (const [description, needle] of [
+  ["keep macOS DMGs out of tauri-action uploads", "--target aarch64-apple-darwin --bundles app"],
+  ["keep Intel DMGs out of tauri-action uploads", "--target x86_64-apple-darwin --bundles app"],
+  ["build the DMG without uploading it", "pnpm tauri bundle --target \"$target\" --bundles dmg --ci"],
   ["submit the DMG to Apple notary service", "notarytool submit \"$dmg\""],
   ["staple the DMG ticket", "stapler staple \"$dmg\""],
   ["validate the stapled DMG ticket", "stapler validate \"$dmg\""],
   ["verify the DMG with Gatekeeper", "context:primary-signature \"$dmg\""],
-  ["replace the pre-notarization release asset", "gh release upload \"$RELEASE_TAG\" \"$asset\""],
-  ["clobber the pre-notarization release asset", "--clobber"],
+  ["upload the DMG after validation", "gh release upload \"$RELEASE_TAG\" \"$asset\""],
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow will ${description}`);
