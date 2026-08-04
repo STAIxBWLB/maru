@@ -29,19 +29,19 @@ declare global {
 
 const isTauri = () => typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
-interface AiOutputEvent {
+export interface AiOutputEvent {
   invocationId: string;
   stream: string;
   line: string;
 }
 
-interface AiDoneEvent {
+export interface AiDoneEvent {
   invocationId: string;
   exitCode: number | null;
   success: boolean;
 }
 
-interface AiErrorEvent {
+export interface AiErrorEvent {
   invocationId: string;
   kind: string;
   message: string;

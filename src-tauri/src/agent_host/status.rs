@@ -24,6 +24,8 @@ const USAGE_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many bytes from the end of a codex rollout file to scan for
 /// `token_count` events (they are always the most recent events).
 const ROLLOUT_TAIL_BYTES: u64 = 256 * 1024;
+/// Bound fallback work when the newest Codex sessions have no quota event.
+const MAX_RECENT_ROLLOUTS: usize = 20;
 
 const AGENTS: [CliProviderKind; 4] = [
     CliProviderKind::Claude,
@@ -315,6 +317,9 @@ fn probe_usage(
             Some(format!("{} CLI not found", provider.default_binary_name())),
         );
     }
+    // Kept as an independent per-backend match rather than derived from
+    // `capabilities().usage`: `cli_backends_real_smoke` asserts the two agree,
+    // and that assertion is only worth running while they are two sources.
     match provider {
         CliProviderKind::Kimi => make(
             "unsupported",
@@ -389,15 +394,25 @@ fn codex_usage_windows() -> Result<Vec<UsageWindow>, UsageProbeError> {
         .ok_or_else(|| UsageProbeError::Other("home directory unavailable".to_string()))?
         .join(".codex")
         .join("sessions");
-    let rollout = newest_rollout_file(&sessions_root).ok_or_else(|| {
-        UsageProbeError::Other("No codex rollout session files found".to_string())
-    })?;
-    // Rollouts can be multi-MB; token_count events sit at the end, so read
-    // only the tail instead of the whole file.
-    let text = read_file_tail(&rollout, ROLLOUT_TAIL_BYTES)
-        .map_err(|err| UsageProbeError::Other(format!("rollout read failed: {err}")))?;
-    parse_codex_rollout_usage(&text)
-        .ok_or_else(|| UsageProbeError::Other("No token_count data in codex rollout".to_string()))
+    let rollouts = recent_rollout_files(&sessions_root, MAX_RECENT_ROLLOUTS);
+    if rollouts.is_empty() {
+        return Err(UsageProbeError::Other(
+            "No codex rollout session files found".to_string(),
+        ));
+    }
+    codex_usage_from_rollouts(&rollouts).ok_or_else(|| {
+        UsageProbeError::Other("No token_count data in recent codex rollouts".to_string())
+    })
+}
+
+fn codex_usage_from_rollouts(rollouts: &[PathBuf]) -> Option<Vec<UsageWindow>> {
+    rollouts.iter().find_map(|rollout| {
+        // Rollouts can be multi-MB; token_count events sit near the end, so
+        // read only the tail. A new session may not have emitted one yet;
+        // keep searching older recent sessions instead of hiding valid quota.
+        let text = read_file_tail(rollout, ROLLOUT_TAIL_BYTES).ok()?;
+        parse_codex_rollout_usage(&text)
+    })
 }
 
 // --- pure parsers (unit-tested without the CLIs) ----------------------------
@@ -408,6 +423,15 @@ struct ClaudeAuthInfo {
     api_provider: Option<String>,
     org_name: Option<String>,
     email: Option<String>,
+}
+
+/// Whether `claude auth status` output says the user is logged in. Fails closed
+/// on unparseable output, matching [`probe_claude_account`] — the skills gate
+/// and the account probe must not disagree about the same machine.
+pub(crate) fn claude_auth_logged_in(text: &str) -> bool {
+    parse_claude_auth_status(text)
+        .map(|info| info.logged_in)
+        .unwrap_or(false)
 }
 
 fn parse_claude_auth_status(text: &str) -> Option<ClaudeAuthInfo> {
@@ -605,11 +629,15 @@ fn parse_codex_rollout_usage(text: &str) -> Option<Vec<UsageWindow>> {
         if value.get("type").and_then(JsonValue::as_str) != Some("event_msg") {
             continue;
         }
-        let payload = value.get("payload")?;
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
         if payload.get("type").and_then(JsonValue::as_str) != Some("token_count") {
             continue;
         }
-        let rate_limits = payload.get("rate_limits")?;
+        let Some(rate_limits) = payload.get("rate_limits") else {
+            continue;
+        };
         let mut windows = Vec::new();
         for (key, label) in [("primary", "5h"), ("secondary", "7d")] {
             if let Some(window) = rate_limits.get(key) {
@@ -625,7 +653,9 @@ fn parse_codex_rollout_usage(text: &str) -> Option<Vec<UsageWindow>> {
                 }
             }
         }
-        return (!windows.is_empty()).then_some(windows);
+        if !windows.is_empty() {
+            return Some(windows);
+        }
     }
     None
 }
@@ -693,46 +723,72 @@ fn home_file(segments: &[&str]) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// Newest `rollout-*.jsonl` in the codex sessions tree. Sessions live under
-/// `YYYY/MM/DD` directories, where lexicographic-descending names are also
-/// newest, so descend only the newest year → month → day instead of walking
-/// the whole tree (which can hold hundreds of rollouts).
-fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
-    fn newest_child_dir(dir: &Path) -> Option<PathBuf> {
-        std::fs::read_dir(dir)
-            .ok()?
+/// Recent `rollout-*.jsonl` files in newest-first order. Sessions live under
+/// `YYYY/MM/DD`; descending date directories avoid an unbounded full-tree
+/// walk, while spanning days lets a just-created rollout fall back to the
+/// preceding session that already contains quota data.
+fn recent_rollout_files(root: &Path, limit: usize) -> Vec<PathBuf> {
+    fn child_dirs_desc(dir: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut paths = entries
             .flatten()
             .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
-            .map(|entry| entry.file_name())
-            .max()
-            .map(|name| dir.join(name))
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+        paths
     }
-    let year = newest_child_dir(root)?;
-    let month = newest_child_dir(&year)?;
-    let day = newest_child_dir(&month)?;
-    std::fs::read_dir(&day)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .file_name()
-                    .map(|name| {
-                        let name = name.to_string_lossy();
-                        name.starts_with("rollout-") && name.ends_with(".jsonl")
+
+    let mut found = Vec::new();
+    for year in child_dirs_desc(root) {
+        for month in child_dirs_desc(&year) {
+            for day in child_dirs_desc(&month) {
+                let Ok(entries) = std::fs::read_dir(&day) else {
+                    continue;
+                };
+                let mut rollouts = entries
+                    .flatten()
+                    .filter(|entry| {
+                        entry
+                            .file_type()
+                            .map(|kind| kind.is_file())
+                            .unwrap_or(false)
+                            && entry
+                                .file_name()
+                                .to_str()
+                                .map(|name| {
+                                    name.starts_with("rollout-") && name.ends_with(".jsonl")
+                                })
+                                .unwrap_or(false)
                     })
-                    .unwrap_or(false)
-        })
-        // Rollout filenames embed a timestamp, so the name is a deterministic
-        // tie-breaker when mtimes compare equal (coarse fs granularity).
-        .max_by_key(|path| {
-            let mtime = path
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            (mtime, path.file_name().map(|name| name.to_owned()))
-        })
+                    .map(|entry| entry.path())
+                    .collect::<Vec<_>>();
+                rollouts.sort_by(|left, right| {
+                    let modified = |path: &Path| {
+                        path.metadata()
+                            .and_then(|meta| meta.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                    };
+                    modified(right)
+                        .cmp(&modified(left))
+                        .then_with(|| right.file_name().cmp(&left.file_name()))
+                });
+                let remaining = limit.saturating_sub(found.len());
+                found.extend(rollouts.into_iter().take(remaining));
+                if found.len() >= limit {
+                    return found;
+                }
+            }
+        }
+    }
+    found
+}
+
+#[cfg(test)]
+fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
+    recent_rollout_files(root, 1).into_iter().next()
 }
 
 /// Read the last `max_bytes` of a file as (lossy) UTF-8. The first line of a
@@ -760,11 +816,15 @@ fn override_for<'a>(
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(not(test))]
-const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-// Short timeout in tests so the sleeping-fake-CLI test stays fast.
-#[cfg(test)]
-const CLI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+/// 8s in production. Tests tighten it to 500ms so the sleeping-fake-CLI test
+/// stays fast — except under `MARU_CLI_SMOKE`, where the test drives the real
+/// binaries and a real `--version` can take most of that 500ms on its own.
+fn cli_probe_timeout() -> Duration {
+    if cfg!(test) && std::env::var_os("MARU_CLI_SMOKE").is_none() {
+        return Duration::from_millis(500);
+    }
+    Duration::from_secs(8)
+}
 
 fn run_cli(program: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut cmd = Command::new(program);
@@ -775,7 +835,7 @@ fn run_cli(program: &Path, args: &[&str]) -> Option<std::process::Output> {
         .stderr(std::process::Stdio::piped())
         .no_window();
     let mut child = crate::agent_host::provider::retry_etxtbsy(|| cmd.spawn()).ok()?;
-    let deadline = Instant::now() + CLI_PROBE_TIMEOUT;
+    let deadline = Instant::now() + cli_probe_timeout();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return child.wait_with_output().ok(),
@@ -955,6 +1015,32 @@ mod tests {
     }
 
     #[test]
+    fn codex_rollout_skips_newer_quota_less_token_count_events() {
+        let valid = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 37.0, "resets_at": 1780000000}
+                }
+            }
+        });
+        let no_limits = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "token_count"}
+        });
+        let empty_limits = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "token_count", "rate_limits": {"primary": null}}
+        });
+        let text = format!("{valid}\n{no_limits}\n{empty_limits}\n");
+
+        let windows = parse_codex_rollout_usage(&text).unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].used_percent, 37.0);
+    }
+
+    #[test]
     fn newest_rollout_file_picks_latest_by_mtime() {
         let dir = tempfile::tempdir().unwrap();
         let day = dir.path().join("2026/07/28");
@@ -985,6 +1071,36 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(empty.path().join("2026")).unwrap();
         assert!(newest_rollout_file(empty.path()).is_none());
+    }
+
+    #[test]
+    fn codex_usage_falls_back_to_an_older_recent_rollout() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_day = dir.path().join("2026/07/31");
+        let new_day = dir.path().join("2026/08/01");
+        std::fs::create_dir_all(&old_day).unwrap();
+        std::fs::create_dir_all(&new_day).unwrap();
+
+        let older = old_day.join("rollout-with-usage.jsonl");
+        let newer = new_day.join("rollout-startup-only.jsonl");
+        let token_count = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 41.0, "resets_at": 1780000000}
+                }
+            }
+        });
+        std::fs::write(&older, format!("{token_count}\n")).unwrap();
+        std::fs::write(&newer, "{\"type\":\"session_meta\"}\n").unwrap();
+
+        let recent = recent_rollout_files(dir.path(), MAX_RECENT_ROLLOUTS);
+        assert_eq!(recent, vec![newer, older]);
+        let windows = codex_usage_from_rollouts(&recent).unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].label, "5h");
+        assert_eq!(windows[0].used_percent, 41.0);
     }
 
     #[test]
@@ -1055,5 +1171,190 @@ mod tests {
         symlink(dir.path(), day.join("cycle")).unwrap();
 
         assert_eq!(newest_rollout_file(dir.path()), Some(rollout));
+    }
+
+    /// Smoke the *real* installed AI CLIs. Every other provider test drives a
+    /// fake shell script (provider.rs `write_fake_cli`), so nothing about the
+    /// actual integration is covered by `make verify`. Run with:
+    ///
+    ///   make verify-integration
+    ///   MARU_CLI_SMOKE_ROUNDTRIP=1 make verify-integration   # + one live prompt
+    ///
+    /// Backends that are not installed on this machine are skipped, not failed.
+    #[test]
+    #[ignore]
+    fn cli_backends_real_smoke() {
+        use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
+        use crate::agent_host::provider::{CliProviderAdapter, ProviderAdapter};
+
+        if std::env::var("MARU_CLI_SMOKE").is_err() {
+            eprintln!("skipped: set MARU_CLI_SMOKE=1 (see `make verify-integration`)");
+            return;
+        }
+        // Not a tempdir: `codex exec` refuses to run outside a trusted (git)
+        // directory unless --skip-git-repo-check is passed, and the product
+        // never passes it (see aiInvoke.ts). The crate root is always a repo.
+        let cwd = env!("CARGO_MANIFEST_DIR").to_string();
+        let request = || CompletionRequest {
+            schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
+            provider: "cli".to_string(),
+            prompt: "Reply with OK.".to_string(),
+            cwd: cwd.clone(),
+            mode: "autonomous-loop".to_string(),
+            metadata: None,
+        };
+
+        let mut checked = 0;
+        for provider in AGENTS {
+            let Some(binary) = resolve_provider_binary(provider, None) else {
+                eprintln!("skip {}: not installed", provider.default_binary_name());
+                continue;
+            };
+            checked += 1;
+            let caps = provider.capabilities();
+            let id = provider.id();
+
+            // 1. the binary answers --version
+            let account = account_status(provider, None);
+            assert!(
+                account.installed && account.version.is_some(),
+                "{id}: `{} --version` produced no usable output",
+                provider.default_binary_name()
+            );
+
+            // 2. auth classification is a known state, never empty or a panic
+            assert!(
+                matches!(
+                    account.auth_status.as_str(),
+                    "authenticated" | "unauthenticated" | "unknown"
+                ),
+                "{id}: unexpected auth_status {:?}",
+                account.auth_status
+            );
+
+            // 3. the skills gate and the account probe agree about this machine
+            let gate = crate::skill_host::dispatch::runtime_status(id.to_string(), None).unwrap();
+            assert_eq!(
+                gate.available,
+                account.auth_status == "authenticated",
+                "{id}: skills gate available={} but account probe says {:?}",
+                gate.available,
+                account.auth_status
+            );
+
+            // 4. the usage capability flag matches what the probe actually does
+            assert_eq!(
+                usage_status(provider, None, true).state == "unsupported",
+                !caps.usage,
+                "{id}: usage state contradicts capabilities()"
+            );
+
+            // 5. Ask the real resolved binary to parse both permission modes.
+            // `--help` prevents a model call while still detecting removed or
+            // renamed options in the installed provider version.
+            for (mode, args, help_needle) in permission_probe_args(provider) {
+                let output = run_cli(&binary, args)
+                    .unwrap_or_else(|| panic!("{id} {mode}: permission probe timed out"));
+                let text = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    output.status.success() && text.contains(help_needle),
+                    "{id} {mode}: real CLI rejected {:?} or omitted {:?}: {}",
+                    args,
+                    help_needle,
+                    text.lines()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or("")
+                );
+            }
+
+            // 6. one trivial round trip — opt-in: it costs tokens and 10-60s
+            if std::env::var("MARU_CLI_SMOKE_ROUNDTRIP").is_ok()
+                && account.auth_status == "authenticated"
+            {
+                let mut adapter =
+                    CliProviderAdapter::new(provider, Vec::new(), None, "plan".to_string());
+                let response = adapter
+                    .complete(request())
+                    .unwrap_or_else(|err| panic!("{id}: round trip failed: {err}"));
+                assert_eq!(response.provider, id);
+                // Deliberately not asserting the model's words — that is flaky,
+                // not a contract.
+                assert!(
+                    !response.content.trim().is_empty(),
+                    "{id}: empty completion"
+                );
+            }
+
+            eprintln!(
+                "{id}: {} auth={} usage={}",
+                account.version.as_deref().unwrap_or("?"),
+                account.auth_status,
+                caps.usage
+            );
+        }
+        if checked == 0 {
+            eprintln!("skipped: no installed AI CLI found; nothing to verify");
+        }
+    }
+
+    type PermissionProbe = (&'static str, &'static [&'static str], &'static str);
+
+    fn permission_probe_args(provider: CliProviderKind) -> [PermissionProbe; 2] {
+        match provider {
+            CliProviderKind::Claude => [
+                (
+                    "plan",
+                    &["--permission-mode", "plan", "--help"],
+                    "--permission-mode",
+                ),
+                (
+                    "acceptEdits",
+                    &["--permission-mode", "acceptEdits", "--help"],
+                    "acceptEdits",
+                ),
+            ],
+            CliProviderKind::Codex => [
+                (
+                    "plan",
+                    &["exec", "--sandbox", "read-only", "--help"],
+                    "--sandbox",
+                ),
+                (
+                    "acceptEdits",
+                    &["exec", "--sandbox", "workspace-write", "--help"],
+                    "--sandbox",
+                ),
+            ],
+            CliProviderKind::Kimi => [
+                ("plan", &["--plan", "--help"], "--plan"),
+                ("acceptEdits", &["-y", "--help"], "--yolo"),
+            ],
+            CliProviderKind::Kiro => [
+                (
+                    "plan",
+                    &[
+                        "chat",
+                        "--no-interactive",
+                        "--trust-tools=read,grep",
+                        "--help",
+                    ],
+                    "--trust-tools",
+                ),
+                (
+                    "acceptEdits",
+                    &[
+                        "chat",
+                        "--no-interactive",
+                        "--trust-tools=read,grep,write",
+                        "--help",
+                    ],
+                    "--trust-tools",
+                ),
+            ],
+        }
     }
 }

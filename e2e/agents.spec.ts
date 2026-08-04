@@ -77,6 +77,12 @@ function seedBackend(page: import("@playwright/test").Page) {
         record("list_ai_missions", args);
         return [];
       },
+      // The browser shell has no ai:// event bus, so sendAgentChatTurn treats
+      // this return value as the assistant turn (see agentChat.ts).
+      start_agent_cli_invocation: (args: Record<string, unknown>) => {
+        record("start_agent_cli_invocation", args);
+        return "안녕하세요, 무엇을 도와드릴까요?";
+      },
     };
     (
       window as unknown as {
@@ -176,4 +182,122 @@ test("an inline agent can change and save its backend", async ({ page }) => {
   );
   expect(saved).toHaveLength(1);
   expect((saved[0].args.agent as { runtime: string }).runtime).toBe("kimi");
+});
+
+test("chat runs the selected agent's resolved backend and offers result routing", async ({
+  page,
+}) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+
+  // Which binary actually resolved is the answer to "is this really wired up".
+  await expect(pane.locator(".agents-chat-runtime")).toContainText("mock://claude");
+
+  await pane.locator(".agents-chat-composer textarea").fill("워크스페이스 정합성 어때?");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+
+  const assistant = pane.locator('.agents-chat-bubble[data-role="assistant"]');
+  await expect(assistant).toContainText("무엇을 도와드릴까요");
+  // A turn is only useful if it can leave the pane.
+  await expect(assistant.getByRole("button", { name: "할 일로 만들기" })).toBeVisible();
+  await expect(assistant.getByRole("button", { name: "메모로 저장" })).toBeVisible();
+
+  const dispatched = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __MARU_AGENT_CALLS__: Array<{ command: string; args: Record<string, unknown> }>;
+      }
+    ).__MARU_AGENT_CALLS__.filter((call) => call.command === "start_agent_cli_invocation"),
+  );
+  expect(dispatched).toHaveLength(1);
+  // The agent record's resolved settings reached the CLI without the user
+  // picking anything per message.
+  expect(dispatched[0].args.provider).toBe("claude");
+  expect(dispatched[0].args.permissionMode).toBe("plan");
+  expect(String(dispatched[0].args.prompt)).toContain("워크스페이스 정합성 어때?");
+  // The agent's own prompt rides along as the preamble.
+  expect(String(dispatched[0].args.prompt)).toContain("정합성 리포트를 생성");
+});
+
+test("chat scrollback survives switching agents and away from the tab", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await pane.locator(".agents-chat-composer textarea").fill("첫 질문");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+  await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toBeVisible();
+
+  // Another agent starts empty rather than inheriting the thread.
+  await pane.locator(".agents-list-item", { hasText: "받은편지함 정리" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await expect(pane.locator(".agents-chat-turns")).toContainText("나눈 대화가 없습니다");
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await expect(pane.locator(".agents-chat-turns")).toContainText("첫 질문");
+});
+
+test("chat cannot be cleared while a turn is still running", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await pane.locator(".agents-chat-composer textarea").fill("첫 질문");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+  await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toBeVisible();
+
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_E2E_INVOKE__: Record<
+        string,
+        (args: Record<string, unknown>) => unknown
+      >;
+      __MARU_RESOLVE_AGENT_CHAT__?: (value: string) => void;
+    };
+    host.__MARU_E2E_INVOKE__.start_agent_cli_invocation = () =>
+      new Promise<string>((resolve) => {
+        host.__MARU_RESOLVE_AGENT_CHAT__ = resolve;
+      });
+  });
+
+  await pane.locator(".agents-chat-composer textarea").fill("아직 실행 중인 질문");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+  await expect(pane.getByRole("button", { name: "대화 비우기" })).toBeDisabled();
+
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_RESOLVE_AGENT_CHAT__?: (value: string) => void;
+    };
+    host.__MARU_RESOLVE_AGENT_CHAT__?.("두 번째 답변");
+  });
+  await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toHaveCount(2);
+});
+
+test("chat Stop cancels while the invocation id is still pending", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_E2E_INVOKE__: Record<
+        string,
+        (args: Record<string, unknown>) => unknown
+      >;
+    };
+    host.__MARU_E2E_INVOKE__.start_agent_cli_invocation = () =>
+      new Promise<string>(() => {});
+  });
+
+  const composer = pane.locator(".agents-chat-composer");
+  const input = composer.locator("textarea");
+  await input.fill("시작 전에 중지");
+  await input.press("Enter");
+  await composer.getByRole("button", { name: "중지" }).click();
+
+  await expect(input).toBeEnabled();
+  await expect(pane.locator('.agents-chat-bubble[data-pending="yes"]')).toHaveCount(0);
 });

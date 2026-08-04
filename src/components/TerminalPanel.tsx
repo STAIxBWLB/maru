@@ -52,6 +52,7 @@ import {
   type TerminalSearchDirection,
   type TerminalSearchMatch,
 } from "../lib/api";
+import { isAgentKind } from "../lib/agentCapabilities";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import type {
@@ -69,9 +70,9 @@ import {
 } from "./NativeTerminalView";
 import {
   activeItemMention,
-  buildAgentContextArgs,
   buildAgentResumeArgs,
   buildMaruContextEnv,
+  buildTerminalLaunchArgs,
   createTerminalTab,
   createTerminalTask,
   describeActiveContextChip,
@@ -134,6 +135,8 @@ export interface TerminalLaunchRequest {
   command?: string | null;
   extraArgs?: string[] | null;
   extraEnv?: Record<string, string> | null;
+  /** False when the request already owns a complete provider argv. */
+  prependContextArgs?: boolean;
   taskId?: string | null;
   /** Force a brand-new task (sidebar "+"), ignoring the active task. */
   forceNewTask?: boolean;
@@ -713,7 +716,6 @@ export const TerminalPanel = memo(
 
         try {
           const contextEnv = buildMaruContextEnv(activeContext, sessionId, injectContext);
-          const contextArgs = buildAgentContextArgs(kind, activeContext, injectContext);
           const spawn = await terminalSpawn(
             sessionId,
             kind,
@@ -725,7 +727,14 @@ export const TerminalPanel = memo(
                 launcher.command,
                 settings.ai.commandOverrides,
               ),
-              extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
+              extraArgs: buildTerminalLaunchArgs({
+                kind,
+                context: activeContext,
+                injectContext,
+                prependContextArgs: request?.prependContextArgs,
+                requestArgs: request?.extraArgs,
+                launcherArgs: launcher.args,
+              }),
               extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
               cols: 120,
               rows: 30,
@@ -1189,7 +1198,7 @@ export const TerminalPanel = memo(
         if (!tabId) return false;
         const tab = state.tabs.find((item) => item.id === tabId);
         if (!tab || !tab.running) return false;
-        if (tab.kind !== "claude" && tab.kind !== "codex") return false;
+        if (!isAgentKind(tab.kind)) return false;
         const sessionId = sessionByTabRef.current.get(tabId);
         if (!sessionId) return false;
         if (!inputPumpsRef.current.get(sessionId)?.push({ type: "text", text: mention })) {
@@ -1205,8 +1214,7 @@ export const TerminalPanel = memo(
       ref,
       (): TerminalPanelHandle => ({
         hasFocusedAgent: () =>
-          activeSurface === "terminal" &&
-          (focusedKind === "claude" || focusedKind === "codex"),
+          activeSurface === "terminal" && focusedKind != null && isAgentKind(focusedKind),
         hasFocus: () =>
           open &&
           terminalPanelRootRef.current != null &&

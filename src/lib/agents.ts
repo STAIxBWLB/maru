@@ -20,6 +20,7 @@ import {
   type SkillContextItem,
   type SkillDispatchRuntime,
   type SkillRecord,
+  type SkillRuntimeStatus,
 } from "./skills";
 import type { MissionRecord, SchedulerSchedule } from "./types";
 
@@ -80,18 +81,16 @@ export interface AgentRecord {
  * skills.ts. An empty list there would make every converted feature fail with
  * `agent_not_found`.
  */
-const MOCK_BUILTIN_AGENTS: Array<Pick<AgentRecord, "id" | "labelKey" | "skillName" | "kind">> = [
-  { id: "inbox-triage", labelKey: "agents.builtin.inboxTriage", skillName: "inbox-process", kind: "background" },
-  { id: "inbox-classify", labelKey: "agents.builtin.inboxClassify", skillName: "", kind: "inline" },
-  { id: "meeting-notes", labelKey: "agents.builtin.meetingNotes", skillName: "meeting-notes", kind: "background" },
-  { id: "task-extract", labelKey: "agents.builtin.taskExtract", skillName: "task-management", kind: "background" },
-  { id: "ideation-draft", labelKey: "agents.builtin.ideationDraft", skillName: "ideation-drafts", kind: "background" },
-  { id: "commit-message", labelKey: "agents.builtin.commitMessage", skillName: "", kind: "inline" },
-];
+type MockBuiltinAgentSeed = Pick<
+  AgentRecord,
+  "id" | "labelKey" | "skillName" | "kind"
+> & Partial<Pick<
+  AgentRecord,
+  "permissionMode" | "prompt" | "enabled" | "recommendedSchedule"
+>>;
 
-function mockBuiltinAgents(): AgentRecord[] {
-  return MOCK_BUILTIN_AGENTS.map((seed) => ({
-    ...seed,
+function mockBuiltinAgent(seed: MockBuiltinAgentSeed): AgentRecord {
+  return {
     label: null,
     description: null,
     runtime: "inherit",
@@ -100,6 +99,61 @@ function mockBuiltinAgents(): AgentRecord[] {
     enabled: true,
     builtin: true,
     customized: false,
+    recommendedSchedule: null,
+    ...seed,
+  };
+}
+
+export const MOCK_BUILTIN_AGENTS: AgentRecord[] = [
+  mockBuiltinAgent({ id: "inbox-triage", labelKey: "agents.builtin.inboxTriage", skillName: "inbox-process", kind: "background" }),
+  mockBuiltinAgent({ id: "inbox-classify", labelKey: "agents.builtin.inboxClassify", skillName: "", kind: "inline" }),
+  mockBuiltinAgent({ id: "meeting-notes", labelKey: "agents.builtin.meetingNotes", skillName: "meeting-notes", kind: "background" }),
+  mockBuiltinAgent({ id: "task-extract", labelKey: "agents.builtin.taskExtract", skillName: "task-management", kind: "background" }),
+  mockBuiltinAgent({ id: "ideation-draft", labelKey: "agents.builtin.ideationDraft", skillName: "ideation-drafts", kind: "background" }),
+  mockBuiltinAgent({ id: "commit-message", labelKey: "agents.builtin.commitMessage", skillName: "", kind: "inline" }),
+  mockBuiltinAgent({
+    id: "vault-hygiene",
+    labelKey: "agents.builtin.vaultHygiene",
+    skillName: "vault-lint",
+    kind: "background",
+    prompt: "vault/ + work/ 정합성 검증 리포트를 vault/reports/lint-YYMMDD.md 로 생성. dead wiki-link, orphan note, 스키마 위반, 명명규칙 위반, stale seed, 로그 포맷 위반을 포함. 자동 수정 금지 — 제안만 기록.",
+    recommendedSchedule: { hour: 22, minute: 0, daysOfWeek: [0] },
+  }),
+  mockBuiltinAgent({
+    id: "vault-proposal",
+    labelKey: "agents.builtin.vaultProposal",
+    skillName: "vault-sync",
+    kind: "background",
+    prompt: "work/ 변경분을 스캔해 vault 추출 후보를 제안. 확인 없이 vault 에 쓰지 말 것 — 제안 목록만 출력.",
+    recommendedSchedule: { hour: 18, minute: 0, daysOfWeek: [5] },
+  }),
+  mockBuiltinAgent({
+    id: "daily-digest",
+    labelKey: "agents.builtin.dailyDigest",
+    skillName: "draft-writer",
+    kind: "background",
+    prompt: "어제 처리한 inbox 항목, 오늘·내일 마감 task, 미결 승인 건을 개조식으로 요약해 scratchpad/drafts/ 아래 하루 브리핑 초안으로 작성. 확정 트리 수정 금지.",
+    enabled: false,
+    recommendedSchedule: { hour: 7, minute: 50, daysOfWeek: [1, 2, 3, 4, 5] },
+  }),
+  mockBuiltinAgent({
+    id: "git-sync",
+    labelKey: "agents.builtin.gitSync",
+    skillName: "git-sync",
+    kind: "background",
+    permissionMode: "acceptEdits",
+    prompt: "workspace 변경분을 의미 단위로 커밋하고 push. 충돌과 force-push 는 보고만 하고 중단. secrets/ 는 제외.",
+    enabled: false,
+    recommendedSchedule: { hour: 18, minute: 30, daysOfWeek: [1, 2, 3, 4, 5] },
+  }),
+];
+
+function mockBuiltinAgents(): AgentRecord[] {
+  return MOCK_BUILTIN_AGENTS.map((agent) => ({
+    ...agent,
+    recommendedSchedule: agent.recommendedSchedule
+      ? { ...agent.recommendedSchedule, daysOfWeek: [...agent.recommendedSchedule.daysOfWeek] }
+      : null,
   }));
 }
 
@@ -335,7 +389,11 @@ export async function runAgent(agent: AgentRecord, ctx: RunAgentContext): Promis
 export async function resolveAvailableRuntime(
   preferred: AiRuntime,
   ai: AiSettings,
-): Promise<{ runtime: AiRuntime; commandOverride: string | null }> {
+): Promise<{
+  runtime: AiRuntime;
+  commandOverride: string | null;
+  status: SkillRuntimeStatus;
+}> {
   let firstFailure: string | null = null;
   for (const runtime of agentRuntimeFallbackOrder(preferred)) {
     const commandOverride = ai.commandOverrides[runtime] ?? null;
@@ -344,7 +402,7 @@ export async function resolveAvailableRuntime(
         runtime: runtime as SkillDispatchRuntime,
         commandOverride,
       });
-      if (status.available) return { runtime, commandOverride };
+      if (status.available) return { runtime, commandOverride, status };
       if (firstFailure === null) {
         firstFailure = [status.message, status.suggestedAction]
           .filter(Boolean)

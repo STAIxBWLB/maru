@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{ErrorKind, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -1013,19 +1013,43 @@ fn build_terminal_command_spec(
     let custom = command_override
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let shell_wrapper = custom
+        .map(|program| is_shell_wrapper(program, &extras))
+        .unwrap_or(false);
 
-    let (program, mut args) = match (kind, custom) {
-        (_, Some(program)) => (program.to_string(), Vec::<String>::new()),
-        ("claude", None) => ("claude".to_string(), Vec::new()),
-        ("codex", None) => ("codex".to_string(), vec!["--cd".to_string(), cwd_str]),
-        ("kimi", None) => ("kimi".to_string(), Vec::new()),
+    // A normal command override replaces only the provider binary, so its
+    // launcher argv still applies. A shell plus -c/-lc is different: it is a
+    // complete wrapper command whose argv must stay byte-for-byte in order.
+    let (program, mut args) = match kind {
+        "claude" => (custom.unwrap_or("claude").to_string(), Vec::new()),
+        "codex" => (
+            custom.unwrap_or("codex").to_string(),
+            if shell_wrapper {
+                Vec::new()
+            } else {
+                vec!["--cd".to_string(), cwd_str]
+            },
+        ),
+        "kimi" => (custom.unwrap_or("kimi").to_string(), Vec::new()),
         // kiro-cli has no --cd flag; the PTY cwd below already runs `chat`
         // in the right directory.
-        ("kiro", None) => ("kiro-cli".to_string(), vec!["chat".to_string()]),
-        ("shell", None) => (default_shell_program(), Vec::new()),
-        (other, None) => return Err(format!("Unsupported terminal launcher: {other}")),
+        "kiro" => (
+            custom.unwrap_or("kiro-cli").to_string(),
+            if shell_wrapper {
+                Vec::new()
+            } else {
+                vec!["chat".to_string()]
+            },
+        ),
+        "shell" => (
+            custom
+                .map(str::to_string)
+                .unwrap_or_else(default_shell_program),
+            Vec::new(),
+        ),
+        other => return Err(format!("Unsupported terminal launcher: {other}")),
     };
-    if kind == "kiro" && custom.is_none() {
+    if kind == "kiro" && !shell_wrapper {
         // kiro-cli parses some flags (e.g. `--v3`) only at the top level,
         // before the `chat` subcommand; everything else stays after it.
         let (top_level, rest): (Vec<String>, Vec<String>) =
@@ -1060,6 +1084,12 @@ fn default_term_program(kind: &str) -> &'static str {
 /// `chat` subcommand.
 fn is_kiro_top_level_flag(arg: &str) -> bool {
     arg == "--v3"
+}
+
+fn is_shell_wrapper(program: &str, args: &[String]) -> bool {
+    let shell = Path::new(program).file_name().and_then(|name| name.to_str());
+    matches!(shell, Some("sh" | "bash" | "dash" | "ksh" | "zsh" | "fish"))
+        && matches!(args.first().map(String::as_str), Some("-c" | "-lc"))
 }
 
 fn resolve_terminal_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -1267,7 +1297,10 @@ mod tests {
     }
 
     #[test]
-    fn launcher_command_override_takes_precedence_over_default_args() {
+    fn launcher_command_override_replaces_program_but_keeps_launcher_args() {
+        // The override names a different *binary*, not a different CLI. Dropping
+        // the launcher's own args left an overridden codex with no `--cd`, so it
+        // ran against the process cwd instead of the workspace.
         let cwd = env::current_dir().unwrap();
         let cwd_str = cwd.to_string_lossy().to_string();
         let spec = build_terminal_command_spec(
@@ -1279,7 +1312,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.program, "/usr/local/bin/codex-1.5");
-        assert_eq!(spec.args, vec!["--profile", "dev"]);
+        assert_eq!(spec.args, vec!["--cd", cwd_str.as_str(), "--profile", "dev"]);
+
+        let shell =
+            build_terminal_command_spec("shell", Some(&cwd_str), Some("/bin/dash"), None, None)
+                .unwrap();
+        assert_eq!(shell.program, "/bin/dash");
+        assert!(shell.args.is_empty());
+    }
+
+    #[test]
+    fn provider_shell_wrapper_keeps_its_argv_verbatim() {
+        let cwd = env::current_dir().unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let wrapper = "printf '%s' \"$MARU_SKILL_PROMPT\" | codex exec -";
+        let spec = build_terminal_command_spec(
+            "codex",
+            Some(&cwd_str),
+            Some("/bin/zsh"),
+            Some(vec!["-lc".to_string(), wrapper.to_string()]),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(spec.program, "/bin/zsh");
+        assert_eq!(spec.args, vec!["-lc", wrapper]);
     }
 
     #[test]
@@ -1301,7 +1358,9 @@ mod tests {
         assert_eq!(spec.program, "kiro-cli");
         assert_eq!(spec.args, vec!["--v3", "chat", "--agent", "x"]);
 
-        // A command override keeps extras verbatim after the program.
+        // An override names a different kiro-cli binary, so `chat` and the
+        // top-level flag ordering still apply — without them it starts no
+        // session at all.
         let spec = build_terminal_command_spec(
             "kiro",
             Some(&cwd_str),
@@ -1310,7 +1369,8 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(spec.args, vec!["--v3", "--agent"]);
+        assert_eq!(spec.program, "/opt/bin/kiro-cli");
+        assert_eq!(spec.args, vec!["--v3", "chat", "--agent"]);
     }
 
     #[test]

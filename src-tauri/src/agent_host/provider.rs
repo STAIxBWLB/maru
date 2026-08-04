@@ -10,12 +10,18 @@ use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+/// What a backend can actually do. Only flags a gate reads live here — a flag
+/// that is the same for every backend is a comment with a runtime cost.
+/// Mirrored in `src/lib/agentCapabilities.ts`; `agentCapabilities.test.ts`
+/// parses this file and fails the build if the two disagree.
 pub struct ProviderCapabilities {
     pub provider: String,
-    pub streaming: bool,
-    pub cli: bool,
-    pub proposal_only: bool,
-    pub autonomous_writes: bool,
+    /// Native session resume (`--resume` / `resume` / `--session`).
+    pub resume: bool,
+    /// A machine-readable usage/quota source exists.
+    pub usage: bool,
+    /// Accepts `--add-dir` for extra readable roots.
+    pub add_dirs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,12 +76,34 @@ impl CliProviderKind {
     }
 
     pub fn capabilities(self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            provider: self.id().to_string(),
-            streaming: true,
-            cli: true,
-            proposal_only: true,
-            autonomous_writes: false,
+        let provider = self.id().to_string();
+        match self {
+            Self::Claude => ProviderCapabilities {
+                provider,
+                resume: true,
+                usage: true,
+                add_dirs: true,
+            },
+            Self::Codex => ProviderCapabilities {
+                provider,
+                resume: true,
+                usage: true,
+                add_dirs: true,
+            },
+            Self::Kimi => ProviderCapabilities {
+                provider,
+                resume: true,
+                usage: false,
+                add_dirs: true,
+            },
+            // kiro-cli has no resume flag, no usage/quota output, and no
+            // --add-dir; its working directory is the process cwd.
+            Self::Kiro => ProviderCapabilities {
+                provider,
+                resume: false,
+                usage: false,
+                add_dirs: false,
+            },
         }
     }
 }
@@ -400,10 +428,9 @@ impl ProviderAdapter for MockProviderAdapter {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             provider: self.id.clone(),
-            streaming: false,
-            cli: false,
-            proposal_only: true,
-            autonomous_writes: false,
+            resume: false,
+            usage: false,
+            add_dirs: false,
         }
     }
 
@@ -868,6 +895,80 @@ mod tests {
             .unwrap();
         assert_eq!(response.content.trim(), "{\"ok\":true}");
         assert_eq!(response.provider, "kiro");
+    }
+
+    /// The per-provider tests below each check one mode. This is the whole
+    /// 4x4 grid in one place, so the safety-relevant `plan` row cannot be
+    /// dropped for a single backend without failing. `cli_backends_real_smoke`
+    /// re-runs the same table against the real installed binaries.
+    #[cfg(unix)]
+    #[test]
+    fn permission_modes_map_to_expected_argv() {
+        let grid: &[(CliProviderKind, [(&str, &str); 4])] = &[
+            (
+                CliProviderKind::Claude,
+                [
+                    ("plan", "--permission-mode plan"),
+                    ("acceptEdits", "--permission-mode acceptEdits"),
+                    ("default", "--permission-mode default"),
+                    ("bypassPermissions", "--permission-mode bypassPermissions"),
+                ],
+            ),
+            (
+                CliProviderKind::Codex,
+                [
+                    ("plan", "--sandbox read-only"),
+                    ("acceptEdits", "--sandbox workspace-write"),
+                    ("default", "exec"),
+                    (
+                        "bypassPermissions",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                    ),
+                ],
+            ),
+            (
+                CliProviderKind::Kimi,
+                [
+                    ("plan", "--plan"),
+                    ("acceptEdits", "-y"),
+                    ("default", "-p"),
+                    ("bypassPermissions", "--auto"),
+                ],
+            ),
+            (
+                CliProviderKind::Kiro,
+                [
+                    ("plan", "--trust-tools=read,grep"),
+                    ("acceptEdits", "--trust-tools=read,grep,write"),
+                    ("default", "--no-interactive"),
+                    ("bypassPermissions", "--trust-all-tools"),
+                ],
+            ),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().to_str().unwrap();
+        for (provider, modes) in grid {
+            for (mode, needle) in modes {
+                let (cmd, _stdin) = build_cli_command(
+                    *provider,
+                    &completion_request("hi", cwd),
+                    &[],
+                    Some("/bin/echo"),
+                    mode,
+                )
+                .unwrap_or_else(|err| panic!("{} {mode}: {err}", provider.id()));
+                let argv = cmd
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(
+                    argv.contains(needle),
+                    "{} {mode}: expected {needle:?} in {argv:?}",
+                    provider.id()
+                );
+            }
+        }
     }
 
     #[test]

@@ -5269,6 +5269,10 @@ function MainApp() {
       command: spec.command ?? null,
       extraArgs: spec.extraArgs,
       extraEnv: spec.extraEnv,
+      // The backend composed all selected context into this provider argv.
+      // Prepending the terminal's active-context flags would also put Codex
+      // --add-dir before its /bin/zsh -lc wrapper and break the command.
+      prependContextArgs: false,
     });
     updateLayoutSettings({ terminalOpen: true, toolPanelSurface: "terminal" });
   }, [updateLayoutSettings]);
@@ -9184,6 +9188,7 @@ function MainApp() {
             missions={processingMissions}
             logLines={processingLogLines}
             runtimeCommands={aiRuntimeCommands}
+            tasksRoot={effectiveTasksSettings.root}
             onRefreshMissions={refreshProcessingMissions}
             onStopMission={stopProcessingMission}
             onMissionStarted={trackMissionQuietly}

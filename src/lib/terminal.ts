@@ -1,3 +1,4 @@
+import { agentCapabilities, isAgentKind } from "./agentCapabilities";
 import type {
   MaruAppMode,
   MaruSettings,
@@ -598,9 +599,10 @@ export function buildAgentResumeArgs(
   kind: TerminalKind,
   agentSessionId: string | null,
 ): string[] {
-  if (!agentSessionId) return [];
+  if (!agentSessionId || !agentCapabilities(kind).resume) return [];
+  // The flag says whether resume exists; the shape stays per-CLI.
   // claude: `claude --resume <id>`. codex: `codex resume <id>` (subcommand).
-  // kimi: `kimi --session <id>`. kiro: no resume support.
+  // kimi: `kimi --session <id>`.
   if (kind === "claude") return ["--resume", agentSessionId];
   if (kind === "codex") return ["resume", agentSessionId];
   if (kind === "kimi") return ["--session", agentSessionId];
@@ -746,9 +748,23 @@ export function buildAgentContextArgs(
   enabled: boolean,
 ): string[] {
   if (!enabled) return [];
-  if (kind !== "claude" && kind !== "codex" && kind !== "kimi") return [];
+  if (!agentCapabilities(kind).addDirs) return [];
   if (!ctx.workspaceRoot) return [];
   return ["--add-dir", ctx.workspaceRoot];
+}
+
+export function buildTerminalLaunchArgs(input: {
+  kind: TerminalKind;
+  context: ActiveTerminalContext;
+  injectContext: boolean;
+  prependContextArgs?: boolean;
+  requestArgs?: string[] | null;
+  launcherArgs?: string[] | null;
+}): string[] {
+  const contextArgs = input.prependContextArgs === false
+    ? []
+    : buildAgentContextArgs(input.kind, input.context, input.injectContext);
+  return [...contextArgs, ...(input.requestArgs ?? input.launcherArgs ?? [])];
 }
 
 function quoteIfNeeded(value: string): string {
@@ -791,7 +807,7 @@ export function describeActiveContextChip(
   ctx: ActiveTerminalContext,
   options: { focusedKind: TerminalKind | null },
 ): ContextChipDescriptor {
-  const isAgent = options.focusedKind === "claude" || options.focusedKind === "codex";
+  const isAgent = options.focusedKind != null && isAgentKind(options.focusedKind);
   const hasItem = Boolean(ctx.docTitle || ctx.docRelPath || ctx.docAbsPath);
   const label = hasItem
     ? ctx.docTitle || ctx.docRelPath || ctx.docAbsPath || ctx.appMode

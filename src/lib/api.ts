@@ -1682,6 +1682,18 @@ export async function startAgentCliInvocation(
   permissionMode: string | null = null,
 ): Promise<string> {
   if (!isTauri()) {
+    // The browser dev shell has no ai:// event bus, so an e2e override's return
+    // value stands in for the whole invocation (see sendAgentChatTurn).
+    const override = await invokeE2EOverride<string>("start_agent_cli_invocation", {
+      provider,
+      prompt,
+      cwd,
+      extraArgs,
+      extraEnv,
+      commandOverride,
+      permissionMode,
+    });
+    if (override) return override;
     throw new Error("Agent CLI invocation is only available inside the Tauri shell.");
   }
   return invoke<string>("start_agent_cli_invocation", {
