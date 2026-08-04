@@ -42,6 +42,7 @@ const t = (key: string, vars?: Record<string, string | number>) => {
   if (key === "agents.usage.docsLabel") return "docs";
   if (key === "agents.usage.state.cliMissing") return "not installed";
   if (key === "agents.usage.state.unsupported") return "usage n/a";
+  if (key === "agents.usage.state.unavailable") return "unavailable";
   if (key === "agents.usage.usageUnavailable") return "unavailable";
   if (key === "agents.usage.skillsUnknown") return "Skills —";
   if (key === "agents.usage.skillsVersion") return `Skills ${vars?.version ?? ""}`;
@@ -151,6 +152,14 @@ describe("AgentUsageBar", () => {
     expect(chips[0].textContent).toContain(" · ");
     expect(chips[1].textContent).toContain("5% used");
     expect(chips[0].classList.contains("dimmed")).toBe(false);
+  });
+
+  it("labels an ok entry that carries no usage windows", async () => {
+    mocks.agentsUsageStatus.mockResolvedValue([usageEntry({ id: "claude", windows: [] })]);
+    await render();
+
+    const chip = container.querySelector(".agent-usage-chip");
+    expect(chip?.textContent).toContain("unavailable");
   });
 
   it("renders dimmed chips explaining the state for unsupported agents", async () => {

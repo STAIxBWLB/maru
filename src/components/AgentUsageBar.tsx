@@ -181,13 +181,15 @@ export function AgentUsageBar({
                 : entry.id}
             </span>
             <span className="agent-usage-chip-value">
-              {entry.state === "ok"
+              {entry.state === "ok" && entry.windows.length > 0
                 ? entry.windows
                     .map((window) =>
                       formatUsageWindowSegment(window, t("agents.usage.usedSuffix"), now),
                     )
                     .join(" · ")
-                : t(USAGE_STATE_KEY[entry.state])}
+                : // "ok" with no windows means the probe parsed nothing; an
+                  // empty value would render as a chip with just a name.
+                  t(USAGE_STATE_KEY[entry.state === "ok" ? "unavailable" : entry.state])}
             </span>
           </button>
         ))}
