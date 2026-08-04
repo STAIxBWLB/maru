@@ -18,10 +18,13 @@ import {
   CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROPOSAL_APPLY_STATE_EVENT,
+  discardStoredChatUserTurn,
   finishChatProposalApply,
+  isChatProposalApplied,
   isChatProposalApplying,
   loadChatTurns,
   persistChatProposalApplied,
+  removeChatUserTurn,
   saveChatTurns,
   sendAgentChatTurn,
   stopAgentChatTurn,
@@ -198,6 +201,21 @@ export function AgentChatTab({
     [agent.id, workPath],
   );
 
+  const discardUserTurn = useCallback(
+    (turnAt: string) => {
+      if (!workPath) return;
+      // Persist independently of the mounted component so an unmount-triggered
+      // cancellation cannot leave the instruction in the next chat replay.
+      discardStoredChatUserTurn(workPath, agent.id, turnAt);
+      setTurns((current) => {
+        const next = removeChatUserTurn(current, turnAt);
+        saveChatTurns(workPath, agent.id, next);
+        return next;
+      });
+    },
+    [agent.id, workPath],
+  );
+
   const droppedTurns = useMemo(() => {
     if (!input.trim()) return 0;
     return buildChatPrompt(agent, turns, input).droppedTurns;
@@ -214,7 +232,8 @@ export function AgentChatTab({
     const abortController = new AbortController();
     sendAbortRef.current = abortController;
     stopRequestedRef.current = null;
-    appendTurn({ role: "user", text: message, at: new Date().toISOString() });
+    const userTurnAt = new Date().toISOString();
+    appendTurn({ role: "user", text: message, at: userTurnAt });
     setInput("");
     try {
       const result = await sendAgentChatTurn({
@@ -240,6 +259,7 @@ export function AgentChatTab({
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
+      discardUserTurn(userTurnAt);
       const expectedStop = stopRequestedRef.current === abortController;
       if (!expectedStop && !(error instanceof Error && error.name === "AbortError")) {
         onError(errorMessage(error));
@@ -255,7 +275,18 @@ export function AgentChatTab({
         setTail([]);
       }
     }
-  }, [agent, ai, appendTurn, busy, input, onError, runtimeSelection, turns, workPath]);
+  }, [
+    agent,
+    ai,
+    appendTurn,
+    busy,
+    discardUserTurn,
+    input,
+    onError,
+    runtimeSelection,
+    turns,
+    workPath,
+  ]);
 
   const stop = useCallback(async () => {
     const invocationId = invocationIdRef.current;
@@ -442,6 +473,10 @@ export function AgentChatTab({
             onCopy={() => void clipboardWriteText(turn.text)}
             onTask={() => void toTask(turn.text)}
             onMemo={() => void toMemo(turn.text)}
+            proposalApplied={
+              Boolean(turn.proposalAppliedAt)
+              || isChatProposalApplied(workPath, agent.id, turn.at)
+            }
             proposalApplying={isChatProposalApplying(workPath, agent.id, turn.at)}
             onApplyProposal={(proposal) => applyProposal(turn.at, proposal)}
           />
@@ -506,6 +541,7 @@ function ChatBubble({
   onCopy,
   onTask,
   onMemo,
+  proposalApplied,
   proposalApplying,
   onApplyProposal,
 }: {
@@ -513,6 +549,7 @@ function ChatBubble({
   onCopy: () => void;
   onTask: () => void;
   onMemo: () => void;
+  proposalApplied: boolean;
   proposalApplying: boolean;
   onApplyProposal: (proposal: SkillProposal) => Promise<void>;
 }) {
@@ -560,13 +597,13 @@ function ChatBubble({
             <Button
               variant="secondary"
               size="sm"
-              disabled={proposalApplying || Boolean(turn.proposalAppliedAt)}
+              disabled={proposalApplying || proposalApplied}
               onClick={() => {
-                if (proposalApplying || turn.proposalAppliedAt) return;
+                if (proposalApplying || proposalApplied) return;
                 void onApplyProposal(proposal);
               }}
             >
-              {turn.proposalAppliedAt
+              {proposalApplied
                 ? t("agents.chat.proposalApplied")
                 : t("agents.chat.applyProposal")}
             </Button>

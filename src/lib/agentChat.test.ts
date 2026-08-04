@@ -44,11 +44,14 @@ import {
   CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROMPT_MAX_CHARS,
+  discardStoredChatUserTurn,
   finishChatProposalApply,
+  isChatProposalApplied,
   isChatProposalApplying,
   loadChatTurns,
   markChatProposalApplied,
   persistChatProposalApplied,
+  removeChatUserTurn,
   saveChatTurns,
   sendAgentChatTurn,
   type ChatTurn,
@@ -108,6 +111,18 @@ function setWindow(throwing = false, tauri = false): Map<string, string> {
   if (tauri) target.__TAURI_INTERNALS__ = {};
   (globalThis as unknown as { window?: unknown }).window = target;
   return store;
+}
+
+function setWindowWithWriteFailure(store: Map<string, string>): void {
+  const localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: () => {
+      throw new Error("quota exceeded");
+    },
+  };
+  const target = new EventTarget() as EventTarget & { localStorage: typeof localStorage };
+  target.localStorage = localStorage;
+  (globalThis as unknown as { window?: unknown }).window = target;
 }
 
 beforeEach(() => {
@@ -205,6 +220,27 @@ describe("chat storage", () => {
     ]);
   });
 
+  it("removes a cancelled user turn without removing adjacent turns", () => {
+    const cancelled = { ...turn("user", "cancelled"), at: "cancelled-at" };
+    const current = [turn("assistant", "before"), cancelled, turn("assistant", "after")];
+
+    expect(removeChatUserTurn(current, "cancelled-at").map((value) => value.text)).toEqual([
+      "before",
+      "after",
+    ]);
+  });
+
+  it("removes a cancelled user turn from durable replay state", () => {
+    const cancelled = { ...turn("user", "do not replay"), at: "cancelled-stored-at" };
+    saveChatTurns("/w", "cancelled-agent", [turn("assistant", "before"), cancelled]);
+
+    discardStoredChatUserTurn("/w", "cancelled-agent", cancelled.at);
+
+    const loaded = loadChatTurns("/w", "cancelled-agent");
+    expect(loaded.map((value) => value.text)).toEqual(["before"]);
+    expect(buildChatPrompt(agent(), loaded, "next").prompt).not.toContain("do not replay");
+  });
+
   it("round-trips turns and caps the history", () => {
     const turns = Array.from({ length: CHAT_HISTORY_CAP + 5 }, (_, i) =>
       turn("user", `메시지 ${i}`),
@@ -272,6 +308,26 @@ describe("chat storage", () => {
       agentId: "a",
       turns: [{ proposalAppliedAt: "2026-08-04T03:00:00.000Z" }],
     });
+  });
+
+  it("reports marker write failure and keeps an in-memory apply guard", () => {
+    const proposal = {
+      ...turn("assistant", "proposal with failed marker write"),
+      at: "write-failure-proposal-at",
+    };
+    const store = setWindow();
+    expect(saveChatTurns("/w", "write-failure-agent", [proposal])).toBe(true);
+    setWindowWithWriteFailure(store);
+
+    expect(() =>
+      persistChatProposalApplied(
+        "/w",
+        "write-failure-agent",
+        proposal.at,
+        "2026-08-04T04:00:00.000Z",
+      )).toThrow("agent_chat_proposal_marker_persist_failed");
+    expect(isChatProposalApplied("/w", "write-failure-agent", proposal.at)).toBe(true);
+    expect(beginChatProposalApply("/w", "write-failure-agent", proposal.at)).toBe(false);
   });
 
   it("keeps one proposal apply lock across component remounts", () => {

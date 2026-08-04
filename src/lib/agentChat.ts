@@ -64,6 +64,7 @@ export interface ChatProposalApplyStateDetail {
 }
 
 const applyingChatProposals = new Set<string>();
+const appliedChatProposals = new Set<string>();
 
 const chatProposalKey = (workPath: string, agentId: string, turnAt: string) =>
   JSON.stringify([workPath, agentId, turnAt]);
@@ -84,7 +85,7 @@ export function beginChatProposalApply(
   turnAt: string,
 ): boolean {
   const key = chatProposalKey(workPath, agentId, turnAt);
-  if (applyingChatProposals.has(key)) return false;
+  if (applyingChatProposals.has(key) || appliedChatProposals.has(key)) return false;
   applyingChatProposals.add(key);
   dispatchChatEvent<ChatProposalApplyStateDetail>(CHAT_PROPOSAL_APPLY_STATE_EVENT, {
     workPath,
@@ -118,10 +119,23 @@ export function isChatProposalApplying(
   return applyingChatProposals.has(chatProposalKey(workPath, agentId, turnAt));
 }
 
+export function isChatProposalApplied(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+): boolean {
+  return appliedChatProposals.has(chatProposalKey(workPath, agentId, turnAt));
+}
+
 /** Append against the latest stored transcript so concurrent turn actions
  *  (for example, applying a proposal) are never replaced by a stale snapshot. */
 export function appendChatTurn(turns: ChatTurn[], turn: ChatTurn): ChatTurn[] {
   return [...turns, turn].slice(-CHAT_HISTORY_CAP);
+}
+
+/** Failed and cancelled user turns must never be replayed in a later prompt. */
+export function removeChatUserTurn(turns: ChatTurn[], turnAt: string): ChatTurn[] {
+  return turns.filter((turn) => !(turn.role === "user" && turn.at === turnAt));
 }
 
 /** Mark an applied proposal without rebuilding the turn from a stale snapshot. */
@@ -198,15 +212,28 @@ export function saveChatTurns(
   workPath: string | null,
   agentId: string,
   turns: ChatTurn[],
-): void {
+): boolean {
   try {
     window.localStorage.setItem(
       storageKey(workPath, agentId),
       JSON.stringify(turns.slice(-CHAT_HISTORY_CAP)),
     );
+    return true;
   } catch {
     // Quota or private mode — the conversation still works for this session.
+    return false;
   }
+}
+
+/** Remove an incomplete user turn from durable replay state. */
+export function discardStoredChatUserTurn(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+): ChatTurn[] {
+  const next = removeChatUserTurn(loadChatTurns(workPath, agentId), turnAt);
+  saveChatTurns(workPath, agentId, next);
+  return next;
 }
 
 /** Persist the proposal guard independently of any mounted chat component. */
@@ -216,12 +243,37 @@ export function persistChatProposalApplied(
   turnAt: string,
   proposalAppliedAt: string,
 ): ChatTurn[] {
+  const key = chatProposalKey(workPath, agentId, turnAt);
   const next = markChatProposalApplied(
     loadChatTurns(workPath, agentId),
     turnAt,
     proposalAppliedAt,
   );
-  saveChatTurns(workPath, agentId, next);
+  // The files are already applied at this point. Retain an in-process guard
+  // even when localStorage is unavailable, so remounting cannot apply the
+  // same proposal again during this app session.
+  appliedChatProposals.add(key);
+  const marked = next.some(
+    (turn) =>
+      turn.role === "assistant"
+      && turn.at === turnAt
+      && turn.proposalAppliedAt === proposalAppliedAt,
+  );
+  if (!marked) {
+    throw new Error(
+      "agent_chat_proposal_marker_missing: proposal applied, but its replay guard could not be recorded",
+    );
+  }
+  if (!saveChatTurns(workPath, agentId, next)) {
+    dispatchChatEvent<ChatProposalAppliedDetail>(CHAT_PROPOSAL_APPLIED_EVENT, {
+      workPath,
+      agentId,
+      turns: next,
+    });
+    throw new Error(
+      "agent_chat_proposal_marker_persist_failed: proposal applied, but its replay guard could not be saved",
+    );
+  }
   dispatchChatEvent<ChatProposalAppliedDetail>(CHAT_PROPOSAL_APPLIED_EVENT, {
     workPath,
     agentId,
