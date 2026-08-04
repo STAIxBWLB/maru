@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isMissingWorkspaceConfigError,
   isWorkspaceConfigShellUnavailableError,
+  nextIgnorePatterns,
   resolveWorkspaceConfigLoad,
 } from "./maruDir";
 
@@ -73,5 +74,37 @@ describe("isMissingWorkspaceConfigError", () => {
       config: null,
       error: `${exact}.`,
     });
+  });
+});
+
+describe("nextIgnorePatterns", () => {
+  const doc = {
+    relPath: ".maruignore",
+    patterns: ["archive", "*.png"],
+    builtin: [".DS_Store"],
+  };
+
+  it("appends a new pattern at the end", () => {
+    expect(nextIgnorePatterns(doc, "drafts/tmp.md")).toEqual([
+      "archive",
+      "*.png",
+      "drafts/tmp.md",
+    ]);
+  });
+
+  it("trims before comparing", () => {
+    expect(nextIgnorePatterns(doc, "  drafts/a.md ")).toEqual([
+      "archive",
+      "*.png",
+      "drafts/a.md",
+    ]);
+  });
+
+  it("returns null when the pattern changes nothing", () => {
+    expect(nextIgnorePatterns(doc, "archive")).toBeNull();
+    expect(nextIgnorePatterns(doc, "  *.png  ")).toBeNull();
+    expect(nextIgnorePatterns(doc, ".DS_Store")).toBeNull();
+    expect(nextIgnorePatterns(doc, "   ")).toBeNull();
+    expect(nextIgnorePatterns(doc, "# a comment")).toBeNull();
   });
 });

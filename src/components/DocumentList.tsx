@@ -102,6 +102,8 @@ interface DocumentListProps {
   onSelect: (entry: VaultEntry) => void;
   onRevealInFinder: (targetPath: string) => void;
   onRevealInFiles: (targetPath: string) => void;
+  /** Hide this entry from the list by adding it to `.maruignore`. */
+  onIgnore?: (relPath: string, kind: "file" | "directory") => void;
   onRefresh: () => void;
   refreshing?: boolean;
   onClose?: () => void;
@@ -149,6 +151,7 @@ export const DocumentList = memo(function DocumentList({
   onSelect,
   onRevealInFinder,
   onRevealInFiles,
+  onIgnore,
   onRefresh,
   refreshing = false,
   onClose,
@@ -832,6 +835,22 @@ export const DocumentList = memo(function DocumentList({
                     }}
                   >
                     {t("rightPane.files.moveSelectedHere", { count: selectedFileQueueCount })}
+                  </button>
+                </>
+              ) : null}
+              {onIgnore ? (
+                <>
+                  <div className="context-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const { relPath, targetKind } = contextMenu;
+                      setContextMenu(null);
+                      onIgnore(relPath, targetKind === "directory" ? "directory" : "file");
+                    }}
+                  >
+                    {t("context.addToIgnore")}
                   </button>
                 </>
               ) : null}

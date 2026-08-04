@@ -176,10 +176,12 @@ import {
   type StudioPackageResult,
 } from "./lib/studio";
 import {
+  addMaruIgnorePattern,
   readMaruSettings,
   listWorkspaceProjects,
   registerWorkspaceRoots,
   saveMaruSettings,
+  listenMaruIgnoreUpdated,
   listenMaruSettingsUpdated,
   updateMaruWorkspace,
 } from "./lib/maruDir";
@@ -5906,6 +5908,34 @@ function MainApp() {
     visibleAppMode,
   ]);
 
+  // The scan honours `.maruignore`, so an edit in Settings > Ignore list
+  // leaves every loaded document list stale until we rescan.
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void listenMaruIgnoreUpdated((payload) => {
+      if (payload.workPath === explorerWorkspacePath) void refreshCurrent();
+    }).then((off) => {
+      dispose = off;
+    });
+    return () => dispose?.();
+  }, [explorerWorkspacePath, refreshCurrent]);
+
+  // "Hide from the list" is an edit to `.maruignore`: the scan reads that
+  // file, so the rescan is what actually drops the row. Settings > Ignore list
+  // is where it comes back.
+  const ignoreEntry = useCallback(
+    async (relPath: string) => {
+      if (!explorerWorkspacePath || !relPath) return;
+      try {
+        await addMaruIgnorePattern(explorerWorkspacePath, relPath);
+        await refreshCurrent();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [explorerWorkspacePath, refreshCurrent],
+  );
+
   const installUpdate = useCallback(
     async (update: AppUpdateCheckResult["update"], info: AppUpdateInfo) => {
       if (installingUpdateRef.current) return;
@@ -9408,6 +9438,7 @@ function MainApp() {
                     targetPath,
                   );
                 }}
+                onIgnore={(relPath) => void ignoreEntry(relPath)}
                 onRefresh={() => void refreshCurrent()}
                 refreshing={explorerWorkspaceState.refreshing}
                 onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}

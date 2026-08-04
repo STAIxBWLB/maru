@@ -15,6 +15,7 @@ import { AppearanceTab } from "./tabs/AppearanceTab";
 import { CommsSettingsSystemTab } from "./tabs/CommsSettingsSystemTab";
 import { ConnectorsTab } from "./tabs/ConnectorsTab";
 import { GeneralTab } from "./tabs/GeneralTab";
+import { IgnoreTab } from "./tabs/IgnoreTab";
 import { InboxRuntimeConfigTab } from "./tabs/InboxRuntimeConfigTab";
 import { MeetingsSettingsSystemTab } from "./tabs/MeetingsSettingsSystemTab";
 import { McpTab } from "./tabs/McpTab";
@@ -113,6 +114,7 @@ export function SettingsTabBody({
           <ConnectorsTab settings={settings} onSettingsChange={onSettingsChange} />
         ) : null}
         {tab === "rules" ? <RulesTab workPath={workPath} /> : null}
+        {tab === "ignore" ? <IgnoreTab workPath={workPath} /> : null}
         {tab === "templates" ? <TemplatesTab workPath={workPath} /> : null}
         {tab === "mcp" ? <McpTab workPath={workPath} /> : null}
         {tab === "projects" ? <ProjectsTab workPath={workPath} /> : null}

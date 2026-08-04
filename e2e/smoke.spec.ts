@@ -798,6 +798,37 @@ test("shows the meetings settings tab in the settings window shell", async ({ pa
   await expect(page.getByText("작업 로그 append", { exact: true })).toBeVisible();
 });
 
+test("edits the document ignore list in settings", async ({ page }) => {
+  await page.goto("/?window=settings&workPath=mock%3A%2F%2Fmaru-sample-workspace&tab=ignore");
+
+  await expect(page.getByRole("tab", { name: "숨김 목록" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const list = page.locator(".ignore-list").first();
+  await expect(page.locator(".ignore-list code", { hasText: "*.png" })).toHaveCount(0);
+  await page.locator(".ignore-add input").fill("*.png");
+  await page.locator(".ignore-add button").click();
+  await expect(list.locator("code", { hasText: "*.png" })).toBeVisible();
+  // Re-adding the same pattern is refused instead of duplicating the row.
+  await page.locator(".ignore-add input").fill("*.png");
+  await page.locator(".ignore-add button").click();
+  await expect(list.locator("code", { hasText: "*.png" })).toHaveCount(1);
+  await expect(page.getByText("이미 등록된 패턴입니다.")).toBeVisible();
+});
+
+test("offers ignoring a document from its context menu", async ({ page }) => {
+  await page.goto("/");
+  const documentList = page.locator(".document-list");
+  await documentList
+    .getByRole("button", { name: /Maru 사업 주간 점검 회의/ })
+    .first()
+    .click({ button: "right" });
+  await expect(
+    page.locator(".context-menu").getByRole("menuitem", { name: /숨김 목록에 추가/ }),
+  ).toBeVisible();
+});
+
 test("opens dot sync management in Jobs without a Tauri runtime", async ({ page }) => {
   await page.goto("/?window=settings&workPath=mock%3A%2F%2Fmaru-sample-workspace&tab=jobs");
 

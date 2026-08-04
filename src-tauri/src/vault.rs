@@ -752,10 +752,50 @@ pub fn matches_maruignore(rel_path: &Path, patterns: &[String]) -> bool {
         if pat.is_empty() {
             return false;
         }
+        if pat.contains('*') || pat.contains('?') {
+            // A pattern with a slash matches the whole relative path;
+            // otherwise it matches any single path segment (`*.png`).
+            return if pat.contains('/') {
+                wildcard_match(pat, &rel_str)
+            } else {
+                rel_str.split('/').any(|seg| wildcard_match(pat, seg))
+            };
+        }
         rel_str == pat
             || rel_str.starts_with(&format!("{pat}/"))
             || rel_str.split('/').any(|seg| seg == pat)
     })
+}
+
+/// Glob match for `*` (any run of characters, `/` included only when the
+/// pattern itself spans directories) and `?` (one character). Iterative
+/// backtracking, no allocation — this runs once per file on 50k-file trees.
+/// Character classes and `!` negation are deliberately unsupported.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    let (mut p, mut t) = (0usize, 0usize);
+    let (mut star, mut resume) = (usize::MAX, 0usize);
+    while t < txt.len() {
+        if p < pat.len() && (pat[p] == '?' || pat[p] == txt[t]) {
+            p += 1;
+            t += 1;
+        } else if p < pat.len() && pat[p] == '*' {
+            star = p;
+            resume = t;
+            p += 1;
+        } else if star != usize::MAX {
+            p = star + 1;
+            resume += 1;
+            t = resume;
+        } else {
+            return false;
+        }
+    }
+    while p < pat.len() && pat[p] == '*' {
+        p += 1;
+    }
+    p == pat.len()
 }
 
 fn clean_text(input: &str) -> String {
@@ -892,6 +932,27 @@ mod tests {
         assert!(titles.contains(&"Keep"));
         assert!(!titles.contains(&"Inside"), "skipme/ must be excluded");
         assert!(!titles.contains(&"Python"), "_sys/env/ must be excluded");
+    }
+
+    #[test]
+    fn maruignore_matches_wildcards() {
+        let patterns = vec![
+            "*.tmp.md".to_string(),
+            "archive/2019-*".to_string(),
+            "draft?.md".to_string(),
+        ];
+        let hit = |rel: &str| matches_maruignore(Path::new(rel), &patterns);
+        assert!(hit("notes/scratch.tmp.md"), "segment glob matches at any depth");
+        assert!(hit("archive/2019-old/a.md"), "path glob matches a prefix dir");
+        assert!(hit("draft1.md"));
+        assert!(!hit("notes/keep.md"));
+        assert!(!hit("archive/2020-new/a.md"));
+        assert!(!hit("draft10.md"), "? is exactly one character");
+        // A pattern without a slash must not match across separators.
+        assert!(!matches_maruignore(
+            Path::new("a/b.md"),
+            &vec!["a*b.md".to_string()]
+        ));
     }
 
     #[test]
