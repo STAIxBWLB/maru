@@ -236,13 +236,13 @@ fn spawn_streaming_invocation(
         .take()
         .ok_or_else(|| "stderr_capture_failed: subprocess produced no stderr handle".to_string())?;
 
-    spawn_line_pump(
+    let stdout_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
         "stdout".to_string(),
         stdout,
     );
-    spawn_line_pump(
+    let stderr_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
         "stderr".to_string(),
@@ -256,11 +256,16 @@ fn spawn_streaming_invocation(
         mission_metadata,
     );
 
-    // Reaper thread: wait for exit, then emit `ai://done` or `ai://error`.
+    // Reaper thread: wait for exit, then drain both output pumps before
+    // emitting `ai://done`. `child.wait()` and the pipe readers are independent
+    // threads, so without the joins a fast exit can overtake the final output
+    // events and consumers persist a truncated response.
     let app_done = app.clone();
     let id_done = invocation_id.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
+            let _ = stdout_pump.join();
+            let _ = stderr_pump.join();
             mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
@@ -301,7 +306,12 @@ fn prepare_invocation_env(
     Ok(extra_env)
 }
 
-fn spawn_line_pump<R>(app: AppHandle, invocation_id: String, stream_name: String, source: R)
+fn spawn_line_pump<R>(
+    app: AppHandle,
+    invocation_id: String,
+    stream_name: String,
+    source: R,
+) -> thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
@@ -322,7 +332,7 @@ where
             );
             mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
-    });
+    })
 }
 
 fn format_spawn_error(err: &std::io::Error) -> String {

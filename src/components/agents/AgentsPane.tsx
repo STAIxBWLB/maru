@@ -841,6 +841,7 @@ function AgentDetail({
       {tab === "chat" ? (
         <div className="agents-detail-body">
           <AgentChatTab
+            key={`${workPath ?? "no-workspace"}:${agent.id}`}
             agent={agent}
             ai={ai}
             workPath={workPath}

@@ -28,6 +28,15 @@ vi.mock("./skills", () => ({
   skillsRuntimeStatus: (params: { runtime: string }) => skillsRuntimeStatus(params),
 }));
 
+type EventHandler = (event: { payload: never }) => void;
+const eventHandlers = new Map<string, EventHandler>();
+const unlisten = vi.fn();
+const listen = vi.fn(async (event: string, handler: EventHandler) => {
+  eventHandlers.set(event, handler);
+  return unlisten;
+});
+vi.mock("@tauri-apps/api/event", () => ({ listen }));
+
 import {
   buildChatPrompt,
   CHAT_HISTORY_CAP,
@@ -71,7 +80,7 @@ function turn(role: ChatTurn["role"], text: string): ChatTurn {
 
 /** Same stub idiom as skillsInstallMode.test.ts — cheaper than a jsdom env,
  *  and `throwing` covers the quota/private-mode path. */
-function setWindow(throwing = false): Map<string, string> {
+function setWindow(throwing = false, tauri = false): Map<string, string> {
   const store = new Map<string, string>();
   const localStorage = {
     getItem: (key: string) => {
@@ -83,7 +92,10 @@ function setWindow(throwing = false): Map<string, string> {
       store.set(key, value);
     },
   };
-  (globalThis as unknown as { window?: unknown }).window = { localStorage };
+  (globalThis as unknown as { window?: unknown }).window = {
+    localStorage,
+    ...(tauri ? { __TAURI_INTERNALS__: {} } : {}),
+  };
   return store;
 }
 
@@ -91,6 +103,9 @@ beforeEach(() => {
   startAgentCliInvocation.mockClear();
   stopAiMission.mockClear();
   skillsRuntimeStatus.mockClear();
+  eventHandlers.clear();
+  listen.mockClear();
+  unlisten.mockClear();
   skillsRuntimeStatus.mockImplementation(async (params: { runtime: string }) => ({
     runtime: params.runtime,
     available: true,
@@ -215,6 +230,70 @@ describe("sendAgentChatTurn", () => {
       onInvocation,
     });
     expect(onInvocation).toHaveBeenCalledWith("ai-chat-1");
+  });
+
+  it("registers listeners before starting and replays events emitted during invoke", async () => {
+    setWindow(false, true);
+    const onChunk = vi.fn();
+    startAgentCliInvocation.mockImplementationOnce(async () => {
+      eventHandlers.get("ai://output")?.({
+        payload: {
+          invocationId: "ai-chat-1",
+          stream: "stdout",
+          line: "fast answer",
+        } as never,
+      });
+      eventHandlers.get("ai://done")?.({
+        payload: {
+          invocationId: "ai-chat-1",
+          success: true,
+          exitCode: 0,
+        } as never,
+      });
+      return "ai-chat-1";
+    });
+
+    const result = await sendAgentChatTurn({
+      agent: agent(),
+      ai,
+      workPath: "/w",
+      turns: [],
+      message: "안녕",
+      onChunk,
+    });
+
+    expect(result.text).toBe("fast answer");
+    expect(onChunk).toHaveBeenCalledWith("fast answer");
+    expect(listen).toHaveBeenCalledTimes(3);
+    expect(Math.max(...listen.mock.invocationCallOrder)).toBeLessThan(
+      startAgentCliInvocation.mock.invocationCallOrder[0],
+    );
+    expect(unlisten).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects an immediate error emitted before the invoke response", async () => {
+    setWindow(false, true);
+    startAgentCliInvocation.mockImplementationOnce(async () => {
+      eventHandlers.get("ai://error")?.({
+        payload: {
+          invocationId: "ai-chat-1",
+          kind: "spawn_failed",
+          message: "bad argv",
+        } as never,
+      });
+      return "ai-chat-1";
+    });
+
+    await expect(
+      sendAgentChatTurn({
+        agent: agent(),
+        ai,
+        workPath: "/w",
+        turns: [],
+        message: "안녕",
+      }),
+    ).rejects.toThrow("spawn_failed: bad argv");
+    expect(unlisten).toHaveBeenCalledTimes(3);
   });
 
   it("refuses a disabled agent without spawning anything", async () => {

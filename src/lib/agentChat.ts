@@ -131,6 +131,11 @@ export interface SendAgentChatTurnParams {
   onChunk?: (line: string) => void;
 }
 
+type BufferedChatEvent =
+  | { type: "output"; payload: AiOutputEvent }
+  | { type: "done"; payload: AiDoneEvent }
+  | { type: "error"; payload: AiErrorEvent };
+
 /** One chat turn against the agent's resolved backend. */
 export async function sendAgentChatTurn(
   params: SendAgentChatTurnParams,
@@ -148,30 +153,31 @@ export async function sendAgentChatTurn(
   const permissionMode = resolveAgentPermissionMode(agent, ai);
   const { prompt } = buildChatPrompt(agent, turns, message);
 
-  const invocationId = await startAgentCliInvocation(
-    runtime,
-    prompt,
-    workPath,
-    null,
-    null,
-    commandOverride,
-    permissionMode,
-  );
-  params.onInvocation?.(invocationId);
-
   if (!isTauri()) {
     // Browser dev shell: no ai:// bus, so the e2e override's return value is
     // the assistant turn. Real event replay can come when a spec needs to
     // assert streaming rather than the final answer.
+    const invocationId = await startAgentCliInvocation(
+      runtime,
+      prompt,
+      workPath,
+      null,
+      null,
+      commandOverride,
+      permissionMode,
+    );
+    params.onInvocation?.(invocationId);
     return { text: invocationId, runtime, permissionMode, exitCode: 0 };
   }
 
   const { listen } = await import("@tauri-apps/api/event");
   return await new Promise<ChatSendResult>((resolve, reject) => {
+    let invocationId: string | null = null;
     let stdout = "";
     const stderr: string[] = [];
     let settled = false;
     const unlisteners: Array<() => void> = [];
+    const bufferedEvents: BufferedChatEvent[] = [];
 
     const cleanup = () => {
       settled = true;
@@ -189,25 +195,35 @@ export async function sendAgentChatTurn(
       reject(error);
     };
 
-    void listen<AiOutputEvent>("ai://output", (evt) => {
-      if (evt.payload.invocationId !== invocationId) return;
-      if (evt.payload.stream === "stdout") {
-        stdout += `${evt.payload.line}\n`;
-      } else {
-        stderr.push(evt.payload.line);
+    const handleEvent = (event: BufferedChatEvent) => {
+      if (invocationId === null) {
+        // A short-lived CLI can emit output and completion before the Tauri
+        // command's invocation-id response crosses back to the webview. Keep
+        // those events until the id is known, then replay only its events.
+        bufferedEvents.push(event);
+        return;
       }
-      params.onChunk?.(evt.payload.line);
-    }).then((off) => unlisteners.push(off));
-
-    void listen<AiDoneEvent>("ai://done", (evt) => {
-      if (evt.payload.invocationId !== invocationId || settled) return;
-      if (!evt.payload.success) {
+      if (event.payload.invocationId !== invocationId || settled) return;
+      if (event.type === "output") {
+        if (event.payload.stream === "stdout") {
+          stdout += `${event.payload.line}\n`;
+        } else {
+          stderr.push(event.payload.line);
+        }
+        params.onChunk?.(event.payload.line);
+        return;
+      }
+      if (event.type === "error") {
+        safeReject(new Error(`${event.payload.kind}: ${event.payload.message}`));
+        return;
+      }
+      if (!event.payload.success) {
         // stderr is only surfaced on failure; it is noise on the happy path.
         const detail = stderr.join("\n").trim();
         safeReject(
           new Error(
             detail
-              || `${runtime} CLI exited with code ${evt.payload.exitCode ?? "unknown"}`,
+              || `${runtime} CLI exited with code ${event.payload.exitCode ?? "unknown"}`,
           ),
         );
         return;
@@ -217,14 +233,47 @@ export async function sendAgentChatTurn(
         text: stdout.trim(),
         runtime,
         permissionMode,
-        exitCode: evt.payload.exitCode,
+        exitCode: event.payload.exitCode,
       });
-    }).then((off) => unlisteners.push(off));
+    };
 
-    void listen<AiErrorEvent>("ai://error", (evt) => {
-      if (evt.payload.invocationId !== invocationId) return;
-      safeReject(new Error(`${evt.payload.kind}: ${evt.payload.message}`));
-    }).then((off) => unlisteners.push(off));
+    void (async () => {
+      try {
+        // Registration must finish before Rust starts the subprocess. Tauri
+        // events are not replayed, and immediate auth/argv failures can finish
+        // before the invoke response otherwise.
+        unlisteners.push(
+          await listen<AiOutputEvent>("ai://output", (evt) =>
+            handleEvent({ type: "output", payload: evt.payload }),
+          ),
+        );
+        unlisteners.push(
+          await listen<AiDoneEvent>("ai://done", (evt) =>
+            handleEvent({ type: "done", payload: evt.payload }),
+          ),
+        );
+        unlisteners.push(
+          await listen<AiErrorEvent>("ai://error", (evt) =>
+            handleEvent({ type: "error", payload: evt.payload }),
+          ),
+        );
+
+        invocationId = await startAgentCliInvocation(
+          runtime,
+          prompt,
+          workPath,
+          null,
+          null,
+          commandOverride,
+          permissionMode,
+        );
+        params.onInvocation?.(invocationId);
+        const pending = bufferedEvents.splice(0);
+        for (const event of pending) handleEvent(event);
+      } catch (error) {
+        safeReject(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
   });
 }
 

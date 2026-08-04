@@ -1688,6 +1688,9 @@ export async function startAgentCliInvocation(
       provider,
       prompt,
       cwd,
+      extraArgs,
+      extraEnv,
+      commandOverride,
       permissionMode,
     });
     if (override) return override;
