@@ -20,6 +20,7 @@ import {
   type SkillContextItem,
   type SkillDispatchRuntime,
   type SkillRecord,
+  type SkillRuntimeStatus,
 } from "./skills";
 import type { MissionRecord, SchedulerSchedule } from "./types";
 
@@ -341,7 +342,11 @@ export async function runAgent(agent: AgentRecord, ctx: RunAgentContext): Promis
 export async function resolveAvailableRuntime(
   preferred: AiRuntime,
   ai: AiSettings,
-): Promise<{ runtime: AiRuntime; commandOverride: string | null }> {
+): Promise<{
+  runtime: AiRuntime;
+  commandOverride: string | null;
+  status: SkillRuntimeStatus;
+}> {
   let firstFailure: string | null = null;
   for (const runtime of agentRuntimeFallbackOrder(preferred)) {
     const commandOverride = ai.commandOverrides[runtime] ?? null;
@@ -350,7 +355,7 @@ export async function resolveAvailableRuntime(
         runtime: runtime as SkillDispatchRuntime,
         commandOverride,
       });
-      if (status.available) return { runtime, commandOverride };
+      if (status.available) return { runtime, commandOverride, status };
       if (firstFailure === null) {
         firstFailure = [status.message, status.suggestedAction]
           .filter(Boolean)

@@ -27,6 +27,8 @@ export interface ChatTurn {
   permissionMode?: string;
   exitCode?: number | null;
   elapsedMs?: number;
+  /** Persisted guard against applying the same append-capable proposal twice. */
+  proposalAppliedAt?: string;
 }
 
 /**
@@ -125,10 +127,19 @@ export interface SendAgentChatTurnParams {
   workPath: string;
   turns: ChatTurn[];
   message: string;
+  /** The selection displayed by the pane; dispatch must use the same backend. */
+  runtimeSelection?: AgentRuntimeSelection;
+  /** Unmounting a foreground chat aborts its subprocess and stale callbacks. */
+  signal?: AbortSignal;
   /** Fires as soon as the subprocess is registered, so the UI can offer Stop. */
   onInvocation?: (invocationId: string) => void;
   /** Live stdout tail while the turn runs. */
   onChunk?: (line: string) => void;
+}
+
+export interface AgentRuntimeSelection {
+  runtime: AiRuntime;
+  commandOverride: string | null;
 }
 
 type BufferedChatEvent =
@@ -146,10 +157,8 @@ export async function sendAgentChatTurn(
   if (!agent.enabled) throw new Error(`agent_disabled: ${agent.id}`);
   if (!message.trim()) throw new Error("agent_prompt_required");
 
-  const { runtime, commandOverride } = await resolveAvailableRuntime(
-    resolveAgentRuntime(agent, ai),
-    ai,
-  );
+  const { runtime, commandOverride } = params.runtimeSelection
+    ?? await resolveAvailableRuntime(resolveAgentRuntime(agent, ai), ai);
   const permissionMode = resolveAgentPermissionMode(agent, ai);
   const { prompt } = buildChatPrompt(agent, turns, message);
 
@@ -195,6 +204,26 @@ export async function sendAgentChatTurn(
       reject(error);
     };
 
+    const abortError = () => {
+      const error = new Error("agent_chat_cancelled");
+      error.name = "AbortError";
+      return error;
+    };
+    const abort = () => {
+      if (invocationId !== null) {
+        void stopAiMission(invocationId).catch(() => {});
+      }
+      safeReject(abortError());
+    };
+    if (params.signal) {
+      params.signal.addEventListener("abort", abort, { once: true });
+      unlisteners.push(() => params.signal?.removeEventListener("abort", abort));
+      if (params.signal.aborted) {
+        abort();
+        return;
+      }
+    }
+
     const handleEvent = (event: BufferedChatEvent) => {
       if (invocationId === null) {
         // A short-lived CLI can emit output and completion before the Tauri
@@ -237,28 +266,33 @@ export async function sendAgentChatTurn(
       });
     };
 
+    const register = async <T>(
+      eventName: string,
+      callback: (event: { payload: T }) => void,
+    ): Promise<boolean> => {
+      const off = await listen<T>(eventName, callback);
+      if (settled) {
+        off();
+        return false;
+      }
+      unlisteners.push(off);
+      return true;
+    };
+
     void (async () => {
       try {
         // Registration must finish before Rust starts the subprocess. Tauri
         // events are not replayed, and immediate auth/argv failures can finish
         // before the invoke response otherwise.
-        unlisteners.push(
-          await listen<AiOutputEvent>("ai://output", (evt) =>
-            handleEvent({ type: "output", payload: evt.payload }),
-          ),
-        );
-        unlisteners.push(
-          await listen<AiDoneEvent>("ai://done", (evt) =>
-            handleEvent({ type: "done", payload: evt.payload }),
-          ),
-        );
-        unlisteners.push(
-          await listen<AiErrorEvent>("ai://error", (evt) =>
-            handleEvent({ type: "error", payload: evt.payload }),
-          ),
-        );
+        if (!(await register<AiOutputEvent>("ai://output", (evt) =>
+          handleEvent({ type: "output", payload: evt.payload })))) return;
+        if (!(await register<AiDoneEvent>("ai://done", (evt) =>
+          handleEvent({ type: "done", payload: evt.payload })))) return;
+        if (!(await register<AiErrorEvent>("ai://error", (evt) =>
+          handleEvent({ type: "error", payload: evt.payload })))) return;
+        if (settled) return;
 
-        invocationId = await startAgentCliInvocation(
+        const startedInvocationId = await startAgentCliInvocation(
           runtime,
           prompt,
           workPath,
@@ -267,6 +301,11 @@ export async function sendAgentChatTurn(
           commandOverride,
           permissionMode,
         );
+        invocationId = startedInvocationId;
+        if (settled || params.signal?.aborted) {
+          await stopAiMission(startedInvocationId).catch(() => {});
+          return;
+        }
         params.onInvocation?.(invocationId);
         const pending = bufferedEvents.splice(0);
         for (const event of pending) handleEvent(event);

@@ -184,6 +184,15 @@ describe("chat storage", () => {
     expect(loadChatTurns("/w", "missing")).toEqual([]);
   });
 
+  it("persists the proposal-applied guard with the assistant turn", () => {
+    saveChatTurns("/w", "a", [
+      { ...turn("assistant", "proposal"), proposalAppliedAt: "2026-08-04T01:00:00.000Z" },
+    ]);
+    expect(loadChatTurns("/w", "a")[0].proposalAppliedAt).toBe(
+      "2026-08-04T01:00:00.000Z",
+    );
+  });
+
   it("returns an empty transcript for a malformed payload instead of throwing", () => {
     const key = "maru:agent-chat:v1:/w:vault-hygiene";
     for (const payload of ["{not json", '{"role":"user"}', '[{"role":"nope"}]', "[3]"]) {
@@ -217,6 +226,22 @@ describe("sendAgentChatTurn", () => {
     expect(args[2]).toBe("/w");
     expect(args[5]).toBe("/opt/kimi");
     expect(args[6]).toBe("acceptEdits");
+  });
+
+  it("dispatches the exact fallback runtime already displayed by the pane", async () => {
+    await sendAgentChatTurn({
+      agent: agent({ runtime: "claude" }),
+      ai,
+      workPath: "/w",
+      turns: [],
+      message: "fallback으로 실행해줘",
+      runtimeSelection: { runtime: "codex", commandOverride: "/opt/codex" },
+    });
+
+    expect(skillsRuntimeStatus).not.toHaveBeenCalled();
+    const args = startAgentCliInvocation.mock.calls[0];
+    expect(args[0]).toBe("codex");
+    expect(args[5]).toBe("/opt/codex");
   });
 
   it("reports the invocation id so the caller can offer Stop", async () => {
@@ -294,6 +319,32 @@ describe("sendAgentChatTurn", () => {
       }),
     ).rejects.toThrow("spawn_failed: bad argv");
     expect(unlisten).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops a late-starting invocation when the chat is aborted during invoke", async () => {
+    setWindow(false, true);
+    let resolveStart: ((id: string) => void) | null = null;
+    startAgentCliInvocation.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const pending = sendAgentChatTurn({
+      agent: agent(),
+      ai,
+      workPath: "/w",
+      turns: [],
+      message: "안녕",
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(startAgentCliInvocation).toHaveBeenCalledTimes(1));
+
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(resolveStart).not.toBeNull();
+    resolveStart!("ai-chat-1");
+    await vi.waitFor(() => expect(stopAiMission).toHaveBeenCalledWith("ai-chat-1"));
   });
 
   it("refuses a disabled agent without spawning anything", async () => {

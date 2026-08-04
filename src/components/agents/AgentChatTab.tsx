@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import type { AgentRecord } from "../../lib/agents";
-import { agentLabel } from "../../lib/agents";
+import { agentLabel, resolveAvailableRuntime } from "../../lib/agents";
 import {
   buildChatPrompt,
   CHAT_HISTORY_CAP,
@@ -18,6 +18,7 @@ import {
   saveChatTurns,
   sendAgentChatTurn,
   stopAgentChatTurn,
+  type AgentRuntimeSelection,
   type ChatTurn,
 } from "../../lib/agentChat";
 import { createTaskNote, saveScratchpadDocument } from "../../lib/api";
@@ -80,9 +81,11 @@ export function AgentChatTab({
   const [invocationId, setInvocationId] = useState<string | null>(null);
   const [tail, setTail] = useState<string[]>([]);
   const [runtime, setRuntime] = useState<SkillRuntimeStatus | null>(null);
+  const [runtimeSelection, setRuntimeSelection] = useState<AgentRuntimeSelection | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const tailRef = useRef<HTMLPreElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const sendAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setTurns(loadChatTurns(workPath, agent.id));
@@ -91,25 +94,41 @@ export function AgentChatTab({
     setNotice(null);
   }, [workPath, agent.id]);
 
-  // Same probe ComposeDialog uses. It answers "which binary actually resolved",
-  // which no other surface shows.
+  useEffect(() => () => sendAbortRef.current?.abort(), []);
+
+  // Resolve the same availability fallback that dispatch uses, then display
+  // that exact backend and binary instead of the unavailable preference.
   useEffect(() => {
     let cancelled = false;
     setRuntime(null);
-    void skillsRuntimeStatus({
-      runtime: resolvedRuntime,
-      commandOverride: runtimeCommands[resolvedRuntime] ?? null,
-    })
-      .then((status) => {
-        if (!cancelled) setRuntime(status);
+    setRuntimeSelection(null);
+    void resolveAvailableRuntime(resolvedRuntime, ai)
+      .then((selection) => {
+        if (cancelled) return;
+        setRuntimeSelection({
+          runtime: selection.runtime,
+          commandOverride: selection.commandOverride,
+        });
+        setRuntime(selection.status);
       })
       .catch(() => {
-        if (!cancelled) setRuntime(null);
+        // No fallback is ready. Preserve the preferred backend's actionable
+        // diagnosis in the header instead of replacing it with a generic error.
+        void skillsRuntimeStatus({
+          runtime: resolvedRuntime,
+          commandOverride: runtimeCommands[resolvedRuntime] ?? null,
+        })
+          .then((status) => {
+            if (!cancelled) setRuntime(status);
+          })
+          .catch(() => {
+            if (!cancelled) setRuntime(null);
+          });
       });
     return () => {
       cancelled = true;
     };
-  }, [resolvedRuntime, runtimeCommands]);
+  }, [ai, resolvedRuntime, runtimeCommands]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -137,12 +156,14 @@ export function AgentChatTab({
 
   const send = useCallback(async () => {
     const message = input.trim();
-    if (!message || busy || !workPath) return;
+    if (!message || busy || !workPath || !runtimeSelection) return;
     setBusy(true);
     setTail([]);
     setNotice(null);
     onError(null);
     const startedAt = Date.now();
+    const abortController = new AbortController();
+    sendAbortRef.current = abortController;
     const withUser = persist([
       ...turns,
       { role: "user", text: message, at: new Date().toISOString() },
@@ -155,6 +176,8 @@ export function AgentChatTab({
         workPath,
         turns,
         message,
+        runtimeSelection,
+        signal: abortController.signal,
         onInvocation: setInvocationId,
         onChunk: (line) => setTail((lines) => [...lines, line].slice(-200)),
       });
@@ -171,13 +194,18 @@ export function AgentChatTab({
         },
       ]);
     } catch (error) {
-      onError(errorMessage(error));
+      if (!(error instanceof Error && error.name === "AbortError")) {
+        onError(errorMessage(error));
+      }
     } finally {
-      setBusy(false);
-      setInvocationId(null);
-      setTail([]);
+      if (sendAbortRef.current === abortController) {
+        sendAbortRef.current = null;
+        setBusy(false);
+        setInvocationId(null);
+        setTail([]);
+      }
     }
-  }, [agent, ai, busy, input, onError, persist, turns, workPath]);
+  }, [agent, ai, busy, input, onError, persist, runtimeSelection, turns, workPath]);
 
   const stop = useCallback(async () => {
     if (!invocationId) return;
@@ -239,7 +267,7 @@ export function AgentChatTab({
   );
 
   const applyProposal = useCallback(
-    async (proposal: SkillProposal) => {
+    async (turnAt: string, proposal: SkillProposal) => {
       if (!workPath) return;
       try {
         const approvalId = await onConfirmApproval({
@@ -252,13 +280,25 @@ export function AgentChatTab({
         });
         if (!approvalId) return;
         await agentApplySkillProposal({ cwd: workPath, proposal, approvalId });
+        const proposalAppliedAt = new Date().toISOString();
+        setTurns((current) => {
+          const next = current.map((turn) =>
+            turn.role === "assistant" && turn.at === turnAt
+              ? { ...turn, proposalAppliedAt }
+              : turn,
+          );
+          saveChatTurns(workPath, agent.id, next);
+          return next;
+        });
         setNotice(t("agents.chat.proposalApplied"));
       } catch (error) {
         onError(errorMessage(error));
       }
     },
-    [onConfirmApproval, onError, t, workPath],
+    [agent.id, onConfirmApproval, onError, t, workPath],
   );
+
+  const activeRuntime = runtimeSelection?.runtime ?? resolvedRuntime;
 
   if (!workPath) {
     return <EmptyState title={t("agents.chat.noWorkspace")} />;
@@ -267,7 +307,7 @@ export function AgentChatTab({
   return (
     <div className="agents-chat">
       <div className="agents-chat-runtime">
-        <span className="agents-chat-runtime-name">{resolvedRuntime}</span>
+        <span className="agents-chat-runtime-name">{activeRuntime}</span>
         <span>·</span>
         <span>{permissionMode}</span>
         {runtime === null ? (
@@ -323,7 +363,7 @@ export function AgentChatTab({
           <EmptyState
             title={t("agents.chat.empty")}
             description={t("agents.chat.emptyHint", {
-              runtime: resolvedRuntime,
+              runtime: activeRuntime,
               mode: permissionMode,
             })}
           />
@@ -335,13 +375,13 @@ export function AgentChatTab({
             onCopy={() => void clipboardWriteText(turn.text)}
             onTask={() => void toTask(turn.text)}
             onMemo={() => void toMemo(turn.text)}
-            onApplyProposal={applyProposal}
+            onApplyProposal={(proposal) => applyProposal(turn.at, proposal)}
           />
         ))}
         {busy ? (
           <div className="agents-chat-bubble" data-role="assistant" data-pending="yes">
             <p className="agents-chat-meta">
-              {t("agents.chat.thinking", { runtime: resolvedRuntime })}
+              {t("agents.chat.thinking", { runtime: activeRuntime })}
             </p>
             <pre className="processing-log" ref={tailRef}>
               {tail.length > 0 ? tail.join("\n") : t("agents.status.waiting")}
@@ -361,7 +401,7 @@ export function AgentChatTab({
         <textarea
           value={input}
           rows={3}
-          disabled={busy || !agent.enabled}
+          disabled={busy || !agent.enabled || runtimeSelection === null}
           placeholder={t("agents.chat.placeholder")}
           aria-label={t("agents.chat.placeholder")}
           onChange={(event) => setInput(event.target.value)}
@@ -381,7 +421,7 @@ export function AgentChatTab({
           <Button
             variant="primary"
             size="sm"
-            disabled={!input.trim() || !agent.enabled}
+            disabled={!input.trim() || !agent.enabled || runtimeSelection === null}
             onClick={() => void send()}
           >
             <Send size={13} />
@@ -408,6 +448,7 @@ function ChatBubble({
 }) {
   const { t } = useTranslation();
   const [proposal, setProposal] = useState<SkillProposal | null>(null);
+  const [applyingProposal, setApplyingProposal] = useState(false);
 
   // A conversational answer usually is not a proposal; parsing is how we find
   // out, and a failure is the normal case rather than an error.
@@ -447,8 +488,19 @@ function ChatBubble({
             <span>{t("agents.chat.toMemo")}</span>
           </Button>
           {proposal ? (
-            <Button variant="secondary" size="sm" onClick={() => void onApplyProposal(proposal)}>
-              {t("agents.chat.applyProposal")}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={applyingProposal || Boolean(turn.proposalAppliedAt)}
+              onClick={() => {
+                if (applyingProposal || turn.proposalAppliedAt) return;
+                setApplyingProposal(true);
+                void onApplyProposal(proposal).finally(() => setApplyingProposal(false));
+              }}
+            >
+              {turn.proposalAppliedAt
+                ? t("agents.chat.proposalApplied")
+                : t("agents.chat.applyProposal")}
             </Button>
           ) : null}
           <IconButton label={t("agents.chat.copy")} title={t("agents.chat.copy")} onClick={onCopy}>
