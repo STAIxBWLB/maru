@@ -629,11 +629,15 @@ fn parse_codex_rollout_usage(text: &str) -> Option<Vec<UsageWindow>> {
         if value.get("type").and_then(JsonValue::as_str) != Some("event_msg") {
             continue;
         }
-        let payload = value.get("payload")?;
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
         if payload.get("type").and_then(JsonValue::as_str) != Some("token_count") {
             continue;
         }
-        let rate_limits = payload.get("rate_limits")?;
+        let Some(rate_limits) = payload.get("rate_limits") else {
+            continue;
+        };
         let mut windows = Vec::new();
         for (key, label) in [("primary", "5h"), ("secondary", "7d")] {
             if let Some(window) = rate_limits.get(key) {
@@ -649,7 +653,9 @@ fn parse_codex_rollout_usage(text: &str) -> Option<Vec<UsageWindow>> {
                 }
             }
         }
-        return (!windows.is_empty()).then_some(windows);
+        if !windows.is_empty() {
+            return Some(windows);
+        }
     }
     None
 }
@@ -1006,6 +1012,32 @@ mod tests {
         assert_eq!(windows[1].used_percent, 12.0);
 
         assert!(parse_codex_rollout_usage("{\"type\":\"response_item\"}\n").is_none());
+    }
+
+    #[test]
+    fn codex_rollout_skips_newer_quota_less_token_count_events() {
+        let valid = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 37.0, "resets_at": 1780000000}
+                }
+            }
+        });
+        let no_limits = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "token_count"}
+        });
+        let empty_limits = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "token_count", "rate_limits": {"primary": null}}
+        });
+        let text = format!("{valid}\n{no_limits}\n{empty_limits}\n");
+
+        let windows = parse_codex_rollout_usage(&text).unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].used_percent, 37.0);
     }
 
     #[test]
