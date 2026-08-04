@@ -129,6 +129,7 @@ interface OutlinePaneProps {
   onExplorerRefresh: () => void;
   onOpenWorkspaceFile: (entry: WorkspaceFileEntry, line?: number) => void;
   explorerIncludeDotFolders: string[];
+  onIgnoreWorkspaceEntry?: (relPath: string, kind: "file" | "directory") => void;
   selectedWorkspaceFileEntries: WorkspaceFileEntry[];
   filesPaneFilters: WorkspaceFilesPaneFilters;
   onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
@@ -262,6 +263,7 @@ export function OutlinePane({
   onExplorerRefresh,
   onOpenWorkspaceFile,
   explorerIncludeDotFolders,
+  onIgnoreWorkspaceEntry,
   selectedWorkspaceFileEntries,
   filesPaneFilters,
   onFilesPaneFiltersChange,
@@ -525,6 +527,7 @@ export function OutlinePane({
               onRefresh={onExplorerRefresh}
               onOpenFile={onOpenWorkspaceFile}
               includeDotFolders={explorerIncludeDotFolders}
+              onIgnore={onIgnoreWorkspaceEntry}
             />
           ) : null}
 

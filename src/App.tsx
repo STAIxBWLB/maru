@@ -5908,17 +5908,37 @@ function MainApp() {
     visibleAppMode,
   ]);
 
+  // Both scans read `.maruignore`, and the document list and the file tree
+  // are loaded independently — refreshing only the active one leaves the
+  // other showing a row the user just hid.
+  const refreshAfterIgnoreChange = useCallback(async () => {
+    if (!explorerWorkspacePath) return;
+    await refreshCurrent();
+    if (
+      visibleAppMode !== "files" &&
+      explorerWorkspaceFilesState.scanStatus === "ready"
+    ) {
+      await refreshWorkspaceFiles(explorerWorkspacePath);
+    }
+  }, [
+    explorerWorkspaceFilesState.scanStatus,
+    explorerWorkspacePath,
+    refreshCurrent,
+    refreshWorkspaceFiles,
+    visibleAppMode,
+  ]);
+
   // The scan honours `.maruignore`, so an edit in Settings > Ignore list
-  // leaves every loaded document list stale until we rescan.
+  // leaves every loaded list stale until we rescan.
   useEffect(() => {
     let dispose: (() => void) | null = null;
     void listenMaruIgnoreUpdated((payload) => {
-      if (payload.workPath === explorerWorkspacePath) void refreshCurrent();
+      if (payload.workPath === explorerWorkspacePath) void refreshAfterIgnoreChange();
     }).then((off) => {
       dispose = off;
     });
     return () => dispose?.();
-  }, [explorerWorkspacePath, refreshCurrent]);
+  }, [explorerWorkspacePath, refreshAfterIgnoreChange]);
 
   // "Hide from the list" is an edit to `.maruignore`: the scan reads that
   // file, so the rescan is what actually drops the row. Settings > Ignore list
@@ -5928,12 +5948,12 @@ function MainApp() {
       if (!explorerWorkspacePath || !relPath) return;
       try {
         await addMaruIgnorePattern(explorerWorkspacePath, relPath);
-        await refreshCurrent();
+        await refreshAfterIgnoreChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [explorerWorkspacePath, refreshCurrent],
+    [explorerWorkspacePath, refreshAfterIgnoreChange],
   );
 
   const installUpdate = useCallback(
@@ -9066,6 +9086,7 @@ function MainApp() {
           />
         ) : surfaceMode === "files" ? (
           <LazyFilesWorkbench
+            onIgnore={(relPath) => void ignoreEntry(relPath)}
             entries={workspaceEntryNodes}
             selectedPaths={selectedFilePaths}
             query={fileQuery}
@@ -9602,6 +9623,7 @@ function MainApp() {
               void openWorkspaceFileEntry(entry, line)
             }
             explorerIncludeDotFolders={maruSettings.scan.includeDotFolders}
+            onIgnoreWorkspaceEntry={(relPath) => void ignoreEntry(relPath)}
             selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
             filesPaneFilters={filesPaneFilters}
             onFilesPaneFiltersChange={setFilesPaneFilters}

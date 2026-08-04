@@ -9,6 +9,7 @@ import {
   Clipboard,
   Copy,
   ExternalLink,
+  EyeOff,
   File,
   FilePlus2,
   FileText,
@@ -189,6 +190,8 @@ interface FilesWorkbenchProps {
   onOpenInBrowser?: (targetPath: string) => void;
   onApplySkillToTarget?: (targetPath: string, targetKind: "file" | "directory") => void;
   onAttachToTerminal?: (relPath: string, absPath: string) => void;
+  /** Hide this entry from the document/file lists by adding it to `.maruignore`. */
+  onIgnore?: (relPath: string, kind: "file" | "directory") => void;
   onError: (message: string) => void;
 }
 
@@ -245,6 +248,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     onOpenInBrowser,
     onApplySkillToTarget,
     onAttachToTerminal,
+    onIgnore,
     onError,
   } = props;
 
@@ -1630,6 +1634,21 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             >
               <MoreHorizontal size={13} />
               {t("files.context.attachTerminal")}
+            </button>
+          ) : null}
+          {primaryEntry && onIgnore ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() =>
+                onIgnore(
+                  primaryEntry.relPath,
+                  isDirectoryNode(primaryEntry) ? "directory" : "file",
+                )
+              }
+            >
+              <EyeOff size={13} />
+              {t("context.addToIgnore")}
             </button>
           ) : null}
           <button

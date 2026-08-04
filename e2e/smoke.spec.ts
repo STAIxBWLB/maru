@@ -817,8 +817,11 @@ test("edits the document ignore list in settings", async ({ page }) => {
   await expect(page.getByText("이미 등록된 패턴입니다.")).toBeVisible();
 });
 
-test("offers ignoring a document from its context menu", async ({ page }) => {
+test("offers ignoring an entry from every workspace listing", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
+
+  // Documents list.
   const documentList = page.locator(".document-list");
   await documentList
     .getByRole("button", { name: /Maru 사업 주간 점검 회의/ })
@@ -826,6 +829,31 @@ test("offers ignoring a document from its context menu", async ({ page }) => {
     .click({ button: "right" });
   await expect(
     page.locator(".context-menu").getByRole("menuitem", { name: /숨김 목록에 추가/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Right-rail Explorer tree.
+  await ensureRightPaneVisible(page);
+  const rightPane = page.locator(".outline-pane");
+  await rightPane.getByRole("tab", { name: "Explorer" }).click();
+  const explorer = rightPane.locator(".explorer-pane");
+  await explorer
+    .getByRole("tree", { name: "Workspace 파일 트리" })
+    .getByRole("treeitem", { name: "attachments" })
+    .click({ button: "right" });
+  await expect(
+    page.locator(".context-menu").getByRole("menuitem", { name: /숨김 목록에 추가/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Files workbench.
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "파일", exact: true })
+    .click();
+  await page.locator(".files-list-row").first().click({ button: "right" });
+  await expect(
+    page.locator(".files-context-menu").getByRole("menuitem", { name: /숨김 목록에 추가/ }),
   ).toBeVisible();
 });
 
