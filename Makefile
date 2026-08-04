@@ -187,7 +187,7 @@ bench-scan: $(ICON_PATH) ## Bench workspace scan (default: ~/workspace/work; ove
 # token is a gate people learn to bypass. Run it when touching provider.rs,
 # skill_host/dispatch.rs, agent_host/status.rs or terminal/mod.rs.
 .PHONY: verify-integration
-verify-integration: $(ICON_PATH) ## Smoke the real installed AI CLIs (availability, auth, usage, permission argv). Uninstalled CLIs are skipped. MARU_CLI_SMOKE_ROUNDTRIP=1 adds one live prompt per authenticated backend.
+verify-integration: $(ICON_PATH) ## Smoke the real installed AI CLIs (availability, auth, usage, permission parsing). Uninstalled CLIs are skipped. MARU_CLI_SMOKE_ROUNDTRIP=1 adds one live prompt per authenticated backend.
 	cd $(TAURI_DIR) && MARU_CLI_SMOKE=1 \
 		$(CARGO) test --lib cli_backends_real_smoke -- --ignored --nocapture --test-threads=1
 

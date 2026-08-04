@@ -1085,7 +1085,7 @@ mod tests {
     #[ignore]
     fn cli_backends_real_smoke() {
         use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
-        use crate::agent_host::provider::{build_cli_command, CliProviderAdapter, ProviderAdapter};
+        use crate::agent_host::provider::{CliProviderAdapter, ProviderAdapter};
 
         if std::env::var("MARU_CLI_SMOKE").is_err() {
             eprintln!("skipped: set MARU_CLI_SMOKE=1 (see `make verify-integration`)");
@@ -1106,10 +1106,10 @@ mod tests {
 
         let mut checked = 0;
         for provider in AGENTS {
-            if resolve_provider_binary(provider, None).is_none() {
+            let Some(binary) = resolve_provider_binary(provider, None) else {
                 eprintln!("skip {}: not installed", provider.default_binary_name());
                 continue;
-            }
+            };
             checked += 1;
             let caps = provider.capabilities();
             let id = provider.id();
@@ -1149,16 +1149,26 @@ mod tests {
                 "{id}: usage state contradicts capabilities()"
             );
 
-            // 5. permission-flag argv against the real resolved binary
-            for (mode, needle) in permission_argv_expectations(provider) {
-                let (cmd, _stdin) = build_cli_command(provider, &request(), &[], None, mode)
-                    .unwrap_or_else(|err| panic!("{id} {mode}: {err}"));
-                let argv = cmd
-                    .get_args()
-                    .map(|a| a.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                assert!(argv.contains(needle), "{id} {mode}: {needle:?} not in {argv:?}");
+            // 5. Ask the real resolved binary to parse both permission modes.
+            // `--help` prevents a model call while still detecting removed or
+            // renamed options in the installed provider version.
+            for (mode, args, help_needle) in permission_probe_args(provider) {
+                let output = run_cli(&binary, args)
+                    .unwrap_or_else(|| panic!("{id} {mode}: permission probe timed out"));
+                let text = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    output.status.success() && text.contains(help_needle),
+                    "{id} {mode}: real CLI rejected {:?} or omitted {:?}: {}",
+                    args,
+                    help_needle,
+                    text.lines()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or("")
+                );
             }
 
             // 6. one trivial round trip — opt-in: it costs tokens and 10-60s
@@ -1173,7 +1183,10 @@ mod tests {
                 assert_eq!(response.provider, id);
                 // Deliberately not asserting the model's words — that is flaky,
                 // not a contract.
-                assert!(!response.content.trim().is_empty(), "{id}: empty completion");
+                assert!(
+                    !response.content.trim().is_empty(),
+                    "{id}: empty completion"
+                );
             }
 
             eprintln!(
@@ -1189,20 +1202,59 @@ mod tests {
         );
     }
 
-    fn permission_argv_expectations(provider: CliProviderKind) -> [(&'static str, &'static str); 2] {
+    type PermissionProbe = (&'static str, &'static [&'static str], &'static str);
+
+    fn permission_probe_args(provider: CliProviderKind) -> [PermissionProbe; 2] {
         match provider {
             CliProviderKind::Claude => [
-                ("plan", "--permission-mode plan"),
-                ("acceptEdits", "--permission-mode acceptEdits"),
+                (
+                    "plan",
+                    &["--permission-mode", "plan", "--help"],
+                    "--permission-mode",
+                ),
+                (
+                    "acceptEdits",
+                    &["--permission-mode", "acceptEdits", "--help"],
+                    "acceptEdits",
+                ),
             ],
             CliProviderKind::Codex => [
-                ("plan", "--sandbox read-only"),
-                ("acceptEdits", "--sandbox workspace-write"),
+                (
+                    "plan",
+                    &["exec", "--sandbox", "read-only", "--help"],
+                    "--sandbox",
+                ),
+                (
+                    "acceptEdits",
+                    &["exec", "--sandbox", "workspace-write", "--help"],
+                    "--sandbox",
+                ),
             ],
-            CliProviderKind::Kimi => [("plan", "--plan"), ("acceptEdits", "-y")],
+            CliProviderKind::Kimi => [
+                ("plan", &["--plan", "--help"], "--plan"),
+                ("acceptEdits", &["-y", "--help"], "--yolo"),
+            ],
             CliProviderKind::Kiro => [
-                ("plan", "--trust-tools=read,grep"),
-                ("acceptEdits", "--trust-tools=read,grep,write"),
+                (
+                    "plan",
+                    &[
+                        "chat",
+                        "--no-interactive",
+                        "--trust-tools=read,grep",
+                        "--help",
+                    ],
+                    "--trust-tools",
+                ),
+                (
+                    "acceptEdits",
+                    &[
+                        "chat",
+                        "--no-interactive",
+                        "--trust-tools=read,grep,write",
+                        "--help",
+                    ],
+                    "--trust-tools",
+                ),
             ],
         }
     }

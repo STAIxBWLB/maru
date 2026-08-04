@@ -531,4 +531,27 @@ describe("MOCK_BUILTIN_AGENTS", () => {
     expect(seeds.length).toBeGreaterThan(0);
     expect(MOCK_BUILTIN_AGENTS.map((agent) => agent.id).sort()).toEqual(seeds.sort());
   });
+
+  it("mirrors the standalone and sensitive builtin defaults", () => {
+    const byId = new Map(MOCK_BUILTIN_AGENTS.map((agent) => [agent.id, agent]));
+    expect(byId.get("vault-hygiene")).toMatchObject({
+      enabled: true,
+      prompt: expect.stringContaining("dead wiki-link"),
+      recommendedSchedule: { hour: 22, minute: 0, daysOfWeek: [0] },
+    });
+    expect(byId.get("vault-proposal")).toMatchObject({
+      enabled: true,
+      prompt: expect.stringContaining("제안 목록만 출력"),
+      recommendedSchedule: { hour: 18, minute: 0, daysOfWeek: [5] },
+    });
+    expect(byId.get("daily-digest")).toMatchObject({
+      enabled: false,
+      recommendedSchedule: { hour: 7, minute: 50, daysOfWeek: [1, 2, 3, 4, 5] },
+    });
+    expect(byId.get("git-sync")).toMatchObject({
+      enabled: false,
+      permissionMode: "acceptEdits",
+      recommendedSchedule: { hour: 18, minute: 30, daysOfWeek: [1, 2, 3, 4, 5] },
+    });
+  });
 });

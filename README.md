@@ -368,7 +368,7 @@ make verify
 # Smoke the real installed AI CLIs. Every provider unit test drives a fake
 # shell script, so this is the only check that touches the actual integration:
 # --version, auth classification, skills-gate/account-probe agreement,
-# usage-vs-capability, and permission argv. Uninstalled backends are skipped.
+# usage-vs-capability, and real-binary permission parsing. Uninstalled backends are skipped.
 # Run it when touching agent_host/provider.rs, skill_host/dispatch.rs,
 # agent_host/status.rs, or terminal/mod.rs. It is deliberately NOT part of
 # make verify, which must stay hermetic.
