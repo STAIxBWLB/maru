@@ -8,6 +8,19 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.43 - 2026-08-04 - Four Backends, One Conversation
+
+- **All four agent backends now tell the same operational truth.** Claude,
+  Codex, Kimi and Kiro share explicit capability gates, preserve their required
+  launch arguments and permission modes, classify authentication consistently,
+  and can be checked against the installed CLIs with the new integration smoke
+  target. Browser development also uses the complete builtin agent inventory.
+- **Agent conversations stay inside Maru.** The selected agent now has a native
+  chat tab with stoppable missions, durable transcript replay, bounded prompt
+  history and the resolved binary path in view. Completed turns can become a
+  task or memo, or enter the existing approval gate as a proposal, while
+  cancellation, remount and incomplete-turn races fail safely.
+
 ## v0.4.42 - 2026-08-04 - Two Macs, One Rhythm
 
 - **Dot sync is visible and manageable from System.** Maru now reads the
