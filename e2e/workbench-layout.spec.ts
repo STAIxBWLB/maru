@@ -232,6 +232,11 @@ for (const width of [1024, 1280, 1440]) {
       expect(workbenchBox.height).toBeGreaterThan(200);
       expect(terminalBox.x).toBeGreaterThanOrEqual(workbenchBox.x + workbenchBox.width - 1);
       expect(statusBox.y).toBeGreaterThanOrEqual(workbenchBox.y + workbenchBox.height - 1);
+      // Per mode: the bar must span the shell. Several legacy mode templates
+      // define no `status` area, and a bar that falls back to auto-placement
+      // lands in the 48px activity column with every chip clipped.
+      expect(statusBox.x).toBeLessThanOrEqual(1);
+      expect(statusBox.width).toBeGreaterThanOrEqual(width - 1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
       ).toBe(true);
