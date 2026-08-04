@@ -470,6 +470,12 @@ tarball containing an `maru` executable, and uploads
 `maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files to the
 same release.
 
+For Developer ID builds, Tauri notarizes and staples `Maru.app` before creating
+the DMG. The workflow then submits each DMG as a separate notarization artifact,
+staples and validates its ticket, runs Gatekeeper's primary-signature check, and
+only then replaces the initially uploaded DMG asset. A failed container check
+fails that macOS matrix leg and blocks the Homebrew tap update.
+
 macOS bundles must be code signed before publishing. Until Apple Developer ID
 secrets are configured, Maru uses explicit ad-hoc bundle signing
 (`bundle.macOS.signingIdentity = "-"`) so Apple Silicon downloads are not

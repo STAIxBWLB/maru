@@ -126,6 +126,9 @@ jobs:
           HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
           HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
           HAS_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAS_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
+          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
         run: |
           set -euo pipefail
           # Developer ID signing prerequisites. Notarization (re-enabled) runs
@@ -146,6 +149,9 @@ jobs:
           check_secret APPLE_CERTIFICATE "$HAS_APPLE_CERTIFICATE"
           check_secret APPLE_CERTIFICATE_PASSWORD "$HAS_APPLE_CERTIFICATE_PASSWORD"
           check_secret KEYCHAIN_PASSWORD "$HAS_KEYCHAIN_PASSWORD"
+          check_secret APPLE_ID "$HAS_APPLE_ID"
+          check_secret APPLE_PASSWORD "$HAS_APPLE_PASSWORD"
+          check_secret APPLE_TEAM_ID "$HAS_APPLE_TEAM_ID"
 
           if [ "$present" -eq 1 ] && [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Partial Apple signing configuration. Missing: %s\n' "${missing[*]}"
@@ -210,6 +216,55 @@ jobs:
           args: ${{ matrix.args }}
           includeUpdaterJson: true
           assetNamePattern: Maru_[version]_[platform]_[arch]_[bundle][ext]
+
+      # Tauri notarizes and staples Maru.app before it creates the DMG, but the
+      # resulting disk image is a distinct signed container and needs its own
+      # notarization ticket. Replace the asset uploaded by tauri-action only
+      # after the ticket and Gatekeeper-facing checks succeed.
+      - name: Notarize, staple, and verify macOS disk image
+        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          TARGET_ARGS: ${{ matrix.args }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg)
+          shopt -u nullglob
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            printf '::error::Expected exactly one macOS DMG, found %s.\n' "${#dmgs[@]}"
+            exit 1
+          fi
+
+          dmg="${dmgs[0]}"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl -a -vv -t open --context context:primary-signature "$dmg"
+
+          version=$(node -p "require('./package.json').version")
+          case "$TARGET_ARGS" in
+            *aarch64-apple-darwin*) asset_arch=aarch64 ;;
+            *x86_64-apple-darwin*) asset_arch=x64 ;;
+            *)
+              echo "::error::Unsupported macOS target: $TARGET_ARGS"
+              exit 1
+              ;;
+          esac
+          asset="$RUNNER_TEMP/Maru_${version}_darwin_${asset_arch}_dmg.dmg"
+          cp "$dmg" "$asset"
+          gh release upload "$RELEASE_TAG" "$asset" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
   cli-macos:
     name: Build CLI macOS ${{ matrix.asset_arch }}

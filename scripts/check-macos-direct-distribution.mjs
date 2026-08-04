@@ -333,6 +333,29 @@ for (const needle of [
   }
 }
 
+const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
+const dmgNotarizationStep = workflow.indexOf("- name: Notarize, staple, and verify macOS disk image");
+if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
+  ok("release workflow notarizes the DMG after Tauri creates it");
+} else {
+  fail("release workflow must notarize the DMG after Tauri creates it");
+}
+
+for (const [description, needle] of [
+  ["submit the DMG to Apple notary service", "notarytool submit \"$dmg\""],
+  ["staple the DMG ticket", "stapler staple \"$dmg\""],
+  ["validate the stapled DMG ticket", "stapler validate \"$dmg\""],
+  ["verify the DMG with Gatekeeper", "context:primary-signature \"$dmg\""],
+  ["replace the pre-notarization release asset", "gh release upload \"$RELEASE_TAG\" \"$asset\""],
+  ["clobber the pre-notarization release asset", "--clobber"],
+]) {
+  if (workflow.includes(needle)) {
+    ok(`release workflow will ${description}`);
+  } else {
+    fail(`release workflow does not ${description}`);
+  }
+}
+
 function checkLocalIdentity() {
   if (process.platform !== "darwin") {
     const message = "local Developer ID identity check requires macOS";
