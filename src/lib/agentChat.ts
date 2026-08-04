@@ -265,11 +265,6 @@ export function persistChatProposalApplied(
     );
   }
   if (!saveChatTurns(workPath, agentId, next)) {
-    dispatchChatEvent<ChatProposalAppliedDetail>(CHAT_PROPOSAL_APPLIED_EVENT, {
-      workPath,
-      agentId,
-      turns: next,
-    });
     throw new Error(
       "agent_chat_proposal_marker_persist_failed: proposal applied, but its replay guard could not be saved",
     );

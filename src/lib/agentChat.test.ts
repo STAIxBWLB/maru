@@ -318,6 +318,10 @@ describe("chat storage", () => {
     const store = setWindow();
     expect(saveChatTurns("/w", "write-failure-agent", [proposal])).toBe(true);
     setWindowWithWriteFailure(store);
+    const appliedEvents: ChatProposalAppliedDetail[] = [];
+    window.addEventListener(CHAT_PROPOSAL_APPLIED_EVENT, (event) => {
+      appliedEvents.push((event as CustomEvent<ChatProposalAppliedDetail>).detail);
+    });
 
     expect(() =>
       persistChatProposalApplied(
@@ -328,6 +332,7 @@ describe("chat storage", () => {
       )).toThrow("agent_chat_proposal_marker_persist_failed");
     expect(isChatProposalApplied("/w", "write-failure-agent", proposal.at)).toBe(true);
     expect(beginChatProposalApply("/w", "write-failure-agent", proposal.at)).toBe(false);
+    expect(appliedEvents).toEqual([]);
   });
 
   it("keeps one proposal apply lock across component remounts", () => {
