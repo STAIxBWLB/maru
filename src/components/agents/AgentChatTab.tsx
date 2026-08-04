@@ -96,6 +96,7 @@ export function AgentChatTab({
   const endRef = useRef<HTMLDivElement | null>(null);
   const sendAbortRef = useRef<AbortController | null>(null);
   const invocationIdRef = useRef<string | null>(null);
+  const stopRequestedRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setTurns(loadChatTurns(workPath, agent.id));
@@ -212,6 +213,7 @@ export function AgentChatTab({
     const startedAt = Date.now();
     const abortController = new AbortController();
     sendAbortRef.current = abortController;
+    stopRequestedRef.current = null;
     appendTurn({ role: "user", text: message, at: new Date().toISOString() });
     setInput("");
     try {
@@ -238,13 +240,17 @@ export function AgentChatTab({
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
-      if (!(error instanceof Error && error.name === "AbortError")) {
+      const expectedStop = stopRequestedRef.current === abortController;
+      if (!expectedStop && !(error instanceof Error && error.name === "AbortError")) {
         onError(errorMessage(error));
       }
     } finally {
       if (sendAbortRef.current === abortController) {
         sendAbortRef.current = null;
         invocationIdRef.current = null;
+        if (stopRequestedRef.current === abortController) {
+          stopRequestedRef.current = null;
+        }
         setBusy(false);
         setTail([]);
       }
@@ -255,10 +261,18 @@ export function AgentChatTab({
     const invocationId = invocationIdRef.current;
     const controller = sendAbortRef.current;
     if (invocationId) {
+      // Mark the expected termination before signalling the subprocess. Rust
+      // may emit ai://done(success=false) before the awaited stop command
+      // returns; suppress that transport error, but still surface a genuine
+      // stop command rejection below.
+      stopRequestedRef.current = controller;
       try {
         await stopAgentChatTurn(invocationId);
         controller?.abort();
       } catch (error) {
+        if (stopRequestedRef.current === controller) {
+          stopRequestedRef.current = null;
+        }
         onError(errorMessage(error));
       }
       return;
