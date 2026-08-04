@@ -18,6 +18,12 @@ import type { AiRuntime, AiSettings } from "./settings";
 const isTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
+function chatAbortError(): Error {
+  const error = new Error("agent_chat_cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
@@ -41,6 +47,13 @@ export const CHAT_PROMPT_MAX_CHARS = 24_000;
 /** Scrollback kept per agent. UI state — anything worth keeping leaves through
  *  the turn actions, which write real files. */
 export const CHAT_HISTORY_CAP = 20;
+export const CHAT_PROPOSAL_APPLIED_EVENT = "maru:agent-chat:proposal-applied";
+
+export interface ChatProposalAppliedDetail {
+  workPath: string;
+  agentId: string;
+  turns: ChatTurn[];
+}
 
 /** Append against the latest stored transcript so concurrent turn actions
  *  (for example, applying a proposal) are never replaced by a stale snapshot. */
@@ -146,6 +159,16 @@ export function persistChatProposalApplied(
     proposalAppliedAt,
   );
   saveChatTurns(workPath, agentId, next);
+  if (
+    typeof window !== "undefined"
+    && typeof window.dispatchEvent === "function"
+    && typeof CustomEvent !== "undefined"
+  ) {
+    window.dispatchEvent(new CustomEvent<ChatProposalAppliedDetail>(
+      CHAT_PROPOSAL_APPLIED_EVENT,
+      { detail: { workPath, agentId, turns: next } },
+    ));
+  }
   return next;
 }
 
@@ -201,7 +224,8 @@ export async function sendAgentChatTurn(
     // Browser dev shell: no ai:// bus, so the e2e override's return value is
     // the assistant turn. Real event replay can come when a spec needs to
     // assert streaming rather than the final answer.
-    const invocationId = await startAgentCliInvocation(
+    if (params.signal?.aborted) throw chatAbortError();
+    const starting = startAgentCliInvocation(
       runtime,
       prompt,
       workPath,
@@ -210,6 +234,28 @@ export async function sendAgentChatTurn(
       commandOverride,
       permissionMode,
     );
+    const invocationId = await new Promise<string>((resolve, reject) => {
+      let aborted = false;
+      const onAbort = () => {
+        aborted = true;
+        reject(chatAbortError());
+      };
+      params.signal?.addEventListener("abort", onAbort, { once: true });
+      void starting.then(
+        (id) => {
+          params.signal?.removeEventListener("abort", onAbort);
+          if (aborted || params.signal?.aborted) {
+            void stopAiMission(id).catch(() => {});
+            return;
+          }
+          resolve(id);
+        },
+        (error) => {
+          params.signal?.removeEventListener("abort", onAbort);
+          if (!aborted) reject(error);
+        },
+      );
+    });
     params.onInvocation?.(invocationId);
     return { text: invocationId, runtime, permissionMode, exitCode: 0 };
   }
@@ -239,16 +285,11 @@ export async function sendAgentChatTurn(
       reject(error);
     };
 
-    const abortError = () => {
-      const error = new Error("agent_chat_cancelled");
-      error.name = "AbortError";
-      return error;
-    };
     const abort = () => {
       if (invocationId !== null) {
         void stopAiMission(invocationId).catch(() => {});
       }
-      safeReject(abortError());
+      safeReject(chatAbortError());
     };
     if (params.signal) {
       params.signal.addEventListener("abort", abort, { once: true });

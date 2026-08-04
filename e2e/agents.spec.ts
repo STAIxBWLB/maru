@@ -275,3 +275,29 @@ test("chat cannot be cleared while a turn is still running", async ({ page }) =>
   });
   await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toHaveCount(2);
 });
+
+test("chat Stop cancels while the invocation id is still pending", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_E2E_INVOKE__: Record<
+        string,
+        (args: Record<string, unknown>) => unknown
+      >;
+    };
+    host.__MARU_E2E_INVOKE__.start_agent_cli_invocation = () =>
+      new Promise<string>(() => {});
+  });
+
+  const composer = pane.locator(".agents-chat-composer");
+  const input = composer.locator("textarea");
+  await input.fill("시작 전에 중지");
+  await input.press("Enter");
+  await composer.getByRole("button", { name: "중지" }).click();
+
+  await expect(input).toBeEnabled();
+  await expect(pane.locator('.agents-chat-bubble[data-pending="yes"]')).toHaveCount(0);
+});

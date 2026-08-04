@@ -41,6 +41,7 @@ import {
   appendChatTurn,
   buildChatPrompt,
   CHAT_HISTORY_CAP,
+  CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROMPT_MAX_CHARS,
   loadChatTurns,
   markChatProposalApplied,
@@ -48,6 +49,7 @@ import {
   saveChatTurns,
   sendAgentChatTurn,
   type ChatTurn,
+  type ChatProposalAppliedDetail,
 } from "./agentChat";
 import type { AgentRecord } from "./agents";
 import type { AiSettings } from "./settings";
@@ -95,10 +97,13 @@ function setWindow(throwing = false, tauri = false): Map<string, string> {
       store.set(key, value);
     },
   };
-  (globalThis as unknown as { window?: unknown }).window = {
-    localStorage,
-    ...(tauri ? { __TAURI_INTERNALS__: {} } : {}),
+  const target = new EventTarget() as EventTarget & {
+    localStorage: typeof localStorage;
+    __TAURI_INTERNALS__?: unknown;
   };
+  target.localStorage = localStorage;
+  if (tauri) target.__TAURI_INTERNALS__ = {};
+  (globalThis as unknown as { window?: unknown }).window = target;
   return store;
 }
 
@@ -241,6 +246,29 @@ describe("chat storage", () => {
     expect(loadChatTurns("/w", "a")[0].proposalAppliedAt).toBe(
       "2026-08-04T02:00:00.000Z",
     );
+  });
+
+  it("notifies a replacement chat after persisting an applied marker", () => {
+    const proposal = turn("assistant", "proposal");
+    saveChatTurns("/w", "a", [proposal]);
+    const details: ChatProposalAppliedDetail[] = [];
+    window.addEventListener(CHAT_PROPOSAL_APPLIED_EVENT, (event) => {
+      details.push((event as CustomEvent<ChatProposalAppliedDetail>).detail);
+    });
+
+    persistChatProposalApplied(
+      "/w",
+      "a",
+      proposal.at,
+      "2026-08-04T03:00:00.000Z",
+    );
+
+    expect(details).toHaveLength(1);
+    expect(details[0]).toMatchObject({
+      workPath: "/w",
+      agentId: "a",
+      turns: [{ proposalAppliedAt: "2026-08-04T03:00:00.000Z" }],
+    });
   });
 
   it("returns an empty transcript for a malformed payload instead of throwing", () => {
