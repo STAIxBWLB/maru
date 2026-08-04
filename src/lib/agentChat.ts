@@ -225,6 +225,23 @@ export function saveChatTurns(
   }
 }
 
+/** Clear durable replay state, or fail without pretending the history is gone. */
+export function clearStoredChatTurns(
+  workPath: string | null,
+  agentId: string,
+): void {
+  try {
+    const key = storageKey(workPath, agentId);
+    window.localStorage.removeItem(key);
+    if (window.localStorage.getItem(key) === null) return;
+  } catch {
+    // Fall through to the explicit persistence failure below.
+  }
+  throw new Error(
+    "agent_chat_clear_persist_failed: chat history could not be removed from replay storage",
+  );
+}
+
 /** Remove an incomplete user turn from durable replay state. */
 export function discardStoredChatUserTurn(
   workPath: string,

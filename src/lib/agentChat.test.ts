@@ -44,6 +44,7 @@ import {
   CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROMPT_MAX_CHARS,
+  clearStoredChatTurns,
   discardStoredChatUserTurn,
   finishChatProposalApply,
   isChatProposalApplied,
@@ -235,6 +236,27 @@ describe("chat storage", () => {
     expect(removeChatUserTurn(current, "cancelled-at").map((value) => value.text)).toEqual([
       "before",
       "after",
+    ]);
+  });
+
+  it("clears durable chat history", () => {
+    saveChatTurns("/w", "clear-agent", [turn("user", "remove me")]);
+
+    clearStoredChatTurns("/w", "clear-agent");
+
+    expect(loadChatTurns("/w", "clear-agent")).toEqual([]);
+  });
+
+  it("reports when durable chat history cannot be cleared", () => {
+    const store = setWindow();
+    saveChatTurns("/w", "blocked-clear-agent", [turn("user", "keep visible")]);
+    setWindowWithWriteFailure(store);
+
+    expect(() => clearStoredChatTurns("/w", "blocked-clear-agent")).toThrow(
+      "agent_chat_clear_persist_failed",
+    );
+    expect(loadChatTurns("/w", "blocked-clear-agent").map((value) => value.text)).toEqual([
+      "keep visible",
     ]);
   });
 

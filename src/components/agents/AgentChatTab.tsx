@@ -15,9 +15,9 @@ import {
   appendChatTurn,
   beginChatProposalApply,
   buildChatPrompt,
-  CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROPOSAL_APPLY_STATE_EVENT,
+  clearStoredChatTurns,
   discardStoredChatUserTurn,
   finishChatProposalApply,
   isChatProposalApplied,
@@ -180,16 +180,6 @@ export function AgentChatTab({
     if (node) node.scrollTop = node.scrollHeight;
   }, [tail]);
 
-  const persist = useCallback(
-    (next: ChatTurn[]) => {
-      const capped = next.slice(-CHAT_HISTORY_CAP);
-      setTurns(capped);
-      saveChatTurns(workPath, agent.id, capped);
-      return capped;
-    },
-    [workPath, agent.id],
-  );
-
   const appendTurn = useCallback(
     (turn: ChatTurn) => {
       setTurns((current) => {
@@ -318,9 +308,14 @@ export function AgentChatTab({
   }, [onError]);
 
   const clear = useCallback(() => {
-    persist([]);
-    setNotice(null);
-  }, [persist]);
+    try {
+      clearStoredChatTurns(workPath, agent.id);
+      setTurns([]);
+      setNotice(null);
+    } catch (error) {
+      onError(errorMessage(error));
+    }
+  }, [agent.id, onError, workPath]);
 
   const toTask = useCallback(
     async (text: string) => {
