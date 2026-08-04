@@ -43,9 +43,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles app
           - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles app
           - platform: ubuntu-22.04
             args: ""
           # Intentionally tracks latest. The Visual Studio 2026 migration of
@@ -159,10 +159,10 @@ jobs:
           fi
 
           if [ "$present" -eq 0 ]; then
-            echo "Apple Developer ID secrets are not configured; macOS bundles will use ad-hoc signing."
-          else
-            echo "Apple Developer ID secrets present; macOS bundles will be signed and notarized."
+            echo "::error::Apple Developer ID signing and notarization secrets are required for macOS releases."
+            exit 1
           fi
+          echo "Apple Developer ID secrets present; macOS bundles will be signed and notarized."
 
       - name: Prepare macOS signing
         if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
@@ -197,8 +197,8 @@ jobs:
       # Maru bundles again (verified locally — submission Accepted in ~1 min).
       # tauri-action notarizes macOS bundles when APPLE_ID + APPLE_PASSWORD
       # (app-specific) + APPLE_TEAM_ID are present; non-macOS legs ignore them.
-      # If the notary stalls again, drop the three APPLE_ID/PASSWORD/TEAM_ID
-      # env lines below to fall back to Developer ID signing only.
+      # The macOS validation step above requires the complete secret set so a
+      # release cannot silently fall back to an unnotarized public artifact.
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
@@ -217,11 +217,11 @@ jobs:
           includeUpdaterJson: true
           assetNamePattern: Maru_[version]_[platform]_[arch]_[bundle][ext]
 
-      # Tauri notarizes and staples Maru.app before it creates the DMG, but the
-      # resulting disk image is a distinct signed container and needs its own
-      # notarization ticket. Replace the asset uploaded by tauri-action only
-      # after the ticket and Gatekeeper-facing checks succeed.
-      - name: Notarize, staple, and verify macOS disk image
+      # The macOS matrix args above intentionally limit tauri-action to the app
+      # bundle, so no unnotarized DMG reaches the public release. Bundle the DMG
+      # from the existing build here, then upload it only after its own Apple
+      # ticket and Gatekeeper-facing checks succeed.
+      - name: Build, notarize, staple, and upload macOS disk image
         if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
         shell: bash
         env:
@@ -229,10 +229,27 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           TARGET_ARGS: ${{ matrix.args }}
         run: |
           set -euo pipefail
+          case "$TARGET_ARGS" in
+            *aarch64-apple-darwin*)
+              target=aarch64-apple-darwin
+              asset_arch=aarch64
+              ;;
+            *x86_64-apple-darwin*)
+              target=x86_64-apple-darwin
+              asset_arch=x64
+              ;;
+            *)
+              echo "::error::Unsupported macOS target: $TARGET_ARGS"
+              exit 1
+              ;;
+          esac
+
+          pnpm tauri bundle --target "$target" --bundles dmg --ci
           shopt -s nullglob
           dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg)
           shopt -u nullglob
@@ -252,14 +269,6 @@ jobs:
           spctl -a -vv -t open --context context:primary-signature "$dmg"
 
           version=$(node -p "require('./package.json').version")
-          case "$TARGET_ARGS" in
-            *aarch64-apple-darwin*) asset_arch=aarch64 ;;
-            *x86_64-apple-darwin*) asset_arch=x64 ;;
-            *)
-              echo "::error::Unsupported macOS target: $TARGET_ARGS"
-              exit 1
-              ;;
-          esac
           asset="$RUNNER_TEMP/Maru_${version}_darwin_${asset_arch}_dmg.dmg"
           cp "$dmg" "$asset"
           gh release upload "$RELEASE_TAG" "$asset" \

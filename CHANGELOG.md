@@ -13,7 +13,7 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 - **macOS disk images now carry their own notarization ticket.** Release builds
   submit each Developer ID-signed DMG after Tauri finishes the already notarized
   app bundle, staple and validate the container ticket, run Gatekeeper's
-  primary-signature check, and only then replace the public release asset.
+  primary-signature check, and only then upload the public release asset.
   Homebrew publication stays blocked until both architectures pass.
 
 ## v0.4.43 - 2026-08-04 - Four Backends, One Conversation

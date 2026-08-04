@@ -470,17 +470,18 @@ tarball containing an `maru` executable, and uploads
 `maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files to the
 same release.
 
-For Developer ID builds, Tauri notarizes and staples `Maru.app` before creating
-the DMG. The workflow then submits each DMG as a separate notarization artifact,
-staples and validates its ticket, runs Gatekeeper's primary-signature check, and
-only then replaces the initially uploaded DMG asset. A failed container check
-fails that macOS matrix leg and blocks the Homebrew tap update.
+For Developer ID builds, Tauri first notarizes, staples and uploads the app
+updater artifact without creating a DMG. The workflow then builds each DMG in a
+staging path, submits it as a separate notarization artifact, staples and
+validates its ticket, and runs Gatekeeper's primary-signature check. Only a DMG
+that passes all checks is uploaded to the public release. A failed container
+check fails that macOS matrix leg and blocks the Homebrew tap update.
 
-macOS bundles must be code signed before publishing. Until Apple Developer ID
-secrets are configured, Maru uses explicit ad-hoc bundle signing
-(`bundle.macOS.signingIdentity = "-"`) so Apple Silicon downloads are not
-shipped as unsigned/broken app bundles. For fully trusted Gatekeeper launches,
-configure these GitHub Secrets and publish a new release:
+macOS bundles must be code signed before publishing. The repository default
+remains explicit ad-hoc signing (`bundle.macOS.signingIdentity = "-"`) for local
+development, but the release workflow fails closed unless the complete
+Developer ID and notarization secret set is present. Configure these GitHub
+Secrets before publishing a release:
 
 - `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
 - `APPLE_CERTIFICATE_PASSWORD`
