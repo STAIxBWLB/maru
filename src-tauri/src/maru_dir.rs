@@ -874,10 +874,12 @@ pub struct MaruIgnoreDocument {
 }
 
 fn read_ignore_patterns(work: &Path) -> Result<Vec<String>, String> {
-    let path = maruignore_path(work);
-    if !path.exists() {
+    // Resolve the same file the scanner reads: a legacy workspace with only
+    // `.anchorignore` must show its patterns here, or the first save writes a
+    // `.maruignore` that takes precedence and silently drops them.
+    let Some(path) = crate::vault::maruignore_source(work) else {
         return Ok(Vec::new());
-    }
+    };
     let content =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read .maruignore: {err}"))?;
     Ok(content
@@ -901,7 +903,14 @@ fn builtin_ignore_patterns() -> Vec<String> {
 fn ignore_document(work: &Path) -> Result<MaruIgnoreDocument, String> {
     let builtin = builtin_ignore_patterns();
     Ok(MaruIgnoreDocument {
-        rel_path: ".maruignore".to_string(),
+        // Whichever file the scanner resolved: a legacy workspace reports
+        // `.anchorignore` until the first save migrates it.
+        rel_path: crate::vault::maruignore_source(work)
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| ".maruignore".to_string()),
         patterns: read_ignore_patterns(work)?
             .into_iter()
             .filter(|pattern| !builtin.contains(pattern))
@@ -928,7 +937,9 @@ pub fn save_maru_ignore(
     let mut seen = BTreeSet::new();
     let mut lines = vec!["# maru: files hidden from the document list".to_string()];
     for pattern in patterns {
-        let trimmed = pattern.trim().to_string();
+        // A relPath captured on Windows carries backslashes; the scanner
+        // compares forward-slash paths, so store the pattern that way.
+        let trimmed = pattern.trim().replace('\\', "/");
         if trimmed.is_empty() || trimmed.starts_with('#') || !seen.insert(trimmed.clone()) {
             continue;
         }
@@ -1346,6 +1357,7 @@ pub fn save_maru_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::{load_maruignore, matches_maruignore};
     use tempfile::TempDir;
 
     fn fresh_work() -> TempDir {
@@ -1459,6 +1471,40 @@ mod tests {
         // Saving a list that omits them must not drop the app-managed defaults.
         let content = fs::read_to_string(tmp.path().join(".maruignore")).unwrap();
         assert!(content.contains("node_modules"), "{content}");
+    }
+
+    #[test]
+    fn read_maru_ignore_falls_back_to_anchorignore_and_save_migrates_it() {
+        let tmp = fresh_work();
+        let work = tmp.path().to_string_lossy().to_string();
+        fs::remove_file(tmp.path().join(".maruignore")).ok();
+        fs::write(tmp.path().join(".anchorignore"), "legacy-dir\n").unwrap();
+
+        let read = read_maru_ignore(work.clone()).unwrap();
+        assert_eq!(read.patterns, vec!["legacy-dir".to_string()]);
+        assert_eq!(read.rel_path, ".anchorignore");
+
+        // Saving writes .maruignore, which then wins over .anchorignore — the
+        // legacy pattern has to survive that migration.
+        let saved = save_maru_ignore(work, read.patterns.clone()).unwrap();
+        assert!(saved.patterns.contains(&"legacy-dir".to_string()));
+        assert_eq!(saved.rel_path, ".maruignore");
+        assert!(matches_maruignore(
+            Path::new("legacy-dir/a.md"),
+            &load_maruignore(tmp.path())
+        ));
+    }
+
+    #[test]
+    fn save_maru_ignore_normalizes_windows_separators() {
+        let tmp = fresh_work();
+        let work = tmp.path().to_string_lossy().to_string();
+        let saved = save_maru_ignore(work, vec!["drafts\\note.md".to_string()]).unwrap();
+        assert_eq!(saved.patterns, vec!["drafts/note.md".to_string()]);
+        assert!(matches_maruignore(
+            Path::new("drafts/note.md"),
+            &load_maruignore(tmp.path())
+        ));
     }
 
     /// `split_settings_json` only persists paths named in the two lists, so a new
