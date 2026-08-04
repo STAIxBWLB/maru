@@ -239,3 +239,39 @@ test("chat scrollback survives switching agents and away from the tab", async ({
   await pane.getByRole("button", { name: "대화", exact: true }).click();
   await expect(pane.locator(".agents-chat-turns")).toContainText("첫 질문");
 });
+
+test("chat cannot be cleared while a turn is still running", async ({ page }) => {
+  const pane = await openAgentsMode(page);
+
+  await pane.locator(".agents-list-item", { hasText: "정합성 점검" }).click();
+  await pane.getByRole("button", { name: "대화", exact: true }).click();
+  await pane.locator(".agents-chat-composer textarea").fill("첫 질문");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+  await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toBeVisible();
+
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_E2E_INVOKE__: Record<
+        string,
+        (args: Record<string, unknown>) => unknown
+      >;
+      __MARU_RESOLVE_AGENT_CHAT__?: (value: string) => void;
+    };
+    host.__MARU_E2E_INVOKE__.start_agent_cli_invocation = () =>
+      new Promise<string>((resolve) => {
+        host.__MARU_RESOLVE_AGENT_CHAT__ = resolve;
+      });
+  });
+
+  await pane.locator(".agents-chat-composer textarea").fill("아직 실행 중인 질문");
+  await pane.locator(".agents-chat-composer textarea").press("Enter");
+  await expect(pane.getByRole("button", { name: "대화 비우기" })).toBeDisabled();
+
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __MARU_RESOLVE_AGENT_CHAT__?: (value: string) => void;
+    };
+    host.__MARU_RESOLVE_AGENT_CHAT__?.("두 번째 답변");
+  });
+  await expect(pane.locator('.agents-chat-bubble[data-role="assistant"]')).toHaveCount(2);
+});

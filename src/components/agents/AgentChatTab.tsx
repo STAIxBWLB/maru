@@ -335,6 +335,7 @@ export function AgentChatTab({
           <IconButton
             label={t("agents.chat.clear")}
             title={t("agents.chat.clear")}
+            disabled={busy}
             onClick={clear}
           >
             <Trash2 size={13} />
