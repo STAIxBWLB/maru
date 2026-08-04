@@ -753,6 +753,20 @@ export function buildAgentContextArgs(
   return ["--add-dir", ctx.workspaceRoot];
 }
 
+export function buildTerminalLaunchArgs(input: {
+  kind: TerminalKind;
+  context: ActiveTerminalContext;
+  injectContext: boolean;
+  prependContextArgs?: boolean;
+  requestArgs?: string[] | null;
+  launcherArgs?: string[] | null;
+}): string[] {
+  const contextArgs = input.prependContextArgs === false
+    ? []
+    : buildAgentContextArgs(input.kind, input.context, input.injectContext);
+  return [...contextArgs, ...(input.requestArgs ?? input.launcherArgs ?? [])];
+}
+
 function quoteIfNeeded(value: string): string {
   if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
   return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;

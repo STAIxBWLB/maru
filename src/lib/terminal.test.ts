@@ -5,6 +5,7 @@ import {
   buildAgentResumeArgs,
   buildMaruBackgroundContextEnv,
   buildMaruContextEnv,
+  buildTerminalLaunchArgs,
   createTerminalTab,
   createTerminalTask,
   describeActiveContextChip,
@@ -513,6 +514,18 @@ describe("active-item context bridge", () => {
     expect(buildAgentContextArgs("kiro", CTX, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", { ...CTX, workspaceRoot: null }, true)).toEqual([]);
     expect(buildAgentContextArgs("claude", CTX, false)).toEqual([]);
+  });
+
+  it("does not prepend active context to a complete provider wrapper", () => {
+    expect(
+      buildTerminalLaunchArgs({
+        kind: "codex",
+        context: CTX,
+        injectContext: true,
+        prependContextArgs: false,
+        requestArgs: ["-lc", "printf prompt | codex exec -"],
+      }),
+    ).toEqual(["-lc", "printf prompt | codex exec -"]);
   });
 
   it("builds file mentions in each style with a trailing space", () => {

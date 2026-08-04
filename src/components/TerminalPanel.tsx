@@ -70,9 +70,9 @@ import {
 } from "./NativeTerminalView";
 import {
   activeItemMention,
-  buildAgentContextArgs,
   buildAgentResumeArgs,
   buildMaruContextEnv,
+  buildTerminalLaunchArgs,
   createTerminalTab,
   createTerminalTask,
   describeActiveContextChip,
@@ -135,6 +135,8 @@ export interface TerminalLaunchRequest {
   command?: string | null;
   extraArgs?: string[] | null;
   extraEnv?: Record<string, string> | null;
+  /** False when the request already owns a complete provider argv. */
+  prependContextArgs?: boolean;
   taskId?: string | null;
   /** Force a brand-new task (sidebar "+"), ignoring the active task. */
   forceNewTask?: boolean;
@@ -714,7 +716,6 @@ export const TerminalPanel = memo(
 
         try {
           const contextEnv = buildMaruContextEnv(activeContext, sessionId, injectContext);
-          const contextArgs = buildAgentContextArgs(kind, activeContext, injectContext);
           const spawn = await terminalSpawn(
             sessionId,
             kind,
@@ -726,7 +727,14 @@ export const TerminalPanel = memo(
                 launcher.command,
                 settings.ai.commandOverrides,
               ),
-              extraArgs: [...contextArgs, ...(request?.extraArgs ?? launcher.args ?? [])],
+              extraArgs: buildTerminalLaunchArgs({
+                kind,
+                context: activeContext,
+                injectContext,
+                prependContextArgs: request?.prependContextArgs,
+                requestArgs: request?.extraArgs,
+                launcherArgs: launcher.args,
+              }),
               extraEnv: mergeMaruTerminalEnv(request?.extraEnv, contextEnv),
               cols: 120,
               rows: 30,
