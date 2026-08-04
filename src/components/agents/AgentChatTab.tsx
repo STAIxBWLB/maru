@@ -87,7 +87,6 @@ export function AgentChatTab({
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [invocationId, setInvocationId] = useState<string | null>(null);
   const [tail, setTail] = useState<string[]>([]);
   const [runtime, setRuntime] = useState<SkillRuntimeStatus | null>(null);
   const [runtimeSelection, setRuntimeSelection] = useState<AgentRuntimeSelection | null>(null);
@@ -96,6 +95,7 @@ export function AgentChatTab({
   const tailRef = useRef<HTMLPreElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const sendAbortRef = useRef<AbortController | null>(null);
+  const invocationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setTurns(loadChatTurns(workPath, agent.id));
@@ -223,7 +223,9 @@ export function AgentChatTab({
         message,
         runtimeSelection,
         signal: abortController.signal,
-        onInvocation: setInvocationId,
+        onInvocation: (id) => {
+          invocationIdRef.current = id;
+        },
         onChunk: (line) => setTail((lines) => [...lines, line].slice(-200)),
       });
       appendTurn({
@@ -242,26 +244,27 @@ export function AgentChatTab({
     } finally {
       if (sendAbortRef.current === abortController) {
         sendAbortRef.current = null;
+        invocationIdRef.current = null;
         setBusy(false);
-        setInvocationId(null);
         setTail([]);
       }
     }
   }, [agent, ai, appendTurn, busy, input, onError, runtimeSelection, turns, workPath]);
 
   const stop = useCallback(async () => {
+    const invocationId = invocationIdRef.current;
     const controller = sendAbortRef.current;
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
+    if (invocationId) {
+      try {
+        await stopAgentChatTurn(invocationId);
+        controller?.abort();
+      } catch (error) {
+        onError(errorMessage(error));
+      }
       return;
     }
-    if (!invocationId) return;
-    try {
-      await stopAgentChatTurn(invocationId);
-    } catch (error) {
-      onError(errorMessage(error));
-    }
-  }, [invocationId, onError]);
+    if (controller && !controller.signal.aborted) controller.abort();
+  }, [onError]);
 
   const clear = useCallback(() => {
     persist([]);

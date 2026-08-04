@@ -24,6 +24,8 @@ const USAGE_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many bytes from the end of a codex rollout file to scan for
 /// `token_count` events (they are always the most recent events).
 const ROLLOUT_TAIL_BYTES: u64 = 256 * 1024;
+/// Bound fallback work when the newest Codex sessions have no quota event.
+const MAX_RECENT_ROLLOUTS: usize = 20;
 
 const AGENTS: [CliProviderKind; 4] = [
     CliProviderKind::Claude,
@@ -392,15 +394,25 @@ fn codex_usage_windows() -> Result<Vec<UsageWindow>, UsageProbeError> {
         .ok_or_else(|| UsageProbeError::Other("home directory unavailable".to_string()))?
         .join(".codex")
         .join("sessions");
-    let rollout = newest_rollout_file(&sessions_root).ok_or_else(|| {
-        UsageProbeError::Other("No codex rollout session files found".to_string())
-    })?;
-    // Rollouts can be multi-MB; token_count events sit at the end, so read
-    // only the tail instead of the whole file.
-    let text = read_file_tail(&rollout, ROLLOUT_TAIL_BYTES)
-        .map_err(|err| UsageProbeError::Other(format!("rollout read failed: {err}")))?;
-    parse_codex_rollout_usage(&text)
-        .ok_or_else(|| UsageProbeError::Other("No token_count data in codex rollout".to_string()))
+    let rollouts = recent_rollout_files(&sessions_root, MAX_RECENT_ROLLOUTS);
+    if rollouts.is_empty() {
+        return Err(UsageProbeError::Other(
+            "No codex rollout session files found".to_string(),
+        ));
+    }
+    codex_usage_from_rollouts(&rollouts).ok_or_else(|| {
+        UsageProbeError::Other("No token_count data in recent codex rollouts".to_string())
+    })
+}
+
+fn codex_usage_from_rollouts(rollouts: &[PathBuf]) -> Option<Vec<UsageWindow>> {
+    rollouts.iter().find_map(|rollout| {
+        // Rollouts can be multi-MB; token_count events sit near the end, so
+        // read only the tail. A new session may not have emitted one yet;
+        // keep searching older recent sessions instead of hiding valid quota.
+        let text = read_file_tail(rollout, ROLLOUT_TAIL_BYTES).ok()?;
+        parse_codex_rollout_usage(&text)
+    })
 }
 
 // --- pure parsers (unit-tested without the CLIs) ----------------------------
@@ -705,46 +717,72 @@ fn home_file(segments: &[&str]) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// Newest `rollout-*.jsonl` in the codex sessions tree. Sessions live under
-/// `YYYY/MM/DD` directories, where lexicographic-descending names are also
-/// newest, so descend only the newest year → month → day instead of walking
-/// the whole tree (which can hold hundreds of rollouts).
-fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
-    fn newest_child_dir(dir: &Path) -> Option<PathBuf> {
-        std::fs::read_dir(dir)
-            .ok()?
+/// Recent `rollout-*.jsonl` files in newest-first order. Sessions live under
+/// `YYYY/MM/DD`; descending date directories avoid an unbounded full-tree
+/// walk, while spanning days lets a just-created rollout fall back to the
+/// preceding session that already contains quota data.
+fn recent_rollout_files(root: &Path, limit: usize) -> Vec<PathBuf> {
+    fn child_dirs_desc(dir: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut paths = entries
             .flatten()
             .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
-            .map(|entry| entry.file_name())
-            .max()
-            .map(|name| dir.join(name))
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+        paths
     }
-    let year = newest_child_dir(root)?;
-    let month = newest_child_dir(&year)?;
-    let day = newest_child_dir(&month)?;
-    std::fs::read_dir(&day)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .file_name()
-                    .map(|name| {
-                        let name = name.to_string_lossy();
-                        name.starts_with("rollout-") && name.ends_with(".jsonl")
+
+    let mut found = Vec::new();
+    for year in child_dirs_desc(root) {
+        for month in child_dirs_desc(&year) {
+            for day in child_dirs_desc(&month) {
+                let Ok(entries) = std::fs::read_dir(&day) else {
+                    continue;
+                };
+                let mut rollouts = entries
+                    .flatten()
+                    .filter(|entry| {
+                        entry
+                            .file_type()
+                            .map(|kind| kind.is_file())
+                            .unwrap_or(false)
+                            && entry
+                                .file_name()
+                                .to_str()
+                                .map(|name| {
+                                    name.starts_with("rollout-") && name.ends_with(".jsonl")
+                                })
+                                .unwrap_or(false)
                     })
-                    .unwrap_or(false)
-        })
-        // Rollout filenames embed a timestamp, so the name is a deterministic
-        // tie-breaker when mtimes compare equal (coarse fs granularity).
-        .max_by_key(|path| {
-            let mtime = path
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            (mtime, path.file_name().map(|name| name.to_owned()))
-        })
+                    .map(|entry| entry.path())
+                    .collect::<Vec<_>>();
+                rollouts.sort_by(|left, right| {
+                    let modified = |path: &Path| {
+                        path.metadata()
+                            .and_then(|meta| meta.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                    };
+                    modified(right)
+                        .cmp(&modified(left))
+                        .then_with(|| right.file_name().cmp(&left.file_name()))
+                });
+                let remaining = limit.saturating_sub(found.len());
+                found.extend(rollouts.into_iter().take(remaining));
+                if found.len() >= limit {
+                    return found;
+                }
+            }
+        }
+    }
+    found
+}
+
+#[cfg(test)]
+fn newest_rollout_file(root: &Path) -> Option<PathBuf> {
+    recent_rollout_files(root, 1).into_iter().next()
 }
 
 /// Read the last `max_bytes` of a file as (lossy) UTF-8. The first line of a
@@ -1001,6 +1039,36 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(empty.path().join("2026")).unwrap();
         assert!(newest_rollout_file(empty.path()).is_none());
+    }
+
+    #[test]
+    fn codex_usage_falls_back_to_an_older_recent_rollout() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_day = dir.path().join("2026/07/31");
+        let new_day = dir.path().join("2026/08/01");
+        std::fs::create_dir_all(&old_day).unwrap();
+        std::fs::create_dir_all(&new_day).unwrap();
+
+        let older = old_day.join("rollout-with-usage.jsonl");
+        let newer = new_day.join("rollout-startup-only.jsonl");
+        let token_count = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 41.0, "resets_at": 1780000000}
+                }
+            }
+        });
+        std::fs::write(&older, format!("{token_count}\n")).unwrap();
+        std::fs::write(&newer, "{\"type\":\"session_meta\"}\n").unwrap();
+
+        let recent = recent_rollout_files(dir.path(), MAX_RECENT_ROLLOUTS);
+        assert_eq!(recent, vec![newer, older]);
+        let windows = codex_usage_from_rollouts(&recent).unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].label, "5h");
+        assert_eq!(windows[0].used_percent, 41.0);
     }
 
     #[test]
