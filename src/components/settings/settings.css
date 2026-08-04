@@ -316,3 +316,71 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Ignore list (.maruignore) */
+
+.ignore-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ignore-add {
+  display: flex;
+  gap: 6px;
+  width: min(520px, 100%);
+}
+
+.ignore-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ignore-list {
+  width: min(520px, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ignore-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.ignore-list li:last-child {
+  border-bottom: none;
+}
+
+.ignore-list code {
+  font-family: var(--font-mono);
+  font-size: var(--type-meta-size);
+  color: var(--ink);
+}
+
+.ignore-list.builtin {
+  opacity: 0.7;
+}
+
+.ignore-list.builtin li {
+  padding: 4px 10px;
+}
+
+.ignore-builtin-title {
+  margin: 4px 0 0;
+  font-size: var(--type-meta-size);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ignore-syntax {
+  max-width: 640px;
+}

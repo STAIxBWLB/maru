@@ -48,6 +48,7 @@ const GENERATED_SECRET_LEAF_FILES = new Set([
   "desktop.ini",
 ]);
 export const MARU_SETTINGS_UPDATED_EVENT = "maru://settings-updated";
+export const MARU_IGNORE_UPDATED_EVENT = "maru://ignore-updated";
 
 export interface MaruSettingsUpdatedPayload {
   workPath: string;
@@ -455,6 +456,81 @@ export async function saveMaruRule(
     throw new Error(".maru rules require the Tauri shell");
   }
   return invoke<RuleEntry>("save_maru_rule", { workPath, name, content });
+}
+
+// === Ignore list (.maruignore) ===
+
+/** Patterns hiding files from the document list, gitignore-style. */
+export interface MaruIgnoreDocument {
+  relPath: string;
+  /** User-editable lines, in file order. */
+  patterns: string[];
+  /** Built-ins the backend always applies; not editable. */
+  builtin: string[];
+}
+
+export async function readMaruIgnore(workPath: string): Promise<MaruIgnoreDocument> {
+  if (!isTauri()) return { relPath: ".maruignore", patterns: [], builtin: [] };
+  return invoke<MaruIgnoreDocument>("read_maru_ignore", { workPath });
+}
+
+export async function saveMaruIgnore(
+  workPath: string,
+  patterns: string[],
+): Promise<MaruIgnoreDocument> {
+  if (!isTauri()) {
+    throw new Error(".maruignore requires the Tauri shell");
+  }
+  const saved = await invoke<MaruIgnoreDocument>("save_maru_ignore", { workPath, patterns });
+  // The scan reads .maruignore, so every list that was already loaded is now
+  // stale. Fanout is best-effort — the save itself has already succeeded.
+  try {
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit(MARU_IGNORE_UPDATED_EVENT, { workPath });
+  } catch {
+    /* best-effort */
+  }
+  return saved;
+}
+
+export async function listenMaruIgnoreUpdated(
+  handler: (payload: { workPath: string }) => void,
+): Promise<() => void> {
+  if (!isTauri()) {
+    const onEvent = (event: Event) => {
+      handler((event as CustomEvent<{ workPath: string }>).detail);
+    };
+    window.addEventListener(MARU_IGNORE_UPDATED_EVENT, onEvent);
+    return () => window.removeEventListener(MARU_IGNORE_UPDATED_EVENT, onEvent);
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<{ workPath: string }>(MARU_IGNORE_UPDATED_EVENT, (event) => {
+    handler(event.payload);
+  });
+}
+
+/** The list to save after adding `pattern`, or null when it changes nothing
+ *  (blank, already listed, or already covered by a built-in). */
+export function nextIgnorePatterns(
+  current: MaruIgnoreDocument,
+  pattern: string,
+): string[] | null {
+  const trimmed = pattern.trim();
+  if (!trimmed || trimmed.startsWith("#")) return null;
+  if (current.patterns.includes(trimmed) || current.builtin.includes(trimmed)) return null;
+  return [...current.patterns, trimmed];
+}
+
+/** Append one pattern, keeping the file's order and skipping duplicates.
+ *  Returns null when the pattern was already ignored. */
+export async function addMaruIgnorePattern(
+  workPath: string,
+  pattern: string,
+): Promise<MaruIgnoreDocument | null> {
+  const current = await readMaruIgnore(workPath);
+  const next = nextIgnorePatterns(current, pattern);
+  if (!next) return null;
+  return saveMaruIgnore(workPath, next);
 }
 
 export async function deleteMaruRule(workPath: string, name: string): Promise<void> {

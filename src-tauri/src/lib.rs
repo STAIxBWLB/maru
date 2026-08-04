@@ -151,8 +151,10 @@ use linter::gaejosik_lint;
 use maru_dir::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
     list_maru_templates, list_workspace_projects, read_maru_mcp,
-    read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills, read_maru_template,
-    read_maru_workspace, save_maru_mcp, save_maru_projects, save_maru_rule, save_maru_settings,
+    read_maru_ignore, read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills,
+    read_maru_template,
+    read_maru_workspace, save_maru_ignore, save_maru_mcp, save_maru_projects, save_maru_rule,
+    save_maru_settings,
     save_maru_template, update_maru_workspace,
 };
 use meetings::{
@@ -536,6 +538,8 @@ pub fn run() {
             list_maru_rules,
             read_maru_rule,
             save_maru_rule,
+            read_maru_ignore,
+            save_maru_ignore,
             delete_maru_rule,
             list_maru_templates,
             read_maru_template,
