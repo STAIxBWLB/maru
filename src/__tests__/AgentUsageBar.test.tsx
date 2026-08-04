@@ -39,6 +39,12 @@ import type { AgentUsageStatus, DotSyncOverview } from "../lib/api";
 const t = (key: string, vars?: Record<string, string | number>) => {
   if (key === "agents.usage.usedSuffix") return "used";
   if (key === "agents.usage.filesLabel") return "files";
+  if (key === "agents.usage.docsLabel") return "docs";
+  if (key === "agents.usage.state.cliMissing") return "not installed";
+  if (key === "agents.usage.state.unsupported") return "usage n/a";
+  if (key === "agents.usage.state.unavailable") return "unavailable";
+  if (key === "agents.usage.usageUnavailable") return "unavailable";
+  if (key === "agents.usage.skillsUnknown") return "Skills —";
   if (key === "agents.usage.skillsVersion") return `Skills ${vars?.version ?? ""}`;
   if (key === "agents.usage.sync.scheduled") return `${vars?.count ?? 0} jobs`;
   if (key.startsWith("system.agents.agent.")) return key.slice("system.agents.agent.".length);
@@ -99,7 +105,9 @@ describe("AgentUsageBar", () => {
     statusProps: {
       onOpenAgents?: () => void;
       workspaceName?: string | null;
+      workspacePath?: string | null;
       workspaceFileCount?: number | null;
+      workspaceDocumentCount?: number | null;
     } = {},
   ) {
     root = createRoot(container);
@@ -146,29 +154,49 @@ describe("AgentUsageBar", () => {
     expect(chips[0].classList.contains("dimmed")).toBe(false);
   });
 
-  it("renders dimmed chips with a dash for unsupported agents", async () => {
+  it("labels an ok entry that carries no usage windows", async () => {
+    mocks.agentsUsageStatus.mockResolvedValue([usageEntry({ id: "claude", windows: [] })]);
+    await render();
+
+    const chip = container.querySelector(".agent-usage-chip");
+    expect(chip?.textContent).toContain("unavailable");
+  });
+
+  it("renders dimmed chips explaining the state for unsupported agents", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([
-      usageEntry({ id: "kimi", state: "unsupported" }),
+      usageEntry({ id: "kimi", state: "unsupported", message: "No usage API available." }),
     ]);
     await render();
 
     const chip = container.querySelector(".agent-usage-chip");
     expect(chip).not.toBeNull();
     expect(chip?.classList.contains("dimmed")).toBe(true);
-    expect(chip?.textContent).toContain("—");
+    expect(chip?.textContent).toContain("usage n/a");
+    expect(chip?.getAttribute("title")).toBe("No usage API available.");
   });
 
-  it("keeps the status bar and an empty chips region when every agent is cli_missing", async () => {
+  it("keeps a chip for agents whose CLI is missing", async () => {
     mocks.agentsUsageStatus.mockResolvedValue([
-      usageEntry({ id: "claude", state: "cli_missing" }),
+      usageEntry({ id: "claude", state: "cli_missing", message: "claude CLI not found" }),
       usageEntry({ id: "kiro", state: "cli_missing" }),
     ]);
     await render();
 
-    expect(container.querySelector(".agent-usage-bar")).not.toBeNull();
-    expect(container.querySelector(".agent-usage-chips")).not.toBeNull();
-    expect(container.querySelectorAll(".agent-usage-chip")).toHaveLength(0);
+    const chips = container.querySelectorAll(".agent-usage-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0].textContent).toContain("not installed");
+    expect(chips[0].getAttribute("title")).toBe("claude CLI not found");
+    expect(chips[1].classList.contains("dimmed")).toBe(true);
     expect(container.querySelector(".agent-usage-stat")?.textContent).toContain("0");
+  });
+
+  it("shows an unavailable chip when the usage call fails", async () => {
+    mocks.agentsUsageStatus.mockRejectedValue(new Error("backend down"));
+    await render();
+
+    const chip = container.querySelector(".agent-usage-chip");
+    expect(chip?.textContent).toContain("unavailable");
+    expect(chip?.getAttribute("title")).toContain("backend down");
   });
 
   it("shows the active mission count and opens Agents", async () => {
@@ -210,7 +238,19 @@ describe("AgentUsageBar", () => {
     ).toBe("42 files");
   });
 
-  it("shows a dash while the workspace file count is unknown", async () => {
+  it("falls back to the document count while the file scan is not ready", async () => {
+    await render(undefined, undefined, {
+      workspaceName: "Private notes",
+      workspaceFileCount: null,
+      workspaceDocumentCount: 10552,
+    });
+
+    expect(
+      container.querySelector(".agent-usage-workspace-name")?.nextElementSibling?.textContent,
+    ).toBe("10,552 docs");
+  });
+
+  it("shows a dash when neither count is known", async () => {
     await render(undefined, undefined, {
       workspaceName: "Private notes",
       workspaceFileCount: null,
@@ -221,8 +261,22 @@ describe("AgentUsageBar", () => {
     ).toBe("— files");
   });
 
-  it("omits the workspace chip when there is no workspace", async () => {
-    await render(undefined, undefined, { workspaceName: null, workspaceFileCount: 0 });
+  it("falls back to the workspace path basename when there is no label", async () => {
+    await render(undefined, undefined, {
+      workspaceName: null,
+      workspacePath: "/Users/me/workspace/work",
+      workspaceDocumentCount: 3,
+    });
+
+    expect(container.querySelector(".agent-usage-workspace-name")?.textContent).toBe("work");
+  });
+
+  it("omits the workspace chip only when there is no workspace at all", async () => {
+    await render(undefined, undefined, {
+      workspaceName: null,
+      workspacePath: null,
+      workspaceFileCount: 0,
+    });
 
     expect(container.querySelector(".agent-usage-workspace-name")).toBeNull();
   });
@@ -318,6 +372,14 @@ describe("AgentUsageBar", () => {
       skills?.click();
     });
     expect(onOpenSettings).toHaveBeenCalledWith("skills");
+  });
+
+  it("keeps a dimmed skills chip when the bundle status is unknown", async () => {
+    await render();
+
+    const skills = container.querySelector(".agent-usage-skills");
+    expect(skills?.textContent).toBe("Skills —");
+    expect(skills?.classList.contains("dimmed")).toBe(true);
   });
 
   it("opens the settings Agents tab when a chip is clicked", async () => {

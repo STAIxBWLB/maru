@@ -9823,9 +9823,11 @@ function MainApp() {
           onOpenSettings={(tab) => setSettingsOverlay({ tab })}
           onOpenAgents={() => setPersistedAppMode("agents")}
           workspaceName={explorerWorkspace?.label ?? null}
+          workspacePath={explorerWorkspacePath ?? null}
           workspaceFileCount={
             explorerWorkspaceFilesState.scanStatus === "ready" ? fileEntries.length : null
           }
+          workspaceDocumentCount={entries.length}
         />
 
         {pendingDestructiveAction ? (

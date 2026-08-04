@@ -232,6 +232,11 @@ for (const width of [1024, 1280, 1440]) {
       expect(workbenchBox.height).toBeGreaterThan(200);
       expect(terminalBox.x).toBeGreaterThanOrEqual(workbenchBox.x + workbenchBox.width - 1);
       expect(statusBox.y).toBeGreaterThanOrEqual(workbenchBox.y + workbenchBox.height - 1);
+      // Per mode: the bar must span the shell. Several legacy mode templates
+      // define no `status` area, and a bar that falls back to auto-placement
+      // lands in the 48px activity column with every chip clipped.
+      expect(statusBox.x).toBeLessThanOrEqual(1);
+      expect(statusBox.width).toBeGreaterThanOrEqual(width - 1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
       ).toBe(true);
@@ -285,6 +290,39 @@ for (const width of [1024, 1280]) {
     }
   });
 }
+
+test("keeps every status bar control inside the status row", async ({ page }) => {
+  // A screenshot of the bar element itself renders content the parent grid
+  // clips, so this asserts geometry instead: the row must contain its own
+  // content, and no control may cross the window edge.
+  for (const height of [720, 900]) {
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto("/");
+    const bar = page.locator(".agent-usage-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar.locator(".agent-usage-chip").first()).toBeVisible();
+
+    const measured = await bar.evaluate((node) => ({
+      scrollHeight: node.scrollHeight,
+      clientHeight: node.clientHeight,
+      bottom: node.getBoundingClientRect().bottom,
+      width: node.getBoundingClientRect().width,
+      shellWidth:
+        document.querySelector(".app-shell")?.getBoundingClientRect().width ?? 0,
+      overflowing: Array.from(node.querySelectorAll("button")).filter((child) => {
+        const rect = child.getBoundingClientRect();
+        const box = node.getBoundingClientRect();
+        return rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5;
+      }).length,
+    }));
+    // The bar must span the shell, not land in the activity column: a bad
+    // grid placement left it 48px wide with every chip overflowing unseen.
+    expect(measured.width).toBeGreaterThanOrEqual(measured.shellWidth - 1);
+    expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight + 1);
+    expect(measured.overflowing).toBe(0);
+    expect(measured.bottom).toBeLessThanOrEqual(height + 0.5);
+  }
+});
 
 test("keeps terminal and status inside a 720x800 viewport", async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 800 });
