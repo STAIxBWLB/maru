@@ -16,6 +16,7 @@ import {
   buildChatPrompt,
   CHAT_HISTORY_CAP,
   loadChatTurns,
+  persistChatProposalApplied,
   saveChatTurns,
   sendAgentChatTurn,
   stopAgentChatTurn,
@@ -87,6 +88,9 @@ export function AgentChatTab({
   const tailRef = useRef<HTMLPreElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const sendAbortRef = useRef<AbortController | null>(null);
+  const activeChatRef = useRef<string | null>(null);
+  const chatKey = `${workPath ?? ""}\0${agent.id}`;
+  activeChatRef.current = chatKey;
 
   useEffect(() => {
     setTurns(loadChatTurns(workPath, agent.id));
@@ -95,7 +99,13 @@ export function AgentChatTab({
     setNotice(null);
   }, [workPath, agent.id]);
 
-  useEffect(() => () => sendAbortRef.current?.abort(), []);
+  useEffect(() => {
+    activeChatRef.current = chatKey;
+    return () => {
+      if (activeChatRef.current === chatKey) activeChatRef.current = null;
+      sendAbortRef.current?.abort();
+    };
+  }, [chatKey]);
 
   // Resolve the same availability fallback that dispatch uses, then display
   // that exact backend and binary instead of the unavailable preference.
@@ -287,21 +297,24 @@ export function AgentChatTab({
         if (!approvalId) return;
         await agentApplySkillProposal({ cwd: workPath, proposal, approvalId });
         const proposalAppliedAt = new Date().toISOString();
-        setTurns((current) => {
-          const next = current.map((turn) =>
-            turn.role === "assistant" && turn.at === turnAt
-              ? { ...turn, proposalAppliedAt }
-              : turn,
-          );
-          saveChatTurns(workPath, agent.id, next);
-          return next;
-        });
-        setNotice(t("agents.chat.proposalApplied"));
+        // Applying writes durable files. Persist its idempotence marker from
+        // the latest stored transcript even if this tab unmounted while the
+        // approval or apply command was in flight.
+        const next = persistChatProposalApplied(
+          workPath,
+          agent.id,
+          turnAt,
+          proposalAppliedAt,
+        );
+        if (activeChatRef.current === chatKey) {
+          setTurns(next);
+          setNotice(t("agents.chat.proposalApplied"));
+        }
       } catch (error) {
         onError(errorMessage(error));
       }
     },
-    [agent.id, onConfirmApproval, onError, t, workPath],
+    [agent.id, chatKey, onConfirmApproval, onError, t, workPath],
   );
 
   const activeRuntime = runtimeSelection?.runtime ?? resolvedRuntime;

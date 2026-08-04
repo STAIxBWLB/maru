@@ -48,6 +48,19 @@ export function appendChatTurn(turns: ChatTurn[], turn: ChatTurn): ChatTurn[] {
   return [...turns, turn].slice(-CHAT_HISTORY_CAP);
 }
 
+/** Mark an applied proposal without rebuilding the turn from a stale snapshot. */
+export function markChatProposalApplied(
+  turns: ChatTurn[],
+  turnAt: string,
+  proposalAppliedAt: string,
+): ChatTurn[] {
+  return turns.map((turn) =>
+    turn.role === "assistant" && turn.at === turnAt
+      ? { ...turn, proposalAppliedAt }
+      : turn,
+  );
+}
+
 // ponytail: multi-turn = replay the capped transcript as one prompt. Ceiling:
 // the prompt grows O(turns^2) in tokens, and no server-side tool or file state
 // carries across turns — every turn is a cold subprocess. Upgrade path is
@@ -118,6 +131,22 @@ export function saveChatTurns(
   } catch {
     // Quota or private mode — the conversation still works for this session.
   }
+}
+
+/** Persist the proposal guard independently of any mounted chat component. */
+export function persistChatProposalApplied(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+  proposalAppliedAt: string,
+): ChatTurn[] {
+  const next = markChatProposalApplied(
+    loadChatTurns(workPath, agentId),
+    turnAt,
+    proposalAppliedAt,
+  );
+  saveChatTurns(workPath, agentId, next);
+  return next;
 }
 
 export interface ChatSendResult {

@@ -43,6 +43,8 @@ import {
   CHAT_HISTORY_CAP,
   CHAT_PROMPT_MAX_CHARS,
   loadChatTurns,
+  markChatProposalApplied,
+  persistChatProposalApplied,
   saveChatTurns,
   sendAgentChatTurn,
   type ChatTurn,
@@ -165,6 +167,21 @@ describe("buildChatPrompt", () => {
 });
 
 describe("chat storage", () => {
+  it("marks an applied proposal in the latest transcript", () => {
+    const current: ChatTurn[] = [
+      turn("assistant", "proposal"),
+      turn("user", "newer question"),
+    ];
+    const next = markChatProposalApplied(
+      current,
+      current[0].at,
+      "2026-08-04T01:00:00.000Z",
+    );
+
+    expect(next[0].proposalAppliedAt).toBe("2026-08-04T01:00:00.000Z");
+    expect(next[1]).toEqual(current[1]);
+  });
+
   it("preserves proposal markers when a later assistant turn is appended", () => {
     const current: ChatTurn[] = [
       { ...turn("assistant", "proposal"), proposalAppliedAt: "2026-08-04T01:00:00.000Z" },
@@ -206,6 +223,23 @@ describe("chat storage", () => {
     ]);
     expect(loadChatTurns("/w", "a")[0].proposalAppliedAt).toBe(
       "2026-08-04T01:00:00.000Z",
+    );
+  });
+
+  it("persists an applied marker against the latest stored transcript", () => {
+    const proposal = turn("assistant", "proposal");
+    saveChatTurns("/w", "a", [proposal, turn("user", "newer question")]);
+
+    const next = persistChatProposalApplied(
+      "/w",
+      "a",
+      proposal.at,
+      "2026-08-04T02:00:00.000Z",
+    );
+
+    expect(next).toHaveLength(2);
+    expect(loadChatTurns("/w", "a")[0].proposalAppliedAt).toBe(
+      "2026-08-04T02:00:00.000Z",
     );
   });
 
