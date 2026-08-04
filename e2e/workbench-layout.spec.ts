@@ -301,12 +301,18 @@ test("keeps every status bar control inside the status row", async ({ page }) =>
       scrollHeight: node.scrollHeight,
       clientHeight: node.clientHeight,
       bottom: node.getBoundingClientRect().bottom,
+      width: node.getBoundingClientRect().width,
+      shellWidth:
+        document.querySelector(".app-shell")?.getBoundingClientRect().width ?? 0,
       overflowing: Array.from(node.querySelectorAll("button")).filter((child) => {
         const rect = child.getBoundingClientRect();
         const box = node.getBoundingClientRect();
         return rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5;
       }).length,
     }));
+    // The bar must span the shell, not land in the activity column: a bad
+    // grid placement left it 48px wide with every chip overflowing unseen.
+    expect(measured.width).toBeGreaterThanOrEqual(measured.shellWidth - 1);
     expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight + 1);
     expect(measured.overflowing).toBe(0);
     expect(measured.bottom).toBeLessThanOrEqual(height + 0.5);

@@ -24910,11 +24910,13 @@ select:focus-visible,
   overflow: hidden;
 }
 
+/* `grid-area: status` already resets row and column; re-setting them to auto
+ * right after cancelled the named placement, so the bar was auto-placed into
+ * the first free cell — row 4 of the 48px activity column. Every chip then
+ * overflowed a 48px box and only a sliver of the first one stayed visible. */
 .agent-usage-bar,
 .app-shell.terminal-dock-right .agent-usage-bar {
   grid-area: status;
-  grid-row: auto;
-  grid-column: auto;
   min-width: 0;
 }
 
