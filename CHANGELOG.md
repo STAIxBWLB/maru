@@ -8,6 +8,28 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.45 - 2026-08-05 - Visible Status, Quieter Lists
+
+- **The status bar is visible again.** `grid-area: status` was cancelled by two
+  `auto` overrides on the next lines, so the bar auto-placed into the 48px
+  activity column: every chip overflowed a 48px box unseen and only a sliver of
+  the first one reached the screen. Placement is restored, the bar sizes its own
+  refresh control instead of inheriting a 30px toolbar button, and the status row
+  grows rather than clipping. Layout tests now assert the bar's geometry in every
+  primary mode.
+- **The status bar degrades in place instead of disappearing.** An agent whose
+  CLI is missing or whose backend exposes no usage API keeps a dimmed chip that
+  says which, carrying the backend's own explanation as its tooltip; a failed
+  usage load reports itself; the workspace chip falls back to the workspace path
+  and to the document count when the file scan is off; and the skills chip stays
+  as a placeholder until its version resolves.
+- **Files can be hidden from the document list.** The scanner always honoured
+  `.maruignore`, but nothing in the app could read or write it. Settings now has
+  an Ignore list tab, and Documents, Files and the Explorer tree can hide an
+  entry from their context menus. Patterns support `*` and `?`, maru's own
+  entries are shown read-only and survive a save, and a legacy `.anchorignore`
+  workspace has its patterns migrated instead of shadowed.
+
 ## v0.4.44 - 2026-08-04 - Trusted From App to Disk
 
 - **macOS disk images now carry their own notarization ticket.** Release builds
