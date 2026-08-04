@@ -232,8 +232,21 @@ export function discardStoredChatUserTurn(
   turnAt: string,
 ): ChatTurn[] {
   const next = removeChatUserTurn(loadChatTurns(workPath, agentId), turnAt);
-  saveChatTurns(workPath, agentId, next);
-  return next;
+  if (saveChatTurns(workPath, agentId, next)) return next;
+
+  // A smaller rewrite can still fail when storage becomes read-only after the
+  // pending turn was saved. Prefer losing this chat scrollback to retaining a
+  // stopped instruction that a later autonomous turn could replay.
+  try {
+    const key = storageKey(workPath, agentId);
+    window.localStorage.removeItem(key);
+    if (window.localStorage.getItem(key) === null) return [];
+  } catch {
+    // Fall through to the explicit safety failure below.
+  }
+  throw new Error(
+    "agent_chat_cancelled_turn_persist_failed: stopped instruction could not be removed from replay storage",
+  );
 }
 
 /** Persist the proposal guard independently of any mounted chat component. */

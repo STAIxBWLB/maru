@@ -102,6 +102,10 @@ function setWindow(throwing = false, tauri = false): Map<string, string> {
       if (throwing) throw new Error("blocked");
       store.set(key, value);
     },
+    removeItem: (key: string) => {
+      if (throwing) throw new Error("blocked");
+      store.delete(key);
+    },
   };
   const target = new EventTarget() as EventTarget & {
     localStorage: typeof localStorage;
@@ -113,11 +117,15 @@ function setWindow(throwing = false, tauri = false): Map<string, string> {
   return store;
 }
 
-function setWindowWithWriteFailure(store: Map<string, string>): void {
+function setWindowWithWriteFailure(store: Map<string, string>, removalWorks = false): void {
   const localStorage = {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: () => {
       throw new Error("quota exceeded");
+    },
+    removeItem: (key: string) => {
+      if (!removalWorks) throw new Error("read only");
+      store.delete(key);
     },
   };
   const target = new EventTarget() as EventTarget & { localStorage: typeof localStorage };
@@ -239,6 +247,29 @@ describe("chat storage", () => {
     const loaded = loadChatTurns("/w", "cancelled-agent");
     expect(loaded.map((value) => value.text)).toEqual(["before"]);
     expect(buildChatPrompt(agent(), loaded, "next").prompt).not.toContain("do not replay");
+  });
+
+  it("clears the transcript if a cancelled-turn rewrite fails", () => {
+    const cancelled = { ...turn("user", "unsafe replay"), at: "cancelled-fallback-at" };
+    const store = setWindow();
+    saveChatTurns("/w", "fallback-agent", [turn("assistant", "before"), cancelled]);
+    setWindowWithWriteFailure(store, true);
+
+    expect(discardStoredChatUserTurn("/w", "fallback-agent", cancelled.at)).toEqual([]);
+    expect(store.size).toBe(0);
+    expect(loadChatTurns("/w", "fallback-agent")).toEqual([]);
+  });
+
+  it("reports when neither rewrite nor deletion can remove a cancelled turn", () => {
+    const cancelled = { ...turn("user", "unsafe replay"), at: "cancelled-blocked-at" };
+    const store = setWindow();
+    saveChatTurns("/w", "blocked-agent", [cancelled]);
+    setWindowWithWriteFailure(store);
+
+    expect(() =>
+      discardStoredChatUserTurn("/w", "blocked-agent", cancelled.at)).toThrow(
+      "agent_chat_cancelled_turn_persist_failed",
+    );
   });
 
   it("round-trips turns and caps the history", () => {

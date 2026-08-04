@@ -203,15 +203,19 @@ export function AgentChatTab({
 
   const discardUserTurn = useCallback(
     (turnAt: string) => {
-      if (!workPath) return;
+      if (!workPath) return null;
       // Persist independently of the mounted component so an unmount-triggered
       // cancellation cannot leave the instruction in the next chat replay.
-      discardStoredChatUserTurn(workPath, agent.id, turnAt);
+      let persistenceError: string | null = null;
+      try {
+        discardStoredChatUserTurn(workPath, agent.id, turnAt);
+      } catch (error) {
+        persistenceError = errorMessage(error);
+      }
       setTurns((current) => {
-        const next = removeChatUserTurn(current, turnAt);
-        saveChatTurns(workPath, agent.id, next);
-        return next;
+        return removeChatUserTurn(current, turnAt);
       });
+      return persistenceError;
     },
     [agent.id, workPath],
   );
@@ -259,9 +263,11 @@ export function AgentChatTab({
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
-      discardUserTurn(userTurnAt);
+      const discardError = discardUserTurn(userTurnAt);
       const expectedStop = stopRequestedRef.current === abortController;
-      if (!expectedStop && !(error instanceof Error && error.name === "AbortError")) {
+      if (discardError) {
+        onError(discardError);
+      } else if (!expectedStop && !(error instanceof Error && error.name === "AbortError")) {
         onError(errorMessage(error));
       }
     } finally {
