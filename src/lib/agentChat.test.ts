@@ -38,6 +38,7 @@ const listen = vi.fn(async (event: string, handler: EventHandler) => {
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
 import {
+  appendChatTurn,
   buildChatPrompt,
   CHAT_HISTORY_CAP,
   CHAT_PROMPT_MAX_CHARS,
@@ -164,6 +165,21 @@ describe("buildChatPrompt", () => {
 });
 
 describe("chat storage", () => {
+  it("preserves proposal markers when a later assistant turn is appended", () => {
+    const current: ChatTurn[] = [
+      { ...turn("assistant", "proposal"), proposalAppliedAt: "2026-08-04T01:00:00.000Z" },
+      turn("user", "next question"),
+    ];
+    const next = appendChatTurn(current, turn("assistant", "next answer"));
+
+    expect(next[0].proposalAppliedAt).toBe("2026-08-04T01:00:00.000Z");
+    expect(next.map((value) => value.text)).toEqual([
+      "proposal",
+      "next question",
+      "next answer",
+    ]);
+  });
+
   it("round-trips turns and caps the history", () => {
     const turns = Array.from({ length: CHAT_HISTORY_CAP + 5 }, (_, i) =>
       turn("user", `메시지 ${i}`),

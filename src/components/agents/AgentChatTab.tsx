@@ -12,6 +12,7 @@ import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import type { AgentRecord } from "../../lib/agents";
 import { agentLabel, resolveAvailableRuntime } from "../../lib/agents";
 import {
+  appendChatTurn,
   buildChatPrompt,
   CHAT_HISTORY_CAP,
   loadChatTurns,
@@ -149,6 +150,17 @@ export function AgentChatTab({
     [workPath, agent.id],
   );
 
+  const appendTurn = useCallback(
+    (turn: ChatTurn) => {
+      setTurns((current) => {
+        const next = appendChatTurn(current, turn);
+        saveChatTurns(workPath, agent.id, next);
+        return next;
+      });
+    },
+    [agent.id, workPath],
+  );
+
   const droppedTurns = useMemo(() => {
     if (!input.trim()) return 0;
     return buildChatPrompt(agent, turns, input).droppedTurns;
@@ -164,10 +176,7 @@ export function AgentChatTab({
     const startedAt = Date.now();
     const abortController = new AbortController();
     sendAbortRef.current = abortController;
-    const withUser = persist([
-      ...turns,
-      { role: "user", text: message, at: new Date().toISOString() },
-    ]);
+    appendTurn({ role: "user", text: message, at: new Date().toISOString() });
     setInput("");
     try {
       const result = await sendAgentChatTurn({
@@ -181,18 +190,15 @@ export function AgentChatTab({
         onInvocation: setInvocationId,
         onChunk: (line) => setTail((lines) => [...lines, line].slice(-200)),
       });
-      persist([
-        ...withUser,
-        {
-          role: "assistant",
-          text: result.text,
-          at: new Date().toISOString(),
-          runtime: result.runtime,
-          permissionMode: result.permissionMode,
-          exitCode: result.exitCode,
-          elapsedMs: Date.now() - startedAt,
-        },
-      ]);
+      appendTurn({
+        role: "assistant",
+        text: result.text,
+        at: new Date().toISOString(),
+        runtime: result.runtime,
+        permissionMode: result.permissionMode,
+        exitCode: result.exitCode,
+        elapsedMs: Date.now() - startedAt,
+      });
     } catch (error) {
       if (!(error instanceof Error && error.name === "AbortError")) {
         onError(errorMessage(error));
@@ -205,7 +211,7 @@ export function AgentChatTab({
         setTail([]);
       }
     }
-  }, [agent, ai, busy, input, onError, persist, runtimeSelection, turns, workPath]);
+  }, [agent, ai, appendTurn, busy, input, onError, runtimeSelection, turns, workPath]);
 
   const stop = useCallback(async () => {
     if (!invocationId) return;

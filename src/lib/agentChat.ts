@@ -42,6 +42,12 @@ export const CHAT_PROMPT_MAX_CHARS = 24_000;
  *  the turn actions, which write real files. */
 export const CHAT_HISTORY_CAP = 20;
 
+/** Append against the latest stored transcript so concurrent turn actions
+ *  (for example, applying a proposal) are never replaced by a stale snapshot. */
+export function appendChatTurn(turns: ChatTurn[], turn: ChatTurn): ChatTurn[] {
+  return [...turns, turn].slice(-CHAT_HISTORY_CAP);
+}
+
 // ponytail: multi-turn = replay the capped transcript as one prompt. Ceiling:
 // the prompt grows O(turns^2) in tokens, and no server-side tool or file state
 // carries across turns — every turn is a cold subprocess. Upgrade path is
