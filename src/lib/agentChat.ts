@@ -48,11 +48,74 @@ export const CHAT_PROMPT_MAX_CHARS = 24_000;
  *  the turn actions, which write real files. */
 export const CHAT_HISTORY_CAP = 20;
 export const CHAT_PROPOSAL_APPLIED_EVENT = "maru:agent-chat:proposal-applied";
+export const CHAT_PROPOSAL_APPLY_STATE_EVENT = "maru:agent-chat:proposal-apply-state";
 
 export interface ChatProposalAppliedDetail {
   workPath: string;
   agentId: string;
   turns: ChatTurn[];
+}
+
+export interface ChatProposalApplyStateDetail {
+  workPath: string;
+  agentId: string;
+  turnAt: string;
+  applying: boolean;
+}
+
+const applyingChatProposals = new Set<string>();
+
+const chatProposalKey = (workPath: string, agentId: string, turnAt: string) =>
+  JSON.stringify([workPath, agentId, turnAt]);
+
+function dispatchChatEvent<T>(name: string, detail: T): void {
+  if (
+    typeof window !== "undefined"
+    && typeof window.dispatchEvent === "function"
+    && typeof CustomEvent !== "undefined"
+  ) {
+    window.dispatchEvent(new CustomEvent<T>(name, { detail }));
+  }
+}
+
+export function beginChatProposalApply(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+): boolean {
+  const key = chatProposalKey(workPath, agentId, turnAt);
+  if (applyingChatProposals.has(key)) return false;
+  applyingChatProposals.add(key);
+  dispatchChatEvent<ChatProposalApplyStateDetail>(CHAT_PROPOSAL_APPLY_STATE_EVENT, {
+    workPath,
+    agentId,
+    turnAt,
+    applying: true,
+  });
+  return true;
+}
+
+export function finishChatProposalApply(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+): void {
+  const key = chatProposalKey(workPath, agentId, turnAt);
+  if (!applyingChatProposals.delete(key)) return;
+  dispatchChatEvent<ChatProposalApplyStateDetail>(CHAT_PROPOSAL_APPLY_STATE_EVENT, {
+    workPath,
+    agentId,
+    turnAt,
+    applying: false,
+  });
+}
+
+export function isChatProposalApplying(
+  workPath: string,
+  agentId: string,
+  turnAt: string,
+): boolean {
+  return applyingChatProposals.has(chatProposalKey(workPath, agentId, turnAt));
 }
 
 /** Append against the latest stored transcript so concurrent turn actions
@@ -159,16 +222,11 @@ export function persistChatProposalApplied(
     proposalAppliedAt,
   );
   saveChatTurns(workPath, agentId, next);
-  if (
-    typeof window !== "undefined"
-    && typeof window.dispatchEvent === "function"
-    && typeof CustomEvent !== "undefined"
-  ) {
-    window.dispatchEvent(new CustomEvent<ChatProposalAppliedDetail>(
-      CHAT_PROPOSAL_APPLIED_EVENT,
-      { detail: { workPath, agentId, turns: next } },
-    ));
-  }
+  dispatchChatEvent<ChatProposalAppliedDetail>(CHAT_PROPOSAL_APPLIED_EVENT, {
+    workPath,
+    agentId,
+    turns: next,
+  });
   return next;
 }
 

@@ -13,9 +13,13 @@ import type { AgentRecord } from "../../lib/agents";
 import { agentLabel, resolveAvailableRuntime } from "../../lib/agents";
 import {
   appendChatTurn,
+  beginChatProposalApply,
   buildChatPrompt,
   CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
+  CHAT_PROPOSAL_APPLY_STATE_EVENT,
+  finishChatProposalApply,
+  isChatProposalApplying,
   loadChatTurns,
   persistChatProposalApplied,
   saveChatTurns,
@@ -23,6 +27,7 @@ import {
   stopAgentChatTurn,
   type AgentRuntimeSelection,
   type ChatProposalAppliedDetail,
+  type ChatProposalApplyStateDetail,
   type ChatTurn,
 } from "../../lib/agentChat";
 import { createTaskNote, saveScratchpadDocument } from "../../lib/api";
@@ -87,6 +92,7 @@ export function AgentChatTab({
   const [runtime, setRuntime] = useState<SkillRuntimeStatus | null>(null);
   const [runtimeSelection, setRuntimeSelection] = useState<AgentRuntimeSelection | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [, setProposalApplyRevision] = useState(0);
   const tailRef = useRef<HTMLPreElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const sendAbortRef = useRef<AbortController | null>(null);
@@ -113,6 +119,19 @@ export function AgentChatTab({
       syncAppliedProposal,
     );
   }, [agent.id, t, workPath]);
+
+  useEffect(() => {
+    const syncApplyState = (event: Event) => {
+      const detail = (event as CustomEvent<ChatProposalApplyStateDetail>).detail;
+      if (detail.workPath !== workPath || detail.agentId !== agent.id) return;
+      setProposalApplyRevision((revision) => revision + 1);
+    };
+    window.addEventListener(CHAT_PROPOSAL_APPLY_STATE_EVENT, syncApplyState);
+    return () => window.removeEventListener(
+      CHAT_PROPOSAL_APPLY_STATE_EVENT,
+      syncApplyState,
+    );
+  }, [agent.id, workPath]);
 
   // Resolve the same availability fallback that dispatch uses, then display
   // that exact backend and binary instead of the unavailable preference.
@@ -297,6 +316,7 @@ export function AgentChatTab({
   const applyProposal = useCallback(
     async (turnAt: string, proposal: SkillProposal) => {
       if (!workPath) return;
+      if (!beginChatProposalApply(workPath, agent.id, turnAt)) return;
       try {
         const approvalId = await onConfirmApproval({
           kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
@@ -320,6 +340,8 @@ export function AgentChatTab({
         );
       } catch (error) {
         onError(errorMessage(error));
+      } finally {
+        finishChatProposalApply(workPath, agent.id, turnAt);
       }
     },
     [agent.id, onConfirmApproval, onError, t, workPath],
@@ -403,6 +425,7 @@ export function AgentChatTab({
             onCopy={() => void clipboardWriteText(turn.text)}
             onTask={() => void toTask(turn.text)}
             onMemo={() => void toMemo(turn.text)}
+            proposalApplying={isChatProposalApplying(workPath, agent.id, turn.at)}
             onApplyProposal={(proposal) => applyProposal(turn.at, proposal)}
           />
         ))}
@@ -466,17 +489,18 @@ function ChatBubble({
   onCopy,
   onTask,
   onMemo,
+  proposalApplying,
   onApplyProposal,
 }: {
   turn: ChatTurn;
   onCopy: () => void;
   onTask: () => void;
   onMemo: () => void;
+  proposalApplying: boolean;
   onApplyProposal: (proposal: SkillProposal) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [proposal, setProposal] = useState<SkillProposal | null>(null);
-  const [applyingProposal, setApplyingProposal] = useState(false);
 
   // A conversational answer usually is not a proposal; parsing is how we find
   // out, and a failure is the normal case rather than an error.
@@ -519,11 +543,10 @@ function ChatBubble({
             <Button
               variant="secondary"
               size="sm"
-              disabled={applyingProposal || Boolean(turn.proposalAppliedAt)}
+              disabled={proposalApplying || Boolean(turn.proposalAppliedAt)}
               onClick={() => {
-                if (applyingProposal || turn.proposalAppliedAt) return;
-                setApplyingProposal(true);
-                void onApplyProposal(proposal).finally(() => setApplyingProposal(false));
+                if (proposalApplying || turn.proposalAppliedAt) return;
+                void onApplyProposal(proposal);
               }}
             >
               {turn.proposalAppliedAt

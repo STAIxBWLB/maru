@@ -39,10 +39,13 @@ vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
 import {
   appendChatTurn,
+  beginChatProposalApply,
   buildChatPrompt,
   CHAT_HISTORY_CAP,
   CHAT_PROPOSAL_APPLIED_EVENT,
   CHAT_PROMPT_MAX_CHARS,
+  finishChatProposalApply,
+  isChatProposalApplying,
   loadChatTurns,
   markChatProposalApplied,
   persistChatProposalApplied,
@@ -269,6 +272,17 @@ describe("chat storage", () => {
       agentId: "a",
       turns: [{ proposalAppliedAt: "2026-08-04T03:00:00.000Z" }],
     });
+  });
+
+  it("keeps one proposal apply lock across component remounts", () => {
+    expect(beginChatProposalApply("/w", "a", "turn-1")).toBe(true);
+    expect(beginChatProposalApply("/w", "a", "turn-1")).toBe(false);
+    expect(isChatProposalApplying("/w", "a", "turn-1")).toBe(true);
+
+    finishChatProposalApply("/w", "a", "turn-1");
+    expect(isChatProposalApplying("/w", "a", "turn-1")).toBe(false);
+    expect(beginChatProposalApply("/w", "a", "turn-1")).toBe(true);
+    finishChatProposalApply("/w", "a", "turn-1");
   });
 
   it("returns an empty transcript for a malformed payload instead of throwing", () => {
