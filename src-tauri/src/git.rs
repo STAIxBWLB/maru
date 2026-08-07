@@ -45,11 +45,6 @@ pub fn git_status(vault_path: String) -> Result<GitStatus, String> {
     git_status_with_mode(vault_path, true)
 }
 
-#[tauri::command]
-pub fn git_status_fast(vault_path: String) -> Result<GitStatus, String> {
-    git_status_with_mode(vault_path, false)
-}
-
 fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<GitStatus, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
@@ -1137,7 +1132,7 @@ mod tests {
         fs::write(root.join("untracked.md"), "new\n").unwrap();
 
         let full = git_status(root.to_string_lossy().to_string()).unwrap();
-        let fast = git_status_fast(root.to_string_lossy().to_string()).unwrap();
+        let fast = git_status_with_mode(root.to_string_lossy().to_string(), false).unwrap();
 
         assert_eq!(full.untracked, 1);
         assert!(full.untracked_known);

@@ -1,6 +1,6 @@
 import { GitBranch, GitCommit, PencilLine, Plus, Sigma } from "lucide-react";
 import { useEffect, useState } from "react";
-import { gitStatus, gitStatusFast } from "../lib/api";
+import { gitStatus } from "../lib/api";
 import { formatGitStatusDisplay } from "../lib/gitStatusDisplay";
 import { useTranslation } from "../lib/i18n";
 import type { GitStatus } from "../lib/types";
@@ -32,27 +32,14 @@ export function GitStatusBadge({ vaultPath, enabled, refreshTrigger, onCommitCli
     function poll() {
       if (!vaultPath) return;
       const requestSeq = ++pollSeq;
-      let fullApplied = false;
-      let fastApplied = false;
-      gitStatusFast(vaultPath)
-        .then((next) => {
-          if (!cancelled && requestSeq === pollSeq && !fullApplied) {
-            fastApplied = true;
-            setStatus(next);
-          }
-        })
-        .catch(() => {
-          if (!cancelled && requestSeq === pollSeq && !fullApplied) setStatus(null);
-        });
       gitStatus(vaultPath)
         .then((next) => {
           if (!cancelled && requestSeq === pollSeq) {
-            fullApplied = true;
             setStatus(next);
           }
         })
         .catch(() => {
-          if (!cancelled && requestSeq === pollSeq && !fastApplied) setStatus(null);
+          if (!cancelled && requestSeq === pollSeq) setStatus(null);
         });
     }
     poll();
