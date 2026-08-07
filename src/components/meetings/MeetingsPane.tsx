@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -164,7 +165,7 @@ interface MeetingsPaneProps {
   onViewConsumed?: () => void;
 }
 
-export function MeetingsPane({
+export const MeetingsPane = memo(function MeetingsPane({
   workPath,
   settings,
   effectiveSettings,
@@ -601,7 +602,7 @@ export function MeetingsPane({
       </main>
     </section>
   );
-}
+});
 
 function MeetingsSidebar({
   view,

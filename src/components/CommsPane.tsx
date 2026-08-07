@@ -1,5 +1,5 @@
 import { RefreshCcw, Settings } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { LegacyLaunchdService } from "../lib/api";
 import type { ApprovalInput } from "../approval/ApprovalDialog";
 import { useTranslation } from "../lib/i18n";
@@ -74,7 +74,7 @@ interface CommsPaneProps {
   onUnloadMigration: (plistPaths: string[]) => void;
 }
 
-export function CommsPane({
+export const CommsPane = memo(function CommsPane({
   runtimeConfig,
   sourceRuns,
   processedCounts,
@@ -306,4 +306,4 @@ export function CommsPane({
       </section>
     </main>
   );
-}
+});

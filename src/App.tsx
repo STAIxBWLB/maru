@@ -55,6 +55,7 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
+import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
   TerminalLaunchRequest,
   TerminalPanelHandle,
@@ -105,7 +106,6 @@ import {
   getSampleWorkspacePath,
   gitStatus,
   kgDocumentRefs,
-  listAiMissions,
   listWorkspaceRoots,
   moveDocument,
   readDocument,
@@ -317,6 +317,7 @@ import type {
   WorkspaceVisibility,
   WorkspaceWritePolicy,
 } from "./lib/types";
+import { ingestMissionUpdate, useTrackedMissions } from "./lib/useActiveMissions";
 import {
   isSameParentMove,
   targetDirForDropTarget,
@@ -727,23 +728,6 @@ function matchesActiveMission(record: MissionRecord): boolean {
   return record.status === "running" || record.status === "idle";
 }
 
-function upsertMission(current: MissionRecord[], next: MissionRecord): MissionRecord[] {
-  const merged = current.filter((mission) => mission.id !== next.id);
-  merged.unshift(next);
-  return trackedMissions(merged);
-}
-
-function trackedMissions(missions: MissionRecord[]): MissionRecord[] {
-  return missions
-    .filter(isTrackedAgentMission)
-    .sort(
-      (a, b) =>
-        b.lastOutputAt.localeCompare(a.lastOutputAt) ||
-        b.startedAt.localeCompare(a.startedAt),
-    )
-    .slice(0, 80);
-}
-
 function formatGmailTtl(seconds: number): string {
   const value = normalizeGmailRefreshTtl(seconds);
   if (value < 60) return `${value}s`;
@@ -1014,6 +998,8 @@ function MainApp() {
   const commsDashboardRequestSeqRef = useRef(0);
   const migrationCheckedRef = useRef(false);
   const processingMissionIdsRef = useRef<Set<string>>(new Set());
+  const processingMissionsRef = useRef<MissionRecord[]>([]);
+  const prevProcessingMissionsRef = useRef<MissionRecord[] | null>(null);
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
   // overwrite the editor with stale content if the user clicked a later
@@ -1114,7 +1100,10 @@ function MainApp() {
   const [processedQuery, setProcessedQuery] = useState("");
   const [processedDeferredQuery, setProcessedDeferredQuery] = useState("");
   const [processedDetail, setProcessedDetail] = useState<InboxProcessedItemDetail | null>(null);
-  const [processingMissions, setProcessingMissions] = useState<MissionRecord[]>([]);
+  // Tracked agent missions (skill + structured-loop) come from the shared
+  // ai://mission_update store in lib/useActiveMissions — the same store
+  // MissionBadge/AgentUsageBar use — instead of a second local listener.
+  const processingMissions = useTrackedMissions();
   const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
   // Per-source processing run state for the Messages dashboard.
   const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
@@ -2880,6 +2869,7 @@ function MainApp() {
 
   useEffect(() => {
     processingMissionIdsRef.current = new Set(processingMissions.map((mission) => mission.id));
+    processingMissionsRef.current = processingMissions;
   }, [processingMissions]);
 
   const updateGmailScanStatus = useCallback((status: GmailScanStatus) => {
@@ -3346,11 +3336,12 @@ function MainApp() {
     [inboxWorkspacePath],
   );
 
+  // Log tails only — the mission list itself streams from the shared
+  // ai://mission_update store (useTrackedMissions), so there is nothing to
+  // re-list here.
   const refreshProcessingMissions = useCallback(async () => {
     try {
-      const missions = trackedMissions(await listAiMissions());
-      setProcessingMissions(missions);
-      processingMissionIdsRef.current = new Set(missions.map((mission) => mission.id));
+      const missions = processingMissionsRef.current;
       const tails = await Promise.all(
         missions.map((mission) =>
           readAiMissionLog(mission.id, 80)
@@ -3363,7 +3354,7 @@ function MainApp() {
         ...Object.fromEntries(tails),
       }));
     } catch {
-      // Mission listing is a secondary diagnostic surface.
+      // Mission log tails are a secondary diagnostic surface.
     }
   }, []);
 
@@ -4026,7 +4017,7 @@ function MainApp() {
     try {
       const record = await stopAiMission(id);
       if (isTrackedAgentMission(record)) {
-        setProcessingMissions((current) => upsertMission(current, record));
+        ingestMissionUpdate(record);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -4244,34 +4235,9 @@ function MainApp() {
 
   useEffect(() => {
     let cancelled = false;
-    let unlistenMission: (() => void) | null = null;
     let unlistenOutput: (() => void) | null = null;
     void import("@tauri-apps/api/event")
       .then(async ({ listen }) => {
-        const offMission = await listen<MissionRecord>("ai://mission_update", (event) => {
-          const record = event.payload;
-          const inboxMission = isInboxProcessMission(record);
-          if (!isTrackedAgentMission(record)) return;
-          processingMissionIdsRef.current = new Set([
-            ...processingMissionIdsRef.current,
-            record.id,
-          ]);
-          setProcessingMissions((current) => upsertMission(current, record));
-          if (inboxMission && !matchesActiveMission(record)) {
-            void refreshProcessedItems();
-            void refreshSourceRuns();
-          }
-          if (!matchesActiveMission(record)) {
-            void readAiMissionLog(record.id, 100)
-              .then((tail) =>
-                setProcessingLogLines((current) => ({
-                  ...current,
-                  [record.id]: tail.lines,
-                })),
-              )
-              .catch(() => {});
-          }
-        });
         const offOutput = await listen<AiOutputEvent>("ai://output", (event) => {
           const payload = event.payload;
           if (!processingMissionIdsRef.current.has(payload.invocationId)) return;
@@ -4282,20 +4248,50 @@ function MainApp() {
           });
         });
         if (cancelled) {
-          offMission();
           offOutput();
         } else {
-          unlistenMission = offMission;
           unlistenOutput = offOutput;
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
-      unlistenMission?.();
       unlistenOutput?.();
     };
-  }, [matchesActiveMission, refreshProcessedItems, refreshSourceRuns]);
+  }, []);
+
+  // Mission-completion side effects. These used to live in App's own
+  // ai://mission_update listener; the shared store (useTrackedMissions) owns
+  // that subscription now, so this diffs the tracked list against the previous
+  // render and fires the same calls on the same transitions. A record only
+  // changes identity when the store ingested an event for it, so "changed or
+  // new record with a non-active status" is exactly the old handler's trigger;
+  // the initial snapshot (previous === null) fires nothing, matching the old
+  // listener, which reacted to events only and never to the initial list.
+  useEffect(() => {
+    const previous = prevProcessingMissionsRef.current;
+    prevProcessingMissionsRef.current = processingMissions;
+    if (previous === null || previous === processingMissions) return;
+    const previousById = new Map(previous.map((mission) => [mission.id, mission]));
+    for (const record of processingMissions) {
+      if (previousById.get(record.id) === record) continue;
+      const inboxMission = isInboxProcessMission(record);
+      if (inboxMission && !matchesActiveMission(record)) {
+        void refreshProcessedItems();
+        void refreshSourceRuns();
+      }
+      if (!matchesActiveMission(record)) {
+        void readAiMissionLog(record.id, 100)
+          .then((tail) =>
+            setProcessingLogLines((current) => ({
+              ...current,
+              [record.id]: tail.lines,
+            })),
+          )
+          .catch(() => {});
+      }
+    }
+  }, [processingMissions, refreshProcessedItems, refreshSourceRuns]);
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.
@@ -8616,6 +8612,379 @@ function MainApp() {
     [renderGraphSurface, rightWorkbenchMode, visibleAppMode],
   );
 
+  // ------------------------------------------------------------------
+  // Stable props for the memoized panes (issue #201). Every non-primitive
+  // prop the mode panes and the editor receive is hoisted into a useCallback
+  // or useMemo keyed on its real inputs, so unrelated MainApp renders keep
+  // prop identities and memo() can skip those panes. Bodies are unchanged
+  // from the inline arrows they replace.
+  // ------------------------------------------------------------------
+
+  // Derived mission lists, keyed on the shared store snapshot.
+  const inboxProcessingMissions = useMemo(
+    () => inboxProcessMissions(processingMissions),
+    [processingMissions],
+  );
+  const meetingsProcessingMissions = useMemo(
+    () => activeMeetingsMissions(processingMissions),
+    [processingMissions],
+  );
+  const tasksProcessingMissions = useMemo(
+    () => activeTasksMissions(processingMissions),
+    [processingMissions],
+  );
+  const trackedAgentMissions = useMemo(
+    () => activeTrackedAgentMissions(processingMissions),
+    [processingMissions],
+  );
+
+  // Shared by Inbox/Comms/Meetings/Today and the skill runs panel.
+  const handleRevealPath = useCallback(
+    (path: string) => {
+      if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+    },
+    [inboxWorkspacePath],
+  );
+  const handleStopProcessingMission = useCallback(
+    (id: string) => void stopProcessingMission(id),
+    [stopProcessingMission],
+  );
+  const handleRefreshProcessed = useCallback(
+    () => void refreshProcessedItems(),
+    [refreshProcessedItems],
+  );
+  const handleSelectProcessedItem = useCallback(
+    (item: InboxProcessedItem) => void selectProcessedItem(item),
+    [selectProcessedItem],
+  );
+
+  // Inbox pane callbacks.
+  const handleInboxRefresh = useCallback(() => {
+    void refreshInbox();
+    void refreshProcessedItems();
+    void refreshProcessingMissions();
+  }, [refreshInbox, refreshProcessedItems, refreshProcessingMissions]);
+  const handleOpenInboxFolder = useCallback(() => {
+    if (!inboxWorkspacePath) return;
+    void openInFileManager(inboxWorkspacePath, inboxRootPath(inboxRuntimeConfig)).catch(
+      (err) => setError(err instanceof Error ? err.message : String(err)),
+    );
+  }, [inboxWorkspacePath, inboxRuntimeConfig]);
+  const handleOpenSourceFolder = useCallback(
+    (key: string) => {
+      if (!inboxWorkspacePath) return;
+      void openInFileManager(inboxWorkspacePath, sourceFolderPath(inboxRuntimeConfig, key)).catch(
+        (err) => setError(err instanceof Error ? err.message : String(err)),
+      );
+    },
+    [inboxWorkspacePath, inboxRuntimeConfig],
+  );
+  const handleClassifyItem = useCallback((id: string) => void classifyItem(id), [classifyItem]);
+  const handleProcessEntries = useCallback(
+    (keys: string[], context?: string) => void processInboxKeys(keys, undefined, true, context),
+    [processInboxKeys],
+  );
+  const handleStageInboxFiles = useCallback(
+    (paths: string[]) => void stageInboxFiles(paths),
+    [stageInboxFiles],
+  );
+  const handleTrashInboxTargets = useCallback(
+    (targets: InboxTrashTarget[]) => void trashInboxTargets(targets),
+    [trashInboxTargets],
+  );
+  const handleInboxProcessApplied = useCallback(() => {
+    void refreshProcessedItems();
+    void refreshInbox();
+  }, [refreshProcessedItems, refreshInbox]);
+
+  // Comms pane callbacks.
+  const handleProcessCommsNow = useCallback(
+    (channel: string) => void processCommsChannelNow(channel),
+    [processCommsChannelNow],
+  );
+  const handleDeepProcessComms = useCallback(
+    (channel: string) => void deepProcessCommsChannel(channel),
+    [deepProcessCommsChannel],
+  );
+  const handleUnloadMigration = useCallback(
+    (paths: string[]) => void unloadMigrationServices(paths),
+    [unloadMigrationServices],
+  );
+
+  // Meetings pane callbacks.
+  const handleMeetingsOpenSkillCompose = useCallback(
+    (skill: SkillRecord | null, context: SkillContextItem[], prompt?: string) =>
+      openSkillCompose(skill, context, prompt),
+    [openSkillCompose],
+  );
+  const handleMeetingsViewConsumed = useCallback(() => setMeetingsRequestedView(null), []);
+
+  // Today pane: the whole tasksProps bundle, keyed on its members.
+  const handleTasksOpenSkillCompose = useCallback(
+    (
+      skill: SkillRecord | null,
+      context: SkillContextItem[],
+      prompt?: string,
+      cwd?: string | null,
+      onDispatched?: () => void | Promise<void>,
+    ) => openSkillCompose(skill, context, prompt, cwd, onDispatched),
+    [openSkillCompose],
+  );
+  const tasksProps = useMemo<TasksPaneProps>(
+    () => ({
+      workPath: inboxWorkspacePath,
+      effectiveSettings: effectiveTasksSettings,
+      labelMode: maruSettings.ui.documentLabelMode,
+      skills,
+      runtimeCommands: aiRuntimeCommands,
+      permissionMode: maruSettings.ai.permissionMode,
+      agents,
+      ai: maruSettings.ai,
+      processingMissions: tasksProcessingMissions,
+      processingLogLines,
+      onRefreshMissions: refreshProcessingMissions,
+      onOpenSettings: openTasksSettings,
+      onOpenSkillCompose: handleTasksOpenSkillCompose,
+      onMissionStarted: handleMeetingsMissionStarted,
+      onStopMission: handleStopProcessingMission,
+      onConfirmApproval: approvalGate.confirmApproval,
+      onRevealPath: handleRevealPath,
+      onError: setError,
+    }),
+    [
+      inboxWorkspacePath,
+      effectiveTasksSettings,
+      maruSettings.ui.documentLabelMode,
+      skills,
+      aiRuntimeCommands,
+      maruSettings.ai,
+      agents,
+      tasksProcessingMissions,
+      processingLogLines,
+      refreshProcessingMissions,
+      openTasksSettings,
+      handleTasksOpenSkillCompose,
+      handleMeetingsMissionStarted,
+      handleStopProcessingMission,
+      approvalGate.confirmApproval,
+      handleRevealPath,
+    ],
+  );
+
+  // EditorPane callbacks. renderEditorPane is a plain function (hook calls
+  // are not allowed inside it), so the per-group closures it used to build
+  // inline are hoisted here as explicit left/right variants; the render
+  // sites select the matching variant on `group`.
+  const leftDocTab = isBinaryTab(leftTab) ? null : (leftTab as EditorTab | null);
+  const rightDocTab = isBinaryTab(rightTab) ? null : (rightTab as EditorTab | null);
+  const leftHtmlKey = leftDocTab ? `left:${leftDocTab.id}` : null;
+  const rightHtmlKey = rightDocTab ? `right:${rightDocTab.id}` : null;
+  const rightEditorGroupTabs = useMemo(
+    () =>
+      rightTab
+        ? editorTabSummaries.filter((summary) => summary.id === rightTab.id)
+        : editorTabSummaries,
+    [rightTab, editorTabSummaries],
+  );
+  const handleBinaryViewerError = useCallback((message: string) => setError(message), []);
+  const leftBinaryBody = useMemo(
+    () =>
+      isBinaryTab(leftTab) ? (
+        <BinaryViewerPane
+          entry={leftTab.fileEntry}
+          workspacePath={leftTab.workspacePath}
+          classification={leftTab.classification}
+          onError={handleBinaryViewerError}
+        />
+      ) : null,
+    [leftTab, handleBinaryViewerError],
+  );
+  const rightBinaryBody = useMemo(
+    () =>
+      isBinaryTab(rightTab) ? (
+        <BinaryViewerPane
+          entry={rightTab.fileEntry}
+          workspacePath={rightTab.workspacePath}
+          classification={rightTab.classification}
+          onError={handleBinaryViewerError}
+        />
+      ) : null,
+    [rightTab, handleBinaryViewerError],
+  );
+  const handleLeftEditorChange = useCallback(
+    (content: string) => {
+      if (!leftResolvedTabId) return;
+      activateEditorTab(leftResolvedTabId, "left");
+      updateTabDraft(leftResolvedTabId, content);
+    },
+    [leftResolvedTabId, activateEditorTab, updateTabDraft],
+  );
+  const handleRightEditorChange = useCallback(
+    (content: string) => {
+      if (!rightResolvedTabId) return;
+      activateEditorTab(rightResolvedTabId, "right");
+      updateTabDraft(rightResolvedTabId, content);
+    },
+    [rightResolvedTabId, activateEditorTab, updateTabDraft],
+  );
+  const handleLeftSelectTab = useCallback(
+    (nextTabId: string) => selectTab(nextTabId, "left"),
+    [selectTab],
+  );
+  const handleRightSelectTab = useCallback(
+    (nextTabId: string) => selectTab(nextTabId, "right"),
+    [selectTab],
+  );
+  const handleLeftCloseTab = useCallback((nextTabId: string) => closeTab(nextTabId), [closeTab]);
+  const handleRightCloseTab = useCallback(() => closeRightEditorPane(), [closeRightEditorPane]);
+  const handleLeftOpenTabPreview = useCallback(
+    (nextTabId: string) => {
+      selectTab(nextTabId, "left");
+      setPersistedEditorViewMode("preview", "left");
+    },
+    [selectTab, setPersistedEditorViewMode],
+  );
+  const handleRightOpenTabPreview = useCallback(
+    (nextTabId: string) => {
+      selectTab(nextTabId, "right");
+      setPersistedEditorViewMode("preview", "right");
+    },
+    [selectTab, setPersistedEditorViewMode],
+  );
+  const handleLeftRevealTabInExplorer = useCallback(
+    (nextTabId: string) => revealTabInExplorer(nextTabId, "left"),
+    [revealTabInExplorer],
+  );
+  const handleRightRevealTabInExplorer = useCallback(
+    (nextTabId: string) => revealTabInExplorer(nextTabId, "right"),
+    [revealTabInExplorer],
+  );
+  const handleLeftSaveTab = useCallback(
+    () => void saveTab(leftResolvedTabId),
+    [leftResolvedTabId, saveTab],
+  );
+  const handleRightSaveTab = useCallback(
+    () => void saveTab(rightResolvedTabId),
+    [rightResolvedTabId, saveTab],
+  );
+  const handleLeftSnapshotTab = useCallback(
+    () => void snapshotTab(leftResolvedTabId),
+    [leftResolvedTabId, snapshotTab],
+  );
+  const handleRightSnapshotTab = useCallback(
+    () => void snapshotTab(rightResolvedTabId),
+    [rightResolvedTabId, snapshotTab],
+  );
+  const handleLeftFocusPane = useCallback(() => {
+    setFocusedWorkbenchSide("left");
+    if (leftResolvedTabId) activateEditorTab(leftResolvedTabId, "left");
+  }, [leftResolvedTabId, activateEditorTab]);
+  const handleRightFocusPane = useCallback(() => {
+    setFocusedWorkbenchSide("right");
+    if (rightResolvedTabId) activateEditorTab(rightResolvedTabId, "right");
+  }, [rightResolvedTabId, activateEditorTab]);
+  const handleLeftViewModeChange = useCallback(
+    (mode: EditorViewMode) => setPersistedEditorViewMode(mode, "left"),
+    [setPersistedEditorViewMode],
+  );
+  const handleRightViewModeChange = useCallback(
+    (mode: EditorViewMode) => setPersistedEditorViewMode(mode, "right"),
+    [setPersistedEditorViewMode],
+  );
+  const handleLeftVisualizeRefs = useCallback(() => {
+    if (leftDocTab) visualizeDocRefs(leftDocTab);
+  }, [leftDocTab, visualizeDocRefs]);
+  const handleRightVisualizeRefs = useCallback(() => {
+    if (rightDocTab) visualizeDocRefs(rightDocTab);
+  }, [rightDocTab, visualizeDocRefs]);
+  const handleLeftToggleKgHighlight = useCallback(() => {
+    if (leftDocTab) toggleKgHighlight(leftDocTab);
+  }, [leftDocTab, toggleKgHighlight]);
+  const handleRightToggleKgHighlight = useCallback(() => {
+    if (rightDocTab) toggleKgHighlight(rightDocTab);
+  }, [rightDocTab, toggleKgHighlight]);
+  const handleLeftHtmlViewModeChange = useCallback(
+    (mode: HtmlViewMode) => {
+      if (!leftDocTab || !leftHtmlKey) return;
+      flushHtmlDraft(leftDocTab.id);
+      setHtmlPaneModes((prev) => ({
+        ...prev,
+        [leftHtmlKey]: { ...prev[leftHtmlKey], mode },
+      }));
+    },
+    [leftDocTab, leftHtmlKey, flushHtmlDraft],
+  );
+  const handleRightHtmlViewModeChange = useCallback(
+    (mode: HtmlViewMode) => {
+      if (!rightDocTab || !rightHtmlKey) return;
+      flushHtmlDraft(rightDocTab.id);
+      setHtmlPaneModes((prev) => ({
+        ...prev,
+        [rightHtmlKey]: { ...prev[rightHtmlKey], mode },
+      }));
+    },
+    [rightDocTab, rightHtmlKey, flushHtmlDraft],
+  );
+  const handleLeftHtmlRiskAck = useCallback(
+    (digest: string) => {
+      if (!leftHtmlKey) return;
+      setHtmlPaneModes((prev) => ({
+        ...prev,
+        [leftHtmlKey]: {
+          ...prev[leftHtmlKey],
+          mode: prev[leftHtmlKey]?.mode ?? "visual",
+          riskAckDigest: digest,
+        },
+      }));
+    },
+    [leftHtmlKey],
+  );
+  const handleRightHtmlRiskAck = useCallback(
+    (digest: string) => {
+      if (!rightHtmlKey) return;
+      setHtmlPaneModes((prev) => ({
+        ...prev,
+        [rightHtmlKey]: {
+          ...prev[rightHtmlKey],
+          mode: prev[rightHtmlKey]?.mode ?? "visual",
+          riskAckDigest: digest,
+        },
+      }));
+    },
+    [rightHtmlKey],
+  );
+  const handleRenameTab = useCallback(
+    (nextTabId: string) => void renameTabDocument(nextTabId),
+    [renameTabDocument],
+  );
+  const handleMoveTab = useCallback(
+    (nextTabId: string) => void moveTabDocument(nextTabId),
+    [moveTabDocument],
+  );
+  const handleDuplicateTab = useCallback(
+    (nextTabId: string) => void duplicateTabDocument(nextTabId),
+    [duplicateTabDocument],
+  );
+  const handleDeleteTab = useCallback(
+    (nextTabId: string) => void trashTabDocument(nextTabId),
+    [trashTabDocument],
+  );
+  const handleKgRefNodeClick = useCallback(
+    (nodePath: string) => {
+      // Same handoff as NeighborhoodPane "그래프에서 보기", but into the
+      // doc↔graph split (panel) so the document stays visible.
+      openGraphPanel({
+        source: activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+        localTarget: { ownerWorkspacePath: null, relPath: nodePath },
+      });
+    },
+    [activeDocumentWorkspacePath, graphVaultPath, openGraphPanel],
+  );
+  const handleToggleOutline = useCallback(
+    () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
+    [outlineOpen, updateLayoutSettings],
+  );
+
   const renderEditorPane = (
     group: EditorGroupId,
     tab: AnyTab | null,
@@ -8626,10 +8995,6 @@ function MainApp() {
       : activeDocumentWorkspace;
     const caps = workspaceCapabilities(workspace);
     const readOnlyReason = workspaceWriteReason(workspace);
-    const groupTabs =
-      group === "right" && tab
-        ? editorTabSummaries.filter((summary) => summary.id === tab.id)
-        : editorTabSummaries;
     const docTab = isBinaryTab(tab) ? null : (tab as EditorTab | null);
     const binaryTab = isBinaryTab(tab) ? (tab as BinaryTab) : null;
     const isManagedVaultNote = Boolean(
@@ -8639,14 +9004,6 @@ function MainApp() {
     );
     const htmlKey = docTab ? `${group}:${docTab.id}` : null;
     const htmlState = htmlKey ? htmlPaneModes[htmlKey] : undefined;
-    const binaryBody = binaryTab ? (
-      <BinaryViewerPane
-        entry={binaryTab.fileEntry}
-        workspacePath={binaryTab.workspacePath}
-        classification={binaryTab.classification}
-        onError={(message) => setError(message)}
-      />
-    ) : null;
     return (
       <EditorPane
         document={docTab?.document ?? null}
@@ -8666,20 +9023,13 @@ function MainApp() {
         readOnlyReason={readOnlyReason}
         isManagedVaultNote={isManagedVaultNote}
         viewMode={editorPaneViewModes[group]}
-        tabs={groupTabs}
+        tabs={group === "right" ? rightEditorGroupTabs : editorTabSummaries}
         activeTabId={tabId}
-        bodyOverride={binaryBody}
+        bodyOverride={group === "right" ? rightBinaryBody : leftBinaryBody}
         entries={tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries}
-        onChange={(content) => {
-          if (!tabId) return;
-          activateEditorTab(tabId, group);
-          updateTabDraft(tabId, content);
-        }}
-        onSelectTab={(nextTabId) => selectTab(nextTabId, group)}
-        onCloseTab={(nextTabId) => {
-          if (group === "right") closeRightEditorPane();
-          else closeTab(nextTabId);
-        }}
+        onChange={group === "right" ? handleRightEditorChange : handleLeftEditorChange}
+        onSelectTab={group === "right" ? handleRightSelectTab : handleLeftSelectTab}
+        onCloseTab={group === "right" ? handleRightCloseTab : handleLeftCloseTab}
         onCloseOtherTabs={closeOtherTabs}
         onCloseTabsToRight={closeTabsToRight}
         onCloseSavedTabs={closeSavedTabs}
@@ -8687,24 +9037,27 @@ function MainApp() {
         onCopyTabName={copyTabName}
         onCopyTabPath={copyTabPath}
         onCopyTabRelativePath={copyTabRelativePath}
-        onRenameTab={(nextTabId) => void renameTabDocument(nextTabId)}
-        onMoveTab={(nextTabId) => void moveTabDocument(nextTabId)}
-        onDuplicateTab={(nextTabId) => void duplicateTabDocument(nextTabId)}
-        onDeleteTab={(nextTabId) => void trashTabDocument(nextTabId)}
-        onOpenTabPreview={(nextTabId) => {
-          selectTab(nextTabId, group);
-          setPersistedEditorViewMode("preview", group);
-        }}
+        onRenameTab={handleRenameTab}
+        onMoveTab={handleMoveTab}
+        onDuplicateTab={handleDuplicateTab}
+        onDeleteTab={handleDeleteTab}
+        onOpenTabPreview={
+          group === "right" ? handleRightOpenTabPreview : handleLeftOpenTabPreview
+        }
         onRevealTabInFinder={revealTabInFinder}
-        onRevealTabInExplorer={(nextTabId) => revealTabInExplorer(nextTabId, group)}
-        onSave={() => void saveTab(tabId)}
-        onSnapshot={() => void snapshotTab(tabId)}
+        onRevealTabInExplorer={
+          group === "right" ? handleRightRevealTabInExplorer : handleLeftRevealTabInExplorer
+        }
+        onSave={group === "right" ? handleRightSaveTab : handleLeftSaveTab}
+        onSnapshot={group === "right" ? handleRightSnapshotTab : handleLeftSnapshotTab}
         onSplitRight={splitEditorRight}
         onOpenSourcePreview={docTab ? openSourcePreviewSplit : undefined}
         onOpenGraphRight={openGraphPanel}
         onVisualizeRefs={
           docTab && !isHtmlFileKind(docTab.document.fileKind)
-            ? () => visualizeDocRefs(docTab)
+            ? group === "right"
+              ? handleRightVisualizeRefs
+              : handleLeftVisualizeRefs
             : undefined
         }
         kgHighlightRefs={
@@ -8714,45 +9067,26 @@ function MainApp() {
         }
         onToggleKgHighlight={
           docTab && !isHtmlFileKind(docTab.document.fileKind)
-            ? () => toggleKgHighlight(docTab)
+            ? group === "right"
+              ? handleRightToggleKgHighlight
+              : handleLeftToggleKgHighlight
             : undefined
         }
-        onKgRefNodeClick={(nodePath) => {
-          // Same handoff as NeighborhoodPane "그래프에서 보기", but into the
-          // doc↔graph split (panel) so the document stays visible.
-          openGraphPanel({
-            source:
-              activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
-            localTarget: { ownerWorkspacePath: null, relPath: nodePath },
-          });
-        }}
-        onFocusPane={() => {
-          setFocusedWorkbenchSide(group);
-          if (tabId) activateEditorTab(tabId, group);
-        }}
-        onToggleOutline={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
-        onViewModeChange={(mode) => setPersistedEditorViewMode(mode, group)}
+        onKgRefNodeClick={handleKgRefNodeClick}
+        onFocusPane={group === "right" ? handleRightFocusPane : handleLeftFocusPane}
+        onToggleOutline={handleToggleOutline}
+        onViewModeChange={
+          group === "right" ? handleRightViewModeChange : handleLeftViewModeChange
+        }
         onWikilinkClick={handleWikilinkClick}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
         vaultPath={docTab?.workspacePath ?? null}
         htmlViewMode={htmlState?.mode ?? "visual"}
-        onHtmlViewModeChange={(mode) => {
-          if (!docTab || !htmlKey) return;
-          flushHtmlDraft(docTab.id);
-          setHtmlPaneModes((prev) => ({ ...prev, [htmlKey]: { ...prev[htmlKey], mode } }));
-        }}
+        onHtmlViewModeChange={
+          group === "right" ? handleRightHtmlViewModeChange : handleLeftHtmlViewModeChange
+        }
         htmlRiskAckDigest={htmlState?.riskAckDigest ?? null}
-        onHtmlRiskAck={(digest) => {
-          if (!htmlKey) return;
-          setHtmlPaneModes((prev) => ({
-            ...prev,
-            [htmlKey]: {
-              ...prev[htmlKey],
-              mode: prev[htmlKey]?.mode ?? "visual",
-              riskAckDigest: digest,
-            },
-          }));
-        }}
+        onHtmlRiskAck={group === "right" ? handleRightHtmlRiskAck : handleLeftHtmlRiskAck}
         htmlFlushRef={group === "left" ? leftHtmlFlushRef : rightHtmlFlushRef}
       />
     );
@@ -9284,7 +9618,7 @@ function MainApp() {
             processedStatusFilter={processedStatusFilter}
             processedQuery={processedQuery}
             processedDetail={processedDetail}
-            processingMissions={inboxProcessMissions(processingMissions)}
+            processingMissions={inboxProcessingMissions}
             processingLogLines={processingLogLines}
             sourceFilter={inboxSourceFilter}
             onSourceFilter={setInboxSourceFilter}
@@ -9292,48 +9626,27 @@ function MainApp() {
             fileDropTarget={inboxRuntimeConfig.file_drop}
             focusRequest={inboxFocusTick}
             actionBusy={inboxActionBusy}
-            onRefresh={() => {
-              void refreshInbox();
-              void refreshProcessedItems();
-              void refreshProcessingMissions();
-            }}
+            onRefresh={handleInboxRefresh}
             onOpenSettings={openInboxSettings}
-            onOpenInboxFolder={() => {
-              if (!inboxWorkspacePath) return;
-              void openInFileManager(
-                inboxWorkspacePath,
-                inboxRootPath(inboxRuntimeConfig),
-              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-            }}
-            onOpenSourceFolder={(key) => {
-              if (!inboxWorkspacePath) return;
-              void openInFileManager(
-                inboxWorkspacePath,
-                sourceFolderPath(inboxRuntimeConfig, key),
-              ).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-            }}
-            onClassify={(id) => void classifyItem(id)}
+            onOpenInboxFolder={handleOpenInboxFolder}
+            onOpenSourceFolder={handleOpenSourceFolder}
+            onClassify={handleClassifyItem}
             onDecide={decideInboxItem}
             onBulkAccept={bulkAcceptInboxKeys}
             onBulkReject={bulkRejectInboxKeys}
             onBulkMoveFiles={bulkMoveInboxFiles}
-            onProcessEntries={(keys, context) => void processInboxKeys(keys, undefined, true, context)}
-            onStageFiles={(paths) => void stageInboxFiles(paths)}
+            onProcessEntries={handleProcessEntries}
+            onStageFiles={handleStageInboxFiles}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}
-            onRefreshProcessed={() => void refreshProcessedItems()}
-            onSelectProcessedItem={(item) => void selectProcessedItem(item)}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
-            }}
-            onTrashItems={(targets) => void trashInboxTargets(targets)}
-            onStopProcessingMission={(id) => void stopProcessingMission(id)}
+            onRefreshProcessed={handleRefreshProcessed}
+            onSelectProcessedItem={handleSelectProcessedItem}
+            onRevealPath={handleRevealPath}
+            onTrashItems={handleTrashInboxTargets}
+            onStopProcessingMission={handleStopProcessingMission}
             workPath={inboxWorkspacePath}
             onConfirmApproval={approvalGate.confirmApproval}
-            onProcessApplied={() => {
-              void refreshProcessedItems();
-              void refreshInbox();
-            }}
+            onProcessApplied={handleInboxProcessApplied}
             onProcessError={setError}
             onShareSelectionChange={setInboxShareablePaths}
           />
@@ -9349,7 +9662,7 @@ function MainApp() {
             processedStatusFilter={processedStatusFilter}
             processedQuery={processedQuery}
             processedDetail={processedDetail}
-            processingMissions={inboxProcessMissions(processingMissions)}
+            processingMissions={inboxProcessingMissions}
             processingLogLines={processingLogLines}
             sourceFilter={commsSourceFilter}
             actionBusy={inboxActionBusy}
@@ -9362,16 +9675,14 @@ function MainApp() {
             migrationServices={migrationServices}
             migrationBusy={migrationBusy}
             onSourceFilter={setCommsSourceFilter}
-            onProcessNow={(channel) => void processCommsChannelNow(channel)}
+            onProcessNow={handleProcessCommsNow}
             onRefresh={refreshActiveSurface}
             onProcessedStatusFilter={setProcessedStatusFilter}
             onProcessedQuery={setProcessedQuery}
-            onRefreshProcessed={() => void refreshProcessedItems()}
-            onSelectProcessedItem={(item) => void selectProcessedItem(item)}
-            onStopProcessingMission={(id) => void stopProcessingMission(id)}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
-            }}
+            onRefreshProcessed={handleRefreshProcessed}
+            onSelectProcessedItem={handleSelectProcessedItem}
+            onStopProcessingMission={handleStopProcessingMission}
+            onRevealPath={handleRevealPath}
             onGwsReauth={startGwsAuth}
             onMsoReauth={startMsoLogin}
             msoReauthDisabled={!inboxWorkspaceConfigReady}
@@ -9379,10 +9690,10 @@ function MainApp() {
             onStartTelegramPolling={startTelegramPollingFromSettings}
             onStopTelegramPolling={stopTelegramPollingFromSettings}
             onTelegramLogin={startTelegramLogin}
-            onDeepProcess={(channel) => void deepProcessCommsChannel(channel)}
+            onDeepProcess={handleDeepProcessComms}
             onOpenCommsSettings={openCommsSettings}
             onRefreshMigration={refreshMigrationServices}
-            onUnloadMigration={(paths) => void unloadMigrationServices(paths)}
+            onUnloadMigration={handleUnloadMigration}
           />
         ) : surfaceMode === "meetings" ? (
           <LazyMeetingsPane
@@ -9395,22 +9706,18 @@ function MainApp() {
             agents={agents}
             ai={maruSettings.ai}
             permissionMode={maruSettings.ai.permissionMode}
-            processingMissions={activeMeetingsMissions(processingMissions)}
+            processingMissions={meetingsProcessingMissions}
             processingLogLines={processingLogLines}
             onRefreshMissions={refreshProcessingMissions}
             onOpenSettings={openMeetingsSettings}
-            onOpenSkillCompose={(skill, context, prompt) =>
-              openSkillCompose(skill, context, prompt)
-            }
+            onOpenSkillCompose={handleMeetingsOpenSkillCompose}
             onMissionStarted={handleMeetingsMissionStarted}
-            onStopMission={(id) => void stopProcessingMission(id)}
+            onStopMission={handleStopProcessingMission}
             onConfirmApproval={approvalGate.confirmApproval}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
-            }}
+            onRevealPath={handleRevealPath}
             onError={setError}
             requestedView={meetingsRequestedView}
-            onViewConsumed={() => setMeetingsRequestedView(null)}
+            onViewConsumed={handleMeetingsViewConsumed}
           />
         ) : surfaceMode === "tasks" ? (
           <LazyTodayPane
@@ -9422,29 +9729,7 @@ function MainApp() {
             onLayoutChange={updateLayoutSettings}
             rolloverEpoch={todayRolloverEpoch}
             refreshRequestEpoch={todayRefreshEpoch}
-            tasksProps={{
-              workPath: inboxWorkspacePath,
-              effectiveSettings: effectiveTasksSettings,
-              labelMode: maruSettings.ui.documentLabelMode,
-              skills,
-              runtimeCommands: aiRuntimeCommands,
-              permissionMode: maruSettings.ai.permissionMode,
-              agents,
-              ai: maruSettings.ai,
-              processingMissions: activeTasksMissions(processingMissions),
-              processingLogLines,
-              onRefreshMissions: refreshProcessingMissions,
-              onOpenSettings: openTasksSettings,
-              onOpenSkillCompose: (skill, context, prompt, cwd, onDispatched) =>
-                openSkillCompose(skill, context, prompt, cwd, onDispatched),
-              onMissionStarted: handleMeetingsMissionStarted,
-              onStopMission: (id) => void stopProcessingMission(id),
-              onConfirmApproval: approvalGate.confirmApproval,
-              onRevealPath: (path) => {
-                if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
-              },
-              onError: setError,
-            }}
+            tasksProps={tasksProps}
           />
         ) : (
           <>
@@ -9680,12 +9965,12 @@ function MainApp() {
               <div className="skills-pane-stack">
                 <SkillRunsPanel
                   workPath={activeDocumentWorkspacePath ?? inboxWorkspacePath}
-                  missions={activeTrackedAgentMissions(processingMissions)}
+                  missions={trackedAgentMissions}
                   logLines={processingLogLines}
                   runtimeCommands={aiRuntimeCommands}
                   permissionMode={maruSettings.ai.permissionMode}
                   onRefresh={refreshProcessingMissions}
-                  onStopMission={(id) => void stopProcessingMission(id)}
+                  onStopMission={handleStopProcessingMission}
                   onMissionStarted={handleMeetingsMissionStarted}
                   onConfirmApproval={approvalGate.confirmApproval}
                   onError={setError}
