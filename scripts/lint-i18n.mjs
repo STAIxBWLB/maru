@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// i18n lint — guards the ko/en parity promise of src/lib/i18n.ts.
+// i18n lint — guards the ko/en parity promise of src/lib/i18n.ts and its
+// per-locale dictionaries in src/lib/i18n/locales/.
 //
 //   1. Dictionary parity: every key in `ko` must exist in `en` and vice
 //      versa (a CI-time gate; vitest covers this at runtime too).
@@ -22,20 +23,19 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const I18N_PATH = join(ROOT, "src", "lib", "i18n.ts");
+const LOCALES_DIR = join(ROOT, "src", "lib", "i18n", "locales");
 const SRC_DIR = join(ROOT, "src");
 
 // ---------------------------------------------------------------------------
 // 1. ko/en dictionary key parity
 // ---------------------------------------------------------------------------
 
-const i18nText = readFileSync(I18N_PATH, "utf8");
-
 function dictKeys(locale) {
+  const text = readFileSync(join(LOCALES_DIR, `${locale}.ts`), "utf8");
   const marker = `const ${locale}: Record<string, string> = {`;
-  const start = i18nText.indexOf(marker);
+  const start = text.indexOf(marker);
   if (start === -1) throw new Error(`[i18n-lint] dictionary '${locale}' not found`);
-  const rest = i18nText.slice(start + marker.length);
+  const rest = text.slice(start + marker.length);
   const end = rest.indexOf("\n};");
   if (end === -1) throw new Error(`[i18n-lint] dictionary '${locale}' not terminated`);
   const keys = new Set();

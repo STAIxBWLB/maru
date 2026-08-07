@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultCoalescer, withSnapshot } from "../../../lib/diagram/actions";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
+import "../../../lib/i18n/testing";
 import {
   mergeCells,
   type MatrixCell,

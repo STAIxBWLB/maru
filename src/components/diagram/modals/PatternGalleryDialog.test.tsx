@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagramPatternSave } from "../../../lib/diagram";
 import { serializePreset, type PatternPresetV1 } from "../../../lib/diagram/presets";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
+import "../../../lib/i18n/testing";
 import {
   PatternGalleryDialog,
   type GallerySelection,

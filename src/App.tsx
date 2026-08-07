@@ -220,7 +220,7 @@ import {
   shouldApplyGmailRefreshResult,
   type GmailMessageState,
 } from "./lib/gmail";
-import { LocaleContext, assertParityOrThrow, useLocaleState } from "./lib/i18n";
+import { LocaleContext, useLocaleState } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
 import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
@@ -477,8 +477,6 @@ type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
   targetPath: string;
 };
-
-assertParityOrThrow();
 
 interface EditorTab {
   id: string;
@@ -8779,6 +8777,10 @@ function MainApp() {
 
     void startWindowDrag().catch(() => {});
   }, []);
+
+  // Gate first paint on the active locale dictionary: the dicts are lazy
+  // chunks now, and rendering before load would flash raw i18n keys.
+  if (!localeValue.ready) return null;
 
   return (
     <LocaleContext.Provider value={localeValue}>

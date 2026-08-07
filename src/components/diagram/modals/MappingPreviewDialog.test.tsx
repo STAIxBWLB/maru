@@ -13,6 +13,7 @@ import {
 } from "../../../lib/diagram/reportTypes";
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
+import "../../../lib/i18n/testing";
 import { MappingPreviewDialog } from "./MappingPreviewDialog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
