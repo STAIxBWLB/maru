@@ -12,7 +12,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { chooseFiles } from "../lib/api";
 import { isInboxRowShareable } from "../lib/shareOutbox";
@@ -119,7 +119,7 @@ type InboxContextMenuState = {
   targets: InboxTrashTarget[];
 };
 
-export function InboxPane({
+export const InboxPane = memo(function InboxPane({
   items,
   entries,
   loading,
@@ -1013,7 +1013,7 @@ export function InboxPane({
       />
     </main>
   );
-}
+});
 
 function InboxSection({
   title,

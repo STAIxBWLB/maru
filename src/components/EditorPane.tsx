@@ -16,6 +16,7 @@ import {
 import {
   forwardRef,
   lazy,
+  memo,
   Suspense,
   useCallback,
   useDeferredValue,
@@ -137,7 +138,7 @@ interface EditorPaneProps {
   onKgRefNodeClick?: (nodePath: string) => void;
 }
 
-export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
+export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
   {
     document,
     openingEntry,
@@ -838,4 +839,4 @@ export const EditorPane = forwardRef<HTMLDivElement, EditorPaneProps>(function E
       </footer>
     </main>
   );
-});
+}));

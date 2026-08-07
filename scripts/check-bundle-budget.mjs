@@ -24,7 +24,9 @@ function check(label, asset, maxGzipBytes) {
   );
 }
 
-check("initial JS", largestMatching(/^index-.*\.js$/), 500 * 1024);
+// Lowered from 500 KiB after the i18n dictionaries moved to lazy chunks
+// (issue #201): the entry measured 284 KiB gzip, leaving ~12% headroom.
+check("initial JS", largestMatching(/^index-.*\.js$/), 320 * 1024);
 check("initial CSS", largestMatching(/^index-.*\.css$/), 70 * 1024);
 
 if (!files.some((file) => /^GraphView-.*\.js$/.test(file))) {
@@ -32,4 +34,7 @@ if (!files.some((file) => /^GraphView-.*\.js$/.test(file))) {
 }
 if (!files.some((file) => /^RichMarkdownEditor-.*\.js$/.test(file))) {
   throw new Error("bundle-budget: RichMarkdownEditor must remain a lazy chunk");
+}
+if (!files.some((file) => /^ko-.*\.js$/.test(file)) || !files.some((file) => /^en-.*\.js$/.test(file))) {
+  throw new Error("bundle-budget: i18n dictionaries must remain lazy chunks");
 }

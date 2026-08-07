@@ -6,6 +6,7 @@
 
 import {
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -72,7 +73,7 @@ interface TodayPaneProps {
   upcomingCount?: number;
 }
 
-export function TodayPane({
+export const TodayPane = memo(function TodayPane({
   route,
   onRouteChange,
   workPath,
@@ -411,4 +412,4 @@ export function TodayPane({
       </div>
     </TodayContext.Provider>
   );
-}
+});

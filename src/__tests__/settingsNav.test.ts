@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "../lib/i18n";
+import "../lib/i18n/testing";
 import {
   SETTINGS_NAV,
   SETTINGS_NAV_GROUPS,

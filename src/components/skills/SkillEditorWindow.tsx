@@ -88,6 +88,9 @@ export function SkillEditorWindowRoot({ workPath, skillId }: SkillEditorWindowRo
     return () => dispose?.();
   }, [workPath]);
 
+  // Same lazy-dictionary gate as the main window: never render raw keys.
+  if (!localeValue.ready) return null;
+
   return (
     <LocaleContext.Provider value={localeValue}>
       <div className="skill-editor-window-shell">

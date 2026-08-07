@@ -108,8 +108,12 @@ export function AgentUsageBar({
   useEffect(() => {
     mountedRef.current = true;
     void load();
-    const timer = window.setInterval(() => void load(), POLL_INTERVAL_MS);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void load();
+    }, POLL_INTERVAL_MS);
     const reloadIfStale = () => {
+      if (document.visibilityState !== "visible") return;
       if (Date.now() - lastLoadedAtRef.current > FOCUS_RELOAD_MIN_AGE_MS) void load();
     };
     const onFocus = () => reloadIfStale();

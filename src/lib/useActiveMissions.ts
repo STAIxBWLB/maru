@@ -1,15 +1,27 @@
 import { useSyncExternalStore } from "react";
 
 import { isTauri, listAiMissions } from "./api";
+import { isTrackedAgentMission } from "./skillRuns";
 import type { MissionRecord } from "./types";
 
 const MAX_ACTIVE_MISSIONS = 20;
+const MAX_TRACKED_MISSIONS = 80;
 
 let activeMissions: MissionRecord[] = [];
+let trackedMissions: MissionRecord[] = [];
 const subscribers = new Set<() => void>();
 let listening = false;
 let listenerGeneration = 0;
 let unlisten: (() => void) | null = null;
+let initialLoadStamp = 0;
+
+/** Bumps every time the store ingests a fresh `listAiMissions` snapshot
+ *  (initial subscribe, or re-subscribe after all consumers unmounted).
+ *  Diff-based consumers use it to reset their baseline instead of treating
+ *  every freshly deserialized record in the snapshot as a transition. */
+export function missionStoreLoadStamp(): number {
+  return initialLoadStamp;
+}
 
 function isActiveMission(mission: MissionRecord): boolean {
   return mission.status === "idle" || mission.status === "running";
@@ -37,9 +49,42 @@ export function nextActiveMissionSnapshot(
     : sortAndCap(withoutCurrent);
 }
 
-function publish(records: MissionRecord[]): void {
-  activeMissions = records;
+function sortAndCapTracked(records: MissionRecord[]): MissionRecord[] {
+  return records
+    .sort(
+      (a, b) =>
+        b.lastOutputAt.localeCompare(a.lastOutputAt) ||
+        b.startedAt.localeCompare(a.startedAt),
+    )
+    .slice(0, MAX_TRACKED_MISSIONS);
+}
+
+export function trackedMissionSnapshot(records: MissionRecord[]): MissionRecord[] {
+  return sortAndCapTracked(records.filter(isTrackedAgentMission));
+}
+
+export function nextTrackedMissionSnapshot(
+  current: MissionRecord[],
+  next: MissionRecord,
+): MissionRecord[] {
+  return trackedMissionSnapshot([next, ...current.filter((mission) => mission.id !== next.id)]);
+}
+
+function publish(active: MissionRecord[], tracked: MissionRecord[]): void {
+  activeMissions = active;
+  trackedMissions = tracked;
   for (const subscriber of subscribers) subscriber();
+}
+
+/** Feeds an externally observed record (e.g. the result of stop_ai_mission)
+ *  into both slices, exactly as if it had arrived on ai://mission_update. */
+export function ingestMissionUpdate(record: MissionRecord): void {
+  publish(
+    nextActiveMissionSnapshot(activeMissions, record),
+    isTrackedAgentMission(record)
+      ? nextTrackedMissionSnapshot(trackedMissions, record)
+      : trackedMissions,
+  );
 }
 
 function stopListening(): void {
@@ -63,7 +108,12 @@ function startListening(): void {
         const off = await listen<MissionRecord>("ai://mission_update", (event) => {
           if (!listening || generation !== listenerGeneration) return;
           if (!initialLoaded) eventsBeforeInitialLoad.push(event.payload);
-          publish(nextActiveMissionSnapshot(activeMissions, event.payload));
+          publish(
+            nextActiveMissionSnapshot(activeMissions, event.payload),
+            isTrackedAgentMission(event.payload)
+              ? nextTrackedMissionSnapshot(trackedMissions, event.payload)
+              : trackedMissions,
+          );
         });
         if (!listening || generation !== listenerGeneration) {
           off();
@@ -76,11 +126,19 @@ function startListening(): void {
     }
 
     try {
-      let records = activeMissionSnapshot(await listAiMissions());
+      const records = await listAiMissions();
+      let active = activeMissionSnapshot(records);
+      let tracked = trackedMissionSnapshot(records);
       for (const event of eventsBeforeInitialLoad) {
-        records = nextActiveMissionSnapshot(records, event);
+        active = nextActiveMissionSnapshot(active, event);
+        if (isTrackedAgentMission(event)) {
+          tracked = nextTrackedMissionSnapshot(tracked, event);
+        }
       }
-      if (listening && generation === listenerGeneration) publish(records);
+      if (listening && generation === listenerGeneration) {
+        initialLoadStamp += 1;
+        publish(active, tracked);
+      }
     } catch {
       // The status is ambient; a transient list failure should not surface globally.
     } finally {
@@ -102,6 +160,14 @@ function getSnapshot(): MissionRecord[] {
   return activeMissions;
 }
 
+function getTrackedSnapshot(): MissionRecord[] {
+  return trackedMissions;
+}
+
 export function useActiveMissions(): MissionRecord[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+export function useTrackedMissions(): MissionRecord[] {
+  return useSyncExternalStore(subscribe, getTrackedSnapshot, getTrackedSnapshot);
 }

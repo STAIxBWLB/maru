@@ -58,7 +58,7 @@ pub struct CatalogScanRequest {
     pub force_refresh: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn catalog_scan(req: CatalogScanRequest) -> Result<CatalogScanReport, String> {
     let root = PathBuf::from(&req.workspace_root);
     scan_catalog_impl(&root, req.force_refresh).map_err(|e| e.to_string())
@@ -77,7 +77,7 @@ pub struct CatalogQueryRequest {
     pub limit: Option<usize>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn catalog_query(req: CatalogQueryRequest) -> Result<Vec<CatalogEntry>, String> {
     let root = PathBuf::from(&req.workspace_root);
     let index = index::load_or_empty(&root).map_err(|e| e.to_string())?;
@@ -105,7 +105,7 @@ pub struct CatalogDrilldownResponse {
     pub related_paths: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn catalog_drilldown(req: CatalogDrilldownRequest) -> Result<CatalogDrilldownResponse, String> {
     let root = PathBuf::from(&req.workspace_root);
     index::drilldown_impl(&root, &req.entry_path).map_err(|e| e.to_string())

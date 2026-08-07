@@ -40,14 +40,9 @@ pub struct GitStatus {
     pub branch: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(vault_path: String) -> Result<GitStatus, String> {
     git_status_with_mode(vault_path, true)
-}
-
-#[tauri::command]
-pub fn git_status_fast(vault_path: String) -> Result<GitStatus, String> {
-    git_status_with_mode(vault_path, false)
 }
 
 fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<GitStatus, String> {
@@ -211,7 +206,7 @@ struct ExclusionRule {
 /// terminal `git status` for full detail when truncated.
 const MAX_CHANGE_ROWS: usize = 200;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
@@ -265,7 +260,7 @@ pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
 /// of huge files inline.
 const MAX_DIFF_BYTES: usize = 64 * 1024;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
@@ -319,7 +314,7 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
 const MAX_COMMIT_PROMPT_BYTES: usize = 18 * 1024;
 const MAX_COMMIT_DIFF_BYTES_PER_FILE: usize = 4 * 1024;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_generate_commit_message(
     vault_path: String,
     paths: Vec<String>,
@@ -491,7 +486,7 @@ fn sanitize_commit_message(raw: &str) -> Result<String, String> {
     Err("commit_message_provider_empty_output".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_sync_scan(
     vault_path: String,
     include_excluded: Option<bool>,
@@ -575,7 +570,7 @@ pub fn git_sync_scan(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, String> {
     let repo = Path::new(&repo_path);
     if !repo.is_dir() {
@@ -638,7 +633,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_sync_commit_push(
     state: tauri::State<'_, ApprovalState>,
     repo_path: String,
@@ -1008,7 +1003,7 @@ fn git_push_args() -> [&'static str; 3] {
 /// Stage all changes and create a commit. Hooks (pre-commit, commit-msg)
 /// run as configured by the user — we never pass --no-verify, so a
 /// failing hook surfaces as an error the user must resolve.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_commit(
     vault_path: String,
     message: String,
@@ -1137,7 +1132,7 @@ mod tests {
         fs::write(root.join("untracked.md"), "new\n").unwrap();
 
         let full = git_status(root.to_string_lossy().to_string()).unwrap();
-        let fast = git_status_fast(root.to_string_lossy().to_string()).unwrap();
+        let fast = git_status_with_mode(root.to_string_lossy().to_string(), false).unwrap();
 
         assert_eq!(full.untracked, 1);
         assert!(full.untracked_known);

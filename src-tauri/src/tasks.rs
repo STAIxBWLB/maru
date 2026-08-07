@@ -175,7 +175,7 @@ pub struct TasksLogLine {
     pub legacy: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_task_notes(
     work_path: String,
     root: Option<String>,
@@ -218,7 +218,7 @@ pub fn scan_task_notes(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMetadata, String> {
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
@@ -241,7 +241,7 @@ pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMet
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_task_note(
     work_path: String,
     draft: CreateTaskDraft,
@@ -379,7 +379,7 @@ pub(crate) fn materialize_capture_task(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_task_status(
     work_path: String,
     rel_path: String,
@@ -414,7 +414,7 @@ pub fn update_task_status(
     task_row_for_path(&work, &target, target_bucket)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_task_schedule_fields(
     work_path: String,
     rel_path: String,
@@ -439,7 +439,7 @@ pub fn update_task_schedule_fields(
     task_row_for_path(&work, &path, bucket)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_task_details(
     work_path: String,
     rel_path: String,
@@ -506,7 +506,7 @@ pub fn update_task_details(
     task_row_for_path(&work, &path, current_bucket)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_task_note(
     work_path: String,
     rel_path: String,
@@ -529,7 +529,7 @@ pub fn move_task_note(
     task_row_for_path(&work, &target, target_bucket)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn append_tasks_log(work_path: String, line: String) -> Result<(), String> {
     let work = normalize_existing_dir(&work_path)?;
     let log_path = work.join(".maru").join("tasks-log.md");
@@ -545,7 +545,7 @@ pub fn append_tasks_log(work_path: String, line: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_tasks_log(
     work_path: String,
     limit: Option<usize>,

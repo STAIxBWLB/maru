@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
+import "../../lib/i18n/testing";
 import { DEFAULT_MARU_SETTINGS } from "../../lib/settings";
 import type { OutboxRecord } from "../../lib/today";
 import type { TodayContextValue } from "./todayContext";

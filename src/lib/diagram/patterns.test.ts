@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "../i18n";
+import "../i18n/testing";
 import {
   PATTERN_LIST,
   REPORT_PATTERN_LIST,

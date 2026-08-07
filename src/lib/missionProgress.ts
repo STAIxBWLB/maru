@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { MissionStatus } from "./types";
 
 /** Live progress snapshot for a per-source processing mission. */
@@ -35,21 +35,56 @@ export function formatElapsed(ms: number): string {
   return `${seconds}s`;
 }
 
+let elapsedNow = Date.now();
+const elapsedSubscribers = new Set<() => void>();
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+function publishElapsedNow(): void {
+  elapsedNow = Date.now();
+  for (const subscriber of elapsedSubscribers) subscriber();
+}
+
+function startElapsedTimer(): void {
+  if (elapsedTimer) return;
+  publishElapsedNow();
+  elapsedTimer = setInterval(publishElapsedNow, 1000);
+}
+
+function stopElapsedTimer(): void {
+  if (!elapsedTimer) return;
+  clearInterval(elapsedTimer);
+  elapsedTimer = null;
+}
+
+function subscribeElapsed(subscriber: () => void): () => void {
+  elapsedSubscribers.add(subscriber);
+  if (elapsedSubscribers.size === 1) startElapsedTimer();
+  return () => {
+    elapsedSubscribers.delete(subscriber);
+    if (elapsedSubscribers.size === 0) stopElapsedTimer();
+  };
+}
+
+function subscribeElapsedIdle(): () => void {
+  return () => {};
+}
+
 /**
  * Live elapsed label since `startIso`, re-rendering once per second while
  * `active`. Returns null when inactive or the timestamp is unparseable, and
  * clears its interval when `active` flips false or the component unmounts.
+ *
+ * Inactive consumers subscribe to a noop so rows for finished missions do
+ * not keep the shared 1 Hz timer alive.
  */
 export function useElapsed(startIso: string | null, active: boolean): string | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [active, startIso]);
-  if (!active || !startIso) return null;
-  const start = Date.parse(startIso);
-  if (Number.isNaN(start)) return null;
+  const start = startIso != null ? Date.parse(startIso) : Number.NaN;
+  const enabled = active && !Number.isNaN(start);
+  const now = useSyncExternalStore(
+    enabled ? subscribeElapsed : subscribeElapsedIdle,
+    () => elapsedNow,
+    () => elapsedNow,
+  );
+  if (!enabled) return null;
   return formatElapsed(now - start);
 }

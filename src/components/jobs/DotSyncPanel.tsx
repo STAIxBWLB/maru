@@ -163,8 +163,13 @@ export function DotSyncPanel() {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    const onFocus = () => void refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refresh();
+    }, POLL_INTERVAL_MS);
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       window.clearInterval(timer);

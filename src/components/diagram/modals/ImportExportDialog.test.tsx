@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../../lib/diagram/reportTypes";
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
+import "../../../lib/i18n/testing";
 import { ImportExportDialog } from "./ImportExportDialog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -118,7 +118,7 @@ use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
 use kg_refs::{kg_document_refs, kg_refs_clear};
 use git::{
-    git_changes, git_commit, git_diff, git_generate_commit_message, git_status, git_status_fast,
+    git_changes, git_commit, git_diff, git_generate_commit_message, git_status,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
 };
 use gmail_gws::{
@@ -333,7 +333,6 @@ pub fn run() {
             set_active_workspace_root,
             refresh_workspace_capabilities,
             git_status,
-            git_status_fast,
             git_commit,
             git_generate_commit_message,
             git_sync_scan,
