@@ -155,7 +155,9 @@ export function useLocaleState(): LocaleState {
   }, []);
   const translate = useCallback(
     (key: string, vars?: Record<string, string | number>) => t(locale, key, vars),
-    [locale],
+    // `ready` is a dep on purpose: t()'s result changes when the dictionary
+    // registers, so memoized consumers of `t` must recompute after load.
+    [locale, ready],
   );
   return useMemo(
     () => ({ locale, setLocale, t: translate, ready }),

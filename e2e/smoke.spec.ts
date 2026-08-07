@@ -85,6 +85,9 @@ async function runCommandPaletteAction(page: Page, label: string) {
 }
 
 async function ensureRightPaneVisible(page: Page) {
+  // Wait for the app shell first: first paint is async (locale chunk load,
+  // workspace boot), and isVisible() would read the not-yet-rendered page.
+  await page.locator(".activity-rail").waitFor();
   const rightPane = page.locator(".outline-pane");
   if (!(await rightPane.isVisible())) {
     await page.locator(".activity-rail").getByLabel("오른쪽 패널 보이기").click();
@@ -493,6 +496,9 @@ test("keeps close shortcut scoped to the focused terminal panel", async ({ page 
   await page.goto("/");
 
   const documentTabs = page.locator(".document-tab");
+  // First paint is async; count() does not auto-wait, so anchor on the
+  // first tab being visible before counting.
+  await expect(documentTabs.first()).toBeVisible();
   const tabCount = await documentTabs.count();
   expect(tabCount).toBeGreaterThan(0);
 
