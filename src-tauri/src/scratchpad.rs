@@ -750,7 +750,7 @@ fn assert_revision(path: &Path, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_list(work_path: String) -> Result<Vec<ScratchpadEntry>, String> {
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
@@ -800,7 +800,7 @@ fn collection_rank(collection: ScratchpadCollection) -> u8 {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_read(
     work_path: String,
     collection: ScratchpadCollection,
@@ -822,7 +822,7 @@ pub fn scratchpad_read(
     Ok(ScratchpadDocument { entry, content })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn scratchpad_save(
     work_path: String,
@@ -877,7 +877,7 @@ pub fn scratchpad_save(
     scratchpad_read(work_path, collection, relative_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_rename(
     work_path: String,
     collection: ScratchpadCollection,
@@ -948,7 +948,7 @@ pub fn scratchpad_rename(
     scratchpad_read(work_path, collection, new_relative_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_trash(
     work_path: String,
     collection: ScratchpadCollection,
@@ -1029,7 +1029,7 @@ fn unique_relative_path(root: &Path, candidate: PathBuf) -> PathBuf {
     unreachable!()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_create_idea(
     work_path: String,
     title: String,
@@ -1203,7 +1203,7 @@ fn move_idea_directory_noreplace(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_transition_idea(
     work_path: String,
     relative_path: String,
@@ -1291,7 +1291,7 @@ pub fn scratchpad_transition_idea(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_cleanup_plan(work_path: String) -> Result<Vec<TempCleanupCandidate>, String> {
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
@@ -1333,7 +1333,7 @@ pub fn scratchpad_cleanup_plan(work_path: String) -> Result<Vec<TempCleanupCandi
     Ok(candidates)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_cleanup_apply(
     work_path: String,
     selections: Vec<TempCleanupSelection>,
@@ -1415,7 +1415,7 @@ pub fn scratchpad_cleanup_apply(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scratchpad_migrate_legacy_memos(
     work_path: String,
 ) -> Result<ScratchpadMigrationResult, String> {

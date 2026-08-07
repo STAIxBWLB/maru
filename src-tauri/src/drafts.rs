@@ -614,7 +614,7 @@ fn promote_impl(
     Ok(entries[index].clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = crate::vault::normalize_existing_dir(&work_path)?;
@@ -630,12 +630,12 @@ pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_read(work_path: String, id: String) -> Result<DraftDocument, String> {
     read_impl(&work_path, &id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_save(
     app: AppHandle,
     work_path: String,
@@ -648,7 +648,7 @@ pub fn drafts_save(
     Ok(document)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn drafts_create(
     app: AppHandle,
@@ -675,7 +675,7 @@ pub fn drafts_create(
     Ok(entry)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_set_status(
     app: AppHandle,
     work_path: String,
@@ -687,7 +687,7 @@ pub fn drafts_set_status(
     Ok(entry)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_discard(
     app: AppHandle,
     work_path: String,
@@ -698,7 +698,7 @@ pub fn drafts_discard(
     Ok(entry)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drafts_promote(
     approvals: tauri::State<'_, ApprovalState>,
     app: AppHandle,

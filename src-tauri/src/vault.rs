@@ -287,7 +287,7 @@ fn excluded_scratchpad_rel_prefix(vault: &Path) -> Option<String> {
     Some(format!("{rel}/"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sample_workspace_path() -> Result<String, String> {
     let root = host_fs::maru_home()?.join("sample-workspace");
     host_fs::ensure_dir(&root)?;
@@ -321,7 +321,7 @@ fn seed_dir_if_missing(dir: &Dir<'_>, root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_vault(
     vault_path: String,
     scan_options: Option<ScanOptions>,
@@ -419,7 +419,7 @@ pub fn scan_vault(
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
     // A cache written before scratchpad exclusion still holds those entries;

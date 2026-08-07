@@ -315,7 +315,7 @@ const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 const INBOX_ROUTE_KIND: &str = "inbox.route";
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_inbox_drop(
     vault_path: String,
     scan_options: Option<ScanOptions>,
@@ -326,7 +326,7 @@ pub fn scan_inbox_drop(
     scan_inbox_with_settings(&vault, &settings, &scan_filter)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_inbox_entries(
     work_path: String,
     scan_options: Option<ScanOptions>,
@@ -337,7 +337,7 @@ pub fn scan_inbox_entries(
     scan_inbox_entries_with_config(&work, &config, &scan_filter)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_inbox_processed_items(
     work_path: String,
     channel: Option<String>,
@@ -367,7 +367,7 @@ pub async fn scan_inbox_processed_snapshot(
     .map_err(|err| format!("Inbox processed scan task failed: {err}"))?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_inbox_processed_item(
     work_path: String,
     item_dir: String,
@@ -377,7 +377,7 @@ pub fn read_inbox_processed_item(
     read_processed_item_with_config(&work, &config, &item_dir)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, String> {
     let work = normalize_existing_dir(&work_path)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
@@ -388,7 +388,7 @@ pub fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, 
 /// status/query filter and no result cap. The dashboard source badges use this
 /// so the per-source totals stay stable regardless of the search box or status
 /// chip and do not silently cap at the processed-item list limit.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn count_inbox_processed_by_channel(
     work_path: String,
 ) -> Result<std::collections::HashMap<String, usize>, String> {
@@ -397,7 +397,7 @@ pub fn count_inbox_processed_by_channel(
     count_processed_by_channel_with_config(&work, &config)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trash_inbox_items(
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
@@ -416,7 +416,7 @@ pub fn trash_inbox_items(
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stage_inbox_drop_files(
     app: AppHandle,
     work_path: String,
@@ -452,7 +452,7 @@ pub fn stage_inbox_drop_files(
     Ok(outcomes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn accept_inbox_item(
     app: AppHandle,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
@@ -468,7 +468,7 @@ pub fn accept_inbox_item(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn accept_inbox_items(
     app: AppHandle,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
@@ -495,7 +495,7 @@ pub fn accept_inbox_items(
     Ok(outcomes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reject_inbox_item(
     app: AppHandle,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
@@ -510,7 +510,7 @@ pub fn reject_inbox_item(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reject_inbox_items(
     app: AppHandle,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
@@ -541,7 +541,7 @@ pub fn reject_inbox_items(
 /// pending item directory is moved as a whole (manifest + raw + extracted +
 /// summary + route) — never a single file — so nothing is orphaned. A receipt
 /// is appended per item to the configured `_state/index.jsonl`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_inbox_decisions(
     app: AppHandle,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,

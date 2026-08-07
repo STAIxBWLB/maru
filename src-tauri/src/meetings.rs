@@ -62,7 +62,7 @@ pub struct MeetingGuides {
     pub notes_guidelines: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_meeting_notes(
     work_path: String,
     root: Option<String>,
@@ -127,7 +127,7 @@ pub fn scan_meeting_notes(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_meeting_metadata(
     work_path: String,
     rel_path: String,
@@ -159,7 +159,7 @@ pub fn read_meeting_metadata(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
     let work = normalize_existing_dir(&work_path)?;
     let guide_paths = read_guide_paths(&work);
@@ -172,7 +172,7 @@ pub fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn append_meetings_log(work_path: String, line: String) -> Result<(), String> {
     let work = normalize_existing_dir(&work_path)?;
     let log_path = work.join(".maru").join("meetings-log.md");
@@ -189,7 +189,7 @@ pub fn append_meetings_log(work_path: String, line: String) -> Result<(), String
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_meetings_log(
     work_path: String,
     limit: Option<usize>,
