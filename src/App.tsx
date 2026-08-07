@@ -317,7 +317,7 @@ import type {
   WorkspaceVisibility,
   WorkspaceWritePolicy,
 } from "./lib/types";
-import { ingestMissionUpdate, useTrackedMissions } from "./lib/useActiveMissions";
+import { ingestMissionUpdate, missionStoreLoadStamp, useTrackedMissions } from "./lib/useActiveMissions";
 import {
   isSameParentMove,
   targetDirForDropTarget,
@@ -1000,6 +1000,7 @@ function MainApp() {
   const processingMissionIdsRef = useRef<Set<string>>(new Set());
   const processingMissionsRef = useRef<MissionRecord[]>([]);
   const prevProcessingMissionsRef = useRef<MissionRecord[] | null>(null);
+  const prevMissionLoadStampRef = useRef(missionStoreLoadStamp());
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
   // overwrite the editor with stale content if the user clicked a later
@@ -3116,11 +3117,16 @@ function MainApp() {
 
   // Watcher bursts coalesce: a refresh requested while one is in flight
   // re-runs once after it lands, so the two scans never overlap and the
-  // trailing event is not dropped.
+  // trailing event is not dropped. The guard refs outlive any single
+  // useCallback closure, so each pass re-reads the scan inputs from
+  // inboxScanInputRef: a requeue triggered by a workspace switch must scan
+  // the new workspace, not the one captured when the loop started.
   const inboxRefreshInFlightRef = useRef(false);
   const inboxRefreshPendingRef = useRef(false);
+  const inboxScanInputRef = useRef({ workspacePath: inboxWorkspacePath, scanOptions });
   const refreshInbox = useCallback(async () => {
-    if (!inboxWorkspacePath) {
+    inboxScanInputRef.current = { workspacePath: inboxWorkspacePath, scanOptions };
+    if (!inboxWorkspacePath && !inboxRefreshInFlightRef.current) {
       setInboxDrops([]);
       setInboxEntries([]);
       return;
@@ -3133,15 +3139,25 @@ function MainApp() {
     try {
       do {
         inboxRefreshPendingRef.current = false;
+        const { workspacePath, scanOptions: options } = inboxScanInputRef.current;
+        if (!workspacePath) {
+          setInboxDrops([]);
+          setInboxEntries([]);
+          continue;
+        }
         setInboxLoading(true);
         setError(null);
         try {
           const [drops, entries] = await Promise.all([
-            scanInboxDrop(inboxWorkspacePath, scanOptions),
-            scanInboxEntries(inboxWorkspacePath, scanOptions),
+            scanInboxDrop(workspacePath, options),
+            scanInboxEntries(workspacePath, options),
           ]);
-          setInboxDrops(drops);
-          setInboxEntries(entries);
+          // The workspace may have switched mid-scan; a requeued pass is
+          // already pending for the new one, so drop the stale results.
+          if (inboxScanInputRef.current.workspacePath === workspacePath) {
+            setInboxDrops(drops);
+            setInboxEntries(entries);
+          }
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -4264,14 +4280,19 @@ function MainApp() {
   // ai://mission_update listener; the shared store (useTrackedMissions) owns
   // that subscription now, so this diffs the tracked list against the previous
   // render and fires the same calls on the same transitions. A record only
-  // changes identity when the store ingested an event for it, so "changed or
-  // new record with a non-active status" is exactly the old handler's trigger;
-  // the initial snapshot (previous === null) fires nothing, matching the old
-  // listener, which reacted to events only and never to the initial list.
+  // changes identity when the store ingested an event for it — except when the
+  // store ingests a whole listAiMissions snapshot (initial subscribe, webview
+  // reload, StrictMode re-subscribe): every record in it is freshly
+  // deserialized, so a load-stamp change resets the baseline instead of
+  // replaying up to MAX_TRACKED log reads for missions that finished long ago.
+  // The old listener reacted to events only and never to a listed snapshot.
   useEffect(() => {
     const previous = prevProcessingMissionsRef.current;
     prevProcessingMissionsRef.current = processingMissions;
-    if (previous === null || previous === processingMissions) return;
+    const loadStamp = missionStoreLoadStamp();
+    const snapshotReloaded = loadStamp !== prevMissionLoadStampRef.current;
+    prevMissionLoadStampRef.current = loadStamp;
+    if (previous === null || snapshotReloaded || previous === processingMissions) return;
     const previousById = new Map(previous.map((mission) => [mission.id, mission]));
     for (const record of processingMissions) {
       if (previousById.get(record.id) === record) continue;

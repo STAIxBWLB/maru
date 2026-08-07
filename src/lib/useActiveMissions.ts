@@ -13,6 +13,15 @@ const subscribers = new Set<() => void>();
 let listening = false;
 let listenerGeneration = 0;
 let unlisten: (() => void) | null = null;
+let initialLoadStamp = 0;
+
+/** Bumps every time the store ingests a fresh `listAiMissions` snapshot
+ *  (initial subscribe, or re-subscribe after all consumers unmounted).
+ *  Diff-based consumers use it to reset their baseline instead of treating
+ *  every freshly deserialized record in the snapshot as a transition. */
+export function missionStoreLoadStamp(): number {
+  return initialLoadStamp;
+}
 
 function isActiveMission(mission: MissionRecord): boolean {
   return mission.status === "idle" || mission.status === "running";
@@ -126,7 +135,10 @@ function startListening(): void {
           tracked = nextTrackedMissionSnapshot(tracked, event);
         }
       }
-      if (listening && generation === listenerGeneration) publish(active, tracked);
+      if (listening && generation === listenerGeneration) {
+        initialLoadStamp += 1;
+        publish(active, tracked);
+      }
     } catch {
       // The status is ambient; a transient list failure should not surface globally.
     } finally {

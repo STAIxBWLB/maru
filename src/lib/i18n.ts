@@ -13,7 +13,7 @@
 // - Use `useTranslation()` in React components, or `t(locale, key)` in
 //   plain TS. Variable interpolation: `{name}` placeholders.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 export type Locale = "ko" | "en";
 
@@ -36,7 +36,12 @@ export function loadLocale(locale: Locale): Promise<void> {
     } else {
       dictionaries.en = (await import("./i18n/locales/en")).en;
     }
-  })();
+  })().catch((err: unknown) => {
+    // Never cache a rejection: a transient chunk-load failure must stay
+    // retryable, or every later loadLocale() call fails forever.
+    delete localeLoads[locale];
+    throw err;
+  });
   return localeLoads[locale];
 }
 
@@ -136,9 +141,17 @@ export function useLocaleState(): LocaleState {
   useEffect(() => {
     if (ready) return;
     let cancelled = false;
-    void loadLocale(locale).then(() => {
-      if (!cancelled) setReady(true);
-    });
+    void loadLocale(locale)
+      .catch(() => loadLocale(locale))
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error(`[i18n] failed to load locale "${locale}"`, err);
+        // Fall through to ready: rendering raw keys beats a window that
+        // stays blank forever behind the `ready` gate.
+      })
+      .then(() => {
+        if (!cancelled) setReady(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -150,8 +163,18 @@ export function useLocaleState(): LocaleState {
   }, [locale]);
   // Load-then-switch: the current locale keeps rendering until the new
   // dictionary is registered, so switching never flashes raw keys either.
+  // The token makes rapid toggles last-write-wins instead of
+  // completion-order-wins (ko -> en -> ko must settle on ko).
+  const localeRequestRef = useRef(0);
   const setLocale = useCallback((next: Locale) => {
-    void loadLocale(next).then(() => setLocaleState(next));
+    const token = ++localeRequestRef.current;
+    void loadLocale(next)
+      .then(() => {
+        if (localeRequestRef.current === token) setLocaleState(next);
+      })
+      .catch(() => {
+        // Keep the current locale; loadLocale stays retryable on failure.
+      });
   }, []);
   const translate = useCallback(
     (key: string, vars?: Record<string, string | number>) => t(locale, key, vars),
