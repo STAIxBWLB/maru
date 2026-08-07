@@ -1,15 +1,18 @@
 // Phase 2 step 2: filesystem watcher layered on top of the polling
 // `scan_inbox_drop` baseline. `notify` watches configured inbox drop/pending paths
 // recursively; relevant create/modify/remove events are forwarded to the
-// frontend via Tauri's event channel as `inbox://file_event` payloads.
+// frontend via Tauri's event channel as batched `inbox://file_events` payloads.
 //
 // Lifecycle: the frontend calls `start_inbox_watcher(vault_path)` on
 // vault activation and `stop_inbox_watcher()` on switch/quit. Replacing
 // an active watcher transparently stops the previous one — the watcher
-// handle is dropped, which `notify` interprets as unsubscribe.
+// handle is dropped, which `notify` interprets as unsubscribe, and the
+// drain thread exits when the disconnected channel reports it.
 
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -20,10 +23,16 @@ use crate::inbox_settings;
 #[derive(Default)]
 pub struct InboxWatcherState(pub Mutex<Option<RecommendedWatcher>>);
 
-/// Payload emitted to the webview as `inbox://file_event`. `kind` is one of
-/// `added` / `modified` / `removed`. Frontend treats any `added`/`modified`
-/// event as a hint to re-run `scan_inbox_drop` (cheap, ~ms). `removed` is
-/// surfaced so the inbox view can drop the row without a re-scan.
+/// Coalesce window for filesystem event bursts. A bulk drop of N files
+/// produces one `inbox://file_events` emit per window instead of N emits
+/// (and therefore N frontend re-scans).
+const DEBOUNCE_MS: u64 = 150;
+
+/// One filesystem change inside an `inbox://file_events` batch. `kind` is
+/// one of `added` / `modified` / `removed`. Frontend treats any batch
+/// containing `added`/`modified` events as a hint to re-run
+/// `scan_inbox_drop` (cheap, ~ms). `removed` is surfaced so the inbox view
+/// can drop the row without a re-scan.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxFileEvent {
@@ -34,6 +43,44 @@ pub struct InboxFileEvent {
     /// First component under `inbox/downloads/` — kakao / telegram / gmail / sharepoint / etc.
     pub source: String,
     pub kind: String,
+}
+
+/// Payload emitted to the webview as `inbox://file_events` — one batch per
+/// coalesce window, never one emit per path.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxFileEventsBatch {
+    pub vault_path: String,
+    pub events: Vec<InboxFileEvent>,
+}
+
+/// Drop consecutive duplicates of the same path+kind — a single save
+/// typically produces a burst of identical modify events.
+fn dedup_events(events: Vec<InboxFileEvent>) -> Vec<InboxFileEvent> {
+    let mut out: Vec<InboxFileEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        let dup = out
+            .last()
+            .is_some_and(|prev| prev.abs_path == event.abs_path && prev.kind == event.kind);
+        if !dup {
+            out.push(event);
+        }
+    }
+    out
+}
+
+fn emit_batch(app: &AppHandle, vault_path: &str, events: Vec<InboxFileEvent>) {
+    let events = dedup_events(events);
+    if events.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "inbox://file_events",
+        InboxFileEventsBatch {
+            vault_path: vault_path.to_string(),
+            events,
+        },
+    );
 }
 
 #[tauri::command]
@@ -68,6 +115,7 @@ pub fn start_inbox_watcher(
     let roots_for_handler = watch_roots.clone();
     let vault_for_handler = vault.clone();
     let vault_string = vault_path.clone();
+    let (tx, rx) = mpsc::channel::<InboxFileEvent>();
 
     let mut watcher = recommended_watcher(move |res: Result<Event, notify::Error>| {
         let Ok(event) = res else { return };
@@ -110,7 +158,7 @@ pub fn start_inbox_watcher(
                 source,
                 kind: kind_label.to_string(),
             };
-            let _ = app.emit("inbox://file_event", payload);
+            let _ = tx.send(payload);
         }
     })
     .map_err(|err| format!("watcher creation failed: {err}"))?;
@@ -120,6 +168,33 @@ pub fn start_inbox_watcher(
             .watch(root, RecursiveMode::Recursive)
             .map_err(|err| format!("watch start failed: {err}"))?;
     }
+
+    // Drain thread (same shape as the scratchpad watcher): wait for the
+    // first event, keep draining until a DEBOUNCE_MS quiet window passes,
+    // then emit one batch. Exits when the watcher — and with it the
+    // channel — is dropped on stop/restart.
+    let vault_for_thread = vault_path.clone();
+    std::thread::spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let deadline = Instant::now() + Duration::from_millis(DEBOUNCE_MS);
+            let mut events = vec![first];
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                match rx.recv_timeout(remaining) {
+                    Ok(event) => events.push(event),
+                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        emit_batch(&app, &vault_for_thread, events);
+                        return;
+                    }
+                }
+            }
+            emit_batch(&app, &vault_for_thread, events);
+        }
+    });
 
     let mut guard = state
         .0
@@ -135,7 +210,8 @@ pub fn stop_inbox_watcher(state: State<'_, InboxWatcherState>) -> Result<(), Str
         .0
         .lock()
         .map_err(|err| format!("watcher state lock poisoned: {err}"))?;
-    // Dropping the RecommendedWatcher unsubscribes the OS handle.
+    // Dropping the RecommendedWatcher unsubscribes the OS handle and ends
+    // the drain thread via the disconnected channel.
     *guard = None;
     Ok(())
 }
@@ -143,6 +219,16 @@ pub fn stop_inbox_watcher(state: State<'_, InboxWatcherState>) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn event(abs_path: &str, kind: &str) -> InboxFileEvent {
+        InboxFileEvent {
+            vault_path: "/v".to_string(),
+            abs_path: abs_path.to_string(),
+            rel_path: format!("inbox/downloads/gmail/{abs_path}"),
+            source: "gmail".to_string(),
+            kind: kind.to_string(),
+        }
+    }
 
     #[test]
     fn payload_shape_serializes_to_camelcase() {
@@ -159,5 +245,48 @@ mod tests {
         assert!(json.contains("\"relPath\""));
         assert!(json.contains("\"source\":\"gmail\""));
         assert!(json.contains("\"kind\":\"added\""));
+    }
+
+    #[test]
+    fn batch_payload_serializes_events_under_vault_path() {
+        let batch = InboxFileEventsBatch {
+            vault_path: "/v".to_string(),
+            events: vec![event("a.pdf", "added"), event("b.pdf", "modified")],
+        };
+        let json = serde_json::to_string(&batch).unwrap();
+        assert!(json.contains("\"vaultPath\":\"/v\""));
+        assert!(json.contains("\"events\":["));
+        assert!(json.contains("\"absPath\":\"a.pdf\""));
+    }
+
+    #[test]
+    fn dedup_events_drops_consecutive_path_kind_duplicates() {
+        let events = vec![
+            event("a.pdf", "modified"),
+            event("a.pdf", "modified"),
+            event("b.pdf", "modified"),
+            event("b.pdf", "removed"),
+            event("a.pdf", "modified"),
+        ];
+        let deduped = dedup_events(events);
+        let summary: Vec<(&str, &str)> = deduped
+            .iter()
+            .map(|event| (event.abs_path.as_str(), event.kind.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("a.pdf", "modified"),
+                ("b.pdf", "modified"),
+                ("b.pdf", "removed"),
+                ("a.pdf", "modified"),
+            ]
+        );
+    }
+
+    #[test]
+    fn dedup_events_keeps_distinct_kinds_of_the_same_path() {
+        let deduped = dedup_events(vec![event("a.pdf", "added"), event("a.pdf", "removed")]);
+        assert_eq!(deduped.len(), 2);
     }
 }

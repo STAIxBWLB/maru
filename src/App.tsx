@@ -3126,25 +3126,42 @@ function MainApp() {
     setCommsRefreshing(false);
   }, [inboxWorkspacePath]);
 
+  // Watcher bursts coalesce: a refresh requested while one is in flight
+  // re-runs once after it lands, so the two scans never overlap and the
+  // trailing event is not dropped.
+  const inboxRefreshInFlightRef = useRef(false);
+  const inboxRefreshPendingRef = useRef(false);
   const refreshInbox = useCallback(async () => {
     if (!inboxWorkspacePath) {
       setInboxDrops([]);
       setInboxEntries([]);
       return;
     }
-    setInboxLoading(true);
-    setError(null);
+    if (inboxRefreshInFlightRef.current) {
+      inboxRefreshPendingRef.current = true;
+      return;
+    }
+    inboxRefreshInFlightRef.current = true;
     try {
-      const [drops, entries] = await Promise.all([
-        scanInboxDrop(inboxWorkspacePath, scanOptions),
-        scanInboxEntries(inboxWorkspacePath, scanOptions),
-      ]);
-      setInboxDrops(drops);
-      setInboxEntries(entries);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      do {
+        inboxRefreshPendingRef.current = false;
+        setInboxLoading(true);
+        setError(null);
+        try {
+          const [drops, entries] = await Promise.all([
+            scanInboxDrop(inboxWorkspacePath, scanOptions),
+            scanInboxEntries(inboxWorkspacePath, scanOptions),
+          ]);
+          setInboxDrops(drops);
+          setInboxEntries(entries);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setInboxLoading(false);
+        }
+      } while (inboxRefreshPendingRef.current);
     } finally {
-      setInboxLoading(false);
+      inboxRefreshInFlightRef.current = false;
     }
   }, [inboxWorkspacePath, scanOptions]);
 
@@ -4284,9 +4301,11 @@ function MainApp() {
 
   // Inbox scan + watcher subscription, scoped to the active workspace and
   // deferred until Inbox mode so startup document paint owns the I/O lane.
-  // The watcher overlays the polling baseline: any file_event triggers
-  // a re-scan rather than a delta apply, which keeps the UI source of
-  // truth a single `scan_inbox_drop` snapshot.
+  // The watcher overlays the polling baseline: the backend emits one
+  // batched `inbox://file_events` per 150 ms window, and each batch
+  // triggers a re-scan (guarded against overlap) rather than a delta
+  // apply, which keeps the UI source of truth a single `scan_inbox_drop`
+  // snapshot.
   useEffect(() => {
     if (!inboxWorkspacePath) {
       setInboxDrops([]);
@@ -4317,7 +4336,7 @@ function MainApp() {
 
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        const off = await listen("inbox://file_event", () => {
+        const off = await listen("inbox://file_events", () => {
           if (!cancelled) void refreshInbox();
         });
         if (cancelled) {
@@ -8292,6 +8311,10 @@ function MainApp() {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    // Sequence guard: deltas arriving while a full scan is in flight
+    // reschedule another one, and only the latest scan may publish — a slow
+    // earlier scan can no longer win the write race.
+    let scanSeq = 0;
     void startVaultWatcher(vaultWatchPath).catch(() => undefined);
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
@@ -8299,8 +8322,9 @@ function MainApp() {
           if (event.payload.workspacePath !== vaultWatchPath) return;
           if (refreshTimer) clearTimeout(refreshTimer);
           refreshTimer = setTimeout(() => {
+            const seq = ++scanSeq;
             void scanVault(vaultWatchPath, scanOptions).then((fresh) => {
-              if (!disposed) updateWorkspaceState(vaultWatchPath, { entries: fresh });
+              if (!disposed && seq === scanSeq) updateWorkspaceState(vaultWatchPath, { entries: fresh });
             });
           }, 150);
         }),

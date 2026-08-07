@@ -552,9 +552,9 @@ export interface InboxDropStageRequest {
   sourcePaths: string[];
 }
 
-/** Live filesystem event from the Rust `notify` watcher. Payload of the
- *  `inbox://file_event` Tauri event; mirrors `InboxFileEvent` in
- *  `src-tauri/src/inbox_watcher.rs`. */
+/** Live filesystem event from the Rust `notify` watcher. Element of the
+ *  batched `inbox://file_events` Tauri event payload; mirrors
+ *  `InboxFileEvent` in `src-tauri/src/inbox_watcher.rs`. */
 export interface InboxFileEvent {
   vaultPath: string;
   absPath: string;
