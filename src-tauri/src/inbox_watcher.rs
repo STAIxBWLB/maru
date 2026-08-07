@@ -29,10 +29,10 @@ pub struct InboxWatcherState(pub Mutex<Option<RecommendedWatcher>>);
 const DEBOUNCE_MS: u64 = 150;
 
 /// One filesystem change inside an `inbox://file_events` batch. `kind` is
-/// one of `added` / `modified` / `removed`. Frontend treats any batch
-/// containing `added`/`modified` events as a hint to re-run
-/// `scan_inbox_drop` (cheap, ~ms). `removed` is surfaced so the inbox view
-/// can drop the row without a re-scan.
+/// one of `added` / `modified` / `removed`. The current frontend re-runs
+/// `scan_inbox_drop` (cheap, ~ms) on any batch and does not inspect the
+/// payload; per-event fields are carried so a future consumer can apply
+/// deltas without a re-scan.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxFileEvent {

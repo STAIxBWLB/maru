@@ -5,7 +5,7 @@
 // Provenance: the browser shell mocks Tauri IPC, so the numbers cover module
 // parse, React mount and first render — not real IPC/scan times. Use the
 // native app for those (see docs/perf-baseline.md).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "@playwright/test";
@@ -58,9 +58,15 @@ try {
     await browser.close();
   }
 } finally {
-  try {
-    if (server.pid) process.kill(-server.pid, "SIGTERM");
-  } catch {
-    server.kill();
+  // Negative-PID (process-group) kill is POSIX-only; on Windows tear the
+  // tree down with taskkill instead so vite doesn't outlive the script.
+  if (server.pid && process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(server.pid), "/T", "/F"]);
+  } else {
+    try {
+      if (server.pid) process.kill(-server.pid, "SIGTERM");
+    } catch {
+      server.kill();
+    }
   }
 }
