@@ -129,8 +129,13 @@ describe("slugifyDraftTitle", () => {
     expect(slugifyDraftTitle("   ")).toBe("draft");
   });
 
-  it("builds a default promote path under notes/", () => {
-    expect(defaultPromoteDocumentPath("My Draft")).toBe("notes/my-draft.md");
+  it("builds a default promote path under the configured directory", () => {
+    expect(defaultPromoteDocumentPath("My Draft", "_incoming")).toBe(
+      "_incoming/my-draft.md",
+    );
+    expect(defaultPromoteDocumentPath("My Draft", "proposals/incoming")).toBe(
+      "proposals/incoming/my-draft.md",
+    );
   });
 });
 

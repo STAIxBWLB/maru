@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
-import { promoteDraft } from "../../lib/api";
-import { defaultPromoteDocumentPath } from "../../lib/drafts";
+import { getDraftsPromoteDefaultDir, promoteDraft } from "../../lib/api";
+import { DEFAULT_PROMOTE_DIR, defaultPromoteDocumentPath } from "../../lib/drafts";
 import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { DraftEntry, DraftPromoteTarget } from "../../lib/types";
@@ -28,12 +28,29 @@ export function PromoteDraftDialog({
   const [target, setTarget] = useState<DraftPromoteTarget>("document");
   const [targetPath, setTargetPath] = useState("");
   const [busy, setBusy] = useState(false);
+  const targetPathEdited = useRef(false);
 
   useEffect(() => {
     if (!draft) return;
+    let disposed = false;
+    targetPathEdited.current = false;
     setTarget(draft.kind === "task" ? "task" : "document");
-    setTargetPath(defaultPromoteDocumentPath(draft.title));
-  }, [draft]);
+    setTargetPath(defaultPromoteDocumentPath(draft.title, DEFAULT_PROMOTE_DIR));
+    if (!workPath) return () => undefined;
+    void getDraftsPromoteDefaultDir(workPath)
+      .then((dir) => {
+        if (!disposed && !targetPathEdited.current) {
+          setTargetPath(defaultPromoteDocumentPath(draft.title, dir));
+        }
+      })
+      .catch(() => {
+        // The fallback is already visible. A config read failure must not stop
+        // the user from entering an explicit target and promoting the draft.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [draft, workPath]);
 
   if (!draft) return null;
 
@@ -102,7 +119,10 @@ export function PromoteDraftDialog({
           <Field label={t("drafts.promote.path")}>
             <TextInput
               value={targetPath}
-              onChange={(event) => setTargetPath(event.target.value)}
+              onChange={(event) => {
+                targetPathEdited.current = true;
+                setTargetPath(event.target.value);
+              }}
             />
           </Field>
         ) : null}

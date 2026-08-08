@@ -35,6 +35,7 @@ thread_local! {
 
 const DRAFT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const DRAFTS_PROMOTE_KIND: &str = "drafts.promote";
+const DEFAULT_PROMOTE_DIR: &str = "_incoming";
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -104,6 +105,30 @@ pub struct DraftsChangedEvent {
     pub draft_id: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct WorkspaceConfig {
+    #[serde(default)]
+    drafts: DraftsConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct DraftsConfig {
+    #[serde(default = "default_promote_dir")]
+    promote_dir: String,
+}
+
+impl Default for DraftsConfig {
+    fn default() -> Self {
+        Self {
+            promote_dir: default_promote_dir(),
+        }
+    }
+}
+
+fn default_promote_dir() -> String {
+    DEFAULT_PROMOTE_DIR.to_string()
+}
+
 fn emit_drafts_changed(app: &AppHandle, work_path: &str, draft_id: Option<String>) {
     let _ = app.emit(
         "drafts://changed",
@@ -116,6 +141,59 @@ fn emit_drafts_changed(app: &AppHandle, work_path: &str, draft_id: Option<String
 
 fn index_path(work: &Path) -> PathBuf {
     work.join(".maru").join("drafts").join("index.json")
+}
+
+fn validate_promote_dir(raw: &str) -> Result<String, String> {
+    // Workspace config is portable across platforms. Treat a backslash as a
+    // separator before inspecting components so Windows-style traversal or
+    // managed-root paths cannot become ordinary file names on Unix.
+    let normalized = raw.trim().replace('\\', "/");
+    let path = Path::new(&normalized);
+    if normalized.is_empty()
+        || normalized.contains('\0')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("drafts.promote_dir must be a safe relative path".to_string());
+    }
+    let first = path
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        });
+    if matches!(
+        first.map(str::to_ascii_lowercase).as_deref(),
+        Some("scratchpad") | Some(".maru")
+    ) {
+        return Err("drafts.promote_dir must not target scratchpad or .maru".to_string());
+    }
+    Ok(path_slashes(path))
+}
+
+fn read_promote_dir(work: &Path) -> Result<String, String> {
+    let path = work.join("workspace.config.yaml");
+    let raw_dir = if !path.is_file() {
+        DEFAULT_PROMOTE_DIR.to_string()
+    } else {
+        let raw = fs::read_to_string(&path)
+            .map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
+        let config: WorkspaceConfig = serde_yaml::from_str(&raw)
+            .map_err(|err| format!("Cannot parse {}: {err}", path.display()))?;
+        config.drafts.promote_dir
+    };
+    let relative = validate_promote_dir(&raw_dir)?;
+    validate_promote_dir_target(work, &relative)?;
+    Ok(relative)
+}
+
+fn promote_default_dir_impl(work_path: &str) -> Result<String, String> {
+    assert_scratchpad_workspace_access(Path::new(work_path))?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    read_promote_dir(&work)
 }
 
 /// Load the draft index. A missing or corrupt index starts empty so a bad
@@ -642,6 +720,37 @@ fn path_is_same_or_descendant(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(&format!("{root}/"))
 }
 
+fn paths_overlap_or_contain(left: &Path, right: &Path) -> bool {
+    if path_is_same_or_descendant(left, right) || path_is_same_or_descendant(right, left) {
+        return true;
+    }
+    let Some(resolved_left) = canonicalize_from_existing_ancestor(left) else {
+        return false;
+    };
+    let Some(resolved_right) = canonicalize_from_existing_ancestor(right) else {
+        return false;
+    };
+    path_is_same_or_descendant(&resolved_left, &resolved_right)
+        || path_is_same_or_descendant(&resolved_right, &resolved_left)
+}
+
+fn validate_promote_dir_target(work: &Path, relative: &str) -> Result<(), String> {
+    let scratchpad = resolve_scratchpad_root(work)
+        .map_err(|error| format!("drafts.promote_dir cannot be checked: {error}"))?;
+    let target = work.join(relative);
+    let managed_roots = [work.join(".maru"), scratchpad];
+    if managed_roots
+        .iter()
+        .any(|managed| paths_overlap_or_contain(&target, managed))
+    {
+        return Err(
+            "drafts.promote_dir must stay outside the scratchpad and .maru managed roots"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn reject_managed_target_alias(work: &Path, target: &Path) -> Result<(), String> {
     let managed_roots = [work.join(".maru"), resolve_scratchpad_root(work)?];
     if managed_roots
@@ -815,6 +924,14 @@ pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
         save_index(&work, &entries)?;
     }
     Ok(entries)
+}
+
+/// Return the configured directory used only for the document target
+/// suggestion in the promote dialog. The actual promote command still accepts
+/// any explicit, independently validated workspace-relative target.
+#[tauri::command(async)]
+pub fn drafts_promote_default_dir(work_path: String) -> Result<String, String> {
+    promote_default_dir_impl(&work_path)
 }
 
 #[tauri::command(async)]
@@ -1155,6 +1272,129 @@ mod tests {
         assert!(!body.exists());
         let listed = load_index(Path::new(&work)).unwrap();
         assert_eq!(listed[0].status, DraftStatus::Discarded);
+    }
+
+    #[test]
+    fn promote_default_dir_uses_incoming_fallback() {
+        let (_temp, work) = workspace();
+        assert_eq!(promote_default_dir_impl(&work).unwrap(), "_incoming");
+    }
+
+    #[test]
+    fn promote_default_dir_reads_workspace_config() {
+        let (temp, work) = workspace();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            "drafts:\n  promote_dir: proposals/incoming\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            promote_default_dir_impl(&work).unwrap(),
+            "proposals/incoming"
+        );
+    }
+
+    #[test]
+    fn promote_default_dir_rejects_configured_scratchpad_overlap() {
+        let (temp, work) = workspace();
+        let custom_root = temp.path().join("private-notes");
+        fs::create_dir_all(&custom_root).unwrap();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\ndrafts:\n  promote_dir: private-notes/incoming\n",
+                custom_root.display()
+            ),
+        )
+        .unwrap();
+
+        let error = promote_default_dir_impl(&work).unwrap_err();
+        assert!(
+            error.contains("drafts.promote_dir"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promote_default_dir_rejects_canonical_alias_to_scratchpad() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, work) = workspace();
+        let custom_root = temp.path().join("private-notes");
+        fs::create_dir_all(&custom_root).unwrap();
+        symlink(&custom_root, temp.path().join("private-alias")).unwrap();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\ndrafts:\n  promote_dir: private-alias/incoming\n",
+                custom_root.display()
+            ),
+        )
+        .unwrap();
+
+        let error = promote_default_dir_impl(&work).unwrap_err();
+        assert!(
+            error.contains("drafts.promote_dir"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn promote_default_dir_rejects_backslash_managed_and_parent_components() {
+        let (temp, work) = workspace();
+        for value in [r"..\outside", r".maru\generated", r"scratchpad\drafts"] {
+            fs::write(
+                temp.path().join("workspace.config.yaml"),
+                format!("drafts:\n  promote_dir: {value}\n"),
+            )
+            .unwrap();
+
+            let error = promote_default_dir_impl(&work).unwrap_err();
+            assert!(
+                error.contains("drafts.promote_dir"),
+                "unexpected error for {value}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn promote_default_dir_normalizes_backslash_separators() {
+        let (temp, work) = workspace();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            "drafts:\n  promote_dir: proposals\\incoming\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            promote_default_dir_impl(&work).unwrap(),
+            "proposals/incoming"
+        );
+    }
+
+    #[test]
+    fn promote_default_dir_rejects_unsafe_config_values() {
+        let (temp, work) = workspace();
+        for value in [
+            "/absolute/path",
+            "../outside",
+            "scratchpad/drafts",
+            ".MARU/generated",
+        ] {
+            fs::write(
+                temp.path().join("workspace.config.yaml"),
+                format!("drafts:\n  promote_dir: {value}\n"),
+            )
+            .unwrap();
+
+            let error = promote_default_dir_impl(&work).unwrap_err();
+            assert!(
+                error.contains("drafts.promote_dir"),
+                "unexpected error for {value}: {error}"
+            );
+        }
     }
 
     #[test]

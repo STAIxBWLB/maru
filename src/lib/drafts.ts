@@ -79,9 +79,12 @@ export function slugifyDraftTitle(title: string): string {
   return slug || "draft";
 }
 
+export const DEFAULT_PROMOTE_DIR = "_incoming";
+
 /** Default workspace-relative target when promoting a draft to a document. */
-export function defaultPromoteDocumentPath(title: string): string {
-  return `notes/${slugifyDraftTitle(title)}.md`;
+export function defaultPromoteDocumentPath(title: string, dir = DEFAULT_PROMOTE_DIR): string {
+  const normalizedDir = dir.trim().replace(/[\\/]+$/, "");
+  return `${normalizedDir || DEFAULT_PROMOTE_DIR}/${slugifyDraftTitle(title)}.md`;
 }
 
 /** Schedule fire time as "HH:MM" (24h, zero-padded). */
