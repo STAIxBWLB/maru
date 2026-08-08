@@ -457,6 +457,14 @@ describe("active-item context bridge", () => {
     expect("MARU_ACTIVE_DOC_REL" in noItem).toBe(false);
   });
 
+  it("passes the resolved draft collection without assuming the default", () => {
+    const env = buildMaruBackgroundContextEnv(
+      { ...CTX, draftsRoot: "/work/scratchpad/generated-drafts" },
+      true,
+    );
+    expect(env.MARU_DRAFTS).toBe("/work/scratchpad/generated-drafts");
+  });
+
   it("keeps scratchpad contract and safe markers when active context is disabled", () => {
     const env = buildMaruContextEnv(CTX, "term-1", false);
     expect(env).toEqual({

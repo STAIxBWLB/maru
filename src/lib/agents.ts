@@ -132,7 +132,7 @@ export const MOCK_BUILTIN_AGENTS: AgentRecord[] = [
     labelKey: "agents.builtin.dailyDigest",
     skillName: "draft-writer",
     kind: "background",
-    prompt: "어제 처리한 inbox 항목, 오늘·내일 마감 task, 미결 승인 건을 개조식으로 요약해 scratchpad/drafts/ 아래 하루 브리핑 초안으로 작성. 확정 트리 수정 금지.",
+    prompt: "어제 처리한 inbox 항목, 오늘·내일 마감 task, 미결 승인 건을 개조식으로 요약해 $MARU_DRAFTS 아래 하루 브리핑 초안으로 작성. 확정 트리 수정 금지.",
     enabled: false,
     recommendedSchedule: { hour: 7, minute: 50, daysOfWeek: [1, 2, 3, 4, 5] },
   }),

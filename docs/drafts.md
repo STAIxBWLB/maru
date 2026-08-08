@@ -1,8 +1,21 @@
 # Drafts and the skill scheduler
 
-Drafts unify AI-generated task drafts and ideation into one first-class,
-unconfirmed concept. A draft is never vault data until the user explicitly
-promotes it through the approval gate.
+The **Ideation hub** is the Drafts mode. It brings durable ideas and
+AI-generated implementation drafts together in one first-class, unconfirmed
+workspace. A draft is never vault data until the user explicitly promotes it
+through the approval gate.
+
+Ideas can be created, edited, and saved from the hub. Reads return a content
+revision, and saves send that revision as `expectedRevision`, so a concurrent
+disk edit is reported as a conflict instead of being overwritten. Stage changes
+use the same optimistic revision and follow the backend lifecycle:
+
+`seed -> developing -> proposal -> archive`, with `seed -> archive` and
+`archive -> seed` also allowed.
+
+The Scratchpad pane is reserved for memos and temporary results. It does not
+list ideation or implementation-draft files, and idea creation, editing, and
+stage actions live in the Ideation hub.
 
 Backend: `src-tauri/src/drafts.rs` (store + promote),
 `src-tauri/src/scheduler.rs` (recurring skill runs).
@@ -27,11 +40,30 @@ Frontend: `src/components/drafts/` (DraftsPane, useTaskCandidateIngestion),
 ## Storage layout
 
 ```text
-<work>/scratchpad/drafts/<id>.md      # draft bodies (scratchpad collection)
+<work>/scratchpad/drafts/<id>.md      # default; actual root is $MARU_DRAFTS
 <work>/.maru/drafts/index.json        # metadata index (JSON array)
 <work>/.maru/drafts/<id>/baseline.md  # frozen promote baseline (gap analysis)
 <work>/.maru/schedules.json           # persisted schedules
 ```
+
+The draft-body directory is configurable with `scratchpad.drafts_subdir` and
+defaults to `drafts`. Maru injects the resolved absolute collection root as
+`MARU_DRAFTS` into bundled and headless skill runs; producers must use that
+variable rather than assuming `scratchpad/drafts/`. The value must be a safe relative subdirectory and may
+not equal or contain any other Scratchpad collection root. This keeps custom
+draft storage inside the Scratchpad root without allowing collection overlap.
+
+### Ideation hub
+
+Ideation files live below the configured `scratchpad.ideation_subdir` root in
+the lifecycle directories `seeds/`, `developing/`, `proposals/`, and
+`_archive/`. The hub refreshes these files through `scratchpad_list`, opens an
+idea with `scratchpad_read`, and saves with `scratchpad_save`. New ideas use
+`scratchpad_create_idea`; lifecycle moves use `scratchpad_transition_idea`.
+
+The former **Open in Scratchpad** action is intentionally gone. This avoids
+two editors competing for the same optimistic revision while keeping memo and
+temporary-file workflows in the Scratchpad pane.
 
 Bodies are capped at 2 MiB. A missing or corrupt index loads as empty so a
 bad file can never wedge the workflow; all writes go through `atomic_file`.
@@ -66,7 +98,9 @@ as are non-`.md` files, and adoption is skipped entirely on a workspace Maru
 may not write to.
 
 **Isolation invariant**: nothing in the drafts module writes outside
-`<workspace>/scratchpad/drafts/`, `<work>/.maru/drafts/`, and the explicit,
+`<workspace>/scratchpad/<drafts_subdir>/` (default: `drafts`, exposed to
+producers as `$MARU_DRAFTS`),
+`<work>/.maru/drafts/`, and the explicit,
 approval-gated promote target. Vault scanning already excludes the scratchpad
 root, so drafts never leak into confirmed vault data, the knowledge graph, or
 search.

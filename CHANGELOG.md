@@ -8,6 +8,13 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## Unreleased
+
+- **Drafts is now the Ideation hub.** Ideas can be created, edited, and
+  revision-checked through their lifecycle; the Scratchpad pane stays focused
+  on memos and temporary results, and `scratchpad.drafts_subdir` now honors a
+  safe, non-overlapping configured collection root.
+
 ## v0.4.46 - 2026-08-08 - Faster Paint, Calmer Idle
 
 - **Startup and idle are measurably lighter.** The ko/en dictionaries (~400 KB

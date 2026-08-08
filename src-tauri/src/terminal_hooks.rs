@@ -646,6 +646,7 @@ fn agent_context_hint_block() -> String {
 When a session is launched from Maru, these environment variables expose the \
 durable scratchpad contract and describe the user's currently-active window/item:\n\n\
 - `MARU_SCRATCHPAD` — durable tracked root for `ideation/` and `memos/`\n\
+- `MARU_DRAFTS` — resolved durable implementation-draft collection (use this instead of assuming `scratchpad/drafts/`)\n\
 - `MARU_TEMP` — ephemeral AI artifacts under `$MARU_SCRATCHPAD/temp`\n\
 - `CLAUDE_CODE_TMPDIR` — Claude runtime scratch under `$MARU_TEMP/runtime/claude`\n\
 - `MARU_WORKSPACE` — current workspace root (also granted via `--add-dir`)\n\
@@ -996,6 +997,7 @@ mod tests {
         assert!(once.contains(HINT_START));
         assert!(once.contains("MARU_ACTIVE_DOC"));
         assert!(once.contains("MARU_SCRATCHPAD"));
+        assert!(once.contains("MARU_DRAFTS"));
         assert!(once.contains("$MARU_TEMP/<provider>/<task>/"));
         // Re-applying replaces in place (no duplicate markers).
         let twice = upsert_marked_block(&once, HINT_START, HINT_END, &block);

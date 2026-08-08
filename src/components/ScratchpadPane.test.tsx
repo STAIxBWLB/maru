@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   applyCleanup: vi.fn(),
   chooseSaveFile: vi.fn(),
-  createIdea: vi.fn(),
   isTauri: vi.fn(),
   list: vi.fn(),
   listen: vi.fn(),
@@ -19,7 +18,6 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   startWatcher: vi.fn(),
   stopWatcher: vi.fn(),
-  transition: vi.fn(),
   trash: vi.fn(),
 }));
 
@@ -36,7 +34,6 @@ vi.mock("dompurify", () => ({
 vi.mock("../lib/api", () => ({
   applyScratchpadTempCleanup: mocks.applyCleanup,
   chooseSaveFile: mocks.chooseSaveFile,
-  createScratchpadIdea: mocks.createIdea,
   isTauri: mocks.isTauri,
   listScratchpad: mocks.list,
   migrateLegacyMemos: mocks.migrate,
@@ -47,7 +44,6 @@ vi.mock("../lib/api", () => ({
   saveScratchpadDocument: mocks.save,
   startScratchpadWatcher: mocks.startWatcher,
   stopScratchpadWatcher: mocks.stopWatcher,
-  transitionScratchpadIdea: mocks.transition,
   trashScratchpadDocument: mocks.trash,
 }));
 
@@ -401,11 +397,10 @@ describe("ScratchpadPane safety flows", () => {
     mocks.list.mockResolvedValue([
       memoEntry({ relativePath: "memo.md", name: "memo.md" }),
       memoEntry({
-        collection: "ideation",
-        source: "manual",
-        ideationStage: "seed",
-        relativePath: "seeds/idea.md",
-        name: "idea.md",
+        collection: "temp",
+        source: "codex",
+        relativePath: "codex/result.md",
+        name: "result.md",
       }),
     ]);
     await render("/work", { sortKey: "name" });
@@ -422,9 +417,8 @@ describe("ScratchpadPane safety flows", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       }),
       memoEntry({
-        collection: "ideation",
-        source: "manual",
-        ideationStage: "seed",
+        collection: "temp",
+        source: "codex",
         relativePath: "seeds/idea.md",
         name: "newer-idea.md",
         updatedAt: "2026-06-01T00:00:00Z",
@@ -438,6 +432,31 @@ describe("ScratchpadPane safety flows", () => {
       container.querySelectorAll(".scratchpad-list-item .scratchpad-list-title strong"),
     ).map((node) => node.textContent);
     expect(names).toEqual(["newer-idea.md", "older-memo.md"]);
+  });
+
+  it("hides ideation entries while keeping memos and temp files visible", async () => {
+    mocks.list.mockResolvedValue([
+      memoEntry({ relativePath: "memo.md", name: "memo.md" }),
+      memoEntry({
+        collection: "temp",
+        source: "codex",
+        relativePath: "codex/result.md",
+        name: "result.md",
+      }),
+      memoEntry({
+        collection: "ideation",
+        source: "manual",
+        ideationStage: "seed",
+        relativePath: "seeds/idea.md",
+        name: "idea.md",
+      }),
+    ]);
+    await render("/work", { sortKey: "modifiedDesc" });
+
+    expect(container.querySelector('button[title="memos/memo.md"]')).toBeTruthy();
+    expect(container.querySelector('button[title="temp/codex/result.md"]')).toBeTruthy();
+    expect(container.querySelector('button[title="ideation/seeds/idea.md"]')).toBeNull();
+    expect(container.textContent).not.toContain("rightPane.scratchpad.newIdea");
   });
 
   it("renders the sort toggle as buttons with the active option pressed", async () => {

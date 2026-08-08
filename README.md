@@ -46,7 +46,7 @@ flag-gated.
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
 | `tasks` | 태스크 / Tasks | Today planner (`src/components/today/`) over file-backed tasks with Google Tasks/Calendar links. Routes: prepare / execute / review stages, calendar, capture, upcoming, log, and the full task list with detail editing and a month/week/day calendar. |
-| `drafts` | 초안 / Drafts | Unconfirmed AI-generated task/idea/implementation drafts (accept → promote, discard) plus the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
+| `drafts` | 아이디어 / Ideation | Ideation hub for durable ideas, implementation drafts, promotion, gap analysis, and the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
 | `gap` | 갭 분석 / Gap Analysis | Diffs promoted drafts against their frozen baselines, classifies the human edits, and feeds the tendencies back into draft prompts. See [docs/gap-analysis.md](docs/gap-analysis.md). |
 | `agents` | 에이전트 / Agents | Every AI job Maru can run: status, chat, run, stop, backend, permission mode, prompt, schedule, plus user-created agents. The 대화 tab talks to the agent's backend in-app instead of through a PTY, and routes a turn into a task, a memo, or an approved proposal. See [docs/agents.md](docs/agents.md). |
 | `catalog` | 카탈로그 / Catalog | M1 Operations Catalog — deadlines, in-flight approvals, unlinked evidence, inbox pending. |
@@ -150,9 +150,13 @@ Three surfaces close the loop between AI generation and the confirmed vault:
 
 - **Drafts + scheduler** — AI skill runs (scheduled from the Agents mode, or
   manual) emit task/idea/implementation draft artifacts that Maru
-  ingests into an unconfirmed store (`scratchpad/drafts/` bodies +
-  `.maru/drafts/index.json` metadata). Accepting a draft promotes it into the
-  vault through the approval gate. See [docs/drafts.md](docs/drafts.md).
+  ingests into an unconfirmed store: the resolved `$MARU_DRAFTS` bodies
+  (`scratchpad/drafts/` by default) plus `.maru/drafts/index.json` metadata.
+  Accepting a draft promotes it into the
+  vault through the approval gate. The Drafts mode is the **Ideation hub**:
+  durable ideas can be created, edited, and moved through their lifecycle
+  there, while the Scratchpad pane remains focused on memos and temporary
+  results. See [docs/drafts.md](docs/drafts.md).
 - **Gap analysis** — promotion freezes a baseline copy; the Gap mode diffs the
   promoted document against it, classifies each human edit (external info /
   direct edit / cross-doc reference / formatting), and appends the summary to
@@ -620,20 +624,25 @@ An AI workspace is any folder containing `.md` (or `.markdown`, `.html`, `.htm`)
 
 ### Scratchpad
 
-The primary private workspace owns one Scratchpad root. `ideation/` and
-`memos/` are durable, Git-tracked content; only `temp/` is disposable and
-Git-ignored.
+The primary private workspace owns one Scratchpad root. `ideation/`,
+`memos/`, and the configurable drafts collection are durable, Git-tracked
+content; only `temp/` is disposable and Git-ignored. The Drafts mode owns
+ideation files and implementation drafts; the Scratchpad pane lists only
+memos and temporary results.
 
 ```text
 <work>/scratchpad/
   ideation/{seeds,developing,proposals,_archive}/
   memos/
+  drafts/  # scratchpad.drafts_subdir default; headless producers use $MARU_DRAFTS
   temp/{claude,codex,kiro,kimi,runtime}/
 ```
 
 `workspace.config.yaml` may set `paths.scratchpad` and the
-`scratchpad.{ideation_subdir,memos_subdir,temp_subdir,editable_extensions,temp_stale_days,ideation_review_days,editable_max_bytes}`
-policy. Maru exposes the resolved root as `MARU_SCRATCHPAD`, its disposable
+`scratchpad.{ideation_subdir,memos_subdir,temp_subdir,drafts_subdir,editable_extensions,temp_stale_days,ideation_review_days,editable_max_bytes}`
+policy. `drafts_subdir` defaults to `drafts`, must be a safe relative path, and
+cannot overlap another collection. Maru exposes the resolved root as `MARU_SCRATCHPAD`, the resolved
+draft collection as `MARU_DRAFTS`, its disposable
 subdirectory as `MARU_TEMP`, and places Claude runtime files below
 `$MARU_TEMP/runtime/claude` through `CLAUDE_CODE_TMPDIR`.
 
