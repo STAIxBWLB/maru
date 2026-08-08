@@ -430,14 +430,19 @@ mod tests {
         std::fs::write(
             work.path().join("workspace.config.yaml"),
             format!(
-                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n",
+                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n  drafts_subdir: generated-drafts\n",
                 work.path().display(),
                 scratchpad.display()
             ),
         )
         .unwrap();
+        let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let caller_env = HashMap::from([
             ("MARU_SCRATCHPAD".to_string(), "/tmp/override".to_string()),
+            (
+                "MARU_DRAFTS".to_string(),
+                "/tmp/override/drafts".to_string(),
+            ),
             ("MARU_TEMP".to_string(), "/tmp/override/temp".to_string()),
             (
                 "CLAUDE_CODE_TMPDIR".to_string(),
@@ -451,6 +456,10 @@ mod tests {
         assert_eq!(
             env.get("MARU_SCRATCHPAD"),
             Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            env.get("MARU_DRAFTS"),
+            Some(&drafts.to_string_lossy().into_owned())
         );
         assert_eq!(
             env.get("CLAUDE_CODE_TMPDIR"),

@@ -654,6 +654,8 @@ export interface ActiveTerminalContext {
   workspaceRoot: string | null;
   /** Durable local scratchpad root from the primary private workspace. */
   scratchpadRoot: string | null;
+  /** Resolved draft collection root, when supplied by the workspace runtime. */
+  draftsRoot?: string | null;
   workspaceVisibility: "private" | "public";
   appMode: MaruAppMode;
   docAbsPath: string | null;
@@ -681,6 +683,7 @@ function applyScratchpadEnv(
   if (!ctx.scratchpadRoot) return env;
   const tempRoot = childPath(ctx.scratchpadRoot, "temp");
   env.MARU_SCRATCHPAD = ctx.scratchpadRoot;
+  if (ctx.draftsRoot) env.MARU_DRAFTS = ctx.draftsRoot;
   env.MARU_TEMP = tempRoot;
   env.CLAUDE_CODE_TMPDIR = childPath(tempRoot, "runtime", "claude");
   return env;
