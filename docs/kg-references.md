@@ -97,11 +97,22 @@ clears the mode. The disk cache makes repeat toggles cheap.
 
 `visualizeDocRefs` fetches the map, collects the unique referenced node
 paths, and opens the doc↔graph split (graph in the tool panel) with a
-`referenceFocus: { docPath, docRoot, nodePaths, nonce }`. `GraphView` resolves
+`referenceFocus: { source: "editor", docPath, docRoot, nodePaths, steps, nonce }`. `GraphView` resolves
 paths to node ids and `GraphCanvas` highlights exactly that neighborhood; the
 `nonce` re-triggers the focus when the same document is re-visualized. The focus
-is per-document and clears on navigation. When nothing resolves, the bar says so
-instead of reporting "0 nodes highlighted".
+is source-owned: editor focus still clears when the active editor document
+changes, while Drafts and Gap can overlay their selected unconfirmed item
+without being cleared by editor navigation. Drafts and Gap resolve
+`originRefs`, `promotedTo`, and body wikilinks against the primary workspace
+entries in the frontend; they never add scratchpad or draft files as graph
+nodes. The Ideation detail shows up to eight resolved relationship chips,
+sorted by graph degree, while the graph overlay receives every resolved node
+path (the chip cap is only a compact projection). Both panes use the existing
+graph-panel opener. Selection changes and the existing exit action clear
+Drafts/Gap focus. In-flight editor focus requests are monotonic and source
+owned, so a late response cannot replace a newer Drafts/Gap overlay or reopen
+the graph. When nothing resolves, the bar says so instead of reporting "0
+nodes highlighted".
 
 `docRoot` carries the workspace the `nodePaths` are relative to, and it is load
 bearing: graph nodes are rooted at the graph's own data path, which is

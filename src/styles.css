@@ -23482,6 +23482,35 @@ select:focus-visible,
   padding-left: 18px;
 }
 
+.drafts-related {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--type-label-size);
+}
+
+.drafts-related-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drafts-related-chip {
+  max-width: 240px;
+  overflow: hidden;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .drafts-detail-toolbar {
   display: flex;
   align-items: center;
