@@ -4557,10 +4557,18 @@ fn scan_source_with_progress(
             .unwrap_or_else(|| title_from_content(&content, &name));
         let dirty = git_dirty(&skill_root).unwrap_or(false);
         let current_hash = hash_directory(&skill_root)?;
-        let saved_hash = saved_hashes
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| current_hash.clone());
+        // Builtin dirty state is authoritative against the active pristine
+        // bundle below. Rebaseline its saved hash on every rescan so a bundle
+        // rotation cannot leave a clean skill looking dirty merely because
+        // the registry still carries the previous bundle's hash.
+        let saved_hash = if source.kind == "builtin" {
+            current_hash.clone()
+        } else {
+            saved_hashes
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| current_hash.clone())
+        };
         let dirty = match source.kind.as_str() {
             "linked" | "cloned" => dirty || saved_hash != current_hash,
             // Builtin dirty = drift from the ACTIVE pristine baseline (the
@@ -6758,6 +6766,156 @@ mod tests {
         assert!(saved.dirty);
         let doc = skills_read_skill("maru-builtin::gaejosik".to_string()).unwrap();
         assert_eq!(doc.content, updated);
+    }
+
+    #[test]
+    fn builtin_rescan_rebaselines_saved_hash_after_bundle_rotation() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        let initial_state = ensure_active_bundle(&builtin).unwrap();
+        let initial_active = initial_state.active.clone().unwrap();
+        let initial_pristine = bundle::bundle_pristine_dir(&initial_active.bundle_id).unwrap();
+
+        let mut registry = SkillsRegistry::default();
+        ensure_builtin_source(&mut registry).unwrap();
+        rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
+
+        let rotated_bundle_id = "r9-rotation-cafe000";
+        let rotated_pristine = bundle::bundle_pristine_dir(rotated_bundle_id).unwrap();
+        host_fs::ensure_dir(rotated_pristine.parent().unwrap()).unwrap();
+        copy_dir_all(&initial_pristine, &rotated_pristine).unwrap();
+        let rotated_skill = rotated_pristine.join("skills/gaejosik/SKILL.md");
+        let rotated_content = format!(
+            "{}\n# Rotated bundle\n",
+            fs::read_to_string(&rotated_skill).unwrap()
+        );
+        fs::write(&rotated_skill, rotated_content).unwrap();
+
+        fs::remove_dir_all(&builtin).unwrap();
+        copy_dir_all(&rotated_pristine, &builtin).unwrap();
+        bundle::write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: rotated_bundle_id.to_string(),
+                revision: 9,
+                display_version: "r9".to_string(),
+                commit: None,
+                source: bundle::REMOTE_SOURCE.to_string(),
+                env_hash: "rotation-env".to_string(),
+                applied_at: "t".to_string(),
+            }),
+            previous: Some(initial_active),
+        })
+        .unwrap();
+
+        // Reproduce a registry persisted before the OTA rotation.
+        for skill in &mut registry.skills {
+            skill.saved_hash = Some("stale-previous-bundle-hash".to_string());
+        }
+        let refreshed = rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
+
+        assert!(refreshed.iter().all(|skill| {
+            skill.content_hash == skill.saved_hash && !skill.dirty
+        }));
+        let rotated = refreshed
+            .iter()
+            .find(|skill| skill.name == "gaejosik")
+            .unwrap();
+        assert_eq!(
+            rotated.content_hash.as_deref(),
+            active_pristine_skill_hash("gaejosik").as_deref()
+        );
+        assert_ne!(
+            rotated.saved_hash.as_deref(),
+            Some("stale-previous-bundle-hash")
+        );
+        save_registry_unlocked(&registry).unwrap();
+        assert!(skills_list_dirty(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn builtin_local_edit_stays_dirty_even_after_saved_hash_rebaseline() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        ensure_active_bundle(&builtin).unwrap();
+        let mut registry = SkillsRegistry::default();
+        ensure_builtin_source(&mut registry).unwrap();
+        rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
+
+        let skill_path = builtin.join("skills/gaejosik/SKILL.md");
+        let edited = format!(
+            "{}\n# Local edit\n",
+            fs::read_to_string(&skill_path).unwrap()
+        );
+        fs::write(&skill_path, edited).unwrap();
+
+        let refreshed = rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
+        let skill = refreshed
+            .iter()
+            .find(|skill| skill.name == "gaejosik")
+            .unwrap();
+        assert!(skill.dirty);
+        assert_eq!(skill.content_hash, skill.saved_hash);
+
+        let dirty = dirty_records_from_registry(&registry).unwrap();
+        assert!(dirty.iter().any(|record| record.name == "gaejosik"));
+    }
+
+    #[test]
+    fn builtin_discard_restores_active_pristine_and_clears_dirty_state() {
+        let _home = test_home();
+        let builtin = builtin_materialized_root().unwrap();
+        ensure_active_bundle(&builtin).unwrap();
+        let pristine = bundle::bundle_pristine_dir(
+            &bundle::read_state()
+                .unwrap()
+                .unwrap()
+                .active
+                .unwrap()
+                .bundle_id,
+        )
+        .unwrap();
+        let mut registry = SkillsRegistry::default();
+        ensure_builtin_source(&mut registry).unwrap();
+        rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
+        save_registry_unlocked(&registry).unwrap();
+
+        let skill_path = builtin.join("skills/gaejosik/SKILL.md");
+        fs::write(
+            &skill_path,
+            format!(
+                "{}\n# Local edit to discard\n",
+                fs::read_to_string(&skill_path).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let outcome = skills_reconcile_skill(
+            None,
+            "gaejosik".to_string(),
+            "discard".to_string(),
+            None,
+            Some(false),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.message, "builtin_restored");
+        let registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.name == "gaejosik")
+            .unwrap();
+        assert!(!skill.dirty);
+        assert_eq!(skill.content_hash, skill.saved_hash);
+        assert_eq!(
+            hash_directory_filtered(&builtin.join("skills/gaejosik")).unwrap(),
+            hash_directory_filtered(&pristine.join("skills/gaejosik")).unwrap()
+        );
+        assert!(skills_list_dirty(None)
+            .unwrap()
+            .iter()
+            .all(|record| record.name != "gaejosik"));
     }
 
     #[test]
