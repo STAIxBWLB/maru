@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { findSkill } from "../../lib/agents";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import { appendTasksLog, readDocument } from "../../lib/api";
 import {
@@ -85,7 +86,6 @@ interface TasksRunsPanelProps {
     payloadPreview?: string | null;
   }) => Promise<string | null>;
   onApplied: () => void;
-  onError: (message: string | null) => void;
 }
 
 export function TasksRunsPanel({
@@ -101,7 +101,6 @@ export function TasksRunsPanel({
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
-  onError,
 }: TasksRunsPanelProps) {
   const { t } = useTranslation();
   const [bundle, setBundle] = useState<TaskReviewBundle | null>(null);
@@ -126,7 +125,7 @@ export function TasksRunsPanel({
 
   const loadReviewResult = async (mission: MissionRecord) => {
     setReviewLoading(true);
-    onError(null);
+    setError(null);
     try {
       const events = await agentReadRunEvents(workPath, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
@@ -158,7 +157,7 @@ export function TasksRunsPanel({
       });
       setApplyResult(null);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setReviewLoading(false);
     }
@@ -187,7 +186,7 @@ export function TasksRunsPanel({
     });
     if (!approvalId) return;
     setApplyBusy(true);
-    onError(null);
+    setError(null);
     try {
       if (proposal) {
         await agentApplySkillProposal({ cwd: workPath, proposal, approvalId, runId: bundle.runId });
@@ -211,7 +210,7 @@ export function TasksRunsPanel({
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
-      onError(t("tasks.review.applySuccess"));
+      setError(t("tasks.review.applySuccess"));
       if (appendAuditLog) {
         const target = proposal?.files[0]?.path ?? selectedFollowupItems[0]?.title ?? bundle.runId;
         await appendTasksLog(
@@ -226,7 +225,7 @@ export function TasksRunsPanel({
         ).catch(() => {});
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplyBusy(false);
     }

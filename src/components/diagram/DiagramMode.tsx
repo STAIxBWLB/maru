@@ -1,3 +1,4 @@
+import { setError } from "../../lib/errorStore";
 import { Eye, Network } from "lucide-react";
 import {
   useCallback,
@@ -163,7 +164,6 @@ export interface DiagramRecentDocument {
 
 export interface DiagramModeProps {
   workPath: string | null;
-  onError?: (message: string | null) => void;
   /** Active editor document — the direct "Insert in report" target when it is
    *  a Markdown file (fileKind "md"). Anything else goes to the chooser. */
   activeDocument?: DiagramActiveDocument | null;
@@ -269,7 +269,6 @@ export function DiagramMode(props: DiagramModeProps) {
 
 function DiagramShell({
   workPath,
-  onError,
   activeDocument = null,
   recentDocuments = [],
   onSaveDocument,
@@ -421,7 +420,7 @@ function DiagramShell({
     if (dirty) snapshotSchedRef.current?.markDirty();
   }, [dirty, docUpdatedAt]);
 
-  const reportError = useCallback((message: string | null) => onError?.(message), [onError]);
+  const reportError = useCallback((message: string | null) => setError(message), []);
 
   const persistLastDocument = useCallback(
     async (lastDocument: string | null) => {

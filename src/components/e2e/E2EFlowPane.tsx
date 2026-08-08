@@ -9,6 +9,7 @@ import {
   Route,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   E2E_FLOW_BASELINE_AVERAGE_MS,
@@ -22,7 +23,6 @@ import { Button } from "../ui/Button";
 interface E2EFlowPaneProps {
   workPath: string | null;
   onRevealPath?: (path: string) => void;
-  onError: (message: string | null) => void;
 }
 
 const stepLabels = [
@@ -37,7 +37,7 @@ const stepLabels = [
   "e2e.step.requery",
 ];
 
-export function E2EFlowPane({ workPath, onRevealPath, onError }: E2EFlowPaneProps) {
+export function E2EFlowPane({ workPath, onRevealPath }: E2EFlowPaneProps) {
   const { t } = useTranslation();
   const [result, setResult] = useState<E2EFlowArtifacts | null>(null);
   const [lookup, setLookup] = useState<E2EFlowArtifacts | null>(null);
@@ -51,12 +51,12 @@ export function E2EFlowPane({ workPath, onRevealPath, onError }: E2EFlowPaneProp
     if (!workPath) {
       const message = t("e2e.error.noWorkspace");
       setLocalError(message);
-      onError(message);
+      setError(message);
       return;
     }
     setBusy("run");
     setLocalError(null);
-    onError(null);
+    setError(null);
     try {
       const next = await runE2EFlow({
         workPath,
@@ -67,7 +67,7 @@ export function E2EFlowPane({ workPath, onRevealPath, onError }: E2EFlowPaneProp
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setBusy(null);
     }
@@ -77,7 +77,7 @@ export function E2EFlowPane({ workPath, onRevealPath, onError }: E2EFlowPaneProp
     if (!workPath || !result) return;
     setBusy("lookup");
     setLocalError(null);
-    onError(null);
+    setError(null);
     try {
       setLookup(
         await readE2EFlow({
@@ -88,7 +88,7 @@ export function E2EFlowPane({ workPath, onRevealPath, onError }: E2EFlowPaneProp
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setBusy(null);
     }

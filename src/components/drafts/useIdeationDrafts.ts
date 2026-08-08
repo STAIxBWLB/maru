@@ -7,6 +7,7 @@ import {
   runAgent,
   type AgentRecord,
 } from "../../lib/agents";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   activeImplementationDraft,
@@ -27,7 +28,6 @@ interface UseIdeationDraftsParams {
   agents: AgentRecord[];
   ai: AiSettings;
   drafts: DraftEntry[];
-  onError: (message: string | null) => void;
   /** Opens a draft in the detail column (existing or freshly ingested). */
   onOpenDraft: (draft: DraftEntry) => void;
   /** Re-lists drafts after an ingestion created one. */
@@ -57,7 +57,6 @@ export function useIdeationDrafts({
   agents,
   ai,
   drafts,
-  onError,
   onOpenDraft,
   onDraftsChanged,
 }: UseIdeationDraftsParams) {
@@ -92,10 +91,10 @@ export function useIdeationDrafts({
         onDraftsChanged();
         if (autoOpen) onOpenDraft(result.created);
       } catch (error) {
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       }
     },
-    [onDraftsChanged, onError, onOpenDraft, workPath],
+    [onDraftsChanged, onOpenDraft, workPath],
   );
 
   // Mount scan: pick up missions that started or finished while the pane was
@@ -178,7 +177,7 @@ export function useIdeationDrafts({
         onOpenDraft(existing);
         return;
       }
-      onError(null);
+      setError(null);
       try {
         const doc = await readScratchpadDocument(workPath, "ideation", ideaPath);
         // Gains the runtime-availability probe and the command-override /
@@ -202,10 +201,10 @@ export function useIdeationDrafts({
         });
         setPendingRuns((current) => ({ ...current, [ideaPath]: runId }));
       } catch (error) {
-        onError(agentErrorMessage(error, t));
+        setError(agentErrorMessage(error, t));
       }
     },
-    [agents, ai, drafts, onError, onOpenDraft, skills, t, workPath],
+    [agents, ai, drafts, onOpenDraft, skills, t, workPath],
   );
 
   return { pendingIdeaPaths: new Set(Object.keys(pendingRuns)), generate };

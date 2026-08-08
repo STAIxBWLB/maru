@@ -89,6 +89,7 @@ import {
   hasActiveWorkspaceFilesPaneFilters,
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
+import { setError } from "../lib/errorStore";
 import { useTranslation } from "../lib/i18n";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
@@ -192,7 +193,6 @@ interface FilesWorkbenchProps {
   onAttachToTerminal?: (relPath: string, absPath: string) => void;
   /** Hide this entry from the document/file lists by adding it to `.maruignore`. */
   onIgnore?: (relPath: string, kind: "file" | "directory") => void;
-  onError: (message: string) => void;
 }
 
 export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbenchProps) {
@@ -249,8 +249,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     onApplySkillToTarget,
     onAttachToTerminal,
     onIgnore,
-    onError,
-  } = props;
+    } = props;
 
   const rootLabel = activeWorkspaceLabel || t("files.workspaceRoot");
   const [currentFolder, setCurrentFolder] = useState("");
@@ -544,11 +543,11 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
         onOpenDocument(fileEntry);
       } else {
         void binaryViewerOpenExternal(workspacePath, entry.path).catch((error) =>
-          onError(error instanceof Error ? error.message : String(error)),
+          setError(error instanceof Error ? error.message : String(error)),
         );
       }
     },
-    [navigateTo, onError, onOpenDocument, onRevealInFinder, workspacePath],
+    [navigateTo, onOpenDocument, onRevealInFinder, workspacePath],
   );
 
   const handleRowSelection = (
@@ -597,7 +596,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
         const outcomes = await task();
         const failed = outcomes.filter((outcome) => outcome.status === "error");
         if (failed.length > 0) {
-          onError(failed.map((outcome) => outcome.error || outcome.name).join("\n"));
+          setError(failed.map((outcome) => outcome.error || outcome.name).join("\n"));
         }
         onFilesystemMutated(outcomes, effect);
         selectPaths(
@@ -606,12 +605,12 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             .map((outcome) => outcome.targetPath as string),
         );
       } catch (error) {
-        onError(error instanceof Error ? error.message : String(error));
+        setError(error instanceof Error ? error.message : String(error));
       } finally {
         setBusy(false);
       }
     },
-    [busy, onError, onFilesystemMutated, selectPaths, workspacePath],
+    [busy, onFilesystemMutated, selectPaths, workspacePath],
   );
 
   const createFolder = async () => {
@@ -626,7 +625,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       setNewFolderName("");
       if (outcome.targetPath) selectPaths([outcome.targetPath]);
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error));
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -649,7 +648,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       setRenamingPath(null);
       if (outcome.targetPath) selectPaths([outcome.targetPath]);
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error));
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -694,7 +693,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       ),
     );
     if (dirty.length > 0) {
-      onError(t("files.operations.dirtyBlocked", { count: dirty.length }));
+      setError(t("files.operations.dirtyBlocked", { count: dirty.length }));
       return;
     }
     const risky =
@@ -1531,7 +1530,6 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             entries={entries}
             selectedEntries={selectedEntries}
             onReveal={onRevealInFinder}
-            onError={onError}
           />
         </aside>
       ) : null}
@@ -1749,13 +1747,11 @@ function FilesPreview({
   entries,
   selectedEntries,
   onReveal,
-  onError,
 }: {
   workspacePath: string | null;
   entries: WorkspaceEntryNode[];
   selectedEntries: WorkspaceEntryNode[];
   onReveal: (path: string) => void;
-  onError: (message: string) => void;
 }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState<
@@ -1924,7 +1920,7 @@ function FilesPreview({
         entry={preview.entry}
         workspacePath={workspacePath}
         classification={preview.classification}
-        onError={onError}
+        onError={setError}
       />
     );
   }

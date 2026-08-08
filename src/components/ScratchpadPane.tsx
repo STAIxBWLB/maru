@@ -59,6 +59,7 @@ import {
   writeScratchpadDraft,
   type ScratchpadDraft,
 } from "../lib/scratchpad";
+import { setError } from "../lib/errorStore";
 import { SCRATCHPAD_LIST_HEIGHT, type SortKey } from "../lib/settings";
 import { PaneResizeHandle } from "./ui/PaneResizeHandle";
 import { SortModeToggle } from "./ui/SortModeToggle";
@@ -79,7 +80,6 @@ interface ScratchpadPaneProps {
   workPath: string | null;
   sortKey: SortKey;
   listHeight: number;
-  onError: (message: string | null) => void;
   onRefreshWorkspace: () => void;
   onSortKeyChange: (key: SortKey) => void;
   onListHeightChange: (height: number) => void;
@@ -141,7 +141,6 @@ export function ScratchpadPane({
   workPath,
   sortKey,
   listHeight,
-  onError,
   onRefreshWorkspace,
   onSortKeyChange,
   onListHeightChange,
@@ -258,12 +257,12 @@ export function ScratchpadPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         if (refreshSerialRef.current === refreshSerial) setLoading(false);
       }
     },
-    [loadEditor, onError, workPath],
+    [loadEditor, workPath],
   );
 
   const flushCurrent = useCallback(
@@ -285,7 +284,7 @@ export function ScratchpadPane({
       const targetPath = copyPath ?? current.relativePath;
       setSaveState("saving");
       setLocalError(null);
-      onError(null);
+      setError(null);
 
       const savePromise = saveScratchpadDocument(
         workPath,
@@ -327,7 +326,7 @@ export function ScratchpadPane({
           if (isRevisionConflict(error)) setConflict(true);
           setLocalError(message);
           setSaveState("error");
-          onError(message);
+          setError(message);
           return false;
         });
 
@@ -339,7 +338,7 @@ export function ScratchpadPane({
       }
       return saved;
     },
-    [clearAutoSaveTimer, loadEditor, onError, refresh, workPath],
+    [clearAutoSaveTimer, loadEditor, refresh, workPath],
   );
 
   useEffect(() => {
@@ -376,7 +375,7 @@ export function ScratchpadPane({
           event.payload.generation !== activeWatcherGenerationRef.current
         ) return;
         setLocalError(event.payload.message);
-        onError(event.payload.message);
+        setError(event.payload.message);
       });
       if (disposed) {
         unlisten();
@@ -458,7 +457,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -493,7 +492,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -535,7 +534,7 @@ export function ScratchpadPane({
       const message = errorMessage(error);
       if (isRevisionConflict(error)) setConflict(true);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -570,7 +569,7 @@ export function ScratchpadPane({
       const message = errorMessage(error);
       setConflict(true);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -598,7 +597,7 @@ export function ScratchpadPane({
       const message = errorMessage(error);
       if (isRevisionConflict(error)) setConflict(true);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -621,7 +620,7 @@ export function ScratchpadPane({
       const message = errorMessage(error);
       if (isRevisionConflict(error)) setConflict(true);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -636,7 +635,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -679,7 +678,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setMigrationStatus(message);
-      onError(message);
+      setError(message);
     } finally {
       setMigrationBusy(false);
     }
@@ -707,7 +706,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setCleanupBusy(false);
     }
@@ -733,7 +732,7 @@ export function ScratchpadPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setCleanupBusy(false);
     }

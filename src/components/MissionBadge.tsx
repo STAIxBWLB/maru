@@ -1,9 +1,10 @@
 import { CircleStop, Loader2, PauseCircle } from "lucide-react";
 import { stopAiMission } from "../lib/api";
+import { setError } from "../lib/errorStore";
 import { useTranslation } from "../lib/i18n";
 import { useActiveMissions } from "../lib/useActiveMissions";
 
-export function MissionBadge({ onError }: { onError?: (message: string) => void }) {
+export function MissionBadge() {
   const { t } = useTranslation();
   const [active] = useActiveMissions();
   if (!active) return null;
@@ -20,7 +21,7 @@ export function MissionBadge({ onError }: { onError?: (message: string) => void 
         title={t("mission.stop")}
         onClick={() => {
           void stopAiMission(active.id).catch((err) => {
-            onError?.(err instanceof Error ? err.message : String(err));
+            setError(err instanceof Error ? err.message : String(err));
           });
         }}
       >

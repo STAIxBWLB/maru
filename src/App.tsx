@@ -91,12 +91,7 @@ import {
   createDocument,
   createVersion,
   DEFAULT_INBOX_RUNTIME_CONFIG,
-  decideGmailItem as decideGmailItemApi,
   decideGmailItems,
-  decideOutlookItem as decideOutlookItemApi,
-  decideOutlookItems,
-  acceptTelegramItem,
-  rejectTelegramItem,
   detectLegacyTelegramLaunchd,
   describeFileQueueSources,
   duplicateDocument,
@@ -115,7 +110,6 @@ import {
   revealInFileManager,
   readInboxProcessedItem,
   readInboxSourceRuns,
-  readInboxRuntimeConfig,
   readKakaoRelayStatus,
   readTelegramMonitorConfig,
   readVaultCache,
@@ -137,10 +131,8 @@ import {
   stageKakaoRelayNew,
   stageOutlookItems,
   stageTelegramItems,
-  startInboxWatcher,
   startTelegramPolling,
   stopAiMission,
-  stopInboxWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
   vaultGraphRoot,
@@ -234,13 +226,8 @@ import {
   type DocumentIndex,
 } from "./lib/documentIndex";
 import {
-  buildGmailMessageStates,
   buildGmailScanQuery,
-  gmailRefreshPolicy,
-  normalizeGmailRefreshTtl,
   normalizeGmailScanLimit,
-  shouldApplyGmailRefreshResult,
-  type GmailMessageState,
 } from "./lib/gmail";
 import { LocaleContext, useLocaleState } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
@@ -253,14 +240,11 @@ import {
   type InboxDecision,
   type InboxItemState,
 } from "./lib/inbox";
-import { buildOutlookMessageStates, type OutlookMessageState } from "./lib/outlook";
 import {
-  buildTelegramMessageStates,
   gwsAuthCommand,
   m365LoginCommand,
   telegramFetchOptions,
   telegramLoginCommand,
-  type TelegramMessageState,
 } from "./lib/telegram";
 import { normalizeTelegramMonitorConfig } from "./lib/telegramMonitor";
 import {
@@ -280,8 +264,6 @@ import {
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
-  skillsApplyBundleUpdate,
-  skillsCheckBundleUpdate,
   skillsListSkills,
   type SkillContextItem,
   type SkillDispatchRuntime,
@@ -297,16 +279,6 @@ import {
   runAgent,
   type AgentRecord,
 } from "./lib/agents";
-import {
-  checkAppUpdate,
-  installAppUpdate,
-  listenForCheckUpdatesMenu,
-  relaunchApp,
-  updaterAvailable,
-  type AppUpdateCheckResult,
-  type AppUpdateInfo,
-  type AppUpdateProgress,
-} from "./lib/updater";
 import type {
   DocumentPayload,
   FileQueueApplyOutcome,
@@ -314,11 +286,7 @@ import type {
   FileQueueSourceInfo,
   FileStoreOperation,
   GitStatus,
-  GmailMessage,
   KgNodeRef,
-  OutlookMessage,
-  TelegramMessage,
-  TelegramPollingStatus,
   InboxClassification,
   InboxDropItem,
   InboxEntry,
@@ -339,6 +307,37 @@ import type {
   WorkspaceWritePolicy,
 } from "./lib/types";
 import { ingestMissionUpdate, missionStoreLoadStamp, useTrackedMissions } from "./lib/useActiveMissions";
+import { setError, useError } from "./lib/errorStore";
+import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
+import { useAiOutputLog } from "./lib/useAiOutputLog";
+import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
+import { useInboxEvents } from "./lib/useInboxEvents";
+import { useTelegramEvents } from "./lib/useTelegramEvents";
+import { useUpdaterToasts } from "./lib/useUpdaterToasts";
+// App overlay/dialog UI state: external store (src/lib/appOverlayStore.ts).
+// Openers write through the module actions; render sites read slices via the
+// per-slice hooks, so dialogs re-render without touching MainApp state.
+import {
+  closeAddWorkspaceDialog,
+  closeCommandPalette,
+  closeCommitDialog,
+  closeCompose,
+  closeNewDocumentDialog,
+  getAppOverlayStoreState,
+  openAddWorkspaceDialog as openAddWorkspaceDialogStore,
+  openCommandPalette,
+  openCommitDialog,
+  openCompose,
+  openNewDocumentDialog as openNewDocumentDialogStore,
+  openSettings,
+  useAddWorkspaceDialog,
+  useCommandPaletteOpen,
+  useCommitDialog,
+  useComposeSeed,
+  useNewDocumentDialog,
+  useSettingsOverlay,
+  useSitesOverlayOpen,
+} from "./lib/appOverlayStore";
 import {
   isSameParentMove,
   targetDirForDropTarget,
@@ -408,7 +407,6 @@ import {
   restoreMainWindowLayout,
   startWindowDrag,
   subscribeMainWindowLayout,
-  tauriAvailable,
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
@@ -483,8 +481,6 @@ const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
-const OUTLOOK_REFRESH_TTL_MS = 60_000;
-const TELEGRAM_REFRESH_TTL_MS = 60_000;
 
 const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((module) => ({ default: module.GraphView })));
 const LazyDiagramMode = lazy(() => import("./components/diagram/DiagramMode").then((module) => ({ default: module.DiagramMode })));
@@ -505,27 +501,6 @@ const LazyFilesWorkbench = lazy(() =>
   })),
 );
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
-
-interface ProviderRefreshCache {
-  fetchedAt: number | null;
-  key: string;
-}
-
-function shouldSkipProviderRefresh(
-  cache: ProviderRefreshCache,
-  key: string,
-  force: boolean,
-  loading: boolean,
-  ttlMs: number,
-): boolean {
-  if (force) return false;
-  if (loading) return true;
-  return Boolean(
-    cache.fetchedAt &&
-      cache.key === key &&
-      Date.now() - cache.fetchedAt < ttlMs,
-  );
-}
 
 type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
@@ -617,38 +592,6 @@ interface InboxCarry {
   classifyError: string | null;
 }
 
-interface GmailScanStatus {
-  fetchedAt: number | null;
-  durationMs: number | null;
-  query: string | null;
-  max: number | null;
-  ttlSeconds: number;
-}
-
-interface AiOutputEvent {
-  invocationId: string;
-  stream: string;
-  line: string;
-}
-
-const DEFAULT_GMAIL_SCAN_STATUS: GmailScanStatus = {
-  fetchedAt: null,
-  durationMs: null,
-  query: null,
-  max: null,
-  ttlSeconds: DEFAULT_INBOX_RUNTIME_CONFIG.gmail.auto_refresh_ttl_seconds,
-};
-
-type UpdateToast =
-  | { kind: "checking" }
-  | { kind: "available"; info: AppUpdateInfo }
-  | { kind: "notAvailable" }
-  | { kind: "downloading"; info: AppUpdateInfo; progress: AppUpdateProgress | null }
-  | { kind: "ready"; info: AppUpdateInfo }
-  | { kind: "skillsUpdated"; version: string }
-  | { kind: "skillsAvailable"; version: string }
-  | { kind: "error"; message: string };
-
 // Shared empty list so `?? NO_ENTRIES` keeps a stable identity: a fresh `[]`
 // every render re-keys the graph model, tears the canvas down, and restarts
 // FA2 on the rebuilt renderer — mid-flight camera math then lands wrong and,
@@ -698,33 +641,8 @@ function startupSettingsPath(registry: WorkspaceRegistry): string | null {
   );
 }
 
-function formatGmailScanStatus(
-  status: GmailScanStatus,
-  loading: boolean,
-  locale: string,
-): string {
-  const ttl = formatGmailTtl(status.ttlSeconds);
-  if (loading) return status.fetchedAt ? `scanning · TTL ${ttl}` : "scanning";
-  if (!status.fetchedAt) return `not scanned · TTL ${ttl}`;
-  const updated = new Intl.DateTimeFormat(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(status.fetchedAt));
-  const duration =
-    status.durationMs === null ? null : `${(status.durationMs / 1000).toFixed(1)}s`;
-  return [`updated ${updated}`, duration, `TTL ${ttl}`].filter(Boolean).join(" · ");
-}
-
 function matchesActiveMission(record: MissionRecord): boolean {
   return record.status === "running" || record.status === "idle";
-}
-
-function formatGmailTtl(seconds: number): string {
-  const value = normalizeGmailRefreshTtl(seconds);
-  if (value < 60) return `${value}s`;
-  if (value < 3600) return `${Math.round(value / 60)}m`;
-  if (value % 3600 === 0) return `${value / 3600}h`;
-  return `${Math.round(value / 60)}m`;
 }
 
 function initialStartupVisibility(
@@ -846,11 +764,6 @@ function MainApp() {
   const tabs = useDocTabs();
   const binaryTabs = useBinaryTabs();
   const tabOrder = useTabOrder();
-  // Dirty-draft guard: "close" = window close requested, "relaunch" = update
-  // ready. Non-null shows the confirm dialog; the action runs on confirm.
-  const [pendingDestructiveAction, setPendingDestructiveAction] =
-    useState<"close" | "relaunch" | null>(null);
-  const closeConfirmedRef = useRef(false);
   const { activeTabId, leftActiveTabId, rightActiveTabId } = useActiveTabIds();
   const focusedEditorGroup = useFocusedEditorGroup();
   const [focusedWorkbenchSide, setFocusedWorkbenchSide] = useState<EditorGroupId>("left");
@@ -873,29 +786,16 @@ function MainApp() {
   const routedOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [newDocumentOpen, setNewDocumentOpen] = useState(false);
-  const [newDocumentSeed, setNewDocumentSeed] = useState<{
-    title: string;
-    relPath: string | null;
-    docType?: string | null;
-    openLibrary?: boolean;
-  } | null>(null);
+  // Global error toast lives in the error store (step 9); setError is a
+  // module action now, so every call site below keeps its old shape.
+  const error = useError();
+  // Overlay/dialog UI state lives in the app overlay store (step 9); these
+  // per-slice hooks keep the same render-scope names MainApp had before.
+  const newDocumentDialog = useNewDocumentDialog();
+  const settingsOverlay = useSettingsOverlay();
+  const commandPaletteOpen = useCommandPaletteOpen();
+  const addWorkspaceDialog = useAddWorkspaceDialog();
   const [lastExportManifestPath, setLastExportManifestPath] = useState<string | null>(null);
-  const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
-  const [addWorkspaceDefaultVisibility, setAddWorkspaceDefaultVisibility] =
-    useState<WorkspaceVisibility>("private");
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  // Settings opens as an in-app overlay, not a separate window. Seeded from
-  // the URL so the legacy `?window=settings&tab=…` deep link keeps working.
-  const [settingsOverlay, setSettingsOverlay] = useState<{ tab: string | null } | null>(
-    () => {
-      if (typeof window === "undefined") return null;
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("window") !== "settings") return null;
-      return { tab: params.get("tab") };
-    },
-  );
   const [editorPaneViewModes, setEditorPaneViewModes] = useState<EditorPaneViewModes>(
     DEFAULT_MARU_SETTINGS.ui.editorPaneViewModes,
   );
@@ -933,19 +833,8 @@ function MainApp() {
   const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<MaruSettings> | null>(null);
   const settingsSaveBaseRef = useRef<MaruSettings | null>(null);
-  const pendingUpdateRef = useRef<AppUpdateCheckResult["update"] | null>(null);
-  const installingUpdateRef = useRef(false);
   const collapsedTreeHydratedRef = useRef(false);
   const collapsedFileHydratedRef = useRef(false);
-  const gmailScanStatusRef = useRef<GmailScanStatus>(DEFAULT_GMAIL_SCAN_STATUS);
-  const gmailLoadingRef = useRef(false);
-  const gmailRequestSeqRef = useRef(0);
-  const outlookLoadingRef = useRef(false);
-  const outlookRequestSeqRef = useRef(0);
-  const outlookRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
-  const telegramLoadingRef = useRef(false);
-  const telegramRequestSeqRef = useRef(0);
-  const telegramRefreshCacheRef = useRef<ProviderRefreshCache>({ fetchedAt: null, key: "" });
   const processedRequestSeqRef = useRef(0);
   const processedDetailRequestSeqRef = useRef(0);
   const processedItemsRef = useRef<InboxProcessedItem[]>([]);
@@ -985,10 +874,7 @@ function MainApp() {
   const [gitRefreshTick, setGitRefreshTick] = useState(0);
   // CommitDialog state — the badge passes the most recent GitStatus so the
   // dialog can show the file counts at the moment the user clicked.
-  const [commitDialog, setCommitDialog] = useState<{
-    path: string;
-    status: GitStatus;
-  } | null>(null);
+  const commitDialog = useCommitDialog();
 
   // Phase 2 inbox surface. Polling scan + notify watcher feed
   // `inboxItems`; per-item classifier output is carried alongside the
@@ -1072,35 +958,19 @@ function MainApp() {
   const [kakaoRelayStatus, setKakaoRelayStatus] = useState<KakaoRelayStatus | null>(null);
   const [commsRefreshing, setCommsRefreshing] = useState(false);
 
-  // Gmail surface (gws CLI). List state is memory-only in Comms, while
-  // accept/reject calls write labels/archive through gws.
-  const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([]);
-  const [gmailLoading, setGmailLoading] = useState(false);
-  const [gmailError, setGmailError] = useState<string | null>(null);
-  const [gmailScanStatus, setGmailScanStatus] = useState<GmailScanStatus>(
-    DEFAULT_GMAIL_SCAN_STATUS,
-  );
+  // Provider accept/reject decisions are memory-only (kept for the bulk
+  // inbox flow and a future comms list); writes go through gws/mws CLIs.
+  const [, setGmailError] = useState<string | null>(null);
   const [gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
     () => new Map(),
   );
-  const [outlookMessages, setOutlookMessages] = useState<OutlookMessage[]>([]);
-  const [outlookLoading, setOutlookLoading] = useState(false);
-  const [outlookError, setOutlookError] = useState<string | null>(null);
-  const [outlookStatus, setOutlookStatus] = useState("");
   const [outlookDecisions, setOutlookDecisions] = useState<Map<string, InboxDecision>>(
     () => new Map(),
   );
-  const [telegramMessages, setTelegramMessages] = useState<TelegramMessage[]>([]);
-  const [telegramLoading, setTelegramLoading] = useState(false);
-  const [telegramError, setTelegramError] = useState<string | null>(null);
-  const [telegramPolling, setTelegramPolling] = useState<TelegramPollingStatus>({
-    running: false,
-    intervalSeconds: 60,
-    lastStartedAt: null,
-    lastFetchedAt: null,
-    lastMessageCount: 0,
-    lastError: null,
-  });
+  // Telegram messages/polling live in the telegram events store (step 9): the
+  // listener hook writes them; refreshCommsDashboard and the polling toggles
+  // write polling through the same store action names as before.
+  const telegramPolling = useTelegramPolling();
   const [telegramDecisions, setTelegramDecisions] = useState<Map<string, InboxDecision>>(
     () => new Map(),
   );
@@ -1109,7 +979,10 @@ function MainApp() {
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
   const [inboxFocusTick, setInboxFocusTick] = useState(0);
   const [inboxActionBusy, setInboxActionBusy] = useState(false);
-  const [updateToast, setUpdateToast] = useState<UpdateToast | null>(null);
+  // App-update + skills-bundle toast state and flows live in the updater
+  // toasts hook (step 9); the JSX below only reads the returned values.
+  const { updateToast, installPendingUpdate, dismissUpdateToast, checkForUpdates } =
+    useUpdaterToasts(t);
   const [terminalLaunchRequest, setTerminalLaunchRequest] =
     useState<TerminalLaunchRequest | null>(null);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -1119,7 +992,7 @@ function MainApp() {
   // read failed; `requireAgent` turns that into a visible error at dispatch.
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const skillsStartupLoadKeyRef = useRef<string | null>(null);
-  const [composeSeed, setComposeSeed] = useState<ComposeDialogSeed | null>(null);
+  const composeSeed = useComposeSeed();
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
     "transcript" | "external" | null
   >(null);
@@ -1844,103 +1717,16 @@ function MainApp() {
     return getEditorTabsState().tabs.some((tab) => tab.draftContent !== tab.document.content);
   }, []);
 
-  const relaunchAfterSettingsFlush = useCallback(async () => {
-    try {
-      await settingsSaverRef.current?.flush();
-      await relaunchApp();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const requestRelaunch = useCallback(async () => {
-    if (hasDirtyDrafts()) {
-      setPendingDestructiveAction("relaunch");
-      return;
-    }
-    await relaunchAfterSettingsFlush();
-  }, [hasDirtyDrafts, relaunchAfterSettingsFlush]);
-
-  const confirmDestructiveAction = useCallback(async () => {
-    const action = pendingDestructiveAction;
-    setPendingDestructiveAction(null);
-    if (action === "relaunch") {
-      await relaunchAfterSettingsFlush();
-      return;
-    }
-    if (action === "close") {
-      try {
-        await settingsSaverRef.current?.flush();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-      closeConfirmedRef.current = true;
-      try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        await getCurrentWindow().close();
-      } catch (err) {
-        closeConfirmedRef.current = false;
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  }, [pendingDestructiveAction, relaunchAfterSettingsFlush]);
-
-  // Main-window close: flush pending settings writes before the window goes
-  // away, and gate on unsaved drafts instead of losing them silently. The
-  // Rust side no longer force-destroys windows on CloseRequested, so this
-  // handler's preventDefault actually wins.
-  useEffect(() => {
-    if (!tauriAvailable()) return;
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    let closing = false;
-
-    void import("@tauri-apps/api/window")
-      .then(({ getCurrentWindow }) => {
-        if (disposed) return;
-        const appWindow = getCurrentWindow();
-        if (appWindow.label !== "main") return;
-        return appWindow.onCloseRequested(async (event) => {
-          // A close confirmed via the dirty-draft dialog replays through
-          // here; consume the one-shot guard and let the default close proceed.
-          if (closeConfirmedRef.current) {
-            closeConfirmedRef.current = false;
-            return;
-          }
-          if (closing) return;
-          event.preventDefault();
-          if (hasDirtyDrafts()) {
-            setPendingDestructiveAction("close");
-            return;
-          }
-          closing = true;
-          try {
-            await settingsSaverRef.current?.flush();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-          closeConfirmedRef.current = true;
-          try {
-            await appWindow.close();
-          } catch (err) {
-            closeConfirmedRef.current = false;
-            closing = false;
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        });
-      })
-      .then((off) => {
-        if (!off) return;
-        if (disposed) off();
-        else unlisten = off;
-      })
-      .catch(() => {});
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [hasDirtyDrafts]);
+  // Dirty-draft guard behind window close and update relaunch: pending action
+  // state, one-shot close replay, and the onCloseRequested subscription all
+  // live in the guard hook now (settings flush semantics unchanged).
+  const {
+    pendingDestructiveAction,
+    requestRelaunch,
+    requestWindowClose,
+    confirmDestructiveAction,
+    cancelDestructiveAction,
+  } = useDestructiveActionGuard({ hasDirtyDrafts, settingsSaverRef });
 
   const updateSettings = useCallback(
     (
@@ -2677,239 +2463,10 @@ function MainApp() {
     [inboxRuntimeConfig],
   );
 
-  const gmailItems = useMemo<GmailMessageState[]>(
-    () => buildGmailMessageStates(gmailMessages, gmailDecisions),
-    [gmailMessages, gmailDecisions],
-  );
-  const outlookItems = useMemo<OutlookMessageState[]>(
-    () => buildOutlookMessageStates(outlookMessages, outlookDecisions),
-    [outlookMessages, outlookDecisions],
-  );
-  const telegramItems = useMemo<TelegramMessageState[]>(
-    () => buildTelegramMessageStates(telegramMessages, telegramDecisions),
-    [telegramMessages, telegramDecisions],
-  );
-
-  const gmailStatus = useMemo(
-    () => formatGmailScanStatus(gmailScanStatus, gmailLoading, locale),
-    [gmailLoading, gmailScanStatus, locale],
-  );
-
   useEffect(() => {
     processingMissionIdsRef.current = new Set(processingMissions.map((mission) => mission.id));
     processingMissionsRef.current = processingMissions;
   }, [processingMissions]);
-
-  const updateGmailScanStatus = useCallback((status: GmailScanStatus) => {
-    gmailScanStatusRef.current = status;
-    setGmailScanStatus(status);
-  }, []);
-
-  const refreshGmail = useCallback(async ({
-    force = false,
-    runtimeOverride,
-  }: {
-    force?: boolean;
-    runtimeOverride?: InboxRuntimeConfig;
-  } = {}) => {
-    const runtime = runtimeOverride ?? inboxRuntimeConfig;
-    const gmailConfig = runtime.gmail ?? DEFAULT_INBOX_RUNTIME_CONFIG.gmail;
-    const ttlSeconds = normalizeGmailRefreshTtl(gmailConfig.auto_refresh_ttl_seconds);
-    const max = normalizeGmailScanLimit(gmailConfig.max_results);
-    const query = buildGmailScanQuery(gmailConfig);
-    const previous = gmailScanStatusRef.current;
-    const decision = gmailRefreshPolicy({
-      enabled: gmailConfig.enabled && Boolean(inboxWorkspacePath),
-      force,
-      loading: gmailLoadingRef.current,
-      now: Date.now(),
-      lastFetchedAt: previous.fetchedAt,
-      ttlSeconds,
-      query,
-      previousQuery: previous.query,
-      max,
-      previousMax: previous.max,
-    });
-    if (decision === "disabled") {
-      gmailRequestSeqRef.current += 1;
-      gmailLoadingRef.current = false;
-      setGmailMessages([]);
-      setGmailError(null);
-      setGmailLoading(false);
-      updateGmailScanStatus({
-        fetchedAt: null,
-        durationMs: null,
-        query,
-        max,
-        ttlSeconds,
-      });
-      return;
-    }
-    if (decision !== "start") {
-      if (
-        previous.query !== query ||
-        previous.max !== max ||
-        previous.ttlSeconds !== ttlSeconds
-      ) {
-        updateGmailScanStatus({
-          ...previous,
-          query,
-          max,
-          ttlSeconds,
-        });
-      }
-      return;
-    }
-    const requestId = ++gmailRequestSeqRef.current;
-    gmailLoadingRef.current = true;
-    setGmailLoading(true);
-    setGmailError(null);
-    const wallStartedAt = Date.now();
-    const perfStartedAt = globalThis.performance?.now() ?? wallStartedAt;
-    try {
-      const messages = await fetchGmailUnread(inboxWorkspacePath, max, query);
-      if (!shouldApplyGmailRefreshResult(requestId, gmailRequestSeqRef.current)) return;
-      const wallFinishedAt = Date.now();
-      const perfFinishedAt = globalThis.performance?.now() ?? wallFinishedAt;
-      setGmailMessages(messages);
-      updateGmailScanStatus({
-        fetchedAt: wallFinishedAt,
-        durationMs: Math.max(0, perfFinishedAt - perfStartedAt),
-        query,
-        max,
-        ttlSeconds,
-      });
-    } catch (err) {
-      if (!shouldApplyGmailRefreshResult(requestId, gmailRequestSeqRef.current)) return;
-      setGmailError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (shouldApplyGmailRefreshResult(requestId, gmailRequestSeqRef.current)) {
-        gmailLoadingRef.current = false;
-        setGmailLoading(false);
-      }
-    }
-  }, [inboxRuntimeConfig, inboxWorkspacePath, updateGmailScanStatus]);
-
-  const refreshOutlook = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (
-      !inboxWorkspacePath ||
-      !inboxWorkspaceConfigReady ||
-      !effectiveCommsSettings.outlook.enabled
-    ) {
-      outlookRequestSeqRef.current += 1;
-      outlookLoadingRef.current = false;
-      outlookRefreshCacheRef.current = { fetchedAt: null, key: "" };
-      setOutlookMessages([]);
-      setOutlookLoading(false);
-      setOutlookError(null);
-      setOutlookStatus("");
-      return;
-    }
-    const refreshKey = JSON.stringify({
-      workPath: inboxWorkspacePath,
-      max: effectiveCommsSettings.outlook.maxResults,
-      m365Path: effectiveCommsSettings.outlook.m365Path ?? null,
-    });
-    if (
-      shouldSkipProviderRefresh(
-        outlookRefreshCacheRef.current,
-        refreshKey,
-        force,
-        outlookLoadingRef.current,
-        OUTLOOK_REFRESH_TTL_MS,
-      )
-    ) {
-      return;
-    }
-    outlookLoadingRef.current = true;
-    const requestId = ++outlookRequestSeqRef.current;
-    setOutlookLoading(true);
-    setOutlookError(null);
-    const startedAt = Date.now();
-    try {
-      const messages = await fetchOutlookUnread(
-        inboxWorkspacePath,
-        effectiveCommsSettings.outlook.maxResults,
-        effectiveCommsSettings.outlook.m365Path,
-      );
-      if (requestId !== outlookRequestSeqRef.current) return;
-      setOutlookMessages(messages);
-      outlookRefreshCacheRef.current = {
-        fetchedAt: Date.now(),
-        key: refreshKey,
-      };
-      setOutlookStatus(`${messages.length.toLocaleString(locale)} · ${Date.now() - startedAt}ms`);
-    } catch (err) {
-      if (requestId !== outlookRequestSeqRef.current) return;
-      setOutlookError(err instanceof Error ? err.message : String(err));
-      setOutlookStatus("");
-    } finally {
-      if (requestId === outlookRequestSeqRef.current) {
-        outlookLoadingRef.current = false;
-        setOutlookLoading(false);
-      }
-    }
-  }, [
-    effectiveCommsSettings.outlook,
-    inboxWorkspaceConfigReady,
-    inboxWorkspacePath,
-    locale,
-  ]);
-
-  const refreshTelegram = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (!inboxWorkspacePath || !effectiveCommsSettings.telegram.enabled) {
-      telegramRequestSeqRef.current += 1;
-      telegramLoadingRef.current = false;
-      telegramRefreshCacheRef.current = { fetchedAt: null, key: "" };
-      setTelegramMessages([]);
-      setTelegramLoading(false);
-      setTelegramError(null);
-      return;
-    }
-    const refreshKey = JSON.stringify({
-      workPath: inboxWorkspacePath,
-      max: effectiveCommsSettings.telegram.maxResults,
-      pythonPath: effectiveCommsSettings.telegram.pythonPath ?? null,
-      scriptPath: effectiveCommsSettings.telegram.scriptPath ?? null,
-      sessionFile: effectiveCommsSettings.telegram.sessionFile ?? null,
-      monitorConfigPath: effectiveCommsSettings.telegram.monitorConfigPath ?? null,
-      legacyAutoDrop: effectiveCommsSettings.telegram.legacyAutoDrop,
-    });
-    if (
-      shouldSkipProviderRefresh(
-        telegramRefreshCacheRef.current,
-        refreshKey,
-        force,
-        telegramLoadingRef.current,
-        TELEGRAM_REFRESH_TTL_MS,
-      )
-    ) {
-      return;
-    }
-    telegramLoadingRef.current = true;
-    const requestId = ++telegramRequestSeqRef.current;
-    setTelegramLoading(true);
-    setTelegramError(null);
-    try {
-      const messages = await fetchTelegramRecent(
-        telegramFetchOptions(inboxWorkspacePath, effectiveCommsSettings.telegram),
-      );
-      if (requestId !== telegramRequestSeqRef.current) return;
-      setTelegramMessages(messages);
-      telegramRefreshCacheRef.current = {
-        fetchedAt: Date.now(),
-        key: refreshKey,
-      };
-    } catch (err) {
-      if (requestId !== telegramRequestSeqRef.current) return;
-      setTelegramError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (requestId === telegramRequestSeqRef.current) {
-        telegramLoadingRef.current = false;
-        setTelegramLoading(false);
-      }
-    }
-  }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3324,127 +2881,6 @@ function MainApp() {
     [approvalGate, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry, t],
   );
 
-  const decideGmailItem = useCallback(
-    async (id: string, decision: InboxDecision) => {
-      if (decision === "pending") return;
-      const approvalId = await approvalGate.confirmApproval({
-        kind: decision === "accepted" ? "gmail.accept" : "gmail.reject",
-        summary:
-          decision === "accepted"
-            ? t("approval.gmail.accept.summary")
-            : t("approval.gmail.reject.summary"),
-        target: id,
-        payloadPreview: decision === "accepted" ? "add maru-accepted; remove INBOX" : "add maru-rejected",
-      });
-      if (!approvalId) return;
-      setInboxActionBusy(true);
-      setGmailError(null);
-      try {
-        const outcome = await decideGmailItemApi(inboxWorkspacePath, id, decision, approvalId);
-        if (!outcome.ok) throw new Error(outcome.error ?? "Gmail decision failed.");
-        setGmailDecisions((prev) => {
-          const next = new Map(prev);
-          next.set(id, decision);
-          return next;
-        });
-      } catch (err) {
-        setGmailError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setInboxActionBusy(false);
-      }
-    },
-    [approvalGate, inboxWorkspacePath, t],
-  );
-
-  const decideOutlookItem = useCallback(
-    async (id: string, decision: InboxDecision) => {
-      if (decision === "pending") return;
-      if (!inboxWorkspacePath || !inboxWorkspaceConfigReady) {
-        setOutlookError(t("comms.outlook.workspaceNotReady"));
-        return;
-      }
-      const approvalId = await approvalGate.confirmApproval({
-        kind: decision === "accepted" ? "outlook.accept" : "outlook.reject",
-        summary:
-          decision === "accepted"
-            ? t("approval.outlook.accept.summary")
-            : t("approval.outlook.reject.summary"),
-        target: id,
-        payloadPreview: decision === "accepted" ? "add maru-accepted" : "add maru-rejected",
-      });
-      if (!approvalId) return;
-      setOutlookError(null);
-      try {
-        const outcome = await decideOutlookItemApi(
-          inboxWorkspacePath,
-          id,
-          decision,
-          approvalId,
-          effectiveCommsSettings.outlook.m365Path,
-        );
-        if (!outcome.ok) throw new Error(outcome.error ?? "Outlook decision failed.");
-        setOutlookDecisions((prev) => {
-          const next = new Map(prev);
-          next.set(id, decision);
-          return next;
-        });
-      } catch (err) {
-        setOutlookError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [
-      effectiveCommsSettings.outlook.m365Path,
-      approvalGate,
-      inboxWorkspaceConfigReady,
-      inboxWorkspacePath,
-      t,
-    ],
-  );
-
-  const decideTelegramItem = useCallback(
-    async (id: string, decision: InboxDecision) => {
-      if (!inboxWorkspacePath || decision === "pending") return;
-      const message = telegramMessages.find((item) => item.id === id);
-      if (!message) return;
-      const approvalId = await approvalGate.confirmApproval({
-        kind: decision === "accepted" ? "telegram.accept" : "telegram.reject",
-        summary:
-          decision === "accepted"
-            ? t("approval.telegram.accept.summary")
-            : t("approval.telegram.reject.summary"),
-        target: decision === "accepted" ? "inbox/drop/telegram" : id,
-        payloadPreview: message.text,
-      });
-      if (!approvalId) return;
-      setTelegramError(null);
-      try {
-        const outcome =
-          decision === "accepted"
-            ? await acceptTelegramItem(inboxWorkspacePath, message, approvalId)
-            : await rejectTelegramItem(id, approvalId);
-        if (!outcome.ok) throw new Error(outcome.error ?? "Telegram decision failed.");
-        setTelegramDecisions((prev) => {
-          const next = new Map(prev);
-          next.set(id, decision);
-          return next;
-        });
-        if (decision === "accepted") void refreshInbox();
-      } catch (err) {
-        setTelegramError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [approvalGate, inboxWorkspacePath, refreshInbox, telegramMessages, t],
-  );
-
-  const decideCommsItem = useCallback(
-    (provider: "gmail" | "outlook" | "telegram", id: string, decision: Exclude<InboxDecision, "pending">) => {
-      if (provider === "gmail") void decideGmailItem(id, decision);
-      else if (provider === "outlook") void decideOutlookItem(id, decision);
-      else void decideTelegramItem(id, decision);
-    },
-    [decideGmailItem, decideOutlookItem, decideTelegramItem],
-  );
-
   const decideInboxKeys = useCallback(
     async (
       keys: string[],
@@ -3707,7 +3143,6 @@ function MainApp() {
             normalizeGmailScanLimit(gmailConfig.max_results),
             buildGmailScanQuery(gmailConfig),
           );
-          setGmailMessages(messages);
           if (messages.length > 0) {
             const approvalId = await approvalGate.confirmApproval({
               kind: "gmail.stage",
@@ -3728,7 +3163,6 @@ function MainApp() {
             effectiveCommsSettings.outlook.maxResults,
             effectiveCommsSettings.outlook.m365Path,
           );
-          setOutlookMessages(messages);
           if (messages.length > 0) {
             const approvalId = await approvalGate.confirmApproval({
               kind: "outlook.stage",
@@ -3977,83 +3411,29 @@ function MainApp() {
     ],
   );
 
-  useEffect(() => {
-    if (!inboxWorkspacePath) {
-      setInboxRuntimeConfig(DEFAULT_INBOX_RUNTIME_CONFIG);
-      setInboxSourceFilter(null);
-      return;
-    }
-    let cancelled = false;
-    let unlistenConfigEvent: (() => void) | null = null;
-    void readInboxRuntimeConfig(inboxWorkspacePath)
-      .then((config) => {
-        if (!cancelled) setInboxRuntimeConfig(config);
-      })
-      .catch(() => {
-        if (!cancelled) setInboxRuntimeConfig(DEFAULT_INBOX_RUNTIME_CONFIG);
-      });
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen("inbox://runtime_config_updated", (event) => {
-          const payload = event.payload as
-            | { workPath?: string; config?: InboxRuntimeConfig }
-            | null;
-          if (!payload?.config || payload.workPath !== inboxWorkspacePath) return;
-          setInboxRuntimeConfig(payload.config);
-          setInboxSourceFilter(null);
-          void refreshInbox();
-          void refreshProcessedItems();
-        }),
-      )
-      .then((off) => {
-        if (cancelled) off();
-        else unlistenConfigEvent = off;
-      })
-      .catch(() => {
-        // Browser dev shell without Tauri event bridge.
-      });
-    return () => {
-      cancelled = true;
-      unlistenConfigEvent?.();
-    };
-  }, [inboxWorkspacePath, refreshInbox, refreshProcessedItems]);
-
-  useEffect(() => {
-    if (
-      surfaceMode !== "comms" ||
-      inboxWorkspaceConfigLoad.status === "idle" ||
-      inboxWorkspaceConfigLoad.status === "pending"
-    ) {
-      return;
-    }
-    let disposed = false;
-    let unlistenTelegram: (() => void) | null = null;
-    void refreshCommsDashboardRef.current();
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen("telegram://messages", (event) => {
-          const payload = event.payload as
-            | {
-                workPath?: string | null;
-                messages?: TelegramMessage[];
-                status?: TelegramPollingStatus;
-              }
-            | null;
-          if (payload?.workPath && payload.workPath !== inboxWorkspacePath) return;
-          if (payload?.messages) setTelegramMessages(payload.messages);
-          if (payload?.status) setTelegramPolling(payload.status);
-        }),
-      )
-      .then((off) => {
-        if (disposed) off();
-        else unlistenTelegram = off;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      unlistenTelegram?.();
-    };
-  }, [surfaceMode, inboxWorkspaceConfigLoad.status, inboxWorkspacePath]);
+  // Event subscriptions extracted in step 9: inbox runtime config + notify
+  // watcher, the telegram comms mirror, and the ai://output log tail live in
+  // dedicated hooks now, with the same gating and handler bodies.
+  useInboxEvents({
+    inboxWorkspacePath,
+    surfaceModeInbox: surfaceMode === "inbox",
+    refreshInbox,
+    refreshProcessedItems,
+    setInboxRuntimeConfig,
+    setInboxSourceFilter,
+    setInboxDrops,
+    setInboxEntries,
+  });
+  useTelegramEvents({
+    enabled:
+      surfaceMode === "comms" &&
+      inboxWorkspaceConfigLoad.status !== "idle" &&
+      inboxWorkspaceConfigLoad.status !== "pending",
+    configStatus: inboxWorkspaceConfigLoad.status,
+    inboxWorkspacePath,
+    refreshCommsDashboardRef,
+  });
+  useAiOutputLog(processingMissionIdsRef, setProcessingLogLines);
 
   useEffect(() => {
     // In comms this is also the filter/search refetch path: the callback
@@ -4075,33 +3455,6 @@ function MainApp() {
     rightPaneTab,
     settingsWorkspaceStartupReady,
   ]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlistenOutput: (() => void) | null = null;
-    void import("@tauri-apps/api/event")
-      .then(async ({ listen }) => {
-        const offOutput = await listen<AiOutputEvent>("ai://output", (event) => {
-          const payload = event.payload;
-          if (!processingMissionIdsRef.current.has(payload.invocationId)) return;
-          const line = `[${payload.stream}] ${payload.line}`;
-          setProcessingLogLines((current) => {
-            const lines = [...(current[payload.invocationId] ?? []), line].slice(-120);
-            return { ...current, [payload.invocationId]: lines };
-          });
-        });
-        if (cancelled) {
-          offOutput();
-        } else {
-          unlistenOutput = offOutput;
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      unlistenOutput?.();
-    };
-  }, []);
 
   // Mission-completion side effects. These used to live in App's own
   // ai://mission_update listener; the shared store (useTrackedMissions) owns
@@ -4140,67 +3493,6 @@ function MainApp() {
       }
     }
   }, [processingMissions, refreshProcessedItems, refreshSourceRuns]);
-
-  // Inbox scan + watcher subscription, scoped to the active workspace and
-  // deferred until Inbox mode so startup document paint owns the I/O lane.
-  // The watcher overlays the polling baseline: the backend emits one
-  // batched `inbox://file_events` per 150 ms window, and each batch
-  // triggers a re-scan (guarded against overlap) rather than a delta
-  // apply, which keeps the UI source of truth a single `scan_inbox_drop`
-  // snapshot.
-  useEffect(() => {
-    if (!inboxWorkspacePath) {
-      setInboxDrops([]);
-      setInboxEntries([]);
-      return;
-    }
-    if (surfaceMode !== "inbox") {
-      return;
-    }
-    let cancelled = false;
-    let unlistenFileEvent: (() => void) | null = null;
-
-    void (async () => {
-      // Cold scan first — watcher only catches subsequent events.
-      void refreshInbox();
-
-      try {
-        await startInboxWatcher(inboxWorkspacePath);
-      } catch (err) {
-        // Most likely cause: <workspace>/inbox/downloads doesn't exist yet.
-        // Surface a soft notice but keep polling functional.
-        if (!cancelled) {
-          // eslint-disable-next-line no-console
-          console.info("[maru] inbox watcher not started:", err);
-        }
-        return;
-      }
-
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const off = await listen("inbox://file_events", () => {
-          if (!cancelled) void refreshInbox();
-        });
-        if (cancelled) {
-          off();
-        } else {
-          unlistenFileEvent = off;
-        }
-      } catch (err) {
-        // Browser dev shell — `@tauri-apps/api/event` may not be wired.
-        // eslint-disable-next-line no-console
-        console.info("[maru] inbox event listener unavailable:", err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (unlistenFileEvent) unlistenFileEvent();
-      void stopInboxWatcher().catch(() => {
-        // best-effort
-      });
-    };
-  }, [inboxWorkspacePath, surfaceMode, refreshInbox]);
 
   const refreshWorkspaceFiles = useCallback(
     async (path: string, initial = false) => {
@@ -4714,12 +4006,11 @@ function MainApp() {
     const seededDocType =
       docType ?? documentFilterDefaultDocType(documentFilter, maruSettings.ui.documentViews);
     const fromLibrary = options?.fromLibrary === true;
-    setNewDocumentSeed(
+    openNewDocumentDialogStore(
       seededDocType || fromLibrary
         ? { title: "", relPath: null, docType: seededDocType ?? null, openLibrary: fromLibrary }
         : null,
     );
-    setNewDocumentOpen(true);
   }, [
     activeDocumentWorkspace,
     activeWorkspaceCanCreate,
@@ -5032,7 +4323,7 @@ function MainApp() {
               path,
               kind: "file",
             })));
-      setComposeSeed({
+      openCompose({
         skill,
         context,
         prompt,
@@ -5061,7 +4352,7 @@ function MainApp() {
   // The Apply-skill dialog nudge routes meeting-notes work into the dedicated
   // Meetings transcript workbench (step tracking + diff review + followups).
   const openMeetingsWorkbench = useCallback(() => {
-    setComposeSeed(null);
+    closeCompose();
     setMeetingsRequestedView("transcript");
     setPersistedAppMode("meetings");
   }, [setPersistedAppMode]);
@@ -5612,11 +4903,10 @@ function MainApp() {
         void selectEntry(resolved);
       } else {
         if (blockWorkspaceWrite("create")) return;
-        setNewDocumentSeed({
+        openNewDocumentDialogStore({
           title: titleFromWikilinkTarget(target),
           relPath: target.trim(),
         });
-        setNewDocumentOpen(true);
         setError(null);
       }
     },
@@ -5732,155 +5022,6 @@ function MainApp() {
     [explorerWorkspacePath, refreshAfterIgnoreChange],
   );
 
-  const installUpdate = useCallback(
-    async (update: AppUpdateCheckResult["update"], info: AppUpdateInfo) => {
-      if (installingUpdateRef.current) return;
-      installingUpdateRef.current = true;
-      setUpdateToast({ kind: "downloading", info, progress: null });
-      try {
-        await installAppUpdate(update, (progress) => {
-          setUpdateToast({ kind: "downloading", info, progress });
-        });
-        // Downloaded and installed, but never relaunch on our own: the
-        // "ready" toast offers an explicit relaunch action so unsaved
-        // drafts are never lost to a surprise restart.
-        setUpdateToast({ kind: "ready", info });
-      } catch (err) {
-        setUpdateToast({
-          kind: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-      } finally {
-        installingUpdateRef.current = false;
-      }
-    },
-    [],
-  );
-
-  const checkForUpdates = useCallback(async (manual = false) => {
-    if (!updaterAvailable()) {
-      if (manual) setUpdateToast({ kind: "error", message: t("updates.desktopOnly") });
-      return;
-    }
-    if (installingUpdateRef.current) return;
-    if (manual) setUpdateToast({ kind: "checking" });
-    try {
-      const result = await checkAppUpdate();
-      if (!result) {
-        if (manual) setUpdateToast({ kind: "notAvailable" });
-        return;
-      }
-      pendingUpdateRef.current = result.update;
-      // Consent-first: surface an actionable toast; downloading and
-      // relaunching only happen from explicit user action.
-      setUpdateToast({ kind: "available", info: result.info });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (manual) {
-        setUpdateToast({ kind: "error", message });
-      } else {
-        console.info("[maru] update check failed:", message);
-      }
-    }
-  }, [t]);
-
-  const installPendingUpdate = useCallback(async () => {
-    const update = pendingUpdateRef.current;
-    if (!update || updateToast?.kind !== "available") return;
-    await installUpdate(update, updateToast.info);
-  }, [installUpdate, updateToast]);
-
-  useEffect(() => {
-    if (!updaterAvailable()) return;
-    const timer = window.setTimeout(() => {
-      void checkForUpdates();
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [checkForUpdates]);
-
-  // Skills bundle OTA: a background check after launch and then every 6 h.
-  // Clean, runtime-compatible updates apply silently; an update that needs a
-  // human (env change, dirty builtin, app too old) surfaces as a toast with
-  // a jump to the skills settings tab. Network errors stay silent;
-  // signature/integrity failures surface as a security warning.
-  const skillsAvailableNotifiedRef = useRef<string | null>(null);
-  const checkSkillsBundle = useCallback(async () => {
-    try {
-      const status = await skillsCheckBundleUpdate();
-      if (!status?.updateAvailable) {
-        skillsAvailableNotifiedRef.current = null;
-        return;
-      }
-      if (!status.autoApplicable) {
-        const version = status.available?.displayVersion ?? "";
-        if (version && skillsAvailableNotifiedRef.current !== version) {
-          skillsAvailableNotifiedRef.current = version;
-          setUpdateToast({ kind: "skillsAvailable", version });
-        }
-        return;
-      }
-      const outcome = await skillsApplyBundleUpdate({ repairEnv: false });
-      if (outcome) {
-        skillsAvailableNotifiedRef.current = null;
-        setUpdateToast({
-          kind: "skillsUpdated",
-          version: outcome.current.displayVersion,
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Verification failures of any kind are security-relevant; only
-      // plain network/channel unavailability stays silent.
-      if (/signature|sha256_mismatch|size_mismatch|metadata_|archive_|bundle_path/.test(message)) {
-        setUpdateToast({
-          kind: "error",
-          message: t("updates.skillsSecurityError", { message }),
-        });
-      } else {
-        console.info("[maru] skills bundle check failed:", message);
-      }
-    }
-  }, [t]);
-
-  useEffect(() => {
-    if (!updaterAvailable()) return;
-    const timer = window.setTimeout(() => {
-      void checkSkillsBundle();
-    }, 3000);
-    const interval = window.setInterval(
-      () => {
-        void checkSkillsBundle();
-      },
-      6 * 60 * 60 * 1000,
-    );
-    return () => {
-      window.clearTimeout(timer);
-      window.clearInterval(interval);
-    };
-  }, [checkSkillsBundle]);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void listenForCheckUpdatesMenu(() => {
-      void checkForUpdates(true);
-    })
-      .then((off) => {
-        if (disposed) {
-          off();
-        } else {
-          unlisten = off;
-        }
-      })
-      .catch((err) => {
-        console.info("[maru] update menu listener unavailable:", err);
-      });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [checkForUpdates]);
-
   const focusSearch = useCallback(() => {
     if (!documentsPaneOpen) {
       updateLayoutSettings({ documentsPaneOpen: true });
@@ -5893,10 +5034,6 @@ function MainApp() {
     searchInputRef.current?.focus();
     searchInputRef.current?.select();
   }, [documentsPaneOpen, updateLayoutSettings]);
-
-  const openCommandPalette = useCallback(() => {
-    setCommandPaletteOpen(true);
-  }, []);
 
   const openInboxAndFocus = useCallback(() => {
     setPersistedAppMode("inbox");
@@ -6068,33 +5205,28 @@ function MainApp() {
     setPersistedAppMode("sites");
   }, [setPersistedAppMode]);
 
-  const closeCommandPalette = useCallback(() => {
-    setCommandPaletteOpen(false);
-  }, []);
-
   const openAddWorkspaceDialog = useCallback((visibility: WorkspaceVisibility = explorerVisibility) => {
-    setAddWorkspaceDefaultVisibility(visibility);
-    setAddWorkspaceOpen(true);
+    openAddWorkspaceDialogStore(visibility);
   }, [explorerVisibility]);
 
   const openPreferences = useCallback(() => {
-    setSettingsOverlay((current) => current ?? { tab: null });
+    openSettings();
   }, []);
 
   const openInboxSettings = useCallback(() => {
-    setSettingsOverlay({ tab: "inbox-channels" });
+    openSettings("inbox-channels");
   }, []);
 
   const openCommsSettings = useCallback(() => {
-    setSettingsOverlay({ tab: "comms" });
+    openSettings("comms");
   }, []);
 
   const openMeetingsSettings = useCallback(() => {
-    setSettingsOverlay({ tab: "meetings" });
+    openSettings("meetings");
   }, []);
 
   const openTasksSettings = useCallback(() => {
-    setSettingsOverlay({ tab: "tasks" });
+    openSettings("tasks");
   }, []);
 
   const startTelegramPollingFromSettings = useCallback(() => {
@@ -6104,13 +5236,15 @@ function MainApp() {
       effectiveCommsSettings.telegram.intervalSeconds,
     )
       .then(setTelegramPolling)
-      .catch((err) => setTelegramError(err instanceof Error ? err.message : String(err)));
+      // Polling status failures had a dedicated state once; nothing renders
+      // it anymore, so start/stop failures stay silent (unchanged behavior).
+      .catch(() => {});
   }, [effectiveCommsSettings.telegram, inboxWorkspacePath]);
 
   const stopTelegramPollingFromSettings = useCallback(() => {
     void stopTelegramPolling()
       .then(setTelegramPolling)
-      .catch((err) => setTelegramError(err instanceof Error ? err.message : String(err)));
+      .catch(() => {});
   }, []);
 
   const startTelegramLogin = useCallback(() => {
@@ -6977,12 +6111,6 @@ function MainApp() {
     updateLayoutSettings,
   ]);
 
-  const requestWindowClose = useCallback(() => {
-    void import("@tauri-apps/api/window")
-      .then(({ getCurrentWindow }) => getCurrentWindow().close())
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
-
   const closeAllCleanTabs = useCallback(() => {
     const dirtyTabs = orderedTabsInState(getEditorTabsState()).filter(
       (tab): tab is EditorTab =>
@@ -7394,7 +6522,7 @@ function MainApp() {
     (status: GitStatus) => {
       if (blockWorkspaceWrite("modify")) return;
       if (!activeDocumentWorkspacePath) return;
-      setCommitDialog({ path: activeDocumentWorkspacePath, status });
+      openCommitDialog(activeDocumentWorkspacePath, status);
     },
     [activeDocumentWorkspacePath, blockWorkspaceWrite],
   );
@@ -7733,7 +6861,10 @@ function MainApp() {
       "mod+shift+m": openComms,
       "mod+shift+t": openTasks,
       "mod+shift+b": openSites,
-      "mod+k": () => setCommandPaletteOpen((v) => !v),
+      "mod+k": () => {
+        if (getAppOverlayStoreState().commandPaletteOpen) closeCommandPalette();
+        else openCommandPalette();
+      },
       "mod+shift+k": () => openSkillCompose(null),
       "mod+p": () =>
         setPersistedEditorViewMode(editorViewMode === "preview" ? "rich" : "preview"),
@@ -7800,7 +6931,7 @@ function MainApp() {
     if (blockWorkspaceWrite("modify")) return;
     try {
       const status = await gitStatus(activeDocumentWorkspacePath);
-      setCommitDialog({ path: activeDocumentWorkspacePath, status });
+      openCommitDialog(activeDocumentWorkspacePath, status);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -7841,7 +6972,8 @@ function MainApp() {
           updateLayoutSettings({ outlineOpen: !outlineOpen });
           break;
         case "view.command_palette":
-          setCommandPaletteOpen((value) => !value);
+          if (getAppOverlayStoreState().commandPaletteOpen) closeCommandPalette();
+          else openCommandPalette();
           break;
         case "go.back":
           navigateBack();
@@ -8067,14 +7199,8 @@ function MainApp() {
   const modeClass = modeClassByAppMode[visibleAppMode] ?? "";
   // In-DOM overlays that cover the content area; the native sites webview
   // cannot stack under DOM modals, so SitesPane hides it while any is open.
-  const sitesOverlayOpen =
-    commandPaletteOpen ||
-    settingsOverlay !== null ||
-    newDocumentOpen ||
-    addWorkspaceOpen ||
-    composeSeed !== null ||
-    commitDialog !== null ||
-    approvalGate.open;
+  // The approval dialog lives outside the overlay store, so it is OR-ed in.
+  const sitesOverlayOpen = useSitesOverlayOpen(approvalGate.open);
   const terminalMaximizedClass =
     maruSettings.ui.layout.terminalOpen && maruSettings.ui.layout.terminalMaximized
       ? " terminal-maximized"
@@ -8281,7 +7407,6 @@ function MainApp() {
         }
         isFavorite={isFavorite}
         onToggleFavorite={toggleFavorite}
-        onError={setError}
         referenceFocus={kgRefFocus}
         onExitReferenceFocus={() => setKgRefFocus(null)}
         onGraphChanged={() => {
@@ -8453,7 +7578,6 @@ function MainApp() {
       onStopMission: handleStopProcessingMission,
       onConfirmApproval: approvalGate.confirmApproval,
       onRevealPath: handleRevealPath,
-      onError: setError,
     }),
     [
       inboxWorkspacePath,
@@ -8849,7 +7973,7 @@ function MainApp() {
             refreshTrigger={gitRefreshTick}
             onCommitClick={activeWorkspaceCanModify ? handleCommitClick : undefined}
           />
-          <MissionBadge onError={setError} />
+          <MissionBadge />
 
           <div className="topbar-spacer" />
 
@@ -9111,13 +8235,11 @@ function MainApp() {
             onRevealPath={(path) => {
               if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
             }}
-            onError={setError}
-          />
+              />
         ) : surfaceMode === "diagram" ? (
           <LazyDiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}
-            onError={setError}
-            activeDocument={
+                activeDocument={
               activeDocTab &&
               activeDocTab.workspacePath === (inboxWorkspacePath ?? settingsWorkPath)
                 ? {
@@ -9143,8 +8265,7 @@ function MainApp() {
         ) : surfaceMode === "sites" ? (
           <LazySitesPane
             overlayOpen={sitesOverlayOpen}
-            onError={setError}
-            onEmptyClose={rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined}
+                onEmptyClose={rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined}
             openedUrls={pendingOpenedSiteUrls}
             onOpenedUrlsHandled={acknowledgeOpenedSiteUrls}
           />
@@ -9230,8 +8351,7 @@ function MainApp() {
             }}
             onApplySkillToTarget={applySkillToFileTarget}
             onAttachToTerminal={attachPathToTerminal}
-            onError={setError}
-          />
+              />
         ) : surfaceMode === "studio" ? (
           <LazyStudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
@@ -9258,8 +8378,7 @@ function MainApp() {
               const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);
             }}
-            onError={setError}
-          />
+              />
         ) : surfaceMode === "catalog" ? (
           <LazyCatalogPane
             workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
@@ -9283,8 +8402,7 @@ function MainApp() {
               }))
             }
             onConfirmApproval={approvalGate.confirmApproval}
-            onError={setError}
-            onOpenScratchpad={openScratchpadSurface}
+                onOpenScratchpad={openScratchpadSurface}
             onOpenAgents={() => setPersistedAppMode("agents")}
             onOpenGapAnalysis={openGapAnalysis}
           />
@@ -9293,8 +8411,7 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             initialDraftId={gapDraftId}
             onConsumeInitialDraftId={() => setGapDraftId(null)}
-            onError={setError}
-          />
+              />
         ) : surfaceMode === "agents" ? (
           <LazyAgentsPane
             workPath={inboxWorkspacePath}
@@ -9309,8 +8426,7 @@ function MainApp() {
             onMissionStarted={trackMissionQuietly}
             onConfirmApproval={approvalGate.confirmApproval}
             onAgentsChanged={refreshAgents}
-            onError={setError}
-          />
+              />
         ) : surfaceMode === "inbox" ? (
           <LazyInboxPane
             items={inboxItems}
@@ -9351,7 +8467,6 @@ function MainApp() {
             workPath={inboxWorkspacePath}
             onConfirmApproval={approvalGate.confirmApproval}
             onProcessApplied={handleInboxProcessApplied}
-            onProcessError={setError}
             onShareSelectionChange={setInboxShareablePaths}
           />
         ) : surfaceMode === "comms" ? (
@@ -9419,8 +8534,7 @@ function MainApp() {
             onStopMission={handleStopProcessingMission}
             onConfirmApproval={approvalGate.confirmApproval}
             onRevealPath={handleRevealPath}
-            onError={setError}
-            requestedView={meetingsRequestedView}
+                requestedView={meetingsRequestedView}
             onViewConsumed={handleMeetingsViewConsumed}
           />
         ) : surfaceMode === "tasks" ? (
@@ -9590,8 +8704,7 @@ function MainApp() {
             activeLine={activeOutlineLine}
             onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
-            onError={setError}
-            onRefreshWorkspace={() => void refreshCurrent()}
+                onRefreshWorkspace={() => void refreshCurrent()}
             onUpdateField={updateField}
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}
@@ -9677,7 +8790,6 @@ function MainApp() {
                   onStopMission={handleStopProcessingMission}
                   onMissionStarted={handleMeetingsMissionStarted}
                   onConfirmApproval={approvalGate.confirmApproval}
-                  onError={setError}
                 />
                 <SkillsQuickPane
                   skills={skills}
@@ -9701,7 +8813,6 @@ function MainApp() {
                 docId={evidenceBinderDocId}
                 documentPath={document?.path ?? null}
                 documentMarkdown={draftContent || document?.content || ""}
-                onError={setError}
               />
             }
           />
@@ -9855,8 +8966,8 @@ function MainApp() {
                   type="button"
                   className="button button-ghost button-sm"
                   onClick={() => {
-                    setUpdateToast(null);
-                    setSettingsOverlay({ tab: "skills" });
+                    dismissUpdateToast();
+                    openSettings("skills");
                   }}
                 >
                   {t("updates.skillsOpen")}
@@ -9875,7 +8986,7 @@ function MainApp() {
                 <button
                   type="button"
                   className="icon-button"
-                  onClick={() => setUpdateToast(null)}
+                  onClick={dismissUpdateToast}
                   aria-label={t("app.errorClose")}
                   title={t("app.errorClose")}
                 >
@@ -9888,7 +8999,7 @@ function MainApp() {
 
         <AgentUsageBar
           commandOverrides={terminalRuntimeCommands}
-          onOpenSettings={(tab) => setSettingsOverlay({ tab })}
+          onOpenSettings={openSettings}
           onOpenAgents={() => setPersistedAppMode("agents")}
           workspaceName={explorerWorkspace?.label ?? null}
           workspacePath={explorerWorkspacePath ?? null}
@@ -9915,7 +9026,7 @@ function MainApp() {
                 <button
                   type="button"
                   className="button button-ghost button-sm"
-                  onClick={() => setPendingDestructiveAction(null)}
+                  onClick={cancelDestructiveAction}
                 >
                   {t("dialog.cancel")}
                 </button>
@@ -9932,23 +9043,24 @@ function MainApp() {
         ) : null}
 
         <NewDocumentDialog
-          open={newDocumentOpen}
+          open={newDocumentDialog !== null}
           workspaceRoot={activeDocumentWorkspacePath}
-          initialTitle={newDocumentSeed?.title ?? ""}
-          initialRelPath={newDocumentSeed?.relPath ?? null}
-          initialDocType={newDocumentSeed?.docType ?? "reference"}
-          initialOpenLibrary={newDocumentSeed?.openLibrary ?? false}
+          initialTitle={newDocumentDialog?.seed?.title ?? ""}
+          initialRelPath={newDocumentDialog?.seed?.relPath ?? null}
+          initialDocType={newDocumentDialog?.seed?.docType ?? "reference"}
+          initialOpenLibrary={newDocumentDialog?.seed?.openLibrary ?? false}
           entries={activeDocumentEntries}
           onOpenChange={(open) => {
-            setNewDocumentOpen(open);
-            if (!open) setNewDocumentSeed(null);
+            if (!open) closeNewDocumentDialog();
           }}
           onCreate={createNew}
         />
         <AddWorkspaceDialog
-          open={addWorkspaceOpen}
-          defaultVisibility={addWorkspaceDefaultVisibility}
-          onOpenChange={setAddWorkspaceOpen}
+          open={addWorkspaceDialog !== null}
+          defaultVisibility={addWorkspaceDialog?.defaultVisibility ?? "private"}
+          onOpenChange={(open) => {
+            if (!open) closeAddWorkspaceDialog();
+          }}
           onAdd={handleAddWorkspace}
           onRegisterWorkspace={handleRegisterWorkspace}
         />
@@ -9957,7 +9069,7 @@ function MainApp() {
           open={composeSeed !== null}
           skills={skills}
           seed={composeSeed}
-          onClose={() => setComposeSeed(null)}
+          onClose={closeCompose}
           onTerminalDispatch={launchSkillTerminal}
           onBackgroundDispatch={(invocationId) => {
             handleMeetingsMissionStarted(invocationId);
@@ -9969,8 +9081,7 @@ function MainApp() {
           permissionMode={maruSettings.ai.permissionMode}
           meetingsWorkspacePath={inboxWorkspacePath}
           onOpenMeetingsWorkbench={openMeetingsWorkbench}
-          onError={setError}
-        />
+          />
         <CommandPalette
           open={commandPaletteOpen}
           documentIndex={documentIndex}
@@ -9988,9 +9099,6 @@ function MainApp() {
               settings={maruSettings}
               onSettingsChange={(next) => updateSettings(next, { flush: true })}
               onInboxRuntimeConfigChange={setInboxRuntimeConfig}
-              tab={settingsOverlay.tab}
-              onTabChange={(tab) => setSettingsOverlay({ tab })}
-              onClose={() => setSettingsOverlay(null)}
             />
           </Suspense>
         ) : null}
@@ -10002,7 +9110,7 @@ function MainApp() {
           aiEnabled={commitMessageRuntime.enabled}
           aiCommandOverride={commitMessageRuntime.commandOverride}
           onConfirmApproval={approvalGate.confirmApproval}
-          onClose={() => setCommitDialog(null)}
+          onClose={closeCommitDialog}
           onCommitted={() => setGitRefreshTick((n) => n + 1)}
         />
       </div>

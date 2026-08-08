@@ -30,6 +30,7 @@ import {
   type DraftStatusFilter,
 } from "../../lib/drafts";
 import type { AgentRecord } from "../../lib/agents";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
 import type { AiRuntime, AiSettings, AiTaskIngestMinImportance } from "../../lib/settings";
@@ -59,7 +60,6 @@ interface DraftsPaneProps {
   taskIngestMinImportance: AiTaskIngestMinImportance;
   onTaskIngestMinImportanceChange: (value: AiTaskIngestMinImportance) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
-  onError: (message: string | null) => void;
   /** Switches to the scratchpad (memo) surface that owns ideation entries. */
   onOpenScratchpad: () => void;
   /** Switches to the Agents mode, which now owns schedules. */
@@ -93,7 +93,6 @@ export function DraftsPane({
   taskIngestMinImportance,
   onTaskIngestMinImportanceChange,
   onConfirmApproval,
-  onError,
   onOpenScratchpad,
   onOpenAgents,
   onOpenGapAnalysis,
@@ -145,11 +144,11 @@ export function DraftsPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setLoading(false);
     }
-  }, [onError, workPath]);
+  }, [workPath]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -212,12 +211,12 @@ export function DraftsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setDetailLoading(false);
       }
     },
-    [confirmDiscardEdits, onError, workPath],
+    [confirmDiscardEdits, workPath],
   );
 
   const handleOpenDraft = useCallback((draft: DraftEntry) => void openDraft(draft), [openDraft]);
@@ -229,7 +228,6 @@ export function DraftsPane({
     workPath,
     minImportance: taskIngestMinImportance,
     onDraftsIngested: handleDraftsChanged,
-    onError,
   });
 
   const { pendingIdeaPaths, generate } = useIdeationDrafts({
@@ -238,7 +236,6 @@ export function DraftsPane({
     agents,
     ai,
     drafts,
-    onError,
     onOpenDraft: handleOpenDraft,
     onDraftsChanged: handleDraftsChanged,
   });
@@ -273,7 +270,7 @@ export function DraftsPane({
       const message = errorMessage(error);
       setSaveState("error");
       setLocalError(message);
-      onError(message);
+      setError(message);
       return null;
     }
   };
@@ -304,7 +301,7 @@ export function DraftsPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
   };
 
@@ -706,7 +703,6 @@ export function DraftsPane({
         open={createOpen}
         workPath={workPath}
         onClose={() => setCreateOpen(false)}
-        onError={onError}
         onCreated={(entry) => {
           setCreateOpen(false);
           void refresh();
@@ -719,7 +715,6 @@ export function DraftsPane({
         workPath={workPath}
         onConfirmApproval={onConfirmApproval}
         onClose={() => setPromoteTarget(null)}
-        onError={onError}
         onPromoted={(entry) => {
           setPromoteTarget(null);
           setDetail((current) =>

@@ -35,6 +35,7 @@ import {
 } from "../../lib/api";
 import { formatRelativeDate } from "../../lib/document";
 import { formatScheduleTime } from "../../lib/drafts";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { AiSettings } from "../../lib/settings";
 import type { SkillDispatchRuntime, SkillRecord } from "../../lib/skills";
@@ -68,7 +69,6 @@ interface AgentsPaneProps {
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   /** App holds its own copy for the converted call sites; keep it in step. */
   onAgentsChanged: () => void;
-  onError: (message: string | null) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -108,7 +108,6 @@ export function AgentsPane({
   onMissionStarted,
   onConfirmApproval,
   onAgentsChanged,
-  onError,
 }: AgentsPaneProps) {
   const { t } = useTranslation();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
@@ -138,9 +137,9 @@ export function AgentsPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     }
-  }, [onAgentsChanged, onError, workPath]);
+  }, [onAgentsChanged, workPath]);
 
   useEffect(() => {
     void refresh();
@@ -221,12 +220,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, refresh],
+    [refresh],
   );
 
   const runNow = useCallback(
@@ -247,12 +246,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [ai, onError, onMissionStarted, onRefreshMissions, skills, workPath],
+    [ai, onMissionStarted, onRefreshMissions, skills, workPath],
   );
 
   const attachSchedule = useCallback(
@@ -287,12 +286,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [ai, onConfirmApproval, onError, refresh, t, workPath],
+    [ai, onConfirmApproval, refresh, t, workPath],
   );
 
   const runSchedule = useCallback(
@@ -307,12 +306,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, onMissionStarted, onRefreshMissions, workPath],
+    [onMissionStarted, onRefreshMissions, workPath],
   );
 
   const toggleSchedule = useCallback(
@@ -326,12 +325,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, refresh, workPath],
+    [refresh, workPath],
   );
 
   const detachSchedule = useCallback(
@@ -349,12 +348,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, refresh, t, workPath],
+    [refresh, t, workPath],
   );
 
   const remove = useCallback(
@@ -367,12 +366,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, refresh],
+    [refresh],
   );
 
   const reset = useCallback(
@@ -384,12 +383,12 @@ export function AgentsPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setBusy(false);
       }
     },
-    [onError, refresh],
+    [refresh],
   );
 
   return (
@@ -534,7 +533,6 @@ export function AgentsPane({
               onStopMissionById={onStopMission}
               onMissionStarted={onMissionStarted}
               onConfirmApproval={onConfirmApproval}
-              onError={onError}
             />
           ) : (
             <EmptyState
@@ -667,7 +665,6 @@ function AgentDetail({
   onStopMissionById,
   onMissionStarted,
   onConfirmApproval,
-  onError,
 }: {
   row: AgentRow;
   tab: DetailTab;
@@ -691,7 +688,6 @@ function AgentDetail({
   onStopMissionById: (id: string) => void;
   onMissionStarted: (id: string) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
-  onError: (message: string | null) => void;
 }) {
   const { t, locale } = useTranslation();
   const { agent } = row;
@@ -852,7 +848,6 @@ function AgentDetail({
               agent.permissionMode === "inherit" ? ai.permissionMode : agent.permissionMode
             }
             onConfirmApproval={onConfirmApproval}
-            onError={onError}
           />
         </div>
       ) : null}
@@ -869,7 +864,6 @@ function AgentDetail({
             onStopMission={onStopMissionById}
             onMissionStarted={onMissionStarted}
             onConfirmApproval={onConfirmApproval}
-            onError={onError}
           />
         </div>
       ) : null}

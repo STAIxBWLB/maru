@@ -7,6 +7,7 @@ import {
   GAP_HUNK_TYPES,
   gapTypeCountKey,
 } from "../../lib/gapAnalysis";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { GapHunkType, GapLogEntry, GapReport, GapReportSummary } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
@@ -20,7 +21,6 @@ interface GapPaneProps {
   initialDraftId: string | null;
   /** Called once the initial selection has been consumed. */
   onConsumeInitialDraftId?: () => void;
-  onError: (message: string | null) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -31,7 +31,6 @@ export function GapPane({
   workPath,
   initialDraftId,
   onConsumeInitialDraftId,
-  onError,
 }: GapPaneProps) {
   const { t, locale } = useTranslation();
   const [reports, setReports] = useState<GapReportSummary[]>([]);
@@ -60,11 +59,11 @@ export function GapPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setReportsLoading(false);
     }
-  }, [onError, workPath]);
+  }, [workPath]);
 
   const refreshLog = useCallback(async () => {
     if (!workPath) {
@@ -77,11 +76,11 @@ export function GapPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setLogLoading(false);
     }
-  }, [onError, workPath]);
+  }, [workPath]);
 
   const analyze = useCallback(
     async (draftId: string) => {
@@ -96,12 +95,12 @@ export function GapPane({
       } catch (error) {
         const message = errorMessage(error);
         setLocalError(message);
-        onError(message);
+        setError(message);
       } finally {
         setAnalyzing(false);
       }
     },
-    [onError, workPath],
+    [workPath],
   );
 
   useEffect(() => {
@@ -161,7 +160,7 @@ export function GapPane({
     } catch (error) {
       const message = errorMessage(error);
       setLocalError(message);
-      onError(message);
+      setError(message);
     } finally {
       setSavingLog(false);
     }

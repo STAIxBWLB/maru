@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import { promoteDraft } from "../../lib/api";
 import { defaultPromoteDocumentPath } from "../../lib/drafts";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { DraftEntry, DraftPromoteTarget } from "../../lib/types";
 import { Button } from "../ui/Button";
@@ -13,7 +14,6 @@ interface PromoteDraftDialogProps {
   workPath: string | null;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   onClose: () => void;
-  onError: (message: string | null) => void;
   onPromoted: (entry: DraftEntry) => void;
 }
 
@@ -22,7 +22,6 @@ export function PromoteDraftDialog({
   workPath,
   onConfirmApproval,
   onClose,
-  onError,
   onPromoted,
 }: PromoteDraftDialogProps) {
   const { t } = useTranslation();
@@ -43,7 +42,7 @@ export function PromoteDraftDialog({
     const path = target === "document" ? targetPath.trim() : "";
     if (target === "document" && !path) return;
     setBusy(true);
-    onError(null);
+    setError(null);
     try {
       const approvalId = await onConfirmApproval({
         kind: "drafts.promote",
@@ -60,7 +59,7 @@ export function PromoteDraftDialog({
       });
       onPromoted(promoted);
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error));
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }

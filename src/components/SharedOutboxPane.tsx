@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { setError } from "../lib/errorStore";
 import { chooseFiles, chooseWorkspaceDirectory } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import {
@@ -26,7 +27,6 @@ interface SharedOutboxPaneProps {
   activeDocument: { path: string; title: string; dirty: boolean } | null;
   selectedFileEntries: Array<{ path: string; name: string }>;
   inboxShareablePaths: string[];
-  onError: (message: string | null) => void;
   onRevealFileInFinder: (targetPath: string) => void;
 }
 
@@ -35,7 +35,6 @@ export function SharedOutboxPane({
   activeDocument,
   selectedFileEntries,
   inboxShareablePaths,
-  onError,
   onRevealFileInFinder,
 }: SharedOutboxPaneProps) {
   const { t } = useTranslation();
@@ -58,18 +57,18 @@ export function SharedOutboxPane({
       setConfig(next);
       setAuthor((current) => current || next.defaultAuthor || "");
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workspacePath, onError]);
+  }, [workspacePath]);
 
   const loadRecent = useCallback(async () => {
     if (!workspacePath) return;
     try {
       setScan(await invoke<ShareOutboxScan>("scan_share_outbox", { workPath: workspacePath }));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workspacePath, onError]);
+  }, [workspacePath]);
 
   useEffect(() => {
     setManualPaths([]);
@@ -119,9 +118,9 @@ export function SharedOutboxPane({
       }));
       await loadRecent();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workspacePath, t, loadRecent, onError]);
+  }, [workspacePath, t, loadRecent]);
 
   const handleCreateRoot = useCallback(async () => {
     if (!workspacePath) return;
@@ -130,9 +129,9 @@ export function SharedOutboxPane({
       await loadConfig();
       await loadRecent();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workspacePath, loadConfig, loadRecent, onError]);
+  }, [workspacePath, loadConfig, loadRecent]);
 
   const handleAddFiles = useCallback(async () => {
     const picked = await chooseFiles(t("shareOutbox.pickFiles"));
@@ -161,7 +160,7 @@ export function SharedOutboxPane({
   const handleApply = useCallback(async () => {
     if (!workspacePath || sources.length === 0) return;
     setApplying(true);
-    onError(null);
+    setError(null);
     try {
       const res = await invoke<ShareOutboxResult[]>("prepare_share_outbox_files", {
         workPath: workspacePath,
@@ -172,11 +171,11 @@ export function SharedOutboxPane({
       await loadRecent();
       await loadConfig();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplying(false);
     }
-  }, [workspacePath, sources, author, replace, loadRecent, loadConfig, onError]);
+  }, [workspacePath, sources, author, replace, loadRecent, loadConfig]);
 
   if (!workspacePath) {
     return (

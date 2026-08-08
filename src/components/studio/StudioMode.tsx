@@ -21,6 +21,7 @@ import { Field, TextArea, TextInput } from "../ui/Field";
 import { EmptyState, ModeHeader } from "../ui/ModeChrome";
 import { RichMarkdownEditor } from "../RichMarkdownEditor";
 import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   defaultMaruDocType,
@@ -78,7 +79,6 @@ interface StudioModeProps {
   lintDismissalsByDoc?: Record<string, string[]>;
   onLintDismissalsChange?: (docId: string, dismissedIds: string[]) => void;
   onRevealPath?: (path: string) => void;
-  onError: (message: string) => void;
 }
 
 type EditorMode = "rich" | "source";
@@ -104,7 +104,6 @@ export function StudioMode({
   lintDismissalsByDoc,
   onLintDismissalsChange,
   onRevealPath,
-  onError,
 }: StudioModeProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<StudioState | null>(null);
@@ -168,9 +167,9 @@ export function StudioMode({
     try {
       setSummaries(await studioStateList(workspaceRoot));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
-  }, [onError, workspaceRoot]);
+  }, [workspaceRoot]);
 
   const enqueueStudioSave = useCallback(
     (nextState: StudioState): Promise<void> => {
@@ -188,7 +187,7 @@ export function StudioMode({
         })
         .catch((err) => {
           if (revision === saveRevisionRef.current) {
-            onError(err instanceof Error ? err.message : String(err));
+            setError(err instanceof Error ? err.message : String(err));
           }
         })
         .finally(() => {
@@ -199,7 +198,7 @@ export function StudioMode({
       saveQueueRef.current = run;
       return run;
     },
-    [loadSummaries, onError, workspaceRoot],
+    [loadSummaries, workspaceRoot],
   );
 
   useEffect(() => {
@@ -222,7 +221,7 @@ export function StudioMode({
         setSummaries(list);
         setState(stored ?? createInitialStudioState(activeDocument));
       } catch (err) {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -234,7 +233,7 @@ export function StudioMode({
       cancelled = true;
       loadingRef.current = false;
     };
-  }, [activeDocId, activeDocument?.path, onError, workspaceRoot]);
+  }, [activeDocId, activeDocument?.path, workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot || !state || loadingRef.current) return;
@@ -289,7 +288,7 @@ export function StudioMode({
           if (!cancelled) setLintIssues(report.issues);
         })
         .catch((err) => {
-          if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
         })
         .finally(() => {
           if (!cancelled) setLintLoading(false);
@@ -299,7 +298,7 @@ export function StudioMode({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [currentLintDismissals, onError, state?.bodyDraft, state?.currentStep, workspaceRoot]);
+  }, [currentLintDismissals, state?.bodyDraft, state?.currentStep, workspaceRoot]);
 
   const patchState = useCallback((updater: (prev: StudioState) => StudioState) => {
     setState((prev) => {
@@ -322,7 +321,7 @@ export function StudioMode({
       const stored = await studioStateRead(workspaceRoot, docId);
       if (stored) setState(stored);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
       loadingRef.current = false;
@@ -337,7 +336,7 @@ export function StudioMode({
       setState(createInitialStudioState(activeDocument));
       await loadSummaries();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -350,7 +349,7 @@ export function StudioMode({
   async function createDocumentFromSource(): Promise<void> {
     if (!state) return;
     if (!state.source.title.trim()) {
-      onError(t("studio.error.title"));
+      setError(t("studio.error.title"));
       return;
     }
     setBusyAction("create");
@@ -370,7 +369,7 @@ export function StudioMode({
         });
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -442,14 +441,14 @@ export function StudioMode({
 
   async function applyBody(): Promise<DocumentPayload | null> {
     if (!state?.source.documentPath) {
-      onError(t("studio.error.noDocument"));
+      setError(t("studio.error.noDocument"));
       return null;
     }
     setBusyAction("apply");
     try {
       return await onApplyBody(state.source.documentPath, state.bodyDraft);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {
       setBusyAction(null);
@@ -474,7 +473,7 @@ export function StudioMode({
     const templateKey = state.template?.hwpxTemplateKey ?? null;
     const configuredPath = state.hwpFields.templatePath?.trim() || null;
     if (!templateKey && !configuredPath) {
-      onError(t("studio.hwp.error.noTemplate"));
+      setError(t("studio.hwp.error.noTemplate"));
       return;
     }
 
@@ -539,7 +538,7 @@ export function StudioMode({
           warnings: [err instanceof Error ? err.message : String(err)],
         },
       }));
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -550,11 +549,11 @@ export function StudioMode({
     const templateKey = state.template?.hwpxTemplateKey ?? null;
     const templatePath = state.hwpFields.templatePath?.trim() || null;
     if (!templateKey && !templatePath) {
-      onError(t("studio.hwp.error.noTemplate"));
+      setError(t("studio.hwp.error.noTemplate"));
       return;
     }
     if (state.hwpFields.fields.length === 0) {
-      onError(t("studio.hwp.error.noFields"));
+      setError(t("studio.hwp.error.noFields"));
       return;
     }
 
@@ -592,7 +591,7 @@ export function StudioMode({
           warnings: [err instanceof Error ? err.message : String(err)],
         },
       }));
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -600,14 +599,14 @@ export function StudioMode({
 
   async function runExport(): Promise<void> {
     if (!workspaceRoot || !state?.source.documentPath) {
-      onError(t("studio.error.noDocument"));
+      setError(t("studio.error.noDocument"));
       return;
     }
     const formats = state.export.formats.filter((format): format is ExportFormat =>
       FORMAT_OPTIONS.includes(format as ExportFormat),
     );
     if (formats.length === 0) {
-      onError(t("studio.export.error.noFormat"));
+      setError(t("studio.export.error.noFormat"));
       return;
     }
     setBusyAction("export");
@@ -635,7 +634,7 @@ export function StudioMode({
         },
       }));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }
@@ -643,7 +642,7 @@ export function StudioMode({
 
   async function freezePackage(): Promise<void> {
     if (!state?.source.documentPath) {
-      onError(t("studio.error.noDocument"));
+      setError(t("studio.error.noDocument"));
       return;
     }
     setBusyAction("package");
@@ -664,7 +663,7 @@ export function StudioMode({
         },
       }));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyAction(null);
     }

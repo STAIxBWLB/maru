@@ -81,7 +81,6 @@ async function render(): Promise<HTMLElement> {
           taskIngestMinImportance="low"
           onTaskIngestMinImportanceChange={() => {}}
           onConfirmApproval={async () => "approval-1"}
-          onError={() => {}}
           onOpenScratchpad={() => {}}
           onOpenAgents={() => {}}
         />

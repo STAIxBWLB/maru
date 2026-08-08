@@ -64,6 +64,7 @@ import {
   runAgentDetailed,
   type AgentRecord,
 } from "../../lib/agents";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   createMeetingReviewChecks,
@@ -159,7 +160,6 @@ interface MeetingsPaneProps {
     payloadPreview?: string | null;
   }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
-  onError: (message: string | null) => void;
   /** When set, the pane switches to this view once and calls onViewConsumed. */
   requestedView?: MeetingsView | null;
   onViewConsumed?: () => void;
@@ -184,7 +184,6 @@ export const MeetingsPane = memo(function MeetingsPane({
   onStopMission,
   onConfirmApproval,
   onRevealPath,
-  onError,
   requestedView,
   onViewConsumed,
 }: MeetingsPaneProps) {
@@ -311,12 +310,12 @@ export const MeetingsPane = memo(function MeetingsPane({
         if (!cancelled) setBodyHits(new Set(paths));
       })
       .catch((err) => {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, workPath, effectiveSettings.root, onError]);
+  }, [debouncedQuery, workPath, effectiveSettings.root]);
 
   const clearMeetingMission = useCallback((id: string) => {
     setClearedRunIds((current) => {
@@ -381,7 +380,7 @@ export const MeetingsPane = memo(function MeetingsPane({
       return;
     }
     setLoading(true);
-    onError(null);
+    setError(null);
     try {
       const next = await scanMeetingNotes(workPath, effectiveSettings.root);
       setRows(next);
@@ -391,11 +390,11 @@ export const MeetingsPane = memo(function MeetingsPane({
           : rowsToMeetingEntries(next)[0]?.relPath ?? null,
       );
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [effectiveSettings.enabled, effectiveSettings.root, onError, workPath]);
+  }, [effectiveSettings.enabled, effectiveSettings.root, workPath]);
 
   useEffect(() => {
     void refresh();
@@ -413,7 +412,7 @@ export const MeetingsPane = memo(function MeetingsPane({
         if (!cancelled) setMetadata(next);
       })
       .catch((err) => {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         if (!cancelled) setMetadataLoading(false);
@@ -421,7 +420,7 @@ export const MeetingsPane = memo(function MeetingsPane({
     return () => {
       cancelled = true;
     };
-  }, [onError, selectedEntry, workPath]);
+  }, [selectedEntry, workPath]);
 
   // "New meeting note" leads into the dedicated Transcript workbench (paste /
   // file input → tracked run → review → followups) instead of a generic
@@ -461,7 +460,7 @@ export const MeetingsPane = memo(function MeetingsPane({
           onOpenSettings={onOpenSettings}
         />
         {view === "activity" ? (
-          <MeetingsActivityPane workPath={workPath} onError={onError} />
+          <MeetingsActivityPane workPath={workPath} />
         ) : view === "transcript" ? (
           <MeetingsTranscriptFlow
             workPath={workPath}
@@ -482,7 +481,6 @@ export const MeetingsPane = memo(function MeetingsPane({
             onRefreshMissions={onRefreshMissions}
             onConfirmApproval={onConfirmApproval}
             onApplied={() => void refresh()}
-            onError={onError}
           />
         ) : view === "external" ? (
           <MeetingsExternalFlow
@@ -504,7 +502,6 @@ export const MeetingsPane = memo(function MeetingsPane({
             onRefreshMissions={onRefreshMissions}
             onConfirmApproval={onConfirmApproval}
             onApplied={() => void refresh()}
-            onError={onError}
           />
         ) : (
           <>
@@ -583,7 +580,6 @@ export const MeetingsPane = memo(function MeetingsPane({
                 workPath={workPath}
                 onOpenSkillCompose={onOpenSkillCompose}
                 onRevealPath={onRevealPath}
-                onError={onError}
               />
             </div>
           </>
@@ -818,7 +814,6 @@ function MeetingsDetailPane({
   workPath,
   onOpenSkillCompose,
   onRevealPath,
-  onError,
 }: {
   entry: MeetingNoteEntry | null;
   metadata: MeetingMetadata | null;
@@ -832,7 +827,6 @@ function MeetingsDetailPane({
     prompt?: string,
   ) => void;
   onRevealPath?: (path: string) => void;
-  onError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   if (!entry) return <aside className="meetings-detail-pane empty">{t("meetings.detail.empty")}</aside>;
@@ -846,7 +840,7 @@ function MeetingsDetailPane({
           `- ${new Date().toISOString()} ${skillName}: ${entry.relPath}`,
         );
       } catch (err) {
-        onError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? err.message : String(err));
       }
     }
     onOpenSkillCompose(skill, context, prompt);
@@ -938,10 +932,8 @@ const ACTIVITY_EVENT_FILTERS: readonly string[] = [
 
 function MeetingsActivityPane({
   workPath,
-  onError,
 }: {
   workPath: string | null;
-  onError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<MeetingsLogLineRecord[]>([]);
@@ -958,16 +950,16 @@ function MeetingsActivityPane({
       return;
     }
     setLoading(true);
-    onError(null);
+    setError(null);
     try {
       const next = await readMeetingsLog(workPath, { limit: 500 });
       setEntries(next);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [onError, workPath]);
+  }, [workPath]);
 
   useEffect(() => {
     void refresh();
@@ -1172,7 +1164,6 @@ function MeetingsTranscriptFlow(props: {
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
-  onError: (message: string | null) => void;
 }) {
   return <MeetingsSkillWorkbench sourceKind="transcript" {...props} />;
 }
@@ -1196,7 +1187,6 @@ function MeetingsExternalFlow({
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
-  onError,
 }: {
   workPath: string | null;
   settings: MeetingsSettings;
@@ -1216,7 +1206,6 @@ function MeetingsExternalFlow({
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
-  onError: (message: string | null) => void;
 }) {
   return (
     <MeetingsSkillWorkbench
@@ -1239,7 +1228,6 @@ function MeetingsExternalFlow({
       onRefreshMissions={onRefreshMissions}
       onConfirmApproval={onConfirmApproval}
       onApplied={onApplied}
-      onError={onError}
     />
   );
 }
@@ -1283,7 +1271,6 @@ function MeetingsSkillWorkbench({
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
-  onError,
 }: {
   sourceKind: MeetingSourceKind;
   workPath: string | null;
@@ -1304,7 +1291,6 @@ function MeetingsSkillWorkbench({
   onRefreshMissions: () => void;
   onConfirmApproval: MeetingsPaneProps["onConfirmApproval"];
   onApplied: () => void;
-  onError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [paths, setPaths] = useState<string[]>([]);
@@ -1377,7 +1363,7 @@ function MeetingsSkillWorkbench({
         }
       })
       .catch((err) => {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         if (!cancelled) setRuntimeStatusLoading(false);
@@ -1385,12 +1371,12 @@ function MeetingsSkillWorkbench({
     return () => {
       cancelled = true;
     };
-  }, [onError, runtimeChooserOpen, runtimeCommands]);
+  }, [runtimeChooserOpen, runtimeCommands]);
 
   const run = async (runtime: SkillDispatchRuntime) => {
     if (!workPath || !canRun) return;
     setBusy(true);
-    onError(null);
+    setError(null);
     try {
       const guides = isExternal ? await readMeetingGuides(workPath) : null;
       const prompt = buildMeetingNotesPrompt({
@@ -1441,7 +1427,7 @@ function MeetingsSkillWorkbench({
       onMissionStarted(invocationId);
       onRefreshMissions();
     } catch (err) {
-      onError(agentErrorMessage(err, t));
+      setError(agentErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
@@ -1452,7 +1438,7 @@ function MeetingsSkillWorkbench({
     const originalRuntime =
       normalizeSkillDispatchRuntime(meetingMissionRuntimeValue(mission)) ?? "claude";
     if (!hasSource) {
-      onError(t("meetings.progress.retryNeedsSource"));
+      setError(t("meetings.progress.retryNeedsSource"));
       return;
     }
     if (settings.hooks.appendVaultLog) {
@@ -1478,7 +1464,7 @@ function MeetingsSkillWorkbench({
   const loadReviewResult = async (mission: MissionRecord) => {
     if (!workPath) return;
     setReviewLoading(true);
-    onError(null);
+    setError(null);
     try {
       const events = await agentReadRunEvents(workPath, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
@@ -1513,7 +1499,7 @@ function MeetingsSkillWorkbench({
       setBundle(draftBundle);
       setApplyResult(null);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setReviewLoading(false);
     }
@@ -1574,7 +1560,7 @@ function MeetingsSkillWorkbench({
     });
     if (!approvalId) return;
     setApplyBusy(true);
-    onError(null);
+    setError(null);
     try {
       if (proposal) {
         await agentApplySkillProposal({
@@ -1614,7 +1600,7 @@ function MeetingsSkillWorkbench({
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
-      onError(t("meetings.review.applySuccess"));
+      setError(t("meetings.review.applySuccess"));
       const targetPath =
         proposal?.files[0]?.path ?? selectedFollowupItems[0]?.title ?? meetingMissionTitle(bundle.mission);
       await writeAuditLine({
@@ -1631,7 +1617,7 @@ function MeetingsSkillWorkbench({
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      onError(message);
+      setError(message);
       await writeAuditLine({
         event: "error",
         runId: bundle.runId,

@@ -1,5 +1,6 @@
 import { ClipboardCheck, Loader2, Pencil, RefreshCcw, Square } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import { applyInboxDecisions } from "../../lib/api";
 import { agentReadRunEvents } from "../../lib/skills";
@@ -34,7 +35,6 @@ interface InboxRunsPanelProps {
     payloadPreview?: string | null;
   }) => Promise<string | null>;
   onApplied: () => void;
-  onError: (message: string | null) => void;
 }
 
 export function InboxRunsPanel({
@@ -45,7 +45,6 @@ export function InboxRunsPanel({
   onRefreshMissions,
   onConfirmApproval,
   onApplied,
-  onError,
 }: InboxRunsPanelProps) {
   const { t } = useTranslation();
   const [bundle, setBundle] = useState<InboxReviewBundle | null>(null);
@@ -75,7 +74,7 @@ export function InboxRunsPanel({
   const loadReviewResult = async (mission: MissionRecord) => {
     if (!workPath) return;
     setReviewLoading(true);
-    onError(null);
+    setError(null);
     try {
       const events = await agentReadRunEvents(workPath, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
@@ -96,7 +95,7 @@ export function InboxRunsPanel({
       });
       setApplyResult(null);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setReviewLoading(false);
     }
@@ -117,7 +116,7 @@ export function InboxRunsPanel({
         appliedAt: new Date().toISOString(),
       });
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
-      onError(t("inbox.review.deferSuccess", { count: deferred }));
+      setError(t("inbox.review.deferSuccess", { count: deferred }));
       return;
     }
     const approvalId = await onConfirmApproval({
@@ -148,7 +147,7 @@ export function InboxRunsPanel({
     });
     if (!approvalId) return;
     setApplyBusy(true);
-    onError(null);
+    setError(null);
     try {
       await applyInboxDecisions(workPath, decisions, approvalId);
       setApplyResult({
@@ -161,9 +160,9 @@ export function InboxRunsPanel({
       setAppliedRunIds((current) => new Set([...current, bundle.runId]));
       onApplied();
       onRefreshMissions();
-      onError(t("inbox.review.applySuccess"));
+      setError(t("inbox.review.applySuccess"));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplyBusy(false);
     }

@@ -25,6 +25,7 @@ import {
   type EvidenceBinding,
   type EvidenceTargetSuggestions,
 } from "../../lib/evidenceBinder";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 
 interface EvidenceBinderPaneProps {
@@ -32,7 +33,6 @@ interface EvidenceBinderPaneProps {
   docId: string | null;
   documentPath: string | null;
   documentMarkdown: string;
-  onError: (message: string | null) => void;
 }
 
 type OptimisticUpdate = (state: EvidenceBinderState) => EvidenceBinderState;
@@ -46,7 +46,6 @@ export function EvidenceBinderPane({
   docId,
   documentPath,
   documentMarkdown,
-  onError,
 }: EvidenceBinderPaneProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<EvidenceBinderState | null>(null);
@@ -118,12 +117,12 @@ export function EvidenceBinderPane({
       }
     } catch (err) {
       if (loadSeqRef.current === loadSeq) {
-        onError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       if (loadSeqRef.current === loadSeq) setLoading(false);
     }
-  }, [docId, documentPath, onError, workspaceRoot]);
+  }, [docId, documentPath, workspaceRoot]);
 
   useEffect(() => {
     void load();
@@ -171,7 +170,7 @@ export function EvidenceBinderPane({
           setState(previousState);
           setRevision(previousRevision);
           const message = err instanceof Error ? err.message : String(err);
-          onError(message);
+          setError(message);
           if (message.includes("evidence_binder_revision_conflict")) void load();
         }
       } finally {
@@ -181,7 +180,7 @@ export function EvidenceBinderPane({
         }
       }
     },
-    [docId, documentPath, load, loading, onError, revision, state, workspaceRoot],
+    [docId, documentPath, load, loading, revision, state, workspaceRoot],
   );
 
   const bindCandidate = useCallback(

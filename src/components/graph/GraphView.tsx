@@ -38,6 +38,7 @@ import {
   graphNodeMatchesLocalTarget,
 } from "../../lib/graph/target";
 import { refreshGraphTheme } from "./graphStyle";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   isInEditable,
@@ -92,7 +93,6 @@ interface GraphViewProps {
   onGraphSettingsChange: (next: GraphSettingsV3) => void;
   isFavorite: (kind: FavoriteKind, relPath: string) => boolean;
   onToggleFavorite: (target: FavoriteTarget) => void;
-  onError: (message: string) => void;
   onGraphChanged?: () => void;
   /** KG reference-focus mode (kg_refs Phase 4): vault-relative node paths the
    *  active document references + a nonce re-arming the animation. */
@@ -123,7 +123,6 @@ export function GraphView({
   onGraphSettingsChange,
   isFavorite,
   onToggleFavorite,
-  onError,
   onGraphChanged,
   referenceFocus = null,
   onExitReferenceFocus,
@@ -649,9 +648,9 @@ export function GraphView({
         : node.label;
       void navigator.clipboard
         .writeText(`[[${target}]]`)
-        .catch((err: unknown) => onError(String(err)));
+        .catch((err: unknown) => setError(String(err)));
     },
-    [nodeById, onError],
+    [nodeById],
   );
   const openNodeById = useCallback(
     (id: string) => {
@@ -708,10 +707,10 @@ export function GraphView({
           downloadGraphBlob(result.blob, name);
         }
       } catch (err: unknown) {
-        onError(String(err));
+        setError(String(err));
       }
     },
-    [workspacePath, onError, t],
+    [workspacePath, t],
   );
 
   // Context-menu lifecycle: close on any outside interaction / Escape.
@@ -747,14 +746,14 @@ export function GraphView({
       }
       const path = shortestPath(derived.analysisModel, source, node.id);
       if (!path) {
-        onError(t("graph.path.none"));
+        setError(t("graph.path.none"));
         return;
       }
       setPathIds(path);
       setHighlightPair(null);
       setPathSourceId(null);
     },
-    [derived.analysisModel, pathSourceId, selectedId, onError, t, toolsOpen],
+    [derived.analysisModel, pathSourceId, selectedId, t, toolsOpen],
   );
 
   const handleInsightNode = useCallback(
@@ -1270,7 +1269,7 @@ export function GraphView({
               onNodeUnpin={() => undefined}
               unpinSignal={unpinSignal}
               onLayoutSettled={handleLayoutSettled}
-              onLayoutError={onError}
+              onLayoutError={setError}
               onRendererStateChange={setRendererState}
               onNodeContextMenu={(node, index, x, y) => setMenu({ node, index, x, y })}
               favoriteIds={favoriteIds}
